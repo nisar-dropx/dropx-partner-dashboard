@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate } from "@/lib/date-format";
 import { loadCodLocations, locationLabel, locationModelName } from "@/lib/ops-pulse/cod";
@@ -177,7 +177,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
           </select></label>
           <button type="submit">Apply location</button>
         </form>
-        <OpsStationManpowerBoard asOf={manpower.asOf} locations={manpowerLocations} people={manpower.people} />
+        <OpsStationManpowerBoard canExport={!authorization.readOnly && hasPermission(authorization, "ops_reports", "access")} asOf={manpower.asOf} locations={manpowerLocations} people={manpower.people} />
       </div>
     </AppShell>;
   }

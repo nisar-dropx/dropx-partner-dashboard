@@ -1,4 +1,6 @@
 import "server-only";
+import { wfhCreditState } from "@/lib/wfh-attendance-credit";
+import { shiftBounds } from "@/lib/shift-attendance-view";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { compareRosterPlanPreference, formatShiftClock } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -25,6 +27,10 @@ type WorkAssignmentRow = {
 };
 
 type AttendanceRow = {
+  work_mode?: string | null;
+  wfh_scheduled_start_at?: string | null;
+  wfh_scheduled_end_at?: string | null;
+  wfh_credit_finalized_at?: string | null;
   enrolment_id: string;
   worker_type: string | null;
   employee_id: string | null;
@@ -60,6 +66,12 @@ export type OpsStationManpowerPerson = {
   locationId: string;
   availability: "Working" | "Completed" | "On leave" | "Roster off" | "Not reported";
   today: {
+    workMode?: string | null;
+    wfhState?: string | null;
+    approvedLeave?: boolean;
+    shiftStartsAt?: string | null;
+    shiftEndsAt?: string | null;
+    earlyMinutes?: number;
     reported: boolean;
     lateMinutes: number;
     workMinutes: number;
@@ -244,13 +256,13 @@ export async function loadOpsStationManpower(
   ].filter((person): person is typeof person & { locationId: string } => Boolean(person.locationId && locationIds.has(person.locationId)));
 
   const employeeIds = rawPeople.filter((person) => person.workerType === "employee").map((person) => person.id);
-  const contractorIds = options.historical ? rawPeople.filter(person => person.workerType === "contractor").map(person => person.id) : [];
+  const contractorIds = rawPeople.filter(person => person.workerType === "contractor").map(person => person.id);
   const leaveFilters = [employeeIds.length ? `employee_id.in.(${employeeIds.join(",")})` : "", contractorIds.length ? `contractor_id.in.(${contractorIds.join(",")})` : ""].filter(Boolean);
   const workerIds = rawPeople.map((person) => person.id);
   const enrolmentIds = [...new Set(rawPeople.flatMap((person) => biometricVariants(person.biometricId)))];
   const [attendanceResult, punchResult, datedRosterResult, weeklyPlansResult, leaveResult] = await Promise.all([
     admin.from("attendance_daily")
-      .select("enrolment_id,worker_type,employee_id,contractor_id,in_time,out_time,punch_count,work_minutes,status")
+      .select("enrolment_id,worker_type,employee_id,contractor_id,in_time,out_time,punch_count,work_minutes,status,work_mode,wfh_scheduled_start_at,wfh_scheduled_end_at,wfh_credit_finalized_at")
       .eq("company_id", companyId).eq("punch_date", asOf).neq("status", "U").limit(5000),
     enrolmentIds.length ? admin.from("attendance_punches")
       .select("enrolment_id,punch_time,punch_label,location_id,device_id")
@@ -385,6 +397,11 @@ export async function loadOpsStationManpower(
     const lateMinutes = actualStart !== null && scheduledStart !== null
       ? Math.max(0, actualStart - scheduledStart - Number(shift?.grace_in_minutes ?? 0))
       : 0;
+    const bounds = shiftBounds(asOf, shift?.start_time, shift?.end_time);
+    const actualEnd = attendance?.out_time ? Date.parse(attendance.out_time) : NaN;
+    const earlyMinutes = bounds.shiftEndsAt && attendance?.in_time && Number(attendance.punch_count ?? 0) >= 2 && actualEnd > Date.parse(attendance.in_time)
+      ? Math.max(0, Math.floor((Date.parse(bounds.shiftEndsAt) - actualEnd) / 60000) - Number(shift?.grace_out_minutes ?? 0)) : 0;
+    const wfhState = wfhCreditState(attendance ?? {});
     const reported = Boolean(attendance?.in_time);
     const missingPunch = reported && (Number(attendance?.punch_count ?? 0) < 2 || !attendance?.out_time);
     const onLeave = person.workerType === "employee" ? leaveEmployeeIds.has(person.id) : leaveContractorIds.has(person.id);
@@ -402,6 +419,11 @@ export async function loadOpsStationManpower(
       locationId: person.locationId,
       availability,
       today: {
+        ...bounds,
+        earlyMinutes,
+        workMode: attendance?.work_mode ?? null,
+        wfhState,
+        approvedLeave: onLeave,
         reported,
         lateMinutes,
         workMinutes: Number(attendance?.work_minutes ?? 0),

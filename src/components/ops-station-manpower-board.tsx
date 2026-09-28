@@ -2,14 +2,15 @@
 
 import { useState, type CSSProperties } from "react";
 import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, Clock3, Gauge, LogIn, MapPin, UserRoundCheck, Users2 } from "lucide-react";
+import { ShiftAttendanceTools } from "@/components/shift-attendance-tools";
+import { matchesShift, shiftCategory, shiftLabel, shiftPunchMinute, type ShiftFilter } from "@/lib/shift-attendance-view";
 import { StationLiveRefresh } from "@/components/station-live-refresh";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { OpsStationManpowerPerson } from "@/lib/ops-pulse/station-manpower";
 
 type AttendanceState = "on-time" | "late" | "missing" | "away";
-type AttendanceFilter = "all" | "present" | "on-time" | "late" | "missing";
+type AttendanceFilter = ShiftFilter | "on-time";
 const WEEK_OFF_FILTER = "__week_off__";
-const arrivalClockFormatter = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const displayClockFormatter = new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
 
 function tier(designation: string) {
@@ -43,13 +44,6 @@ function attendanceInterval(person: OpsStationManpowerPerson) {
   return `${clock(person.today.inTime)}–${person.today.outTime ? clock(person.today.outTime) : "OUT pending"}`;
 }
 
-function workedOffLabel(person: OpsStationManpowerPerson) {
-  if (!person.today.reported) return "Roster off";
-  return person.today.outTime
-    ? `Worked on week off · ${duration(person.today.workMinutes)}`
-    : "Working on week off · OUT pending";
-}
-
 function locationLabel(location: OpsStationManpowerPerson["today"]["inLocation"]) {
   if (!location) return "Not recorded";
   return location.name && location.name !== location.code ? `${location.code} · ${location.name}` : location.code;
@@ -67,6 +61,7 @@ function AttendanceDetail({ person }: { person: OpsStationManpowerPerson }) {
     <span>Out <strong>{person.today.outTime ? clock(person.today.outTime) : person.today.reported ? "No OUT punch" : "—"}</strong></span>
     <span>Worked <strong>{duration(person.today.workMinutes)}</strong></span>
     <span>Roster <strong>{rosterStatus}</strong></span>
+      <span>Status <strong>{shiftLabel(person)}</strong></span>
     {person.today.reported ? <><span className={person.today.inLocation?.id && person.today.inLocation.id !== person.locationId ? "punch-location-mismatch" : ""}>IN location <strong>{locationLabel(person.today.inLocation)}</strong></span><span className={person.today.outLocation?.id && person.today.outLocation.id !== person.locationId ? "punch-location-mismatch" : ""}>OUT location <strong>{person.today.outTime ? locationLabel(person.today.outLocation) : "OUT pending"}</strong></span>{person.today.hasLocationMismatch ? <span className="punch-location-expected">Expected <strong>{locationLabel(person.today.expectedLocation)}</strong></span> : null}</> : null}
   </div>;
 }
@@ -82,25 +77,19 @@ function rosterRoleGroups(members: OpsStationManpowerPerson[]) {
 }
 
 function attendanceState(person: OpsStationManpowerPerson): AttendanceState {
-  if (person.availability === "On leave" || person.availability === "Roster off") return "away";
-  if (person.today.lateMinutes > 0) return "late";
+  const category = shiftCategory(person);
+  if (["wfh", "trip", "leave", "off", "upcoming", "unassigned"].includes(category)) return "away";
+  if (person.today.lateMinutes > 0 || (person.today.earlyMinutes ?? 0) > 0 || matchesShift(person, "single")) return "late";
   if (person.today.reported) return "on-time";
   return "missing";
 }
 
 function matchesAttendanceFilter(person: OpsStationManpowerPerson, filter: AttendanceFilter) {
-  if (filter === "all") return true;
-  if (filter === "present") return person.today.reported;
-  return attendanceState(person) === filter;
+  if (filter === "on-time") return attendanceState(person) === "on-time" && (person.today.earlyMinutes ?? 0) === 0;
+  return matchesShift(person, filter);
 }
 
-function stateLabel(person: OpsStationManpowerPerson) {
-  const state = attendanceState(person);
-  if (state === "late") return `Late ${person.today.lateMinutes}m`;
-  if (state === "on-time") return person.availability === "Working" ? "On time · working" : "On time · completed";
-  if (state === "away") return person.availability;
-  return "Not reported";
-}
+function stateLabel(person: OpsStationManpowerPerson) { return shiftLabel(person); }
 
 function shiftClock(shiftName: string | null) {
   const match = String(shiftName ?? "").match(/·\s*(\d{2}):(\d{2})-(\d{2}):(\d{2})/);
@@ -108,15 +97,6 @@ function shiftClock(shiftName: string | null) {
   const start = Number(match[1]) * 60 + Number(match[2]);
   const rawEnd = Number(match[3]) * 60 + Number(match[4]);
   return { start, end: rawEnd <= start ? rawEnd + 1440 : rawEnd, startLabel: `${match[1]}:${match[2]}`, endLabel: `${match[3]}:${match[4]}` };
-}
-
-function arrivalMinutes(value: string | null, shiftStart: number) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const parts = arrivalClockFormatter.formatToParts(date);
-  const local = Number(parts.find((part) => part.type === "hour")?.value ?? 0) * 60 + Number(parts.find((part) => part.type === "minute")?.value ?? 0);
-  return shiftStart >= 18 * 60 && local < 8 * 60 ? local + 1440 : local;
 }
 
 function locationExperience(location: CodLocationRow) {
@@ -131,29 +111,9 @@ function locationExperience(location: CodLocationRow) {
 function timetableWindow(people: OpsStationManpowerPerson[]) {
   const clocks = people.map((person) => shiftClock(person.today.shiftName)).filter((value): value is NonNullable<ReturnType<typeof shiftClock>> => Boolean(value));
   if (!clocks.length) return null;
-  const starts = [...new Set(clocks.map((value) => value.start))].sort((left, right) => left - right);
-  let cut = starts[0];
-  let largestGap = -1;
-  starts.forEach((start, index) => {
-    const next = index === starts.length - 1 ? starts[0] + 1440 : starts[index + 1];
-    if (next - start > largestGap) {
-      largestGap = next - start;
-      cut = next % 1440;
-    }
-  });
-  const normalized = clocks.map((value) => {
-    const start = value.start < cut ? value.start + 1440 : value.start;
-    return { start, end: start + (value.end - value.start) };
-  });
-  const start = Math.min(...normalized.map((value) => value.start));
-  const end = Math.max(...normalized.map((value) => value.end));
+  const start = Math.min(...clocks.map(value => value.start));
+  const end = Math.max(...clocks.map(value => value.end));
   return { start, end, length: Math.max(60, end - start) };
-}
-
-function timetableMinute(value: string | null, windowStart: number) {
-  const minute = arrivalMinutes(value, windowStart % 1440);
-  if (minute === null) return null;
-  return minute < windowStart ? minute + 1440 : minute;
 }
 
 function minuteLabel(value: number) {
@@ -187,13 +147,21 @@ function ActiveRosterView({ asOf, people, locationCode }: { asOf: string; people
   </details>;
 }
 
-function StationTimetable({ people, locationCode }: { people: OpsStationManpowerPerson[]; locationCode: string }) {
+function StationTimetable({ people, locationCode, asOf, exportUrl }: { people: OpsStationManpowerPerson[]; locationCode: string; asOf: string; exportUrl?: string }) {
+  const [filter, setFilter] = useState<ShiftFilter>("all"), [search, setSearch] = useState("");
+  const visible = people.filter(p => matchesShift(p, filter, search));
+  return <div><ShiftAttendanceTools people={people} filter={filter} search={search} onFilter={setFilter} onSearch={setSearch} exportUrl={exportUrl} />
+    {visible.length ? <StationTimetableContent key={filter + search} people={visible} locationCode={locationCode} asOf={asOf} /> : <p className="station-manpower-empty">No people match these filters.</p>}
+  </div>;
+}
+
+function StationTimetableContent({ people, locationCode, asOf }: { people: OpsStationManpowerPerson[]; locationCode: string; asOf: string }) {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [selectedShift, setSelectedShift] = useState<string | null>(null);
-  const [selectedAttendance, setSelectedAttendance] = useState<AttendanceFilter>("all");
+  const selectedAttendance: AttendanceFilter = "all";
   const window = timetableWindow(people);
   const offDuty = people
-    .filter((person) => person.today.rosterDayType === "weekly_off")
+    .filter((person) => !shiftClock(person.today.shiftName))
     .sort((left, right) => tier(left.designation) - tier(right.designation) || left.name.localeCompare(right.name));
   const scheduled = people.filter((person) => Boolean(shiftClock(person.today.shiftName))).sort((left, right) => {
     const leftClock = shiftClock(left.today.shiftName);
@@ -210,8 +178,8 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
       const open = selectedPersonId === personKey;
       return <article className={open ? "open" : ""} key={personKey}>
         <button type="button" aria-expanded={open} onClick={() => setSelectedPersonId(open ? null : personKey)}>
-          <span><span className="station-timetable-person-name"><b>{person.name}</b><PunchLocationBadge person={person} /></span><small>{person.designation} · Week off</small></span>
-          <span><b>{attendanceInterval(person)}</b><small>{workedOffLabel(person)}</small></span>
+          <span><span className="station-timetable-person-name"><b>{person.name}</b><PunchLocationBadge person={person} /></span><small>{person.designation} · {stateLabel(person)}</small></span>
+          <span><b>{attendanceInterval(person)}</b><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
         </button>
         {open ? <AttendanceDetail person={person} /> : null}
       </article>;
@@ -235,19 +203,8 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
   const shiftFilteredOffDuty = validSelectedShift === WEEK_OFF_FILTER ? offDuty : validSelectedShift ? [] : offDuty;
   const visibleScheduled = shiftFilteredScheduled.filter((person) => matchesAttendanceFilter(person, selectedAttendance));
   const visibleOffDuty = shiftFilteredOffDuty.filter((person) => matchesAttendanceFilter(person, selectedAttendance));
-  const attendanceFilters: Array<{ value: AttendanceFilter; label: string; count: number }> = [
-    { value: "all", label: "All", count: shiftFilteredScheduled.length + shiftFilteredOffDuty.length },
-    { value: "present", label: "Present", count: [...shiftFilteredScheduled, ...shiftFilteredOffDuty].filter((person) => person.today.reported).length },
-    { value: "on-time", label: "On time", count: shiftFilteredScheduled.filter((person) => attendanceState(person) === "on-time").length },
-    { value: "late", label: "Late", count: shiftFilteredScheduled.filter((person) => attendanceState(person) === "late").length },
-    { value: "missing", label: "Not reported", count: shiftFilteredScheduled.filter((person) => attendanceState(person) === "missing").length }
-  ];
   const selectShift = (shift: string | null) => {
     setSelectedShift((current) => current === shift ? null : shift);
-    setSelectedPersonId(null);
-  };
-  const selectAttendance = (filter: AttendanceFilter) => {
-    setSelectedAttendance(filter);
     setSelectedPersonId(null);
   };
 
@@ -256,10 +213,8 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
     <div className="station-timetable-shift-strip" aria-label="Filter timetable by shift">
       <button type="button" className={validSelectedShift === null ? "active" : ""} aria-pressed={validSelectedShift === null} onClick={() => selectShift(null)}><b>All shifts</b><small>{scheduled.length + offDuty.length} people</small></button>
       {shiftSummary.map((shift) => <button type="button" className={validSelectedShift === shift.name ? "active" : ""} aria-pressed={validSelectedShift === shift.name} key={shift.name} onClick={() => selectShift(shift.name)}><b>{shift.clock.startLabel}–{shift.clock.endLabel}</b><small>{shift.reported}/{shift.expected} reported</small></button>)}
-      {offDuty.length ? <button type="button" className={`week-off ${validSelectedShift === WEEK_OFF_FILTER ? "active" : ""}`} aria-pressed={validSelectedShift === WEEK_OFF_FILTER} onClick={() => selectShift(WEEK_OFF_FILTER)}><b>Week off</b><small>{offDuty.filter((person) => person.today.reported).length}/{offDuty.length} present</small></button> : null}
-      <i className="station-timetable-filter-divider" aria-hidden="true" />
-      <span className="station-timetable-filter-label">Status</span>
-      {attendanceFilters.map((filter) => <button type="button" className={`attendance-status ${filter.value} ${selectedAttendance === filter.value ? "active" : ""}`} aria-pressed={selectedAttendance === filter.value} key={filter.value} onClick={() => selectAttendance(filter.value)}><b>{filter.label}</b><small>{filter.count}</small></button>)}
+      {offDuty.length ? <button type="button" className={`week-off ${validSelectedShift === WEEK_OFF_FILTER ? "active" : ""}`} aria-pressed={validSelectedShift === WEEK_OFF_FILTER} onClick={() => selectShift(WEEK_OFF_FILTER)}><b>Off / other</b><small>{offDuty.filter((person) => person.today.reported).length}/{offDuty.length} present</small></button> : null}
+
     </div>
     <div className="station-timetable-scroll">
       <div className="station-timetable-axis" aria-hidden="true"><span>Team member</span><span>Shift</span><div>{ticks.map((tick, index) => <time key={`${tick}:${index}`} style={{ left: `${index / 6 * 100}%` }}>{minuteLabel(tick)}</time>)}</div><span>Reported</span></div>
@@ -269,8 +224,8 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
           const shiftStart = shift.start < window.start ? shift.start + 1440 : shift.start;
           const shiftEnd = shiftStart + (shift.end - shift.start);
           const state = attendanceState(person);
-          const arrival = timetableMinute(person.today.inTime, window.start);
-          const recordedOut = timetableMinute(person.today.outTime, window.start);
+          const arrival = shiftPunchMinute(person.today.inTime, asOf);
+          const recordedOut = shiftPunchMinute(person.today.outTime, asOf);
           const actualEnd = arrival === null ? null : recordedOut ?? arrival + Math.max(5, person.today.workMinutes);
           const personKey = `${person.workerType}:${person.id}`;
           const open = selectedPersonId === personKey;
@@ -287,7 +242,7 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
                 {arrival !== null && actualEnd !== null ? <span className={`station-timetable-actual ${state}`} style={{ left: `${actualLeft}%`, width: `${actualWidth}%` }} /> : null}
                 {arrival !== null ? <span className={`station-timetable-arrival ${state}`} style={{ left: `${actualLeft}%` }} title={`Reported ${clock(person.today.inTime)}`} /> : null}
               </span>
-              <span className={`station-timetable-status ${state}`}><b>{clock(person.today.inTime)}</b><small>{stateLabel(person)}</small></span>
+              <span className={`station-timetable-status ${state}`}><b>{clock(person.today.inTime)}</b><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
             </button>
             {open ? <AttendanceDetail person={person} /> : null}
           </div>;
@@ -295,21 +250,21 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
         {visibleOffDuty.map((person) => {
           const personKey = `${person.workerType}:${person.id}`;
           const open = selectedPersonId === personKey;
-          const arrival = timetableMinute(person.today.inTime, window.start);
-          const recordedOut = timetableMinute(person.today.outTime, window.start);
+          const arrival = shiftPunchMinute(person.today.inTime, asOf);
+          const recordedOut = shiftPunchMinute(person.today.outTime, asOf);
           const actualEnd = arrival === null ? null : recordedOut ?? arrival + Math.max(5, person.today.workMinutes);
           const actualLeft = arrival === null ? 0 : position(Math.max(window.start, arrival));
           const actualWidth = actualEnd === null ? 0 : Math.max(.7, position(Math.min(window.end, actualEnd)) - actualLeft);
           return <div className={`station-timetable-person-row away ${person.today.reported ? "off-worked" : ""} ${open ? "open" : ""}`} key={personKey}>
             <button type="button" className="station-timetable-row" aria-expanded={open} onClick={() => setSelectedPersonId(open ? null : personKey)}>
               <span className="station-timetable-person"><span className="station-timetable-person-name"><b>{person.name}</b><PunchLocationBadge person={person} /></span><small>{person.designation}</small></span>
-              <span className="station-timetable-shift"><b>Week off</b><small>Approved roster</small></span>
+              <span className="station-timetable-shift"><b>Off / other</b><small>Approved roster</small></span>
               <span className="station-timetable-lane">
-                <span className="station-timetable-off-label">Week off</span>
+                <span className="station-timetable-off-label">{stateLabel(person)}</span>
                 {arrival !== null && actualEnd !== null ? <span className="station-timetable-actual off-worked" style={{ left: `${actualLeft}%`, width: `${actualWidth}%` }} /> : null}
                 {arrival !== null ? <span className="station-timetable-arrival away" style={{ left: `${actualLeft}%` }} title={`Reported ${clock(person.today.inTime)} on week off`} /> : null}
               </span>
-              <span className="station-timetable-status away"><b>{attendanceInterval(person)}</b><small>{workedOffLabel(person)}</small></span>
+              <span className="station-timetable-status away"><b>{attendanceInterval(person)}</b><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
             </button>
             {open ? <AttendanceDetail person={person} /> : null}
           </div>;
@@ -321,24 +276,25 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
   </section>;
 }
 
-export function OpsStationManpowerBoard({ asOf, locations, people }: { asOf: string; locations: CodLocationRow[]; people: OpsStationManpowerPerson[] }) {
+export function OpsStationManpowerBoard({ asOf, locations, people, canExport = false }: { asOf: string; locations: CodLocationRow[]; people: OpsStationManpowerPerson[]; canExport?: boolean }) {
   const expectedPeople = people.filter((person) => Boolean(shiftClock(person.today.shiftName)) && attendanceState(person) !== "away");
   const scheduledReported = expectedPeople.filter((person) => person.today.reported).length;
   const present = people.filter((person) => person.today.reported).length;
   const offDayWorked = people.filter((person) => person.today.rosterDayType === "weekly_off" && person.today.reported).length;
   const onTime = expectedPeople.filter((person) => attendanceState(person) === "on-time").length;
-  const late = expectedPeople.filter((person) => attendanceState(person) === "late").length;
+  const late = expectedPeople.filter((person) => matchesShift(person, "late")).length;
+  const early = expectedPeople.filter((person) => matchesShift(person, "early")).length;
   const missing = expectedPeople.filter((person) => attendanceState(person) === "missing").length;
   return <div className="station-manpower-workspace">
     <section className="station-manpower-summary">
       <article><Users2 size={17} /><span>Scheduled</span><strong>{expectedPeople.length}</strong><small>{people.length} active people · {locations.length} locations</small></article>
-      <article className="good"><UserRoundCheck size={17} /><span>Present</span><strong>{present}</strong><small>{scheduledReported} scheduled{offDayWorked ? ` · ${offDayWorked} off-day` : ""}</small></article>
-      <article className="good"><CheckCircle2 size={17} /><span>On time</span><strong>{onTime}</strong><small>Within shift grace</small></article>
-      <article className={late ? "warn" : "good"}><Clock3 size={17} /><span>Late</span><strong>{late}</strong><small>Red markers need attention</small></article>
+      <article className="good"><UserRoundCheck size={17} /><span>Punched</span><strong>{present}</strong><small>{scheduledReported} scheduled{offDayWorked ? ` · ${offDayWorked} off-day` : ""}</small></article>
+      <article className="good"><CheckCircle2 size={17} /><span>No exceptions</span><strong>{onTime}</strong><small>No late in or early out</small></article>
+      <article className={late ? "warn" : "good"}><Clock3 size={17} /><span>Late in</span><strong>{late}</strong><small>{early} early out · see filters</small></article>
       <article className={missing ? "attention" : "good"}><AlertTriangle size={17} /><span>Not reported</span><strong>{missing}</strong><small>Scheduled but no punch</small></article>
       <StationLiveRefresh />
     </section>
-    <section className="station-insight-intro"><div><span><Gauge size={14} />Shift attendance insights</span><h2>Roster timetable and attendance gaps</h2></div><div className="station-insight-legend"><span className="on-time">On time / present</span><span className="late">Late / delayed start</span><span className="missing">Empty = not reported</span><span className="away">Leave / off</span></div></section>
+    <section className="station-insight-intro"><div><span><Gauge size={14} />Shift attendance insights</span><h2>Roster timetable and attendance gaps</h2></div><div className="station-insight-legend"><span className="on-time">On time / present</span><span className="late">Late in / early out</span><span className="missing">Empty = not reported</span><span className="away">WFH / leave / off</span></div></section>
     <div className="station-manpower-grid">{locations.map((location) => {
       const locationPeople = people.filter((person) => person.locationId === location.id).sort((left, right) => tier(left.designation) - tier(right.designation) || left.designation.localeCompare(right.designation) || left.name.localeCompare(right.name));
       const experience = locationExperience(location);
@@ -348,12 +304,12 @@ export function OpsStationManpowerBoard({ asOf, locations, people }: { asOf: str
       const locationExpected = locationPeople.filter((person) => Boolean(shiftClock(person.today.shiftName)) && attendanceState(person) !== "away");
       const locationReported = locationExpected.filter((person) => person.today.reported).length;
       const locationOffDayWorked = locationPeople.filter((person) => person.today.rosterDayType === "weekly_off" && person.today.reported).length;
-      const locationLate = locationExpected.filter((person) => attendanceState(person) === "late").length;
+      const locationLate = locationExpected.filter((person) => matchesShift(person, "late")).length;
       const locationMissing = locationExpected.filter((person) => attendanceState(person) === "missing").length;
       const readiness = locationExpected.length ? Math.round(locationReported / locationExpected.length * 100) : 0;
       return <section className="station-manpower-card" key={location.id}>
         <header><div><span><MapPin size={14} />{location.station_code} · {experience.noun}{experience.model ? ` · ${experience.model}` : ""}</span><h2>{location.station_name || location.station_code}</h2><p>{locationPeople.length} active people across {shifts.size} {experience.schedules}</p></div><div className="station-readiness-ring" style={{ "--readiness": `${readiness}%` } as CSSProperties}><strong>{readiness}%</strong><span>reported</span></div><div className="station-manpower-card-metrics"><span><strong>{locationExpected.length}</strong> expected</span><span className={locationLate ? "warn" : ""}><strong>{locationLate}</strong> late</span><span className={locationMissing ? "bad" : ""}><strong>{locationMissing}</strong> missing</span>{locationOffDayWorked ? <span className="off-worked"><strong>{locationOffDayWorked}</strong> off-day worked</span> : null}</div></header>
-        {locationPeople.length ? <><div className="station-command-strip"><div><span>{experience.lead}</span><strong>{leadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{leadership.map((person) => person.designation).join(" · ") || "Leadership gap"}</small></div><div><span>Shift / workstream leads</span><strong>{shiftLeadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{shiftLeadership.map((person) => person.designation).join(" · ") || "No second-level lead mapped"}</small></div></div><ActiveRosterView asOf={asOf} people={locationPeople} locationCode={location.station_code} /><StationTimetable key={`${asOf}:${location.id}`} people={locationPeople} locationCode={location.station_code} /></> : <div className="station-manpower-empty"><Users2 size={20} /><strong>No active People manpower is assigned here.</strong><span>The location remains visible because it is inside your OpsPulse scope.</span></div>}
+        {locationPeople.length ? <><div className="station-command-strip"><div><span>{experience.lead}</span><strong>{leadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{leadership.map((person) => person.designation).join(" · ") || "Leadership gap"}</small></div><div><span>Shift / workstream leads</span><strong>{shiftLeadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{shiftLeadership.map((person) => person.designation).join(" · ") || "No second-level lead mapped"}</small></div></div><ActiveRosterView asOf={asOf} people={locationPeople} locationCode={location.station_code} /><StationTimetable asOf={asOf} exportUrl={canExport ? `/api/ops-pulse/shift-attendance/export?date=${asOf}&location=${location.id}` : undefined} key={`${asOf}:${location.id}`} people={locationPeople} locationCode={location.station_code} /></> : <div className="station-manpower-empty"><Users2 size={20} /><strong>No active People manpower is assigned here.</strong><span>The location remains visible because it is inside your OpsPulse scope.</span></div>}
       </section>;
     })}</div>
     <p className="station-manpower-footnote">Live biometric attendance for {asOf} is compared only with the active approved People roster version. Profile shift assignments do not create expected rows here.</p>
