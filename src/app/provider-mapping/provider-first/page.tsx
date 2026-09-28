@@ -66,10 +66,6 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
     return { providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "" };
   });
   const paymentMethods: PaymentMethodOption[] = ((methodsResult.data ?? []) as PaymentMethodRow[])
-    .filter((method) => !(method.payment_method_components ?? []).some((component) => {
-      const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
-      return field?.calculation_source === "attendance_eligibility";
-    }))
     .map((method) => ({ id: method.id, code: method.code, name: method.name, components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
 
   return <AppShell active="ID Mapping" pageCode="provider_mapping">

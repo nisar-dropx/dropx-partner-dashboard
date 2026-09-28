@@ -110,23 +110,6 @@ export async function updatePaymentMethod(formData: FormData) {
   const code = required(formData.get("code"), "Method ID").toUpperCase();
   const name = required(formData.get("name"), "Method name");
   const components = await selectedPaymentFields(formData, companyId);
-  const attendanceFields = await admin.from("payment_fields")
-    .select("id", { count: "exact", head: true })
-    .eq("company_id", companyId)
-    .eq("calculation_source", "attendance_eligibility")
-    .in("id", components.map((component) => component.payment_field_id));
-  if (attendanceFields.error) throw new Error(attendanceFields.error.message);
-  if ((attendanceFields.count ?? 0) > 0) {
-    const mappings = await admin.from("field_executive_provider_mappings")
-      .select("id", { count: "exact", head: true })
-      .eq("company_id", companyId)
-      .eq("payment_method_id", id)
-      .neq("status", "cancelled");
-    if (mappings.error) throw new Error(mappings.error.message);
-    if ((mappings.count ?? 0) > 0) {
-      throw new Error(`This payment method is used by ${mappings.count} provider ID mapping${mappings.count === 1 ? "" : "s"}. Reassign those mappings before adding an Attendance field.`);
-    }
-  }
 
   const existingMethod = await admin
     .from("payment_methods")
@@ -260,25 +243,6 @@ export async function updatePaymentField(formData: FormData) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     const id = required(formData.get("field_id"), "Payment field");
     const payload = parsePaymentField(formData);
-    if (payload.calculation_source === "attendance_eligibility") {
-      const components = await supabaseAdmin.from("payment_method_components")
-        .select("payment_method_id")
-        .eq("payment_field_id", id)
-        .eq("company_id", companyId);
-      if (components.error) throw new Error(components.error.message);
-      const methodIds = [...new Set((components.data ?? []).map((component) => String(component.payment_method_id)).filter(Boolean))];
-      if (methodIds.length) {
-        const mappings = await supabaseAdmin.from("field_executive_provider_mappings")
-          .select("id", { count: "exact", head: true })
-          .eq("company_id", companyId)
-          .in("payment_method_id", methodIds)
-          .neq("status", "cancelled");
-        if (mappings.error) throw new Error(mappings.error.message);
-        if ((mappings.count ?? 0) > 0) {
-          throw new Error(`This field is used by ${mappings.count} provider ID mapping${mappings.count === 1 ? "" : "s"}. Reassign those mappings before changing the calculation basis to Attendance.`);
-        }
-      }
-    }
     const update = await supabaseAdmin.from("payment_fields").update({ ...payload, updated_at: new Date().toISOString() })
       .eq("id", id).eq("company_id", companyId);
     if (update.error) throw new Error(update.error.message);
