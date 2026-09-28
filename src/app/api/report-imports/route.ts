@@ -5,9 +5,19 @@ import crypto from "crypto";
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { directPayForDay } from "@/lib/direct-workforce-pay";
 import { getServiceAuthorization, ServiceAuthError } from "@/lib/service-auth";
 import { loadCodLocations, locationModelName, providerName } from "@/lib/ops-pulse/cod";
+import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  buildReportImportAttendanceByWorkforceDate,
+  canonicalWorkforceForMapping,
+  createReportImportWorkforceIndex,
+  type ReportImportAttendanceRow,
+  type ReportImportMappingIdentity,
+  type ReportImportWorkforceIdentity
+} from "./report-import-attendance";
 
 type SourceType = string;
 type CoreSourceType = "amazon_shipments" | "iocl_fuel" | "bpcl_fuel" | "cashbook";
@@ -805,6 +815,111 @@ function daysInMonth(value: string) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+async function loadAmazonMappingAttendance(
+  companyId: string,
+  sourceRows: AmazonAggregateRow[],
+  mappings: Array<ReportImportMappingIdentity & { payment_method_id?: string | null }>
+) {
+  const emptyIndex = createReportImportWorkforceIndex([]);
+  if (!supabaseAdmin || !sourceRows.length || !mappings.length) {
+    return { attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(), workforceIndex: emptyIndex };
+  }
+
+  const canonicalIds = [...new Set(mappings.map((mapping) => mapping.workforce_id).filter((id): id is string => Boolean(id)))];
+  const sourceIds = [...new Set(mappings.flatMap((mapping) => [
+    mapping.employee_id,
+    mapping.contractor_id,
+    mapping.field_executive_id
+  ]).filter((id): id is string => Boolean(id)))];
+  const workforceRequests = [
+    { column: "id", ids: canonicalIds },
+    { column: "source_profile_id", ids: sourceIds }
+  ].flatMap((group) => {
+    const requests = [];
+    for (let index = 0; index < group.ids.length; index += 100) {
+      requests.push(readAllRows(supabaseAdmin!.from("workforce")
+        .select("id,source_profile_type,source_profile_id")
+        .eq("company_id", companyId)
+        .in(group.column, group.ids.slice(index, index + 100))
+        .order("id")));
+    }
+    return requests;
+  });
+  const workforceResults = await Promise.all(workforceRequests);
+  if (workforceResults.some((result) => result.error)) return null;
+  const workforceRows = [...new Map(workforceResults
+    .flatMap((result) => result.data ?? [])
+    .map((row) => [row.id, row as ReportImportWorkforceIdentity])).values()];
+  const workforceIndex = createReportImportWorkforceIndex(workforceRows);
+  const canonicalWorkers = [...new Map(mappings.flatMap((mapping) => {
+    const worker = canonicalWorkforceForMapping(mapping, workforceIndex);
+    return worker ? [[worker.id, worker] as const] : [];
+  })).values()];
+  if (!canonicalWorkers.length) {
+    return { attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(), workforceIndex };
+  }
+
+  const mappingEmployeeIds = mappings.map((mapping) => mapping.employee_id);
+  const mappingContractorIds = mappings.map((mapping) => mapping.contractor_id);
+  const mappingExecutiveIds = mappings.map((mapping) => mapping.field_executive_id);
+  const attendanceIdentityGroups = [
+    { column: "workforce_id", ids: canonicalWorkers.map((worker) => worker.id) },
+    {
+      column: "employee_id",
+      ids: [...mappingEmployeeIds, ...canonicalWorkers
+        .filter((worker) => worker.source_profile_type === "employee")
+        .map((worker) => worker.source_profile_id)]
+    },
+    {
+      column: "contractor_id",
+      ids: [...mappingContractorIds, ...canonicalWorkers
+        .filter((worker) => worker.source_profile_type === "contractor")
+        .map((worker) => worker.source_profile_id)]
+    },
+    {
+      // App/GPS punches currently put canonical Workforce IDs in this legacy
+      // column, while migrated profiles can still use their source profile ID.
+      column: "field_executive_id",
+      ids: [
+        ...mappingExecutiveIds,
+        ...canonicalWorkers.map((worker) => worker.id),
+        ...canonicalWorkers
+          .filter((worker) => worker.source_profile_type === "field_executive")
+          .map((worker) => worker.source_profile_id)
+      ]
+    }
+  ].map((group) => ({
+    ...group,
+    ids: [...new Set(group.ids.filter((id): id is string => Boolean(id)))]
+  }));
+  const dates = sourceRows.map((row) => row.work_date).sort();
+  const from = dates[0];
+  const to = dates.at(-1)!;
+  const attendanceRequests = attendanceIdentityGroups.flatMap((group) => {
+    const requests = [];
+    for (let index = 0; index < group.ids.length; index += 100) {
+      requests.push(readAllRows(supabaseAdmin!.from("attendance_daily")
+        .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
+        .eq("company_id", companyId)
+        .in(group.column, group.ids.slice(index, index + 100))
+        .gte("punch_date", from)
+        .lte("punch_date", to)
+        .order("punch_date")
+        .order("id")));
+    }
+    return requests;
+  });
+  const attendanceResults = await Promise.all(attendanceRequests);
+  if (attendanceResults.some((result) => result.error)) return null;
+  const attendanceRows = [...new Map(attendanceResults
+    .flatMap((result) => result.data ?? [])
+    .map((row) => [row.id, row as ReportImportAttendanceRow])).values()];
+  return {
+    attendanceByWorkforceDate: buildReportImportAttendanceByWorkforceDate(attendanceRows, workforceIndex),
+    workforceIndex
+  };
+}
+
 async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnType<typeof aggregateAmazonRows>) {
   if (!supabaseAdmin || !sourceRows.length) return sourceRows as AmazonAggregateRow[];
   const rows = sourceRows as AmazonAggregateRow[];
@@ -818,7 +933,7 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
   const amazonProviderIds = (providersResult.data ?? []).filter((provider) => /amazon/i.test(`${provider.code ?? ""} ${provider.name ?? ""}`)).map((provider) => provider.id);
   if (!amazonProviderIds.length) return rows;
   const mappingsResult = await supabaseAdmin.from("field_executive_provider_mappings")
-    .select("provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,pay_type,delivery_rate,pickup_rate,mfn_rate,mfn_return_rate,guarantee_amount,guarantee_schedule,fuel_rate")
+    .select("provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,pay_type,delivery_rate,pickup_rate,mfn_rate,mfn_return_rate,guarantee_amount,guarantee_schedule,fuel_rate,workforce_id,employee_id,contractor_id,field_executive_id")
     .eq("company_id", companyId).eq("status", "active")
     .in("provider_id", amazonProviderIds).in("provider_member_id", providerMemberIds);
   if (mappingsResult.error) return rows;
@@ -836,6 +951,21 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     list.push(component);
     componentsByMethod.set(component.payment_method_id, list);
   });
+  const attendanceMethodIds = new Set((componentsResult.data ?? []).flatMap((component) => {
+    const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
+    return key(field?.calculation_source) === "attendanceeligibility" ? [component.payment_method_id] : [];
+  }));
+  const attendanceContext = attendanceMethodIds.size
+    ? await loadAmazonMappingAttendance(
+      companyId,
+      rows,
+      (mappingsResult.data ?? []).filter((mapping) => attendanceMethodIds.has(mapping.payment_method_id))
+    )
+    : {
+      attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(),
+      workforceIndex: createReportImportWorkforceIndex([])
+    };
+  if (!attendanceContext) return rows;
 
   return rows.map((row) => {
     const stationId = stationIdByCode.get(row.station_code);
@@ -883,8 +1013,25 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       const rate = Number(values[componentCode] ?? values[component.component_code] ?? 0);
       const calculationType = clean(field?.calculation_type || (component.component_type === "production" ? "count_x_rate" : "fixed_daily"));
       const schedule = clean(field?.pay_schedule || component.pay_schedule);
-      const amount = component.component_type === "production" || calculationType === "count_x_rate"
+      const productionComponent = component.component_type === "production" || calculationType === "count_x_rate";
+      const attendanceComponent = !productionComponent && key(field?.calculation_source) === "attendanceeligibility";
+      const worker = attendanceComponent
+        ? canonicalWorkforceForMapping(mapping, attendanceContext.workforceIndex)
+        : undefined;
+      const attendance = worker
+        ? attendanceContext.attendanceByWorkforceDate.get(`${worker.id}|${row.work_date}`)
+        : undefined;
+      const amount = productionComponent
         ? productionForSource(row, source) * rate
+        : attendanceComponent
+          ? directPayForDay({ [componentCode]: rate }, [{
+            component_code: componentCode,
+            component_type: component.component_type,
+            label: field?.label,
+            pay_schedule: schedule,
+            calculation_type: calculationType,
+            calculation_source: "attendance_eligibility"
+          }], row.work_date, attendance).total
         : schedule === "per_month" || calculationType === "fixed_monthly"
           ? rate / daysInMonth(row.work_date)
           : rate;

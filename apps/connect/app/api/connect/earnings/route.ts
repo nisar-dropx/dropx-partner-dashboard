@@ -8,7 +8,8 @@ import {loadOwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import {allocateOwnDailyCards,type DailyCardSource} from '@/lib/workforce-daily-card';
 import {ownIncentives,type IncentiveSource,type OwnCampaign} from '@/lib/workforce-own-incentives';
 import {assertNoProviderDirectOverlap} from '@/lib/direct-workforce-payment';
-import {loadDirectPaymentContext,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
+import {attendanceIdentityFilter,loadDirectPaymentContext,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
+import {calculateProviderAttendancePayments,hasProviderAttendanceComponents,type ProviderAttendanceMapping} from '@/lib/provider-attendance-payment';
 
 export const dynamic='force-dynamic';
 
@@ -46,21 +47,23 @@ export async function GET(request: Request) {
     const filters=account.profileType==="workforce" ? [`workforce_id.eq.${account.id}`] : columns[account.profileType] ? [`and(workforce_id.is.null,${columns[account.profileType]}.eq.${account.id})`] : [];
     if(account.profileType==="workforce"&&workforce?.source_profile_id&&workforce.source_profile_type&&columns[workforce.source_profile_type])filters.push(`and(workforce_id.is.null,${columns[workforce.source_profile_type]}.eq.${workforce.source_profile_id})`);
     const identityFilter=filters.length ? filters.join(","):"id.eq.00000000-0000-0000-0000-000000000000";
-    const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,pay_type,effective_from,effective_to,providers(name,code),stations(station_code),payment_methods(name)").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
+    const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,pay_type,effective_from,effective_to,status,providers(name,code),stations(station_code),payment_methods(id,name,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source)))").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
     if (mappingResult.error) throw new Error(mappingResult.error.message);
     const mappings = mappingResult.data ?? []; const stationIds = [...new Set(mappings.map((row) => row.station_id).filter(Boolean))]; const memberIds = [...new Set(mappings.map((row) => row.provider_member_id).filter(Boolean))];
-    const direct = await loadDirectPaymentContext({companyId:account.companyId,workforceId:workforce?.id??null,from,to,employmentFrom:workforce?.date_of_join,employmentTo:workforce?.last_working_date});
+    const direct = await loadDirectPaymentContext({companyId:account.companyId,workforceId:workforce?.id??null,from,to,employmentFrom:workforce?.date_of_join,employmentTo:workforce?.last_working_date,sourceProfileId:workforce?.source_profile_id,sourceProfileType:workforce?.source_profile_type});
     assertNoProviderDirectOverlap({allocations:direct.allocations,mappings,from,to});
-    const [stationsResult, metricsResult, allocationsResult, rateCardsResult, adjustments, campaignResult] = await Promise.all([
+    const [stationsResult, metricsResult, allocationsResult, rateCardsResult, adjustments, campaignResult, attendanceResult] = await Promise.all([
       stationIds.length ? db().from("stations").select("id,station_code,location_model_id").eq("company_id", account.companyId).in("id", stationIds) : Promise.resolve({ data: [], error: null }),
       memberIds.length ? db().from("cps_shipment_daily").select("id,provider_employee_id,work_date,station_code,client,total_activity,amazon_delivery,swa_delivery,total_delivery,c_return,mfn,mfn_return").eq("company_id", account.companyId).in("provider_employee_id", memberIds).gte("work_date", from).lte("work_date", to) : Promise.resolve({ data: [], error: null }),
       db().from("payment_field_provider_metrics").select("provider_id,provider_model_id,provider_production_metrics(source_key),payment_fields(code,label,field_type)").eq("company_id", account.companyId),
       db().from("workforce_rate_cards").select("id,provider_id,station_id,designation_id,pay_type,effective_from,effective_to,delivery_rate,return_rate,mfn_rate,mfn_return_rate,fuel_rate,fixed_amount,guarantee_amount,status,approved_at").eq("company_id", account.companyId).neq("status", "draft").lte("effective_from", to).or(`effective_to.is.null,effective_to.gte.${from}`),
       loadOwnAdjustmentLedger(db(),account,from,to),
-      db().from('workforce_incentive_campaigns').select('id,company_id,name,provider_id,station_id,designation_id,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,effective_from,effective_to,status,approved_at').eq('company_id',account.companyId).neq('status','draft').lte('effective_from',to).gte('effective_to',from)
+      db().from('workforce_incentive_campaigns').select('id,company_id,name,provider_id,station_id,designation_id,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,effective_from,effective_to,status,approved_at').eq('company_id',account.companyId).neq('status','draft').lte('effective_from',to).gte('effective_to',from),
+      workforce?.id && mappings.length ? db().from('attendance_daily').select('id,punch_date,status,in_time,out_time,work_minutes').eq('company_id',account.companyId).or(attendanceIdentityFilter(workforce)).gte('punch_date',from).lte('punch_date',to).order('punch_date') : Promise.resolve({data:[],error:null})
     ]);
-    const error = stationsResult.error?.message || metricsResult.error?.message || allocationsResult.error?.message || rateCardsResult.error?.message; if (error) throw new Error(error);
+    const error = stationsResult.error?.message || metricsResult.error?.message || allocationsResult.error?.message || rateCardsResult.error?.message || attendanceResult.error?.message; if (error) throw new Error(error);
     if(campaignResult.error)throw new Error('Your incentive estimate could not be verified. Refresh before relying on earnings.');
+    if((attendanceResult.data??[]).length>=1000)throw new Error('Too many attendance records to reconcile safely. Contact Workforce.');
     const stationById = new Map((stationsResult.data ?? []).map((row) => [row.id, row])); const dailyByMember = new Map<string, Array<Record<string, unknown>>>();
     (metricsResult.data ?? []).forEach((row) => dailyByMember.set(String(row.provider_employee_id), [...(dailyByMember.get(String(row.provider_employee_id)) ?? []), row as Record<string, unknown>]));
     if(mappings.length>=1000 || (metricsResult.data ?? []).length>=1000 || (allocationsResult.data ?? []).length>=1000 || (rateCardsResult.data ?? []).length>=1000 || (campaignResult.data??[]).length>=1000) throw new Error("Too many earning records to reconcile safely. Please contact Workforce.");
@@ -76,6 +79,9 @@ export async function GET(request: Request) {
       const mapping=paymentMappingForDay(mappings,row),card=mapping?cardFor(mapping,String(row.work_date)):null;
       return card?[{row:row as DailyCardSource,card}]:[];
     }));
+    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:attendanceResult.data??[],from,to});
+    const providerAttendanceByMapping=new Map<string,typeof providerAttendanceDays>();
+    for(const day of providerAttendanceDays)providerAttendanceByMapping.set(day.mappingId,[...(providerAttendanceByMapping.get(day.mappingId)??[]),day]);
     const providerEarnings = mappings.map((mapping: any) => {
       const station: any = stationById.get(mapping.station_id); const daily = (dailyByMember.get(String(mapping.provider_member_id)) ?? []).filter((row) => paymentMappingForDay(mappings,row as {work_date:string;provider_employee_id:string;station_code:string;client:string})?.id === mapping.id);
       const productionRules = (allocationsResult.data ?? []).filter((allocation: any) => allocation.provider_id === mapping.provider_id && (!allocation.provider_model_id || allocation.provider_model_id === station?.location_model_id)).flatMap((allocation: any) => {
@@ -83,9 +89,25 @@ export async function GET(request: Request) {
         const rate = Number(mapping.payment_values?.[field.code] ?? 0); return [{ label: field.label || field.code, source: metric.source_key, rate }];
       });
       const production = productionRules.map((rule: any) => { const count = daily.reduce((sum, row) => sum + metricValue(row, rule.source), 0); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
-      const dailyEarnings = daily.map((row) => { const production = productionRules.map((rule: any) => { const count = metricValue(row, rule.source); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; }); const card = cardFor(mapping, String(row.work_date)); const baseAmount=card?dailyCardAmounts.get(String(row.id))!:Math.round(production.reduce((sum:number,line:any)=>sum+line.amount,0)*100)/100,incentiveAmount=incentives.bySource.get(String(row.id))??0; return { id:String(row.id),date: String(row.work_date), production, baseAmount,incentiveAmount,amount:Math.round((baseAmount+incentiveAmount)*100)/100,deliveries:metricValue(row,'total_delivery'),calculationSource:card?'workforce_rate_card':'provider_mapping',payType:card?.pay_type??'provider_mapping' }; });
+      const attendanceDays=providerAttendanceByMapping.get(String(mapping.id))??[];
+      const remainingAttendance=new Map(attendanceDays.map(day=>[day.date,day]));
+      const attendanceConfigured=hasProviderAttendanceComponents(mapping as ProviderAttendanceMapping);
+      const dailyEarnings = daily.map((row) => {
+        const date=String(row.work_date),attendanceDay=remainingAttendance.get(date);remainingAttendance.delete(date);
+        const production = productionRules.map((rule: any) => { const count = metricValue(row, rule.source); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
+        const attendanceLines=(attendanceDay?.lines??[]).map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount}));
+        const card = cardFor(mapping,date);
+        const productionAmount=Math.round(production.reduce((sum:number,line:any)=>sum+line.amount,0)*100)/100;
+        const baseAmount=attendanceConfigured?Math.round((productionAmount+(attendanceDay?.amount??0))*100)/100:card?dailyCardAmounts.get(String(row.id))!:productionAmount;
+        const incentiveAmount=incentives.bySource.get(String(row.id))??0;
+        return { id:String(row.id),date,production:[...production,...attendanceLines],baseAmount,incentiveAmount,amount:Math.round((baseAmount+incentiveAmount)*100)/100,deliveries:metricValue(row,'total_delivery'),calculationSource:attendanceConfigured?'provider_attendance':card?'workforce_rate_card':'provider_mapping',payType:attendanceConfigured?'attendance_eligibility':card?.pay_type??'provider_mapping' };
+      });
+      for(const attendanceDay of remainingAttendance.values())dailyEarnings.push({id:attendanceDay.id,date:attendanceDay.date,production:attendanceDay.lines.map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount})),baseAmount:attendanceDay.amount,incentiveAmount:0,amount:attendanceDay.amount,deliveries:0,calculationSource:'provider_attendance',payType:'attendance_eligibility'});
+      dailyEarnings.sort((left,right)=>right.date.localeCompare(left.date)||left.id.localeCompare(right.id));
+      const attendanceProduction=new Map<string,{label:string;count:number;rate:number;amount:number}>();
+      for(const day of attendanceDays)for(const line of day.lines){const key=`${line.code}:${line.rate}`,current=attendanceProduction.get(key)??{label:line.label,count:0,rate:line.rate,amount:0};current.count+=line.count;current.amount=Math.round((current.amount+line.amount)*100)/100;attendanceProduction.set(key,current);}
       const baseAmount = Math.round(dailyEarnings.reduce((sum: number, line) => sum + line.baseAmount, 0)*100)/100; const additions = Math.round(dailyEarnings.reduce((sum,line)=>sum+line.incentiveAmount,0)*100)/100;
-      return { id: mapping.id, location: station?.station_code ?? "-", provider: first(mapping.providers)?.name ?? "-", model: station?.location_model_id ? "Mapped model" : "All models", paymentMethod: first(mapping.payment_methods)?.name ?? "-", workDays: new Set(daily.map((row) => String(row.work_date))).size, production, daily: dailyEarnings, baseAmount, additions, grossAmount: baseAmount + additions };
+      return { id: mapping.id, location: station?.station_code ?? "-", provider: first(mapping.providers)?.name ?? "-", model: station?.location_model_id ? "Mapped model" : "All models", paymentMethod: first(mapping.payment_methods)?.name ?? "-", workDays: new Set(dailyEarnings.map((row) => row.date)).size, production:[...production,...attendanceProduction.values()], daily: dailyEarnings, baseAmount, additions, grossAmount: baseAmount + additions };
     });
     const directMethods=paymentMethodById(direct.methods);
     const directEarnings=direct.allocations.flatMap(allocation=>{
