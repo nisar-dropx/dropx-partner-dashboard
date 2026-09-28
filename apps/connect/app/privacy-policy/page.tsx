@@ -38,7 +38,7 @@ export default function PrivacyPolicyPage() {
             <p>
               This policy applies to employees, field executives, and
               independent contractors who use the DropX One app for
-              attendance, dispatch, and workforce management. Last updated 26
+              attendance, dispatch, and workforce management. Last updated 28
               September 2026.
             </p>
           </div>
@@ -129,13 +129,31 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section className="deletion-section">
+          <h2>Payslips and other documents</h2>
+          <p>
+            DropX One shows your payslips, your group insurance card and
+            HR documents such as work cycle records. Insurance cards are
+            obtained from your employer&rsquo;s insurance provider and held
+            in Google Drive, which DropX Logistics uses as a storage
+            provider; the app downloads your card directly from there.
+            When you open a document, a copy is kept in the app&rsquo;s
+            private storage on your phone so it opens without downloading
+            again. That copy is deleted when you log out or uninstall the
+            app. If you tap Download, the file is saved to your
+            phone&rsquo;s Downloads folder, where it stays under your
+            control.
+          </p>
+        </section>
+
+        <section className="deletion-section">
           <h2>Who this data is shared with</h2>
           <p>
             Data collected by DropX One is shared with the company you work
             for or are contracted to, for attendance, payroll, and workforce
             management purposes. It is not sold to third parties or used for
             advertising. Service providers (cloud hosting, push notification
-            delivery) may process data on DropX Logistics&rsquo; behalf under
+            delivery, document storage) and your employer&rsquo;s insurance
+            provider may process data on DropX Logistics&rsquo; behalf under
             contractual confidentiality obligations.
           </p>
         </section>

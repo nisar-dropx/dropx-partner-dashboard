@@ -9463,6 +9463,140 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.dx-documents-head-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+}
+
+.dx-documents-head-actions > button,
+.dx-document-list > article > button,
+.dx-document-viewer header > button {
+  display: inline-flex;
+  min-height: 40px;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  color: #fff;
+  border: 0;
+  border-radius: 11px;
+  background: var(--one-ink);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.dx-documents-head-actions > button:disabled,
+.dx-document-list > article > button:disabled,
+.dx-document-viewer header > button:disabled {
+  opacity: .45;
+}
+
+.dx-documents-head-actions svg,
+.dx-document-list > article > button svg,
+.dx-document-viewer header svg {
+  width: 16px;
+  height: 16px;
+}
+
+.dx-documents-head-actions > .dx-documents-refresh,
+.dx-document-viewer header > .close {
+  padding: 0 11px;
+  color: var(--one-ink);
+  border: 1px solid rgba(25, 34, 59, .12);
+  background: #fff;
+}
+
+.dx-document-list > article.is-openable {
+  cursor: pointer;
+}
+
+.dx-request-download {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-weight: 700;
+}
+
+.dx-request-download svg {
+  width: 15px;
+  height: 15px;
+}
+
+.dx-document-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  background: #f4f2ef;
+}
+
+.dx-document-viewer header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 14px;
+  background: #fff;
+  border-bottom: 1px solid rgba(25, 34, 59, .09);
+}
+
+.dx-document-viewer header strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--one-ink);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dx-document-viewer-notice,
+.dx-document-viewer-error {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+}
+
+.dx-document-viewer-notice {
+  color: #2f7a4a;
+  background: #eaf5ee;
+}
+
+.dx-document-viewer-error {
+  color: #b83c3f;
+  background: #fbeceb;
+}
+
+.dx-document-viewer-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dx-document-viewer-body img,
+.dx-document-viewer-pages canvas {
+  display: block;
+  width: 100%;
+  margin: 0 auto 12px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(30, 24, 18, .12);
+}
+
+@media (max-width: 640px) {
+  .dx-documents-head-actions > button:not(.dx-documents-refresh) {
+    min-width: 42px;
+    padding: 0 11px;
+    font-size: 0;
+  }
+
+  .dx-document-list > article > button {
+    grid-column: 1 / -1;
+  }
+}
+
 .dx-auth input,
 .dx-auth select,
 .dx-settings select,
