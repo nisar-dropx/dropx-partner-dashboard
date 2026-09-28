@@ -1,3 +1,4 @@
+import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
 import { createHash, randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { normalizeMobile } from "@/lib/connect-otp";
@@ -980,31 +981,10 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       const providerMappingRequired = designationId
         ? Boolean(providerMappingRequiredByDesignationId.get(designationId))
         : false;
-      if (requiresProviderMappingActivation({
-        workspace,
-        profileType: account.profile_type,
-        designationId,
-        activationGateEnabled: designationId ? Boolean(activationGateByDesignationId.get(designationId)) : false,
-        providerMappingRequired
-      })) {
-        const [planResult, mappingResult] = await Promise.all([
-          supabaseAdmin!.from("workforce_joining_plans")
-            .select("provider_stage")
-            .eq("company_id", account.company_id)
-            .eq("workforce_id", account.id)
-            .maybeSingle(),
-          supabaseAdmin!.from("field_executive_provider_mappings")
-            .select("id")
-            .eq("company_id", account.company_id)
-            .eq("workforce_id", account.id)
-            .neq("status", "cancelled")
-            .limit(1)
-        ]);
-        if (planResult.error && !isMissingColumnError(planResult.error)) throw new Error(planResult.error.message);
-        if (mappingResult.error && !isMissingColumnError(mappingResult.error)) throw new Error(mappingResult.error.message);
-        activationStage = String(planResult.data?.provider_stage ?? "not_started");
-        const activated = activationStage === "activated" || Boolean(mappingResult.data?.length);
-        activationOnly = !activated;
+      if (workspace === "workforce" && account.profile_type === "workforce") {
+        const state=(await loadPartnerOnboardingStates(supabaseAdmin!,account.company_id,[account.id])).get(account.id);
+        activationOnly=Boolean(state?.registration_ready && state.restrict_dropx_one && !state.mapping_confirmed);
+        activationStage=state?.stage??null;
       }
 
       return {

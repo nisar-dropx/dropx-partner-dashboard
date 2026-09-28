@@ -1063,7 +1063,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     const companyId = requireCompanyId(authorization);
     const workforceId = required(formData.get("workforce_id"), "Associate");
     const workforce = await supabaseAdmin.from("workforce")
-      .select("id,full_name,location_id,onboarding_status,stations(station_code)")
+      .select("id,email,full_name,location_id,onboarding_status,stations(station_code)")
       .eq("company_id", companyId)
       .eq("id", workforceId)
       .is("deleted_at", null)
@@ -1073,8 +1073,8 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(workforce.data.location_id)) {
       throw new Error("Associate is outside your station scope.");
     }
-    if (!["approved", "active"].includes(String(workforce.data.onboarding_status ?? ""))) {
-      throw new Error("Approve the associate before creating the Amazon ID.");
+    if (!["under_review", "approved", "active"].includes(String(workforce.data.onboarding_status ?? ""))) {
+      throw new Error("Complete registration before creating the partner ID.");
     }
     const latest = await supabaseAdmin.from("workforce_amazon_invitation_requests")
       .select("id,status")
@@ -1098,28 +1098,12 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     if (latest.data && ["queued", "processing", "sent"].includes(latest.data.status)) {
       redirect(`${destination}&notice=${encodeURIComponent(`Amazon ID invitation is already ${latest.data.status}.`)}`);
     }
-    const settings = await supabaseAdmin.from("workforce_amazon_station_settings")
-      .select("associate_email_pattern,invitation_enabled")
-      .eq("company_id", companyId)
-      .eq("station_id", workforce.data.location_id)
-      .maybeSingle();
-    if (settings.error) throw new Error(settings.error.message);
-    if (!settings.data?.invitation_enabled || !settings.data.associate_email_pattern) {
-      throw new Error("Complete and enable the Amazon station invitation master first.");
-    }
-    const station = Array.isArray(workforce.data.stations) ? workforce.data.stations[0] : workforce.data.stations;
-    const generated = await supabaseAdmin.rpc("workforce_amazon_email_from_pattern", {
-      p_pattern: settings.data.associate_email_pattern,
-      p_full_name: workforce.data.full_name,
-      p_station_code: station?.station_code ?? ""
-    });
-    if (generated.error || !generated.data) throw new Error(generated.error?.message || "Unable to generate the station email.");
     const queued = await supabaseAdmin.rpc("workforce_queue_amazon_invitation", {
       p_company: companyId,
       p_actor: authorization.userId,
       p_actor_name: authorization.fullName || authorization.email || "OpsPulse",
       p_workforce: workforceId,
-      p_email: generated.data,
+      p_email: workforce.data.email,
       p_source_portal: "ops_pulse",
       p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
     });
@@ -1130,4 +1114,14 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     if (error && typeof error === "object" && "digest" in error) throw error;
     redirect(`${destination}&error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to queue the Amazon invitation.")}`);
   }
+}
+
+export async function recordPartnerProgress(form:FormData){
+ const auth=await requirePagePermission("delivery_associates","edit");
+ try{
+  if(!supabaseAdmin||auth.readOnly)throw new Error("Editing is unavailable.");
+  const value=(key:string)=>String(form.get(key)||"").trim();
+  const result=await supabaseAdmin.rpc("workforce_record_partner_progress",{p_company:requireCompanyId(auth),p_actor:auth.userId,p_workforce:value("workforce_id"),p_locations:auth.hasAllLocationAccess?null:auth.locationScopeIds,p_reported:value("reported_on"),p_invited:value("manual_invited_on")||null,p_portal:"ops_pulse"});
+  if(result.error)throw new Error(result.error.message);revalidatePath("/work-force-register");redirect("/work-force-register?notice="+encodeURIComponent("Reporting date and partner progress saved."));
+ }catch(error){if(error&&typeof error==="object"&&"digest"in error)throw error;redirect("/work-force-register?error="+encodeURIComponent(error instanceof Error?error.message:"Unable to record progress."));}
 }

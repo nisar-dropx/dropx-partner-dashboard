@@ -1,0 +1,6 @@
+"use client";
+import type {PartnerOnboardingState} from "@/lib/partner-onboarding";
+import {recordPartnerProgress} from "@/app/field-executive/actions";
+export function PartnerProgressNote({state,workforceId,canEdit}:{state:PartnerOnboardingState;workforceId:string;canEdit:boolean}){
+ return <div style={{fontSize:12,maxWidth:270}}>{state.due_kind?<strong style={{display:"block",color:"#b45309"}}>{state.due_kind==='invitation_due'?'Invitation overdue':'ID setup follow-up due'} · since {state.due_since}</strong>:null}<small style={{display:"block"}}>Reported: {state.reported_on||'Not recorded'}{state.invited_on?` · Invited: ${state.invited_on}`:''}</small>{canEdit&&!state.mapping_confirmed?<details><summary style={{cursor:"pointer"}}>Record reporting{state.adapter==='manual'?' / partner invitation':''}</summary><form action={recordPartnerProgress}><input name="workforce_id" type="hidden" value={workforceId}/><label>Actual date reported<input type="date" name="reported_on" required defaultValue={state.reported_on||''}/></label>{state.adapter==='manual'&&state.registration_ready?<label>Partner invitation sent on<input type="date" name="manual_invited_on" defaultValue={state.invited_on||''}/></label>:null}<button className="button secondary compact">Save</button></form></details>:null}</div>;
+}

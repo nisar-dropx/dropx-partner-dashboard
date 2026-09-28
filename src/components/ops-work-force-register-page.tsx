@@ -24,7 +24,7 @@ export function OpsWorkforceRegisterPage({ searchParams }: { searchParams?: Work
       pageCode="delivery_associates"
       pageTitle="Workforce Register"
       returnPath="/work-force-register"
-      registerView={searchParams?.status==="active"?"active":"pending"}
+      registerView={searchParams?.status==="due"?"due":searchParams?.status==="active"?"active":"pending"}
       viewId={searchParams?.view}
       addFormValues={{ fullName: searchParams?.full_name, mobileCountryCode: searchParams?.mobile_country_code, mobile: searchParams?.mobile, email: searchParams?.email, dateOfJoin: searchParams?.date_of_join, locationId: searchParams?.location_id, designation: searchParams?.designation }}
     />
