@@ -16,6 +16,7 @@ import {
 import {
   clockMinutes,
   costTrendSeries,
+  formatTrendValue,
   performanceTrendSeries,
   trendDates,
   trendNumber,
