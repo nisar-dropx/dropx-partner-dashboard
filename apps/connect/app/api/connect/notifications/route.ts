@@ -165,6 +165,18 @@ export async function POST(request: Request) {
         onConflict: "company_id,profile_type,account_id,device_id"
       });
     if (result.error) throw result.error;
+    // deviceId is derived from the WebView user agent, which changes on app/WebView updates, so
+    // the same phone re-registers under a new deviceId with the same token. Retire the older rows
+    // or every push is delivered once per row.
+    const retire = await supabaseAdmin
+      .from("mob_app_device_tokens")
+      .update({ is_active: false, updated_at: now })
+      .eq("company_id", account.companyId)
+      .eq("profile_type", account.profileType)
+      .eq("account_id", account.id)
+      .eq("push_token", pushToken)
+      .neq("device_id", deviceId);
+    if (retire.error) throw retire.error;
     return NextResponse.json({ ok: true });
   } catch (error) {
     return errorResponse(error);

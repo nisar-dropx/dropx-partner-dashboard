@@ -114,7 +114,14 @@ export async function deliverNotificationPush(notification: PushNotification) {
     .eq("is_active", true)
     .not("push_token", "is", null);
   if (tokenResult.error) return;
-  const tokens = (tokenResult.data ?? []).filter((row) => Boolean(row.push_token));
+  // The same phone can be registered under several device rows with one FCM token (see the
+  // notifications route), so send once per token, not once per row.
+  const seenTokens = new Set<string>();
+  const tokens = (tokenResult.data ?? []).filter((row) => {
+    if (!row.push_token || seenTokens.has(row.push_token)) return false;
+    seenTokens.add(row.push_token);
+    return true;
+  });
   if (tokens.length === 0) {
     await supabaseAdmin
       .from("mob_app_notifications")
