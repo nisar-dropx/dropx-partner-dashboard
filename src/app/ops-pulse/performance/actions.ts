@@ -188,6 +188,14 @@ async function requireVehicleDetails(companyId: string, stationId: string, sourc
   if (!saved.count) throw Error("Record Vehicle 1 arrival and unloading before completing this review.");
 }
 
+async function requireNoonEmd(companyId: string, stationId: string, sourceDate: string) {
+  const saved = await supabaseAdmin!.from("ops_performance_daily_inputs").select("source_date", { count: "exact", head: true })
+    .eq("company_id", companyId).eq("station_id", stationId).eq("source_date", sourceDate)
+    .not("emd_noon_pct", "is", null).limit(1);
+  if (saved.error) throw Error("Unable to check EMD at 12 p.m. Please retry.");
+  if (!saved.count) throw Error("Record EMD at 12 p.m. before completing this review.");
+}
+
 /** One common comment box: save a note, or complete the assigned stage with that note. */
 export async function savePerformanceReviewComment(data:FormData):Promise<ReviewActionResult> {
   const authorization=await requirePagePermission("performance_review","access");
@@ -210,6 +218,7 @@ export async function savePerformanceReviewComment(data:FormData):Promise<Review
       if (missing.length) throw Error(`Add ${missing.length} short delay reason${missing.length === 1 ? "" : "s"} in RCA before completing: ${missing.slice(0, 3).map(row => row.label).join("; ")}${missing.length > 3 ? "; …" : ""}.`);
       await requireCodRemark(companyId, station.station_code, review.id);
       await requireVehicleDetails(companyId, station.id, review.source_date);
+      await requireNoonEmd(companyId, station.id, review.source_date);
     }
     const result=await supabaseAdmin!.rpc("ops_mutate_manager_review",{p_company:companyId,p_actor:authorization.userId,p_review:review.id,p_action:complete?"complete":"comment",p_data:{note,step_id:step?.id,expected_review_version:review.updated_at,...author(authorization,access.actor.label)}});
     rpcError(result.error);
@@ -266,6 +275,7 @@ export async function bypassPerformanceReviewLevel(data: FormData): Promise<Revi
     if (!steps.some(entry => entry.id !== step.id && entry.status === "pending")) {
       await requireCodRemark(companyId, station.station_code, review.id);
       await requireVehicleDetails(companyId, station.id, review.source_date);
+      await requireNoonEmd(companyId, station.id, review.source_date);
     }
     const result = await supabaseAdmin!.rpc("ops_bypass_review_level", {
       p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_step: step.id,

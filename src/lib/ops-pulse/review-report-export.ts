@@ -54,6 +54,18 @@ export async function reviewReportXlsx(report: ReviewReport) {
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
 }
 
+/** Compact date-range export for users who only need performance values. */
+export function reviewMetricsXlsx(report: ReviewReport) {
+  const table = report.tables.find((entry) => entry.name === "Performance scorecard");
+  if (!table) throw Error("Performance scorecard data is unavailable.");
+  const workbook = XLSX.utils.book_new(), sheet = XLSX.utils.aoa_to_sheet([table.columns, ...table.rows.map((row) => table.columns.map((column) => (row as ReportRow)[column] ?? null))]);
+  sheet["!autofilter"] = { ref: sheet["!ref"]! };
+  sheet["!freeze"] = { ySplit: 1 };
+  sheet["!cols"] = table.columns.map((column) => ({ wch: /Station|Metric|IST/i.test(column) ? 28 : 18 }));
+  XLSX.utils.book_append_sheet(workbook, sheet, "Performance metrics");
+  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+}
+
 const scriptFont = (s: string) => /[\u0D00-\u0D7F]/.test(s) ? "NotoSansMalayalam" : /[\u0C00-\u0C7F]/.test(s) ? "NotoSansTelugu" : /[\u0900-\u097F]/.test(s) ? "NotoSansDevanagari" : /[\u0B80-\u0BFF]/.test(s) ? "NotoSansTamil" : /[\u0C80-\u0CFF]/.test(s) ? "NotoSansKannada" : "NotoSans";
 export async function reviewReportPdf(report: ReviewReport) {
   const doc = await PDFDocument.create();

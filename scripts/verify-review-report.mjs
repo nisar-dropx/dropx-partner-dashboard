@@ -40,7 +40,10 @@ const staleData={...data,edd:data.edd.map(r=>({...r,backlog_at:'2026-09-08T01:00
 const staleReport=buildReviewReport('2026-09-08','2026-09-08',[{id:'s1',station_code:'TESTA'}],staleData,[],new Date('2026-09-10T12:00:00Z'));
 assert.equal(staleReport.tables.find(t=>t.name==='Review summary').rows[0]['Latest EDD pending'],null);
 assert.ok(staleReport.tables.find(t=>t.name==='EDD checkpoints').rows.every(r=>r['At station pending']===null),'exports suppress stale counts exactly like Review Desk');
-const {reviewReportXlsx,reviewReportPdf}=load('src/lib/ops-pulse/review-report-export.ts');
+const {reviewMetricsXlsx,reviewReportXlsx,reviewReportPdf}=load('src/lib/ops-pulse/review-report-export.ts');
+const metricsWorkbook=require('xlsx').read(await reviewMetricsXlsx(report),{type:'buffer'});
+assert.deepEqual(metricsWorkbook.SheetNames,['Performance metrics']);
+assert.ok(require('xlsx').utils.sheet_to_json(metricsWorkbook.Sheets['Performance metrics']).some(r=>r.Metric==='AFN Prem DOT%'));
 const codWorkbook=require('xlsx').read(await reviewReportXlsx(codReport),{type:'buffer'});
 assert.ok(require('xlsx').utils.sheet_to_json(codWorkbook.Sheets['RCA and reasons']).some(r=>r.Reason==='Bank reconciliation pending'&&r.Actual==='₹123.45'));
 const xlsx=await reviewReportXlsx(report),XLSX=require('xlsx'),wb=XLSX.read(xlsx,{type:'buffer'});

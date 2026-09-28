@@ -83,7 +83,7 @@ test("Hawkeye keeps zero, leaves gaps, uses latest upload and never falls back t
   const rows = t.performanceTrendSeries(["2026-08-31", "2026-09-01"], facts, [
     { metricKey: "afn_premium_dot", target: 0.955, direction: "higher" },
   ]);
-  assert.equal(rows.length, 33);
+  assert.equal(rows.length, hawkeye.hawkeyeMetricDefinitions.length + 1);
   const dot = rows.find((s) => s.key === "afn_premium_dot");
   assert.deepEqual(
     dot.points.map((p) => p.value),

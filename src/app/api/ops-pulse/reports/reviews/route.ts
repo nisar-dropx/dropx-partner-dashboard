@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   if (!auth || !hasPermission(auth, "ops_reports", "access") || !hasPermission(auth, "performance_review", "access")) return Response.json({ error: "Reports and Performance Review access are required." }, { status: 403, headers: noStore });
   const url = new URL(request.url), from = url.searchParams.get("from") || "", to = url.searchParams.get("to") || "", format = url.searchParams.get("format") || "json";
   try { reviewReportDates(from, to); } catch (error) { return Response.json({ error: (error as Error).message }, { status: 400, headers: noStore }); }
-  if (!["json", "xlsx", "pdf"].includes(format)) return Response.json({ error: "Choose Excel or PDF." }, { status: 400, headers: noStore });
+  if (!["json", "xlsx", "pdf", "metrics_xlsx"].includes(format)) return Response.json({ error: "Choose a supported report format." }, { status: 400, headers: noStore });
   const requested = [...new Set((url.searchParams.get("stations") || "").split(",").map(s => s.trim().toUpperCase()).filter(Boolean))];
   if (!requested.length || requested.length > 250 || requested.some(s => !/^[A-Z0-9_ -]{1,50}$/.test(s))) return Response.json({ error: "Select at least one valid station (up to 250)." }, { status: 400, headers: noStore });
   const companyId = requireCompanyId(auth);
@@ -25,9 +25,10 @@ export async function GET(request: Request) {
   try {
     const report = await loadReviewReport(companyId, reviewLocations.filter(s => requested.includes(s.station_code)), from, to);
     if (format === "json") return Response.json({ generatedAt: report.generatedAt, rows: report.tables[0].rows, notes: report.notes, sections: report.tables.map(t => ({ name: t.name, count: t.rows.length })) }, { headers: noStore });
-    const { reviewReportPdf, reviewReportXlsx } = await import("@/lib/ops-pulse/review-report-export");
-    const bytes = format === "pdf" ? await reviewReportPdf(report) : await reviewReportXlsx(report);
-    return new Response(new Uint8Array(bytes), { headers: { ...noStore, "Content-Type": format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="OpsPulse-Review-Summary-${from}-to-${to}.${format}"` } });
+    const { reviewMetricsXlsx, reviewReportPdf, reviewReportXlsx } = await import("@/lib/ops-pulse/review-report-export");
+    const bytes = format === "pdf" ? await reviewReportPdf(report) : format === "metrics_xlsx" ? reviewMetricsXlsx(report) : await reviewReportXlsx(report);
+    const fileName = format === "metrics_xlsx" ? `OpsPulse-Performance-Metrics-${from}-to-${to}.xlsx` : `OpsPulse-Review-Summary-${from}-to-${to}.${format}`;
+    return new Response(new Uint8Array(bytes), { headers: { ...noStore, "Content-Type": format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${fileName}"` } });
   } catch (error) {
     console.error("Review summary export failed", { message: (error as Error).message });
     const message = (error as Error).message;

@@ -18,7 +18,7 @@ export function ReviewReportBuilder({ stations }: { stations: Station[] }) {
   try { reviewReportDates(from, to); if (!selected.length) validation = "Select at least one location."; } catch (e) { validation = (e as Error).message; }
   const invalidate = () => { generation.current++; active.current?.abort(); setPreview(null); setBusy(""); setError(""); setPage(0); };
   const toggle = (codes: string[], checked: boolean) => { invalidate(); setSelected(current => checked ? [...new Set([...current, ...codes])] : current.filter(s => !codes.includes(s))); };
-  async function generate(format: "json" | "xlsx" | "pdf") {
+  async function generate(format: "json" | "xlsx" | "pdf" | "metrics_xlsx") {
     if (validation || busy) return;
     const controller = new AbortController(); active.current = controller;
     const requestGeneration = ++generation.current;
@@ -32,7 +32,7 @@ export function ReviewReportBuilder({ stations }: { stations: Station[] }) {
         const blob = await response.blob();
         if (generation.current !== requestGeneration) return;
         const url = URL.createObjectURL(blob), link = document.createElement("a");
-        link.href = url; link.download = `OpsPulse-Review-Summary-${from}-to-${to}.${format}`;
+        link.href = url; link.download = format === "metrics_xlsx" ? `OpsPulse-Performance-Metrics-${from}-to-${to}.xlsx` : `OpsPulse-Review-Summary-${from}-to-${to}.${format}`;
         document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
       }
     } catch (e) { if (!controller.signal.aborted && generation.current === requestGeneration) setError((e as Error).message); }
@@ -40,7 +40,7 @@ export function ReviewReportBuilder({ stations }: { stations: Station[] }) {
   }
   const rows = useMemo(() => (preview?.rows ?? []).filter(row => (status === "All" || row["Review status"] === status) && `${row.Station} ${row["Station name"]} ${row["Current reviewer"]}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => sort === "misses" ? Number(b["Performance misses"] ?? -1) - Number(a["Performance misses"] ?? -1) : sort === "actions" ? Number(b["Open actions"]) - Number(a["Open actions"]) : sort === "station" ? String(a.Station).localeCompare(String(b.Station)) || String(b.Date).localeCompare(String(a.Date)) : String(b.Date).localeCompare(String(a.Date)) || String(a.Station).localeCompare(String(b.Station))), [preview, query, status, sort]);
   return <section className="review-report-builder" aria-labelledby="review-report-heading">
-    <header><div><span className="review-report-eyebrow">Review archive · Excel & PDF</span><h2 id="review-report-heading">Review Summary</h2><p>One report across locations and performance dates. Includes scorecards, RCA, short delay reasons, action plans, review discussion and operational records.</p></div><span className="review-report-format">Standard format v1</span></header>
+    <header><div><span className="review-report-eyebrow">Review archive · Excel & PDF</span><h2 id="review-report-heading">Review Summary</h2><p>One report across locations and performance dates. Use Performance metrics Excel when you only need the selected date range’s metric values and targets.</p></div><span className="review-report-format">Standard format v1</span></header>
     <div className="review-report-controls">
       <label>From<input type="date" value={from} onChange={e => { invalidate(); setFrom(e.target.value); }}/></label>
       <label>To<input type="date" value={to} onChange={e => { invalidate(); setTo(e.target.value); }}/></label>
@@ -51,9 +51,9 @@ export function ReviewReportBuilder({ stations }: { stations: Station[] }) {
         <div className="review-report-checks">{stations.filter(s => `${s.code} ${s.name}`.toLowerCase().includes(stationSearch.toLowerCase())).map(s => <label key={s.code}><input type="checkbox" checked={selected.includes(s.code)} onChange={e => toggle([s.code], e.target.checked)}/><span><b>{s.code}</b> · {s.name}</span></label>)}</div>
       </ReviewDetails>
     </div>
-    <div className="review-report-actions"><button type="button" className="button" disabled={Boolean(validation || busy)} onClick={() => generate("json")}>Preview summary</button><button type="button" className="button secondary" disabled={Boolean(validation || busy)} onClick={() => generate("xlsx")}>Download Excel</button><button type="button" className="button secondary" disabled={Boolean(validation || busy)} onClick={() => generate("pdf")}>Download PDF</button><small>Up to 92 days · All selected locations · IST</small></div>
+    <div className="review-report-actions"><button type="button" className="button" disabled={Boolean(validation || busy)} onClick={() => generate("json")}>Preview summary</button><button type="button" className="button secondary" disabled={Boolean(validation || busy)} onClick={() => generate("metrics_xlsx")}>Performance metrics Excel</button><button type="button" className="button secondary" disabled={Boolean(validation || busy)} onClick={() => generate("xlsx")}>Full review Excel</button><button type="button" className="button secondary" disabled={Boolean(validation || busy)} onClick={() => generate("pdf")}>Download PDF</button><small>Up to 92 days · All selected locations · IST</small></div>
     {validation ? <p className="review-report-message">{validation}</p> : null}
-    {busy ? <p role="status" className="review-report-message">{busy === "json" ? "Loading review summary" : `Preparing ${busy === "pdf" ? "PDF" : "Excel"}`}… Larger date ranges can take a little longer. <button type="button" onClick={invalidate}>Cancel</button></p> : null}
+    {busy ? <p role="status" className="review-report-message">{busy === "json" ? "Loading review summary" : `Preparing ${busy === "pdf" ? "PDF" : busy === "metrics_xlsx" ? "performance metrics Excel" : "full review Excel"}`}… Larger date ranges can take a little longer. <button type="button" onClick={invalidate}>Cancel</button></p> : null}
     {error ? <p role="alert" className="review-report-error">{error}</p> : null}
     <ReviewDetails className="review-report-help"><summary>What is included?</summary><ReviewDetailsClose label="Close report explanation"/><p>Saved RCA and plans; station-opening and UTR delay reasons; action owners/due dates; reviewer stages, bypass/proxy reasons and comments; vehicle arrival/unloading, EMD, recorded CPS costs and 30-minute EDD checkpoints. Missing data is labelled, never treated as zero. Raw biometric punch histories remain in the individual attendance drill-down.</p><p>Downloads include the entire location/date selection. The search, status and sort below only change the preview.</p></ReviewDetails>
     {preview ? <div className="review-report-preview"><div className="review-report-preview-head"><strong>{preview.rows.length} station-days · {preview.rows.filter(r => r["Review status"] === "Completed").length} completed</strong><small>Generated {reportIst(preview.generatedAt)}</small></div>

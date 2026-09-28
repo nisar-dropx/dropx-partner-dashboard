@@ -31,7 +31,7 @@ export function PerformanceConnections({connections,date,stationCode,canEdit}:{
   </ReviewActionForm>;
   return <section className="review-vehicles" aria-label="Station vehicles">
     <header><span><strong>Station vehicles · {Math.max(1,connections.length)}</strong><small>Vehicle 1 is required · arrival & unloading in IST</small></span>
-      <div className="review-history-actions"><TrendButton group="station" metric="arrival" label="Vehicle timings and EMD"/>{canEdit?<button type="button" className="button secondary" aria-expanded={adding} aria-controls="review-new-vehicle" onClick={()=>setAdding(v=>!v)}>{adding?"Close additional vehicle":"+ Add vehicle"}</button>:null}</div>
+      <div className="review-history-actions"><TrendButton group="station" metric="arrival" label="Vehicle timings"/>{canEdit?<button type="button" className="button secondary" aria-expanded={adding} aria-controls="review-new-vehicle" onClick={()=>setAdding(v=>!v)}>{adding?"Close additional vehicle":"+ Add vehicle"}</button>:null}</div>
     </header>
     {!connections.length ? <div className="review-vehicle-required">
       <div><strong>Vehicle 1 · required</strong><small>{canEdit ? "Save both timings before a manager can complete this review." : "Arrival and unloading details have not been recorded."}</small></div>

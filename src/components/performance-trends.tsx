@@ -271,6 +271,7 @@ export function PerformanceTrendProvider({
                   <button type="button" onClick={() => setExpanded(!expanded)}>
                     {expanded ? "Numbers only" : "Graph & details"}
                   </button>
+                  {group === "station" ? <a className="review-trend-download" href={`/api/ops-pulse/performance/station-inputs-report?${new URLSearchParams({ station, date, days: String(period) })}`}>Download Vehicle + EMD Excel</a> : null}
                 </div>
                 {error ? (
                   <div role="alert" className="review-trend-message">
