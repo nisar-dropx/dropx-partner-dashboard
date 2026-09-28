@@ -1,26 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { workforcePaymentMonth, workforcePaymentPeriod } from "@/lib/workforce-payment-period";
+import { workforcePaymentReadPeriod } from "@/lib/workforce-payment-period";
 import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
 import { workforcePaymentStatus } from "@/lib/workforce-payment-status";
 import {personalPaymentCard} from '@/lib/personal-payment-card';
 import {allocateOwnDailyCards} from '@/lib/workforce-daily-card';
 import {assertNoProviderDirectOverlap,type DirectPaymentComponent} from '@/lib/direct-workforce-payment';
-import {loadDirectPaymentContext,loadDirectPaymentSetup,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
+import {attendanceIdentityFilter,loadDirectPaymentContext,loadDirectPaymentSetup,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
+import {calculateProviderAttendancePayments,consumeProviderAttendanceAmount,hasProviderAttendanceComponents,type ProviderAttendanceMapping,type ProviderAttendanceMethod} from '@/lib/provider-attendance-payment';
 export const dynamic='force-dynamic';
 
 type Mapping = {
   id: string;
+  payment_method_id?: string | null;
   pay_type?:string|null;
   workforce_id?: string | null;
   provider_member_id: string | null;
   effective_from: string | null;
   effective_to: string | null;
   payment_values: Record<string, unknown> | null;
+  status?: string | null;
   providers?: { name?: string | null; code?:string|null } | Array<{ name?: string | null;code?:string|null }> | null;
   stations?: {station_code?:string|null} | Array<{station_code?:string|null}> | null;
-  payment_methods?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  payment_methods?: (ProviderAttendanceMethod & { name?: string | null }) | Array<ProviderAttendanceMethod & { name?: string | null }> | null;
 };
 
 function relationName(value: Mapping["providers"] | Mapping["payment_methods"]) {
@@ -42,6 +45,33 @@ function componentField(component: DirectPaymentComponent) {
   return Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
 }
 
+function productionMetric(row: Record<string, unknown>, source: string) {
+  const value = (key: string) => Number(row[key] ?? 0);
+  const normalized = source.trim().toLowerCase();
+  if (["amazon_delivery", "amazondelivery"].includes(normalized)) return value("amazon_delivery");
+  if (["swa_delivery", "swadelivery"].includes(normalized)) return value("swa_delivery");
+  if (["total_delivery", "delivery"].includes(normalized)) return value("total_delivery") || value("amazon_delivery") + value("swa_delivery");
+  if (["customer_return", "creturn", "c_return"].includes(normalized)) return value("c_return");
+  if (["seller_pickup", "mfn"].includes(normalized)) return value("mfn");
+  if (["seller_return", "mfn_return", "slller_return"].includes(normalized)) return value("mfn_return");
+  return 0;
+}
+
+function mappedProductionAmount(mapping: Mapping, row: Record<string, unknown>) {
+  const method = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
+  const values = mapping.payment_values ?? {};
+  const total = (method?.payment_method_components ?? []).reduce((sum, component) => {
+    const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
+    if (component.component_type !== "production" && field?.field_type !== "production" && field?.calculation_type !== "count_x_rate") return sum;
+    const code = String(component.component_code || field?.code || "").trim();
+    const rawRate = values[code] ?? Object.entries(values).find(([key]) => key.trim().toUpperCase() === code.toUpperCase())?.[1];
+    const rate = Number(rawRate ?? 0);
+    if (!Number.isFinite(rate) || rate < 0) throw new Error("Your provider production rate is invalid. Contact Workforce.");
+    return sum + productionMetric(row, String(field?.calculation_source ?? code)) * rate;
+  }, 0);
+  return Math.round(total * 100) / 100;
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Payments are unavailable right now.");
@@ -58,13 +88,13 @@ export async function GET(request: NextRequest) {
     if(legacyColumns[account.profileType])identityFilters.push(`and(workforce_id.is.null,${legacyColumns[account.profileType]}.eq.${account.id})`);
     if (account.profileType === "workforce" && workforce?.source_profile_id && workforce.source_profile_type && legacyColumns[workforce.source_profile_type]) identityFilters.push(`and(workforce_id.is.null,${legacyColumns[workforce.source_profile_type]}.eq.${workforce.source_profile_id})`);
 
-    const currentPeriod = workforcePaymentMonth();
-    const currentMonth = currentPeriod.from.slice(0, 7);
+    const today = todayKolkata();
+    const currentMonth = today.slice(0, 7);
     const month = request.nextUrl.searchParams.get("month") || currentMonth;
-    const period = workforcePaymentPeriod(month);
-    if (month > currentMonth) throw new Error("Choose the current month or an earlier month.");
+    const period = workforcePaymentReadPeriod(month, today);
+    const currentPeriod = workforcePaymentReadPeriod(currentMonth, today);
     const loadMappings = (target: { from: string; to: string }) => admin.from("field_executive_provider_mappings")
-      .select("id,provider_member_id,effective_from,effective_to,payment_values,pay_type,providers(name,code),stations(station_code),payment_methods(name),workforce_id,field_executive_id,contractor_id,employee_id")
+      .select("id,provider_member_id,effective_from,effective_to,status,payment_method_id,payment_values,pay_type,providers(name,code),stations(station_code),payment_methods(id,name,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source))),workforce_id,field_executive_id,contractor_id,employee_id")
       .eq("company_id", account.companyId)
       .neq("status", "cancelled").lt("effective_from",target.to).or(`effective_to.is.null,effective_to.gte.${target.from}`)
       .or(identityFilters.length ? identityFilters.join(","):"id.eq.00000000-0000-0000-0000-000000000000").order("effective_from",{ascending:false}).limit(1000);
@@ -73,29 +103,36 @@ export async function GET(request: NextRequest) {
 
     if((mappingResult.data ?? []).length>=1000) throw new Error("Too many mapping versions to reconcile safely. Please contact Workforce.");
     const mappings = (mappingResult.data ?? []) as Mapping[];
-    const periodEnd = month === currentMonth ? todayKolkata() : previousDate(period.to);
-    const direct = await loadDirectPaymentContext({companyId:account.companyId,workforceId:workforce?.id??null,from:period.from,to:periodEnd,employmentFrom:workforce?.date_of_join,employmentTo:workforce?.last_working_date});
+    const periodEnd = previousDate(period.to);
+    const direct = await loadDirectPaymentContext({companyId:account.companyId,workforceId:workforce?.id??null,from:period.from,to:periodEnd,employmentFrom:workforce?.date_of_join,employmentTo:workforce?.last_working_date,sourceProfileId:workforce?.source_profile_id,sourceProfileType:workforce?.source_profile_type});
     assertNoProviderDirectOverlap({allocations:direct.allocations,mappings,from:period.from,to:periodEnd});
     const currentMappingResult = month === currentMonth ? mappingResult : await loadMappings(currentPeriod);
     if (currentMappingResult.error) throw new Error("We could not load your current rate card. Please try again.");
     if ((currentMappingResult.data ?? []).length >= 1000) throw new Error("Too many current mapping versions to reconcile safely. Please contact Workforce.");
     const currentMappings = (currentMappingResult.data ?? []) as Mapping[];
-    const currentEnd = todayKolkata();
+    const currentEnd = today;
     const currentDirect = month === currentMonth
       ? direct
       : await loadDirectPaymentSetup({companyId:account.companyId,workforceId:workforce?.id??null,from:currentPeriod.from,to:currentEnd});
     assertNoProviderDirectOverlap({allocations:currentDirect.allocations,mappings:currentMappings,from:currentPeriod.from,to:currentEnd});
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
-    const dailyResult = providerMemberIds.length
-      ? await supabaseAdmin.from("cps_shipment_daily")
+    const [dailyResult,providerAttendanceResult] = await Promise.all([providerMemberIds.length
+      ? supabaseAdmin.from("cps_shipment_daily")
         .select("id,work_date,station_code,client,provider_employee_id,provider_employee_name,total_activity,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
         .eq("company_id", account.companyId)
         .in("provider_employee_id", providerMemberIds)
         .gte("work_date", period.from)
         .lt("work_date", period.to)
         .order("work_date", { ascending: false })
-      : { data: [], error: null };
+      : Promise.resolve({ data: [], error: null }),
+      workforce?.id && mappings.length
+        ? supabaseAdmin.from("attendance_daily").select("id,punch_date,status,in_time,out_time,work_minutes")
+          .eq("company_id",account.companyId).or(attendanceIdentityFilter(workforce)).gte("punch_date",period.from).lte("punch_date",periodEnd).order("punch_date")
+        : Promise.resolve({data:[],error:null})
+    ]);
     if (dailyResult.error) throw new Error("We could not load your live earnings. Please try again.");
+    if (providerAttendanceResult.error) throw new Error("We could not load the attendance used for your provider earnings. Please try again.");
+    if ((providerAttendanceResult.data ?? []).length >= 1000) throw new Error("Too many attendance records to reconcile safely. Contact Workforce.");
 
     type RateLine = { code: string; label: string; count: number; rate: number; amount: number };
     type ProviderDay = { providerMemberId: string; providerMemberName: string | null; deliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine> };
@@ -119,6 +156,9 @@ export async function GET(request: NextRequest) {
     };
     const dailyByDate = new Map<string, Day>();
     const providerWorkDates = new Set<string>();
+    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:providerAttendanceResult.data??[],from:period.from,to:periodEnd});
+    const providerAttendanceByMappingDate=new Map(providerAttendanceDays.map(day=>[`${day.mappingId}|${day.date}`,day]));
+    const consumedProviderAttendance=new Set<string>();
     const personalAmounts=allocateOwnDailyCards((dailyResult.data||[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row),card=m?personalPaymentCard(m):null;return card?[{row,card}]:[];}));
     for (const row of dailyResult.data ?? []) {
       const mapping=paymentMappingForDay(mappings,row);
@@ -129,7 +169,10 @@ export async function GET(request: NextRequest) {
       const cReturns = Number(row.c_return ?? 0);
       const mfn = Number(row.mfn ?? 0);
       const mfnReturns = Number(row.mfn_return ?? 0);
-      const earnings = personalAmounts.get(row.id) ?? Number(row.da_total_pay ?? 0);
+      const attendanceDay=providerAttendanceByMappingDate.get(`${mapping.id}|${date}`);
+      const earnings = hasProviderAttendanceComponents(mapping as unknown as ProviderAttendanceMapping)
+        ? Math.round((mappedProductionAmount(mapping,row as Record<string,unknown>)+consumeProviderAttendanceAmount(attendanceDay,consumedProviderAttendance))*100)/100
+        : personalAmounts.get(row.id) ?? Number(row.da_total_pay ?? 0);
       const lines: RateLine[] = [
         { code: "delivery", label: "Delivery", count: deliveries, rate: mappedRate(mapping, row.del_rate, ["DELIVERY", "AMAZON_DELIVERY"]), amount: 0 },
         { code: "c_return", label: "C-return", count: cReturns, rate: mappedRate(mapping, row.c_return_rate, ["CRETURN", "C_RETURN", "CUSTOMER_RETURN"]), amount: 0 },
@@ -156,6 +199,13 @@ export async function GET(request: NextRequest) {
       lines.forEach((line) => mergeLine(provider.rateLines, line));
       current.providers.set(providerMemberId, provider);
       dailyByDate.set(date, current);
+    }
+    for(const attendanceDay of providerAttendanceDays){
+      providerWorkDates.add(attendanceDay.date);
+      const current=dailyByDate.get(attendanceDay.date)??{date:attendanceDay.date,deliveries:0,amazonDeliveries:0,swaDeliveries:0,cReturns:0,mfn:0,mfnReturns:0,earnings:0,rateLines:new Map<string,RateLine>(),providers:new Map<string,ProviderDay>()};
+      current.earnings+=consumeProviderAttendanceAmount(attendanceDay,consumedProviderAttendance);
+      attendanceDay.lines.forEach(line=>mergeLine(current.rateLines,{code:line.code,label:line.label,count:line.count,rate:line.rate,amount:line.amount}));
+      dailyByDate.set(attendanceDay.date,current);
     }
     for (const directDay of direct.days) {
       const current = dailyByDate.get(directDay.date) ?? { date: directDay.date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>(), providers: new Map<string, ProviderDay>() };

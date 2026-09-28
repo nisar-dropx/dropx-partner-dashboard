@@ -58,31 +58,52 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (error) return { rows: [] as WorkforcePayoutRow[], error };
   const locations = locationsResult.data ?? [];
   const allowed = new Set(locations.map((row) => row.id));
-  const mappings = (mappingsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
+  const allMappings = mappingsResult.data ?? [];
+  const mappings = allMappings.filter((row: any) => allowed.has(row.station_id));
   const directAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
   const directWorkforceIds = Array.from(new Set(directAllocations.map((row: any) => row.workforce_id).filter(Boolean)));
-  const sourceIds = Array.from(new Set([...mappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]), ...directWorkforceIds].filter(Boolean)));
+  const sourceIds = Array.from(new Set([...allMappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]), ...directWorkforceIds].filter(Boolean)));
   const contractorIds = Array.from(new Set(mappings.map((row: any) => row.contractor_id).filter(Boolean)));
   const employeeIds = Array.from(new Set(mappings.map((row: any) => row.employee_id).filter(Boolean)));
   const fieldExecutiveIds = Array.from(new Set(mappings.map((row: any) => row.field_executive_id).filter(Boolean)));
   const providerMemberIds = Array.from(new Set(mappings.map((row: any) => row.provider_member_id).filter(Boolean)));
   const workforceIds = Array.from(new Set([...mappings.map((row: any) => row.workforce_id), ...directWorkforceIds].filter(Boolean)));
-  const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, attendanceResult, directComponentsResult] = await Promise.all([
-    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, dropx_id, full_name").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, dropx_id, full_name, date_of_join, last_working_date, pan_number").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
+  const paymentMethodIds = Array.from(new Set([...allMappings, ...directAllocations].map((row: any) => row.payment_method_id).filter(Boolean)));
+  const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
+    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
+    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
     providerMemberIds.length ? supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", fromDate).lte("work_date", toDate).limit(50000) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
     fieldExecutiveIds.length ? supabaseAdmin.from("workforce").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIds) : Promise.resolve({ data: [], error: null }),
     workforceIds.length ? supabaseAdmin.from("connect_profile_verifications").select("account_id, verified").eq("company_id", companyId).eq("profile_type", "workforce").eq("kind", "pan_aadhaar").in("account_id", workforceIds) : Promise.resolve({ data: [], error: null }),
-    directWorkforceIds.length ? (async () => {
-      const rows: any[] = [];
-      for (let index = 0; index < directWorkforceIds.length; index += 100) {
+    paymentMethodIds.length ? supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", paymentMethodIds) : Promise.resolve({ data: [], error: null })
+  ]);
+  if (workforceBySourceResult.error || workforceByIdResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error || panAadhaarResult.error || methodComponentsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceBySourceResult.error?.message || workforceByIdResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || panAadhaarResult.error?.message || methodComponentsResult.error?.message || "Unable to load payout data." };
+  const workerBySource = new Map<string, any>();
+  [...(workforceBySourceResult.data ?? []), ...(workforceByIdResult.data ?? [])].forEach((row: any) => {
+    if (row.id) workerBySource.set(row.id, row);
+    if (row.source_profile_id) workerBySource.set(row.source_profile_id, row);
+  });
+  const canonicalWorkers = Array.from(new Map([
+    ...directWorkforceIds,
+    ...mappings.map((mapping: any) => workerBySource.get(mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id)?.id)
+  ].filter(Boolean).map((id) => [id, workerBySource.get(id)])).values()).filter(Boolean);
+  const attendanceIdentityGroups = [
+    { column: "workforce_id", ids: canonicalWorkers.map((worker: any) => worker.id) },
+    { column: "employee_id", ids: canonicalWorkers.filter((worker: any) => worker.source_profile_type === "employee").map((worker: any) => worker.source_profile_id) },
+    { column: "contractor_id", ids: canonicalWorkers.filter((worker: any) => worker.source_profile_type === "contractor").map((worker: any) => worker.source_profile_id) },
+    { column: "field_executive_id", ids: canonicalWorkers.filter((worker: any) => worker.source_profile_type === "field_executive").map((worker: any) => worker.source_profile_id) }
+  ].map((group) => ({ ...group, ids: Array.from(new Set(group.ids.filter(Boolean))) }));
+  const attendanceResult = attendanceIdentityGroups.some((group) => group.ids.length) ? await (async () => {
+    const rows: any[] = [];
+    for (const group of attendanceIdentityGroups) {
+      for (let index = 0; index < group.ids.length; index += 100) {
         const result = await readAllRows(supabaseAdmin!.from("attendance_daily")
-          .select("id,workforce_id,punch_date,status,in_time,out_time,work_minutes")
+          .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
           .eq("company_id", companyId)
-          .in("workforce_id", directWorkforceIds.slice(index, index + 100))
+          .in(group.column, group.ids.slice(index, index + 100))
           .gte("punch_date", fromDate)
           .lte("punch_date", toDate)
           .order("punch_date")
@@ -90,54 +111,12 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         if (result.error) return result;
         rows.push(...(result.data ?? []));
       }
-      return { data: rows, error: null };
-    })() : Promise.resolve({ data: [], error: null }),
-    directAllocations.length ? supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", Array.from(new Set(directAllocations.map((row: any) => row.payment_method_id)))) : Promise.resolve({ data: [], error: null })
-  ]);
-  if (workforceBySourceResult.error || workforceByIdResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error || panAadhaarResult.error || attendanceResult.error || directComponentsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceBySourceResult.error?.message || workforceByIdResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || panAadhaarResult.error?.message || attendanceResult.error?.message || directComponentsResult.error?.message || "Unable to load payout data." };
-  const workerBySource = new Map<string, any>();
-  [...(workforceBySourceResult.data ?? []), ...(workforceByIdResult.data ?? [])].forEach((row: any) => {
-    if (row.id) workerBySource.set(row.id, row);
-    if (row.source_profile_id) workerBySource.set(row.source_profile_id, row);
-  });
-  const panBySource = new Map([...contractorsResult.data ?? [], ...employeesResult.data ?? [], ...fieldExecutivesResult.data ?? []].map((row: any) => [row.id, row.pan_number]));
-  const locationById = new Map(locations.map((row: any) => [row.id, row])); const modelById = new Map((modelsResult.data ?? []).map((row: any) => [row.id, row]));
-  const metricsByProviderMember = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByProviderMember.set(row.provider_employee_id, [...(metricsByProviderMember.get(row.provider_employee_id) ?? []), row]));
-  const allocations = allocationResult.data ?? [];
-  const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
-  const panAadhaarLinkedByWorkforceId = new Map((panAadhaarResult.data ?? []).map((row: any) => [row.account_id, row.verified === true]));
-  const providerRows = mappings.map((mapping: any) => {
-    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const providerDailyRows = metricsByProviderMember.get(mapping.provider_member_id) ?? []; const providerMemberName = providerDailyRows.find((daily) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
-    const eligibleDaily = providerDailyRows.filter((daily) => daily.work_date >= mapping.effective_from && (!mapping.effective_to || daily.work_date <= mapping.effective_to));
-    const productionRules = allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).flatMap((item: any) => {
-      const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
-      if (!field?.code || field.field_type !== "production" || !metric?.source_key) return [];
-      return [{ code: String(field.code), label: productionLabel(String(field.code), String(field.label || field.code)), source: String(metric.source_key), rate: Number(mapping.payment_values?.[field.code] ?? 0) }];
-    });
-    const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = [...new Set(eligibleDaily.map((daily) => String(daily.work_date)))].sort().reverse().map((date) => {
-      const rows = eligibleDaily.filter((daily) => String(daily.work_date) === date);
-      const lines = productionRules.map((rule) => { const count = rows.reduce((sum, daily) => sum + metricValue(daily, rule.source), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
-      return { date, lines, baseAmount: lines.reduce((sum, line) => sum + line.amount, 0) };
-    });
-    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = productionRules.map((rule) => { const count = dailyBreakdown.reduce((sum, day) => sum + (day.lines.find((line) => line.code === rule.code)?.count ?? 0), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
-    const production = productionBreakdown.reduce((sum, line) => sum + line.count, 0);
-    const baseAmount = productionBreakdown.reduce((sum, line) => sum + line.amount, 0);
-    const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
-    const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) }); const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0); const panAadhaarLinked = mapping.workforce_id ? panAadhaarLinkedByWorkforceId.get(mapping.workforce_id) === true : false;
-    const additions = 0; const grossPayment = baseAmount + additions;
-    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
-  });
-  const overlappingPaymentSetup = mappings.some((mapping: any) => {
-    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
-    const canonicalWorkforceId = workerBySource.get(sourceId)?.id;
-    if (!canonicalWorkforceId) return false;
-    return directAllocations.some((allocation: any) => allocation.workforce_id === canonicalWorkforceId
-      && String(mapping.effective_from) <= String(allocation.effective_to ?? toDate)
-      && String(allocation.effective_from) <= String(mapping.effective_to ?? toDate));
-  });
-  if (overlappingPaymentSetup) return { rows: [] as WorkforcePayoutRow[], error: "Provider-linked and direct payment allocations overlap. Close one setup before relying on this payout estimate." };
-  const directComponentsByMethod = new Map<string, DirectPayComponent[]>();
-  for (const row of directComponentsResult.data ?? []) {
+    }
+    return { data: [...new Map(rows.map((row) => [row.id, row])).values()], error: null };
+  })() : { data: [], error: null };
+  if (attendanceResult.error) return { rows: [] as WorkforcePayoutRow[], error: attendanceResult.error.message };
+  const componentsByMethod = new Map<string, DirectPayComponent[]>();
+  for (const row of methodComponentsResult.data ?? []) {
     const field: any = Array.isArray(row.payment_fields) ? row.payment_fields[0] : row.payment_fields;
     const component: DirectPayComponent = {
       component_code: String(row.component_code ?? ""),
@@ -147,11 +126,14 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       calculation_type: String(field?.calculation_type ?? "") || null,
       calculation_source: String(field?.calculation_source ?? "") || null
     };
-    directComponentsByMethod.set(String(row.payment_method_id), [...(directComponentsByMethod.get(String(row.payment_method_id)) ?? []), component]);
+    componentsByMethod.set(String(row.payment_method_id), [...(componentsByMethod.get(String(row.payment_method_id)) ?? []), component]);
   }
   const attendanceByWorkerDate = new Map<string, any>();
   for (const row of attendanceResult.data ?? []) {
-    const key = `${row.workforce_id}|${row.punch_date}`;
+    const sourceId = row.workforce_id || row.employee_id || row.contractor_id || row.field_executive_id;
+    const canonicalWorkforceId = workerBySource.get(sourceId)?.id;
+    if (!canonicalWorkforceId) continue;
+    const key = `${canonicalWorkforceId}|${row.punch_date}`;
     const current = attendanceByWorkerDate.get(key);
     attendanceByWorkerDate.set(key, preferredDirectPayAttendance(current, row));
   }
@@ -160,6 +142,85 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     for (let cursor = new Date(`${from}T00:00:00Z`); cursor <= new Date(`${to}T00:00:00Z`); cursor.setUTCDate(cursor.getUTCDate() + 1)) dates.push(cursor.toISOString().slice(0, 10));
     return dates;
   };
+  const panBySource = new Map([...contractorsResult.data ?? [], ...employeesResult.data ?? [], ...fieldExecutivesResult.data ?? []].map((row: any) => [row.id, row.pan_number]));
+  const locationById = new Map(locations.map((row: any) => [row.id, row])); const modelById = new Map((modelsResult.data ?? []).map((row: any) => [row.id, row]));
+  const metricsByProviderMember = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByProviderMember.set(row.provider_employee_id, [...(metricsByProviderMember.get(row.provider_employee_id) ?? []), row]));
+  const allocations = allocationResult.data ?? [];
+  const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
+  const panAadhaarLinkedByWorkforceId = new Map((panAadhaarResult.data ?? []).map((row: any) => [row.account_id, row.verified === true]));
+  const attendanceComponentsFor = (mapping: any) => (componentsByMethod.get(String(mapping.payment_method_id)) ?? [])
+    .filter((component) => component.component_type !== "production" && component.calculation_source === "attendance_eligibility");
+  const attendanceSetupSignature = (mapping: any) => JSON.stringify(attendanceComponentsFor(mapping)
+    .map((component) => {
+      const code = String(component.component_code ?? "").trim().toUpperCase();
+      const rawRate = Object.entries(mapping.payment_values ?? {}).find(([key]) => key.trim().toUpperCase() === code)?.[1] ?? null;
+      return [code, component.pay_schedule, component.calculation_type, component.calculation_source, rawRate];
+    })
+    .sort((left, right) => String(left[0]).localeCompare(String(right[0]))));
+  let providerAttendanceConflict = false;
+  const attendanceOwnerOn = (workforceId: string, date: string) => {
+    const candidates = allMappings.filter((candidate: any) => {
+      const sourceId = candidate.workforce_id || candidate.contractor_id || candidate.employee_id || candidate.field_executive_id;
+      return workerBySource.get(sourceId)?.id === workforceId
+        && String(candidate.effective_from) <= date
+        && (!candidate.effective_to || String(candidate.effective_to) >= date)
+        && attendanceComponentsFor(candidate).length > 0;
+    }).sort((left: any, right: any) => String(right.effective_from).localeCompare(String(left.effective_from)) || String(right.id).localeCompare(String(left.id)));
+    if (!candidates.length) return "";
+    const latest = candidates.filter((candidate: any) => String(candidate.effective_from) === String(candidates[0].effective_from));
+    if (new Set(latest.map(attendanceSetupSignature)).size > 1) providerAttendanceConflict = true;
+    return String(latest[0].id);
+  };
+  const providerRows = mappings.map((mapping: any) => {
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const providerDailyRows = metricsByProviderMember.get(mapping.provider_member_id) ?? []; const providerMemberName = providerDailyRows.find((daily) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
+    const activeFrom = [fromDate, String(mapping.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
+    const activeTo = [toDate, today(), String(mapping.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
+    const eligibleDaily = activeFrom <= activeTo ? providerDailyRows.filter((daily) => daily.work_date >= activeFrom && daily.work_date <= activeTo) : [];
+    const productionRules = allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).flatMap((item: any) => {
+      const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
+      if (!field?.code || field.field_type !== "production" || !metric?.source_key) return [];
+      return [{ code: String(field.code), label: productionLabel(String(field.code), String(field.label || field.code)), source: String(metric.source_key), rate: Number(mapping.payment_values?.[field.code] ?? 0) }];
+    });
+    const attendanceComponents = attendanceComponentsFor(mapping);
+    const attendanceDates = attendanceComponents.length && worker?.id && activeFrom <= activeTo
+      ? dateRange(activeFrom, activeTo).filter((date) => attendanceOwnerOn(worker.id, date) === String(mapping.id))
+      : [];
+    const dates = [...new Set([...eligibleDaily.map((daily) => String(daily.work_date)), ...attendanceDates])];
+    let missingAttendanceConfiguration = false;
+    const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = dates.sort().reverse().map((date) => {
+      const rows = eligibleDaily.filter((daily) => String(daily.work_date) === date);
+      const productionLines = productionRules.map((rule) => { const count = rows.reduce((sum, daily) => sum + metricValue(daily, rule.source), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
+      const ownedAttendanceComponents = attendanceDates.includes(date) ? attendanceComponents : [];
+      const attendancePay = directPayForDay(mapping.payment_values, ownedAttendanceComponents, date, attendanceByWorkerDate.get(`${worker?.id}|${date}`));
+      missingAttendanceConfiguration ||= ownedAttendanceComponents.length > 0 && attendancePay.missing;
+      const attendanceLines = attendancePay.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount }));
+      const lines = [...productionLines, ...attendanceLines];
+      return { date, lines, baseAmount: Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100 };
+    });
+    const lineMap = new Map<string, { code: string; label: string; count: number; rate: number; amount: number }>();
+    for (const day of dailyBreakdown) for (const line of day.lines) {
+      const current = lineMap.get(line.code) ?? { ...line, count: 0, amount: 0 };
+      current.count += line.count; current.amount += line.amount; lineMap.set(line.code, current);
+    }
+    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [...lineMap.values()].map((line) => ({ ...line, count: Math.round(line.count * 100) / 100, amount: Math.round(line.amount * 100) / 100 }));
+    const production = productionBreakdown.reduce((sum, line) => sum + line.count, 0);
+    const baseAmount = Math.round(productionBreakdown.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
+    const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
+    const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) }); const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0); const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
+    const additions = 0; const grossPayment = baseAmount + additions;
+    const status = missingAttendanceConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
+    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status } satisfies WorkforcePayoutRow;
+  });
+  if (providerAttendanceConflict) return { rows: [] as WorkforcePayoutRow[], error: "Conflicting provider attendance payment setups exist for the same workforce date. Resolve the duplicate rate cards before calculating payroll." };
+  const overlappingPaymentSetup = mappings.some((mapping: any) => {
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
+    const canonicalWorkforceId = workerBySource.get(sourceId)?.id;
+    if (!canonicalWorkforceId) return false;
+    return directAllocations.some((allocation: any) => allocation.workforce_id === canonicalWorkforceId
+      && String(mapping.effective_from) <= String(allocation.effective_to ?? toDate)
+      && String(allocation.effective_from) <= String(mapping.effective_to ?? toDate));
+  });
+  if (overlappingPaymentSetup) return { rows: [] as WorkforcePayoutRow[], error: "Provider-linked and direct payment allocations overlap. Close one setup before relying on this payout estimate." };
   const allocationsByWorkforce = new Map<string, any[]>();
   for (const allocation of directAllocations) allocationsByWorkforce.set(String(allocation.workforce_id), [
     ...(allocationsByWorkforce.get(String(allocation.workforce_id)) ?? []),
@@ -173,7 +234,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         : [];
       const components = snapshotComponents.length
         ? snapshotComponents
-        : directComponentsByMethod.get(String(allocation.payment_method_id)) ?? [];
+        : componentsByMethod.get(String(allocation.payment_method_id)) ?? [];
       const activeFrom = [fromDate, String(allocation.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
       const activeTo = [toDate, today(), String(allocation.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
@@ -208,9 +269,9 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const period = resolvePeriod(searchParams);
   const authorization = await requirePagePermission("workforce_payouts", "access"); const companyId = requireCompanyId(authorization); const { rows, error } = await loadRows(companyId, authorization, period.fromDate, period.toDate);
   const gross = rows.reduce((sum, row) => sum + row.baseAmount, 0); const ready = rows.filter((row) => row.baseAmount > 0).length;
-  return <AppShell active="Workforce Payouts" pageCode="workforce_payouts"><PageHead eyebrow="Payments" title="Workforce Payouts" subtitle="Calculate provider-production and direct attendance/fixed workforce earnings, then review additions and deductions before payout." action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
+  return <AppShell active="Workforce Payouts" pageCode="workforce_payouts"><PageHead eyebrow="Payments" title="Workforce Payouts" subtitle="Calculate provider production and attendance-based workforce earnings, then review additions and deductions before payout." action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
     <WorkforceFinanceQueue companyId={companyId} authorization={authorization} status={typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : undefined}/>
     <h2>Live estimate worksheet · not a payment instruction</h2>
-    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load payouts</strong><p className="subtle">{error}</p></div></section> : <><div className="stat-grid four"><div className="stat-card"><span>Payment allocations</span><strong>{rows.length}</strong></div><div className="stat-card"><span>Payment rows</span><strong>{ready}</strong></div><div className="stat-card"><span>Gross amount</span><strong>Rs {gross.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong></div><div className="stat-card"><span>Pending review</span><strong>{ready}</strong></div></div><section className="panel"><div className="panel-head payout-period-head"><div><h2>{period.title}</h2><p className="subtle">Only workforce in your allocated locations is shown. Provider production and direct attendance/fixed allocations use their effective dates.</p></div><form className="payout-period-filter" method="get"><label>Period<select className="field" name="period" defaultValue={period.mode}><option value="monthly">Monthly</option><option value="daily">Daily</option><option value="range">Custom range</option></select></label><label>Month<input className="field" type="month" name="month" defaultValue={period.month} /></label><label>Day<input className="field" type="date" name="day" defaultValue={period.day} /></label><label>From<input className="field" type="date" name="from" defaultValue={period.from} /></label><label>To<input className="field" type="date" name="to" defaultValue={period.to} /></label><button className="button secondary" type="submit">Apply</button></form></div><WorkforcePayoutTable rows={rows} /></section></>}
+    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load payouts</strong><p className="subtle">{error}</p></div></section> : <><div className="stat-grid four"><div className="stat-card"><span>Payment allocations</span><strong>{rows.length}</strong></div><div className="stat-card"><span>Payment rows</span><strong>{ready}</strong></div><div className="stat-card"><span>Gross amount</span><strong>Rs {gross.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong></div><div className="stat-card"><span>Pending review</span><strong>{ready}</strong></div></div><section className="panel"><div className="panel-head payout-period-head"><div><h2>{period.title}</h2><p className="subtle">Only workforce in your allocated locations is shown. Provider production and attendance-based amounts use effective dates and recorded attendance.</p></div><form className="payout-period-filter" method="get"><label>Period<select className="field" name="period" defaultValue={period.mode}><option value="monthly">Monthly</option><option value="daily">Daily</option><option value="range">Custom range</option></select></label><label>Month<input className="field" type="month" name="month" defaultValue={period.month} /></label><label>Day<input className="field" type="date" name="day" defaultValue={period.day} /></label><label>From<input className="field" type="date" name="from" defaultValue={period.from} /></label><label>To<input className="field" type="date" name="to" defaultValue={period.to} /></label><button className="button secondary" type="submit">Apply</button></form></div><WorkforcePayoutTable rows={rows} /></section></>}
   </AppShell>;
 }

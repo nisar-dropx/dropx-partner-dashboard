@@ -20,6 +20,17 @@ export type CanonicalPaymentWorker = {
   source_profile_type: string | null;
 };
 
+export function attendanceIdentityFilter(worker: Pick<CanonicalPaymentWorker, "id" | "source_profile_id" | "source_profile_type">) {
+  const sourceColumn = worker.source_profile_type === "employee" ? "employee_id"
+    : worker.source_profile_type === "contractor" ? "contractor_id"
+      : worker.source_profile_type === "field_executive" ? "field_executive_id"
+        : "";
+  return [
+    `workforce_id.eq.${worker.id}`,
+    sourceColumn && worker.source_profile_id ? `and(workforce_id.is.null,${sourceColumn}.eq.${worker.source_profile_id})` : ""
+  ].filter(Boolean).join(",");
+}
+
 function db() {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
   return supabaseAdmin;
@@ -88,6 +99,8 @@ export async function loadDirectPaymentContext(input: {
   to: string;
   employmentFrom?: string | null;
   employmentTo?: string | null;
+  sourceProfileId?: string | null;
+  sourceProfileType?: string | null;
 }) {
   const setup = await loadDirectPaymentSetup(input);
   if (!input.workforceId || !setup.allocations.length) return { ...setup, attendance: [] as DirectAttendanceDay[], days: [] };
@@ -97,7 +110,7 @@ export async function loadDirectPaymentContext(input: {
   const attendanceResult = await db().from("attendance_daily")
     .select("id,punch_date,status,in_time,out_time,work_minutes")
     .eq("company_id", input.companyId)
-    .eq("workforce_id", input.workforceId)
+    .or(attendanceIdentityFilter({ id: input.workforceId, source_profile_id: input.sourceProfileId ?? null, source_profile_type: input.sourceProfileType ?? null }))
     .gte("punch_date", accrualFrom)
     .lte("punch_date", accrualTo)
     .order("punch_date")

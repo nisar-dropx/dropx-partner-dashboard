@@ -14,6 +14,8 @@ const incentiveCompiled=ts.transpileModule(readFileSync(new URL('./workforce-own
 const {ownIncentives}=await import(`data:text/javascript;base64,${Buffer.from(incentiveCompiled).toString('base64')}`);
 const personalCompiled=ts.transpileModule(readFileSync(new URL('./personal-payment-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {personalPaymentCard}=await import(`data:text/javascript;base64,${Buffer.from(personalCompiled).toString('base64')}`);
+const providerAttendanceCompiled=ts.transpileModule(readFileSync(new URL('./provider-attendance-payment.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {calculateProviderAttendancePayments,hasProviderAttendanceComponents}=await import(`data:text/javascript;base64,${Buffer.from(providerAttendanceCompiled).toString('base64')}`);
 const from='2026-09-01',to='2026-09-30';
 const row=(overrides={})=>({id:'claim-1',company_id:'company',workforce_id:'person',adjustment_type:'earning',category:'reimbursement',amount:'200.00',effective_date:'2026-09-12',status:'approved',requested_at:'2026-09-10T09:00:00Z',reviewed_at:'2026-09-11T09:00:00Z',payroll_run_id:null,...overrides});
 const account={id:'person',companyId:'company',profileType:'workforce',workspace:'workforce',pageAccess:['earnings']};
@@ -138,10 +140,15 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null)
     query=current.profileType==='workforce'?query.eq('id',current.id):query.eq('source_profile_type',current.profileType).eq('source_profile_id',current.id);
     const result=await query.maybeSingle();if(result.error)throw Error('Your Workforce identity could not be verified.');return result.data;
    },
+   attendanceIdentityFilter:worker=>`workforce_id.eq.${worker.id}`,
    loadDirectPaymentContext:async()=>({allocations:[],methods:[],attendance:[],days:[]}),
    paymentMethodById:()=>new Map()
-  }
- };
+   },
+   '@/lib/provider-attendance-payment':{
+    calculateProviderAttendancePayments,
+    hasProviderAttendanceComponents
+   }
+  };
  new Function('require','exports',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports);
  return module.exports.GET;
 }
@@ -174,10 +181,26 @@ test('route shares fixed daily pay across provider IDs but retains each ID trace
  const source=mappings.map((m,n)=>({id:'source-'+n,provider_employee_id:m.id,work_date:from,station_code:'TEST',client:'Provider',total_delivery:n?50:10,total_activity:n?50:10,c_return:0,mfn:0,mfn_return:0}));
  const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?source:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:[],error:null}));
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
- assert.equal(response.status,200);assert.equal(body.earnings.length,2);assert.equal(body.summary.workDays,1);assert.equal(body.summary.baseAmount,800);assert.equal(body.summary.netAmount,800);
+ assert.equal(response.status,200,JSON.stringify(body));assert.equal(body.earnings.length,2);assert.equal(body.summary.workDays,1);assert.equal(body.summary.baseAmount,800);assert.equal(body.summary.netAmount,800);
  assert.deepEqual(body.earnings.map(e=>e.baseAmount),[133.33,666.67]);
  assert.equal(body.earnings[0].daily[0].calculationSource,'workforce_rate_card');assert.equal(body.earnings[0].daily[0].payType,'fixed_daily');assert.equal(body.earnings[0].daily[0].deliveries,10);
  assert.ok(db.calls.filter(q=>q.table==='cps_shipment_daily').every(q=>operation(q,'eq','company_id','company')));
+});
+
+test('route adds provider attendance heads once while production remains shipment-driven',async()=>{
+ const attendanceComponent={component_code:'FIXED_PAY_PER_DAY',component_type:'amount',label:'Fixed pay per day',pay_schedule:'per_day',sort_order:1,is_active:true,payment_fields:{code:'FIXED_PAY_PER_DAY',label:'Fixed pay per day',field_type:'amount',pay_schedule:'per_day',calculation_type:'fixed_daily',calculation_source:'attendance_eligibility'}};
+ const productionComponent={component_code:'DELIVERY',component_type:'production',label:'Delivery',pay_schedule:null,sort_order:2,is_active:true,payment_fields:{code:'DELIVERY',label:'Delivery',field_type:'production',pay_schedule:null,calculation_type:'count_x_rate',calculation_source:'total_delivery'}};
+ const mapping={id:'A',provider_member_id:'A',provider_id:'provider',station_id:'station',payment_method_id:'method',payment_values:{FIXED_PAY_PER_DAY:800,DELIVERY:10},effective_from:from,effective_to:to,status:'active',providers:{name:'Provider'},payment_methods:{id:'method',name:'Attendance plus production',payment_method_components:[attendanceComponent,productionComponent]}};
+ const sources=[{id:'source-1',provider_employee_id:'A',work_date:'2026-09-01',station_code:'TEST',client:'Provider',total_delivery:10,total_activity:10,c_return:0,mfn:0,mfn_return:0},{id:'source-3',provider_employee_id:'A',work_date:'2026-09-03',station_code:'TEST',client:'Provider',total_delivery:5,total_activity:5,c_return:0,mfn:0,mfn_return:0}];
+ const attendance=[{id:'attendance-1',punch_date:'2026-09-01',status:'P',work_minutes:480},{id:'attendance-2',punch_date:'2026-09-02',status:'HD',work_minutes:240},{id:'attendance-3',punch_date:'2026-09-03',status:'A',work_minutes:0}];
+ const allocation={provider_id:'provider',provider_model_id:null,provider_production_metrics:{source_key:'total_delivery'},payment_fields:{code:'DELIVERY',label:'Delivery',field_type:'production'}};
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?[mapping]:q.table==='cps_shipment_daily'?sources:q.table==='attendance_daily'?attendance:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='payment_field_provider_metrics'?[allocation]:[],error:null}));
+ const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(item=>item.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
+ assert.equal(response.status,200,JSON.stringify(body));
+ assert.deepEqual(body.earnings[0].daily.map(day=>[day.date,day.baseAmount]),[['2026-09-03',50],['2026-09-02',400],['2026-09-01',900]]);
+ assert.equal(body.summary.baseAmount,1350);
+ assert.equal(body.earnings[0].production.find(line=>line.label==='Delivery').amount,150);
+ assert.equal(body.earnings[0].production.find(line=>line.label==='Fixed pay per day').amount,1200);
 });
 
 test('route reconciles daily incentives and adjustments separately without leaking policy rows',async()=>{
@@ -187,7 +210,7 @@ test('route reconciles daily incentives and adjustments separately without leaki
  const campaign={id:'campaign',company_id:'company',name:'Approved reward',provider_id:'provider',station_id:'station',designation_id:'DA',metric:'total_delivery',calculation_type:'per_unit_above_threshold',threshold_value:45,rate_value:12,flat_amount:0,maximum_amount:null,effective_from:from,effective_to:to,status:'active',approved_at:'2026-08-31T00:00:00Z',owner_note:'PRIVATE'};
  const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?sources:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:q.table==='workforce_incentive_campaigns'?[campaign]:q.table==='workforce_adjustments'?[row(),row({id:'deduction',adjustment_type:'deduction',amount:25})]:[],error:null}));
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
- assert.equal(response.status,200);assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155});
+ assert.equal(response.status,200,JSON.stringify(body));assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155});
  assert.equal(body.earnings.reduce((sum,e)=>sum+e.grossAmount,0),980);assert.equal(body.earnings.flatMap(e=>e.daily).reduce((sum,e)=>sum+e.amount,0),980);
  assert.equal(body.incentives.amount,180);assert.equal(body.incentives.campaigns[0].workDays,1);assert.equal(JSON.stringify(body).includes('PRIVATE'),false);
  const currentIndiaDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());

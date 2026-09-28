@@ -47,6 +47,41 @@ test('missing component values and unknown production sources remain visible',()
  const f=facts();f.mappings[0].payment_values={};let r=rebuildCps(base(),f);assert.equal(r.daily[0].exposed_deliveries,100);
  f.mappings[0].payment_values={DELIVERY:5};f.components[0].calculation_source='DISTANCE_UNKNOWN';r=rebuildCps(base(),f);assert.equal(r.daily[0].da,0);assert.match(r.gaps[0].kind,/production source/);
 });
+test('provider rate cards gate fixed schedules by attendance without changing production pay',()=>{
+ const card={payment_method_id:'mixed',payment_values:{DELIVERY:10,DAILY:600,MONTHLY:3000,HOURLY:100}};
+ const components=[
+  {component_code:'DELIVERY',component_type:'production',calculation_type:'count_x_rate',calculation_source:'total_delivery'},
+  {component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'},
+  {component_code:'MONTHLY',component_type:'amount',pay_schedule:'per_month',calculation_type:'fixed_monthly',calculation_source:'attendance_eligibility'},
+  {component_code:'HOURLY',component_type:'amount',pay_schedule:'per_hour',calculation_source:'attendance_eligibility'},
+ ];
+ const shipment={client:'Amazon',total_delivery:100};
+ const present=calculateRateCard(card,components,shipment,'2026-09-01',true,{punch_date:'2026-09-01',status:'P',work_minutes:480});
+ const half=calculateRateCard(card,components,shipment,'2026-09-02',true,{punch_date:'2026-09-02',status:'HD',work_minutes:240});
+ const absent=calculateRateCard(card,components,shipment,'2026-09-03',true,{punch_date:'2026-09-03',status:'A',work_minutes:480});
+ const missing=calculateRateCard(card,components,shipment,'2026-09-04',true);
+ assert.deepEqual([present.salary,half.salary,absent.salary,missing.salary],[1500,750,0,0]);
+ assert.deepEqual([present.variable,half.variable,absent.variable,missing.variable],[1000,1000,1000,1000]);
+ assert.ok([present,half,absent,missing].every(result=>result.missing===false));
+});
+test('provider attendance pay creates fixed rows on worked days without a shipment upload',()=>{
+ const f=facts();f.shipments=[];f.mappings[0].payment_values={DAILY:600,MONTHLY:3000,HOURLY:100};
+ f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
+ f.components=[
+  {payment_method_id:'per-packet',component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'},
+  {payment_method_id:'per-packet',component_code:'MONTHLY',component_type:'amount',pay_schedule:'per_month',calculation_type:'fixed_monthly',calculation_source:'attendance_eligibility'},
+  {payment_method_id:'per-packet',component_code:'HOURLY',component_type:'amount',pay_schedule:'per_hour',calculation_source:'attendance_eligibility'},
+ ];
+ f.attendance=[
+  {employee_id:'e1',punch_date:'2026-09-01',status:'P',work_minutes:480},
+  {employee_id:'e1',punch_date:'2026-09-02',status:'HD',work_minutes:240},
+  {employee_id:'e1',punch_date:'2026-09-03',status:'A',work_minutes:480},
+ ];
+ const r=rebuildCps(base([day('A','2026-09-01',0),day('A','2026-09-02',0),day('A','2026-09-03',0),day('A','2026-09-04',0)]),f);
+ assert.deepEqual(r.daily.map(row=>row.da_salary),[1500,750,0,0]);
+ assert.deepEqual(r.associates.map(row=>row.work_date),['2026-09-01','2026-09-02']);
+ assert.ok(r.associates.every(row=>row.id.startsWith('fixed:')&&row.mapping_status==='Mapped'));
+});
 test('rate revisions use effective dates and reject simultaneous conflicting cards',()=>{
  const f=facts();f.mappings.push({...f.mappings[0],id:'m2',effective_from:'2026-09-02',payment_values:{DELIVERY:20}});
  let r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);

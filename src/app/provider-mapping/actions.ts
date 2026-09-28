@@ -83,11 +83,6 @@ type ProviderPaymentComponent = {
   payment_fields?: { calculation_source?: string | null; calculation_type?: string | null } | Array<{ calculation_source?: string | null; calculation_type?: string | null }> | null;
 };
 
-function usesAttendanceCalculation(component: ProviderPaymentComponent) {
-  const field = firstRelation(component.payment_fields);
-  return field?.calculation_source === "attendance_eligibility";
-}
-
 type WorkforceDesignationReference = {
   designation_id?: string | null;
   designation?: string | null;
@@ -271,7 +266,6 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       const paymentMethod = uploadRow.paymentMethodCode ? paymentMethodByCode.get(uploadRow.paymentMethodCode) : null;
       if (hasAllocationData && !uploadRow.paymentMethodCode) { skipped("Payment Method Code is required when payment allocation data is supplied."); continue; }
       if (uploadRow.paymentMethodCode && !paymentMethod) { skipped("Payment Method Code is not active or does not exist."); continue; }
-      if (paymentMethod?.components.some(usesAttendanceCalculation)) { skipped("Attendance-based payment methods must be assigned in Direct pay allocations."); continue; }
       const effectiveFrom = bulkDate(uploadRow.effectiveFromRaw);
       const effectiveTo = bulkDate(uploadRow.effectiveToRaw);
       if (effectiveFrom === null) { skipped("Effective From must be YYYY-MM-DD or DD/MM/YYYY."); continue; }
@@ -412,9 +406,6 @@ async function saveExecutiveMappingRow(
 
   if (methodError) throw new Error(methodError.message);
   const methodComponents = (paymentMethod.payment_method_components ?? []) as ProviderPaymentComponent[];
-  if (methodComponents.some(usesAttendanceCalculation)) {
-    throw new Error(`Row ${index + 1}: Attendance-based payment methods must be assigned in Direct pay allocations, not provider ID mapping.`);
-  }
 
   const [{ data: legacyWorker }, { data: station }] = await Promise.all([
     sourceType === "employee"

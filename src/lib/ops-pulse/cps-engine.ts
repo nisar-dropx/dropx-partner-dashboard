@@ -1,5 +1,12 @@
 import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput } from './cps';
-import { allocationActiveOn, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from '../direct-workforce-pay';
+import {
+  allocationActiveOn,
+  directPayAttendanceUnit,
+  directPayForDay,
+  preferredDirectPayAttendance,
+  type DirectPayAttendance,
+  type DirectPayComponent,
+} from '../direct-workforce-pay';
 
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
@@ -75,7 +82,7 @@ function rateSignature(r: RecordRow) {
     Array.isArray(r.payment_components) ? r.payment_components : null,
     ...['delivery_rate','pickup_rate','mfn_rate','mfn_return_rate','guarantee_amount','guarantee_schedule','fuel_rate'].map(k=>r[k] ?? null)]);
 }
-export function calculateRateCard(r: RecordRow, components: RecordRow[], shipment: RecordRow, date: string, includeFixed: boolean) {
+export function calculateRateCard(r: RecordRow, components: RecordRow[], shipment: RecordRow, date: string, includeFixed: boolean, attendance?: DirectPayAttendance | null) {
   const cost={salary:0,variable:0,fuel:0,van:0,missing:false};
   if (r.payment_method_id && !components.length) cost.missing=true;
   const values = Object.fromEntries(Object.entries(r.payment_values ?? {}).map(([k,v])=>[key(k),v]));
@@ -89,7 +96,14 @@ export function calculateRateCard(r: RecordRow, components: RecordRow[], shipmen
     if(isProduction && count==null) {cost.missing=true;continue;}
     if(!isProduction && !includeFixed) continue;
     const monthly= /month/i.test(String(c.pay_schedule)) || c.calculation_type==='fixed_monthly';
-    const amount=isProduction ? rate*count! : monthly ? monthlyAccrual(rate,date) : rate;
+    const hourly=/hour/i.test(String(c.pay_schedule));
+    const daily=/day/i.test(String(c.pay_schedule));
+    const attendanceBased=!isProduction && c.calculation_source==='attendance_eligibility';
+    if(attendanceBased && !monthly && !hourly && !daily) {cost.missing=true;continue;}
+    const attendanceUnit=attendanceBased ? directPayAttendanceUnit(attendance) : 1;
+    const workedHours=attendanceUnit>0 ? Math.max(0,num(attendance?.work_minutes))/60 : 0;
+    const attendanceAmount=monthly ? monthlyAccrual(rate,date)*attendanceUnit : hourly ? rate*workedHours : rate*attendanceUnit;
+    const amount=isProduction ? rate*count! : attendanceBased ? Math.round(attendanceAmount*100)/100 : monthly ? monthlyAccrual(rate,date) : rate;
     const bucket=/VAN|VEHICLE|DOCK/.test(label) ? 'van' : /FUEL|KILOMET|\bKM\b/.test(label) ? 'fuel' : !isProduction ? 'salary' : 'variable';
     cost[bucket]+=amount;
   }
@@ -106,6 +120,11 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const selected=new Set(base.daily.map(d=>d.station_code));
   const dates=[...new Set(base.daily.map(d=>d.work_date))].sort();
   const workforce=new Map(facts.workforce.map(w=>[w.id,w]));
+  const workforceByAttendanceIdentity=new Map<string,RecordRow>();
+  for(const worker of facts.workforce) {
+    workforceByAttendanceIdentity.set(`workforce|${worker.id}`,worker);
+    if(worker.source_profile_type&&worker.source_profile_id) workforceByAttendanceIdentity.set(`${worker.source_profile_type}|${worker.source_profile_id}`,worker);
+  }
   const canonical = (m:RecordRow): RecordRow | undefined => workforce.get(m.workforce_id) ?? facts.workforce.find(w =>
     (w.source_profile_type==='employee' && w.source_profile_id===m.employee_id && m.employee_id) ||
     (w.source_profile_type==='contractor' && w.source_profile_id===m.contractor_id && m.contractor_id) ||
@@ -114,6 +133,17 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const components=new Map<string,RecordRow[]>();
   facts.components.forEach(c=>components.set(c.payment_method_id,[...(components.get(c.payment_method_id)??[]),c]));
   const providers=new Map(facts.providers.map(p=>[p.id,compact(`${p.code} ${p.name}`)]));
+  const attendanceByWorkerDate=new Map<string,RecordRow>();
+  for(const row of facts.attendance??[]) {
+    if(!row.punch_date) continue;
+    const attendanceWorker=workforceByAttendanceIdentity.get(`workforce|${row.workforce_id}`)
+      ??workforceByAttendanceIdentity.get(`employee|${row.employee_id}`)
+      ??workforceByAttendanceIdentity.get(`contractor|${row.contractor_id}`)
+      ??workforceByAttendanceIdentity.get(`field_executive|${row.field_executive_id}`);
+    if(!attendanceWorker) continue;
+    const k=`${attendanceWorker.id}|${row.punch_date}`,existing=attendanceByWorkerDate.get(k);
+    attendanceByWorkerDate.set(k,preferredDirectPayAttendance(existing as DirectPayAttendance|undefined,row as DirectPayAttendance) as RecordRow);
+  }
   const dailyVolumes=new Map<string,Map<string,number>>();
   facts.volumes.forEach(v=>{const map=dailyVolumes.get(v.work_date)??new Map();map.set(v.station_code,num(v.deliveries));dailyVolumes.set(v.work_date,map);});
   const lines:CpsLine[]=base.breakup.filter(l=>l.source!=='Shipment payment mapping').map(l=>({...l,head:l.source==='Finance Rent Master'||(l.head==='Other'&&/^(station|office|premise|facility) rent$/i.test(l.sub_head))?'Rent':l.head}));
@@ -148,16 +178,19 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const k=`${worker.id}|${row.work_date}`, g=groups.get(k)??{worker,date:row.work_date,rows:[] as LiveAssociate[],maps:[] as RecordRow[]};
     g.rows.push(row);g.maps.push(...matches);groups.set(k,g);
   }
-  // Monthly commitments accrue even when the provider upload has no row for a worker.
+  // Calendar-monthly commitments and attendance-earned fixed pay accrue even when
+  // the provider upload has no row for a worker.
   for(const m of mappings) {
     if(!m.worker || !configured(m)) continue;
     const cs=components.get(m.payment_method_id)??[];
-    const monthly=cs.some(c=>c.component_type!=='production' && (/month/i.test(c.pay_schedule??'') || c.calculation_type==='fixed_monthly')) || /month/i.test(m.guarantee_schedule??'');
-    if(!monthly) continue;
     for(const date of dates) {
       if(!activeOn(m,date) || !employedOn(m.worker,date)) continue;
       const k=`${m.worker.id}|${date}`;
       if(groups.has(k)) continue;
+      const attendance=attendanceByWorkerDate.get(k) as DirectPayAttendance|undefined;
+      const calendarMonthly=cs.some(c=>c.component_type!=='production' && c.calculation_type!=='count_x_rate' && c.calculation_source!=='attendance_eligibility' && (/month/i.test(c.pay_schedule??'') || c.calculation_type==='fixed_monthly')) || /month/i.test(m.guarantee_schedule??'');
+      const attendanceFixed=cs.some(c=>c.component_type!=='production' && c.calculation_type!=='count_x_rate' && c.calculation_source==='attendance_eligibility');
+      if(!calendarMonthly && !(attendanceFixed && directPayAttendanceUnit(attendance)>0)) continue;
       const station=stationById.get(m.station_id ?? m.worker.location_id)?.station_code;
       if(!station) continue;
       const row={id:`fixed:${m.worker.id}:${date}`,client:'Amazon',work_date:date,station_code:station,provider_employee_id:m.provider_member_id,provider_employee_name:m.worker.full_name,dropx_name:m.worker.full_name,dropx_emp_code:m.worker.dropx_id,pay_type:m.pay_type,total_delivery:0,total_activity:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:0,fuel_pay:0,van_pay:0,da_total_pay:0,mapping_status:'Mapped'};
@@ -182,7 +215,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const cs=card ? components.get(card.payment_method_id)??[] : [];
     const aggregate:RecordRow={client:g.rows[0].client};
     for(const field of ['amazon_delivery','swa_delivery','total_delivery','total_activity','c_return','mfn','mfn_return']) aggregate[field]=g.rows.reduce((n,r)=>n+num(r[field]),0);
-    const costs=card ? calculateRateCard(card,cs,aggregate,g.date,true) : {salary:0,variable:0,fuel:0,van:0,missing:true};
+    const costs=card ? calculateRateCard(card,cs,aggregate,g.date,true,attendanceByWorkerDate.get(`${g.worker.id}|${g.date}`) as DirectPayAttendance|undefined) : {salary:0,variable:0,fuel:0,van:0,missing:true};
     const issue=conflict ? 'Conflicting rate cards' : !card ? 'Payment setup missing' : costs.missing ? 'Rate values or production source missing' : '';
     if(issue) {
       for(const row of g.rows) {row.mapping_status=issue;gap(issue,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery));}
@@ -214,12 +247,6 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   // Providerless designations accrue from their direct, effective-dated allocation.
   // A historical provider mapping remains authoritative for its own dates; a direct
   // allocation may never overlap it because that would create duplicate pay.
-  const attendanceByWorkerDate=new Map<string,RecordRow>();
-  for(const row of facts.attendance??[]) {
-    if(!row.workforce_id || !row.punch_date) continue;
-    const k=`${row.workforce_id}|${row.punch_date}`,existing=attendanceByWorkerDate.get(k);
-    attendanceByWorkerDate.set(k,preferredDirectPayAttendance(existing as any,row as any) as RecordRow);
-  }
   const directAllocations=(facts.allocations??[]).filter(a=>a.status!=='cancelled');
   const policyHistoryProvided=Array.isArray(facts.policy_history);
   const paymentPolicyOn=(w:RecordRow,date:string):{
