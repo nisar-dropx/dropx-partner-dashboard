@@ -10,6 +10,7 @@ export type CpsFacts = {
   people_rules: CpsCostInput[];
   allocations?: RecordRow[];
   attendance?: RecordRow[];
+  policy_history?: RecordRow[];
   rent_coverage?: RecordRow[];
   manual_inputs?: CpsCostInput[];
 };
@@ -220,13 +221,41 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     attendanceByWorkerDate.set(k,preferredDirectPayAttendance(existing as any,row as any) as RecordRow);
   }
   const directAllocations=(facts.allocations??[]).filter(a=>a.status!=='cancelled');
+  const policyHistoryProvided=Array.isArray(facts.policy_history);
+  const paymentPolicyOn=(w:RecordRow,date:string):{
+    station_id:string|null;
+    station_code_snapshot:string|null;
+    designation_is_active:boolean;
+    is_field_operations:boolean;
+    provider_mapping_required:boolean;
+  }|null=>{
+    if(!policyHistoryProvided) return {
+      station_id:w.location_id??null,
+      station_code_snapshot:stationById.get(w.location_id)?.station_code??null,
+      designation_is_active:w.designation_is_active!==false,
+      is_field_operations:w.designation_is_active!==false&&w.is_field_operations!==false,
+      provider_mapping_required:w.designation_is_active!==false&&w.provider_mapping_required!==false,
+    };
+    const history=facts.policy_history!.filter(policy=>policy.workforce_id===w.id&&activeOn(policy,date))
+      .sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0];
+    return history ? {
+      station_id:history.station_id??null,
+      station_code_snapshot:history.station_code_snapshot??null,
+      designation_is_active:history.designation_is_active!==false,
+      is_field_operations:history.designation_is_active!==false&&history.is_field_operations===true,
+      provider_mapping_required:history.designation_is_active!==false&&history.provider_mapping_required===true,
+    } : null;
+  };
   for(const w of facts.workforce) {
-    if(w.is_field_operations===false) continue;
     for(const date of dates) {
       if(!employedOn(w,date)) continue;
+      const policy=paymentPolicyOn(w,date);
       const providerCards=mappings.filter(m=>m.worker?.id===w.id&&activeOn(m,date)&&configured(m));
       const cards=directAllocations.filter(a=>a.workforce_id===w.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)));
-      const station=stationById.get(cards[0]?.station_id??w.location_id)?.station_code;
+      const station=stationById.get(cards[0]?.station_id)?.station_code
+        ??stationById.get(policy?.station_id)?.station_code
+        ??policy?.station_code_snapshot
+        ??(!policyHistoryProvided?stationById.get(w.location_id)?.station_code:undefined);
       if(!station || !selected.has(station)) continue;
       if(providerCards.length&&cards.length) {
         gap('Conflicting provider and direct pay setup',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
@@ -235,7 +264,11 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       // Preserve a valid historical provider card after the designation policy changes.
       if(providerCards.length) continue;
       if(!cards.length) {
-        if(w.provider_mapping_required===false) gap('Direct payment allocation missing',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
+        // Current flags are not evidence of historical policy. New source payloads
+        // supply an effective-dated ledger; dates before its first honest snapshot
+        // deliberately produce no policy-derived gap.
+        if(!policy?.designation_is_active || !policy.is_field_operations) continue;
+        if(!policy.provider_mapping_required) gap('Direct payment allocation missing',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
         continue;
       }
       const latest=cards[0],current=cards.filter(a=>a.effective_from===latest.effective_from);
@@ -269,8 +302,11 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   // Only designations that require an external provider identity create provider-link gaps.
   const through=dates.at(-1);
   if(through) for(const w of facts.workforce) {
-    if(w.is_field_operations===false || w.provider_mapping_required===false) continue;
-    const station=stationById.get(w.location_id)?.station_code;
+    const policy=paymentPolicyOn(w,through);
+    if(!policy?.designation_is_active || !policy.is_field_operations || !policy.provider_mapping_required) continue;
+    const station=stationById.get(policy.station_id)?.station_code
+      ??policy.station_code_snapshot
+      ??(!policyHistoryProvided?stationById.get(w.location_id)?.station_code:undefined);
     if(!station || !selected.has(station) || !employedOn(w,through)) continue;
     if(directAllocations.some(a=>a.workforce_id===w.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},through))) continue;
     const current=mappings.filter(m=>m.worker?.id===w.id && activeOn(m,through));
@@ -285,10 +321,17 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const rules=facts.people_rules.filter(r=>r.employee_id===e.id && activeOn(r,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
     const rule=rules[0];
     const overhead=/^HO(?:_|$)/.test(home?.station_code??'') || ['CLM','AOM','TC','RM','CM','NH','PGM','BH','CT','HRE','HRM','FINMGR','FLTM'].includes(e.designation);
+    const linkedWorkforce=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
+    const linkedPolicy=linkedWorkforce?paymentPolicyOn(linkedWorkforce,date):null;
+    const linkedAllocation=linkedWorkforce?directAllocations.filter(a=>a.workforce_id===linkedWorkforce.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0]:undefined;
+    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||(linkedPolicy?.designation_is_active&&linkedPolicy.is_field_operations)));
+    const workforceStation=stationById.get(linkedAllocation?.station_id)?.station_code
+      ??stationById.get(linkedPolicy?.station_id)?.station_code
+      ??linkedPolicy?.station_code_snapshot;
     let codes:string[]=rule?.station_codes??[];
     let head:CpsHead=rule?.head ?? (overhead?'Overhead':e.designation==='DR'?'Van':['DA','DCD','ODCD','WM','PTDA'].includes(e.designation)?'DA':'UTR');
     if(!rule) {
-      if(!overhead) codes=home?[home.station_code]:[];
+      if(!overhead) codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):home?[home.station_code]:[];
       else {
         codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
         if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
@@ -299,7 +342,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     }
     if(!codes.length) {
       // Report at the employee's home location when no verified allocation group exists.
-      if(home) gap('Overhead allocation missing',home.station_code,date,'',e.full_name,e.employee_code,0,0,'People / Finance');
+      if(home&&!datedWorkforceOwnership) gap('Overhead allocation missing',home.station_code,date,'',e.full_name,e.employee_code,0,0,'People / Finance');
       continue;
     }
     if(!codes.some(c=>selected.has(c))) continue;
@@ -312,8 +355,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       if(head==='UTR')staffed.add(`${station}|${date}`);
       add(station,date,head,rule?.sub_head||rule?.label||(head==='Overhead'?`${e.designation || 'Shared staff'} CTC`:head==='DA'?'Salary / minimum guarantee':head==='Van'?'Van driver CTC':'Station staff CTC'),amount,'People CTC');
       if(head==='DA' && selected.has(station)) {
-        const w=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
-        const k=`${w?.id??e.id}|${station}`,p=people.get(k)??{id:w?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
+        const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
         p.salary+=amount;people.set(k,p);
       }
     }

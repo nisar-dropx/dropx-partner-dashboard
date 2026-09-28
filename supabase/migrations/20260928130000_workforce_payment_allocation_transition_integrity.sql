@@ -1,5 +1,20 @@
 begin;
 
+alter table public.workforce_payment_allocations
+  add column if not exists transition_restore_state jsonb;
+
+alter table public.workforce_payment_allocations
+  drop constraint if exists workforce_payment_allocations_transition_restore_check;
+alter table public.workforce_payment_allocations
+  add constraint workforce_payment_allocations_transition_restore_check
+  check (
+    transition_restore_state is null
+    or jsonb_typeof(transition_restore_state) = 'object'
+  );
+
+comment on column public.workforce_payment_allocations.transition_restore_state is
+  'Private pre-transition state used to reversibly apply corrected Workforce employment cutoffs.';
+
 create or replace function public.reconcile_workforce_direct_payment_transition()
 returns trigger
 language plpgsql
@@ -11,6 +26,7 @@ declare
   v_cutoff date;
   v_terminal_status boolean := false;
   v_offboarding boolean := false;
+  v_cutoff_state_changed boolean := false;
   v_old_designation public.designations%rowtype;
   v_new_designation public.designations%rowtype;
   v_old_designation_found boolean := false;
@@ -33,14 +49,53 @@ begin
   v_offboarding := new.is_active = false
     or new.deleted_at is not null
     or new.deactivated_at is not null
-    or (new.last_working_date is not null and new.last_working_date is distinct from old.last_working_date)
+    or new.last_working_date is not null
     or v_terminal_status;
+
+  v_cutoff_state_changed := new.is_active is distinct from old.is_active
+    or new.deleted_at is distinct from old.deleted_at
+    or new.deactivated_at is distinct from old.deactivated_at
+    or new.last_working_date is distinct from old.last_working_date
+    or lower(coalesce(new.lifecycle_status, ''))
+      is distinct from lower(coalesce(old.lifecycle_status, ''));
+
+  if v_cutoff_state_changed then
+    update public.workforce_payment_allocations allocation
+    set effective_to = case
+          when allocation.transition_restore_state ? 'effective_to'
+            then (allocation.transition_restore_state ->> 'effective_to')::date
+          else allocation.effective_to
+        end,
+        status = coalesce(
+          nullif(allocation.transition_restore_state ->> 'status', ''),
+          allocation.status
+        ),
+        change_reason = case
+          when allocation.transition_restore_state ? 'change_reason'
+            then nullif(allocation.transition_restore_state ->> 'change_reason', '')
+          else allocation.change_reason
+        end,
+        transition_restore_state = null,
+        updated_at = now()
+    where allocation.company_id = new.company_id
+      and allocation.workforce_id = new.id
+      and allocation.transition_restore_state ->> 'kind' = 'employment_cutoff';
+  end if;
 
   if v_offboarding then
     v_cutoff := coalesce(new.last_working_date, v_today);
 
     update public.workforce_payment_allocations allocation
-    set status = 'cancelled',
+    set transition_restore_state = coalesce(
+          allocation.transition_restore_state,
+          jsonb_build_object(
+            'kind', 'employment_cutoff',
+            'effective_to', allocation.effective_to,
+            'status', allocation.status,
+            'change_reason', allocation.change_reason
+          )
+        ),
+        status = 'cancelled',
         change_reason = concat_ws(
           ' | ',
           nullif(btrim(allocation.change_reason), ''),
@@ -53,7 +108,16 @@ begin
       and allocation.effective_from > v_cutoff;
 
     update public.workforce_payment_allocations allocation
-    set effective_to = v_cutoff,
+    set transition_restore_state = coalesce(
+          allocation.transition_restore_state,
+          jsonb_build_object(
+            'kind', 'employment_cutoff',
+            'effective_to', allocation.effective_to,
+            'status', allocation.status,
+            'change_reason', allocation.change_reason
+          )
+        ),
+        effective_to = v_cutoff,
         status = 'closed',
         change_reason = concat_ws(
           ' | ',

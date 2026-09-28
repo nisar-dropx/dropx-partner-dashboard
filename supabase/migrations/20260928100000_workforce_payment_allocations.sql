@@ -15,6 +15,7 @@ create table if not exists public.workforce_payment_allocations (
   payment_method_id uuid not null references public.payment_methods(id) on delete restrict,
   payment_values jsonb not null default '{}'::jsonb,
   payment_components jsonb not null default '[]'::jsonb,
+  transition_restore_state jsonb,
   effective_from date not null,
   effective_to date,
   status text not null default 'active',
@@ -30,36 +31,143 @@ create table if not exists public.workforce_payment_allocations (
   constraint workforce_payment_allocations_values_object_check
     check (jsonb_typeof(payment_values) = 'object'),
   constraint workforce_payment_allocations_components_array_check
-    check (jsonb_typeof(payment_components) = 'array')
+    check (jsonb_typeof(payment_components) = 'array'),
+  constraint workforce_payment_allocations_transition_restore_check
+    check (
+      transition_restore_state is null
+      or jsonb_typeof(transition_restore_state) = 'object'
+    )
 );
 
-alter table public.workforce_payment_allocations
-  add column if not exists payment_components jsonb not null default '[]'::jsonb;
+-- Backfill component definitions only when upgrading a legacy table that did
+-- not yet have the snapshot column. An intentionally empty frozen snapshot is
+-- therefore never repopulated from changed master data when this script reruns.
+do $$
+declare
+  v_snapshot_column_added boolean;
+begin
+  select not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'workforce_payment_allocations'
+      and column_name = 'payment_components'
+  ) into v_snapshot_column_added;
 
-update public.workforce_payment_allocations allocation
-set payment_components = coalesce((
-  select jsonb_agg(
-    jsonb_build_object(
-      'component_code', component.component_code,
-      'component_type', component.component_type,
-      'label', coalesce(field.label, component.label),
-      'pay_schedule', coalesce(field.pay_schedule, component.pay_schedule),
-      'calculation_type', field.calculation_type,
-      'sort_order', component.sort_order
-    )
-    order by component.sort_order, component.component_code
-  )
-  from public.payment_method_components component
-  left join public.payment_fields field
-    on field.id = component.payment_field_id
-   and field.company_id = allocation.company_id
-  where component.payment_method_id = allocation.payment_method_id
-    and component.company_id = allocation.company_id
-    and component.is_active = true
-    and component.component_type = 'amount'
-), '[]'::jsonb)
-where jsonb_typeof(allocation.payment_components) <> 'array'
-   or jsonb_array_length(allocation.payment_components) = 0;
+  if v_snapshot_column_added then
+    alter table public.workforce_payment_allocations
+      add column payment_components jsonb not null default '[]'::jsonb;
+
+    update public.workforce_payment_allocations allocation
+    set payment_components = coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'component_code', component.component_code,
+          'component_type', component.component_type,
+          'label', coalesce(field.label, component.label),
+          'pay_schedule', coalesce(field.pay_schedule, component.pay_schedule),
+          'calculation_type', field.calculation_type,
+          'sort_order', component.sort_order
+        )
+        order by component.sort_order, component.component_code
+      )
+      from public.payment_method_components component
+      left join public.payment_fields field
+        on field.id = component.payment_field_id
+       and field.company_id = allocation.company_id
+      where component.payment_method_id = allocation.payment_method_id
+        and component.company_id = allocation.company_id
+        and component.is_active = true
+        and component.component_type = 'amount'
+    ), '[]'::jsonb);
+  end if;
+end
+$$;
+
+alter table public.workforce_payment_allocations
+  add column if not exists transition_restore_state jsonb;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.workforce_payment_allocations'::regclass
+      and conname = 'workforce_payment_allocations_transition_restore_check'
+  ) then
+    alter table public.workforce_payment_allocations
+      add constraint workforce_payment_allocations_transition_restore_check
+      check (
+        transition_restore_state is null
+        or jsonb_typeof(transition_restore_state) = 'object'
+      );
+  end if;
+end
+$$;
+
+-- The single-column foreign keys above guarantee that each referenced record
+-- exists, but they do not guarantee that it belongs to the allocation tenant.
+-- Composite foreign keys keep raw service-role writes tenant-safe too.
+create unique index if not exists workforce_company_id_id_uidx
+  on public.workforce (company_id, id);
+create unique index if not exists stations_company_id_id_uidx
+  on public.stations (company_id, id);
+create unique index if not exists designations_company_id_id_uidx
+  on public.designations (company_id, id);
+create unique index if not exists payment_methods_company_id_id_uidx
+  on public.payment_methods (company_id, id);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.workforce_payment_allocations'::regclass
+      and conname = 'workforce_payment_allocations_workforce_company_fk'
+  ) then
+    alter table public.workforce_payment_allocations
+      add constraint workforce_payment_allocations_workforce_company_fk
+      foreign key (company_id, workforce_id)
+      references public.workforce (company_id, id)
+      on delete restrict;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.workforce_payment_allocations'::regclass
+      and conname = 'workforce_payment_allocations_station_company_fk'
+  ) then
+    alter table public.workforce_payment_allocations
+      add constraint workforce_payment_allocations_station_company_fk
+      foreign key (company_id, station_id)
+      references public.stations (company_id, id)
+      on delete restrict;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.workforce_payment_allocations'::regclass
+      and conname = 'workforce_payment_allocations_designation_company_fk'
+  ) then
+    alter table public.workforce_payment_allocations
+      add constraint workforce_payment_allocations_designation_company_fk
+      foreign key (company_id, designation_id)
+      references public.designations (company_id, id)
+      on delete restrict;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.workforce_payment_allocations'::regclass
+      and conname = 'workforce_payment_allocations_method_company_fk'
+  ) then
+    alter table public.workforce_payment_allocations
+      add constraint workforce_payment_allocations_method_company_fk
+      foreign key (company_id, payment_method_id)
+      references public.payment_methods (company_id, id)
+      on delete restrict;
+  end if;
+end
+$$;
 
 do $$
 begin
@@ -118,6 +226,8 @@ comment on column public.workforce_payment_allocations.payment_values is
   'Configured non-production payment-field values keyed by payment_method_components.component_code.';
 comment on column public.workforce_payment_allocations.payment_components is
   'Immutable component definition snapshot used to calculate this allocation after its payment-method master changes.';
+comment on column public.workforce_payment_allocations.transition_restore_state is
+  'Private pre-transition state used to reversibly apply corrected Workforce employment cutoffs.';
 comment on column public.workforce_payment_allocations.station_code_snapshot is
   'Station code copied when this history row is created so historical payroll remains explainable after master-data edits.';
 comment on column public.workforce_payment_allocations.designation_code_snapshot is
@@ -318,11 +428,36 @@ declare
   v_designation_id uuid;
   v_designation_code text;
   v_designation_name text;
+  v_last_working_date date;
+  v_effective_to date := p_effective_to;
+  v_transition_restore_state jsonb;
   v_component record;
   v_component_count integer := 0;
   v_payment_components jsonb := '[]'::jsonb;
   v_result_id uuid;
 begin
+  if p_company_id is null or p_workforce_id is null then
+    raise exception 'Company and Workforce member are required.';
+  end if;
+
+  -- Every allocation/finalization/transition path takes the Workforce row
+  -- before its advisory lock. This consistent order avoids a row/advisory
+  -- deadlock with the Workforce BEFORE UPDATE transition trigger.
+  perform 1
+  from public.workforce workforce
+  where workforce.company_id = p_company_id
+    and workforce.id = p_workforce_id
+  for update;
+
+  if not found then
+    raise exception 'Workforce member does not belong to this company.';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(
+    p_company_id::text || ':' || p_workforce_id::text,
+    0
+  ));
+
   if p_effective_from is null then
     raise exception 'Effective from date is required.';
   end if;
@@ -333,18 +468,22 @@ begin
     raise exception 'Payment values must be a JSON object.';
   end if;
 
+  -- Re-read all mutable ownership fields after both locks. If a transition won
+  -- the Workforce row first, this statement sees its committed new state.
   select
     workforce.location_id,
     station.station_code,
     designation.id,
     designation.code,
-    designation.name
+    designation.name,
+    workforce.last_working_date
   into
     v_location_id,
     v_station_code,
     v_designation_id,
     v_designation_code,
-    v_designation_name
+    v_designation_name,
+    v_last_working_date
   from public.workforce workforce
   join lateral (
     select candidate.*
@@ -371,6 +510,21 @@ begin
 
   if not found then
     raise exception 'Workforce member must be active, have an active company location and use a designation enabled for direct payment allocation.';
+  end if;
+
+  if v_last_working_date is not null then
+    if p_effective_from > v_last_working_date then
+      raise exception 'A direct payment allocation cannot start after the Workforce last working date.';
+    end if;
+    if v_effective_to is null or v_effective_to > v_last_working_date then
+      v_transition_restore_state := jsonb_build_object(
+        'kind', 'employment_cutoff',
+        'effective_to', p_effective_to,
+        'status', case when p_effective_to is null then 'active' else 'closed' end,
+        'change_reason', nullif(btrim(p_change_reason), '')
+      );
+      v_effective_to := v_last_working_date;
+    end if;
   end if;
 
   if not exists (
@@ -468,8 +622,9 @@ begin
         payment_method_id = p_payment_method_id,
         payment_values = p_payment_values,
         payment_components = v_payment_components,
-        effective_to = p_effective_to,
-        status = case when p_effective_to is null then 'active' else 'closed' end,
+        transition_restore_state = v_transition_restore_state,
+        effective_to = v_effective_to,
+        status = case when v_effective_to is null then 'active' else 'closed' end,
         change_reason = nullif(btrim(p_change_reason), ''),
         updated_by = p_actor_user_id,
         updated_at = now()
@@ -482,6 +637,7 @@ begin
     update public.workforce_payment_allocations
     set effective_to = p_effective_from - 1,
         status = 'closed',
+        transition_restore_state = null,
         updated_by = p_actor_user_id,
         updated_at = now()
     where id = v_current.id;
@@ -498,6 +654,7 @@ begin
     payment_method_id,
     payment_values,
     payment_components,
+    transition_restore_state,
     effective_from,
     effective_to,
     status,
@@ -515,9 +672,10 @@ begin
     p_payment_method_id,
     p_payment_values,
     v_payment_components,
+    v_transition_restore_state,
     p_effective_from,
-    p_effective_to,
-    case when p_effective_to is null then 'active' else 'closed' end,
+    v_effective_to,
+    case when v_effective_to is null then 'active' else 'closed' end,
     nullif(btrim(p_change_reason), ''),
     p_actor_user_id,
     p_actor_user_id
@@ -529,17 +687,16 @@ end;
 $$;
 
 alter table public.workforce_payment_allocations enable row level security;
-revoke all on table public.workforce_payment_allocations from public, anon, authenticated;
-grant select, insert, update, delete on table public.workforce_payment_allocations to service_role;
+revoke all on table public.workforce_payment_allocations from public, anon, authenticated, service_role;
+grant select on table public.workforce_payment_allocations to service_role;
 
 drop policy if exists workforce_payment_allocations_service_role_policy
   on public.workforce_payment_allocations;
 create policy workforce_payment_allocations_service_role_policy
   on public.workforce_payment_allocations
-  for all
+  for select
   to service_role
-  using (true)
-  with check (true);
+  using (true);
 
 revoke all on function public.save_workforce_payment_allocation(uuid, uuid, uuid, jsonb, date, date, text, uuid)
   from public, anon, authenticated;
