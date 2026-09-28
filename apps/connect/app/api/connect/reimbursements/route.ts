@@ -841,11 +841,110 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
   }
 }
 
+async function carryForwardExistingClaim(form: FormData, account: ConnectAccount) {
+  if (!await hasOrganizationExpenseVisibility(account)) {
+    throw new Error("Only an organisation-level approver can reconcile a prior higher-manager approval.");
+  }
+  const claimId = clean(form.get("claimId"));
+  if (!claimId) throw new Error("Select a reimbursement claim.");
+
+  const claimResult = await db().from("hr_expense_claims")
+    .select("id,claim_no,claim_request_id,status,current_step,total_claimed,hr_expense_items(category_id,amount),hr_expense_approval_steps(id,step_order,step_name,stage_code,approver_user_id,status)")
+    .eq("company_id", account.companyId).eq("id", claimId).maybeSingle();
+  if (claimResult.error || !claimResult.data) throw new Error(claimResult.error?.message ?? "Reimbursement claim was not found.");
+  const claim = claimResult.data;
+  if (claim.status !== "pending_approval") throw new Error("Only a pending reimbursement claim can be reconciled.");
+  if (!claim.claim_request_id) throw new Error("This claim is not linked to an approved expense request.");
+
+  const requestResult = await db().from("hr_expense_claim_requests")
+    .select("id,status,decided_by,decided_at,estimated_amount,expected_expenses")
+    .eq("company_id", account.companyId).eq("id", claim.claim_request_id).maybeSingle();
+  if (requestResult.error || !requestResult.data) throw new Error(requestResult.error?.message ?? "The linked expense request was not found.");
+
+  const storedSteps = [...(claim.hr_expense_approval_steps ?? [])].sort((left, right) => left.step_order - right.step_order);
+  const carryForward = carryForwardApprovedExpenseRequest(
+    storedSteps,
+    requestResult.data,
+    (claim.hr_expense_items ?? []).map((item) => ({ categoryId: item.category_id, amount: Number(item.amount) }))
+  );
+  if (!carryForward.applied || !carryForward.approvedByUserId) {
+    throw new Error(`The prior approval cannot be carried forward (${carryForward.reason.replaceAll("_", " ")}).`);
+  }
+
+  const approvedThroughOrder = Math.max(...storedSteps
+    .filter((step) => step.stage_code === "manager" && step.approver_user_id === carryForward.approvedByUserId)
+    .map((step) => step.step_order));
+  const skippedIds = storedSteps
+    .filter((step) => step.stage_code === "manager" && step.step_order <= approvedThroughOrder && ["pending", "waiting"].includes(step.status))
+    .map((step) => step.id);
+  const nextStep = storedSteps.find((step) => step.step_order > approvedThroughOrder && ["pending", "waiting"].includes(step.status));
+  if (!nextStep) throw new Error("A remaining Finance or policy-exception step is required.");
+  if (!skippedIds.length && claim.current_step === nextStep.step_order && nextStep.status === "pending") {
+    return NextResponse.json({
+      ok: true,
+      alreadyReconciled: true,
+      claimId,
+      claimNo: claim.claim_no,
+      skippedManagerCount: carryForward.skippedManagerCount,
+      currentStep: nextStep.step_order,
+      currentStage: nextStep.stage_code
+    });
+  }
+
+  const activate = await db().from("hr_expense_approval_steps").update({ status: "pending" })
+    .eq("company_id", account.companyId).eq("claim_id", claimId).eq("id", nextStep.id).in("status", ["waiting", "pending"]);
+  if (activate.error) throw new Error(activate.error.message);
+  const skip = await db().from("hr_expense_approval_steps").update({
+    status: "skipped",
+    decided_by: carryForward.approvedByUserId,
+    decided_at: carryForward.approvedAt ?? new Date().toISOString(),
+    decision_note: "Satisfied by the higher-manager approval recorded on the linked expense request."
+  }).eq("company_id", account.companyId).eq("claim_id", claimId).in("id", skippedIds);
+  if (skip.error) throw new Error(skip.error.message);
+  const advance = await db().from("hr_expense_claims").update({ current_step: nextStep.step_order, updated_at: new Date().toISOString() })
+    .eq("company_id", account.companyId).eq("id", claimId).eq("status", "pending_approval");
+  if (advance.error) throw new Error(advance.error.message);
+
+  const auditEvent = await db().from("hr_expense_events").insert({
+    company_id: account.companyId,
+    claim_id: claimId,
+    event_type: "manager_approval_carried_forward",
+    from_status: "pending_approval",
+    to_status: "pending_approval",
+    actor_user_id: carryForward.approvedByUserId,
+    comments: "Manager approval satisfied by the higher-manager approval recorded on the linked expense request.",
+    metadata: {
+      claim_request_id: claim.claim_request_id,
+      source_approver_user_id: carryForward.approvedByUserId,
+      source_approved_at: carryForward.approvedAt,
+      skipped_manager_count: skippedIds.length,
+      next_step_order: nextStep.step_order,
+      next_stage_code: nextStep.stage_code,
+      guard: "within_approved_total_and_expense_breakdown"
+    }
+  });
+  if (auditEvent.error) throw new Error(auditEvent.error.message);
+
+  return NextResponse.json({
+    ok: true,
+    claimId,
+    claimNo: claim.claim_no,
+    skippedManagerCount: skippedIds.length,
+    currentStep: nextStep.step_order,
+    currentStage: nextStep.stage_code
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
-    const account = await selectedAccount(request, { accountId: form.get("accountId"), profileType: form.get("profileType") });
     const kind = clean(form.get("kind")).toLowerCase() || "claim";
+    const account = await selectedAccount(
+      request,
+      { accountId: form.get("accountId"), profileType: form.get("profileType") },
+      kind === "carry_forward_request_approval"
+    );
+    if (kind === "carry_forward_request_approval") return await carryForwardExistingClaim(form, account);
     if (kind === "policy_quote") {
       const items = JSON.parse(clean(form.get("items")) || "[]");
       if (!Array.isArray(items) || items.length > 50) throw new Error("Invalid expense lines.");
