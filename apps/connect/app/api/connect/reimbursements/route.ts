@@ -14,6 +14,7 @@ import {
   resolveExpenseApprovers,
   resolveExpenseClaimRequestAssignees
 } from "../../../../src/lib/connect-expense-data";
+import { carryForwardApprovedExpenseRequest, type ApprovedExpenseRequest } from "../../../../src/lib/expense-approval-carry-forward";
 import {
   isExpensePurposeCode,
   normalizeExpectedExpenses,
@@ -686,6 +687,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
 
     claimId = existingClaimId || randomUUID();
     let linkedRequestId = claimRequestId;
+    let approvedRequest: (ApprovedExpenseRequest & { id: string }) | null = null;
     if (isResubmit) {
       const workerColumn = approval.identity.workerType === "employee" ? "employee_id" : "contractor_id";
       const [claim, attachments] = await Promise.all([
@@ -696,10 +698,21 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       if (attachments.error) throw new Error(attachments.error.message);
       priorPaths = (attachments.data ?? []).map((item) => item.storage_path);
       linkedRequestId = claim.data.claim_request_id ?? linkedRequestId;
+      if (!linkedRequestId) throw new Error("The approved reimbursement request linked to this claim was not found.");
+      const request = await db().from("hr_expense_claim_requests")
+        .select("id,status,consumed_claim_id,estimated_amount,expected_expenses,decided_by,decided_at")
+        .eq("company_id", account.companyId)
+        .eq("id", linkedRequestId)
+        .eq(workerColumn, account.id)
+        .maybeSingle();
+      if (request.error || !request.data) throw new Error(request.error?.message ?? "Approved reimbursement request was not found.");
+      if (request.data.status !== "approved") throw new Error("Only an approved reimbursement request can be claimed.");
+      if (request.data.consumed_claim_id && request.data.consumed_claim_id !== claimId) throw new Error("This request belongs to another claim.");
+      approvedRequest = request.data;
     } else {
       const workerColumn = approval.identity.workerType === "employee" ? "employee_id" : "contractor_id";
       const request = await db().from("hr_expense_claim_requests")
-        .select("id,status,consumed_claim_id,purpose,trip_from,trip_to")
+        .select("id,status,consumed_claim_id,purpose,trip_from,trip_to,estimated_amount,expected_expenses,decided_by,decided_at")
         .eq("company_id", account.companyId)
         .eq("id", linkedRequestId)
         .eq(workerColumn, account.id)
@@ -707,7 +720,11 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       if (request.error || !request.data) throw new Error(request.error?.message ?? "Approved reimbursement request was not found.");
       if (request.data.status !== "approved") throw new Error("Only an approved reimbursement request can be claimed.");
       if (request.data.consumed_claim_id) throw new Error("This request already has a claim.");
+      approvedRequest = request.data;
     }
+
+    const carryForward = carryForwardApprovedExpenseRequest(approval.steps, approvedRequest, items);
+    if (carryForward?.applied) approval.steps = carryForward.steps;
 
     const mergeInputs = await Promise.all(receiptFiles.map(async (file) => ({
       bytes: new Uint8Array(await file.arrayBuffer()),
@@ -758,6 +775,26 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
         p_claim_request_id: linkedRequestId
       });
     if (rpc.error) throw new Error(rpc.error.message);
+
+    if (carryForward?.applied) {
+      const auditEvent = await db().from("hr_expense_events").insert({
+        company_id: account.companyId,
+        claim_id: claimId,
+        event_type: "manager_approval_carried_forward",
+        from_status: "pending_approval",
+        to_status: "pending_approval",
+        actor_user_id: carryForward.approvedByUserId,
+        comments: "Manager approval satisfied by the higher-manager approval recorded on the linked expense request.",
+        metadata: {
+          claim_request_id: linkedRequestId,
+          source_approver_user_id: carryForward.approvedByUserId,
+          source_approved_at: carryForward.approvedAt,
+          skipped_manager_count: carryForward.skippedManagerCount,
+          guard: "within_approved_total_and_expense_breakdown"
+        }
+      });
+      if (auditEvent.error) throw new Error(auditEvent.error.message);
+    }
 
     if (isResubmit) {
       await db().from("hr_expense_attachments").delete().eq("company_id", account.companyId).eq("claim_id", claimId);
