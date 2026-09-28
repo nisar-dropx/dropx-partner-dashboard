@@ -45,6 +45,10 @@ async function processReminders(request: Request, catchUp: boolean) {
   // before selecting reminder recipients so a manager change cannot leave an
   // old manager receiving mail while the current manager sees an empty inbox.
   const reconciliation = await reconcilePendingPaymentApprovers();
+  // Reference-only DAs must not block payments. Resolve paid/unmatched
+  // recoveries when their authoritative provider mapping becomes available.
+  const recovery = await supabaseAdmin.rpc("reconcile_adhoc_da_recoveries");
+  if (recovery.error) console.error("Adhoc DA recovery reconciliation failed", recovery.error.message);
 
   const [paymentDue, advanceDue] = await Promise.all([
     supabaseAdmin.from("payment_requests").select("id, company_id, status, approval_status, current_approver_role_id, current_approver_role_ids, payment_process_role_ids")
@@ -87,5 +91,5 @@ async function processReminders(request: Request, catchUp: boolean) {
   }
 
   console.info("Payment reminders completed", JSON.stringify({ sent, skipped, queued: queue.length, catchUp, reconciliation, results }));
-  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + advances.length, reconciliation, results });
+  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + advances.length, reconciliation, recovery: recovery.error ? { error: recovery.error.message } : recovery.data, results });
 }

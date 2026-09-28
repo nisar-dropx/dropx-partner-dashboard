@@ -28,20 +28,19 @@ function required(value: FormDataEntryValue | null, field: string) {
   return text;
 }
 
-function adhocDaIdentityFields(formData: FormData, workDate: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) throw new Error("Select a valid delivery work date.");
+function adhocDaIdentityFields(formData: FormData) {
+  // Names are reference data, not a dated shipment/payroll submission.
+  const workDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
   const identityMode = clean(formData.get("adhoc_identity_mode"));
   if (identityMode === "manual_scc") {
     const manualName = required(formData.get("adhoc_manual_name"), "Exact SCC associate name");
-    const workforceId = required(formData.get("adhoc_manual_workforce_id"), "DropX payroll associate");
     if (manualName.length < 2 || manualName.length > 160) throw new Error("Enter the exact SCC associate name (2–160 characters).");
-    if (!/^[a-f0-9-]{36}$/i.test(workforceId)) throw new Error("Select a valid DropX payroll associate.");
     return {
       source_system: "OPS_ADHOC_DA",
       adhoc_shipment_id: null,
       adhoc_work_date: workDate,
       adhoc_da_name: manualName,
-      adhoc_workforce_id: workforceId
+      adhoc_workforce_id: null
     };
   }
   const shipmentId = required(formData.get("adhoc_shipment_id"), "DA name / Provider ID");
@@ -547,8 +546,8 @@ export async function createPaymentRequest(formData: FormData) {
 
     const requestNo = await nextPaymentRequestNo(companyId);
     const isAdhocDa = headResult.data.code === "ADHOC_DA";
-    const workDate = isAdhocDa ? required(formData.get("adhoc_work_date"), "Delivery work date") : new Date().toISOString().slice(0, 10);
-    const adhocFields = isAdhocDa ? adhocDaIdentityFields(formData, workDate) : {};
+    const workDate = isAdhocDa ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()) : new Date().toISOString().slice(0, 10);
+    const adhocFields = isAdhocDa ? adhocDaIdentityFields(formData) : {};
     const legacyAccountValue = bankAccountNo ?? paymentReference ?? paymentPortal ?? locationResult.data.station_code;
     const legacyIfscValue = ifsc ?? (isUpiPayment ? "UPI" : "ONLINE");
     const legacyHolderValue = accountHolderName ?? verifiedUpiHolderName ?? submittedUpiHolderName ?? paymentPortal ?? "Online Payment";
@@ -905,7 +904,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
     const adhocFields = headData.code === "ADHOC_DA"
-      ? adhocDaIdentityFields(formData, required(formData.get("adhoc_work_date"), "Delivery work date"))
+      ? adhocDaIdentityFields(formData)
       : {};
     if (!normalizePaymentModes(headData.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");

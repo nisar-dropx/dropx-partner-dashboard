@@ -27,17 +27,15 @@ export async function GET(request: Request) {
       : { data: [], error: null };
     if (result.error) return Response.json({ error: "Unable to load shipment data. Please retry." }, { status: 503 });
     for (const row of result.data ?? []) {
-      if (!row.provider_employee_id) continue;
-      const key = row.provider_employee_id.trim().toUpperCase();
-      if (!options.has(key)) options.set(key, { value: row.id, label: `${row.provider_employee_name || "Unnamed DA"} — ${row.provider_employee_id}` });
+      const name = row.provider_employee_name?.trim();
+      const providerId = row.provider_employee_id?.trim();
+      if (!name && !providerId) continue;
+      const key = providerId ? `ID:${providerId}` : `NAME:${name}`;
+      if (!options.has(key)) options.set(key, { value: row.id, label: [name || "Unnamed DA", providerId].filter(Boolean).join(" — ") });
     }
     if ((result.data?.length ?? 0) < 1000) {
-      const workforce = await supabaseAdmin.from("workforce").select("id,dropx_id,full_name")
-        .eq("company_id", company).eq("location_id", location).eq("is_active", true).is("deleted_at", null).order("full_name").limit(2000);
-      if (workforce.error) return Response.json({ error: "Unable to load station payroll associates." }, { status: 503 });
       return Response.json({
-        options: [...options.values()].sort((a, b) => a.label.localeCompare(b.label)),
-        workforceOptions: (workforce.data ?? []).map(row => ({ value: row.id, label: row.full_name, helper: row.dropx_id || "No DropX ID" }))
+        options: [...options.values()].sort((a, b) => a.label.localeCompare(b.label))
       }, { headers: { "Cache-Control": "no-store" } });
     }
   }
