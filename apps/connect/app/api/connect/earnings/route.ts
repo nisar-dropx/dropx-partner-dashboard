@@ -7,6 +7,8 @@ import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import {loadOwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import {allocateOwnDailyCards,type DailyCardSource} from '@/lib/workforce-daily-card';
 import {ownIncentives,type IncentiveSource,type OwnCampaign} from '@/lib/workforce-own-incentives';
+import {assertNoProviderDirectOverlap} from '@/lib/direct-workforce-payment';
+import {loadDirectPaymentContext,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
 
 export const dynamic='force-dynamic';
 
@@ -28,6 +30,9 @@ function validMonth(value: string | null) {
   if (value && value > current) throw new Error("Choose the current month or an earlier month.");
   return value || current;
 }
+function todayKolkata() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
 
 export async function GET(request: Request) {
   try {
@@ -35,34 +40,29 @@ export async function GET(request: Request) {
     if (!accountId || !profileType) throw new Error("Select your workforce account.");
     const account = await requireConnectAccount(profileType, accountId);
     if (account.workspace !== "workforce" || !account.pageAccess.includes("earnings")) throw new Error("My Earnings is not enabled for this account.");
-    const month = validMonth(url.searchParams.get("month")); const from = `${month}-01`; const end = new Date(`${from}T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1); end.setUTCDate(0); const to = end.toISOString().slice(0, 10);
+    const month = validMonth(url.searchParams.get("month")); const from = `${month}-01`; const end = new Date(`${from}T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1); end.setUTCDate(0); const monthEnd = end.toISOString().slice(0, 10); const to = month === workforcePaymentMonth().from.slice(0, 7) ? [todayKolkata(), monthEnd].sort()[0] : monthEnd;
+    const workforce = await resolveCanonicalPaymentWorker(account);
     const columns:Record<string,string>={contractor:"contractor_id",employee:"employee_id",field_executive:"field_executive_id"};
     const filters=account.profileType==="workforce" ? [`workforce_id.eq.${account.id}`] : columns[account.profileType] ? [`and(workforce_id.is.null,${columns[account.profileType]}.eq.${account.id})`] : [];
-    if(account.profileType==="workforce"){
-      const source=await db().from("workforce").select("source_profile_id,source_profile_type").eq("company_id",account.companyId).eq("id",account.id).maybeSingle();
-      if(source.error) throw new Error("Your Workforce identity could not be verified.");
-      if(source.data?.source_profile_id && columns[source.data.source_profile_type])filters.push(`and(workforce_id.is.null,${columns[source.data.source_profile_type]}.eq.${source.data.source_profile_id})`);
-    }
+    if(account.profileType==="workforce"&&workforce?.source_profile_id&&workforce.source_profile_type&&columns[workforce.source_profile_type])filters.push(`and(workforce_id.is.null,${columns[workforce.source_profile_type]}.eq.${workforce.source_profile_id})`);
     const identityFilter=filters.length ? filters.join(","):"id.eq.00000000-0000-0000-0000-000000000000";
     const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,pay_type,effective_from,effective_to,providers(name,code),stations(station_code),payment_methods(name)").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
     if (mappingResult.error) throw new Error(mappingResult.error.message);
     const mappings = mappingResult.data ?? []; const stationIds = [...new Set(mappings.map((row) => row.station_id).filter(Boolean))]; const memberIds = [...new Set(mappings.map((row) => row.provider_member_id).filter(Boolean))];
-    let canonicalQuery=db().from('workforce').select('id,designation_id,location_id').eq('company_id',account.companyId).is('deleted_at',null).neq('migration_state','reclassified');
-    canonicalQuery=account.profileType==='workforce'?canonicalQuery.eq('id',account.id):canonicalQuery.eq('source_profile_type',account.profileType).eq('source_profile_id',account.id);
-    const [stationsResult, metricsResult, allocationsResult, workforceResult, rateCardsResult, adjustments, campaignResult] = await Promise.all([
+    const direct = await loadDirectPaymentContext({companyId:account.companyId,workforceId:workforce?.id??null,from,to,employmentFrom:workforce?.date_of_join,employmentTo:workforce?.last_working_date});
+    assertNoProviderDirectOverlap({allocations:direct.allocations,mappings,from,to});
+    const [stationsResult, metricsResult, allocationsResult, rateCardsResult, adjustments, campaignResult] = await Promise.all([
       stationIds.length ? db().from("stations").select("id,station_code,location_model_id").eq("company_id", account.companyId).in("id", stationIds) : Promise.resolve({ data: [], error: null }),
       memberIds.length ? db().from("cps_shipment_daily").select("id,provider_employee_id,work_date,station_code,client,total_activity,amazon_delivery,swa_delivery,total_delivery,c_return,mfn,mfn_return").eq("company_id", account.companyId).in("provider_employee_id", memberIds).gte("work_date", from).lte("work_date", to) : Promise.resolve({ data: [], error: null }),
       db().from("payment_field_provider_metrics").select("provider_id,provider_model_id,provider_production_metrics(source_key),payment_fields(code,label,field_type)").eq("company_id", account.companyId),
-      canonicalQuery.maybeSingle(),
       db().from("workforce_rate_cards").select("id,provider_id,station_id,designation_id,pay_type,effective_from,effective_to,delivery_rate,return_rate,mfn_rate,mfn_return_rate,fuel_rate,fixed_amount,guarantee_amount,status,approved_at").eq("company_id", account.companyId).neq("status", "draft").lte("effective_from", to).or(`effective_to.is.null,effective_to.gte.${from}`),
       loadOwnAdjustmentLedger(db(),account,from,to),
       db().from('workforce_incentive_campaigns').select('id,company_id,name,provider_id,station_id,designation_id,metric,calculation_type,threshold_value,rate_value,flat_amount,maximum_amount,effective_from,effective_to,status,approved_at').eq('company_id',account.companyId).neq('status','draft').lte('effective_from',to).gte('effective_to',from)
     ]);
-    const error = stationsResult.error?.message || metricsResult.error?.message || allocationsResult.error?.message || workforceResult.error?.message || rateCardsResult.error?.message; if (error) throw new Error(error);
+    const error = stationsResult.error?.message || metricsResult.error?.message || allocationsResult.error?.message || rateCardsResult.error?.message; if (error) throw new Error(error);
     if(campaignResult.error)throw new Error('Your incentive estimate could not be verified. Refresh before relying on earnings.');
     const stationById = new Map((stationsResult.data ?? []).map((row) => [row.id, row])); const dailyByMember = new Map<string, Array<Record<string, unknown>>>();
     (metricsResult.data ?? []).forEach((row) => dailyByMember.set(String(row.provider_employee_id), [...(dailyByMember.get(String(row.provider_employee_id)) ?? []), row as Record<string, unknown>]));
-    const workforce = workforceResult.data as { id:string;designation_id?: string | null; location_id?: string | null } | null;
     if(mappings.length>=1000 || (metricsResult.data ?? []).length>=1000 || (allocationsResult.data ?? []).length>=1000 || (rateCardsResult.data ?? []).length>=1000 || (campaignResult.data??[]).length>=1000) throw new Error("Too many earning records to reconcile safely. Please contact Workforce.");
     const incentives=ownIncentives({companyId:account.companyId,canonical:Boolean(workforce?.id),designationId:workforce?.designation_id??null,from,to,campaigns:(campaignResult.data??[]) as OwnCampaign[],sources:(metricsResult.data??[]).flatMap(row=>{
       const mapping=paymentMappingForDay(mappings,row);
@@ -76,7 +76,7 @@ export async function GET(request: Request) {
       const mapping=paymentMappingForDay(mappings,row),card=mapping?cardFor(mapping,String(row.work_date)):null;
       return card?[{row:row as DailyCardSource,card}]:[];
     }));
-    const earnings = mappings.map((mapping: any) => {
+    const providerEarnings = mappings.map((mapping: any) => {
       const station: any = stationById.get(mapping.station_id); const daily = (dailyByMember.get(String(mapping.provider_member_id)) ?? []).filter((row) => paymentMappingForDay(mappings,row as {work_date:string;provider_employee_id:string;station_code:string;client:string})?.id === mapping.id);
       const productionRules = (allocationsResult.data ?? []).filter((allocation: any) => allocation.provider_id === mapping.provider_id && (!allocation.provider_model_id || allocation.provider_model_id === station?.location_model_id)).flatMap((allocation: any) => {
         const field: any = first(allocation.payment_fields); const metric: any = first(allocation.provider_production_metrics); if (!field?.code || field.field_type !== "production" || !metric?.source_key) return [];
@@ -87,8 +87,20 @@ export async function GET(request: Request) {
       const baseAmount = Math.round(dailyEarnings.reduce((sum: number, line) => sum + line.baseAmount, 0)*100)/100; const additions = Math.round(dailyEarnings.reduce((sum,line)=>sum+line.incentiveAmount,0)*100)/100;
       return { id: mapping.id, location: station?.station_code ?? "-", provider: first(mapping.providers)?.name ?? "-", model: station?.location_model_id ? "Mapped model" : "All models", paymentMethod: first(mapping.payment_methods)?.name ?? "-", workDays: new Set(daily.map((row) => String(row.work_date))).size, production, daily: dailyEarnings, baseAmount, additions, grossAmount: baseAmount + additions };
     });
+    const directMethods=paymentMethodById(direct.methods);
+    const directEarnings=direct.allocations.flatMap(allocation=>{
+      const days=direct.days.filter(day=>day.allocationId===allocation.id);
+      if(!days.length)return [];
+      const productionByKey=new Map<string,{label:string;count:number;rate:number;amount:number}>();
+      for(const day of days)for(const line of day.lines){const key=`${line.code}:${line.rate}`;const current=productionByKey.get(key)??{label:line.label,count:0,rate:line.rate,amount:0};current.count+=line.count;current.amount=Math.round((current.amount+line.amount)*100)/100;productionByKey.set(key,current);}
+      const daily=days.map(day=>({id:day.id,date:day.date,production:day.lines.map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount})),baseAmount:day.amount,incentiveAmount:0,amount:day.amount,deliveries:0,calculationSource:'direct_allocation' as const,payType:'direct_allocation'}));
+      const baseAmount=Math.round(days.reduce((sum,day)=>sum+day.amount,0)*100)/100;
+      return [{id:allocation.id,location:allocation.station_code_snapshot??'-',provider:'Direct workforce',model:allocation.designation_name_snapshot??allocation.designation_code_snapshot??'-',paymentMethod:directMethods.get(allocation.payment_method_id)?.name??'-',workDays:days.filter(day=>day.workDayUnits>0).reduce((sum,day)=>sum+day.workDayUnits,0),production:[...productionByKey.values()],daily,baseAmount,additions:0,grossAmount:baseAmount}];
+    });
+    const earnings=[...providerEarnings,...directEarnings];
     const summary = earnings.reduce((total, row) => ({ workDays: total.workDays + row.workDays, baseAmount: total.baseAmount + row.baseAmount, additions: total.additions + row.additions, grossAmount: total.grossAmount + row.grossAmount }), { workDays: 0, baseAmount: 0, additions: 0, grossAmount: 0 });
-    summary.workDays=new Set(earnings.flatMap(row=>row.daily.map(day=>day.date))).size;
+    summary.workDays=new Set(providerEarnings.flatMap(row=>row.daily.map(day=>day.date))).size
+      + directEarnings.reduce((total,row)=>total+row.workDays,0);
     summary.baseAmount=Math.round(summary.baseAmount*100)/100;
     // Posted adjustments remain part of this period's estimate exactly once. Statements are
     // a separate historical record, never added again and never treated as outstanding dues.

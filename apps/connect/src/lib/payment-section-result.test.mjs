@@ -42,8 +42,8 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  assert.match(payouts,/setPayouts\(\[\]\)/);
  const detailsRoute=readFileSync(new URL('../../app/api/connect/workforce-payments/route.ts',import.meta.url),'utf8');
  assert.match(detailsRoute,/workforcePaymentPeriod\(month\)/);
- assert.match(detailsRoute,/hasPaymentMapping: mappings\.length > 0/);
- assert.match(detailsRoute,/mapping: currentMappings\.map/);
+ assert.match(detailsRoute,/hasPaymentMapping: mappings\.length > 0 \|\| direct\.allocations\.length > 0/);
+ assert.match(detailsRoute,/mapping: currentMappingPayload/);
  assert.match(source,/tab === "rate-card" && rateCardAllowed && data && !loading && !error/);
  assert.match(source,/!hasCurrentMap \? <section/);
  const monthCss=readFileSync(new URL('../components/payout-month-control.module.css',import.meta.url),'utf8');

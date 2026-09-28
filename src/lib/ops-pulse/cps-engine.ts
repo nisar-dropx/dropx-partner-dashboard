@@ -1,4 +1,5 @@
 import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput } from './cps';
+import { allocationActiveOn, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from '../direct-workforce-pay';
 
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
@@ -7,6 +8,9 @@ export type CpsFacts = {
   workforce: RecordRow[]; components: RecordRow[]; providers: RecordRow[];
   stations: RecordRow[]; employees: RecordRow[]; salaries: RecordRow[];
   people_rules: CpsCostInput[];
+  allocations?: RecordRow[];
+  attendance?: RecordRow[];
+  policy_history?: RecordRow[];
   rent_coverage?: RecordRow[];
   manual_inputs?: CpsCostInput[];
 };
@@ -68,6 +72,7 @@ function configured(r: RecordRow) {
 }
 function rateSignature(r: RecordRow) {
   return JSON.stringify([r.payment_method_id, Object.entries(r.payment_values ?? {}).sort(([a],[b])=>a.localeCompare(b)),
+    Array.isArray(r.payment_components) ? r.payment_components : null,
     ...['delivery_rate','pickup_rate','mfn_rate','mfn_return_rate','guarantee_amount','guarantee_schedule','fuel_rate'].map(k=>r[k] ?? null)]);
 }
 export function calculateRateCard(r: RecordRow, components: RecordRow[], shipment: RecordRow, date: string, includeFixed: boolean) {
@@ -121,7 +126,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const seen=gapDates.get(k)??new Set<string>();seen.add(date);gapDates.set(k,seen);
     if(existing) {existing.days=seen.size;existing.first_date=existing.first_date<date?existing.first_date:date;existing.last_date=existing.last_date>date?existing.last_date:date;existing.deliveries+=deliveries;existing.known_cost+=cost;return;}
     gaps.set(k,{key:k,kind,station_code:station,provider_id:id,dropx_id:dropx,name,first_date:date,last_date:date,days:1,deliveries,known_cost:cost,owner,
-      href:owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : `https://dashboard.dropxlogistics.com/provider-mapping/${dropx?'':'provider-first'}?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
+      href:owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `https://dashboard.dropxlogistics.com/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : `https://dashboard.dropxlogistics.com/provider-mapping/${dropx?'':'provider-first'}?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
   }
   const add=(station:string,date:string,head:CpsHead,sub:string,amount:number,source:string) => {
     if(selected.has(station) && amount!==0) lines.push({station_code:station,work_date:date,head,sub_head:sub,amount,source});
@@ -206,11 +211,104 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       if(first){p.paid_days++;if((volumes.get(row.station_code)??0)===0 && costs.salary>0)p.zero_delivery_days++;}people.set(k,p);
     }
   }
-  // Every current workforce identity needs a provider link, including people yet to appear in uploads.
+  // Providerless designations accrue from their direct, effective-dated allocation.
+  // A historical provider mapping remains authoritative for its own dates; a direct
+  // allocation may never overlap it because that would create duplicate pay.
+  const attendanceByWorkerDate=new Map<string,RecordRow>();
+  for(const row of facts.attendance??[]) {
+    if(!row.workforce_id || !row.punch_date) continue;
+    const k=`${row.workforce_id}|${row.punch_date}`,existing=attendanceByWorkerDate.get(k);
+    attendanceByWorkerDate.set(k,preferredDirectPayAttendance(existing as any,row as any) as RecordRow);
+  }
+  const directAllocations=(facts.allocations??[]).filter(a=>a.status!=='cancelled');
+  const policyHistoryProvided=Array.isArray(facts.policy_history);
+  const paymentPolicyOn=(w:RecordRow,date:string):{
+    station_id:string|null;
+    station_code_snapshot:string|null;
+    designation_is_active:boolean;
+    is_field_operations:boolean;
+    provider_mapping_required:boolean;
+  }|null=>{
+    if(!policyHistoryProvided) return {
+      station_id:w.location_id??null,
+      station_code_snapshot:stationById.get(w.location_id)?.station_code??null,
+      designation_is_active:w.designation_is_active!==false,
+      is_field_operations:w.designation_is_active!==false&&w.is_field_operations!==false,
+      provider_mapping_required:w.designation_is_active!==false&&w.provider_mapping_required!==false,
+    };
+    const history=facts.policy_history!.filter(policy=>policy.workforce_id===w.id&&activeOn(policy,date))
+      .sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0];
+    return history ? {
+      station_id:history.station_id??null,
+      station_code_snapshot:history.station_code_snapshot??null,
+      designation_is_active:history.designation_is_active!==false,
+      is_field_operations:history.designation_is_active!==false&&history.is_field_operations===true,
+      provider_mapping_required:history.designation_is_active!==false&&history.provider_mapping_required===true,
+    } : null;
+  };
+  for(const w of facts.workforce) {
+    for(const date of dates) {
+      if(!employedOn(w,date)) continue;
+      const policy=paymentPolicyOn(w,date);
+      const providerCards=mappings.filter(m=>m.worker?.id===w.id&&activeOn(m,date)&&configured(m));
+      const cards=directAllocations.filter(a=>a.workforce_id===w.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)));
+      const station=stationById.get(cards[0]?.station_id)?.station_code
+        ??stationById.get(policy?.station_id)?.station_code
+        ??policy?.station_code_snapshot
+        ??(!policyHistoryProvided?stationById.get(w.location_id)?.station_code:undefined);
+      if(!station || !selected.has(station)) continue;
+      if(providerCards.length&&cards.length) {
+        gap('Conflicting provider and direct pay setup',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
+        continue;
+      }
+      // Preserve a valid historical provider card after the designation policy changes.
+      if(providerCards.length) continue;
+      if(!cards.length) {
+        // Current flags are not evidence of historical policy. New source payloads
+        // supply an effective-dated ledger; dates before its first honest snapshot
+        // deliberately produce no policy-derived gap.
+        if(!policy?.designation_is_active || !policy.is_field_operations) continue;
+        if(!policy.provider_mapping_required) gap('Direct payment allocation missing',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
+        continue;
+      }
+      const latest=cards[0],current=cards.filter(a=>a.effective_from===latest.effective_from);
+      if(new Set(current.map(rateSignature)).size>1) {
+        gap('Conflicting direct payment allocations',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
+        continue;
+      }
+      const snapshotComponents=Array.isArray(latest.payment_components) ? latest.payment_components.filter((component:unknown)=>component&&typeof component==='object') as DirectPayComponent[] : [];
+      const directComponents=snapshotComponents.length ? snapshotComponents : (components.get(latest.payment_method_id)??[]) as DirectPayComponent[];
+      const result=directPayForDay(latest.payment_values,directComponents,date,attendanceByWorkerDate.get(`${w.id}|${date}`) as {punch_date:string;status?:string|null;in_time?:string|null;out_time?:string|null;work_minutes?:number|string|null}|undefined);
+      if(result.missing) {
+        gap('Direct payment allocation incomplete',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
+        continue;
+      }
+      let salary=0,fuel=0,van=0;
+      const salaryCoveredByPeople = w.source_profile_type==='employee'
+        && employeeCostDays.has(`${w.source_profile_id}|${date}`);
+      for(const line of result.lines) {
+        if(line.bucket==='van') {van+=line.amount;add(station,date,'Van',line.label,line.amount,'Direct workforce allocation');}
+        else if(line.bucket==='fuel') {fuel+=line.amount;add(station,date,'DA',line.label,line.amount,'Direct workforce allocation');}
+        else if(!salaryCoveredByPeople) {salary+=line.amount;add(station,date,'DA',`Salary / ${line.label}`,line.amount,'Direct workforce allocation');}
+      }
+      if(salaryCoveredByPeople && salary===0 && fuel===0 && van===0) continue;
+      if(!result.total&&!result.present&&!result.lines.some(line=>line.schedule==='per_month')) continue;
+      const synthetic={id:`direct:${w.id}:${date}`,client:'Direct',work_date:date,station_code:station,provider_employee_id:'',provider_employee_name:w.full_name,dropx_name:w.full_name,dropx_emp_code:w.dropx_id,pay_type:'DIRECT',total_delivery:0,total_activity:result.present?1:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:salary,fuel_pay:fuel,van_pay:van,da_total_pay:salary+fuel,mapping_status:'Mapped'} as LiveAssociate;
+      associates.push(synthetic);
+      const personKey=`${w.id}|${station}`,person=people.get(personKey)??{id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
+      person.salary+=salary;person.fuel+=fuel;person.van+=van;if(result.total>0){person.paid_days++;person.zero_delivery_days++;}people.set(personKey,person);
+    }
+  }
+  // Only designations that require an external provider identity create provider-link gaps.
   const through=dates.at(-1);
   if(through) for(const w of facts.workforce) {
-    const station=stationById.get(w.location_id)?.station_code;
+    const policy=paymentPolicyOn(w,through);
+    if(!policy?.designation_is_active || !policy.is_field_operations || !policy.provider_mapping_required) continue;
+    const station=stationById.get(policy.station_id)?.station_code
+      ??policy.station_code_snapshot
+      ??(!policyHistoryProvided?stationById.get(w.location_id)?.station_code:undefined);
     if(!station || !selected.has(station) || !employedOn(w,through)) continue;
+    if(directAllocations.some(a=>a.workforce_id===w.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},through))) continue;
     const current=mappings.filter(m=>m.worker?.id===w.id && activeOn(m,through));
     if(!current.some(m=>key(m.provider_member_id))) gap('Provider ID not linked',station,through,'',w.full_name,w.dropx_id);
     else if(!current.some(configured) && ![...gaps.values()].some(g=>g.dropx_id===w.dropx_id && g.kind==='Payment setup missing')) gap('Payment setup missing',station,through,current[0].provider_member_id,w.full_name,w.dropx_id);
@@ -223,10 +321,17 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const rules=facts.people_rules.filter(r=>r.employee_id===e.id && activeOn(r,date)).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
     const rule=rules[0];
     const overhead=/^HO(?:_|$)/.test(home?.station_code??'') || ['CLM','AOM','TC','RM','CM','NH','PGM','BH','CT','HRE','HRM','FINMGR','FLTM'].includes(e.designation);
+    const linkedWorkforce=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
+    const linkedPolicy=linkedWorkforce?paymentPolicyOn(linkedWorkforce,date):null;
+    const linkedAllocation=linkedWorkforce?directAllocations.filter(a=>a.workforce_id===linkedWorkforce.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0]:undefined;
+    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||(linkedPolicy?.designation_is_active&&linkedPolicy.is_field_operations)));
+    const workforceStation=stationById.get(linkedAllocation?.station_id)?.station_code
+      ??stationById.get(linkedPolicy?.station_id)?.station_code
+      ??linkedPolicy?.station_code_snapshot;
     let codes:string[]=rule?.station_codes??[];
     let head:CpsHead=rule?.head ?? (overhead?'Overhead':e.designation==='DR'?'Van':['DA','DCD','ODCD','WM','PTDA'].includes(e.designation)?'DA':'UTR');
     if(!rule) {
-      if(!overhead) codes=home?[home.station_code]:[];
+      if(!overhead) codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):home?[home.station_code]:[];
       else {
         codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
         if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
@@ -237,7 +342,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     }
     if(!codes.length) {
       // Report at the employee's home location when no verified allocation group exists.
-      if(home) gap('Overhead allocation missing',home.station_code,date,'',e.full_name,e.employee_code,0,0,'People / Finance');
+      if(home&&!datedWorkforceOwnership) gap('Overhead allocation missing',home.station_code,date,'',e.full_name,e.employee_code,0,0,'People / Finance');
       continue;
     }
     if(!codes.some(c=>selected.has(c))) continue;
@@ -250,8 +355,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       if(head==='UTR')staffed.add(`${station}|${date}`);
       add(station,date,head,rule?.sub_head||rule?.label||(head==='Overhead'?`${e.designation || 'Shared staff'} CTC`:head==='DA'?'Salary / minimum guarantee':head==='Van'?'Van driver CTC':'Station staff CTC'),amount,'People CTC');
       if(head==='DA' && selected.has(station)) {
-        const w=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
-        const k=`${w?.id??e.id}|${station}`,p=people.get(k)??{id:w?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
+        const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
         p.salary+=amount;people.set(k,p);
       }
     }

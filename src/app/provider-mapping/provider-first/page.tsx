@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type ProviderFirstWorker } from "@/components/provider-first-mapping-worksheet";
@@ -27,22 +28,28 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
 
   if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode="provider_mapping"><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
-  const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult] = await Promise.all([
+  const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult, designationsResult] = await Promise.all([
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
-    supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
+    supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }),
-    supabaseAdmin.from("payment_methods").select("id, code, name, payment_method_components(component_code, component_type, label, sort_order)").eq("company_id", companyId).eq("is_active", true).order("code")
+    supabaseAdmin.from("payment_methods").select("id, code, name, payment_method_components(component_code, component_type, label, sort_order)").eq("company_id", companyId).eq("is_active", true).order("code"),
+    supabaseAdmin.from("designations").select("id, code, name, is_field_operations, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
-  const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error;
+  const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error;
   const stations = (stationsResult.data ?? []).filter((station) => allowed(station.id));
   const stationByCode = new Map(stations.map((station) => [station.station_code, station]));
   const activeMappings = ((mappingsResult.data ?? []) as Mapping[]).filter((mapping) => allowed(mapping.station_id) && !mapping.effective_to);
   const mappingByWorkforce = new Map(activeMappings.filter((mapping) => mapping.workforce_id).map((mapping) => [mapping.workforce_id!, mapping]));
   const mappingByMember = new Map(activeMappings.map((mapping) => [String(mapping.provider_member_id), mapping]));
   const workforceById = new Map((workersResult.data ?? []).map((worker) => [worker.id, worker]));
+  const designationById = new Map((designationsResult.data ?? []).map((designation) => [String(designation.id), designation]));
+  const designationByName = new Map((designationsResult.data ?? []).flatMap((designation) => [designation.name, designation.code].map((value) => [String(value ?? "").trim().toLowerCase(), designation] as const)));
   const stationLabelById = new Map(stations.map((station) => [station.id, station.station_code]));
-  const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => allowed(worker.location_id) && worker.dropx_id).map((worker) => {
+  const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => {
+    const designation = designationById.get(String(worker.designation_id ?? "")) ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
+    return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
+  }).map((worker) => {
     const mapping = mappingByWorkforce.get(worker.id);
     return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: String(worker.location_id ?? ""), providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(String(worker.location_id ?? "")) ?? "No location", onboardingStatus: String(worker.onboarding_status ?? "") };
   });
@@ -62,6 +69,7 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
 
   return <AppShell active="ID Mapping" pageCode="provider_mapping">
     <PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
+    <nav className="performance-tabs" aria-label="ID mapping views"><Link href="/provider-mapping">Existing worksheet</Link><Link className="active" href="/provider-mapping/provider-first">Provider member first</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link></nav>
     
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}

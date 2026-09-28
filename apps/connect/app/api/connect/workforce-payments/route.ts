@@ -6,6 +6,8 @@ import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
 import { workforcePaymentStatus } from "@/lib/workforce-payment-status";
 import {personalPaymentCard} from '@/lib/personal-payment-card';
 import {allocateOwnDailyCards} from '@/lib/workforce-daily-card';
+import {assertNoProviderDirectOverlap,type DirectPaymentComponent} from '@/lib/direct-workforce-payment';
+import {loadDirectPaymentContext,loadDirectPaymentSetup,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
 export const dynamic='force-dynamic';
 
 type Mapping = {
@@ -26,6 +28,20 @@ function relationName(value: Mapping["providers"] | Mapping["payment_methods"]) 
   return row?.name ?? null;
 }
 
+function previousDate(value: string) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function todayKolkata() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+function componentField(component: DirectPaymentComponent) {
+  return Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Payments are unavailable right now.");
@@ -36,18 +52,11 @@ export async function GET(request: NextRequest) {
     if (account.workspace !== "workforce") throw new Error("This payment view is available in the Workforce workspace only.");
     if (!account.pageAccess.some(code => ["earnings", "rate_card"].includes(code))) return NextResponse.json({error:"Payments are not enabled for this account."},{status:403,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"}});
 
+    const workforce = await resolveCanonicalPaymentWorker(account);
     const identityFilters:string[] = account.profileType==="workforce" ? [`workforce_id.eq.${account.id}`] : [];
     const legacyColumns:Record<string,string>={employee:"employee_id",contractor:"contractor_id",field_executive:"field_executive_id"};
     if(legacyColumns[account.profileType])identityFilters.push(`and(workforce_id.is.null,${legacyColumns[account.profileType]}.eq.${account.id})`);
-    if (account.profileType === "workforce") {
-      const source = await supabaseAdmin.from("workforce")
-        .select("source_profile_id,source_profile_type")
-        .eq("company_id", account.companyId)
-        .eq("id", account.id)
-        .maybeSingle();
-      if(source.error) throw new Error("Your Workforce identity could not be verified.");
-      if(source.data?.source_profile_id && legacyColumns[source.data.source_profile_type])identityFilters.push(`and(workforce_id.is.null,${legacyColumns[source.data.source_profile_type]}.eq.${source.data.source_profile_id})`);
-    }
+    if (account.profileType === "workforce" && workforce?.source_profile_id && workforce.source_profile_type && legacyColumns[workforce.source_profile_type]) identityFilters.push(`and(workforce_id.is.null,${legacyColumns[workforce.source_profile_type]}.eq.${workforce.source_profile_id})`);
 
     const currentPeriod = workforcePaymentMonth();
     const currentMonth = currentPeriod.from.slice(0, 7);
@@ -64,10 +73,18 @@ export async function GET(request: NextRequest) {
 
     if((mappingResult.data ?? []).length>=1000) throw new Error("Too many mapping versions to reconcile safely. Please contact Workforce.");
     const mappings = (mappingResult.data ?? []) as Mapping[];
+    const periodEnd = month === currentMonth ? todayKolkata() : previousDate(period.to);
+    const direct = await loadDirectPaymentContext({companyId:account.companyId,workforceId:workforce?.id??null,from:period.from,to:periodEnd,employmentFrom:workforce?.date_of_join,employmentTo:workforce?.last_working_date});
+    assertNoProviderDirectOverlap({allocations:direct.allocations,mappings,from:period.from,to:periodEnd});
     const currentMappingResult = month === currentMonth ? mappingResult : await loadMappings(currentPeriod);
     if (currentMappingResult.error) throw new Error("We could not load your current rate card. Please try again.");
     if ((currentMappingResult.data ?? []).length >= 1000) throw new Error("Too many current mapping versions to reconcile safely. Please contact Workforce.");
     const currentMappings = (currentMappingResult.data ?? []) as Mapping[];
+    const currentEnd = todayKolkata();
+    const currentDirect = month === currentMonth
+      ? direct
+      : await loadDirectPaymentSetup({companyId:account.companyId,workforceId:workforce?.id??null,from:currentPeriod.from,to:currentEnd});
+    assertNoProviderDirectOverlap({allocations:currentDirect.allocations,mappings:currentMappings,from:currentPeriod.from,to:currentEnd});
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
     const dailyResult = providerMemberIds.length
       ? await supabaseAdmin.from("cps_shipment_daily")
@@ -101,11 +118,13 @@ export async function GET(request: NextRequest) {
       target.set(key, current);
     };
     const dailyByDate = new Map<string, Day>();
+    const providerWorkDates = new Set<string>();
     const personalAmounts=allocateOwnDailyCards((dailyResult.data||[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row),card=m?personalPaymentCard(m):null;return card?[{row,card}]:[];}));
     for (const row of dailyResult.data ?? []) {
       const mapping=paymentMappingForDay(mappings,row);
       if(!mapping) continue;
       const date = String(row.work_date ?? "");
+      providerWorkDates.add(date);
       const deliveries = Number(row.total_delivery ?? (Number(row.amazon_delivery ?? 0) + Number(row.swa_delivery ?? 0)));
       const cReturns = Number(row.c_return ?? 0);
       const mfn = Number(row.mfn ?? 0);
@@ -137,6 +156,12 @@ export async function GET(request: NextRequest) {
       lines.forEach((line) => mergeLine(provider.rateLines, line));
       current.providers.set(providerMemberId, provider);
       dailyByDate.set(date, current);
+    }
+    for (const directDay of direct.days) {
+      const current = dailyByDate.get(directDay.date) ?? { date: directDay.date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>(), providers: new Map<string, ProviderDay>() };
+      current.earnings += directDay.amount;
+      directDay.lines.forEach((line) => mergeLine(current.rateLines, { code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount }));
+      dailyByDate.set(directDay.date, current);
     }
     const daily = [...dailyByDate.values()].map((row) => ({ ...row, rateLines: [...row.rateLines.values()], providers: [...row.providers.values()].map((provider) => ({ ...provider, rateLines: [...provider.rateLines.values()] })).sort((left, right) => left.providerMemberId.localeCompare(right.providerMemberId)) })).sort((left, right) => right.date.localeCompare(left.date));
     const mtdLines = new Map<string, RateLine>();
@@ -181,32 +206,59 @@ export async function GET(request: NextRequest) {
         grossAmount: Number(item.gross_amount ?? 0), netAmount: Number(item.net_amount ?? 0)
       }];
     });
-    const rateCard = currentMappings.flatMap((mapping) => Object.entries(mapping.payment_values ?? {})
+    const providerRateCard = currentMappings.flatMap((mapping) => Object.entries(mapping.payment_values ?? {})
       .filter(([key, value]) => !key.startsWith('DROPX_') && Number.isFinite(Number(value)))
       .map(([code, value]) => ({ code, rate: Number(value), providerMemberId: mapping.provider_member_id, effectiveFrom: mapping.effective_from, effectiveTo: mapping.effective_to })));
+    const currentDirectMethods=paymentMethodById(currentDirect.methods);
+    const directRateCard=currentDirect.allocations.flatMap(allocation=>{
+      const method=currentDirectMethods.get(allocation.payment_method_id);
+      const snapshotComponents=Array.isArray(allocation.payment_components)
+        ? allocation.payment_components.filter((component):component is DirectPaymentComponent=>Boolean(component&&typeof component==='object'))
+        : [];
+      const components=snapshotComponents.length?snapshotComponents:(method?.payment_method_components??[]).filter(component=>component.is_active!==false);
+      return components.flatMap(component=>{
+        const field=componentField(component),code=String(component.component_code||field?.code||'').trim();
+        const raw=allocation.payment_values?.[code]??allocation.payment_values?.[component.component_code];
+        const rate=Number(raw);
+        return code&&Number.isFinite(rate)?[{code,label:String(field?.label||component.label||code),rate,providerMemberId:null,effectiveFrom:allocation.effective_from,effectiveTo:allocation.effective_to,source:'direct' as const}]:[];
+      });
+    });
+    const directMapping=currentDirect.allocations.map(allocation=>({
+      id:allocation.id,
+      providerMemberId:null,
+      provider:null,
+      paymentMethod:currentDirectMethods.get(allocation.payment_method_id)?.name??null,
+      effectiveFrom:allocation.effective_from,
+      effectiveTo:allocation.effective_to,
+      source:'direct' as const,
+      station:allocation.station_code_snapshot??null
+    }));
+    const currentMappingPayload=[...currentMappings.map((mapping) => ({
+      id: mapping.id,
+      providerMemberId: mapping.provider_member_id,
+      provider: relationName(mapping.providers),
+      paymentMethod: relationName(mapping.payment_methods),
+      effectiveFrom: mapping.effective_from,
+      effectiveTo: mapping.effective_to,
+      source:'provider' as const,
+      station:null
+    })),...directMapping].sort((left,right)=>String(right.effectiveFrom??'').localeCompare(String(left.effectiveFrom??'')));
 
     return NextResponse.json({
       month,
       period: period.label,
-      hasPaymentMapping: mappings.length > 0,
-      mapping: currentMappings.map((mapping) => ({
-        id: mapping.id,
-        providerMemberId: mapping.provider_member_id,
-        provider: relationName(mapping.providers),
-        paymentMethod: relationName(mapping.payment_methods),
-        effectiveFrom: mapping.effective_from,
-        effectiveTo: mapping.effective_to
-      })),
+      hasPaymentMapping: mappings.length > 0 || direct.allocations.length > 0,
+      mapping: currentMappingPayload,
       summary: account.pageAccess.includes("earnings") ? {
         deliveries: daily.reduce((total, row) => total + row.deliveries, 0),
         earnings: daily.reduce((total, row) => total + row.earnings, 0),
-        workingDays: daily.length,
+        workingDays: providerWorkDates.size + direct.days.reduce((total,day)=>total+day.workDayUnits,0),
         latestDate: daily[0]?.date ?? null,
         rateLines: [...mtdLines.values()]
       } : {deliveries:0,earnings:0,workingDays:0,latestDate:null,rateLines:[]},
       daily: account.pageAccess.includes("earnings") ? daily : [],
       statements,
-      rateCard
+      rateCard:[...providerRateCard,...directRateCard]
     }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load workforce payments." }, { status: 400,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"} });
