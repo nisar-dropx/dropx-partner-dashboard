@@ -159,6 +159,40 @@ export async function GET(request: Request) {
     return workbookResponse([{ name: "Daily summary", rows: stationRows }, { name: "Pincode mix", rows: pincodeRows }, { name: "Customer promise", rows: promiseRows }, { name: "Inbound", rows: inboundRows }, { name: "Assigned ground input", rows: groundRows }], `station-360-${from}-to-${to}.xlsx`);
   }
 
+  if (type === "inbound_counts") {
+    // Counts only, so fetch the minimum columns and page through every row with no export cap.
+    const facts = await allRows((start, end) => db.from("inbound_shipment_facts")
+      .select("expected_arrival_date,station_code,postal_code,package_count")
+      .eq("company_id", companyId).in("station_code", codes).gte("expected_arrival_date", from).lte("expected_arrival_date", to)
+      .order("expected_arrival_date").order("station_code").order("tracking_id").range(start, end), Number.POSITIVE_INFINITY);
+    if (facts.error) return Response.json({ error: facts.error.message }, { status: 500 });
+    const counts = new Map<string, { shipments: number; packages: number; pincodes: Set<string> }>();
+    facts.data.forEach((row) => {
+      const key = `${row.expected_arrival_date}|${row.station_code}`;
+      const item = counts.get(key) ?? { shipments: 0, packages: 0, pincodes: new Set<string>() };
+      item.shipments += 1; item.packages += Math.max(1, n(row.package_count));
+      if (row.postal_code) item.pincodes.add(row.postal_code);
+      counts.set(key, item);
+    });
+    // Every selected station-day gets a row so missing imports show up as zero.
+    const countRows: Record<string, unknown>[] = [];
+    for (let day = new Date(`${from}T00:00:00Z`); day <= new Date(`${to}T00:00:00Z`); day.setUTCDate(day.getUTCDate() + 1)) {
+      const date = day.toISOString().slice(0, 10);
+      [...codes].sort().forEach((station) => {
+        const item = counts.get(`${date}|${station}`);
+        countRows.push({ "Expected arrival date": date, Station: station, "Shipments (tracking IDs)": item?.shipments ?? 0, Packages: item?.packages ?? 0, Pincodes: item?.pincodes.size ?? 0, Status: item ? "Imported" : "No data" });
+      });
+    }
+    const stationTotals = [...codes].sort().map((station) => {
+      const rows = countRows.filter((row) => row.Station === station);
+      return { Station: station, Shipments: rows.reduce((sum, row) => sum + n(row["Shipments (tracking IDs)"]), 0), Packages: rows.reduce((sum, row) => sum + n(row.Packages), 0), "Days with data": rows.filter((row) => row.Status === "Imported").length, "Days without data": rows.filter((row) => row.Status !== "Imported").length };
+    });
+    return workbookResponse([
+      { name: "Station totals", rows: stationTotals }, { name: "Daily counts", rows: countRows },
+      { name: "Read me", rows: [{ "Period": `${from} to ${to}`, "Source": "Inbound data (inbound_shipment_detail) from Report Imports", "Date basis": "Expected arrival date", "Shipments": "Unique tracking IDs; re-imports refresh the same tracking ID instead of adding a duplicate", "No data": "No imported shipments for that station and date - check the import log" }] }
+    ], `inbound-shipment-counts-${from}-to-${to}.xlsx`);
+  }
+
   if (type === "inbound_daily") {
     const result = await allRows((start, end) => db.from("inbound_shipment_facts").select("expected_arrival_date,station_code,postal_code,package_count")
       .eq("company_id", companyId).in("station_code", codes).gte("expected_arrival_date", from).lte("expected_arrival_date", to).order("expected_arrival_date").range(start, end));

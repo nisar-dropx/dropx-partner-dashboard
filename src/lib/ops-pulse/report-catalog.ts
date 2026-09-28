@@ -3,6 +3,7 @@ export const opsReportCatalog = [
   { type: "shipment_station", group: "Shipments", title: "Station shipment summary", description: "Day-level delivered volume, road IDs, SPR and small/volumetric mix.", format: "CSV" },
   { type: "shipment_pincode", group: "Shipments", title: "Pincode volume & size mix", description: "Station and pincode volume with small, volumetric and unclassified percentages.", format: "CSV" },
   { type: "shipment_promise", group: "Shipments", title: "Customer promise", description: "Station and pincode promise-date performance with early, on-promise and late volume.", format: "CSV" },
+  { type: "inbound_counts", group: "Shipments", title: "Inbound shipment counts", description: "Worker-imported inbound data: station totals and station-day shipment counts by expected-arrival date, with zero-count days flagged.", format: "Excel" },
   { type: "inbound_daily", group: "Shipments", title: "Inbound volume", description: "Expected-arrival day volume by station and pincode.", format: "CSV" },
   { type: "station_360", group: "Shipments", title: "Station 360 workbook", description: "One station workbook with daily summary, pincode mix, inbound and customer promise.", format: "Excel", singleStation: true },
   { type: "station_delivery", group: "Operations", title: "Station delivery", description: "Assigned, delivered, returns, MFN, active DAs and productivity.", format: "CSV" },
