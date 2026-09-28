@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
 import { ConnectNativeBridge } from "./connect-native-bridge";
+import { PullToRefresh } from "./pull-to-refresh";
 import { ConnectAppInstallCard } from "./connect-app-install-card";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectDocuments } from "./connect-documents";
@@ -824,6 +825,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         <AttendanceLocationMonitor account={account} />
       ) : null}
       {account ? <ConnectNativeBridge account={account} /> : null}
+      <PullToRefresh />
       {step === "activation" && account?.activationOnly ? <ConnectActivationStatus account={account} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
