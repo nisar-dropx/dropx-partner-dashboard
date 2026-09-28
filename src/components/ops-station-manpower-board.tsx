@@ -148,14 +148,14 @@ function ActiveRosterView({ asOf, people, locationCode }: { asOf: string; people
 }
 
 function StationTimetable({ people, locationCode, asOf, exportUrl }: { people: OpsStationManpowerPerson[]; locationCode: string; asOf: string; exportUrl?: string }) {
-  const [filter, setFilter] = useState<ShiftFilter>("all"), [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<ShiftFilter>("all"), [search, setSearch] = useState(""), [exportShift, setExportShift] = useState<string | null>(null);
   const visible = people.filter(p => matchesShift(p, filter, search));
-  return <div><ShiftAttendanceTools people={people} filter={filter} search={search} onFilter={setFilter} onSearch={setSearch} exportUrl={exportUrl} />
-    {visible.length ? <StationTimetableContent key={filter + search} people={visible} locationCode={locationCode} asOf={asOf} /> : <p className="station-manpower-empty">No people match these filters.</p>}
+  return <div><ShiftAttendanceTools people={people} filter={filter} search={search} onFilter={value => { setFilter(value); setExportShift(null); }} onSearch={value => { setSearch(value); setExportShift(null); }} exportUrl={exportUrl ? `${exportUrl}&shift=${encodeURIComponent(exportShift ?? "")}` : undefined} />
+    {visible.length ? <StationTimetableContent key={filter + search} people={visible} locationCode={locationCode} asOf={asOf} onShiftChange={setExportShift} /> : <p className="station-manpower-empty">No people match these filters.</p>}
   </div>;
 }
 
-function StationTimetableContent({ people, locationCode, asOf }: { people: OpsStationManpowerPerson[]; locationCode: string; asOf: string }) {
+function StationTimetableContent({ people, locationCode, asOf, onShiftChange }: { people: OpsStationManpowerPerson[]; locationCode: string; asOf: string; onShiftChange: (shift: string | null) => void }) {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [selectedShift, setSelectedShift] = useState<string | null>(null);
   const selectedAttendance: AttendanceFilter = "all";
@@ -204,7 +204,9 @@ function StationTimetableContent({ people, locationCode, asOf }: { people: OpsSt
   const visibleScheduled = shiftFilteredScheduled.filter((person) => matchesAttendanceFilter(person, selectedAttendance));
   const visibleOffDuty = shiftFilteredOffDuty.filter((person) => matchesAttendanceFilter(person, selectedAttendance));
   const selectShift = (shift: string | null) => {
-    setSelectedShift((current) => current === shift ? null : shift);
+    const next = selectedShift === shift ? null : shift;
+    setSelectedShift(next);
+    onShiftChange(next);
     setSelectedPersonId(null);
   };
 

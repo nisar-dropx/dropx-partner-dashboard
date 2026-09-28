@@ -1,8 +1,8 @@
 import * as XLSX from "xlsx";
 import { matchesShift, shiftLabel, type ShiftAttendance } from "@/lib/shift-attendance-view";
-export function shiftAttendanceWorkbook(people: Array<ShiftAttendance & { designation: string; locationId: string | null }>, date: string, locations: Map<string, string>, status: string, search: string) {
+export function shiftAttendanceWorkbook(people: Array<ShiftAttendance & { designation: string; locationId: string | null }>, date: string, locations: Map<string, string>, status: string, search: string, shift = "") {
   const time = (value: string | null) => value ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "";
-  const rows = people.filter(p => matchesShift(p, status, search)).sort((a, b) => a.name.localeCompare(b.name)).map(p => ({
+  const rows = people.filter(p => matchesShift(p, status, search)).filter(p => !shift || (shift === "__week_off__" ? !p.today.shiftName : p.today.shiftName === shift)).sort((a, b) => a.name.localeCompare(b.name)).map(p => ({
     Date: date, Location: locations.get(p.locationId ?? "") ?? "", "People ID": p.code, Name: p.name, Designation: p.designation,
     Roster: p.today.shiftName ?? p.today.rosterDayType ?? "No approved roster",
     Status: shiftLabel(p), "Work mode": p.today.workMode ?? "Onsite",

@@ -21,15 +21,14 @@ export function ShiftAttendanceTools({ people, filter, search, onFilter, onSearc
     finally { setBusy(false); }
   }
   return <div style={{ padding: "10px 12px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "white", border: "1px solid #e2e8f0", borderRadius: 12 }}>
-    <label style={{ display: "flex", gap: 6, alignItems: "center", flex: "1 1 180px" }}><Search size={15} aria-hidden="true" />
-      <input aria-label="Search shift attendance" placeholder="Name or People ID" value={search} onChange={e => onSearch(e.target.value)} style={{ width: "100%", minWidth: 0 }} />
+    <label style={{ display: "flex", gap: 6, alignItems: "center", flex: "1 1 240px", maxWidth: 480 }}><Search size={15} aria-hidden="true" />
+      <input aria-label="Search shift attendance" placeholder="Name or People ID" value={search} onChange={e => onSearch(e.target.value)} style={{ width: "100%", minWidth: 0, height: 34, padding: "6px 10px", border: "1px solid #dbe2ea", borderRadius: 8, fontSize: 12, background: "#fff", color: "#344054" }} />
     </label>
-    <select aria-label="Attendance status" value={filter} onChange={e => onFilter(e.target.value as ShiftFilter)} style={{ width: "auto", minWidth: 180 }}>
+    <select aria-label="Attendance status" value={filter} onChange={e => onFilter(e.target.value as ShiftFilter)} style={{ width: "auto", minWidth: 180, height: 34, padding: "6px 10px", border: "1px solid #dbe2ea", borderRadius: 8, fontSize: 12, background: "#fff", color: "#344054" }}>
       {shiftFilters.map(([value, label]) => <option key={value} value={value}>{label} ({people.filter(p => matchesShift(p, value, search)).length})</option>)}
     </select>
-    {(filter !== "all" || search) && <button type="button" onClick={() => { onFilter("all"); onSearch(""); }}>Reset</button>}
-    <button type="button" disabled={!exportUrl || busy} title={!exportUrl ? "Attendance export permission required" : "Download matching rows for this date and location"} onClick={download}><Download size={14} /> {busy ? "Downloading…" : "Excel"}</button>
+    {(filter !== "all" || search) && <button type="button" style={{ height: 34, padding: "6px 12px", border: "1px solid #dbe2ea", borderRadius: 8, background: "#fff", fontSize: 12 }} onClick={() => { onFilter("all"); onSearch(""); }}>Reset</button>}
+    <button type="button" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, height: 34, padding: "6px 12px", border: "1px solid #dbe2ea", borderRadius: 8, background: "#fff", color: !exportUrl ? "#98a2b3" : "#344054", fontSize: 12, fontWeight: 600 }} disabled={!exportUrl || busy} title={!exportUrl ? "Attendance export permission required" : "Download matching rows for this date and location"} onClick={download}><Download size={14} /> {busy ? "Downloading…" : "Excel"}</button>
     {error && <span role="alert" style={{ color: "#b91c1c", width: "100%", fontSize: 12 }}>{error}</span>}
   </div>;
 }
-

@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const selected = locations.locations.filter(l => l.id === locationId);
     if (!selected.length) return Response.json({ error: "Location access denied." }, { status: 403 });
     const data = await loadOpsStationManpower(companyId, selected, date);
-    return shiftExportResponse(shiftAttendanceWorkbook(data.people, date, new Map(selected.map(l => [l.id, l.station_code])), q.get("status") ?? "all", q.get("search") ?? ""), date);
+    return shiftExportResponse(shiftAttendanceWorkbook(data.people, date, new Map(selected.map(l => [l.id, l.station_code])), q.get("status") ?? "all", q.get("search") ?? "", q.get("shift") ?? ""), date);
   } catch (error) {
     console.error("Shift attendance export failed", error);
     return Response.json({ error: "Unable to download shift attendance. Please retry." }, { status: 503 });

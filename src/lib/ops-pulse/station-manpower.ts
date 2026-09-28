@@ -1,6 +1,6 @@
 import "server-only";
 import { wfhCreditState } from "@/lib/wfh-attendance-credit";
-import { shiftBounds } from "@/lib/shift-attendance-view";
+import { shiftBounds, shiftPunchMinute } from "@/lib/shift-attendance-view";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { compareRosterPlanPreference, formatShiftClock } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -400,7 +400,7 @@ export async function loadOpsStationManpower(
     const bounds = shiftBounds(asOf, shift?.start_time, shift?.end_time);
     const actualEnd = attendance?.out_time ? Date.parse(attendance.out_time) : NaN;
     const earlyMinutes = bounds.shiftEndsAt && attendance?.in_time && Number(attendance.punch_count ?? 0) >= 2 && actualEnd > Date.parse(attendance.in_time)
-      ? Math.max(0, Math.floor((Date.parse(bounds.shiftEndsAt) - actualEnd) / 60000) - Number(shift?.grace_out_minutes ?? 0)) : 0;
+      ? Math.max(0, (shiftPunchMinute(bounds.shiftEndsAt, asOf)! - shiftPunchMinute(attendance.out_time, asOf)!) - Number(shift?.grace_out_minutes ?? 0)) : 0;
     const wfhState = wfhCreditState(attendance ?? {});
     const reported = Boolean(attendance?.in_time);
     const missingPunch = reported && (Number(attendance?.punch_count ?? 0) < 2 || !attendance?.out_time);
