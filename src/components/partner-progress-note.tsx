@@ -6,7 +6,7 @@ import { recordPartnerProgress } from "@/app/field-executive/actions";
 export function PartnerProgressNote({ state, workforceId, canEdit }: {
   state: PartnerOnboardingState; workforceId: string; canEdit: boolean;
 }) {
-  return <div style={{ fontSize: 12, maxWidth: 300 }}>
+  return <div style={{ fontSize: 12, maxWidth: 300, whiteSpace: "normal", textAlign: "left", overflowWrap: "anywhere" }}>
     {state.due_kind ? <span style={{ color: "#b45309", fontWeight: 600 }} title={`${state.due_kind === "invitation_due" ? "Invitation" : "ID setup follow-up"} overdue since ${state.due_since}`}>Due · {state.due_since}</span> : null}
     <details>
       <summary style={{ cursor: "pointer", padding: "4px 0", fontWeight: 500 }}>View details</summary>
