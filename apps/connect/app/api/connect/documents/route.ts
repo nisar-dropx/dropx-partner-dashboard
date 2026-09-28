@@ -82,7 +82,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ url: signed.data.signedUrl });
     }
 
-    const [pay, issued, exit, types, requests] = await Promise.all([
+    const [pay, issued, exit, types, requests, insurance] = await Promise.all([
       supabaseAdmin.from("hr_pay_documents")
         .select("id,document_type,document_number,period_label,period_start,period_end,published_at")
         .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
@@ -106,9 +106,14 @@ export async function GET(request: Request) {
       supabaseAdmin.from("hr_document_requests")
         .select("id,request_number,request_type_id,request_type_name,reason,status,hr_note,requested_at,first_action_at,closed_at,fulfilled_document_id,updated_at")
         .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
-        .order("requested_at", { ascending: false }).limit(50)
+        .order("requested_at", { ascending: false }).limit(50),
+      supabaseAdmin.from("connect_insurance_cards")
+        .select("id,drive_file_id,file_name,mime_type,policy_number,insurer_name,valid_to,source_updated_at")
+        .eq("company_id", account.companyId).eq("profile_type", profileType).eq("profile_id", account.id)
     ]);
     if (pay.error || issued.error || exit.error || types.error || requests.error) throw new Error(pay.error?.message ?? issued.error?.message ?? exit.error?.message ?? types.error?.message ?? requests.error?.message ?? "Unable to load documents.");
+    // Insurance cards are optional: a missing table (migration not run yet) must not break Documents.
+    const insuranceRows = insurance.error ? [] : insurance.data ?? [];
 
     const requestIds = (requests.data ?? []).map((row) => row.id);
     const [messagesResult, attachmentsResult] = await Promise.all([
@@ -140,6 +145,16 @@ export async function GET(request: Request) {
         id: row.id, kind: "exit", category: String(row.document_type).replaceAll("_", " "), title: String(row.document_type).replaceAll("_", " "),
         subtitle: "Offboarding document", fileName: row.file_name,
         publishedAt: row.generated_at, expiresOn: null, downloadUrl: query("exit", row.id)
+      })),
+      // Served straight from Google Drive (the file is shared by link), never through this server.
+      ...insuranceRows.map((row) => ({
+        id: row.id, kind: "insurance", category: "insurance card",
+        title: row.insurer_name ? `${row.insurer_name} insurance card` : "Insurance card",
+        subtitle: row.policy_number ? `Policy ${row.policy_number}` : "Group insurance",
+        fileName: row.file_name || "insurance-card.pdf", mimeType: row.mime_type || null,
+        publishedAt: row.source_updated_at, expiresOn: row.valid_to,
+        downloadUrl: `https://drive.google.com/uc?export=download&id=${encodeURIComponent(row.drive_file_id)}`,
+        external: true
       }))
     ].sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
 

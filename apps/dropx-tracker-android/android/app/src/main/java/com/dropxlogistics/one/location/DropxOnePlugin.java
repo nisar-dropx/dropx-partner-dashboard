@@ -53,6 +53,176 @@ public class DropxOnePlugin extends Plugin {
     androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
       | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL;
 
+  // Documents (payslips, insurance cards, work cycle) are kept in the app's private storage
+  // (getFilesDir), which Android deletes when the app is uninstalled. Each is fetched once;
+  // later opens read the local copy instead of hitting the server or Google Drive again.
+  private static final java.util.concurrent.ExecutorService documentExecutor =
+    java.util.concurrent.Executors.newSingleThreadExecutor();
+
+  private java.io.File documentDir() {
+    java.io.File dir = new java.io.File(getContext().getFilesDir(), "documents");
+    if (!dir.exists()) dir.mkdirs();
+    return dir;
+  }
+
+  // Plain streams rather than java.nio.file, which needs API 26 (minSdk is 22).
+  private static void copyFile(java.io.File source, java.io.OutputStream out) throws java.io.IOException {
+    try (java.io.InputStream in = new java.io.FileInputStream(source)) {
+      byte[] buffer = new byte[16 * 1024];
+      int read;
+      while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+    }
+  }
+
+  private static byte[] readFile(java.io.File source) throws java.io.IOException {
+    java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+    copyFile(source, out);
+    return out.toByteArray();
+  }
+
+  private static String readMimeType(java.io.File meta) throws java.io.IOException {
+    return meta.exists() ? new String(readFile(meta), "UTF-8").trim() : "application/octet-stream";
+  }
+
+  private static String safeDocumentKey(String key) {
+    return key == null ? "" : key.replaceAll("[^A-Za-z0-9_-]", "_");
+  }
+
+  /** Downloads a document into private storage unless this exact version is already stored. */
+  @PluginMethod
+  public void cacheDocument(PluginCall call) {
+    String key = safeDocumentKey(call.getString("key"));
+    String url = call.getString("url", "");
+    if (key.isEmpty() || !(url.startsWith("https://"))) {
+      call.reject("A document key and https URL are required.");
+      return;
+    }
+    java.io.File file = new java.io.File(documentDir(), key + ".bin");
+    java.io.File meta = new java.io.File(documentDir(), key + ".type");
+    if (file.exists() && file.length() > 0 && meta.exists()) {
+      call.resolve();
+      return;
+    }
+    documentExecutor.execute(() -> {
+      java.net.HttpURLConnection connection = null;
+      java.io.File temp = new java.io.File(documentDir(), key + ".part");
+      try {
+        connection = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        connection.setInstanceFollowRedirects(true);
+        connection.setConnectTimeout(20_000);
+        connection.setReadTimeout(60_000);
+        // Our own document URLs are authorised by the DropX One session cookie.
+        String cookie = android.webkit.CookieManager.getInstance().getCookie(url);
+        if (cookie != null && !cookie.isEmpty()) connection.setRequestProperty("Cookie", cookie);
+        int status = connection.getResponseCode();
+        String mimeType = connection.getContentType();
+        if (status >= 400) throw new java.io.IOException("Document is unavailable (" + status + ").");
+        // Google Drive answers with an HTML page instead of the file when it isn't shared by link.
+        if (mimeType != null && mimeType.startsWith("text/html")) {
+          throw new java.io.IOException("This document isn't available yet. Please try again later.");
+        }
+        try (java.io.InputStream in = connection.getInputStream();
+             java.io.OutputStream out = new java.io.FileOutputStream(temp)) {
+          byte[] buffer = new byte[16 * 1024];
+          int read;
+          while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+        }
+        if (!temp.renameTo(file)) throw new java.io.IOException("Unable to store the document.");
+        String type = mimeType == null ? "application/octet-stream" : mimeType.split(";")[0].trim();
+        try (java.io.FileWriter writer = new java.io.FileWriter(meta)) { writer.write(type); }
+        call.resolve();
+      } catch (Exception e) {
+        temp.delete();
+        call.reject(e.getMessage() == null ? "Unable to download the document." : e.getMessage());
+      } finally {
+        if (connection != null) connection.disconnect();
+      }
+    });
+  }
+
+  /** Returns a stored document as base64 so the app can show it in its viewer. */
+  @PluginMethod
+  public void readCachedDocument(PluginCall call) {
+    String key = safeDocumentKey(call.getString("key"));
+    java.io.File file = new java.io.File(documentDir(), key + ".bin");
+    java.io.File meta = new java.io.File(documentDir(), key + ".type");
+    if (key.isEmpty() || !file.exists()) {
+      call.reject("Document is not stored on this phone.");
+      return;
+    }
+    documentExecutor.execute(() -> {
+      try {
+        byte[] bytes = readFile(file);
+        String mimeType = readMimeType(meta);
+        com.getcapacitor.JSObject result = new com.getcapacitor.JSObject();
+        result.put("data", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP));
+        result.put("mimeType", mimeType);
+        call.resolve(result);
+      } catch (Exception e) {
+        call.reject("Unable to open the document.");
+      }
+    });
+  }
+
+  /** Copies a stored document into the phone's Downloads folder. */
+  @PluginMethod
+  public void saveDocumentToDownloads(PluginCall call) {
+    String key = safeDocumentKey(call.getString("key"));
+    String fileName = call.getString("fileName", "document").replaceAll("[\\\\/:*?\"<>|]", "_");
+    java.io.File file = new java.io.File(documentDir(), key + ".bin");
+    java.io.File meta = new java.io.File(documentDir(), key + ".type");
+    if (key.isEmpty() || !file.exists()) {
+      call.reject("Document is not stored on this phone.");
+      return;
+    }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+        && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+      Activity activity = getActivity();
+      if (activity != null) {
+        ActivityCompat.requestPermissions(activity, new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE }, STORAGE_REQUEST_CODE);
+      }
+      call.reject("Allow storage access, then tap Download again.");
+      return;
+    }
+    documentExecutor.execute(() -> {
+      try {
+        String mimeType = readMimeType(meta);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          android.content.ContentValues values = new android.content.ContentValues();
+          values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName);
+          values.put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType);
+          values.put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/DropX One");
+          android.net.Uri uri = getContext().getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+          if (uri == null) throw new java.io.IOException("Unable to create the download.");
+          try (java.io.OutputStream out = getContext().getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new java.io.IOException("Unable to write the download.");
+            copyFile(file, out);
+          }
+        } else {
+          java.io.File downloads = new java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "DropX One");
+          if (!downloads.exists()) downloads.mkdirs();
+          try (java.io.OutputStream out = new java.io.FileOutputStream(new java.io.File(downloads, fileName))) {
+            copyFile(file, out);
+          }
+        }
+        call.resolve();
+      } catch (Exception e) {
+        call.reject("Unable to save the document to Downloads.");
+      }
+    });
+  }
+
+  /** Deletes every stored document, e.g. on logout. */
+  @PluginMethod
+  public void clearCachedDocuments(PluginCall call) {
+    java.io.File[] files = documentDir().listFiles();
+    if (files != null) for (java.io.File file : files) file.delete();
+    call.resolve();
+  }
+
+  private static final int STORAGE_REQUEST_CODE = 9004;
+
   /** Whether this phone has a fingerprint/face or screen lock set up that can unlock the app. */
   @PluginMethod
   public void biometricStatus(PluginCall call) {

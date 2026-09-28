@@ -9,6 +9,7 @@ import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
 import { ConnectNativeBridge } from "./connect-native-bridge";
 import { PullToRefresh } from "./pull-to-refresh";
+import { clearStoredDocuments } from "../lib/document-store";
 import { ConnectAppInstallCard } from "./connect-app-install-card";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectDocuments } from "./connect-documents";
@@ -370,6 +371,9 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   async function logout() {
     await fetch("/api/connect/auth/session", { method: "DELETE" });
     localStorage.removeItem(biometricUnlockTimestampKey);
+    // Payslips and cards stored on the phone belong to the person logging out.
+    Object.keys(localStorage).filter((key) => key.startsWith("dropx_documents:")).forEach((key) => localStorage.removeItem(key));
+    await clearStoredDocuments();
     setCountryCode("91"); setMobile(""); setPin(""); setConfirmPin(""); setOtp("");
     setAccounts([]); setLockedAccounts([]); setAccount(null); setAvatar(""); setDrawer(false); setProfileMenu(false); setNotificationMenu(false); setNotifications([]); setUnreadNotifications(0); setStep("mobile"); setNotice("Logged out."); setError("");
   }

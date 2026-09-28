@@ -43,8 +43,10 @@ android {
         // applyInsetsToWebView's own doc). 39 (4.5.12) sends a hashed ANDROID_ID in the user
         // agent so an account can be bound to one phone (see MainActivity.appendDeviceIdToUserAgent).
         // 40 (4.5.13) adds native BiometricPrompt unlock (DropxOnePlugin.authenticateBiometric).
-        versionCode 40
-        versionName "4.5.13"
+        // 41 (4.5.14) stores opened documents on the phone and saves them to Downloads
+        // (DropxOnePlugin.cacheDocument / saveDocumentToDownloads).
+        versionCode 41
+        versionName "4.5.14"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
