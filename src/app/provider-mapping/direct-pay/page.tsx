@@ -199,9 +199,7 @@ export default async function DirectPaymentAllocationsPage({
       paymentValues: Object.fromEntries(Object.entries(current?.payment_values ?? {})
         .map(([code, value]) => [code, Number(value)])
         .filter(([, value]) => Number.isFinite(value))),
-      effectiveFrom: current
-        ? (current.effective_from > today ? current.effective_from : today)
-        : defaultEffectiveFrom,
+      effectiveFrom: current?.effective_from ?? defaultEffectiveFrom,
       effectiveTo: current?.effective_to ?? "",
       historyCount: history.length
     };
