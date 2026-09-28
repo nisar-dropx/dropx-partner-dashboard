@@ -13,7 +13,7 @@ const checks = [
   [cod.includes("loadPeopleOperationalHierarchy") && cod.includes('hierarchy_source: "people"'), "shared OpsPulse locations are overlaid from People"],
   [switcher.includes("reporting_authorities") && switcher.includes("cluster_manager_names"), "global scope filter presents People reporting authorities and cluster managers"],
   [routing.includes("loadPeopleOperationalHierarchy") && !routing.includes('.select("id,region,cluster")'), "approval same-cluster routing uses People rather than station text"],
-  [reviews.includes("primaryReportingChain") && !reviews.includes('from("org_positions")') && !reviews.includes("reports_to_user_id"), "performance reviews use the People reporting chain"],
+  [reviews.includes("loadPeopleReviewRoute") && !reviews.includes('from("org_positions")') && !reviews.includes("reports_to_user_id"), "performance reviews use the People reporting chain"],
   [locationMaster.includes("loadPeopleOperationalHierarchy"), "location master presents the People hierarchy"],
   [![cod, switcher, routing, reviews, locationMaster].some((source) => /Dhananjay/i.test(source)), "supported hierarchy surfaces contain no hard-coded legacy manager"],
 ];

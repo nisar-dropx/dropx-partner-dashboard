@@ -3,7 +3,7 @@ import { cache } from "react";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE } from "@/lib/ops-pulse/performance-source-policy";
-import { reviewCapabilities, reviewRole, reviewRoutingIssue } from "@/lib/ops-pulse/review-policy";
+import { reviewCapabilities, reviewRole, reviewRoutingIssue, visibleReviewStep } from "@/lib/ops-pulse/review-policy";
 import { loadReviewOversightRoles, matchesOversightTier } from "@/lib/ops-pulse/review-oversight-roles";
 
 /** Has the Performance Scorecard (Hawkeye daily) been imported for this station/date? Reviews and RCA are blocked until it has. */
@@ -61,12 +61,12 @@ export const loadReviewActor = cache(async (companyId: string, userId: string, r
 export async function getReviewAccess(
   authorization: AuthorizationContext,
   stationId: string,
-  review: { status: string; current_step_order: number; reviewer_edit_reopened?: boolean } | null,
-  steps: { step_order: number; reviewer_user_id?: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
+  review: { status: string; current_step_order: number; reviewer_edit_reopened?: boolean; routing_error?: string | null } | null,
+  steps: { step_order: number; reviewer_user_id?: string | null; reviewer_role: string; status: string; routing_source?: string | null; route_superseded_at?: string | null; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
   options?: { inScope?: boolean; scorecardImported?: boolean }
 ) {
   const actor = await loadReviewActor(authorization.companyId!, authorization.userId, authorization.roleCode, authorization.roleName);
-  const pendingSteps = steps.filter((step) => step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role))).sort((a, b) => a.step_order - b.step_order);
+  const pendingSteps = steps.filter((step) => step.status !== "skipped" && visibleReviewStep(step)).sort((a, b) => a.step_order - b.step_order);
   const current = pendingSteps.find((step) => step.step_order === review?.current_step_order && step.status === "pending");
   // Review Desk already filtered the station into permittedLocations — trust that over a second scope check.
   const inScope = options?.inScope ?? (authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(stationId));
@@ -97,12 +97,14 @@ export async function getReviewAccess(
     scorecardImported: options?.scorecardImported ?? false,
     reviewerEditReopened: Boolean(review?.reviewer_edit_reopened)
   });
-  const routingIssue = reviewRoutingIssue(steps);
+  const routingIssue = review?.routing_error || reviewRoutingIssue(steps);
   return {
     actor,
     routingIssue,
     ...capabilities,
     canComplete: capabilities.canComplete && !routingIssue,
+    canProxy: capabilities.canProxy && !routingIssue,
+    canBypass: capabilities.canBypass && !routingIssue,
     // Exposed so the UI can show "you are the original reviewer" hints (e.g. the reopened-edit-access banner).
     isOriginalReviewer: Boolean(pendingSteps[0]?.reviewer_user_id && pendingSteps[0].reviewer_user_id === authorization.userId)
   };

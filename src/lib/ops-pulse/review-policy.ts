@@ -151,14 +151,14 @@ export function filterLocationsByReviewCluster<T extends { id: string }>(
   });
 }
 
-export function visibleReviewStep(step: { status: string; reviewer_role: string; bypassed_at?: string | null }) {
-  return ["cluster", "aom", "national"].includes(reviewRole(step.reviewer_role)) &&
+export function visibleReviewStep(step: { status: string; reviewer_role: string; bypassed_at?: string | null; routing_source?: string | null; route_superseded_at?: string | null }) {
+  return !step.route_superseded_at && (step.routing_source === "people" || ["cluster", "aom", "national"].includes(reviewRole(step.reviewer_role))) &&
     (step.status !== "skipped" || Boolean(step.bypassed_at));
 }
 
-export function reviewRoutingIssue(steps: { status: string; reviewer_role: string; bypassed_at?: string | null }[]) {
+export function reviewRoutingIssue(steps: { status: string; reviewer_role: string; bypassed_at?: string | null; routing_source?: string | null; route_superseded_at?: string | null }[]) {
   const configured = steps.filter(visibleReviewStep);
-  return configured.length > 0 && !configured.some(step => reviewRole(step.reviewer_role) === "national")
+  return configured.length > 0 && !configured.some(step => step.routing_source === "people") && !configured.some(step => reviewRole(step.reviewer_role) === "national")
     ? "The next reporting manager is not linked in People. Contact HR to complete the reporting line. You can still save review inputs."
     : null;
 }

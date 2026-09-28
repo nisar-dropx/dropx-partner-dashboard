@@ -55,7 +55,7 @@ test('Program Manager edits/comments at all stages including closed, not another
   }
 });
 test('location scope and page permissions remain enforced even for oversight',()=>{
-  for(const override of [{inScope:false},{canView:false},{canEdit:false,canAdd:false}])assert.ok(Object.values(reviewCapabilities({...base,owner:true,programManager:true,...override})).every(v=>!v));
+  for(const override of [{inScope:false},{canView:false},{canEdit:false,canAdd:false}])assert.ok(Object.entries(reviewCapabilities({...base,owner:true,programManager:true,...override})).filter(([key])=>key.startsWith("can")).every(([,value])=>!value));
 });
 test('role classification includes TL, location mail accounts and People PGM',()=>{
   assert.equal(reviewRole('OPERATIONS_LOCATION'), 'station');assert.equal(reviewRole('TL Team Lead'),'station');assert.equal(reviewRole('PGM Program Manager'),'program');assert.equal(reviewRole('PROGRAM_HEAD'),'program');

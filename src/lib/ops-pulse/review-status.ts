@@ -1,3 +1,4 @@
+import type { PeopleReviewRoute } from "./people-review-route";
 export const REVIEW_STATUS_MAX_DAYS = 31;
 
 export type ReviewStatusLocation = {
@@ -29,6 +30,7 @@ export type ReviewStatusReview = {
   closed_at: string | null;
   updated_at: string;
   reviewer_edit_reopened?: boolean;
+  routing_error?: string | null;
 };
 
 export type ReviewStatusStep = {
@@ -37,6 +39,8 @@ export type ReviewStatusStep = {
   step_order: number;
   reviewer_name: string;
   reviewer_role: string;
+  routing_source?: string | null;
+  route_superseded_at?: string | null;
   reviewer_user_id?: string | null;
   proxy_reviewer_user_id?: string | null;
   status: "pending" | "completed" | "skipped";
@@ -80,6 +84,8 @@ export type ReviewStatusFollowup = {
 };
 
 export type ReviewStatusRow = {
+  peopleRoute?: PeopleReviewRoute;
+  routingError?: string | null;
   key: string;
   date: string;
   stationId: string;
@@ -150,6 +156,7 @@ function reviewKey(stationId: string, date: string) {
 }
 
 export function buildReviewStatusRows(input: {
+  routes?: Record<string, PeopleReviewRoute>;
   dates: string[];
   locations: ReviewStatusLocation[];
   reviews: ReviewStatusReview[];
@@ -180,12 +187,15 @@ export function buildReviewStatusRows(input: {
 
   return input.dates.flatMap((date) => input.locations.map((location): ReviewStatusRow => {
     const review = reviewByKey.get(reviewKey(location.id, date)) ?? null;
-    const steps = review ? [...(stepsByReview.get(review.id) ?? [])].sort((left, right) => left.step_order - right.step_order) : [];
+    const steps = review ? [...(stepsByReview.get(review.id) ?? [])].filter(step => !step.route_superseded_at).sort((left, right) => left.step_order - right.step_order) : [];
+    const peopleRoute = input.routes?.[location.id];
+    const routingError = review?.status === "closed" ? null : review?.routing_error || peopleRoute?.error;
     const currentStep = steps.find((step) => step.status === "pending" && step.step_order === review?.current_step_order)
       ?? steps.find((step) => step.status === "pending");
     const status: ReviewStatusKind = !review ? "not_started" : review.status === "closed" ? "completed" : "in_progress";
     const lastStepAt = steps.reduce<string | null>((latest, step) => !step.completed_at || (latest && latest > step.completed_at) ? latest : step.completed_at, null);
     return {
+      peopleRoute, routingError,
       key: reviewKey(location.id, date),
       date,
       stationId: location.id,
@@ -204,7 +214,7 @@ export function buildReviewStatusRows(input: {
       completedSteps: steps.filter((step) => step.status === "completed").length,
       skippedSteps: steps.filter((step) => step.status === "skipped").length,
       totalSteps: steps.length,
-      currentDependency: currentStep ? `${currentStep.reviewer_role} · ${currentStep.proxy_reviewer_name || currentStep.reviewer_name}` : status === "completed" ? "Completed" : "Start review",
+      currentDependency: routingError ? "People mapping needs attention" : currentStep ? `${currentStep.reviewer_role} · ${currentStep.proxy_reviewer_name || currentStep.reviewer_name}` : status === "completed" ? "Completed" : "Start review",
       lastActivityAt: review ? review.closed_at || lastStepAt || review.updated_at || review.started_at : null
     };
   }));

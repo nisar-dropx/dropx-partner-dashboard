@@ -59,6 +59,7 @@ const db = { from(table) {
 }, async rpc(name, args) { calls.push([name,args]); if (args.p_action === 'item') saved = [args.p_data]; return { error: null }; } };
 const discipline = { isDisciplineRcaKey: () => false, missingDisciplineReasons: () => [] };
 const actions = compile('src/app/ops-pulse/performance/actions.ts', {
+  '@/lib/ops-pulse/people-review-routing': { syncPeopleReviewRoutes: async () => {} },
   'next/cache': { revalidatePath() {} }, '@/lib/company-scope': { requireCompanyId: () => 'company1' }, '@/lib/supabase-admin': { supabaseAdmin: db },
   '@/lib/authorization': { requirePagePermission: async () => ({ userId: 'user1', fullName: 'Test reviewer', hasAllLocationAccess: false, locationScopeIds: ['station1'] }) },
   '@/lib/ops-pulse/performance-review': {}, '@/lib/ops-pulse/review-policy': { visibleReviewStep: () => true, reviewBypassReason: v => v },

@@ -1,3 +1,5 @@
+import { loadPeopleReviewGraph } from "@/lib/ops-pulse/people-review-routing";
+import { resolvePeopleReviewRoute, type PeopleReviewRoute } from "@/lib/ops-pulse/people-review-route";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -77,8 +79,9 @@ function filterRows(rows: ReviewStatusRow[], filters: SearchParams) {
 }
 
 function StepStatus({ row }: { row: ReviewStatusRow }) {
+  if (row.routingError) return <p className="alert warning">{row.routingError}</p>;
   if (!row.steps.length) {
-    const route = [row.clusterManager, row.aom, row.nationalHead].filter(Boolean).join(" → ");
+    const route = row.peopleRoute?.chain.map(step => `${step.reviewerName} · ${step.reviewerRole}`).join(" → ") || "";
     return <p className="review-status-empty-detail">No review has been opened. {route ? `Current People route: ${route}.` : "Complete the reporting hierarchy in People before starting."}</p>;
   }
   return <div className="review-status-steps">
@@ -108,7 +111,7 @@ function ReviewStatusDetail({ row, access }: { row: ReviewStatusRow; access: Row
   const openItems = row.items.filter((item) => item.status !== "done");
   const openFollowups = row.followups.filter((item) => item.status !== "done");
   const discussion = row.updates.filter((update) => update.update_type !== "action").slice(0, 4);
-  const routeLabel = [row.clusterManager, row.aom, row.nationalHead].filter(Boolean).join(" → ");
+  const routeLabel = row.steps.length ? row.steps.map(step => `${step.reviewer_name} · ${step.reviewer_role}`).join(" → ") : row.peopleRoute?.chain.map(step => `${step.reviewerName} · ${step.reviewerRole}`).join(" → ") || "";
   return <div className="review-status-detail">
     <div className="review-status-detail-head">
       <div><span>Started</span><strong>{formatDashboardDateTime(row.review?.started_at, "Not started")}</strong></div>
@@ -164,7 +167,9 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
   const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const locations = resolveOperatingContext(locationsResult.locations).modeLocations;
   const dataset = await loadReviewStatusDataset(companyId, locations.map((location) => location.station_code), range.from, range.to);
-  const allRows = buildReviewStatusRows({ dates: reviewStatusDates(range.from, range.to), locations, ...dataset });
+  const graph = await loadPeopleReviewGraph(companyId).catch(() => null);
+  const routes: Record<string, PeopleReviewRoute> = Object.fromEntries(locations.map(location => [location.id, graph ? resolvePeopleReviewRoute(graph, location.id) : { chain: [], error: "People routing could not be verified. Refresh and try again." }]));
+  const allRows = buildReviewStatusRows({ routes, dates: reviewStatusDates(range.from, range.to), locations, ...dataset });
   const filters: SearchParams = {
     from: range.from,
     to: range.to,

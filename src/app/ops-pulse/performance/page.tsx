@@ -481,10 +481,11 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     loadReviewEddHistory(companyId, selectedReviewLocation.id, selectedReviewLocation.station_code, selectedDate),
     loadReviewUtrDiscipline(companyId, selectedReviewLocation, selectedDate)
   ]) : Promise.resolve(null);
+  let peopleRouteError: string | null = null;
   const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData, stationTargets] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
     // Always resolve the People route so Proxy/Skip and Start stay available before a review row exists.
-    resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),
+    resolvePerformanceReviewChain(companyId, selectedReviewLocation.id).catch((error: Error) => { peopleRouteError = error.message; return []; }),
     loadPerformanceReviewBacklog(companyId, selectedDate, deskCodes, reviewPendingPage(searchParams?.pendingPage)),
     loadPerformanceFollowups(companyId,connectionStationId,selectedDate),
     loadPerformanceNoonEmd(companyId,connectionStationId,selectedDate),
@@ -496,7 +497,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     ? connectionResult.connections
     : legacyConnectionsFromReview(selectedReview);
   const reviewAccess = selectedReviewLocation && view === "reviews" ? await getReviewAccess(authorization,selectedReviewLocation.id,selectedReview,
-    selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending"})),
+    selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,routing_source:step.routingSource,status:"pending"})),
     { inScope: true, scorecardImported: Boolean(selectedReviewRow) }) : null;
   const reviewOperations = await reviewOperationsPromise;
 
@@ -541,7 +542,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             connections={reviewConnections}
             updates={reviewWorkspace.updates}
             reviewChain={reviewChain}
-            routingIssue={reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : selectedStationClusterConflict ? "Two People assignments are tied for Cluster Manager at this station. Contact HR to resolve the org chart — the Cluster/AOM filter may not reflect the intended manager until then." : null)}
+            routingIssue={peopleRouteError ?? reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : selectedStationClusterConflict ? "Two People assignments are tied for Cluster Manager at this station. Contact HR to resolve the org chart — the Cluster/AOM filter may not reflect the intended manager until then." : null)}
             date={selectedDate}
             error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Performance Scorecard is imported for this station and date yet. Import it before starting a review or adding RCA — Opening and UTR delay reasons are still available below." : null)}
             items={reviewWorkspace.items}

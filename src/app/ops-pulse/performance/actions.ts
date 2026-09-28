@@ -1,5 +1,6 @@
 "use server";
 
+import { syncPeopleReviewRoutes } from "@/lib/ops-pulse/people-review-routing";
 import { revalidatePath } from "next/cache";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -50,11 +51,12 @@ async function context(authorization: AuthorizationContext, data: FormData) {
   const companyId = requireCompanyId(authorization);
   const station = await stationForAction(authorization, text(data, "station_code").toUpperCase());
   const date = dateValue(text(data, "source_date"));
+  await syncPeopleReviewRoutes(companyId, { reviewId: text(data, "review_id"), stationCodes: [station.station_code], from: date, to: date });
   const result = await supabaseAdmin.from("ops_performance_reviews")
-    .select("id,station_id,station_code,source_date,current_step_order,status,updated_at,reviewer_edit_reopened")
+    .select("id,station_id,station_code,source_date,current_step_order,status,updated_at,reviewer_edit_reopened,routing_error")
     .eq("company_id", companyId).eq("id", text(data, "review_id")).eq("station_id", station.id).eq("source_date", date).maybeSingle();
   if (result.error || !result.data) throw new Error("This review is unavailable. Refresh and try again.");
-  const steps = await supabaseAdmin.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
+  const steps = await supabaseAdmin.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id,routing_source,route_superseded_at")
     .eq("company_id", companyId).eq("review_id", result.data.id).order("step_order");
   if (steps.error) throw new Error("Unable to check the current review stage.");
   const scorecardImported = await isScorecardImported(companyId, station.station_code, date);
@@ -74,10 +76,10 @@ export async function startPerformanceReview(data: FormData): Promise<ReviewActi
     const chain = await resolvePerformanceReviewChain(companyId, station.id);
     if (!chain.length) throw new Error("The station review manager is not assigned in People. Contact your administrator.");
     const scorecardImported = await isScorecardImported(companyId, station.station_code, sourceDate);
-    const access = await getReviewAccess(authorization, station.id, null, chain.map((step, index) => ({ step_order: index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending" })), { inScope: true, scorecardImported });
+    const access = await getReviewAccess(authorization, station.id, null, chain.map((step, index) => ({ step_order: index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,routing_source:step.routingSource,status:"pending" })), { inScope: true, scorecardImported });
     if (!access.scorecardImported) throw new Error("Import the Performance Scorecard for this station and date before starting a review.");
     if (!access.canStart) throw new Error("Only the first review manager or authorised oversight team can start this review.");
-    const result = await supabaseAdmin!.rpc("ops_start_manager_review", {
+    const result = await supabaseAdmin!.rpc("ops_start_people_review", {
       p_company: companyId,p_actor:authorization.userId,p_station:station.id,p_chain:chain,
       p_data:{source_date:sourceDate,source_type:text(data,"source_type") || "operational_data",source_batch_id:text(data,"source_batch_id"),report_week:text(data,"report_week") || null}
     });
@@ -218,7 +220,7 @@ export async function savePerformanceConnection(data:FormData):Promise<ReviewAct
     if (reviewResult.error) throw new Error("Unable to check review access for connection timings.");
     const review = reviewResult.data;
     const stepsResult = review
-      ? await supabaseAdmin!.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
+      ? await supabaseAdmin!.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id,routing_source,route_superseded_at")
           .eq("company_id", companyId).eq("review_id", review.id).order("step_order")
       : { data: [] as { id: string; step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[], error: null };
     if (stepsResult.error) throw new Error("Unable to check the current review stage.");
@@ -350,7 +352,7 @@ export async function savePerformanceNoonEmd(data: FormData): Promise<ReviewActi
     if (reviewResult.error) throw new Error("Unable to check review access for station inputs.");
     const review = reviewResult.data;
     const stepsResult = review
-      ? await supabaseAdmin!.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
+      ? await supabaseAdmin!.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id,routing_source,route_superseded_at")
           .eq("company_id", companyId).eq("review_id", review.id).order("step_order")
       : { data: [] as { id: string; step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[], error: null };
     if (stepsResult.error) throw new Error("Unable to check the current review stage.");

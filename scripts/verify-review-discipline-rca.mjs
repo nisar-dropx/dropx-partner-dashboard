@@ -43,6 +43,7 @@ const db = { from(table) {
   return q;
 }, async rpc(name, args) { calls.push([name,args]); if (args.p_action === "item") saved.push({ metric_key: args.p_data.metric_key, root_cause: args.p_data.root_cause }); return { error: null }; } };
 const dependencies = {
+  "@/lib/ops-pulse/people-review-routing": { syncPeopleReviewRoutes: async (company, options) => { assert.equal(company,"company1"); assert.equal(options.reviewId,"review1"); calls.push(["people_route_synced"]); } },
   "next/cache": { revalidatePath() {} }, "@/lib/authorization": { requirePagePermission: async () => authorization },
   "@/lib/company-scope": { requireCompanyId: () => "company1" }, "@/lib/supabase-admin": { supabaseAdmin: db },
   "@/lib/ops-pulse/performance-review": {}, "@/lib/ops-pulse/review-policy": {},

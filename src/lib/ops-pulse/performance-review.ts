@@ -1,11 +1,10 @@
 import type { AuthorizationContext } from "@/lib/authorization";
-import { managerReviewChain } from "@/lib/ops-pulse/review-policy";
-import { loadReviewUserLinks } from "@/lib/ops-pulse/review-user-links";
+import { allRoutingRows, loadPeopleReviewRoute, syncPeopleReviewRoutes } from "./people-review-routing";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
 import { loadStationOpeningAttendance } from "@/lib/ops-pulse/station-opening-attendance";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
-import { loadOpsScopedManagerReviewChain, loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { REVIEW_PENDING_PAGE_SIZE } from "@/lib/ops-pulse/review-periods";
 
@@ -37,6 +36,7 @@ export type PerformanceReview = {
   updated_at: string;
   /** Oversight re-opened edit access for the original CM/AOM reviewer after editing this review themselves. */
   reviewer_edit_reopened: boolean;
+  routing_error?: string | null;
 };
 
 export type PerformanceReviewCarryover = Pick<PerformanceReview, "id" | "station_code" | "source_date" | "status" | "review_summary" | "closed_at" | "updated_at">;
@@ -48,6 +48,8 @@ export type PerformanceReviewStep = {
   reviewer_user_id: string | null;
   reviewer_name: string;
   reviewer_role: string;
+  routing_source?: string | null;
+  route_superseded_at?: string | null;
   status: "pending" | "completed" | "skipped";
   feedback: string | null;
   completed_at: string | null;
@@ -94,7 +96,7 @@ export async function loadPerformanceReviewBacklog(companyId: string, date: stri
   const empty = { rows: [], count: 0, page: 1, pageSize: REVIEW_PENDING_PAGE_SIZE, error: null };
   if (!supabaseAdmin || !stationCodes.length) return empty;
   const query = (page: number) => supabaseAdmin!.from("ops_performance_reviews")
-    .select("id,station_code,source_date,review_type,status,started_at,current_step_order", { count: "exact" })
+    .select("id,station_code,source_date,review_type,status,started_at,current_step_order,routing_error", { count: "exact" })
     .eq("company_id", companyId).eq("review_type", "daily_operations").in("station_code", stationCodes)
     .lt("source_date", date).in("status", ["open", "in_review"])
     .order("source_date").order("station_code").order("id")
@@ -104,6 +106,10 @@ export async function loadPerformanceReviewBacklog(companyId: string, date: stri
   const page = Math.min(requestedPage, Math.max(1, Math.ceil((result.count ?? 0) / REVIEW_PENDING_PAGE_SIZE)));
   if (page !== requestedPage) result = await query(page);
   if (result.error) return { ...empty, error: "Earlier pending reviews could not be loaded. Refresh to try again." };
+  try { await syncPeopleReviewRoutes(companyId, { reviewIds: (result.data ?? []).map(row => row.id) }); }
+  catch (error) { return { ...empty, error: error instanceof Error ? error.message : "People routing could not be refreshed." }; }
+  result = await query(page);
+  if (result.error) return { ...empty, error: "Earlier pending routes could not be refreshed." };
   const reviews = result.data ?? [];
   const steps = reviews.length ? await supabaseAdmin.from("ops_performance_review_steps")
     .select("review_id,step_order,reviewer_name,reviewer_role,status,proxy_reviewer_name").eq("company_id", companyId)
@@ -112,7 +118,7 @@ export async function loadPerformanceReviewBacklog(companyId: string, date: stri
   return {
     rows: reviews.map(row => {
       const step = steps.data?.find(step => step.review_id === row.id && step.step_order === row.current_step_order);
-      return { ...row, pending_name: step?.proxy_reviewer_name || step?.reviewer_name || null, pending_role: step?.reviewer_role ?? null } as PerformancePendingReview;
+      return { ...row, pending_name: row.routing_error ? "People mapping needs attention" : step?.proxy_reviewer_name || step?.reviewer_name || null, pending_role: row.routing_error ? null : step?.reviewer_role ?? null } as PerformancePendingReview;
     }), count: result.count ?? 0, page, pageSize: REVIEW_PENDING_PAGE_SIZE, error: null
   };
 }
@@ -244,6 +250,10 @@ export type PerformanceReviewChainStep = {
   reviewerName: string;
   reviewerRole: string;
   reviewerUserId: string | null;
+  routingSource?: "people";
+  personId?: string;
+  assignmentId?: string;
+  designationId?: string;
 };
 
 type Relation<T> = T | T[] | null | undefined;
@@ -293,12 +303,14 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
     return { settings: fallback, reviews: [] as PerformanceReview[], previousReviews: [] as PerformanceReviewCarryover[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: supabaseAdmin ? null : "Database service is unavailable." };
   }
 
+  try { await syncPeopleReviewRoutes(companyId, { stationCodes, from: sourceDate, to: sourceDate }); }
+  catch (error) { return { settings: fallback, reviews: [] as PerformanceReview[], previousReviews: [] as PerformanceReviewCarryover[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: error instanceof Error ? error.message : "People routing could not be refreshed." }; }
   const [settingsResult, reviewsResult, historicalReviewsResult] = await Promise.all([
     supabaseAdmin.from("ops_performance_review_settings")
       .select("daily_review_time,weekly_review_time,weekly_review_weekday,stale_after_hours")
       .eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("ops_performance_reviews")
-      .select("id,review_type,source_date,report_year,report_week,station_id,station_code,source_type,source_batch_id,status,current_step_order,vehicle_arrival_time,unloading_complete_time,station_clear_time,review_summary,started_at,closed_at,updated_at,reviewer_edit_reopened")
+      .select("id,review_type,source_date,report_year,report_week,station_id,station_code,source_type,source_batch_id,status,current_step_order,vehicle_arrival_time,unloading_complete_time,station_clear_time,review_summary,started_at,closed_at,updated_at,reviewer_edit_reopened,routing_error")
       .eq("company_id", companyId).eq("review_type", "daily_operations").eq("source_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("ops_performance_reviews")
       .select("id,station_code,source_date,status,review_summary,closed_at,updated_at")
@@ -314,7 +326,7 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
   const itemReviewIds = [...new Set([...selectedReviewIds, ...historicalReviewIds])];
   const [stepsResult, itemsResult, updatesResult] = await Promise.all([
     selectedReviewIds.length
-      ? supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_user_id,proxy_reviewer_name,proxy_reason,proxy_started_at").eq("company_id", companyId).in("review_id", selectedReviewIds).order("step_order")
+      ? allRoutingRows(supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_user_id,proxy_reviewer_name,proxy_reason,proxy_started_at,routing_source,route_superseded_at").eq("company_id", companyId).in("review_id", selectedReviewIds).is("route_superseded_at", null).order("step_order").order("id")).then(data => ({ data, error: null })).catch((error: Error) => ({ data: [], error: { message: error.message } }))
       : Promise.resolve({ data: [] as PerformanceReviewStep[], error: null }),
     itemReviewIds.length
       ? supabaseAdmin.from("ops_performance_review_items").select("id,review_id,metric_key,metric_label,actual_value,target_value,target_direction,severity,root_cause,corrective_action,action_owner,due_date,status,created_at,updated_at").eq("company_id", companyId).in("review_id", itemReviewIds).order("created_at", { ascending: false }).limit(1000)
@@ -776,26 +788,9 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
 }
 
 export async function resolvePerformanceReviewChain(companyId: string, stationId: string, _authorization?: AuthorizationContext): Promise<PerformanceReviewChainStep[]> {
-  if (!supabaseAdmin) return [];
-  const hierarchy = await loadPeopleOperationalHierarchy(companyId, [stationId]);
-  if (hierarchy.error) throw new Error(hierarchy.error);
-  const stationHierarchy = hierarchy.byLocation.get(stationId);
-  let peopleChain = managerReviewChain(stationHierarchy?.managerReportingChain.length
-    ? stationHierarchy.managerReportingChain : stationHierarchy?.primaryReportingChain ?? []);
-  // Stations in a CM's Ops scope may have no People roots yet (no TL posted).
-  // Fall back to the Ops-scoped manager's own reporting line so Start review works.
-  if (!peopleChain.length) {
-    const scoped = await loadOpsScopedManagerReviewChain(companyId, stationId);
-    if (scoped.error) throw new Error(scoped.error);
-    peopleChain = managerReviewChain(scoped.chain);
-  }
-  if (!peopleChain.length) return [];
-  const userByPerson = await loadReviewUserLinks(supabaseAdmin,companyId,peopleChain.map(person=>person.personId));
-  return peopleChain.map((person) => ({
-    reviewerName: person.name,
-    reviewerRole: person.role,
-    reviewerUserId: userByPerson.get(person.personId) ?? null
-  }));
+  const route = await loadPeopleReviewRoute(companyId, stationId);
+  if (route.error) throw new Error(route.error);
+  return route.chain;
 }
 
 export async function loadReviewStationLeads(companyId: string, stationId: string) {

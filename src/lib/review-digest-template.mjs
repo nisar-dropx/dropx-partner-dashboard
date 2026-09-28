@@ -1,5 +1,3 @@
-import {resolvePeopleOperationalHierarchy,resolveManagerChainForPersonIds} from './people-operational-hierarchy-core.ts';
-import {managerReviewChain} from './ops-pulse/review-policy.ts';
 export function buildReviewMessages(snapshot,config,subjectTemplate){
 const label=date=>new Date(date+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Kolkata'});
 const performanceLabel=label(snapshot.performanceDate),digestLabel=label(snapshot.digestDate);
@@ -15,22 +13,17 @@ const stations = snapshot.stations.filter(s => {
 });
 const includedCodes = new Set(stations.map(s => s.station_code));
 const recipients = snapshot.recipients.filter(r=>config.recipient_role_codes.includes(r.designation_code)&&String(r.email).endsWith('@'+config.email_domain)).map(r => ({...r, station_codes:r.station_codes.filter(code => includedCodes.has(code))})).filter(r => r.station_codes.length);
-const hierarchy = resolvePeopleOperationalHierarchy(stations.map(s => s.id), snapshot.assignments, snapshot.relationships);
 const rows = stations.map(station => {
   const review = snapshot.reviews.find(r => r.station_id === station.id);
-  const existingSteps = snapshot.steps.filter(s => s.review_id === review?.id).sort((a,b) => a.step_order-b.step_order);
-  const h = hierarchy.get(station.id);
-  let chain = managerReviewChain(h?.managerReportingChain.length ? h.managerReportingChain : h?.primaryReportingChain ?? []);
-  if (!chain.length) {
-    const scopedUserIds = snapshot.recipients.filter(r => r.station_codes.includes(station.station_code)).map(r => r.id);
-    const peopleIds = snapshot.links.filter(l => scopedUserIds.includes(l.user_id)).map(l => l.person_id);
-    chain = managerReviewChain(resolveManagerChainForPersonIds(peopleIds, snapshot.assignments, snapshot.relationships));
-  }
-  const steps = existingSteps.length ? existingSteps : chain.map((p,index) => ({reviewer_name:p.name,reviewer_role:p.role,status:'pending',step_order:index+1}));
+  const route = snapshot.routes?.[station.id];
+  const routingError = review?.status === 'closed' ? null : review?.routing_error || route?.error || (!route ? 'People route could not be verified' : null);
+  const existingSteps = snapshot.steps.filter(s => s.review_id === review?.id && !s.route_superseded_at && (s.status !== 'skipped' || s.bypassed_at)).sort((a,b) => a.step_order-b.step_order);
+  const steps = (review ? existingSteps : (route?.chain ?? []).map((p,index) => ({reviewer_name:p.reviewerName,reviewer_role:p.reviewerRole,status:'pending',step_order:index+1})))
+    .filter(s => !routingError || s.status !== 'pending');
   const pending = steps.filter(s => s.status === 'pending');
   const done = steps.filter(s => s.status === 'completed');
   const skipped = steps.filter(s => s.status === 'skipped');
-  return {...station, steps, pending, done, skipped, status:review?.status === 'closed' && !pending.length ? 'completed' : review ? 'in_progress' : 'not_started', routingMissing:!steps.length};
+  return {...station, steps, pending, done, skipped, status:review?.status === 'closed' && !pending.length ? 'completed' : review ? 'in_progress' : 'not_started', routingMissing:Boolean(routingError) || !steps.length, routingError};
 });
 const order = {not_started:0,in_progress:1,completed:2};
 rows.sort((a,b) => order[a.status]-order[b.status] || a.station_code.localeCompare(b.station_code));
@@ -41,7 +34,7 @@ function chip(text, color='red') {
   return `<span style="display:inline-block;background:${bg};color:${fg};font-size:11px;font-weight:700;padding:4px 7px;border-radius:5px;margin:2px 3px 2px 0;white-space:nowrap">${esc(text)}</span>`;
 }
 function renderRow(row) {
-  const pendingText = row.routingMissing ? '<b style="color:#875900">Reporting route not configured</b>' : row.pending.length ? row.pending.map((s,index) => `<div style="margin:3px 0;${index === 0 ? 'font-weight:700;color:#b42332' : 'color:#647085'}">${index === 0 ? 'Next: ' : ''}${esc(s.proxy_reviewer_name || s.reviewer_name)} <span style="font-size:11px">· ${esc(roleLabel(s.reviewer_role))}</span></div>`).join('') : '<span style="color:#1b7145">No review stage pending</span>';
+  const pendingText = row.routingMissing ? `<b style="color:#875900">People mapping needs attention</b><div>${esc(row.routingError || "Reporting route not configured")}</div>` : row.pending.length ? row.pending.map((s,index) => `<div style="margin:3px 0;${index === 0 ? 'font-weight:700;color:#b42332' : 'color:#647085'}">${index === 0 ? 'Next: ' : ''}${esc(s.proxy_reviewer_name || s.reviewer_name)} <span style="font-size:11px">· ${esc(roleLabel(s.reviewer_role))}</span></div>`).join('') : '<span style="color:#1b7145">No review stage pending</span>';
   const time = value => value ? new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(value)) + ' IST' : '';
   const stages = row.steps.map(s => `<div>${chip(`${roleLabel(s.reviewer_role)} ${s.status === 'completed' ? '✓' : s.status === 'skipped' ? 'Skipped' : 'Pending'}`, s.status === 'completed' ? 'green' : s.status === 'skipped' ? 'amber' : 'red')}${s.status === 'completed' ? `<div style="font-size:10px;color:#1b7145;margin:1px 0 7px">Reviewed by ${esc(s.proxy_reviewer_name || s.reviewer_name)}${s.proxy_reviewer_name ? `<br>on behalf of ${esc(s.reviewer_name)} · Proxy review` : ''}${s.completed_at ? `<br>${esc(time(s.completed_at))}` : ''}</div>` : s.status === 'pending' && s.proxy_reviewer_name ? `<div style="font-size:10px;color:#875900">Proxy assigned: ${esc(s.proxy_reviewer_name)}<br>on behalf of ${esc(s.reviewer_name)} · Not yet reviewed</div>` : ''}</div>`).join('');
   return `<tr><td style="padding:13px 12px;border-bottom:1px solid #e9edf2;vertical-align:top;width:24%"><b style="color:#172d47;font-size:14px">${esc(row.station_code)}</b><div style="font-size:11px;color:#788294;margin-top:3px">${esc(row.station_name)} · ${esc(row.model)}</div>${chip(row.status === 'completed' ? 'Complete' : row.status === 'in_progress' ? 'In progress' : 'Not started',row.status==='completed'?'green':row.status==='in_progress'?'amber':'red')}</td><td style="padding:10px 12px;border-bottom:1px solid #e9edf2;vertical-align:top;font-size:12px">${pendingText}</td><td style="padding:10px 12px;border-bottom:1px solid #e9edf2;vertical-align:top;width:29%">${stages}<div style="font-size:11px;color:#788294;margin-top:4px">${row.done.length} reviewed${row.skipped.length ? ` · ${row.skipped.length} skipped` : ''} · ${row.routingMissing ? 'Route missing' : `${row.pending.length} layer${row.pending.length===1?'':'s'} pending`}</div></td></tr>`;
@@ -58,5 +51,5 @@ function renderEmail(recipient) {
   return {html, recipient, counts:{locations:scoped.length,pending:pending.length,complete:completed.length,pendingStages:stageCount},routingMissing:scoped.filter(r=>r.routingMissing).map(r=>r.station_code)};
 }
 
-return recipients.map(recipient=>{const result=renderEmail(recipient);const scoped=rows.filter(r=>recipient.station_codes.includes(r.station_code));return {email:recipient.email,name:recipient.full_name,subject,html:result.html,text:['Ops Pulse daily review status','Report date: '+digestLabel,'Performance day: '+performanceLabel,String(config.manager_reminder||''),...scoped.map(row=>row.station_code+' · '+row.station_name+' · '+row.status+' | '+row.steps.map(s=>s.reviewer_role+': '+s.status+' · '+(s.proxy_reviewer_name?s.proxy_reviewer_name+' (proxy for '+s.reviewer_name+')':s.reviewer_name)).join('; ')),'https://ops.dropxlogistics.com/performance/review-status?from='+snapshot.performanceDate+'&to='+snapshot.performanceDate].join('\n'),scope:{stationIds:scoped.map(r=>r.id),...result.counts}};}).filter(m=>config.send_zero_cases||m.scope.pending>0);
+return recipients.map(recipient=>{const result=renderEmail(recipient);const scoped=rows.filter(r=>recipient.station_codes.includes(r.station_code));return {email:recipient.email,name:recipient.full_name,subject,html:result.html,text:['Ops Pulse daily review status','Report date: '+digestLabel,'Performance day: '+performanceLabel,String(config.manager_reminder||''),...scoped.map(row=>row.station_code+' · '+row.station_name+' · '+row.status+' | '+(row.routingError ? 'People mapping needs attention: '+row.routingError+' | ' : '')+row.steps.map(s=>s.reviewer_role+': '+s.status+' · '+(s.proxy_reviewer_name?s.proxy_reviewer_name+' (proxy for '+s.reviewer_name+')':s.reviewer_name)).join('; ')),'https://ops.dropxlogistics.com/performance/review-status?from='+snapshot.performanceDate+'&to='+snapshot.performanceDate].join('\n'),scope:{stationIds:scoped.map(r=>r.id),...result.counts}};}).filter(m=>config.send_zero_cases||m.scope.pending>0);
 }

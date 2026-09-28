@@ -1,3 +1,4 @@
+import { allRoutingRows, syncPeopleReviewRoutes } from "./people-review-routing";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type {
   ReviewStatusFollowup,
@@ -12,7 +13,7 @@ async function loadReviews(companyId: string, stationCodes: string[], from: stri
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
     const result = await supabaseAdmin!.from("ops_performance_reviews")
-      .select("id,source_date,station_id,station_code,source_type,status,current_step_order,review_summary,started_at,closed_at,updated_at,reviewer_edit_reopened")
+      .select("id,source_date,station_id,station_code,source_type,status,current_step_order,review_summary,started_at,closed_at,updated_at,reviewer_edit_reopened,routing_error")
       .eq("company_id", companyId).eq("review_type", "daily_operations").in("station_code", stationCodes)
       .gte("source_date", from).lte("source_date", to)
       .order("source_date", { ascending: false }).order("station_code").range(offset, offset + pageSize - 1);
@@ -30,13 +31,15 @@ function chunks<T>(rows: T[], size = 200) {
 export async function loadReviewStatusDataset(companyId: string, stationCodes: string[], from: string, to: string) {
   const empty = { reviews: [] as ReviewStatusReview[], steps: [] as ReviewStatusStep[], items: [] as ReviewStatusItem[], updates: [] as ReviewStatusUpdate[], followups: [] as ReviewStatusFollowup[], error: null as string | null };
   if (!supabaseAdmin || !stationCodes.length) return { ...empty, error: !supabaseAdmin ? "Review status is unavailable because the database service is not configured." : null };
+  try { await syncPeopleReviewRoutes(companyId, { stationCodes, from, to }); }
+  catch (error) { return { ...empty, error: error instanceof Error ? error.message : "People routing could not be refreshed." }; }
   const reviewResult = await loadReviews(companyId, stationCodes, from, to);
   if (reviewResult.error || !reviewResult.rows.length) return { ...empty, reviews: reviewResult.rows, error: reviewResult.error };
 
   const dataset = { ...empty, reviews: reviewResult.rows };
   for (const reviewIds of chunks(reviewResult.rows.map((review) => review.id))) {
     const [steps, items, updates, followups] = await Promise.all([
-      supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,proxy_reviewer_user_id,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_name,proxy_reason,proxy_started_at").eq("company_id", companyId).in("review_id", reviewIds).order("step_order"),
+      allRoutingRows(supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,proxy_reviewer_user_id,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_name,proxy_reason,proxy_started_at,routing_source,route_superseded_at").eq("company_id", companyId).in("review_id", reviewIds).is("route_superseded_at", null).order("step_order").order("id")).then(data => ({ data, error: null })).catch((error: Error) => ({ data: [], error: { message: error.message } })),
       supabaseAdmin.from("ops_performance_review_items").select("review_id,metric_label,status,root_cause,corrective_action,action_owner,due_date").eq("company_id", companyId).in("review_id", reviewIds),
       supabaseAdmin.from("ops_performance_review_updates").select("review_id,update_type,note,author_name,author_role,stage_label,created_at").eq("company_id", companyId).in("review_id", reviewIds).order("created_at", { ascending: false }),
       supabaseAdmin.from("ops_performance_followups").select("review_id,action_number,title,owner_label,due_date,status").eq("company_id", companyId).in("review_id", reviewIds).order("action_number")

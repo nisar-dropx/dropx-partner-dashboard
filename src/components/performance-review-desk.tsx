@@ -208,7 +208,7 @@ export function PerformanceReviewDesk(props: Props) {
     const item = resolveItem(metric);
     if (item) itemsByMetricForRca.set(metric.key, item);
   }
-  const activeStep = review ? steps.find((step) => step.review_id === review.id && step.step_order === review.current_step_order) ?? null : null;
+  const activeStep = review && !review.routing_error ? steps.find((step) => step.review_id === review.id && step.step_order === review.current_step_order) ?? null : null;
   const reviewByStation = new Map(reviews.map((entry) => [stationKey(entry.station_code), entry]));
   const completedCount = locations.filter((location) => reviewByStation.get(stationKey(location.station_code))?.status === "closed").length;
   const inReviewCount = locations.filter((location) => ["open", "in_review"].includes(reviewByStation.get(stationKey(location.station_code))?.status ?? "")).length;
@@ -222,6 +222,7 @@ export function PerformanceReviewDesk(props: Props) {
       reviewer_user_id: step.reviewerUserId,
       reviewer_name: step.reviewerName,
       reviewer_role: step.reviewerRole,
+      routing_source: step.routingSource,
       status: "pending" as const,
       feedback: null,
       completed_at: null,
@@ -382,7 +383,7 @@ export function PerformanceReviewDesk(props: Props) {
       </ReviewActionForm> : <p className="review-empty">All comments are visible here. Only the assigned manager can complete the current stage.</p>}
       <div className="review-comment-feed">{reviewUpdates.length ? reviewUpdates.map(update=><article key={update.id}>
         <header><strong>{update.author_name || "Recorded update"}</strong><span>{update.author_role || update.stage_label || "Review"}</span><time dateTime={update.created_at}>{new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(update.created_at))}</time></header>
-        <p>{update.note}</p>
+        <>{update.stage_label === "People routing" ? <details><summary>People mapping update · view details</summary><p>{update.note}</p></details> : <p>{update.note}</p>}</>
       </article>) : <p className="review-empty">No comments yet.</p>}</div>
     </section> : null}
   </div></ReviewAttendanceProvider></PerformanceTrendProvider>;

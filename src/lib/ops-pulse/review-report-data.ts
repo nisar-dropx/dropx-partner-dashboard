@@ -1,3 +1,4 @@
+import { syncPeopleReviewRoutes } from "./people-review-routing";
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadPerformanceTargets, resolvePerformanceTargets } from "./performance-targets";
@@ -16,10 +17,11 @@ export async function reportAllRows<T>(query: (start: number, end: number) => Pr
 export async function loadReviewReport(companyId: string, stations: ReportStation[], from: string, to: string) {
   reviewReportDates(from, to);
   if (!supabaseAdmin || !stations.length) throw Error("No available report stations.");
+  await syncPeopleReviewRoutes(companyId, { stationCodes: stations.map(s => s.station_code), from, to });
   const db = supabaseAdmin, codes = stations.map(s => s.station_code), ids = stations.map(s => s.id);
   const byDate = (table: string, columns: string, dateColumn: string, stationColumn = "station_code") => reportAllRows<ReportSourceRow>((a, b) => db.from(table).select(columns).eq("company_id", companyId).in(stationColumn, stationColumn === "station_id" ? ids : codes).gte(dateColumn, from).lte(dateColumn, to).order(dateColumn).order(stationColumn).order(table === "ops_performance_daily_inputs" ? "updated_at" : table === "ops_review_edd_observations" ? "captured_slot" : "id").range(a, b) as any);
   const [reviews, facts, connections, emd, costs, edd, targetResult] = await Promise.all([
-    reportAllRows<ReportSourceRow>((a,b) => db.from("ops_performance_reviews").select("id,source_date,station_id,station_code,status,current_step_order,review_summary,started_at,closed_at,updated_at").eq("company_id",companyId).eq("review_type","daily_operations").in("station_code",codes).gte("source_date",from).lte("source_date",to).order("source_date").order("id").range(a,b)),
+    reportAllRows<ReportSourceRow>((a,b) => db.from("ops_performance_reviews").select("id,source_date,station_id,station_code,status,current_step_order,review_summary,started_at,closed_at,updated_at,routing_error").eq("company_id",companyId).eq("review_type","daily_operations").in("station_code",codes).gte("source_date",from).lte("source_date",to).order("source_date").order("id").range(a,b)),
     reportAllRows<ReportSourceRow>((a,b) => db.from("report_metric_facts").select("id,report_date,station_code,values_json,created_at").eq("company_id",companyId).eq("source_type","amazon_hawkeye_daily").in("station_code",codes).gte("report_date",from).lte("report_date",to).order("report_date").order("id").range(a,b)),
     byDate("ops_performance_connections", "id,station_id,service_date,label,arrival_at,unloading_at,updated_by_name,updated_at", "service_date", "station_id"),
     byDate("ops_performance_daily_inputs", "station_id,source_date,emd_noon_pct,updated_at,updated_by_name", "source_date", "station_id"),
@@ -31,7 +33,7 @@ export async function loadReviewReport(companyId: string, stations: ReportStatio
   const data: ReviewReportSources = { reviews, facts, connections, emd, costs, edd, items: [], steps: [], updates: [], followups: [] };
   const children = {
     items: ["ops_performance_review_items", "id,review_id,metric_key,metric_label,actual_value,target_value,target_direction,severity,root_cause,corrective_action,action_owner,due_date,status,carried_from_item_id,updated_at"],
-    steps: ["ops_performance_review_steps", "id,review_id,step_order,reviewer_name,reviewer_role,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_name,proxy_reason"],
+    steps: ["ops_performance_review_steps", "id,review_id,step_order,reviewer_name,reviewer_role,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_name,proxy_reason,route_superseded_at"],
     updates: ["ops_performance_review_updates", "id,review_id,update_type,note,author_name,author_role,stage_label,created_at"],
     followups: ["ops_performance_followups", "id,review_id,action_number,title,owner_label,due_date,status,progress_note,completed_at,updated_by_name,updated_at"]
   };
