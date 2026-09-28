@@ -7,6 +7,8 @@ import {
   BadgeIndianRupee,
   CheckCircle2,
   ChevronRight,
+  Download,
+  ExternalLink,
   FileText,
   Headphones,
   LoaderCircle,
@@ -20,6 +22,7 @@ import {
   Sparkles,
   X
 } from "lucide-react";
+import { ConnectDialog } from "./connect-dialog";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
@@ -54,6 +57,7 @@ type CommunicationCase = {
   messages: CaseMessage[];
   attachments: CaseAttachment[];
 };
+type AnnouncementAttachment = { id: string; original_name: string; mime_type: string; file_size: number };
 type Announcement = {
   id: string;
   category: string;
@@ -62,7 +66,18 @@ type Announcement = {
   priority: "normal" | "important" | "urgent";
   published_at: string;
   readAt?: string | null;
+  attachments?: AnnouncementAttachment[];
 };
+
+function fileKind(mimeType: string) {
+  if (mimeType === "application/pdf") return "PDF";
+  if (mimeType.startsWith("image/")) return "Image";
+  if (mimeType.startsWith("video/")) return "Video";
+  if (mimeType.includes("wordprocessingml")) return "Word";
+  if (mimeType.includes("spreadsheetml")) return "Excel";
+  if (mimeType.includes("presentationml")) return "PowerPoint";
+  return "File";
+}
 
 const statusLabels: Record<string, string> = {
   submitted: "Submitted",
@@ -102,6 +117,10 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
   const [cases, setCases] = useState<CommunicationCase[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [selectedAnnouncementId, setSelectedAnnouncementId] = useState("");
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
+  const [openingFileId, setOpeningFileId] = useState("");
+  const [viewerFile, setViewerFile] = useState<(AnnouncementAttachment & { url: string }) | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -223,6 +242,61 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
     }
   }
 
+  const signedAnnouncementFile = useCallback(async (id: string) => {
+    const fileQuery = new URLSearchParams(query);
+    fileQuery.set("announcementAttachmentId", id);
+    const response = await fetch(`/api/connect/communication-center?${fileQuery}`, { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.url) throw new Error(payload.error || "This attachment is unavailable.");
+    return String(payload.url);
+  }, [query]);
+
+  // Opens inside the app (same dialog pattern as approval attachments) rather
+  // than a new browser tab, which the DropX One WebView does not always allow.
+  async function openAnnouncementFile(file: AnnouncementAttachment) {
+    setError("");
+    setOpeningFileId(file.id);
+    try {
+      setViewerFile({ ...file, url: imagePreviews[file.id] || await signedAnnouncementFile(file.id) });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "This attachment is unavailable.");
+    } finally {
+      setOpeningFileId("");
+    }
+  }
+
+  // Images are shown inline inside the opened update; links expire after five
+  // minutes, so they are fetched only when the update is actually opened.
+  useEffect(() => {
+    const images = (selectedAnnouncement?.attachments ?? []).filter((file) => file.mime_type.startsWith("image/"));
+    if (!images.length) return;
+    let cancelled = false;
+    void Promise.all(images.map(async (file) => [file.id, await signedAnnouncementFile(file.id).catch(() => "")] as const)).then((entries) => {
+      if (!cancelled) setImagePreviews((current) => ({ ...current, ...Object.fromEntries(entries.filter(([, url]) => url)) }));
+    });
+    return () => { cancelled = true; };
+  }, [selectedAnnouncement, signedAnnouncementFile]);
+
+  async function downloadAnnouncementFile(file: AnnouncementAttachment & { url: string }) {
+    setDownloading(true);
+    try {
+      const response = await fetch(file.url);
+      if (!response.ok) throw new Error("Unable to download this attachment.");
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = file.original_name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to download this attachment.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   async function openAnnouncement(item: Announcement) {
     setSelectedAnnouncementId(item.id);
     if (item.readAt) return;
@@ -249,6 +323,37 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
       </header>
       <div className="dx-privacy-strip announcement"><CheckCircle2 /><span><strong>Official DropX communication.</strong> This update is read-only and was sent to your team.</span></div>
       <article className="dx-announcement-body">{selectedAnnouncement.body.split("\n").map((line, index) => <p key={`${index}-${line}`}>{line || <>&nbsp;</>}</p>)}</article>
+      {selectedAnnouncement.attachments?.length ? <section className="dx-announcement-files">
+        <strong><Paperclip />Attachments · {selectedAnnouncement.attachments.length}</strong>
+        {selectedAnnouncement.attachments.filter((file) => file.mime_type.startsWith("image/") && imagePreviews[file.id]).map((file) => <button className="dx-announcement-image" key={`preview-${file.id}`} onClick={() => void openAnnouncementFile(file)} type="button">
+          {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed storage URL */}
+          <img alt={file.original_name} loading="lazy" src={imagePreviews[file.id]} />
+        </button>)}
+        <div className="dx-evidence-list">{selectedAnnouncement.attachments.map((file) => <button disabled={openingFileId === file.id} key={file.id} onClick={() => void openAnnouncementFile(file)} type="button">
+          {openingFileId === file.id ? <LoaderCircle className="dx-file-spin" /> : <FileText />}
+          <span>{file.original_name}<small>{fileKind(file.mime_type)} · {readableSize(file.file_size)} · Tap to open</small></span>
+          <ChevronRight />
+        </button>)}</div>
+      </section> : null}
+      {error ? <div className="dx-communication-alert error"><AlertTriangle />{error}<button aria-label="Dismiss error" onClick={() => setError("")}><X /></button></div> : null}
+      {viewerFile ? <ConnectDialog className="dx-attachment-modal" eyebrow="Update attachment" onClose={() => setViewerFile(null)} title={viewerFile.original_name}>
+        <div className="dx-attachment-modal-body">
+          <div className="dx-attachment-preview">
+            {viewerFile.mime_type.startsWith("image/")
+              // eslint-disable-next-line @next/next/no-img-element -- short-lived signed storage URL
+              ? <img alt={viewerFile.original_name} src={viewerFile.url} />
+              : viewerFile.mime_type === "application/pdf"
+                ? <iframe src={viewerFile.url} style={{ width: "100%", height: "min(65vh,700px)", border: 0 }} title={viewerFile.original_name} />
+                : viewerFile.mime_type.startsWith("video/")
+                  ? <video controls playsInline src={viewerFile.url} style={{ width: "100%", maxHeight: "60dvh" }} />
+                  : <div className="dx-announcement-file-note"><FileText /><strong>{fileKind(viewerFile.mime_type)} file</strong><span>{readableSize(viewerFile.file_size)} · Download it, or open it in your device&apos;s {fileKind(viewerFile.mime_type)} app.</span></div>}
+          </div>
+        </div>
+        <div className="dx-attachment-modal-foot">
+          <a className="dx-attachment-open" href={viewerFile.url} rel="noreferrer" target="_blank"><ExternalLink />Open</a>
+          <button className="dx-attachment-download" disabled={downloading} onClick={() => void downloadAnnouncementFile(viewerFile)} type="button"><Download />{downloading ? "Downloading…" : "Download"}</button>
+        </div>
+      </ConnectDialog> : null}
     </section>;
   }
 
@@ -313,7 +418,7 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
       <button className={section === "speak-up" ? "active" : ""} onClick={() => setSection("speak-up")}><ShieldCheck /><span>Speak Up</span></button>
     </nav>
 
-    {section === "updates" ? <div className="dx-announcement-panel"><header><div><span><Megaphone />COMPANY COMMUNICATION</span><h2>Updates</h2><p>Announcements, policies, incentives and rollout plans from DropX.</p></div>{announcements.filter((item) => !item.readAt).length ? <b>{announcements.filter((item) => !item.readAt).length} new</b> : null}</header><div>{announcements.length ? announcements.slice(0, 30).map((item) => <button className={item.readAt ? "read" : "unread"} key={item.id} onClick={() => void openAnnouncement(item)}><i className={item.priority}><Megaphone /></i><span><small>{item.category} · {shortDate(item.published_at)}</small><strong>{item.title}</strong><em>{item.body.slice(0, 120)}{item.body.length > 120 ? "…" : ""}</em></span><ChevronRight /></button>) : <div className="dx-empty-cases"><Megaphone /><strong>You’re all caught up</strong><span>Official updates sent to your team will appear here.</span></div>}</div></div> : <>
+    {section === "updates" ? <div className="dx-announcement-panel"><header><div><span><Megaphone />COMPANY COMMUNICATION</span><h2>Updates</h2><p>Announcements, policies, incentives and rollout plans from DropX.</p></div>{announcements.filter((item) => !item.readAt).length ? <b>{announcements.filter((item) => !item.readAt).length} new</b> : null}</header><div>{announcements.length ? announcements.slice(0, 30).map((item) => <button className={item.readAt ? "read" : "unread"} key={item.id} onClick={() => void openAnnouncement(item)}><i className={item.priority}><Megaphone /></i><span><small>{item.category} · {shortDate(item.published_at)}</small><strong>{item.title}</strong><em>{item.body.slice(0, 120)}{item.body.length > 120 ? "…" : ""}</em>{item.attachments?.length ? <small className="dx-announcement-clip"><Paperclip />{item.attachments.length} attachment{item.attachments.length === 1 ? "" : "s"}</small> : null}</span><ChevronRight /></button>) : <div className="dx-empty-cases"><Megaphone /><strong>You’re all caught up</strong><span>Official updates sent to your team will appear here.</span></div>}</div></div> : <>
       <section className={`dx-connect-channel-card ${confidential ? "speak-up" : "hr-help"}`}>
         <i>{confidential ? <ShieldCheck /> : <Headphones />}</i>
         <div><small>{confidential ? "CONFIDENTIAL CHANNEL" : supportChannelLabel}</small><h2>{confidential ? "Speak Up" : supportLabel}</h2><p>{channelSetting?.subtitle ?? (confidential ? "Report fraud, abuse, harassment or serious misconduct." : `Start a private conversation with the ${supportTeamLabel}.`)}</p></div>

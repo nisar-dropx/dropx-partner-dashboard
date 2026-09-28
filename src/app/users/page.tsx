@@ -148,6 +148,12 @@ function permissionText(role: UserRoleRow, permissions: RolePermissionRow[], pag
   return `${viewCount} view / ${addCount} add / ${editCount} edit`;
 }
 
+function viewPermissionCount(roleId: string | null | undefined, permissions: RolePermissionRow[], pages: AppPageRow[]) {
+  if (!roleId) return 0;
+  const surfacePageIds = new Set(pages.map((page) => page.id));
+  return permissions.filter((permission) => permission.role_id === roleId && permission.can_view && surfacePageIds.has(permission.page_id)).length;
+}
+
 function descendantRoleIds(roles: UserRoleRow[], rootId: string) {
   const descendants = new Set<string>();
   let added = true;
@@ -335,16 +341,16 @@ const businessProducts = [
 const locationBusinessProducts = businessProducts.filter((product) => product.code !== "finance");
 
 async function loadDashboardDesignationOverview(companyId: string) {
-  if (!supabaseAdmin) return { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean }> }>, error: null as string | null };
+  if (!supabaseAdmin) return { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean; roleId: string | null }> }>, error: null as string | null };
   const [designations, policies] = await Promise.all([
     supabaseAdmin.from("designations").select("id,code,name,designation_category:designation_categories!designations_designation_category_id_fkey!inner(people_module,is_active)").eq("company_id", companyId).eq("is_active", true).eq("designation_category.people_module", "people_hr").eq("designation_category.is_active", true).order("name"),
     supabaseAdmin.from("designation_product_access_policies").select("designation_id,product_code,default_role_id,is_enabled").eq("company_id", companyId).in("product_code", businessProducts.map((product) => product.code))
   ]);
   if (designations.error || policies.error) return { designations: [], error: designations.error?.message ?? policies.error?.message ?? "Access overview could not be loaded." };
-  const byDesignation = new Map<string, Record<string, { enabled: boolean; configured: boolean }>>();
+  const byDesignation = new Map<string, Record<string, { enabled: boolean; configured: boolean; roleId: string | null }>>();
   for (const policy of policies.data ?? []) {
     const current = byDesignation.get(policy.designation_id) ?? {};
-    current[policy.product_code] = { enabled: Boolean(policy.is_enabled), configured: Boolean(policy.default_role_id) };
+    current[policy.product_code] = { enabled: Boolean(policy.is_enabled), configured: Boolean(policy.default_role_id), roleId: policy.default_role_id ?? null };
     byDesignation.set(policy.designation_id, current);
   }
   return { designations: (designations.data ?? []).map((designation) => ({ id: designation.id, code: designation.code, name: designation.name, policies: byDesignation.get(designation.id) ?? {} })), error: null as string | null };
@@ -615,7 +621,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     : { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, locationRoleId: null as string | null, error: null as string | null };
   const dashboardDesignationOverview = showRolesSection && accessSurface === "dashboard"
     ? await loadDashboardDesignationOverview(companyId)
-    : { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean }> }>, error: null as string | null };
+    : { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean; roleId: string | null }> }>, error: null as string | null };
   const dashboardLocationAccess = showRolesSection && accessSurface === "dashboard"
     ? await loadDashboardLocationAccess(companyId)
     : { locations: [] as Array<{ locationId: string; code: string; name: string; email: string | null; profileId: string | null; enabledProducts: string[] }>, error: null as string | null };
@@ -805,7 +811,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         <div className="table-wrap"><table style={{ minWidth: 900 }}><thead><tr><th>Designation</th>{businessProducts.map((product) => <th key={product.code}>{product.label}</th>)}</tr></thead><tbody>
           {dashboardDesignationOverview.designations.map((designation) => <tr key={designation.id}><td><strong>{designation.name}</strong><div className="subtle">{designation.code}</div></td>{businessProducts.map((product) => {
             const policy = designation.policies[product.code];
-            const label = !policy?.enabled ? "Not enabled" : policy.configured ? "Configured" : "Setup required";
+            // Recruit keeps its menus in its own app, so only shared-matrix portals can be checked for an empty role.
+            const menuless = policy?.configured && product.code !== "recruit" && !permissions.some((permission) => permission.role_id === policy.roleId && permission.can_view);
+            const label = !policy?.enabled ? "Not enabled" : !policy.configured ? "Setup required" : menuless ? "Menus pending" : "Configured";
             return <td key={product.code}><a href={product.href}><StatusPill status={label} /></a></td>;
           })}</tr>)}
           {!dashboardDesignationOverview.designations.length ? <tr><td className="empty-cell" colSpan={businessProducts.length + 1}>No active People designation is available.</td></tr> : null}
@@ -834,11 +842,12 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           roleId: surfaceDesignationAccess.locationRoleId,
           permissionSummary: surfaceDesignationAccess.locationRoleId
             ? permissionText(loadedRoles.find((role) => role.id === surfaceDesignationAccess.locationRoleId)!, permissions, pages)
-            : "Portal owner setup required"
+            : "Portal owner setup required",
+          viewCount: viewPermissionCount(surfaceDesignationAccess.locationRoleId, permissions, pages)
         }}
         rows={surfaceDesignationAccess.designations.filter((designation) => designation.enabled).map((designation) => {
           const role = designation.defaultRoleId ? loadedRoles.find((candidate) => candidate.id === designation.defaultRoleId) ?? null : null;
-          return { designationId: designation.id, code: designation.code, name: designation.name, enabled: designation.enabled, roleId: role?.id ?? null, locationAccessMode: role?.location_access_mode ?? null, permissionSummary: role ? permissionText(role, permissions, pages) : designation.enabled ? "Portal owner setup required" : "Not enabled for this portal" };
+          return { designationId: designation.id, code: designation.code, name: designation.name, enabled: designation.enabled, roleId: role?.id ?? null, locationAccessMode: role?.location_access_mode ?? null, permissionSummary: role ? permissionText(role, permissions, pages) : designation.enabled ? "Portal owner setup required" : "Not enabled for this portal", viewCount: viewPermissionCount(role?.id, permissions, pages) };
         })}
         title={`${accessSurfaceLabel(accessSurface)} designation access`}
       />

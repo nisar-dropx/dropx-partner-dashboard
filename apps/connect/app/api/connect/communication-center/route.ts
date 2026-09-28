@@ -11,6 +11,7 @@ import {
 } from "@/lib/communication-center";
 
 const evidenceBucket = "communication-evidence";
+const announcementBucket = "communication-announcements";
 const allowedTypes = new Set([
   "image/jpeg",
   "image/png",
@@ -98,13 +99,25 @@ async function announcementInbox(companyId: string, profileType: string, account
   if (announcementResult.error) throw announcementResult.error;
   const receiptById = new Map(receipts.map((item) => [item.announcement_id, item]));
   const now = Date.now();
-  return (announcementResult.data ?? [])
-    .filter((item) => !item.expires_at || new Date(item.expires_at).getTime() > now)
-    .map((item) => ({
-      ...item,
-      deliveredAt: receiptById.get(item.id)?.delivered_at ?? null,
-      readAt: receiptById.get(item.id)?.read_at ?? null
-    }));
+  const visible = (announcementResult.data ?? [])
+    .filter((item) => !item.expires_at || new Date(item.expires_at).getTime() > now);
+  // Attachment metadata only - files open through a short-lived signed URL
+  // (GET ?announcementAttachmentId=). Tolerates the table not existing yet.
+  const attachmentResult = visible.length
+    ? await supabaseAdmin!
+      .from("communication_announcement_attachments")
+      .select("id,announcement_id,original_name,mime_type,file_size")
+      .eq("company_id", companyId)
+      .in("announcement_id", visible.map((item) => item.id))
+      .order("display_order")
+    : { data: [], error: null };
+  const attachments = attachmentResult.error ? [] : attachmentResult.data ?? [];
+  return visible.map((item) => ({
+    ...item,
+    attachments: attachments.filter((attachment) => attachment.announcement_id === item.id),
+    deliveredAt: receiptById.get(item.id)?.delivered_at ?? null,
+    readAt: receiptById.get(item.id)?.read_at ?? null
+  }));
 }
 
 async function peopleRecipients(companyId: string) {
@@ -176,6 +189,33 @@ export async function GET(request: Request) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const account = await accountFromRequest(request);
     const url = new URL(request.url);
+    const announcementAttachmentId = url.searchParams.get("announcementAttachmentId") ?? "";
+    if (announcementAttachmentId) {
+      const fileResult = await supabaseAdmin
+        .from("communication_announcement_attachments")
+        .select("id,announcement_id,storage_path,original_name")
+        .eq("company_id", account.companyId)
+        .eq("id", announcementAttachmentId)
+        .maybeSingle();
+      if (fileResult.error) throw fileResult.error;
+      // Only an account that actually received this update may open its files.
+      const receipt = fileResult.data
+        ? await supabaseAdmin.from("communication_announcement_recipients")
+          .select("announcement_id")
+          .eq("company_id", account.companyId)
+          .eq("announcement_id", fileResult.data.announcement_id)
+          .eq("recipient_profile_type", account.profileType)
+          .eq("recipient_account_id", account.id)
+          .maybeSingle()
+        : { data: null, error: null };
+      if (receipt.error) throw receipt.error;
+      if (!fileResult.data || !receipt.data) {
+        return NextResponse.json({ error: "This attachment is not available for this account." }, { status: 403 });
+      }
+      const signed = await supabaseAdmin.storage.from(announcementBucket).createSignedUrl(fileResult.data.storage_path, 300);
+      if (signed.error) throw signed.error;
+      return NextResponse.json({ url: signed.data.signedUrl });
+    }
     const attachmentId = url.searchParams.get("attachmentId") ?? "";
     if (attachmentId) {
       const attachmentResult = await supabaseAdmin

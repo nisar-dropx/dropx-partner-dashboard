@@ -35,6 +35,9 @@ export async function GET(request: Request) {
 
   for (const setting of (settings.data ?? []) as SettingRow[]) {
     summary.companies += 1;
+    // Directory sync and the job queue are independent: a sync failure (for
+    // example one bad directory row) used to skip every queued job, which left
+    // HR-requested renames stuck in "queued" indefinitely.
     try {
       const lastSyncAt = setting.last_sync_at ? new Date(setting.last_sync_at).getTime() : 0;
       if (setting.directory_sync_enabled && now.getTime() - lastSyncAt >= 30 * 60 * 1000) {
@@ -42,6 +45,10 @@ export async function GET(request: Request) {
         summary.synced += 1;
         summary.users += sync.users;
       }
+    } catch (error) {
+      summary.errors.push(`${setting.company_id}: ${error instanceof Error ? error.message : "Workspace directory sync failed"}`);
+    }
+    try {
       if (setting.provisioning_enabled) {
         const jobs = await processWorkspaceJobs(25, setting.company_id);
         summary.processed += jobs.processed;

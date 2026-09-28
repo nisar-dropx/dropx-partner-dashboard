@@ -535,6 +535,50 @@ async function syncManagedGroups(client: GoogleWorkspaceClient, account: Workspa
   }
 }
 
+/**
+ * After a primary-email rename, a DropX login that signed in with the old
+ * Workspace address must follow it, or the person is locked out. Logins on a
+ * personal address (OTP / personal Google) are left untouched.
+ */
+async function followPrimaryEmailRename(input: { companyId: string; accountId: string; profileId: string | null; previousEmail: string; primaryEmail: string }) {
+  if (!input.profileId) return;
+  const profile = await db().from("profiles").select("id,email").eq("company_id", input.companyId).eq("id", input.profileId).maybeSingle();
+  if (profile.error) throw new Error(profile.error.message);
+  if (!profile.data || normalizeEmail(profile.data.email) !== input.previousEmail) return;
+  const now = new Date().toISOString();
+  const savedProfile = await db().from("profiles").update({ email: input.primaryEmail, updated_at: now }).eq("id", input.profileId);
+  if (savedProfile.error) throw new Error(savedProfile.error.message);
+  const authUser = await db().auth.admin.getUserById(input.profileId);
+  if (!authUser.error && normalizeEmail(authUser.data.user?.email) === input.previousEmail) {
+    const savedAuth = await db().auth.admin.updateUserById(input.profileId, { email: input.primaryEmail, email_confirm: true });
+    if (savedAuth.error) throw new Error(savedAuth.error.message);
+  }
+}
+
+/** Tells the person their company address changed - to the new DropX mailbox only, never a personal address. */
+async function notifyPrimaryEmailChange(input: { companyId: string; accountId: string; jobId?: string | null; fullName: string; personalEmail: string | null; previousEmail: string; primaryEmail: string; oldAddressRemoved: boolean }) {
+  const recipients = [input.primaryEmail];
+  const body = [
+    `Hi ${input.fullName || "there"},`,
+    "",
+    "Your DropX company email address has been changed.",
+    "",
+    `New email: ${input.primaryEmail}`,
+    `Previous email: ${input.previousEmail}${input.oldAddressRemoved ? " (removed - it no longer receives mail)" : ""}`,
+    "",
+    "Your password, mailbox contents, Drive files and DropX access are unchanged. Sign in to Google and to DropX portals with the new address from now on.",
+    "",
+    "If you weren't expecting this change, contact HR immediately."
+  ].join("\n");
+  try {
+    await sendEmail({ companyId: input.companyId, to: recipients, subject: "Your DropX company email has changed", body });
+    await audit({ companyId: input.companyId, accountId: input.accountId, jobId: input.jobId, action: "primary_email_change_notice", status: "success", detail: { sent_to: recipients } });
+  } catch (error) {
+    // The rename itself already succeeded; a failed notice must not roll it back.
+    await audit({ companyId: input.companyId, accountId: input.accountId, jobId: input.jobId, action: "primary_email_change_notice", status: "failed", detail: { error: error instanceof Error ? error.message : "Email failed" } });
+  }
+}
+
 async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, retentionDays: number, existing?: WorkspaceAccountRow | null) {
   const email = normalizeEmail(user.primaryEmail);
   const [profileResult, stationResult] = await Promise.all([
@@ -575,7 +619,7 @@ async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, r
     : mappedStandalone
       ? null
       : profileResult.data?.id ?? stationResult.data?.id ?? existing?.source_record_id ?? null;
-  const result = await db().from("google_workspace_accounts").upsert({
+  const row = {
     company_id: companyId,
     google_user_id: user.id,
     primary_email: email,
@@ -604,9 +648,23 @@ async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, r
     last_error: null,
     google_etag: user.etag ?? null,
     updated_at: new Date().toISOString()
-  }, { onConflict: "company_id,primary_email" }).select("id").single();
+  };
+  // Match the existing mapping by row id, not by email: when a primary email
+  // is renamed directly in Google Admin, the Google user id stays the same but
+  // the address changes. Upserting on (company_id, primary_email) then tried to
+  // insert a second row for the same Google user, which violated
+  // google_workspace_account_google_id_unique and aborted the whole sync.
+  const result = existing?.id
+    ? await db().from("google_workspace_accounts").update(row).eq("id", existing.id).select("id").single()
+    : await db().from("google_workspace_accounts").upsert(row, { onConflict: "company_id,primary_email" }).select("id").single();
   if (result.error) throw new Error(result.error.message);
   const accountId = result.data.id as string;
+
+  const previousEmail = normalizeEmail(existing?.primary_email);
+  if (existing?.id && previousEmail && previousEmail !== email) {
+    await followPrimaryEmailRename({ companyId, accountId, profileId: existing.profile_id, previousEmail, primaryEmail: email });
+    await audit({ companyId, accountId, action: "primary_email_change", status: "success", detail: { previous_primary_email: previousEmail, primary_email: email, source: "google_admin" } });
+  }
 
   if (user.suspended) {
     const eligibleAt = existing?.deletion_eligible_at ?? new Date(Date.now() + retentionDays * 86400000).toISOString();
@@ -652,13 +710,22 @@ export async function syncWorkspaceDirectory(companyId: string, actorId?: string
     if (existingResult.error) throw new Error(existingResult.error.message);
     const existingByGoogleId = new Map((existingResult.data ?? []).map((row) => [row.google_user_id, row as WorkspaceAccountRow]));
     const existingByEmail = new Map((existingResult.data ?? []).map((row) => [normalizeEmail(row.primary_email), row as WorkspaceAccountRow]));
+    // One bad directory row must not stop every other user from syncing.
+    const failures: string[] = [];
     for (const user of users) {
-      await saveDirectoryUser(
-        companyId,
-        user,
-        setting.default_retention_days,
-        existingByGoogleId.get(user.id) ?? existingByEmail.get(normalizeEmail(user.primaryEmail)) ?? null
-      );
+      try {
+        await saveDirectoryUser(
+          companyId,
+          user,
+          setting.default_retention_days,
+          existingByGoogleId.get(user.id) ?? existingByEmail.get(normalizeEmail(user.primaryEmail)) ?? null
+        );
+      } catch (error) {
+        failures.push(`${normalizeEmail(user.primaryEmail)}: ${error instanceof Error ? error.message : "sync failed"}`);
+      }
+    }
+    if (failures.length) {
+      throw new Error(`${failures.length} of ${users.length} Workspace users could not be synced. ${failures.slice(0, 5).join("; ")}`);
     }
     const now = new Date().toISOString();
     await db().from("google_workspace_settings").update({ last_sync_status: "success", last_sync_at: now, last_sync_error: null, updated_at: now }).eq("company_id", companyId);
@@ -849,16 +916,29 @@ async function updateEmployeeAccess(job: WorkspaceJobRow) {
   const setting = await loadSettings(job.company_id, true);
   const source = await workerSource(job.company_id, job.source_record_id, job.source_type);
   const policy = await getPolicy(job.company_id, source.designationId);
-  if (!policy) throw new Error("The current designation has no active Workspace policy.");
   const account = await getAccount(job.account_id);
   const connection = clientFor(setting);
   const names = splitName(source.fullName);
   const requestedPrimaryEmail = normalizeEmail(job.payload.requested_primary_email);
   const currentPrimaryEmail = normalizeEmail(account.primary_email);
+  const previousPrimaryEmail = normalizeEmail(job.payload.previous_primary_email);
+  const emailChangeConfirmed = job.payload.workspace_email_change_confirmed === true;
   const emailChangeRequested = Boolean(requestedPrimaryEmail && requestedPrimaryEmail !== currentPrimaryEmail);
+  // The rename may already have been picked up by directory sync (it was done
+  // in Google Admin, and sync ran before this job). The old address still has
+  // to be cleaned up and the person told, exactly as for a rename done here.
+  const renameAlreadySynced = !emailChangeRequested && emailChangeConfirmed
+    && Boolean(previousPrimaryEmail) && previousPrimaryEmail !== currentPrimaryEmail
+    && requestedPrimaryEmail === currentPrimaryEmail;
+  // Designation Workspace policies only drive org unit, groups and legacy
+  // portal grants. People designations normally have none; that used to block
+  // every update_access job - HR-confirmed email renames included - with
+  // "The current designation has no active Workspace policy." Without a
+  // policy, the job now syncs the name/rename only and leaves groups alone.
   let effectiveAccount = account;
+  let renameNotice: { previousEmail: string; primaryEmail: string; oldAddressRemoved: boolean } | null = null;
   if (emailChangeRequested) {
-    if (job.payload.workspace_email_change_confirmed !== true) {
+    if (!emailChangeConfirmed) {
       throw new Error("The primary Workspace email change was not explicitly confirmed in People.");
     }
     if (!requestedPrimaryEmail.endsWith(`@${normalizeEmail(setting.primary_domain)}`)) {
@@ -874,11 +954,15 @@ async function updateEmployeeAccess(job: WorkspaceJobRow) {
     if (targetUser && targetUser.id !== account.google_user_id) {
       throw new Error("The requested Workspace email already belongs to another Google user.");
     }
-    const renamed = await connection.patchUser(account.google_user_id || account.primary_email, {
-      primaryEmail: requestedPrimaryEmail,
-      name: { givenName: names.givenName, familyName: names.familyName },
-      orgUnitPath: policy.org_unit_path
-    });
+    // If the address was already renamed in Google Admin, the target already
+    // belongs to this same Google user - adopt it instead of renaming twice.
+    const renamed = targetUser && targetUser.id === account.google_user_id
+      ? targetUser
+      : await connection.patchUser(account.google_user_id || account.primary_email, {
+        primaryEmail: requestedPrimaryEmail,
+        name: { givenName: names.givenName, familyName: names.familyName },
+        ...(policy ? { orgUnitPath: policy.org_unit_path } : {})
+      });
     const renamedEmail = normalizeEmail(renamed.primaryEmail) || requestedPrimaryEmail;
     const savedRename = await db().from("google_workspace_accounts").update({
       google_user_id: renamed.id || account.google_user_id,
@@ -887,6 +971,7 @@ async function updateEmployeeAccess(job: WorkspaceJobRow) {
     }).eq("id", account.id);
     if (savedRename.error) throw new Error(savedRename.error.message);
     effectiveAccount = { ...account, google_user_id: renamed.id || account.google_user_id, primary_email: renamedEmail };
+    await followPrimaryEmailRename({ companyId: job.company_id, accountId: account.id, profileId: account.profile_id, previousEmail: currentPrimaryEmail, primaryEmail: renamedEmail });
     await audit({
       companyId: job.company_id,
       accountId: account.id,
@@ -896,11 +981,45 @@ async function updateEmployeeAccess(job: WorkspaceJobRow) {
       status: "success",
       detail: { previous_primary_email: currentPrimaryEmail, primary_email: renamedEmail }
     });
+    renameNotice = { previousEmail: currentPrimaryEmail, primaryEmail: renamedEmail, oldAddressRemoved: false };
+  } else if (renameAlreadySynced) {
+    renameNotice = { previousEmail: previousPrimaryEmail, primaryEmail: currentPrimaryEmail, oldAddressRemoved: false };
   } else if (account.google_user_id) {
     await connection.patchUser(account.google_user_id, {
       name: { givenName: names.givenName, familyName: names.familyName },
-      orgUnitPath: policy.org_unit_path
+      ...(policy ? { orgUnitPath: policy.org_unit_path } : {})
     });
+  }
+
+  if (renameNotice) {
+    // Google keeps the previous primary address as an alias after a rename.
+    // HR asked for a clean replacement, so remove it: the old address stops
+    // receiving mail and is free to reuse.
+    await connection.removeUserAlias(effectiveAccount.google_user_id || renameNotice.primaryEmail, renameNotice.previousEmail);
+    renameNotice.oldAddressRemoved = true;
+    await audit({ companyId: job.company_id, accountId: account.id, jobId: job.id, actorId: job.requested_by, action: "previous_email_alias_removed", status: "success", detail: { alias: renameNotice.previousEmail } });
+    await notifyPrimaryEmailChange({
+      companyId: job.company_id,
+      accountId: account.id,
+      jobId: job.id,
+      fullName: source.fullName,
+      personalEmail: source.personalEmail,
+      ...renameNotice
+    });
+  }
+
+  if (!policy) {
+    const saved = await db().from("google_workspace_accounts").update({
+      primary_email: effectiveAccount.primary_email,
+      full_name: source.fullName,
+      designation_id: source.designationId,
+      location_id: source.locationId,
+      account_state: "active",
+      last_error: null,
+      updated_at: new Date().toISOString()
+    }).eq("id", account.id);
+    if (saved.error) throw new Error(saved.error.message);
+    return account.id;
   }
   await syncManagedGroups(connection, effectiveAccount, policy.group_emails);
   await ensureDropxAccess({ account: { ...effectiveAccount, group_emails: policy.group_emails }, source, policy });

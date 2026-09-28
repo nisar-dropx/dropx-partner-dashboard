@@ -13,7 +13,14 @@ export type SurfaceDesignationAccessRow = {
   roleId: string | null;
   locationAccessMode: "all_locations" | "role_based" | null;
   permissionSummary: string;
+  /** Menus this designation's portal role can open. 0 means the role exists but grants nothing. */
+  viewCount: number;
 };
+
+function portalStatus(roleId: string | null, viewCount: number) {
+  if (!roleId) return "Setup required";
+  return viewCount > 0 ? "Configured" : "Menus pending";
+}
 
 const PAGE_SIZE = 12;
 
@@ -30,7 +37,7 @@ export function SurfaceDesignationAccessPanel({
   canEdit: boolean;
   configureAction: (formData: FormData) => void | Promise<void>;
   masterHref: string;
-  locationAccount: { roleId: string | null; permissionSummary: string };
+  locationAccount: { roleId: string | null; permissionSummary: string; viewCount: number };
   configureLocationAction: (formData: FormData) => void | Promise<void>;
   productCode: string;
   rows: SurfaceDesignationAccessRow[];
@@ -40,25 +47,27 @@ export function SurfaceDesignationAccessPanel({
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pagedRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const pendingCount = rows.filter((row) => row.roleId && !row.viewCount).length;
 
   return <section className="panel">
     <div className="panel-head toolbar"><div><h2>{title}</h2><p className="subtle">Only People designations enabled for this portal appear here. Configure the menus and actions; People remains the source of the designation and person scope.</p></div><a className="button secondary" href={masterHref}>Designation Master</a></div>
     <div className="panel-head"><div><h3>Location Account</h3><p className="subtle">Station mailbox eligibility is granted only from the main Dashboard. Configure here which {title.replace(" designation access", "")} menus those mailboxes can use.</p></div></div>
     <div className="table-wrap"><table style={{ minWidth: 860 }}><thead><tr><th>Account type</th><th>Portal status</th><th>Location scope</th><th>Menu permissions</th><th>Action</th></tr></thead><tbody><tr>
       <td><strong>Location Account</strong><div className="subtle">One shared DropX mailbox per station or station group</div></td>
-      <td><StatusPill status={locationAccount.roleId ? "Configured" : "Setup required"} /></td>
+      <td><StatusPill status={portalStatus(locationAccount.roleId, locationAccount.viewCount)} /></td>
       <td>Dashboard-managed locations</td>
       <td>{locationAccount.permissionSummary}</td>
-      <td>{!canEdit ? "—" : locationAccount.roleId ? <PendingLink className="button secondary" href={`/users?section=roles&editRole=${locationAccount.roleId}`} scroll={false}>Configure menus</PendingLink> : <form action={configureLocationAction}><input name="product_code" type="hidden" value={productCode} /><SubmitButton className="button secondary" pendingText="Preparing…">Set up menus</SubmitButton></form>}</td>
+      <td>{!canEdit ? "—" : locationAccount.roleId ? <PendingLink className={`button ${locationAccount.viewCount ? "secondary" : "primary"}`} href={`/users?section=roles&editRole=${locationAccount.roleId}`} scroll={false}>Configure menus</PendingLink> : <form action={configureLocationAction}><input name="product_code" type="hidden" value={productCode} /><SubmitButton className="button secondary" pendingText="Preparing…">Set up menus</SubmitButton></form>}</td>
     </tr></tbody></table></div>
     <div className="panel-head" style={{ borderTop: "1px solid var(--border)" }}><div><h3>People designations</h3><p className="subtle">Only designations enabled for this portal are listed below.</p></div></div>
+    {pendingCount ? <div className="panel-body"><div className="message-panel error" role="status"><strong>{pendingCount} designation{pendingCount === 1 ? "" : "s"} with no menus.</strong> These are enabled for this portal but grant no menus, so people holding them are restricted. Use Configure menus on each row marked Menus pending.</div></div> : null}
     <div className="table-wrap"><table style={{ minWidth: 860 }}><thead><tr><th>Designation</th><th>Portal status</th><th>Location scope</th><th>Menu permissions</th><th>Action</th></tr></thead><tbody>
       {pagedRows.map((row) => <tr key={row.designationId}>
         <td><strong>{row.name}</strong><div className="subtle">{row.code}</div></td>
-        <td><StatusPill status={row.roleId ? "Configured" : "Setup required"} /></td>
+        <td><StatusPill status={portalStatus(row.roleId, row.viewCount)} /></td>
         <td>{row.roleId ? row.locationAccessMode === "all_locations" ? "All locations" : "Person-managed locations" : "—"}</td>
-        <td>{row.permissionSummary}</td>
-        <td>{!canEdit ? "—" : row.roleId ? <PendingLink className="button secondary" href={`/users?section=roles&editRole=${row.roleId}`} scroll={false}>Configure menus</PendingLink> : <form action={configureAction}><input name="designation_id" type="hidden" value={row.designationId} /><input name="product_code" type="hidden" value={productCode} /><SubmitButton className="button secondary" pendingText="Preparing…">Set up menus</SubmitButton></form>}</td>
+        <td>{row.permissionSummary}{row.roleId && !row.viewCount ? <div className="subtle">No menus granted yet. People with this designation are signed in but see nothing until menus are configured.</div> : null}</td>
+        <td>{!canEdit ? "—" : row.roleId ? <PendingLink className={`button ${row.viewCount ? "secondary" : "primary"}`} href={`/users?section=roles&editRole=${row.roleId}`} scroll={false}>Configure menus</PendingLink> : <form action={configureAction}><input name="designation_id" type="hidden" value={row.designationId} /><input name="product_code" type="hidden" value={productCode} /><SubmitButton className="button secondary" pendingText="Preparing…">Set up menus</SubmitButton></form>}</td>
       </tr>)}
       {!pagedRows.length ? <tr><td className="empty-cell" colSpan={5}>No People designation is enabled for this portal. Enable one in People Designation Master.</td></tr> : null}
     </tbody></table></div>

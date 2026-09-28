@@ -332,6 +332,16 @@ export class GoogleWorkspaceClient {
     });
   }
 
+  /** Removes an alias (e.g. the address a user had before a primary-email rename). Missing aliases are ignored. */
+  async removeUserAlias(userKey: string, alias: string) {
+    try {
+      await this.request<void>(`/users/${encodeURIComponent(userKey)}/aliases/${encodeURIComponent(alias)}`, { method: "DELETE" });
+    } catch (error) {
+      if (error instanceof GoogleWorkspaceApiError && error.status === 404) return;
+      throw error;
+    }
+  }
+
   async getGroup(groupKey: string) {
     try {
       return await this.request<GoogleDirectoryGroup>(`/groups/${encodeURIComponent(groupKey)}`);
