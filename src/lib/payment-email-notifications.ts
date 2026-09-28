@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { approvalEmailCard } from "@/lib/approval-email-card";
 import { deliverPaymentMail, loadPaymentMailPolicy } from "@/lib/payment-mail-delivery";
+import { excludeFinanceRecipients } from "@/lib/payment-email-recipient-policy";
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 
 const PAYMENT_APPROVALS_URL = "https://ops.dropxlogistics.com/payments/approvals";
@@ -96,45 +97,42 @@ const defaultTemplates: Record<PaymentEmailEventType, Pick<TemplateRow, "subject
   },
   payment_approve: {
     to_recipients: ["initial:current_approver", "final:requester"],
-    cc_recipients: ["initial:requester", "initial:location_manager", "initial:payment_processor", "final:location_manager", "final:final_approver", "final:payment_processor"],
+    cc_recipients: ["initial:requester", "initial:location_manager", "final:location_manager", "final:final_approver"],
     subject_template: "Payment approved · {{request_no}}",
     body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was approved by {{action_by}}.{{remarks_note}}"
   },
   payment_return: {
     to_recipients: ["requester"],
-    cc_recipients: ["location_manager", "current_approver", "final_approver", "payment_processor"],
+    cc_recipients: ["location_manager", "current_approver", "final_approver"],
     subject_template: "Payment returned · {{request_no}}",
     body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was returned by {{action_by}} for correction.{{remarks_note}}"
   },
   payment_reject: {
     to_recipients: ["requester"],
-    cc_recipients: ["location_manager", "current_approver", "final_approver", "payment_processor"],
+    cc_recipients: ["location_manager", "current_approver", "final_approver"],
     subject_template: "Payment rejected · {{request_no}}",
     body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was rejected by {{action_by}}.{{remarks_note}}"
   }
 };
 
 const allowedRecipientsByEvent: Record<PaymentEmailEventType, string[]> = {
-  payment_request: ["requester", "current_approver", "location_manager", "final_approver", "payment_processor"],
+  payment_request: ["requester", "current_approver", "location_manager", "final_approver"],
   payment_approve: [
     "requester",
     "location_manager",
     "current_approver",
     "final_approver",
-    "payment_processor",
     "initial:requester",
     "initial:location_manager",
     "initial:current_approver",
     "initial:final_approver",
-    "initial:payment_processor",
     "final:requester",
     "final:location_manager",
     "final:current_approver",
-    "final:final_approver",
-    "final:payment_processor"
+    "final:final_approver"
   ],
-  payment_return: ["requester", "location_manager", "current_approver", "final_approver", "payment_processor"],
-  payment_reject: ["requester", "location_manager", "current_approver", "final_approver", "payment_processor"]
+  payment_return: ["requester", "location_manager", "current_approver", "final_approver"],
+  payment_reject: ["requester", "location_manager", "current_approver", "final_approver"]
 };
 
 function clean(value: unknown) {
@@ -289,6 +287,40 @@ async function profilesForProductRoles(companyId: string, roleIds: string[], loc
   return [...profiles.values()];
 }
 
+async function financeRecipientEmails(companyId: string) {
+  if (!supabaseAdmin) return new Set<string>();
+  const [memberships, roles] = await Promise.all([
+    supabaseAdmin.from("company_product_memberships")
+      .select("user_id")
+      .eq("company_id", companyId)
+      .eq("product_code", "finance")
+      .eq("is_active", true),
+    supabaseAdmin.from("user_roles")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("product_code", "finance")
+      .eq("is_active", true)
+  ]);
+  if (memberships.error || roles.error) {
+    throw new Error(memberships.error?.message ?? roles.error?.message ?? "Finance mail exclusions could not be resolved.");
+  }
+
+  const memberIds = [...new Set((memberships.data ?? []).map((row) => row.user_id).filter(Boolean))];
+  const roleIds = [...new Set((roles.data ?? []).map((row) => row.id).filter(Boolean))];
+  const [memberProfiles, roleProfiles] = await Promise.all([
+    memberIds.length
+      ? supabaseAdmin.from("profiles").select("email").eq("company_id", companyId).eq("is_active", true).in("id", memberIds)
+      : Promise.resolve({ data: [], error: null }),
+    roleIds.length
+      ? supabaseAdmin.from("profiles").select("email").eq("company_id", companyId).eq("is_active", true).in("role_id", roleIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+  if (memberProfiles.error || roleProfiles.error) {
+    throw new Error(memberProfiles.error?.message ?? roleProfiles.error?.message ?? "Finance mail exclusions could not be resolved.");
+  }
+  return new Set(uniqueEmails([...(memberProfiles.data ?? []), ...(roleProfiles.data ?? [])].map((profile) => profile.email ?? "")));
+}
+
 async function resolveHierarchyFinalApprovers({
   actorUserId,
   companyId,
@@ -343,7 +375,6 @@ async function resolveRecipientEmails({
   currentApprover,
   finalApprovers,
   location,
-  paymentProcessors,
   requester,
   selected
 }: {
@@ -351,7 +382,6 @@ async function resolveRecipientEmails({
   currentApprover: { email?: string | null } | null;
   finalApprovers: { email?: string | null }[];
   location: { station_email?: string | null; station_manager_email?: string | null } | null;
-  paymentProcessors: { email?: string | null }[];
   requester: { email?: string | null } | null;
   selected: string[];
 }) {
@@ -361,7 +391,6 @@ async function resolveRecipientEmails({
     if (recipient === "current_approver" && currentApprover?.email) emails.push(currentApprover.email);
     if (recipient === "approver" && actor?.email) emails.push(actor.email);
     if (recipient === "final_approver") finalApprovers.forEach((user) => user.email ? emails.push(user.email) : null);
-    if (recipient === "payment_processor") paymentProcessors.forEach((user) => user.email ? emails.push(user.email) : null);
     if (recipient === "location_email" && location?.station_email) emails.push(location.station_email);
     if (recipient === "location_manager" && location?.station_manager_email) emails.push(location.station_manager_email);
   });
@@ -401,7 +430,6 @@ export async function sendPaymentNotification({
         current_approver_user_id,
         final_approval_role_id,
         final_approval_role_ids,
-        payment_process_role_ids,
         email_root_message_id,
         email_last_message_id,
         email_send_count,
@@ -413,8 +441,7 @@ export async function sendPaymentNotification({
     if (requestError || !request) throw new Error(requestError?.message ?? "Payment request not found.");
 
     const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
-    const paymentProcessRoleIds = (request.payment_process_role_ids ?? []) as string[];
-    const [requester, actor, currentApprover, locationResult, companyResult, paymentProcessors] = await Promise.all([
+    const [requester, actor, currentApprover, locationResult, companyResult, financeEmails] = await Promise.all([
       profileById(companyId, request.requested_by),
       profileById(companyId, actorUserId),
       profileById(companyId, request.current_approver_user_id),
@@ -422,7 +449,7 @@ export async function sendPaymentNotification({
         ? supabaseAdmin.from("stations").select("station_code, station_email, station_manager_email").eq("company_id", companyId).eq("id", request.location_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       supabaseAdmin.from("companies").select("name").eq("id", companyId).maybeSingle(),
-      profilesForProductRoles(companyId, paymentProcessRoleIds, request.location_id)
+      financeRecipientEmails(companyId)
     ]);
     const finalApprovers = await resolveHierarchyFinalApprovers({
       actorUserId,
@@ -468,14 +495,14 @@ export async function sendPaymentNotification({
       ? emailsForApprovalPhase(template.custom_cc_emails, approvalPhase)
       : template.custom_cc_emails ?? [];
     const actorEmail = normalizeEmail(actor?.email);
-    const to = uniqueEmails([
-      ...(await resolveRecipientEmails({ actor, currentApprover, finalApprovers, location: locationResult.data, paymentProcessors, requester, selected: selectedToRecipients })),
+    const to = excludeFinanceRecipients(uniqueEmails([
+      ...(await resolveRecipientEmails({ actor, currentApprover, finalApprovers, location: locationResult.data, requester, selected: selectedToRecipients })),
       ...selectedCustomToEmails
-    ]).filter((email) => email !== actorEmail);
-    const cc = uniqueEmails([
-      ...(await resolveRecipientEmails({ actor, currentApprover, finalApprovers, location: locationResult.data, paymentProcessors, requester, selected: selectedCcRecipients })),
+    ]).filter((email) => email !== actorEmail), financeEmails);
+    const cc = excludeFinanceRecipients(uniqueEmails([
+      ...(await resolveRecipientEmails({ actor, currentApprover, finalApprovers, location: locationResult.data, requester, selected: selectedCcRecipients })),
       ...selectedCustomCcEmails
-    ]).filter((email) => email !== actorEmail && !to.includes(email));
+    ]).filter((email) => email !== actorEmail && !to.includes(email)), financeEmails);
 
     if (!to.length) return skipped("No To recipients were resolved for this payment email.");
     const subjectTemplate = eventType === "payment_approve"
@@ -526,7 +553,7 @@ export async function sendPaymentApprovalReminder(companyId: string, requestId: 
       .from("payment_requests")
       .select(`
         id, request_no, location_id, location_code, payment_head_id, amount, status, approval_status,
-        requested_by, current_approver_user_id, payment_process_role_ids, final_approval_role_id, final_approval_role_ids,
+        requested_by, current_approver_user_id, final_approval_role_id, final_approval_role_ids,
         email_root_message_id, email_last_message_id, email_send_count,
         payment_heads ( name, code )
       `)
@@ -540,15 +567,14 @@ export async function sendPaymentApprovalReminder(companyId: string, requestId: 
     }
 
     const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
-    const paymentProcessRoleIds = (request.payment_process_role_ids ?? []) as string[];
-    const [requester, currentApprover, locationResult, companyResult, paymentProcessors] = await Promise.all([
+    const [requester, currentApprover, locationResult, companyResult, financeEmails] = await Promise.all([
       profileById(companyId, request.requested_by),
       profileById(companyId, request.current_approver_user_id),
       request.location_id
         ? supabaseAdmin.from("stations").select("station_code, station_email, station_manager_email").eq("company_id", companyId).eq("id", request.location_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       supabaseAdmin.from("companies").select("name").eq("id", companyId).maybeSingle(),
-      profilesForProductRoles(companyId, paymentProcessRoleIds, request.location_id)
+      financeRecipientEmails(companyId)
     ]);
     const finalApprovers = await resolveHierarchyFinalApprovers({
       companyId, currentApproverUserId: request.current_approver_user_id, finalRoleIds,
@@ -569,7 +595,7 @@ export async function sendPaymentApprovalReminder(companyId: string, requestId: 
     };
 
     // All stages: target only the named current approver, never future approvers.
-    const to = uniqueEmails([currentApprover?.email ?? ""]);
+    const to = excludeFinanceRecipients(uniqueEmails([currentApprover?.email ?? ""]), financeEmails);
     if (!to.length) return skipped("No To recipients were resolved for this payment reminder.");
     const cc: string[] = [];
 

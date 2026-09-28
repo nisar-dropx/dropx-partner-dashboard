@@ -47,7 +47,7 @@ export async function sendMissedPaymentReminders() {
   }
   redirectWithFlash("payment_request", { notice });
 }
-const baseRecipients = ["requester", "current_approver", "location_manager", "final_approver", "payment_processor"];
+const baseRecipients = ["requester", "current_approver", "location_manager", "final_approver"];
 const allowedRecipients = new Set([
   ...baseRecipients,
   ...baseRecipients.map((recipient) => `initial:${recipient}`),

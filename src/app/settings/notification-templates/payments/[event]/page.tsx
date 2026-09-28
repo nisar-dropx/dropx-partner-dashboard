@@ -60,16 +60,14 @@ const requestRecipientOptions = [
   { label: "Requester", value: "requester" },
   { label: "Current approver (assigned stage)", value: "current_approver" },
   { label: "Reporting Manager", value: "location_manager" },
-  { label: "Final approver", value: "final_approver" },
-  { label: "Payment processor", value: "payment_processor" }
+  { label: "Final approver", value: "final_approver" }
 ];
 
 const actionRecipientOptions = [
   { label: "Requester", value: "requester" },
   { label: "Reporting Manager", value: "location_manager" },
   { label: "Current approver", value: "current_approver" },
-  { label: "Final approver", value: "final_approver" },
-  { label: "Payment processor", value: "payment_processor" }
+  { label: "Final approver", value: "final_approver" }
 ];
 
 const recipientOptionsByEvent: Record<PaymentEmailEventType, typeof requestRecipientOptions> = {
