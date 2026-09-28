@@ -27,6 +27,7 @@ export const fleetNavItem: NavItem = {
 
 export const navItems: NavItem[] = [
   { code: "dashboard", label: "Command Center", href: "/dashboard", icon: "#" },
+  { code: "request_tracker", label: "Request Tracker", href: "/request-tracker", icon: "⌕" },
   {
     code: "people_all",
     label: "People",

@@ -1,0 +1,685 @@
+[
+  {
+    "key": "payment",
+    "label": "Payment request",
+    "portal": "Finance",
+    "table": "payment_requests",
+    "aliases": [
+      "request_no",
+      "payment_reference",
+      "utr_cin",
+      "utr"
+    ],
+    "history": [
+      {
+        "table": "payment_request_approvals",
+        "keys": [
+          "payment_request_id",
+          "request_id"
+        ]
+      }
+    ],
+    "coverage": "Approval status is separate from bank settlement. Writes and approval logs are separate calls; not a complete field-change journal. No universal approved-reversal object located."
+  },
+  {
+    "key": "expense_request",
+    "label": "Reimbursement estimate / pre-request",
+    "portal": "People",
+    "table": "hr_expense_claim_requests",
+    "aliases": [
+      "request_no"
+    ],
+    "history": [
+      {
+        "table": "hr_expense_claim_request_assignees",
+        "keys": [
+          "request_id",
+          "claim_request_id"
+        ]
+      }
+    ],
+    "coverage": "Pre-request history is thinner than claim history. Withdrawn or returned transitions need explicit events, not inference from last update."
+  },
+  {
+    "key": "expense_claim",
+    "label": "Reimbursement bill claim",
+    "portal": "People",
+    "table": "hr_expense_claims",
+    "aliases": [
+      "claim_no"
+    ],
+    "history": [
+      {
+        "table": "hr_expense_events",
+        "keys": [
+          "claim_id"
+        ]
+      }
+    ],
+    "coverage": "Keep claim and payment stages distinct. Payment-sync events can carry generic Payments actor rather than the actual processor."
+  },
+  {
+    "key": "pay_advance",
+    "label": "People pay advance",
+    "portal": "People",
+    "table": "hr_pay_advance_requests",
+    "aliases": [
+      "request_number"
+    ],
+    "history": [
+      {
+        "table": "hr_pay_advance_steps",
+        "keys": [
+          "request_id"
+        ]
+      }
+    ],
+    "coverage": "Approval, disbursement and full recovery are different milestones. Count-based numbering needs concurrency verification."
+  },
+  {
+    "key": "legacy_advance",
+    "label": "Ops / DropX One advance request",
+    "portal": "OpsPulse",
+    "table": "payment_advance_requests",
+    "aliases": [],
+    "history": [],
+    "coverage": "Decision action does not persist decision actor or append a business event. Do not merge with hr_pay_advance_requests by amount/name."
+  },
+  {
+    "key": "field_travel",
+    "label": "Recruiter field travel reimbursement",
+    "portal": "Recruit",
+    "table": "field_travel_reimbursements",
+    "aliases": [],
+    "history": [],
+    "coverage": "Do not create a duplicate root payment. Client retry ID is not the canonical payment ID."
+  },
+  {
+    "key": "workforce_payroll",
+    "label": "Workforce payroll run and Finance handoff",
+    "portal": "Workforce",
+    "table": "workforce_payroll_runs",
+    "aliases": [
+      "run_number"
+    ],
+    "history": [
+      {
+        "table": "workforce_payroll_events",
+        "keys": [
+          "payroll_run_id",
+          "run_id"
+        ]
+      }
+    ],
+    "coverage": "One run has many payments. A partially paid run must not be shown as wholly complete. Guard forbids rewriting paid status/reference without a separate approved reversal."
+  },
+  {
+    "key": "people_payroll",
+    "label": "People payroll run / adjustments",
+    "portal": "People",
+    "table": "hr_payroll_runs",
+    "aliases": [],
+    "history": [],
+    "coverage": "Snapshot generations and revisions must remain traceable. Payroll approval is not proof of a bank payment."
+  },
+  {
+    "key": "payout_publication",
+    "label": "Workforce payout publication",
+    "portal": "Workforce",
+    "table": "workforce_payout_publications",
+    "aliases": [],
+    "history": [],
+    "coverage": "Notification success and business approval are distinct. Preserve old revisions after recalculation."
+  },
+  {
+    "key": "payout_dispute",
+    "label": "Workforce payout dispute",
+    "portal": "Workforce",
+    "table": "workforce_payout_disputes",
+    "aliases": [],
+    "history": [
+      {
+        "table": "workforce_payout_dispute_events",
+        "keys": [
+          "dispute_id"
+        ]
+      }
+    ],
+    "coverage": "Messages are evidence but not always a structured before/after event. Initial One event may have a worker name but no auth actor id."
+  },
+  {
+    "key": "payout_correction",
+    "label": "Workforce payout correction",
+    "portal": "Workforce",
+    "table": "workforce_payout_corrections",
+    "aliases": [],
+    "history": [],
+    "coverage": "Approved does not mean applied. Tracker must test correction_id in calculation snapshots."
+  },
+  {
+    "key": "adjustment",
+    "label": "Workforce earning / deduction adjustment",
+    "portal": "Workforce",
+    "table": "workforce_adjustments",
+    "aliases": [
+      "external_reference"
+    ],
+    "history": [],
+    "coverage": "Generic adjustment row is not a complete immutable lifecycle history. Preserve rejected/reversed versions."
+  },
+  {
+    "key": "loss",
+    "label": "Station loss claim",
+    "portal": "Workforce",
+    "table": "workforce_station_loss_claims",
+    "aliases": [],
+    "history": [],
+    "coverage": "Loss report and applied salary deduction are different facts."
+  },
+  {
+    "key": "mileage",
+    "label": "Mileage claim",
+    "portal": "Workforce",
+    "table": "workforce_mileage_claims",
+    "aliases": [],
+    "history": [],
+    "coverage": "Mileage evidence reference cannot be treated as global unique request ID."
+  },
+  {
+    "key": "workforce_hold",
+    "label": "Workforce payment hold / release",
+    "portal": "Workforce",
+    "table": "workforce_payment_holds",
+    "aliases": [
+      "reference"
+    ],
+    "history": [],
+    "coverage": "Same reference may exist for another worker. Capture every release request and denied release attempt separately."
+  },
+  {
+    "key": "salary_hold",
+    "label": "People salary hold / cancellation",
+    "portal": "People",
+    "table": "ops_salary_holds",
+    "aliases": [],
+    "history": [],
+    "coverage": "Separate namespace and ownership from Workforce hold; append a complete transition log."
+  },
+  {
+    "key": "leave",
+    "label": "Leave request",
+    "portal": "People",
+    "table": "hr_leave_requests",
+    "aliases": [],
+    "history": [
+      {
+        "table": "hr_leave_approval_steps",
+        "keys": [
+          "request_id",
+          "leave_request_id"
+        ]
+      }
+    ],
+    "coverage": "History must preserve cancellations, changes and applied attendance, not only approval status."
+  },
+  {
+    "key": "attendance",
+    "label": "Attendance regularization / manual punch",
+    "portal": "People",
+    "table": "attendance_regularization_requests",
+    "aliases": [],
+    "history": [
+      {
+        "table": "attendance_regularization_approval_steps",
+        "keys": [
+          "request_id",
+          "regularization_request_id"
+        ]
+      }
+    ],
+    "coverage": "Several portals write this shared table. Distinguish request_kind, origin, actual punch and requested correction."
+  },
+  {
+    "key": "wfh",
+    "label": "Work-from-home request",
+    "portal": "People",
+    "table": "hr_wfh_requests",
+    "aliases": [
+      "request_no"
+    ],
+    "history": [
+      {
+        "table": "hr_wfh_approval_steps",
+        "keys": [
+          "request_id"
+        ]
+      }
+    ],
+    "coverage": "Approved date range may contain skipped holidays/punches; show per-date effect."
+  },
+  {
+    "key": "trip",
+    "label": "Business trip / site visit request",
+    "portal": "People",
+    "table": "hr_site_visit_requests",
+    "aliases": [
+      "request_no"
+    ],
+    "history": [
+      {
+        "table": "hr_site_visit_approval_steps",
+        "keys": [
+          "request_id"
+        ]
+      }
+    ],
+    "coverage": "Portal label Business trip maps to site_visit storage; alias both names."
+  },
+  {
+    "key": "roster",
+    "label": "Weekly roster plan / recall / resubmission",
+    "portal": "People",
+    "table": "hr_roster_plans",
+    "aliases": [],
+    "history": [
+      {
+        "table": "hr_roster_approval_steps",
+        "keys": [
+          "plan_id"
+        ]
+      }
+    ],
+    "coverage": "Steps can be deleted and rebuilt on recall/resubmit. Include approval_history so prior cycles do not disappear."
+  },
+  {
+    "key": "roster_swap",
+    "label": "Shift swap request",
+    "portal": "People",
+    "table": "hr_roster_swap_requests",
+    "aliases": [],
+    "history": [
+      {
+        "table": "hr_roster_swap_approval_steps",
+        "keys": [
+          "request_id",
+          "swap_request_id"
+        ]
+      }
+    ],
+    "coverage": "Two-party request; do not report only the requester as the next actor."
+  },
+  {
+    "key": "document",
+    "label": "Employee document request",
+    "portal": "People",
+    "table": "hr_document_requests",
+    "aliases": [
+      "request_number"
+    ],
+    "history": [
+      {
+        "table": "hr_document_request_events",
+        "keys": [
+          "request_id"
+        ]
+      },
+      {
+        "table": "hr_document_request_messages",
+        "keys": [
+          "request_id"
+        ]
+      }
+    ],
+    "coverage": "Older hr_note was a mutable field; backfilled messages are reconstructed history, not original author-proof events."
+  },
+  {
+    "key": "exit",
+    "label": "Exit / resignation / withdrawal",
+    "portal": "People",
+    "table": "hr_exit_cases",
+    "aliases": [
+      "case_number"
+    ],
+    "history": [
+      {
+        "table": "hr_exit_events",
+        "keys": [
+          "exit_case_id",
+          "case_id"
+        ]
+      }
+    ],
+    "coverage": "Approval, access cutoff, clearance, settlement and closed case are distinct milestones."
+  },
+  {
+    "key": "people_lifecycle",
+    "label": "Suspension / restoration / access reconciliation",
+    "portal": "People",
+    "table": "hr_worker_lifecycle_events",
+    "aliases": [],
+    "history": [],
+    "coverage": "Business effective date differs from recorded time; human initiator can differ from worker executing the change."
+  },
+  {
+    "key": "people_case",
+    "label": "Connect Centre case / protected report",
+    "portal": "People",
+    "table": "communication_cases",
+    "aliases": [
+      "case_number"
+    ],
+    "history": [
+      {
+        "table": "communication_case_events",
+        "keys": [
+          "case_id"
+        ]
+      }
+    ],
+    "coverage": "Admin tracker must preserve protected identity and private attachment permissions."
+  },
+  {
+    "key": "unplanned_leave",
+    "label": "Unplanned leave case",
+    "portal": "People",
+    "table": "hr_unplanned_leave_cases",
+    "aliases": [],
+    "history": [
+      {
+        "table": "hr_unplanned_leave_case_history",
+        "keys": [
+          "case_id"
+        ]
+      }
+    ],
+    "coverage": "Detection is a system event, not a submitted employee request."
+  },
+  {
+    "key": "workforce_onboarding",
+    "label": "Associate registration and joining",
+    "portal": "Workforce",
+    "table": "workforce",
+    "aliases": [
+      "dropx_id"
+    ],
+    "history": [
+      {
+        "table": "workforce_onboarding_events",
+        "keys": [
+          "workforce_id"
+        ]
+      },
+      {
+        "table": "workforce_joining_events",
+        "keys": [
+          "workforce_id"
+        ]
+      }
+    ],
+    "coverage": "Person identifier is not a request identifier. Correlate through explicit intake/source links; never by name alone."
+  },
+  {
+    "key": "workforce_exit",
+    "label": "Associate exit / lifecycle case",
+    "portal": "Workforce",
+    "table": "workforce_lifecycle_cases",
+    "aliases": [],
+    "history": [
+      {
+        "table": "workforce_lifecycle_events",
+        "keys": [
+          "case_id"
+        ]
+      }
+    ],
+    "coverage": "Legacy field names differ from canonical Workforce cutover; verify deployed column set."
+  },
+  {
+    "key": "amazon_invite",
+    "label": "Provider / Amazon invitation request",
+    "portal": "Workforce",
+    "table": "workforce_amazon_invitation_requests",
+    "aliases": [
+      "external_reference"
+    ],
+    "history": [],
+    "coverage": "Sent invitation is not completed provider activation. Preserve every attempt and provider response."
+  },
+  {
+    "key": "referral",
+    "label": "Refer-and-earn referral",
+    "portal": "Workforce",
+    "table": "workforce_referrals",
+    "aliases": [],
+    "history": [],
+    "coverage": "Do not equate qualified or approved with paid; validate reward link and payout evidence."
+  },
+  {
+    "key": "workforce_connect",
+    "label": "Associate Connect support request",
+    "portal": "Workforce",
+    "table": "workforce_connect_requests",
+    "aliases": [],
+    "history": [],
+    "coverage": "Update action overwrites note and has no recorded responder actor or appended event; old conversation cannot be reconstructed from this row."
+  },
+  {
+    "key": "lead",
+    "label": "Recruitment lead / candidate",
+    "portal": "Recruit",
+    "table": "recruitment_leads",
+    "aliases": [
+      "meta_lead_id",
+      "canonical_key"
+    ],
+    "history": [
+      {
+        "table": "recruitment_lead_history",
+        "keys": [
+          "lead_id"
+        ]
+      }
+    ],
+    "coverage": "System Logs intentionally hides some system events; central tracker must read full evidence and retain source identity."
+  },
+  {
+    "key": "application",
+    "label": "Job application and People handoff",
+    "portal": "Recruit",
+    "table": "recruitment_applications",
+    "aliases": [
+      "external_application_id"
+    ],
+    "history": [],
+    "coverage": "The candidate record and employment record remain different entities; join the explicit transfer fields."
+  },
+  {
+    "key": "requisition",
+    "label": "Hiring requisition",
+    "portal": "Recruit",
+    "table": "recruitment_job_requisitions",
+    "aliases": [
+      "requisition_code"
+    ],
+    "history": [
+      {
+        "table": "recruitment_requisition_events",
+        "keys": [
+          "requisition_id"
+        ]
+      }
+    ],
+    "coverage": "Closing requisition does not close all related applications; retain separate states."
+  },
+  {
+    "key": "ad_request",
+    "label": "Advertising request / external publication",
+    "portal": "Recruit",
+    "table": "recruitment_ad_requests",
+    "aliases": [
+      "request_id"
+    ],
+    "history": [],
+    "coverage": "History is a mutable JSON array updated in application code. A database edit can bypass it; concurrent writes can replace entries."
+  },
+  {
+    "key": "profile_change",
+    "label": "Workforce profile change request",
+    "portal": "Recruit",
+    "table": "workforce_profile_change_requests",
+    "aliases": [],
+    "history": [],
+    "coverage": "Do not apply approval automatically in tracker; preserve old proposed versions and canonical person mapping."
+  },
+  {
+    "key": "ops_review",
+    "label": "Operational performance review",
+    "portal": "OpsPulse",
+    "table": "ops_performance_reviews",
+    "aliases": [],
+    "history": [
+      {
+        "table": "ops_performance_review_updates",
+        "keys": [
+          "review_id"
+        ]
+      }
+    ],
+    "coverage": "Import source date differs from event time. Proxy identity and bypass reason must survive role/name changes."
+  },
+  {
+    "key": "ops_followup",
+    "label": "Operational follow-up action",
+    "portal": "OpsPulse",
+    "table": "ops_performance_followups",
+    "aliases": [],
+    "history": [],
+    "coverage": "Action number is not globally unique; label-only owners need a durable actor/person mapping."
+  },
+  {
+    "key": "cod",
+    "label": "COD proof / exception / reconciliation",
+    "portal": "OpsPulse",
+    "table": "cod_submissions",
+    "aliases": [],
+    "history": [
+      {
+        "table": "cod_proof_history",
+        "keys": [
+          "submission_id"
+        ]
+      },
+      {
+        "table": "cod_reconciliation_audit_log",
+        "keys": [
+          "submission_id"
+        ]
+      }
+    ],
+    "coverage": "A daily station record is not a payment request. External worker outcomes need explicit correlation and attempt history."
+  },
+  {
+    "key": "asset_audit",
+    "label": "Company asset audit",
+    "portal": "Fleet",
+    "table": "asset_audit_sessions",
+    "aliases": [
+      "audit_number"
+    ],
+    "history": [
+      {
+        "table": "asset_events",
+        "keys": [
+          "audit_session_id"
+        ]
+      }
+    ],
+    "coverage": "Asset ID/tag is an entity alias, not the audit case ID; retain each audit session."
+  },
+  {
+    "key": "fleet_audit",
+    "label": "Vehicle audit and findings",
+    "portal": "Fleet",
+    "table": "fleet_audits",
+    "aliases": [],
+    "history": [],
+    "coverage": "An audit document is not itself an immutable change journal; inspected schema needs event-coverage hardening."
+  },
+  {
+    "key": "fleet_service",
+    "label": "Vehicle service / maintenance record",
+    "portal": "Fleet",
+    "table": "fleet_service_history",
+    "aliases": [],
+    "history": [],
+    "coverage": "Historical service rows do not prove every edit/reversal was logged. Do not infer payment link from matching amount or date."
+  },
+  {
+    "key": "workspace_job",
+    "label": "Mailbox / identity job",
+    "portal": "Dashboard",
+    "table": "google_workspace_jobs",
+    "aliases": [],
+    "history": [
+      {
+        "table": "google_workspace_audit_log",
+        "keys": [
+          "job_id"
+        ]
+      }
+    ],
+    "coverage": "Audit insert helper ignores returned error. Service-account updates require both initiator and executor attribution."
+  },
+  {
+    "key": "import",
+    "label": "Report import batch",
+    "portal": "Dashboard",
+    "table": "report_import_batches",
+    "aliases": [],
+    "history": [],
+    "coverage": "A successful upload is not necessarily a successful downstream recalculation; log dependency completion."
+  },
+  {
+    "key": "connector",
+    "label": "External connector run",
+    "portal": "Dashboard",
+    "table": "amazon_connector_runs",
+    "aliases": [],
+    "history": [
+      {
+        "table": "amazon_connector_run_events",
+        "keys": [
+          "run_id"
+        ]
+      }
+    ],
+    "coverage": "External console changes cannot be inferred from internal logs; record provider receipt/time separately."
+  },
+  {
+    "key": "edd_refresh",
+    "label": "EDD / review-source refresh job",
+    "portal": "Dashboard",
+    "table": "ops_review_edd_refresh_jobs",
+    "aliases": [],
+    "history": [],
+    "coverage": "Mutable queue state is not a full per-attempt log. No company_id in this creation schema: resolve tenant through an authoritative station mapping before exposing a job."
+  },
+  {
+    "key": "finance_master",
+    "label": "Finance policy / rent changes",
+    "portal": "Dashboard",
+    "table": "finance_rent_audit",
+    "aliases": [],
+    "history": [],
+    "coverage": "Track configuration changes as related events; do not retroactively rewrite original policy snapshots."
+  },
+  {
+    "key": "access_change",
+    "label": "Designation / access / routing changes",
+    "portal": "Dashboard",
+    "table": "position_access_events",
+    "aliases": [],
+    "history": [],
+    "coverage": "Do not substitute current role/name for historical actor role. Portal grants and People identity are different authorities."
+  }
+]

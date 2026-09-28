@@ -476,6 +476,7 @@ export function hasPermission(
   pageCode: string,
   action: PermissionAction
 ) {
+  if (pageCode === "request_tracker") return (action === "access" || action === "view") && isCompanyOwner(authorization);
   if (authorization.readOnly && (action === "add" || action === "edit")) return false;
   if (isCompanyOwner(authorization)) return true;
   const permission = authorization.permissions[pageCode] ?? noPermission;

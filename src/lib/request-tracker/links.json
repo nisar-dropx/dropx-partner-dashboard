@@ -1,0 +1,18 @@
+{
+  "payment_request_id": "payment",
+  "claim_request_id": "expense_request",
+  "consumed_claim_id": "expense_claim",
+  "claim_id": "expense_claim",
+  "payroll_run_id": "workforce_payroll",
+  "publication_id": "payout_publication",
+  "dispute_id": "payout_dispute",
+  "correction_id": "payout_correction",
+  "adjustment_id": "adjustment",
+  "requisition_id": "requisition",
+  "lead_id": "lead",
+  "application_id": "application",
+  "exit_case_id": "exit",
+  "review_id": "ops_review",
+  "audit_session_id": "asset_audit",
+  "job_id": "workspace_job"
+}

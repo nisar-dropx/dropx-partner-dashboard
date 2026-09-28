@@ -1,0 +1,40 @@
+// Disposable PostgreSQL regression checks. No production connection is used.
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {randomUUID} from 'node:crypto';
+import {PGlite} from '@electric-sql/pglite';
+const db=new PGlite();
+const company=randomUUID(),other=randomUUID(),id=randomUUID(),claim=randomUUID(),actor=randomUUID();
+try{
+ await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;
+ create schema auth;create function auth.uid() returns uuid language sql as 'select nullif(current_setting(''test.actor'',true),'''')::uuid';
+ create table public.payment_requests(id uuid primary key,company_id uuid not null,request_no text,status text,approval_status text,bank_account_no text,details jsonb,updated_by uuid,created_at timestamptz default now(),updated_at timestamptz default now());
+ create table public.payment_request_approvals(id uuid primary key,company_id uuid,payment_request_id uuid,request_id uuid,action text,comments text,approver_user_id uuid,created_at timestamptz default now());
+ create table public.hr_expense_claims(id uuid primary key,company_id uuid,claim_no text,payment_request_id uuid,status text,created_at timestamptz default now());
+ grant select,insert,update,delete on all tables in schema public to service_role;`);
+ await db.exec(readFileSync(new URL('../supabase/migrations/20260928123000_dashboard_request_tracker.sql',import.meta.url),'utf8'));
+ await db.exec('set role service_role');
+ await db.query('insert into payment_requests(id,company_id,request_no,status,bank_account_no,details) values($1,$2,$3,$4,$5,$6)',[id,company,'PAY-123','pending','sensitive-account',JSON.stringify({bank:{number:'nested-secret'},items:[{password:'secret',amount:42}]})]);
+ await db.query('insert into payment_requests(id,company_id,request_no,status) values($1,$2,$3,$4)',[randomUUID(),other,'PAY-123','paid']);
+ await db.query('insert into hr_expense_claims(id,company_id,claim_no,payment_request_id,status) values($1,$2,$3,$4,$5)',[claim,company,'ER-TEST',id,'approved_for_payment']);
+ await db.query('insert into payment_request_approvals(id,company_id,request_id,action,approver_user_id) values($1,$2,$3,$4,$5)',[randomUUID(),company,id,'approved',actor]);
+ const search=async(kind='',q='',offset=0)=>(await db.query('select request_tracker_search($1,$2,$3,$4,$5) result',[company,kind,q,'',offset])).rows[0].result;
+ const detail=async(c=company)=>(await db.query('select request_tracker_detail($1,$2,$3) result',[c,'payment',id])).rows[0].result;
+ const found=await search('','PAY-123');assert.equal(found.rows.length,1,'tenant isolation for duplicate aliases');assert.ok(found.warnings.length,'unavailable sources are explicit');
+ assert.equal(found.rows[0].record.bank_account_no,'[Protected]');assert.equal(found.rows[0].record.details.bank,'[Protected]');assert.equal(found.rows[0].record.details.items[0].password,'[Protected]');
+ assert.equal((await search('payment',id)).rows.length,1,'UUID lookup');assert.equal((await search('payment',"' OR 1=1 --")).rows.length,0,'parameterized search');
+ assert.equal(await detail(other),null,'detail tenant isolation');
+ let d=await detail();assert.equal(d.events.length,3,'legacy dual-FK approval and new audit both retained');assert.ok(d.events.some(e=>e.source==='payment_request_approvals'));
+ const rel=(await db.query('select request_tracker_related($1,$2,$3) result',[company,'payment',id])).rows[0].result;assert.equal(rel[0].id,claim,'reverse claim link');
+ await db.exec('begin');await db.query('update payment_requests set status=$1 where id=$2',['failed',id]);await db.exec('rollback');assert.equal((await detail()).events.length,3,'rolled-back changes leave no committed audit');
+ await db.query('select set_config($1,$2,false)',['test.actor',actor]);
+ await db.query('update payment_requests set status=$1,updated_by=$2 where id=$3',['paid',actor,id]);
+ d=await detail();const update=d.events.find(e=>e.record.operation==='update');assert.equal(update.record.actor_id,actor);assert.equal(update.record.before_data.status,'pending');assert.equal(update.record.after_data.status,'paid');assert.equal(update.record.before_data.bank_account_no,'[Protected]');
+ await assert.rejects(db.query('delete from request_tracker_events'),'audit delete denied to service role');
+ await assert.rejects(db.query('update request_tracker_events set operation=$1',['fake']),'audit rewrite denied to service role');
+ await db.exec('set role authenticated');await assert.rejects(db.query('select request_tracker_search($1)',[company]),'browser roles cannot call cross-tenant RPC');await db.exec('set role service_role');
+ await db.query('delete from payment_requests where id=$1',[id]);d=await detail();assert.equal(d.deleted,true);assert.equal(d.record.request_no,'PAY-123','redacted tombstone retains identity');assert.equal(d.events.length,5);assert.equal((await search('payment','PAY-123')).rows[0].record.status,'deleted','deleted roots remain searchable');
+ await db.exec('reset role');await db.query('insert into payment_requests(id,company_id,request_no,status) select gen_random_uuid(),$1,\'P\'||i,\'pending\' from generate_series(1,55) i',[company]);
+ await db.exec('set role service_role');const first=await search('payment');const second=await search('payment','',50);assert.equal(first.rows.length,50);assert.equal(first.hasMore,true);assert.equal(second.rows.length,5);assert.equal(second.hasMore,false);assert.equal(new Set([...first.rows,...second.rows].map(r=>r.record.id)).size,55,'stable paging when timestamps tie');
+ console.log('Request Tracker PostgreSQL checks passed: isolation, redaction, legacy logs, links, rollback, actor attribution, immutable service access, tombstones and pagination.');
+}finally{await db.close();}
