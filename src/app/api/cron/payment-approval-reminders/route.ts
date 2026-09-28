@@ -5,6 +5,7 @@ import { sendPaymentAdvanceReminder } from "@/lib/payment-advance-email-notifica
 import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 import { isPaymentProcessingStage } from "@/lib/payment-mail-delivery";
+import { reconcilePendingPaymentApprovers } from "@/lib/payment-approver-reconciliation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -39,6 +40,11 @@ async function processReminders(request: Request, catchUp: boolean) {
   }
   if (!isEddCronHost(new URL(request.url).hostname)) return NextResponse.json({ skipped: "Payment reminders run on OpsPulse only" });
   if (!supabaseAdmin) return NextResponse.json({ error: "Supabase service role key is not configured." }, { status: 500 });
+
+  // People is the routing source of truth. Repair still-pending assignments
+  // before selecting reminder recipients so a manager change cannot leave an
+  // old manager receiving mail while the current manager sees an empty inbox.
+  const reconciliation = await reconcilePendingPaymentApprovers();
 
   const [paymentDue, advanceDue] = await Promise.all([
     supabaseAdmin.from("payment_requests").select("id, company_id, status, approval_status, current_approver_role_id, current_approver_role_ids, payment_process_role_ids")
@@ -80,6 +86,6 @@ async function processReminders(request: Request, catchUp: boolean) {
     results.push({ requestId: item.requestId, sent: result.sent, ...(!result.sent ? { reason: result.reason } : {}) });
   }
 
-  console.info("Payment reminders completed", JSON.stringify({ sent, skipped, queued: queue.length, catchUp, results }));
-  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + advances.length, results });
+  console.info("Payment reminders completed", JSON.stringify({ sent, skipped, queued: queue.length, catchUp, reconciliation, results }));
+  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + advances.length, reconciliation, results });
 }
