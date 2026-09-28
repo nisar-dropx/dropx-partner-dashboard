@@ -362,6 +362,16 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request, undefined, true);
     const url = new URL(request.url);
     const kind = url.searchParams.get("kind");
+    if (kind === "carry_forward_form") {
+      if (!await hasOrganizationExpenseVisibility(account)) throw new Error("Organisation-level reimbursement access is required.");
+      const claimId = clean(url.searchParams.get("claimId"));
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claimId)) {
+        throw new Error("Select a valid reimbursement claim.");
+      }
+      return new Response(`<!doctype html><html><head><meta name="robots" content="noindex"><title>Reconcile reimbursement</title></head><body><main><h1>Reconcile prior approval</h1><p>This action applies the approved expense-request manager decision only when the claim remains within the approved total and expense breakdown. Finance remains mandatory.</p><form method="post" action="/api/connect/reimbursements"><input type="hidden" name="kind" value="carry_forward_request_approval"><input type="hidden" name="accountId" value="${account.id}"><input type="hidden" name="profileType" value="user"><input type="hidden" name="claimId" value="${claimId}"><button type="submit">Reconcile and move to Finance</button></form></main></body></html>`, {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, no-store", "x-robots-tag": "noindex" }
+      });
+    }
     if (kind === "approval_guide") {
       const guide = await expenseApprovalGuidePayload(account);
       return NextResponse.json({ guide }, { headers: { "Cache-Control": "private, no-store" } });
