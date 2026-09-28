@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { canPreviewPortalUsers, loadPeopleDesignations } from "@/lib/people-designation";
+import { withTimeout } from "@/lib/with-timeout";
 
 export const portalPreviewCookieName = "dropx_portal_preview_v1";
 export const previewNoStoreHeaders = { "Cache-Control": "private, no-store, max-age=0", "Vary": "Cookie" };
@@ -32,7 +33,10 @@ export const hasPreviewProductAccess = cache(async (companyId: string, userId: s
 export const getSignedInPreviewProfile = cache(async () => {
   const client = createServerSupabaseClient();
   if (!client || !supabaseAdmin) return null;
-  const { data } = await client.auth.getUser();
+  // Preview resolution runs while rendering every authenticated page. It must
+  // not keep the page's loading boundary open when Supabase auth is degraded.
+  const { data } = await withTimeout(client.auth.getUser(), 5000, "Preview session check")
+    .catch(() => ({ data: { user: null } }));
   if (!data.user) return null;
   const { data: profile, error } = await supabaseAdmin.from("profiles")
     .select("id,company_id,full_name,is_master_owner,role_id,is_active").eq("id", data.user.id).maybeSingle();

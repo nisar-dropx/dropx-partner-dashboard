@@ -15,6 +15,7 @@ import { isPeopleHostName } from "@/lib/people/surface";
 import { firstAllowedFinanceHref, hasFinancePortalAccess } from "@/lib/finance/navigation";
 import { isFinanceHostName, safeFinanceNextPath } from "@/lib/finance/surface";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { withTimeout } from "@/lib/with-timeout";
 import { signInWithGoogle } from "./actions";
 
 type LoginPageProps = {
@@ -29,7 +30,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
   const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
-  const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+  // Sign-in must remain reachable when the auth service is slow or temporarily
+  // unavailable. Treat an unverifiable session as signed out rather than hold
+  // the whole route in Next's loading boundary.
+  const { data } = supabase
+    ? await withTimeout(supabase.auth.getUser(), 5000, "Login session check")
+      .catch(() => ({ data: { user: null } }))
+    : { data: { user: null } };
   if (data.user) {
     if (host === "admin-panel.dropxlogistics.com") redirect("/");
     const authorization = await getAuthorization();

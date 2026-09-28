@@ -71,6 +71,12 @@ const timeoutAuth = moduleAt("src/lib/authorization.ts", {
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
 });
 assert.equal(await timeoutAuth.getAuthorization(), null, "two consecutive sign-in timeouts resolve as an unavailable session instead of a server exception");
+const unavailableAuth = moduleAt("src/lib/authorization.ts", {
+  ...mocks,
+  "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new Error("Supabase auth is unavailable"); } },
+  "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
+});
+assert.equal(await unavailableAuth.getAuthorization(), null, "an upstream auth error fails closed as an unavailable session instead of leaving the route unresolved");
 const ownerBefore = await auth.getAuthorization();
 assert.equal(ownerBefore.designationName, "Managing Partner");
 assert.equal(ownerBefore.roleCode, "OWNER");
@@ -111,6 +117,7 @@ assert.match(route, /Same-origin request required/);
 assert.match(route, /users.some\(user => user.id === userId\)/);
 const helper = fs.readFileSync("src/lib/portal-preview.ts", "utf8");
 assert.match(helper, /auth.getUser\(\)/);
+assert.match(helper, /Preview session check/);
 assert.match(helper, /eq\("company_id", viewer.company_id\)/);
 assert.match(helper, /eq\("product_code", product\)/);
 assert.match(helper, /actor === viewerId/);
@@ -118,11 +125,15 @@ assert.match(helper, /no-store/);
 const shell = fs.readFileSync("src/components/app-shell.tsx", "utf8");
 assert.match(shell, /authorization.designationName \?\? authorization.roleName/);
 assert.doesNotMatch(shell, /!isWorkforceHost && authorization.canPreviewUsers/);
+const login = fs.readFileSync("src/app/login/page.tsx", "utf8");
+assert.match(login, /Login session check/);
+assert.match(login, /catch\(\(\) => \(\{ data: \{ user: null \} \}\)\)/);
 console.log("Portal preview tests passed: designation display, unchanged owner privileges, target permission and location parity, read-only, company/active/actor boundaries.");
 let previewCookie = null;
 const realPreview = moduleAt("src/lib/portal-preview.ts", {
   react: { cache: fn => fn },
   "next/headers": { cookies: () => ({ get: () => previewCookie ? { value: previewCookie } : undefined }), headers: () => ({ get: () => "ops.dropxlogistics.com" }) },
+  "@/lib/with-timeout": moduleAt("src/lib/with-timeout.ts", {}),
   "@/lib/supabase-admin": { supabaseAdmin: admin },
   "@/lib/supabase-server": mocks["@/lib/supabase-server"],
   "@/lib/people-designation": { ...mocks["@/lib/people-designation"], canPreviewPortalUsers: people.canPreviewPortalUsers }

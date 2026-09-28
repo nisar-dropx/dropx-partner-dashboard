@@ -18,18 +18,19 @@ const AUTH_TIMEOUT_MS = 10000;
  * should never be indistinguishable from "you're not signed in." Retry once
  * before treating it as an unavailable session. A second timeout must use the
  * normal null-session path: a page can redirect to sign-in and recover on its
- * next request, rather than rendering Next's server-exception page.
+ * next request, rather than rendering Next's server-exception page. A failed
+ * upstream auth response is also an unavailable session: authorization must
+ * fail closed instead of making the application route fail to render.
  */
 async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabaseClient>) {
   if (!supabase) return { data: { user: null } };
   try {
     return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check");
   } catch (error) {
-    if (!(error instanceof TimeoutError)) throw error;
+    if (!(error instanceof TimeoutError)) return { data: { user: null } };
     try {
       return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check (retry)");
-    } catch (retryError) {
-      if (!(retryError instanceof TimeoutError)) throw retryError;
+    } catch {
       return { data: { user: null } };
     }
   }
