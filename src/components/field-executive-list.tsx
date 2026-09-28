@@ -22,7 +22,6 @@ export type FieldExecutiveListRow = {
   isActive: boolean;
   status: string;
   canEdit?: boolean;
-  activationHref?: string;
   canQueueAmazonId?: boolean;
   partnerOnboarding?:import("@/lib/partner-onboarding").PartnerOnboardingState;
 };
@@ -294,7 +293,7 @@ export function FieldExecutiveList({
                 <td>{row.location}</td>
                 <td>{row.designation}</td>
                 <td><StatusPill status={row.status} /></td>
-                {showActions ? <td className="action-cell">{row.partnerOnboarding?<><PartnerProgressNote state={row.partnerOnboarding} workforceId={row.id} canEdit={Boolean(row.canEdit)}/><small style={{display:"block",maxWidth:260}}>{row.partnerOnboarding.instruction}</small></>:null}{row.canQueueAmazonId ? <form action={queueAmazonInvitationFromOpsPulse}><input name="workforce_id" type="hidden" value={row.id} /><button className="row-action-item" type="submit">Create Amazon ID</button></form> : null}
+                {showActions ? <td className="action-cell">{row.partnerOnboarding?<><PartnerProgressNote state={row.partnerOnboarding} workforceId={row.id} canEdit={Boolean(row.canEdit)}/></>:null}{row.canQueueAmazonId ? <form action={queueAmazonInvitationFromOpsPulse}><input name="workforce_id" type="hidden" value={row.id} /><button className="row-action-item" type="submit">Create Amazon ID</button></form> : null}
                   <div className="row-action-menu" ref={openMenuId === row.id ? menuRef : undefined}>
                     <button
                       aria-expanded={openMenuId === row.id}
@@ -317,7 +316,6 @@ export function FieldExecutiveList({
                           </PendingLink>
                         ) : null}
 
-                        {row.activationHref ? <a className="row-action-item" href={row.activationHref} target="_blank" rel="noreferrer">Amazon status ↗</a> : null}
                       </div>
                     ) : null}
                   </div>

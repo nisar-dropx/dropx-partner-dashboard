@@ -809,8 +809,6 @@ async function loadFieldExecutiveData(
       ),
       isActive: executive.is_active,
       status: partnerStates.get(executive.id)?.label || fieldExecutiveStatus(executive, targetRegister === "workforce"),
-      activationHref: targetRegister === "workforce" && executive.dropx_id
-        ? `https://workforce.dropxlogistics.com/delivery-network/id-onboarding?view=pending&q=${encodeURIComponent(executive.dropx_id)}` : undefined,
       partnerOnboarding: partnerStates.get(executive.id),
       canQueueAmazonId: Boolean(partnerStates.get(executive.id)?.can_trigger)
     };
@@ -977,7 +975,7 @@ export async function FieldExecutivePageContent({
       />
 
       {registerNavigation}
-      {returnPath==="/work-force-register"?<nav className="workforce-lifecycle-tabs" aria-label="Workforce register status"><PendingLink className={registerView==="pending"?"active":""} href="/work-force-register?status=pending">Pending <strong>{pendingRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="active"?"active":""} href="/work-force-register?status=active">Active <strong>{activeRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="due"?"active":""} href="/work-force-register?status=due">Due <strong>{dueRegisterRows.length}</strong></PendingLink><a href="https://workforce.dropxlogistics.com/delivery-network/associates?view=pending" target="_blank" rel="noreferrer">Workforce follow-up ↗</a></nav>:null}
+      {returnPath==="/work-force-register"?<nav className="workforce-lifecycle-tabs" aria-label="Workforce register status"><PendingLink className={registerView==="pending"?"active":""} href="/work-force-register?status=pending">Pending <strong>{pendingRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="active"?"active":""} href="/work-force-register?status=active">Active <strong>{activeRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="due"?"active":""} href="/work-force-register?status=due">Due <strong>{dueRegisterRows.length}</strong></PendingLink></nav>:null}
 
       {error || errorMessage || notice ? (
         <section className={`panel message-panel ${error || errorMessage ? "error" : "success"}`}>
