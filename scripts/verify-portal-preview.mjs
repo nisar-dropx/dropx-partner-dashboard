@@ -64,6 +64,13 @@ const mocks = {
   "@/lib/portal-preview": { getPreviewViewer: async () => actor === "owner" ? tables.profiles[0] : null, selectedPreviewUserId: () => selected, hasPreviewProductAccess: async () => !revoked }
 };
 const auth = moduleAt("src/lib/authorization.ts", mocks);
+class ImmediateTimeout extends Error { constructor() { super("timed out"); this.name = "TimeoutError"; } }
+const timeoutAuth = moduleAt("src/lib/authorization.ts", {
+  ...mocks,
+  "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new ImmediateTimeout(); } },
+  "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
+});
+assert.equal(await timeoutAuth.getAuthorization(), null, "two consecutive sign-in timeouts resolve as an unavailable session instead of a server exception");
 const ownerBefore = await auth.getAuthorization();
 assert.equal(ownerBefore.designationName, "Managing Partner");
 assert.equal(ownerBefore.roleCode, "OWNER");

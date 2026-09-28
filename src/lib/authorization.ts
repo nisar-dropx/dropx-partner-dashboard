@@ -16,10 +16,9 @@ const AUTH_TIMEOUT_MS = 10000;
 /**
  * A single slow-but-alive Supabase response (common under sustained DB load)
  * should never be indistinguishable from "you're not signed in." Retry once
- * before letting a timeout propagate - callers can then choose to show a
- * retryable error instead of redirecting away from work in progress, while a
- * genuine "no session" response still resolves normally through the usual
- * null-returning path below.
+ * before treating it as an unavailable session. A second timeout must use the
+ * normal null-session path: a page can redirect to sign-in and recover on its
+ * next request, rather than rendering Next's server-exception page.
  */
 async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabaseClient>) {
   if (!supabase) return { data: { user: null } };
@@ -27,7 +26,12 @@ async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabase
     return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check");
   } catch (error) {
     if (!(error instanceof TimeoutError)) throw error;
-    return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check (retry)");
+    try {
+      return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check (retry)");
+    } catch (retryError) {
+      if (!(retryError instanceof TimeoutError)) throw retryError;
+      return { data: { user: null } };
+    }
   }
 }
 
