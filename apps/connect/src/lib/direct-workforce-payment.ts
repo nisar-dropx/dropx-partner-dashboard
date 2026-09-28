@@ -14,6 +14,8 @@ export type DirectPaymentComponent = {
   component_type: string;
   label?: string | null;
   pay_schedule?: string | null;
+  calculation_type?: string | null;
+  calculation_source?: string | null;
   sort_order?: number | null;
   is_active?: boolean | null;
   payment_fields?: Relation<DirectPaymentField>;
@@ -149,7 +151,7 @@ function paymentValue(values: Record<string, unknown> | null, code: string) {
 }
 
 function componentSchedule(component: DirectPaymentComponent, field: DirectPaymentField | null) {
-  const calculation = String(field?.calculation_type ?? "").trim().toLowerCase();
+  const calculation = String(field?.calculation_type ?? component.calculation_type ?? "").trim().toLowerCase();
   const configured = String(field?.pay_schedule || component.pay_schedule || "").trim().toLowerCase();
   if (calculation === "fixed_monthly" || configured === "per_month") return "per_month" as const;
   if (configured === "per_hour") return "per_hour" as const;
@@ -205,7 +207,8 @@ export function calculateDirectWorkforcePayments(input: {
       .sort((left, right) => Number(left.sort_order ?? 0) - Number(right.sort_order ?? 0) || left.component_code.localeCompare(right.component_code));
     const lines = components.map((component): DirectPaymentLine => {
       const field = first(component.payment_fields);
-      const calculation = String(field?.calculation_type ?? "").trim().toLowerCase();
+      const calculation = String(field?.calculation_type ?? component.calculation_type ?? "").trim().toLowerCase();
+      const calculationSource = String(field?.calculation_source ?? component.calculation_source ?? "").trim().toLowerCase();
       if (component.component_type === "production" || field?.field_type === "production" || calculation === "count_x_rate") {
         throw new Error("Production components cannot be used in a direct workforce payment allocation.");
       }
@@ -214,9 +217,14 @@ export function calculateDirectWorkforcePayments(input: {
       const label = String(field?.label || component.label || code).trim();
       const rate = paymentValue(allocation.payment_values, code);
       const schedule = componentSchedule(component, field);
-      const count = schedule === "per_month" ? 1 / daysInMonth(date) : schedule === "per_hour" ? (units > 0 ? minutes / 60 : 0) : units;
+      const attendanceBased = calculationSource === "attendance_eligibility";
+      const count = schedule === "per_month"
+        ? (attendanceBased ? units : 1) / daysInMonth(date)
+        : schedule === "per_hour"
+          ? (units > 0 ? minutes / 60 : 0)
+          : units;
       const calculated = schedule === "per_month"
-        ? monthlyDailyAccrual(rate, date)
+        ? monthlyDailyAccrual(rate, date) * (attendanceBased ? units : 1)
         : rate * count;
       return { code, label, count, rate, amount: amount(calculated), schedule };
     });

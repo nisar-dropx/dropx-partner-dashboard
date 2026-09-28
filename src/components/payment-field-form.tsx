@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 import {
+  attendanceCalculationType,
+  paymentCalculationBasis,
+  type PaymentCalculationBasis,
   type ProviderCalculationSources,
   type PaymentCalculationSource,
   type PaymentCalculationType
@@ -26,6 +29,17 @@ type ProviderAllocation = { provider_id: string; provider_model_id: string | nul
 
 export function PaymentFieldForm({ action, initialField, submitLabel, providerMetrics = [], providerModels = [], selectedAllocations = [] }: { action: (formData: FormData) => Promise<void>; initialField?: PaymentField; submitLabel: string; providerMetrics?: ProviderMetric[]; providerModels?: ProviderModel[]; selectedAllocations?: ProviderAllocation[] }) {
   const [type, setType] = useState<"amount" | "production">(initialField?.field_type ?? "production");
+  const [schedule, setSchedule] = useState<"per_hour" | "per_day" | "per_month">(initialField?.pay_schedule ?? "per_month");
+  const [basis, setBasis] = useState<PaymentCalculationBasis>(() => initialField
+    ? paymentCalculationBasis({ fieldType: initialField.field_type, calculationType: initialField.calculation_type, calculationSource: initialField.calculation_source })
+    : "attendance");
+  const amountBasis = basis === "production" ? "attendance" : basis;
+  const calculationType = type === "production" ? "count_x_rate" : amountBasis === "attendance" ? attendanceCalculationType(schedule) : "manual_input";
+  const formula = schedule === "per_hour"
+    ? "Hourly rate × worked hours from attendance. Days without payable attendance pay zero."
+    : schedule === "per_day"
+      ? "Daily rate × attendance units. Full day = 1, half day = 0.5, absent = 0."
+      : "Monthly amount ÷ calendar days × attendance units. Full day = 1, half day = 0.5, absent = 0.";
 
   return (
     <form action={action} className="payment-field-form">
@@ -34,14 +48,15 @@ export function PaymentFieldForm({ action, initialField, submitLabel, providerMe
         <span className="payment-field-section-title">Field details</span>
         <label>Field ID<input className="field mono" defaultValue={initialField?.code} name="field_code" readOnly={Boolean(initialField?.usage_count)} required title={initialField?.usage_count ? "Field ID is locked because this field is already used." : undefined} /></label>
         <label>Display name<input className="field" defaultValue={initialField?.label} name="field_label" required /></label>
-        <label>Value type<select className="select" name="field_type" onChange={(event) => setType(event.target.value as "amount" | "production")} value={type}><option value="production">Production count x rate</option><option value="amount">Amount</option></select></label>
-        {type === "amount" ? <label>Payment frequency<select className="select" defaultValue={initialField?.pay_schedule ?? "per_month"} name="pay_schedule" required><option value="per_hour">Per hour</option><option value="per_day">Per day</option><option value="per_month">Per month</option></select></label> : null}
+        <label>Value type<select className="select" name="field_type" onChange={(event) => { const next = event.target.value as "amount" | "production"; setType(next); setBasis(next === "production" ? "production" : amountBasis); }} value={type}><option value="production">Production count x rate</option><option value="amount">Amount</option></select></label>
+        {type === "amount" ? <label>Payment frequency<select className="select" name="pay_schedule" onChange={(event) => setSchedule(event.target.value as typeof schedule)} required value={schedule}><option value="per_hour">Per hour</option><option value="per_day">Per day</option><option value="per_month">Per month</option></select></label> : null}
       </div>
 
       <div className="payment-field-form-section payment-field-calculation">
         <span className="payment-field-section-title">How payment is calculated</span>
-        <input name="calculation_type" type="hidden" value={type === "production" ? "count_x_rate" : "manual_input"} />
+        <input name="calculation_type" type="hidden" value={calculationType} />
         {type === "production" ? <>
+          <input name="calculation_basis" type="hidden" value="production" />
           <div className="payment-field-allocation-head"><span>Provider</span><span>Operating model</span><span>Production count</span></div>
           {providerModels.map((model) => {
             const options = providerMetrics.filter((metric) => metric.provider_id === model.provider_id && (metric.provider_model_id === model.id || metric.provider_model_id === null));
@@ -67,8 +82,11 @@ export function PaymentFieldForm({ action, initialField, submitLabel, providerMe
           {!providerMetrics.length ? <p className="payment-field-calculation-help">No provider production counts are configured. Add them in Provider Master first.</p> : null}
           <div className="payment-field-calculation-help">Allocate a production count separately for each provider and operating model. The individual rate is entered for each DropX ID in ID &amp; pay mapping.</div>
         </> : <>
-          <input name="calculation_source" type="hidden" value="" />
-          <p className="payment-field-calculation-help">The configured amount in ID &amp; pay mapping will be used directly.</p>
+          <label>Calculation basis<select className="select" name="calculation_basis" onChange={(event) => setBasis(event.target.value as PaymentCalculationBasis)} value={amountBasis}><option value="attendance">Attendance / worked time</option><option value="legacy">Schedule default (existing behavior)</option></select></label>
+          <input name="calculation_source" type="hidden" value={amountBasis === "attendance" ? "attendance_eligibility" : ""} />
+          <p className="payment-field-calculation-help">{amountBasis === "attendance" ? formula : "Monthly amounts accrue for each active calendar day. Daily and hourly amounts use attendance, matching the existing calculation."}</p>
+          {amountBasis === "attendance" ? <p className="payment-field-calculation-help">Use this for direct workforce pay that must depend on recorded attendance.</p> : null}
+          {initialField ? <p className="payment-field-calculation-help">Existing direct-pay history stays unchanged. Re-save a current allocation from its effective date to apply a changed basis.</p> : null}
         </>}
       </div>
 

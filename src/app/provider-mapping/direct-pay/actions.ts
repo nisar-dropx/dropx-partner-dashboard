@@ -137,7 +137,7 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
     }
     const paymentValues = normalizeDirectPaymentValues(components, rawValues);
 
-    const saveResult = await supabaseAdmin.rpc("save_workforce_payment_allocation", {
+    const saveResult = await supabaseAdmin.rpc("save_workforce_payment_allocation_v2", {
       p_company_id: companyId,
       p_workforce_id: workforceId,
       p_payment_method_id: paymentMethodId,

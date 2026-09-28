@@ -19,6 +19,35 @@ test("monthly accrual conserves paise across a month", () => {
   assert.equal(Math.round(total * 100) / 100, 1000);
 });
 
+test("attendance-based monthly pay uses full, half and absent attendance units", () => {
+  const component = {
+    component_code: "MONTHLY",
+    component_type: "amount",
+    pay_schedule: "per_month",
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility"
+  };
+  const present = directPayForDay({ MONTHLY: 3000 }, [component], "2026-09-01", { punch_date: "2026-09-01", status: "P", work_minutes: 480 });
+  const halfDay = directPayForDay({ MONTHLY: 3000 }, [component], "2026-09-02", { punch_date: "2026-09-02", status: "HD", work_minutes: 240 });
+  const absent = directPayForDay({ MONTHLY: 3000 }, [component], "2026-09-03", { punch_date: "2026-09-03", status: "A", work_minutes: 0 });
+  const missingAttendance = directPayForDay({ MONTHLY: 3000 }, [component], "2026-09-04", null);
+
+  assert.equal(present.total, 100);
+  assert.equal(halfDay.total, 50);
+  assert.equal(absent.total, 0);
+  assert.equal(missingAttendance.total, 0);
+  assert.equal(present.lines[0].count, 1 / 30);
+  assert.equal(halfDay.lines[0].count, 0.5 / 30);
+});
+
+test("legacy monthly pay remains calendar-based when no attendance basis is configured", () => {
+  const result = directPayForDay({ MONTHLY: 3000 }, [
+    { component_code: "MONTHLY", component_type: "amount", pay_schedule: "per_month", calculation_type: "fixed_monthly" }
+  ], "2026-09-01", null);
+  assert.equal(result.total, 100);
+  assert.equal(result.lines[0].count, 1 / 30);
+});
+
 test("provider-production components are rejected for direct allocations", () => {
   const result = directPayForDay({ DELIVERY: 10 }, [
     { component_code: "DELIVERY", component_type: "production", pay_schedule: null }

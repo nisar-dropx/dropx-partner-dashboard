@@ -77,6 +77,17 @@ function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
+type ProviderPaymentComponent = {
+  component_code: string;
+  label: string;
+  payment_fields?: { calculation_source?: string | null; calculation_type?: string | null } | Array<{ calculation_source?: string | null; calculation_type?: string | null }> | null;
+};
+
+function usesAttendanceCalculation(component: ProviderPaymentComponent) {
+  const field = firstRelation(component.payment_fields);
+  return field?.calculation_source === "attendance_eligibility";
+}
+
 type WorkforceDesignationReference = {
   designation_id?: string | null;
   designation?: string | null;
@@ -187,7 +198,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, designation_id, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true).eq("provider_mapping_required", true),
-      supabaseAdmin.from("payment_methods").select("id, code, payment_method_components(component_code, label)").eq("company_id", companyId).eq("is_active", true)
+      supabaseAdmin.from("payment_methods").select("id, code, payment_method_components(component_code, label, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
     ]);
     if (employeeError) throw new Error(employeeError.message);
     if (contractorError) throw new Error(contractorError.message);
@@ -198,7 +209,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     const paymentMethodByCode = new Map((paymentMethods ?? []).map((method) => [String(method.code ?? "").trim().toUpperCase(), {
       id: String(method.id),
       code: String(method.code ?? "").trim(),
-      components: (method.payment_method_components ?? []) as Array<{ component_code: string; label: string }>
+      components: (method.payment_method_components ?? []) as ProviderPaymentComponent[]
     }]));
     const allPaymentFieldCodes = new Set(Array.from(paymentMethodByCode.values()).flatMap((method) => method.components.map((component) => normalizedHeader(component.component_code))));
 
@@ -260,6 +271,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       const paymentMethod = uploadRow.paymentMethodCode ? paymentMethodByCode.get(uploadRow.paymentMethodCode) : null;
       if (hasAllocationData && !uploadRow.paymentMethodCode) { skipped("Payment Method Code is required when payment allocation data is supplied."); continue; }
       if (uploadRow.paymentMethodCode && !paymentMethod) { skipped("Payment Method Code is not active or does not exist."); continue; }
+      if (paymentMethod?.components.some(usesAttendanceCalculation)) { skipped("Attendance-based payment methods must be assigned in Direct pay allocations."); continue; }
       const effectiveFrom = bulkDate(uploadRow.effectiveFromRaw);
       const effectiveTo = bulkDate(uploadRow.effectiveToRaw);
       if (effectiveFrom === null) { skipped("Effective From must be YYYY-MM-DD or DD/MM/YYYY."); continue; }
@@ -392,13 +404,17 @@ async function saveExecutiveMappingRow(
   const rawPaymentValues = rowValue(formData, index, "payment_values_json") ?? "{}";
   const { data: paymentMethod, error: methodError } = await supabaseAdmin
     .from("payment_methods")
-    .select("id, code, payment_method_components (component_code, label)")
+    .select("id, code, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
     .eq("id", paymentMethodId)
     .eq("company_id", companyId)
     .eq("is_active", true)
     .single();
 
   if (methodError) throw new Error(methodError.message);
+  const methodComponents = (paymentMethod.payment_method_components ?? []) as ProviderPaymentComponent[];
+  if (methodComponents.some(usesAttendanceCalculation)) {
+    throw new Error(`Row ${index + 1}: Attendance-based payment methods must be assigned in Direct pay allocations, not provider ID mapping.`);
+  }
 
   const [{ data: legacyWorker }, { data: station }] = await Promise.all([
     sourceType === "employee"
@@ -514,7 +530,7 @@ async function saveExecutiveMappingRow(
     throw new Error(`Row ${index + 1}: Payment values are invalid.`);
   }
 
-  const components = (paymentMethod.payment_method_components ?? []) as Array<{ component_code: string; label: string }>;
+  const components = methodComponents;
   const selectedComponentCodes = new Set(components.map((component) => component.component_code));
   paymentValues = Object.fromEntries(
     Object.entries(paymentValues).filter(([key]) => selectedComponentCodes.has(key))
