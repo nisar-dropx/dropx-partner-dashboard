@@ -180,6 +180,14 @@ async function requireCodRemark(companyId: string, stationCode: string, reviewId
   if (missingCodRemark(rows, saved.data ?? [])) throw Error("Add a short reason / remark for COD pending 2+ days in RCA before completing this review.");
 }
 
+async function requireVehicleDetails(companyId: string, stationId: string, sourceDate: string) {
+  const saved = await supabaseAdmin!.from("ops_performance_connections").select("id", { count: "exact", head: true })
+    .eq("company_id", companyId).eq("station_id", stationId).eq("service_date", sourceDate)
+    .not("arrival_at", "is", null).not("unloading_at", "is", null).limit(1);
+  if (saved.error) throw Error("Unable to check station vehicle details. Please retry.");
+  if (!saved.count) throw Error("Record Vehicle 1 arrival and unloading before completing this review.");
+}
+
 /** One common comment box: save a note, or complete the assigned stage with that note. */
 export async function savePerformanceReviewComment(data:FormData):Promise<ReviewActionResult> {
   const authorization=await requirePagePermission("performance_review","access");
@@ -201,6 +209,7 @@ export async function savePerformanceReviewComment(data:FormData):Promise<Review
       const missing = missingDisciplineReasons(delays, saved.data ?? []);
       if (missing.length) throw Error(`Add ${missing.length} short delay reason${missing.length === 1 ? "" : "s"} in RCA before completing: ${missing.slice(0, 3).map(row => row.label).join("; ")}${missing.length > 3 ? "; …" : ""}.`);
       await requireCodRemark(companyId, station.station_code, review.id);
+      await requireVehicleDetails(companyId, station.id, review.source_date);
     }
     const result=await supabaseAdmin!.rpc("ops_mutate_manager_review",{p_company:companyId,p_actor:authorization.userId,p_review:review.id,p_action:complete?"complete":"comment",p_data:{note,step_id:step?.id,expected_review_version:review.updated_at,...author(authorization,access.actor.label)}});
     rpcError(result.error);
@@ -253,8 +262,11 @@ export async function bypassPerformanceReviewLevel(data: FormData): Promise<Revi
     const step = steps.find(entry => entry.id === text(data, "step_id") && entry.status === "pending" && visibleReviewStep(entry));
     if (!step) throw new Error("This review level is no longer pending. Refresh to continue.");
     const reason = reviewBypassReason(text(data, "reason"));
-    // Skipping the final outstanding stage must not silently bypass the COD requirement.
-    if (!steps.some(entry => entry.id !== step.id && entry.status === "pending")) await requireCodRemark(companyId, station.station_code, review.id);
+    // Skipping the final outstanding stage must not silently bypass completion requirements.
+    if (!steps.some(entry => entry.id !== step.id && entry.status === "pending")) {
+      await requireCodRemark(companyId, station.station_code, review.id);
+      await requireVehicleDetails(companyId, station.id, review.source_date);
+    }
     const result = await supabaseAdmin!.rpc("ops_bypass_review_level", {
       p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_step: step.id,
       p_reason: reason, p_expected_version: text(data, "review_version") || null,

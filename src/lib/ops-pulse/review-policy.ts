@@ -195,6 +195,7 @@ export function stationTimingClocks(values: { arrival: string; unloading: string
   const arrival = clock(values.arrival);
   if (!arrival) throw new Error("Enter the vehicle arrival time first.");
   const unloading = clock(values.unloading);
+  if (!unloading) throw new Error("Enter the unloading completion time.");
   const clearance = clock(values.clearance);
   const unloadingDate = unloading && unloading < arrival ? nextCalendarDay(serviceDate) : serviceDate;
   const clearanceDate = clearance && unloading && clearance < unloading ? nextCalendarDay(unloadingDate) : unloadingDate;

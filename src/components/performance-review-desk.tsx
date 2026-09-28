@@ -179,6 +179,7 @@ export function PerformanceReviewDesk(props: Props) {
   const disciplineRows = buildDisciplineRca(snapshot, props.utrDiscipline.discipline);
   const codRows = buildCodRca(props.codSnapshot);
   const codRemarkMissing = missingCodRemark(codRows, currentItems);
+  const vehicleDetailsRecorded = connections.some((connection) => Boolean(connection.arrival_at && connection.unloading_at));
   const missingReasons = missingDisciplineReasons(disciplineRows, currentItems);
   const metricMisses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
   const misses = [...metricMisses, ...disciplineRows, ...codRows];
@@ -269,6 +270,7 @@ export function PerformanceReviewDesk(props: Props) {
       <div><span>Source</span><strong>{sourceType === "amazon_hawkeye_daily" ? "Hawkeye D-1" : sourceType === "daily_edsp_metrics" ? "Daily EDSP" : "Operational data"}</strong></div>
       <div><span>Review</span><strong>{review ? review.status.replace("_", " ") : "Not started"}</strong></div>
       <div><span>Current dependency</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.proxy_reviewer_name||activeStep.reviewer_name}${activeStep.proxy_reviewer_name?" (proxy)":""}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
+      <div className={vehicleDetailsRecorded ? "review-ready" : "review-required"}><span>Vehicle 1</span><strong>{vehicleDetailsRecorded ? "Timings recorded" : "Details required"}</strong></div>
       {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button id="start-station-review" className="button">Start review</button></ReviewActionForm> : null}
     </section>
 
@@ -373,6 +375,7 @@ export function PerformanceReviewDesk(props: Props) {
     <PerformanceFollowups key={`${selectedCode}-${date}`} review={review} date={date} rows={props.followups.rows} count={props.followups.count} error={props.followups.error} canAdd={canEdit} canUpdate={props.canManageActions}/>
     {review ? <section className="review-discussion" id="review-discussion">
       <header><div><h3>Review discussion</h3><p>{review.status === "closed" ? "Review completed · all inputs remain visible" : activeStep ? `${activeStep.proxy_reviewer_name||activeStep.reviewer_name} reviews with ${selectedSteps.findIndex(step=>step.id===activeStep.id)>0?selectedSteps[selectedSteps.findIndex(step=>step.id===activeStep.id)-1].reviewer_name:props.stationLeads}` : "Review manager not assigned"}</p></div><span>{reviewUpdates.length} updates</span></header>
+      {review.status !== "closed" && !vehicleDetailsRecorded ? <p className="review-delay-required review-vehicle-required-note"><a href="#review-station-updates">Vehicle 1 arrival and unloading are required</a> before completing this review.</p> : null}
       {review.status !== "closed" && missingReasons.length ? <p className="review-delay-required"><a href="#review-rca">{missingReasons.length} delay reason{missingReasons.length === 1 ? "" : "s"} required in RCA</a> before completing this review.</p> : null}
       {review.status !== "closed" && codRemarkMissing ? <p className="review-delay-required"><a href="#review-cod-remark">COD pending 2+ days · reason / remark required</a> before completing this review.</p> : null}
       {review.status !== "closed" && props.codSnapshot.error ? <p className="review-delay-required">COD ageing could not be verified. Refresh the COD report before completing this review.</p> : null}

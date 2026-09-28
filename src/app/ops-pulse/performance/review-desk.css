@@ -130,6 +130,12 @@
 .review-vehicle { border-top: 1px solid #e9edf3; margin-top: 10px; }
 .review-vehicle > summary { padding: 10px 0; cursor: pointer; }
 .review-vehicle > summary > span { min-width: 0; overflow-wrap: anywhere; }
+.review-vehicle-required { margin-top: 10px; padding: 12px; border: 1px solid #f6c66b; border-radius: 8px; background: #fffaf0; }
+.review-vehicle-required > div > small { display: block; margin-top: 4px; color: #9a3412; font-size: 11px; }
+.review-vehicle-required .review-station-times { margin-top: 10px !important; background: #fff !important; }
+.review-required strong { color: #b45309; }
+.review-ready strong { color: #15803d; }
+.review-vehicle-required-note { border-color: #f6c66b; background: #fffaf0; }
 .performance-review-desk .review-vehicles .review-station-times { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .review-vehicles .review-station-times label { min-width: 0; }
 .review-vehicles input { width: 100%; min-width: 0; }

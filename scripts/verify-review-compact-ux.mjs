@@ -26,6 +26,8 @@ assert.ok(html.includes('Arrived 07:35 · Unloaded 08:25'));
 assert.ok(!/clearance|Vehicle cleared|09:00/.test(html),'retired field absent from summary, read and edit views');
 assert.ok(!/<details[^>]+open/.test(html),'existing vehicles start collapsed');
 assert.ok(html.includes('Close Vehicle 1 timings')&&html.includes('aria-controls="review-new-vehicle"'));
+const requiredVehicle=renderToStaticMarkup(React.createElement(component.PerformanceConnections,{connections:[],date:'2026-09-09',stationCode:'GDRD',canEdit:true}));
+assert.ok(requiredVehicle.includes('Vehicle 1 · required')&&requiredVehicle.includes('Save both timings before a manager can complete this review.'),'Vehicle 1 is present and clearly required before completion');
 const css=read('src/app/ops-pulse/performance/review-desk.css');
 assert.ok(css.includes('position: static; width: auto; max-width: 100%'),'drilldowns stay inline');
 assert.ok(css.includes('min-height: 44px')&&css.includes('overflow-x: auto'),'touch targets and contained mobile scrolling');
@@ -37,5 +39,7 @@ assert.ok(!scorecardHtml.includes('Needs attention')&&!scorecardHtml.includes('S
 const action=read('src/app/ops-pulse/performance/actions.ts').split('export async function savePerformanceConnection')[1].split('/** Explicit exception')[0];
 assert.ok(!action.includes('text(data, "clearance")'));
 const migration=read('supabase/migrations/20260910142408_retire_review_vehicle_clearance.sql');
+const requiredVehicleMigration=read('supabase/migrations/20260928200000_require_review_vehicle_details.sql');
+assert.ok(requiredVehicleMigration.includes('ops_assert_review_vehicle_details')&&requiredVehicleMigration.includes("perform public.ops_assert_review_vehicle_details(p_company,v_review.station_id,v_review.source_date)"),'database completion paths require a saved Vehicle 1');
 assert.ok(!migration.includes('clearance_at=')&&!migration.includes('delete from'));
 console.log('PASS compact Review Desk: retired field, closed vehicle rows, close/Escape/focus, preserved drafts, mobile targets and inline panels.');

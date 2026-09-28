@@ -65,8 +65,9 @@ test('connection handles overnight completion and saves in IST',()=>{
   assert.deepEqual(connectionTimes({arrival:'2026-09-01T23:30',unloading:'2026-09-02T00:20',clearance:'2026-09-02T01:00'},'2026-09-01'),{arrival:'2026-09-01T18:00:00.000Z',unloading:'2026-09-01T18:50:00.000Z',clearance:'2026-09-01T19:30:00.000Z'});
   assert.deepEqual(stationTimingClocks({arrival:'23:30',unloading:'00:20',clearance:'01:00'},'2026-09-01'),{arrival:'2026-09-01T18:00:00.000Z',unloading:'2026-09-01T18:50:00.000Z',clearance:'2026-09-01T19:30:00.000Z'});
 });
-test('partial connection allowed; chronology and invalid dates rejected',()=>{
+test('legacy partial connections remain readable; new station timing entries require unloading',()=>{
   assert.equal(connectionTimes({arrival:'2026-09-01T07:00',unloading:'',clearance:''},'2026-09-01').unloading,null);
+  assert.throws(()=>stationTimingClocks({arrival:'07:00',unloading:'',clearance:''},'2026-09-01'),/unloading completion/);
   for(const values of [
     {arrival:'2026-09-01T07:00',unloading:'2026-09-01T06:00',clearance:''},
     {arrival:'2026-09-01T07:00',unloading:'',clearance:'2026-09-01T08:00'},

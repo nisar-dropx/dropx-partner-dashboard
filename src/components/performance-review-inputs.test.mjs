@@ -16,7 +16,8 @@ const targets=compile('../lib/ops-pulse/station-review-targets.ts');
 const {PerformanceConnections}=compile('./performance-connections.tsx',{
   '@/components/performance-trends':{TrendButton:()=>null},
   '@/lib/ops-pulse/station-review-targets':targets,
-  '@/components/review-action-form':{ReviewActionForm:({children})=>React.createElement('form',{},children)}
+  '@/components/review-action-form':{ReviewActionForm:({children})=>React.createElement('form',{},children)},
+  '@/components/review-details':{ReviewDetails:({children})=>React.createElement('details',{},children),ReviewDetailsClose:()=>null}
 });
 const base={id:'10000000-0000-0000-0000-000000000001',version:2,label:'Vehicle A',arrival_at:'2026-09-03T01:30:00Z',unloading_at:'2026-09-03T02:30:00Z',clearance_at:'2026-09-03T03:00:00Z'};
 const second={...base,id:'10000000-0000-0000-0000-000000000002',label:'Vehicle B',arrival_at:'2026-09-03T04:30:00Z'};
@@ -24,9 +25,9 @@ const render=props=>renderToStaticMarkup(React.createElement(PerformanceConnecti
 test('every saved vehicle remains editable with its own ID and version',()=>{
   const html=render({connections:[base,second],canEdit:true,clearanceCutoff:'08:00'});
   assert.match(html,/Vehicle A/);assert.match(html,/Vehicle B/);assert.match(html,/Add vehicle/);
-  assert.equal((html.match(/name="connection_id"/g)||[]).length,2);
+  assert.equal((html.match(/name="connection_id"/g)||[]).length,3,'two saved vehicles plus the collapsed additional-vehicle form');
   assert.match(html,new RegExp(base.id));assert.match(html,new RegExp(second.id));
-  assert.match(html,/30 min late/);
+  assert.match(html,/Unloading complete/);
 });
 test('read-only station review shows all connections but no save/add actions',()=>{
   const html=render({connections:[base,second],canEdit:false});
@@ -36,6 +37,8 @@ test('read-only station review shows all connections but no save/add actions',()
 test('empty editable station starts one new vehicle without replacing existing records',()=>{
   const html=render({connections:[],canEdit:true});
   assert.match(html,/name="connection_id" value=""/);
-  assert.match(html,/Save this vehicle, then use/);
+  assert.match(html,/Vehicle 1 · required/);
+  assert.match(html,/Save both timings before a manager can complete this review/);
+  assert.match(html,/required=""/);
   assert.match(html,/Save vehicle timings/);
 });

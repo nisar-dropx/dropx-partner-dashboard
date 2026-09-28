@@ -31,15 +31,15 @@ assert.equal(logic.missingDisciplineReasons(rows, [{ metric_key: rows[0].key, ro
 assert.equal(logic.missingDisciplineReasons(rows, rows.map(r => ({ metric_key: r.key, root_cause: "Bus delay" }))).length, 0);
 
 // Server action tests run with an in-memory database; no real review inputs are created.
-let calls = [], saved = [], sourceError = false, scope = true, allowRca = false, allowComplete = true;
+let calls = [], saved = [], sourceError = false, scope = true, allowRca = false, allowComplete = true, vehicleDetails = true;
 const review = { id: "review1", station_id: "station1", station_code: "QLDA", source_date: "2026-09-08", current_step_order: 2, status: "in_review", updated_at: "version1" };
 const step = { id: "step2", step_order: 2, status: "pending" };
 const authorization = { userId: "reviewer", fullName: "Reviewer", hasAllLocationAccess: false, locationScopeIds: ["station1"] };
 const db = { from(table) {
   const filters = [];
   const result = () => ({ data: table === "stations" ? (scope ? { id: "station1", station_code: "QLDA" } : null)
-    : table === "ops_performance_reviews" ? review : table === "ops_performance_review_steps" ? [step] : saved, error: null });
-  const q = { select() { return q; }, eq(k,v) { filters.push([k,v]); calls.push([table,k,v]); return q; }, maybeSingle() { return Promise.resolve(result()); }, order() { return Promise.resolve(result()); }, then(resolve,reject) { return Promise.resolve(result()).then(resolve,reject); } };
+    : table === "ops_performance_reviews" ? review : table === "ops_performance_review_steps" ? [step] : saved, count: table === "ops_performance_connections" ? (vehicleDetails ? 1 : 0) : null, error: null });
+  const q = { select() { return q; }, eq(k,v) { filters.push([k,v]); calls.push([table,k,v]); return q; }, not() { return q; }, limit() { return Promise.resolve(result()); }, maybeSingle() { return Promise.resolve(result()); }, order() { return Promise.resolve(result()); }, then(resolve,reject) { return Promise.resolve(result()).then(resolve,reject); } };
   return q;
 }, async rpc(name, args) { calls.push([name,args]); if (args.p_action === "item") saved.push({ metric_key: args.p_data.metric_key, root_cause: args.p_data.root_cause }); return { error: null }; } };
 const dependencies = {
@@ -80,6 +80,9 @@ assert.equal(written[0].p_data.actual_value, 12);
 assert.equal(written[0].p_data.corrective_action, "", "only the short reason is required");
 assert.equal(written[0].p_data.expected_review_version, "version1");
 assert.ok(calls.some(c => c[0] === "ops_performance_review_items" && c[1] === "company_id" && c[2] === "company1"));
+vehicleDetails = false;
+assert.match((await actions.savePerformanceReviewComment(form())).error, /Vehicle 1 arrival and unloading/);
+vehicleDetails = true;
 assert.equal((await actions.savePerformanceReviewComment(form())).notice, "Your review is complete. The next manager can now review.");
 assert.equal((await actions.savePerformanceReviewItem(form())).error, "RCA and actions are editable by the first review manager during their stage, or Program Manager.", "later manager does not gain metric RCA rights");
 allowRca = true;

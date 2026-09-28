@@ -52,10 +52,10 @@ const db = { from(table) {
     const data = table === 'stations' ? scope ? { id: 'station1', station_code: 'TEST' } : null
       : table === 'ops_performance_reviews' ? filters.every(([k,v]) => k === 'company_id' ? v === 'company1' : review[k] === v) ? review : null
       : table === 'ops_performance_review_steps' ? steps : saved;
-    return { data, error: savedError && table === 'ops_performance_review_items' ? { message: 'Unavailable' } : null };
+    return { data, count: table === 'ops_performance_connections' ? 1 : null, error: savedError && table === 'ops_performance_review_items' ? { message: 'Unavailable' } : null };
   };
   const q = { select() { return q; }, eq(k,v) { filters.push([k,v]); calls.push([table,k,v]); return q; },
-    order() { return Promise.resolve(result()); }, maybeSingle() { return Promise.resolve(result()); }, then(a,b) { return Promise.resolve(result()).then(a,b); } }; return q;
+    not() { return q; }, limit() { return Promise.resolve(result()); }, order() { return Promise.resolve(result()); }, maybeSingle() { return Promise.resolve(result()); }, then(a,b) { return Promise.resolve(result()).then(a,b); } }; return q;
 }, async rpc(name, args) { calls.push([name,args]); if (args.p_action === 'item') saved = [args.p_data]; return { error: null }; } };
 const discipline = { isDisciplineRcaKey: () => false, missingDisciplineReasons: () => [] };
 const actions = compile('src/app/ops-pulse/performance/actions.ts', {
