@@ -40,6 +40,6 @@ const action=read('src/app/ops-pulse/performance/actions.ts').split('export asyn
 assert.ok(!action.includes('text(data, "clearance")'));
 const migration=read('supabase/migrations/20260910142408_retire_review_vehicle_clearance.sql');
 const requiredVehicleMigration=read('supabase/migrations/20260928200000_require_review_vehicle_details.sql');
-assert.ok(requiredVehicleMigration.includes('ops_assert_review_vehicle_details')&&requiredVehicleMigration.includes("perform public.ops_assert_review_vehicle_details(p_company,v_review.station_id,v_review.source_date)"),'database completion paths require a saved Vehicle 1');
+assert.ok(requiredVehicleMigration.includes('ops_assert_review_vehicle_details')&&requiredVehicleMigration.includes('ops_guard_review_vehicle_completion')&&requiredVehicleMigration.includes('ops_guard_review_vehicle_close'),'database completion and final-close paths require a saved Vehicle 1');
 assert.ok(!migration.includes('clearance_at=')&&!migration.includes('delete from'));
 console.log('PASS compact Review Desk: retired field, closed vehicle rows, close/Escape/focus, preserved drafts, mobile targets and inline panels.');
