@@ -318,7 +318,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
         <div className="modal-backdrop">
           <section className="modal-panel wide payment-fields-modal" aria-label="Payment fields">
             <div className="panel-head">
-              <div><h2>Payment Fields</h2><p className="subtle">Link each production field to a provider count. Enter the corresponding rate separately for each DropX ID.</p></div>
+              <div><h2>Payment Fields</h2><p className="subtle">Choose how each field is calculated. Production fields use provider counts; amount fields can use recorded attendance.</p></div>
               <PendingLink className="icon-button" href="/master/payment-methods" scroll={false} aria-label="Close">x</PendingLink>
             </div>
             {pagePermission.canAdd ? <div className="payment-field-create"><div className="payment-field-create-head"><h3>Add payment field</h3><p className="subtle">Create the field once, then reuse it in any payment method.</p></div><PaymentFieldForm action={createPaymentField} providerMetrics={providerMetrics} providerModels={providerModels} submitLabel="Add field" /></div> : null}

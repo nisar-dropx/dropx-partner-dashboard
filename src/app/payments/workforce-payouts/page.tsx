@@ -92,7 +92,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       }
       return { data: rows, error: null };
     })() : Promise.resolve({ data: [], error: null }),
-    directAllocations.length ? supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", Array.from(new Set(directAllocations.map((row: any) => row.payment_method_id)))) : Promise.resolve({ data: [], error: null })
+    directAllocations.length ? supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", Array.from(new Set(directAllocations.map((row: any) => row.payment_method_id)))) : Promise.resolve({ data: [], error: null })
   ]);
   if (workforceBySourceResult.error || workforceByIdResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error || panAadhaarResult.error || attendanceResult.error || directComponentsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceBySourceResult.error?.message || workforceByIdResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || panAadhaarResult.error?.message || attendanceResult.error?.message || directComponentsResult.error?.message || "Unable to load payout data." };
   const workerBySource = new Map<string, any>();
@@ -144,7 +144,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       component_type: String(field?.field_type ?? row.component_type ?? ""),
       label: String(field?.label ?? row.label ?? row.component_code ?? ""),
       pay_schedule: String(field?.pay_schedule ?? row.pay_schedule ?? "") || null,
-      calculation_type: String(field?.calculation_type ?? "") || null
+      calculation_type: String(field?.calculation_type ?? "") || null,
+      calculation_source: String(field?.calculation_source ?? "") || null
     };
     directComponentsByMethod.set(String(row.payment_method_id), [...(directComponentsByMethod.get(String(row.payment_method_id)) ?? []), component]);
   }

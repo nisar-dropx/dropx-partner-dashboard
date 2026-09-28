@@ -4,6 +4,7 @@ export type DirectPayComponent = {
   label?: string | null;
   pay_schedule?: string | null;
   calculation_type?: string | null;
+  calculation_source?: string | null;
 };
 
 export type DirectPayAttendance = {
@@ -97,12 +98,15 @@ export function directPayForDay(
       missing = true;
       continue;
     }
+    const attendanceBased = component.calculation_source === "attendance_eligibility";
     const count = schedule === "per_month"
-      ? 1 / new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate()
+      ? (attendanceBased ? attendanceUnit : 1) / new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate()
       : schedule === "per_hour"
         ? minutes / 60
         : attendanceUnit;
-    const amount = schedule === "per_month" ? monthlyDailyAccrual(rate, date) : rounded(rate * count);
+    const amount = schedule === "per_month"
+      ? rounded(monthlyDailyAccrual(rate, date) * (attendanceBased ? attendanceUnit : 1))
+      : rounded(rate * count);
     const normalized = `${code} ${label}`.toUpperCase();
     const bucket = /VAN|VEHICLE|DOCK/.test(normalized) ? "van" : /FUEL|KILOMET|\bKM\b/.test(normalized) ? "fuel" : "salary";
     lines.push({ code, label, schedule, count, rate, amount, bucket });

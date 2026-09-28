@@ -9,7 +9,7 @@ const allocation = (changes = {}) => ({
 const method = (components) => ({ id: "method", name: "Attendance pay", payment_method_components: components });
 const component = (code, schedule, changes = {}) => ({
   component_code: code, component_type: "amount", label: code, pay_schedule: schedule, sort_order: 1, is_active: true,
-  payment_fields: { code, label: code, field_type: "amount", pay_schedule: schedule, calculation_type: schedule === "per_month" ? "fixed_monthly" : "fixed_daily", calculation_source: "attendance_eligibility" },
+  payment_fields: { code, label: code, field_type: "amount", pay_schedule: schedule, calculation_type: "manual_input", calculation_source: null },
   ...changes
 });
 const day = (id, date, status = "P", work_minutes = 480) => ({ id, punch_date: date, status, work_minutes });
@@ -26,8 +26,12 @@ test("direct allocation pays full and half attendance days without a provider ID
 });
 
 test("monthly components accrue by active calendar day while hourly components use canonical attendance", () => {
+  const legacyMonthly = component("MONTHLY", "per_month", {
+    calculation_type: "fixed_monthly",
+    payment_fields: { code: "MONTHLY", label: "MONTHLY", field_type: "amount", pay_schedule: "per_month", calculation_type: "fixed_monthly", calculation_source: null }
+  });
   const result = calculateDirectWorkforcePayments({
-    allocations: [allocation()], methods: [method([component("MONTHLY", "per_month"), component("HOURLY", "per_hour", { sort_order: 2 })])],
+    allocations: [allocation()], methods: [method([legacyMonthly, component("HOURLY", "per_hour", { sort_order: 2 })])],
     attendance: [day("d1", "2026-09-15", "P", 240)], from: "2026-09-15", to: "2026-09-16"
   });
   assert.equal(result[0].lines[0].amount, 103.33);
@@ -36,6 +40,25 @@ test("monthly components accrue by active calendar day while hourly components u
   assert.equal(result[1].lines[0].amount, 103.33);
   assert.equal(result[1].lines[1].amount, 0);
   assert.equal(result[1].amount, 103.33);
+});
+
+test("attendance-based monthly components pay only full and half attendance units", () => {
+  const attendanceMonthly = component("MONTHLY", "per_month", {
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility",
+    payment_fields: { code: "MONTHLY", label: "MONTHLY", field_type: "amount", pay_schedule: "per_month", calculation_type: "fixed_monthly", calculation_source: "attendance_eligibility" }
+  });
+  const result = calculateDirectWorkforcePayments({
+    allocations: [allocation({ payment_values: { MONTHLY: 3000 } })],
+    methods: [method([attendanceMonthly])],
+    attendance: [day("d1", "2026-09-01", "P"), day("d2", "2026-09-02", "HD"), day("d3", "2026-09-03", "A")],
+    from: "2026-09-01",
+    to: "2026-09-04"
+  });
+  assert.deepEqual(result.map((row) => [row.date, row.workDayUnits, row.amount]), [
+    ["2026-09-01", 1, 100],
+    ["2026-09-02", 0.5, 50]
+  ]);
 });
 
 test("effective dates choose exactly one allocation and reject overlapping setup", () => {
