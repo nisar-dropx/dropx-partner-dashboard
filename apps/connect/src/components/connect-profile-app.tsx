@@ -27,6 +27,7 @@ export type AppAccount = {
   workspace?: "people" | "workforce";
   workspaceLabel?: string;
   designationCode?: string | null;
+  providerMappingRequired?: boolean;
   activationOnly?: boolean;
   activationStage?: string | null;
 };

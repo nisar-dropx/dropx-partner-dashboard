@@ -7,8 +7,8 @@ test('two own IDs explain one daily guarantee and one incentive total',()=>{
  assert.deepEqual(result.groups,[{key:'fixed_daily',label:'Fixed daily pay',amount:800,days:1}]);
 });
 test('different effective pay types remain explicit without multiplying old mapping rates',()=>{
- const result=ownProductionBreakdown([day({payType:'fixed_monthly'}),day({id:'b',date:'2026-09-02',payType:'hybrid'}),day({id:'c',date:'2026-09-03',calculationSource:'provider_mapping',payType:'provider_mapping'})]);
- assert.equal(result.groups.length,3);assert.ok(result.groups.some(g=>g.label.includes('calendar-day')));assert.ok(result.groups.some(g=>g.label.includes('Daily guarantee')));
+ const result=ownProductionBreakdown([day({payType:'fixed_monthly'}),day({id:'b',date:'2026-09-02',payType:'hybrid'}),day({id:'c',date:'2026-09-03',calculationSource:'provider_mapping',payType:'provider_mapping'}),day({id:'d',date:'2026-09-04',calculationSource:'direct_allocation',payType:'direct_allocation'})]);
+ assert.equal(result.groups.length,4);assert.ok(result.groups.some(g=>g.label.includes('calendar-day')));assert.ok(result.groups.some(g=>g.label.includes('Daily guarantee')));assert.ok(result.groups.some(g=>g.label.includes('Direct workforce')));
 });
 test('monthly adjustments stay outside daily production and rows sort newest first',()=>{
  const input=[{daily:days()},{daily:[day({id:'c',date:'2026-09-02',baseAmount:20,incentiveAmount:0,amount:20})]}];

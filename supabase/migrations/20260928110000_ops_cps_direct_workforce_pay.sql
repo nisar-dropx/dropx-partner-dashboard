@@ -1,0 +1,31 @@
+-- Feed designation policy, direct allocations and canonical attendance into the
+-- server-side CPS rebuild. Source records remain immutable; the TypeScript
+-- engine applies effective dates and exposes configuration gaps.
+create or replace function public.ops_cps_source_facts(p_company uuid,p_from date,p_through date,p_stations text[])
+returns jsonb language plpgsql stable security invoker set search_path='' as $$
+begin
+ if p_company is null or p_stations is null or cardinality(p_stations)>150 or p_from is null or p_through is null
+   or p_through<p_from or p_through-p_from>30 or date_trunc('month',p_from)<>date_trunc('month',p_through)
+   or p_through>(now() at time zone 'Asia/Kolkata')::date then raise exception 'Invalid CPS scope'; end if;
+ return jsonb_build_object(
+ 'shipments',coalesce((select jsonb_agg(t) from (select id,client,work_date,station_code,provider_employee_id,provider_employee_name,amazon_delivery,swa_delivery,total_delivery,total_activity,c_return,mfn,mfn_return from public.cps_shipment_daily where company_id=p_company and work_date between p_from and p_through)t),'[]'::jsonb),
+ 'volumes',coalesce((select jsonb_agg(t) from (select station_code,work_date,sum(total_delivery) deliveries from public.cps_shipment_daily where company_id=p_company and work_date between p_from and p_through group by station_code,work_date)t),'[]'::jsonb),
+ 'mappings',coalesce((select jsonb_agg(t) from (select m.id,m.workforce_id,m.employee_id,m.contractor_id,m.field_executive_id,m.provider_id,m.provider_member_id,m.station_id,m.effective_from,m.effective_to,m.status,m.pay_type,m.payment_method_id,m.payment_values,m.delivery_rate,m.pickup_rate,m.mfn_rate,m.mfn_return_rate,m.guarantee_amount,m.guarantee_schedule,m.fuel_rate from public.field_executive_provider_mappings m where m.company_id=p_company and m.status in ('active','closed') and m.effective_from<=p_through and coalesce(m.effective_to,p_through)>=p_from)t),'[]'::jsonb),
+ 'allocations',coalesce((select jsonb_agg(t) from (select a.id,a.workforce_id,a.station_id,a.designation_id,a.payment_method_id,a.payment_values,a.payment_components,a.effective_from,a.effective_to,a.status from public.workforce_payment_allocations a where a.company_id=p_company and a.status in ('active','closed') and a.effective_from<=p_through and coalesce(a.effective_to,p_through)>=p_from)t),'[]'::jsonb),
+ 'attendance',coalesce((select jsonb_agg(t) from (select a.workforce_id,a.punch_date,a.status,a.in_time,a.out_time,a.work_minutes from public.attendance_daily a where a.company_id=p_company and a.workforce_id is not null and a.punch_date between p_from and p_through)t),'[]'::jsonb),
+ 'workforce',coalesce((select jsonb_agg(t) from (select w.id,w.dropx_id,w.full_name,w.location_id,w.date_of_join,w.last_working_date,w.is_active,w.deleted_at,w.source_profile_type,w.source_profile_id,w.designation_id,coalesce(d.is_field_operations,false) is_field_operations,coalesce(d.provider_mapping_required,true) provider_mapping_required from public.workforce w left join lateral (select candidate.* from public.designations candidate where candidate.company_id=w.company_id and (candidate.id=w.designation_id or (w.designation_id is null and lower(btrim(w.designation)) in (lower(btrim(candidate.code)),lower(btrim(candidate.name))))) order by (candidate.id=w.designation_id) desc,candidate.id limit 1) d on true where w.company_id=p_company)t),'[]'::jsonb),
+ 'components',coalesce((select jsonb_agg(t) from (select c.payment_method_id,c.component_code,c.component_type,coalesce(f.label,c.label) label,coalesce(f.pay_schedule,c.pay_schedule) pay_schedule,f.calculation_type,f.calculation_source,f.provider_calculation_sources from public.payment_method_components c left join public.payment_fields f on f.id=c.payment_field_id and f.company_id=p_company where c.company_id=p_company and c.is_active)t),'[]'::jsonb),
+ 'providers',coalesce((select jsonb_agg(t) from(select id,code,name from public.providers where company_id=p_company)t),'[]'::jsonb),
+ 'stations',coalesce((select jsonb_agg(t) from(select id,station_code,region,state,cluster,cluster_name,cluster_manager_email,ops_manager_email,is_active,hide_from_location_list from public.stations where company_id=p_company)t),'[]'::jsonb),
+ 'employees',coalesce((select jsonb_agg(t) from(select e.id,e.employee_code,e.full_name,e.email,e.location_id,e.date_of_join,e.last_working_date,e.is_active,e.deleted_at,d.code designation,op.location_access_mode,op.location_scope_ids from public.employees e left join public.designations d on d.id=e.designation_id left join public.org_positions op on op.id=e.org_position_id and op.company_id=p_company where e.company_id=p_company)t),'[]'::jsonb),
+ 'salaries',coalesce((select jsonb_agg(t) from(select a.id,a.employee_id,a.effective_from,a.effective_to,max(v.amount) filter(where h.head_type='ctc') monthly_ctc from public.hr_employee_salary_assignments a left join public.hr_employee_salary_values v on v.assignment_id=a.id and v.company_id=p_company left join public.hr_payroll_heads h on h.id=v.payroll_head_id and h.company_id=p_company where a.company_id=p_company and a.effective_from<=p_through and coalesce(a.effective_to,p_through)>=p_from group by a.id,a.employee_id,a.effective_from,a.effective_to)t),'[]'::jsonb),
+ 'rent_coverage',coalesce((select jsonb_agg(t) from(select allocation_station_code station_code,effective_from,effective_to from public.finance_rent_master where company_id=p_company and deleted_at is null and effective_from<=p_through and coalesce(effective_to,p_through)>=p_from)t),'[]'::jsonb),
+ 'manual_inputs',coalesce((select jsonb_agg(i) from public.ops_cps_cost_inputs i where i.company_id=p_company and i.employee_id is null and i.is_active and i.effective_from<=p_through and coalesce(i.effective_to,p_through)>=p_from),'[]'::jsonb),
+ 'people_rules',coalesce((select jsonb_agg(i) from public.ops_cps_cost_inputs i where i.company_id=p_company and i.employee_id is not null and i.is_active and i.effective_from<=p_through and coalesce(i.effective_to,p_through)>=p_from),'[]'::jsonb),
+ 'generated_at',now());
+end; $$;
+
+revoke all on function public.ops_cps_source_facts(uuid,date,date,text[]) from public,anon,authenticated;
+grant execute on function public.ops_cps_source_facts(uuid,date,date,text[]) to service_role;
+
+notify pgrst, 'reload schema';

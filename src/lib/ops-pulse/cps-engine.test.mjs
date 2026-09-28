@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
+const direct={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('../direct-workforce-pay.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(direct.exports,direct);
 const mod={exports:{}};
-new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod);
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../direct-workforce-pay')return direct.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -68,4 +70,42 @@ test('salary linked to People is not charged again by workforce rate card',()=>{
 test('monthly commitments stop at last working date',()=>{
  const f=facts();f.workforce[0].is_active=false;f.workforce[0].last_working_date='2026-09-01';f.shipments=[];f.mappings[0].payment_values={SALARY:30000};f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
  const r=rebuildCps(base([day('A','2026-09-01',0),day('A','2026-09-02',0)]),f);assert.equal(r.daily[0].da_salary,1000);assert.equal(r.daily[1].da_salary,0);
+});
+test('providerless workforce accrues direct attendance pay without a provider ID gap',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;
+ f.allocations=[{id:'a1',workforce_id:'w1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'direct',payment_values:{DAILY:700}}];
+ f.components=[{payment_method_id:'direct',component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',label:'Driver daily pay'}];
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P',in_time:'2026-09-01T03:00:00Z',out_time:'2026-09-01T11:00:00Z',work_minutes:480}];
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,700);assert.equal(r.people[0].salary,700);assert.ok(!r.gaps.some(g=>g.kind==='Provider ID not linked'));
+});
+test('providerless workforce without a direct allocation has an actionable gap',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.ok(r.gaps.some(g=>g.kind==='Direct payment allocation missing'&&g.href.includes('/provider-mapping/direct-pay')));
+});
+test('historical direct cost stays on the allocation station after a workforce transfer',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;f.workforce[0].location_id='station-b';
+ f.allocations=[{id:'a1',workforce_id:'w1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'direct',payment_values:{MONTHLY:3000}}];
+ f.components=[{payment_method_id:'direct',component_code:'MONTHLY',component_type:'amount',pay_schedule:'per_month',label:'Driver salary'}];
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].station_code,'A');assert.equal(r.daily[0].da_salary,100);assert.equal(r.people[0].station_code,'A');
+});
+test('a later provider-required policy does not erase effective-dated direct pay history',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=true;
+ f.allocations=[{id:'a1',workforce_id:'w1',station_id:'station-a',effective_from:'2026-09-01',effective_to:'2026-09-01',status:'closed',payment_method_id:'direct',payment_values:{DAILY:700}}];
+ f.components=[{payment_method_id:'direct',component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',label:'Driver daily pay'}];
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P',work_minutes:480}];
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,700);assert.ok(!r.gaps.some(g=>g.kind==='Provider ID not linked'));
+});
+test('direct allocation snapshots prevent later payment-method edits from rewriting CPS history',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;
+ f.allocations=[{id:'a1',workforce_id:'w1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'direct',payment_values:{DAILY:700},payment_components:[{component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',label:'Snapshotted driver pay'}]}];
+ f.components=[{payment_method_id:'direct',component_code:'MONTHLY',component_type:'amount',pay_schedule:'per_month',label:'Changed master salary'}];
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P',work_minutes:480}];
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,700);assert.equal(r.breakup.find(line=>line.source==='Direct workforce allocation').sub_head,'Salary / Snapshotted driver pay');
+});
+test('People CTC suppresses the salary bucket from an employee-backed direct allocation',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
+ f.allocations=[{id:'a1',workforce_id:'w1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'direct',payment_values:{SALARY:30000}}];
+ f.components=[{payment_method_id:'direct',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month',label:'Driver salary'}];
+ f.employees=[{id:'e1',employee_code:'E1',full_name:'Driver',location_id:'station-a',is_active:true,date_of_join:'2026-01-01',designation:'DRIVER'}];f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:33000}];
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da_salary,0);assert.equal(r.daily[0].utr,1100);assert.ok(!r.breakup.some(line=>line.source==='Direct workforce allocation'&&line.head==='DA'));
 });

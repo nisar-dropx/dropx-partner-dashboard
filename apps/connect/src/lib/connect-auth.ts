@@ -13,6 +13,7 @@ import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 import { enforceAccessCutoffIfDueForWorker } from "./access-cutoff";
+import { requiresProviderMappingActivation } from "./provider-mapping-policy";
 
 export type ConnectAccount = {
   id: string;
@@ -32,6 +33,7 @@ export type ConnectAccount = {
   workspace: "people" | "workforce";
   workspaceLabel: string;
   designationCode: string | null;
+  providerMappingRequired: boolean;
   activationOnly: boolean;
   activationStage: string | null;
 };
@@ -80,6 +82,8 @@ type DesignationAccessRow = {
   onboarding_categories: string[] | null;
   app_page_access?: string[] | null;
   dropx_one_activation_gate?: boolean | null;
+  is_field_operations?: boolean | null;
+  provider_mapping_required?: boolean | null;
 };
 
 type DesignationCategoryRow = {
@@ -148,7 +152,7 @@ const nonEmployeeBaseSelect = "id,company_id,full_name,email,dropx_id,biometric_
 function nonEmployeeSelect(profileType: NonEmployeeProfileType, includeMobile = false) {
   const mobileColumns = includeMobile ? ",mobile,mobile_country_code" : "";
   if (profileType === "workforce") {
-    return `${nonEmployeeBaseSelect}${mobileColumns},source_profile_type,source_profile_id,deleted_at`;
+    return `${nonEmployeeBaseSelect}${mobileColumns},designation_id,source_profile_type,source_profile_id,deleted_at`;
   }
   if (profileType === "contractor") {
     return `${nonEmployeeBaseSelect}${mobileColumns},deleted_at`;
@@ -306,6 +310,7 @@ function mapNonEmployeeAccountRow(
     email?: string | null;
     dropx_id?: string | null;
     biometric_id?: string | null;
+    designation_id?: string | null;
     designation?: string | null;
     onboarding_status?: string | null;
     profile_photo_path?: string | null;
@@ -321,6 +326,7 @@ function mapNonEmployeeAccountRow(
     email: profile.email,
     dropx_id: profile.dropx_id,
     biometric_id: profile.biometric_id,
+    designation_id: profile.designation_id ?? null,
     role: profile.designation || workforceLabel(profileType),
     status: profile.onboarding_status === "active"
       ? "Active"
@@ -586,7 +592,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
   type ProfileMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null };
-  type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; source_profile_type?: string | null; source_profile_id?: string | null; deleted_at?: string | null };
+  type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; source_profile_type?: string | null; source_profile_id?: string | null; deleted_at?: string | null };
 
   let profilesResult: MatchResult<ProfileMatch> = await supabaseAdmin
     .from("profiles")
@@ -787,38 +793,57 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const designationResult = companyIds.length
     ? await supabaseAdmin
       .from("designations")
-      .select("id, company_id, code, name, designation_category_id, onboarding_categories, app_page_access, dropx_one_activation_gate")
+      .select("id, company_id, code, name, designation_category_id, onboarding_categories, app_page_access, dropx_one_activation_gate, is_field_operations, provider_mapping_required")
       .in("company_id", companyIds)
       .eq("is_active", true)
     : { data: [], error: null };
   let designationRows: DesignationAccessRow[] = (designationResult.data ?? []) as DesignationAccessRow[];
   let designationAccessAvailable = true;
   if (isMissingColumnError(designationResult.error)) {
-    designationAccessAvailable = false;
-    const fallbackResult = companyIds.length
+    const compatibilityResult = companyIds.length
       ? await supabaseAdmin
         .from("designations")
-        .select("id, company_id, code, name, designation_category_id, onboarding_categories")
+        .select("id, company_id, code, name, designation_category_id, onboarding_categories, app_page_access, dropx_one_activation_gate, is_field_operations")
         .in("company_id", companyIds)
         .eq("is_active", true)
       : { data: [], error: null };
-    if (fallbackResult.error && !isMissingColumnError(fallbackResult.error)) {
-      throw new Error(fallbackResult.error.message);
+    if (!compatibilityResult.error) {
+      designationRows = (compatibilityResult.data ?? []).map((designation) => ({
+        ...designation,
+        provider_mapping_required: Boolean(designation.is_field_operations)
+      })) as DesignationAccessRow[];
+    } else {
+      if (!isMissingColumnError(compatibilityResult.error)) throw new Error(compatibilityResult.error.message);
+      designationAccessAvailable = false;
+      const fallbackResult = companyIds.length
+        ? await supabaseAdmin
+          .from("designations")
+          .select("id, company_id, code, name, designation_category_id, onboarding_categories")
+          .in("company_id", companyIds)
+          .eq("is_active", true)
+        : { data: [], error: null };
+      if (fallbackResult.error && !isMissingColumnError(fallbackResult.error)) {
+        throw new Error(fallbackResult.error.message);
+      }
+      designationRows = (fallbackResult.data ?? []).map((designation) => ({
+        ...designation,
+        app_page_access: null,
+        dropx_one_activation_gate: false,
+        is_field_operations: false,
+        provider_mapping_required: false
+      })) as DesignationAccessRow[];
     }
-    designationRows = (fallbackResult.data ?? []).map((designation) => ({
-      ...designation,
-      app_page_access: null,
-      dropx_one_activation_gate: false
-    })) as DesignationAccessRow[];
   } else if (designationResult.error) {
     throw new Error(designationResult.error.message);
   }
   const pageAccessByDesignationId = new Map<string, string[] | null>();
   const activationGateByDesignationId = new Map<string, boolean>();
+  const providerMappingRequiredByDesignationId = new Map<string, boolean>();
   const designationNameById = new Map<string, string>();
   const designationCodeById = new Map<string, string | null>();
   const pageAccessByDesignationKey = new Map<string, string[] | null>();
   const pageAccessByDesignationRole = new Map<string, string[] | null>();
+  const designationIdByRole = new Map<string, string>();
   const categoryIds = [...new Set(designationRows.map((designation) => designation.designation_category_id).filter(Boolean))] as string[];
   const designationCategoryResult = categoryIds.length
     ? await supabaseAdmin.from("designation_categories")
@@ -840,6 +865,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       : null;
     pageAccessByDesignationId.set(String(designation.id), pages);
     activationGateByDesignationId.set(String(designation.id), Boolean(designation.dropx_one_activation_gate));
+    providerMappingRequiredByDesignationId.set(String(designation.id), Boolean(designation.provider_mapping_required));
     designationNameById.set(String(designation.id), String(designation.name || designation.code));
     designationCodeById.set(String(designation.id), designation.code ? String(designation.code) : null);
     peopleModuleByDesignationId.set(
@@ -873,6 +899,8 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       designationRoleLookupKey(String(designation.company_id), String(designation.code)),
       pages
     );
+    designationIdByRole.set(designationRoleLookupKey(String(designation.company_id), String(designation.name)), String(designation.id));
+    designationIdByRole.set(designationRoleLookupKey(String(designation.company_id), String(designation.code)), String(designation.id));
   }
   const preferenceResult = await supabaseAdmin
     .from("mob_app_user_preferences")
@@ -898,8 +926,10 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     .map(async (account): Promise<ConnectAccount> => {
       const categoryCode = categoryCodeForProfile(account.profile_type);
       const categoryPages = pageAccessByCategory.get(`${account.company_id}:${categoryCode}`) ?? [];
-      const rawDesignationPages = account.designation_id
-        ? pageAccessByDesignationId.get(account.designation_id)
+      const resolvedDesignationId = account.designation_id
+        ?? (account.role ? designationIdByRole.get(designationRoleLookupKey(account.company_id, account.role)) ?? null : null);
+      const rawDesignationPages = resolvedDesignationId
+        ? pageAccessByDesignationId.get(resolvedDesignationId)
         : account.role
           ? pageAccessByDesignationKey.get(designationLookupKey(account.company_id, categoryCode, account.role))
             ?? pageAccessByDesignationRole.get(designationRoleLookupKey(account.company_id, account.role))
@@ -909,13 +939,13 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         : rawDesignationPages;
       const workspace = connectWorkspace(
         account.profile_type,
-        account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null
+        resolvedDesignationId ? peopleModuleByDesignationId.get(resolvedDesignationId) : null
       );
       // WFH and Business Trip are never granted via designation/category app_page_access.
       // Each is shown only when its People attendance master lists the worker's designation.
       const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages)
         .filter((page) => page !== "wfh" && page !== "business_trip");
-      const designationId = account.designation_id ?? null;
+      const designationId = resolvedDesignationId;
       const designationLabel = designationId
         ? {
           name: designationNameById.get(designationId) ?? account.role ?? "",
@@ -947,7 +977,16 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
 
       let activationOnly = false;
       let activationStage: string | null = null;
-      if (workspace === "workforce" && account.profile_type === "workforce" && designationId && activationGateByDesignationId.get(designationId)) {
+      const providerMappingRequired = designationId
+        ? Boolean(providerMappingRequiredByDesignationId.get(designationId))
+        : false;
+      if (requiresProviderMappingActivation({
+        workspace,
+        profileType: account.profile_type,
+        designationId,
+        activationGateEnabled: designationId ? Boolean(activationGateByDesignationId.get(designationId)) : false,
+        providerMappingRequired
+      })) {
         const [planResult, mappingResult] = await Promise.all([
           supabaseAdmin!.from("workforce_joining_plans")
             .select("provider_stage")
@@ -994,6 +1033,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       workspace,
       workspaceLabel: workspace === "people" ? "People workspace" : "Workforce workspace",
       designationCode: designationId ? designationCodeById.get(designationId) ?? null : null,
+      providerMappingRequired,
       activationOnly,
       activationStage
       };

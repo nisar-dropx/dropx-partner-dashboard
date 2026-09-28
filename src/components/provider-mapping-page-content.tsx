@@ -48,8 +48,11 @@ type ContractorRow = {
 };
 
 type FieldOperationsDesignationRow = {
+  id: string;
   code: string;
   name: string;
+  is_field_operations: boolean;
+  provider_mapping_required: boolean;
 };
 
 type WorkforceRow = {
@@ -60,6 +63,8 @@ type WorkforceRow = {
   date_of_join: string | null;
   location_id: string | null;
   dropx_id: string | null;
+  designation_id: string | null;
+  designation: string | null;
   is_active: boolean;
   deleted_at: string | null;
 };
@@ -135,7 +140,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
   }
 
   const companyId = requireCompanyId(authorization);
-  const [locationsResult, executivesResult, employeesResult, contractorsResult, workforceResult, designationsResult, mappingsResult, paymentMethodsResult] = await Promise.all([
+  const [locationsResult, workforceResult, designationsResult, mappingsResult, paymentMethodsResult] = await Promise.all([
     supabaseAdmin
       .from("stations")
       .select("id, station_code, station_name, provider_id")
@@ -144,39 +149,14 @@ async function loadMappingData(authorization: AuthorizationContext) {
       .order("station_code"),
     supabaseAdmin
       .from("workforce")
-      .select(`
-        id,
-        full_name,
-        date_of_join,
-        location_id,
-        dropx_id,
-        is_active
-      `)
-      .eq("company_id", companyId)
-      .order("full_name"),
-    supabaseAdmin
-      .from("employees")
-      .select("id, full_name, date_of_join, location_id, employee_code, is_active")
-      .eq("company_id", companyId)
-      .is("deleted_at", null)
-      .order("full_name"),
-    supabaseAdmin
-      .from("contractors")
-      .select("id, full_name, date_of_join, location_id, dropx_id, designation, is_active")
-      .eq("company_id", companyId)
-      .is("deleted_at", null)
-      .order("full_name"),
-    supabaseAdmin
-      .from("workforce")
-      .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, dropx_id, is_active, deleted_at")
+      .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, dropx_id, designation_id, designation, is_active, deleted_at")
       .eq("company_id", companyId)
       .order("full_name"),
     supabaseAdmin
       .from("designations")
-      .select("code, name")
+      .select("id, code, name, is_field_operations, provider_mapping_required")
       .eq("company_id", companyId)
-      .eq("is_active", true)
-      .eq("is_field_operations", true),
+      .eq("is_active", true),
     supabaseAdmin
       .from("field_executive_provider_mappings")
       .select(`
@@ -269,11 +249,18 @@ async function loadMappingData(authorization: AuthorizationContext) {
   });
 
   const workforceRows = (workforceResult.data ?? []) as unknown as WorkforceRow[];
+  const designationRows = (designationsResult.data ?? []) as FieldOperationsDesignationRow[];
+  const designationById = new Map(designationRows.map((designation) => [designation.id, designation]));
+  const designationByName = new Map(designationRows.flatMap((designation) => [designation.name, designation.code]
+    .map((value) => [String(value).trim().toLowerCase(), designation] as const)));
   const workers = workforceRows
-    .filter((worker) =>
-      (worker.is_active || latestMappingByWorkerKey.has(`workforce:${worker.id}`)) &&
-      isAllocatedLocation(worker.location_id)
-    )
+    .filter((worker) => {
+      const existing = latestMappingByWorkerKey.has(`workforce:${worker.id}`);
+      const designation = designationById.get(String(worker.designation_id ?? ""))
+        ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
+      return (existing || worker.is_active && designation?.is_field_operations && designation.provider_mapping_required !== false)
+        && isAllocatedLocation(worker.location_id);
+    })
     .map((worker) => ({
       id: worker.id,
       sourceType: "workforce" as const,
@@ -314,7 +301,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
     locations,
     mappings,
     paymentMethods,
-    error: mappingsResult.error?.message || employeesResult.error?.message || contractorsResult.error?.message || workforceResult.error?.message || designationsResult.error?.message || executivesResult.error?.message || locationsResult.error?.message || paymentMethodsResult.error?.message || null
+    error: mappingsResult.error?.message || workforceResult.error?.message || designationsResult.error?.message || locationsResult.error?.message || paymentMethodsResult.error?.message || null
   };
 }
 
@@ -340,12 +327,13 @@ export async function ProviderMappingPageContent({
       <PageHead
         eyebrow="Source-of-truth bridge"
         title="ID & pay mapping"
-        subtitle="Maintain DropX ID to Provider Member ID mappings, date-effective history, and payout rates in editable rows."
+        subtitle="Maintain provider-linked identities and rates. Providerless designations are configured in Direct pay allocations."
       />
 
       <nav className="performance-tabs" aria-label="ID mapping views">
         <Link className="active" href="/provider-mapping">Existing worksheet</Link>
         <Link href="/provider-mapping/provider-first">Provider member first</Link>
+        <Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>
       </nav>
 
       {error || flashError || flashNotice ? (

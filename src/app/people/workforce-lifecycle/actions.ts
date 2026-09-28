@@ -31,7 +31,7 @@ async function requireScopedApplicant(id: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, full_name, location_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status")
+    .select("id, full_name, location_id, designation_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status")
     .eq("company_id", companyId)
     .eq("id", id)
     .maybeSingle();
@@ -44,16 +44,37 @@ async function requireScopedApplicant(id: string) {
   return { authorization, companyId, applicant: result.data };
 }
 
-async function designationCode(companyId: string, designation: string | null) {
-  if (!supabaseAdmin || !designation) return "";
-  const result = await supabaseAdmin
-    .from("designations")
-    .select("code")
-    .eq("company_id", companyId)
-    .ilike("name", designation)
-    .maybeSingle();
-  if (result.error) throw new Error(result.error.message);
-  return String(result.data?.code ?? "").trim().toUpperCase();
+async function designationPolicy(companyId: string, designationId: string | null, designation: string | null) {
+  if (!supabaseAdmin || (!designationId && !designation)) {
+    return { code: "", providerMappingRequired: true };
+  }
+  let policy: { code: string | null; name: string | null; provider_mapping_required: boolean | null } | null = null;
+  if (designationId) {
+    const result = await supabaseAdmin
+      .from("designations")
+      .select("code, name, provider_mapping_required")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .eq("id", designationId)
+      .maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    policy = result.data;
+  } else {
+    const result = await supabaseAdmin
+      .from("designations")
+      .select("code, name, provider_mapping_required")
+      .eq("company_id", companyId)
+      .eq("is_active", true);
+    if (result.error) throw new Error(result.error.message);
+    const designationText = String(designation ?? "").trim().toLowerCase();
+    policy = (result.data ?? []).find((row) => [row.code, row.name]
+      .some((value) => String(value ?? "").trim().toLowerCase() === designationText)) ?? null;
+  }
+  return {
+    code: String(policy?.code ?? "").trim().toUpperCase(),
+    // Fail closed if a legacy row has no explicit value.
+    providerMappingRequired: policy?.provider_mapping_required !== false
+  };
 }
 
 export async function reviewWorkforceOnboarding(formData: FormData) {
@@ -97,21 +118,25 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
       lifecycleRedirect({ notice: action === "return" ? "Application returned for correction." : "Application rejected." });
     }
 
-    const code = await designationCode(companyId, applicant.designation);
+    const policy = await designationPolicy(companyId, applicant.designation_id, applicant.designation);
     const master = await supabaseAdmin!.from("workforce_onboarding_checklist_master")
       .select("id, code, label, is_required, applicable_designation_codes")
       .eq("company_id", companyId).eq("is_active", true).order("sort_order");
     if (master.error) throw new Error(master.error.message);
     const applicable = (master.data ?? []).filter((item) => {
       const codes = Array.isArray(item.applicable_designation_codes) ? item.applicable_designation_codes : [];
-      return !codes.length || codes.map((value) => String(value).toUpperCase()).includes(code);
+      return !codes.length || codes.map((value) => String(value).toUpperCase()).includes(policy.code);
     });
-    const providerId = text(formData.get("provider_employee_id"));
-    const providerNotRequired = formData.get("provider_not_required") === "true";
+    const providerId = policy.providerMappingRequired ? text(formData.get("provider_employee_id")) : "";
+    if (policy.providerMappingRequired && !providerId) {
+      throw new Error("Provider Employee ID is required for this designation before onboarding can be approved.");
+    }
     const results = applicable.map((item) => {
       const checked = formData.get(`checklist_${item.id}`) === "true";
-      const status = item.code === "provider_id_created" && providerNotRequired
-        ? "not_required"
+      const status = item.code === "provider_id_created"
+        ? policy.providerMappingRequired
+          ? providerId ? "completed" : "pending"
+          : "not_required"
         : checked ? "completed" : "pending";
       return {
         company_id: companyId,
@@ -119,7 +144,7 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
         checklist_item_id: item.id,
         status,
         remarks: item.code === "provider_id_created"
-          ? providerId ? `Provider ID: ${providerId}` : providerNotRequired ? "Provider ID not required" : null
+          ? providerId ? `Provider ID: ${providerId}` : policy.providerMappingRequired ? null : "Provider ID not required by designation"
           : null,
         completed_by: status === "pending" ? null : authorization.userId,
         completed_at: status === "pending" ? null : reviewedAt,

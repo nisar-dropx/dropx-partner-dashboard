@@ -131,6 +131,16 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null)
   '@/lib/workforce-daily-card':{allocateOwnDailyCards},
   '@/lib/personal-payment-card':{personalPaymentCard},
   '@/lib/workforce-own-incentives':{ownIncentives}
+  ,'@/lib/direct-workforce-payment':{assertNoProviderDirectOverlap:()=>{}}
+  ,'@/lib/direct-workforce-payment-data':{
+   resolveCanonicalPaymentWorker:async current=>{
+    let query=db.from('workforce').select('id,designation_id,location_id,source_profile_id,source_profile_type').eq('company_id',current.companyId).is('deleted_at',null).neq('migration_state','reclassified');
+    query=current.profileType==='workforce'?query.eq('id',current.id):query.eq('source_profile_type',current.profileType).eq('source_profile_id',current.id);
+    const result=await query.maybeSingle();if(result.error)throw Error('Your Workforce identity could not be verified.');return result.data;
+   },
+   loadDirectPaymentContext:async()=>({allocations:[],methods:[],attendance:[],days:[]}),
+   paymentMethodById:()=>new Map()
+  }
  };
  new Function('require','exports',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports);
  return module.exports.GET;
@@ -180,7 +190,9 @@ test('route reconciles daily incentives and adjustments separately without leaki
  assert.equal(response.status,200);assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155});
  assert.equal(body.earnings.reduce((sum,e)=>sum+e.grossAmount,0),980);assert.equal(body.earnings.flatMap(e=>e.daily).reduce((sum,e)=>sum+e.amount,0),980);
  assert.equal(body.incentives.amount,180);assert.equal(body.incentives.campaigns[0].workDays,1);assert.equal(JSON.stringify(body).includes('PRIVATE'),false);
- const query=db.calls.find(q=>q.table==='workforce_incentive_campaigns');assert.ok(operation(query,'eq','company_id','company'));assert.ok(operation(query,'gte','effective_to',from));assert.ok(operation(query,'lte','effective_from',to));
+ const currentIndiaDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const expectedTo=[to,currentIndiaDate].sort()[0];
+ const query=db.calls.find(q=>q.table==='workforce_incentive_campaigns');assert.ok(operation(query,'eq','company_id','company'));assert.ok(operation(query,'gte','effective_to',from));assert.ok(operation(query,'lte','effective_from',expectedTo));
  assert.equal(db.calls.some(q=>['payment_requests','workforce_payroll_items'].includes(q.table)),false);
 });
 test('incentive lookup failure cannot silently return a partial estimate',async()=>{
@@ -191,7 +203,7 @@ test('incentive lookup failure cannot silently return a partial estimate',async(
 test('legacy incentive designation context uses exact canonical source and company, not raw legacy identity',async()=>{
  const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:[],error:null}));
  const response=await earningsRoute(db,async()=>({...account,profileType:'contractor',id:'legacy'}))(request());assert.equal(response.status,200);
- const query=db.calls.find(q=>q.table==='workforce'&&operation(q,'select','id,designation_id,location_id'));
+ const query=db.calls.find(q=>q.table==='workforce'&&operation(q,'select','id,designation_id,location_id,source_profile_id,source_profile_type'));
  for(const [method,...args] of [['eq','company_id','company'],['eq','source_profile_type','contractor'],['eq','source_profile_id','legacy'],['is','deleted_at',null],['neq','migration_state','reclassified']])assert.ok(operation(query,method,...args));
 });
 test('client guard contract: keyed accounts, latest response only, no silent imported-pay fallback',()=>{

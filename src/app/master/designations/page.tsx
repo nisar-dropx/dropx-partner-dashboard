@@ -47,6 +47,7 @@ type DesignationRow = {
   portal_permissions?: unknown;
   profile_field_rules?: unknown;
   is_field_operations?: boolean | null;
+  provider_mapping_required?: boolean | null;
   is_active: boolean;
 };
 
@@ -77,6 +78,11 @@ function isMissingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"));
 }
 
+function isMissingProviderMappingPolicyColumn(error: unknown) {
+  const message = String((error as { message?: unknown })?.message ?? "").toLowerCase();
+  return isMissingColumnError(error) && message.includes("provider_mapping_required");
+}
+
 async function loadDesignations(companyId: string, locationScopeIds: string[], hasAllLocationAccess: boolean) {
   if (!supabaseAdmin) {
     return {
@@ -91,7 +97,7 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
   }
 
   const [designationsResult, providersResult, locationsResult, modelsResult, categoriesResult, rolesResult] = await Promise.all([
-    supabaseAdmin.from("designations").select("id, code, name, provider_ids, model_ids, location_ids, onboarding_categories, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, is_active").eq("company_id", companyId).order("code"),
+    supabaseAdmin.from("designations").select("id, code, name, provider_ids, model_ids, location_ids, onboarding_categories, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, provider_mapping_required, is_active").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("providers").select("id, code, name, is_active").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("stations").select("id, station_code, station_name, hide_from_location_list").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("location_models").select("id, provider_id, code, name, is_active, providers (code, name)").eq("company_id", companyId).eq("is_active", true).order("code"),
@@ -100,7 +106,20 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
   ]);
   let designationRows: unknown[] = designationsResult.data ?? [];
   let designationError: { message?: string } | null = designationsResult.error;
-  if (isMissingColumnError(designationsResult.error)) {
+  if (isMissingProviderMappingPolicyColumn(designationsResult.error)) {
+    const policyFallbackResult = await supabaseAdmin
+      .from("designations")
+      .select("id, code, name, provider_ids, model_ids, location_ids, onboarding_categories, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, is_active")
+      .eq("company_id", companyId)
+      .order("code");
+    designationRows = (policyFallbackResult.data ?? []).map((row) => ({
+      ...row,
+      // Preserve the pre-migration requirement instead of silently bypassing provider mapping.
+      provider_mapping_required: Boolean(row.is_field_operations)
+    }));
+    designationError = policyFallbackResult.error;
+  }
+  if (isMissingColumnError(designationError)) {
     let fallbackRows: unknown[] = [];
     let fallbackError: { message?: string } | null = null;
     const fallbackResult = await supabaseAdmin.from("designations").select("id, code, name, provider_ids, location_ids, onboarding_categories, is_active").eq("company_id", companyId).order("code");
@@ -122,6 +141,7 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
       onboarding_role_ids: [],
       portal_permissions: null,
       is_field_operations: false,
+      provider_mapping_required: false,
     }));
     designationError = fallbackError;
   }
@@ -283,6 +303,7 @@ export default async function DesignationsPage({
                   <th>Models</th>
                   <th>App pages</th>
                   <th>Field operations</th>
+                  <th>Provider mapping</th>
                   <th>Status</th>
                   {pagePermission.canEdit ? <th>Action</th> : null}
                 </tr>
@@ -321,12 +342,19 @@ export default async function DesignationsPage({
                         ) : <span className="subtle">No pages</span>}
                       </td>
                       <td>{designation.is_field_operations ? <span className="mini-tag">Included</span> : <span className="subtle">-</span>}</td>
+                      <td>
+                        {!designation.is_field_operations
+                          ? <span className="subtle">Not applicable</span>
+                          : designation.provider_mapping_required
+                            ? <span className="mini-tag">Required</span>
+                            : <span className="subtle">Not required</span>}
+                      </td>
                       <td><StatusPill status={designation.is_active ? "Active" : "Inactive"} /></td>
                       {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/master/designations?edit=${designation.id}`} scroll={false}>Edit</PendingLink></td> : null}
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 8 : 7}>No designations found.</td></tr>
+                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 9 : 8}>No designations found.</td></tr>
                 )}
               </tbody>
             </table>
