@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 // A worker can withdraw their own attendance correction, like a leave withdrawal, until any
 // approver has approved a step. After that it has to run its course.
 export const cancellableRegularizationStatuses = ["pending", "pending_manager", "pending_hr"];
+// Same bucket the submit flow in app/api/connect/attendance/route.ts uploads proof to.
+const REGULARIZATION_PROOF_BUCKET = "employee-profile-documents";
 
 function db() {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -28,7 +30,7 @@ export function canCancelRegularization(status: unknown, hasApproval: boolean) {
 export async function cancelRegularizationRequest(worker: { companyId: string; profileType: string; profileId: string }, requestId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Attendance request is invalid.");
   const request = await db().from("attendance_regularization_requests")
-    .select("id, status")
+    .select("id, status, attachment_path, attachment_path_out")
     .eq("company_id", worker.companyId)
     .eq("profile_type", worker.profileType)
     .eq("profile_id", worker.profileId)
@@ -60,4 +62,20 @@ export async function cancelRegularizationRequest(worker: { companyId: string; p
     .eq("request_id", requestId)
     .in("status", ["pending", "queued"]);
   if (steps.error) throw new Error(steps.error.message);
+
+  // The supporting CCTV proof is deleted with the withdrawal. Only returned requests are reused by a
+  // later submission, so a withdrawn request's files aren't referenced anywhere else. The paths are
+  // cleared only once the files are gone, so a failed delete never leaves an untracked file behind;
+  // the withdrawal itself still stands either way.
+  const paths = [request.data.attachment_path, request.data.attachment_path_out]
+    .filter((path): path is string => typeof path === "string" && path.length > 0);
+  if (paths.length) {
+    const removed = await db().storage.from(REGULARIZATION_PROOF_BUCKET).remove(paths);
+    if (!removed.error) {
+      await db().from("attendance_regularization_requests")
+        .update({ attachment_path: null, attachment_path_out: null, updated_at: now })
+        .eq("company_id", worker.companyId)
+        .eq("id", requestId);
+    }
+  }
 }
