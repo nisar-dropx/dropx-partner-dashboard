@@ -251,11 +251,23 @@ export type AdvanceResult = {
  * that has no candidate and is marked not required. Returns done:true once
  * there are no more steps - the caller marks the request fully approved.
  */
-export async function advanceApproval(companyId: string, steps: ApprovalStepRow[], currentStepOrder: number, locationId: string | null | undefined): Promise<AdvanceResult> {
+export async function advanceApproval(
+  companyId: string,
+  steps: ApprovalStepRow[],
+  currentStepOrder: number,
+  locationId: string | null | undefined,
+  alreadyApprovedUserIds: ReadonlySet<string> = new Set()
+): Promise<AdvanceResult> {
   const remaining = steps.filter((step) => step.step_order > currentStepOrder).sort((left, right) => left.step_order - right.step_order);
 
   for (const step of remaining) {
     const approver = await resolveStepApprover(companyId, step, locationId);
+    // A station-level approver who already approved this request (e.g. the
+    // AOM approving on the CLM's behalf at the CLM step) is not asked again at
+    // the AOM step. Company-level steps (Business Head, Finance) are never
+    // skipped this way - they stay mandatory.
+    const isLocalStep = step.has_local_candidates ?? step.candidates.some((candidate) => candidate.scope !== "company");
+    if (approver && isLocalStep && alreadyApprovedUserIds.has(approver.userId)) continue;
     if (approver) return { done: false, nextStepOrder: step.step_order, approver, noApproverConfigured: false };
     if (!step.is_required) continue;
     return { done: false, nextStepOrder: step.step_order, approver: null, noApproverConfigured: true };

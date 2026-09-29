@@ -422,7 +422,15 @@ export async function approvePaymentRequest(formData: FormData) {
         updated_by: authorization.userId
       });
     } else {
-      const advance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id);
+      // Everyone who has approved in this cycle (including this approval), so a
+      // person who already approved is not routed the same request again.
+      const priorApprovals = await supabaseAdmin.from("payment_request_approvals")
+        .select("approver_user_id")
+        .eq("payment_request_id", request.id)
+        .eq("approval_cycle", approvalCycle)
+        .eq("action", "approved");
+      const approvedUserIds = new Set<string>([authorization.userId, ...((priorApprovals.data ?? []).map((row) => row.approver_user_id).filter((id): id is string => Boolean(id)))]);
+      const advance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id, approvedUserIds);
       if (advance.done) {
         await updatePaymentRequest(request.id, companyId, {
           status: "approved",
