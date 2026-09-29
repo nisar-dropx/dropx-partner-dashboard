@@ -59,3 +59,5 @@
 @media(max-width:1000px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.metrics{gap:10px}.metric{padding:14px}.metric strong{font-size:22px}.panelHead{padding:16px}.tabs{width:100%;overflow:auto}.search{min-width:0;flex:1}.share{min-width:110px}}
 @media(prefers-reduced-motion:reduce){.skeleton{animation:none}}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:nowrap}
+.nowrap{white-space:nowrap}

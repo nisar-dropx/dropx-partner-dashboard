@@ -3,43 +3,62 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import styles from "@/components/ops-loss-report.module.css";
+import type { LossRow } from "@/lib/ops-pulse/loss-reports";
 
-/** Keep wide Amazon files readable: identity columns first, at most 12 columns on screen (CSV has all). */
-const MAX_COLUMNS = 12;
-const LONG_TEXT = /remark|comment|note|description|reason/i;
+type Column = { key: keyof LossRow; label: string; kind?: "money" | "date" | "long" | "tid" };
 
-const amount = (value: string | undefined) => {
-  const n = Number(String(value ?? "").replace(/[₹,\s]/g, ""));
-  return Number.isFinite(n) && String(value ?? "").trim() ? new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(n) : value ?? "";
+/** Per-report labels for the typed loss_cases columns. Empty columns are hidden. */
+const COLUMNS: Record<"nl" | "slp", Column[]> = {
+  nl: [
+    { key: "tid", label: "TID", kind: "tid" }, { key: "amount", label: "Value", kind: "money" },
+    { key: "case_status", label: "Status" }, { key: "category", label: "Loss bucket" }, { key: "sub_category", label: "Sub bucket" },
+    { key: "impact_date", label: "Impact date", kind: "date" }, { key: "da_name", label: "DA" }, { key: "period", label: "Recovery month" },
+    { key: "remarks", label: "Remarks", kind: "long" }
+  ],
+  slp: [
+    { key: "tid", label: "TID", kind: "tid" }, { key: "amount", label: "Recovery", kind: "money" },
+    { key: "case_status", label: "Status" }, { key: "category", label: "Case source" }, { key: "sub_category", label: "TID alignment" },
+    { key: "impact_date", label: "Created", kind: "date" }, { key: "closed_date", label: "Closed", kind: "date" }, { key: "period", label: "Period" },
+    { key: "remarks", label: "Remarks", kind: "long" }
+  ]
 };
 
-export function OpsLossCases({ station, stationName, rows, headers, referenceColumn, stationColumn, amountColumn, closeHref, fileLabel }: {
+const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
+const dateFmt = (v: string) => new Date(`${v}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+function cellText(row: LossRow, col: Column): string {
+  const v = row[col.key];
+  if (v == null || v === "") return "";
+  if (col.kind === "money") return money.format(Number(v));
+  if (col.kind === "date") return dateFmt(String(v));
+  return String(v);
+}
+
+export function OpsLossCases({ report, station, stationName, rows, closeHref, fileLabel }: {
+  report: "nl" | "slp";
   station: string;
   stationName: string | null;
-  rows: Record<string, string>[];
-  headers: string[];
-  referenceColumn: string | null;
-  stationColumn: string | null;
-  amountColumn: string | null;
+  rows: LossRow[];
   closeHref: string;
   fileLabel: string;
 }) {
   const [query, setQuery] = useState("");
-  const columns = useMemo(() => [
-    ...[referenceColumn, amountColumn].filter((c): c is string => Boolean(c)),
-    ...headers.filter((h) => h !== referenceColumn && h !== amountColumn && h !== stationColumn && h.toLowerCase() !== "id")
-  ].slice(0, MAX_COLUMNS), [headers, referenceColumn, amountColumn, stationColumn]);
+  const columns = useMemo(() => COLUMNS[report].filter((c) => rows.some((r) => r[c.key] != null && r[c.key] !== "")), [report, rows]);
+  const approxCount = useMemo(() => rows.filter((r) => r.tid_approximate).length, [rows]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(q)));
-  }, [rows, query]);
+    return rows.filter((r) => [...COLUMNS[report].map((c) => r[c.key]), ...Object.values(r.extra ?? {})].some((v) => String(v ?? "").toLowerCase().includes(q)));
+  }, [rows, query, report]);
 
   function exportCsv() {
-    const esc = (v: string) => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-    const csv = [headers.map(esc).join(","), ...shown.map((r) => headers.map((h) => esc(r[h] ?? "")).join(","))].join("\n");
-    const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+    const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const extraKeys = [...new Set(rows.flatMap((r) => Object.keys(r.extra ?? {})))];
+    const base = COLUMNS[report];
+    const head = ["Station", ...base.map((c) => c.label), "TID approximate", ...extraKeys];
+    const lines = shown.map((r) => [station, ...base.map((c) => r[c.key]), r.tid_approximate ? "yes" : "", ...extraKeys.map((k) => r.extra?.[k])].map(esc).join(","));
+    const url = URL.createObjectURL(new Blob(["﻿" + [head.map(esc).join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
     a.download = `losses-${fileLabel}.csv`;
@@ -49,18 +68,27 @@ export function OpsLossCases({ station, stationName, rows, headers, referenceCol
 
   return <section className={styles.panel} aria-label={`${station} cases`}>
     <div className={styles.panelHead}>
-      <div><h2>{station}{stationName ? ` · ${stationName}` : ""}</h2><p>{rows.length.toLocaleString("en-IN")} {rows.length === 1 ? "case" : "cases"}{query ? ` · ${shown.length} match` : ""}</p></div>
+      <div>
+        <h2>{station}{stationName ? ` · ${stationName}` : ""}</h2>
+        <p>{rows.length.toLocaleString("en-IN")} {rows.length === 1 ? "case" : "cases"}{query ? ` · ${shown.length} match` : ""}
+          {approxCount ? ` · ≈ ${approxCount} TID${approxCount === 1 ? "" : "s"} rounded in Amazon's file` : ""}</p>
+      </div>
       <div className={styles.toolbar}>
-        <label className={styles.search}><span aria-hidden>⌕</span><input type="search" placeholder="Search cases" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search cases" /></label>
+        <label className={styles.search}><span aria-hidden>⌕</span><input type="search" placeholder="Search TID, status, DA, remarks" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search cases" /></label>
         <button type="button" className={styles.button} onClick={exportCsv}>Download CSV</button>
         <Link href={closeHref} scroll={false} className={styles.button}>Close</Link>
       </div>
     </div>
     <div className={styles.tableWrap}><table className={styles.table}>
-      <thead><tr>{columns.map((c) => <th key={c} className={c === amountColumn ? styles.numeric : undefined}>{c.replace(/_/g, " ")}</th>)}</tr></thead>
+      <thead><tr>{columns.map((c) => <th key={c.key} className={c.kind === "money" ? styles.numeric : undefined}>{c.label}</th>)}</tr></thead>
       <tbody>
-        {shown.map((r, i) => <tr key={i}>{columns.map((c) =>
-          <td key={c} className={c === amountColumn ? styles.numeric : LONG_TEXT.test(c) ? styles.remark : undefined}>{c === amountColumn ? <strong>{amount(r[c])}</strong> : r[c] ?? ""}</td>)}</tr>)}
+        {shown.map((r) => <tr key={r.case_key}>{columns.map((c) => {
+          const text = cellText(r, c);
+          if (c.kind === "money") return <td key={c.key} className={styles.numeric}><strong>{text}</strong></td>;
+          if (c.kind === "long") return <td key={c.key} className={styles.remark}>{text}</td>;
+          if (c.kind === "tid") return <td key={c.key} className={styles.mono} title={r.tid_approximate ? "Amazon's file only kept the first digits of this TID" : undefined}>{r.tid_approximate ? `≈ ${text}` : text}</td>;
+          return <td key={c.key} className={c.kind === "date" ? styles.nowrap : undefined}>{text}</td>;
+        })}</tr>)}
         {!shown.length ? <tr><td colSpan={Math.max(columns.length, 1)}><div className={styles.empty}>No cases match “{query}”.</div></td></tr> : null}
       </tbody>
     </table></div>

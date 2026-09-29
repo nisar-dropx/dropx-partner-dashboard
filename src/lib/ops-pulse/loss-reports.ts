@@ -20,10 +20,17 @@ export type LossRun = {
   reference_column: string | null;
   total_rows: number;
   finished_at: string | null;
+  checked_at: string | null;
 };
 
 export type LossStationTotal = { station_code: string; station_name: string | null; row_count: number; total_amount: number };
-export type LossRow = { id: number; station_code: string | null; amount: number | null; reference: string | null; raw: Record<string, string> };
+/** Typed case from public.loss_cases (one row per case, updated in place by the worker). */
+export type LossRow = {
+  case_key: string; tid: string | null; tid_approximate: boolean; station_code: string | null; amount: number | null;
+  case_status: string | null; category: string | null; sub_category: string | null; impact_date: string | null;
+  closed_date: string | null; da_name: string | null; remarks: string | null; period: string | null; extra: Record<string, string>;
+};
+const CASE_COLUMNS = "case_key,tid,tid_approximate,station_code,amount,case_status,category,sub_category,impact_date,closed_date,da_name,remarks,period,extra";
 
 export type LossReportView = {
   run: LossRun | null;
@@ -64,19 +71,21 @@ async function allowedStations(auth: AuthorizationContext, companyId: string) {
 export async function loadLossReport(auth: AuthorizationContext, report: LossReportKind, station?: string | null): Promise<LossReportView> {
   if (!supabaseAdmin) throw new Error("Database is unavailable.");
   const companyId = requireCompanyId(auth);
-  const { codes, names } = await allowedStations(auth, companyId);
-
-  const [runResult, failResult] = await Promise.all([
+  // Scope + latest runs are independent — one round trip instead of three.
+  const [{ codes, names }, runResult, failResult] = await Promise.all([
+    allowedStations(auth, companyId),
     supabaseAdmin.from("loss_report_runs")
-      .select("id,source_file,source_week,source_created_at,period_label,source_total_count,headers,station_column,amount_column,reference_column,total_rows,finished_at")
+      .select("id,source_file,source_week,source_created_at,period_label,source_total_count,headers,station_column,amount_column,reference_column,total_rows,finished_at,checked_at")
       .eq("report", report).eq("status", "completed").order("started_at", { ascending: false }).limit(1).maybeSingle(),
     supabaseAdmin.from("loss_report_runs")
-      .select("error,finished_at,started_at").eq("report", report).order("started_at", { ascending: false }).limit(1).maybeSingle()
+      .select("error,finished_at").eq("report", report).eq("status", "failed").order("started_at", { ascending: false }).limit(1).maybeSingle()
   ]);
   if (runResult.error) throw new Error("Loss report could not be loaded. Run the loss report migration if this is a new setup.");
   const run = runResult.data as LossRun | null;
-  const latest = failResult.data as { error: string | null; finished_at: string | null } | null;
-  const lastFailure = latest?.error ? latest : null;
+  const failure = failResult.data as { error: string | null; finished_at: string | null } | null;
+  // Unchanged pulls only bump checked_at, so a failure matters only if it's newer than the last good check.
+  const lastGood = run ? Date.parse(run.checked_at ?? run.finished_at ?? "") || 0 : 0;
+  const lastFailure = failure?.error && Date.parse(failure.finished_at ?? "") > lastGood ? failure : null;
   const empty = { run, lastFailure, totals: [], rows: [], selectedStation: null, scopedToAll: codes === null };
   if (!run) return empty;
   if (codes && !codes.size) return empty;
@@ -94,7 +103,7 @@ export async function loadLossReport(auth: AuthorizationContext, report: LossRep
   let rows: LossRow[] = [];
   if (selectedAllowed) {
     const rowResult = await readAllRows(
-      supabaseAdmin.from("loss_report_rows").select("id,station_code,amount,reference,raw").eq("run_id", run.id).eq("station_code", selectedAllowed).order("id")
+      supabaseAdmin.from("loss_cases").select(CASE_COLUMNS).eq("report", report).eq("station_code", selectedAllowed).order("amount", { ascending: false, nullsFirst: false })
     );
     if (rowResult.error) throw new Error("Station rows could not be loaded.");
     rows = (rowResult.data ?? []) as LossRow[];

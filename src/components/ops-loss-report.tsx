@@ -44,7 +44,8 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
       <span>Source <strong>{(run.source_file ?? "Amazon report").trim()}</strong></span>
       {run.period_label ? <><i className={styles.dot} /><span>Period <strong>{run.period_label}</strong></span></> : null}
       {run.source_week ? <><i className={styles.dot} /><span>{run.source_week}</span></> : null}
-      <i className={styles.dot} /><span>Updated <strong>{time(run.finished_at)}</strong></span>
+      <i className={styles.dot} /><span>Data changed <strong>{time(run.finished_at)}</strong></span>
+      {run.checked_at && run.checked_at !== run.finished_at ? <><i className={styles.dot} /><span>Last checked <strong>{time(run.checked_at)}</strong></span></> : null}
       {view.scopedToAll ? null : <><i className={styles.dot} /><span>Your stations only</span></>}
     </div> : null}
 
@@ -88,13 +89,10 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
 
       {selected ? <OpsLossCases
         key={selected.station_code}
+        report={activeTab === "nl" ? "nl" : "slp"}
         station={selected.station_code}
         stationName={selected.station_name}
-        rows={rows.map((r) => r.raw)}
-        headers={run.headers}
-        referenceColumn={run.reference_column}
-        stationColumn={run.station_column}
-        amountColumn={run.amount_column}
+        rows={rows}
         closeHref={basePath}
         fileLabel={`${activeTab}-${selected.station_code}`}
       /> : null}
