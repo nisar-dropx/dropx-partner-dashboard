@@ -34,18 +34,11 @@ export async function resolveInitialStage<T extends ApprovalStage>(
   steps: T[], resolve: (step: T) => Promise<StageTarget>
 ) {
   const ordered = [...steps].sort((a, b) => a.step_order - b.step_order);
-  let unresolvedLocal: T | undefined;
   for (const step of ordered) {
-    // A missing/absent local manager is not an approval. Never promote a new
-    // request to a company-level approver after skipping all local stages.
-    if (!isLocalApprovalStage(step) && unresolvedLocal) {
-      return { step: unresolvedLocal, approver: null };
-    }
     const approver = await resolve(step);
     if (approver || step.is_required) return { step, approver };
-    if (isLocalApprovalStage(step)) unresolvedLocal = step;
   }
-  return { step: unresolvedLocal ?? ordered.at(-1), approver: null };
+  return { step: ordered.at(-1), approver: null };
 }
 
 export function initialStageStatus(approver: StageTarget) {
@@ -60,9 +53,9 @@ export function hasInitialApprovalForStage(
   const current = steps.find(step => step.step_order === currentStepOrder);
   if (!current) return false;
   if (isLocalApprovalStage(current)) return true;
-  const priorLocalRoles = new Set(steps.filter(step => step.step_order < currentStepOrder && isLocalApprovalStage(step))
+  const priorLocalRoles = new Set(steps.filter(step => step.step_order < currentStepOrder && step.is_required && isLocalApprovalStage(step))
     .flatMap(step => step.candidates.map(candidate => candidate.role_id)));
-  if (!priorLocalRoles.size) return true; // Explicitly company-only workflow.
+  if (!priorLocalRoles.size) return true; // Company-only, or all earlier local stages were explicitly optional.
   return approvals.some(approval => String(approval.action).toLowerCase() === "approved" &&
     Boolean(approval.approver_role_id && priorLocalRoles.has(approval.approver_role_id)));
 }

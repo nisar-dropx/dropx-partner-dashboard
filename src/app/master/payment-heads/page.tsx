@@ -37,6 +37,12 @@ type PaymentHeadRow = {
   expense_approval_threshold: number | null;
   is_active: boolean;
   payment_head_questions?: QuestionRow[] | null;
+  payment_head_approval_steps?: Array<{
+    id: string;
+    step_order: number;
+    candidates: Array<{ role_id: string; scope: "station" | "cluster" | "company" }>;
+    is_required: boolean;
+  }> | null;
 };
 
 type RoleRow = { id: string; code: string; name: string; is_active: boolean };
@@ -62,7 +68,7 @@ async function loadPaymentHeads(companyId: string) {
   const [headsResult, rolesResult] = await Promise.all([
     supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
+      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days), payment_head_approval_steps (id, step_order, candidates, is_required)")
       .eq("company_id", companyId)
       .order("code"),
     supabaseAdmin
@@ -160,6 +166,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                   <th>External ID</th>
                   <th>Initial Approver</th>
                   <th>Final Approval</th>
+                  <th>Ordered Workflow</th>
                   <th>Payment Process</th>
                   <th>Payment Methods</th>
                   <th>Expense Approval</th>
@@ -180,17 +187,29 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                       <td>{head.external_id || "-"}</td>
                       <td>{configuredRoleIds(head.initial_approval_role_ids, head.initial_approval_role_id).map((roleId) => roleById.get(roleId)?.name).filter(Boolean).join(", ") || "-"}</td>
                       <td>{configuredRoleIds(head.final_approval_role_ids, head.final_approval_role_id).map((roleId) => roleById.get(roleId)?.name).filter(Boolean).join(", ") || "-"}</td>
+                      <td>
+                        {(head.payment_head_approval_steps ?? []).length
+                          ? `${head.payment_head_approval_steps?.length} configured step${head.payment_head_approval_steps?.length === 1 ? "" : "s"}`
+                          : "Legacy roles only"}
+                      </td>
                       <td>{(head.payment_process_role_ids ?? []).map((roleId) => roleById.get(roleId)?.name).filter(Boolean).join(", ") || "-"}</td>
                       <td>{normalizePaymentModes(head.supported_payment_modes).map(paymentModeLabel).join(", ")}</td>
                       <td>{head.request_expense_approval ? (head.expense_approval_threshold == null ? "All requests" : `Above Rs ${Number(head.expense_approval_threshold).toLocaleString("en-IN")}`) : "-"}</td>
                       <td>{expenseFields} expense / {paymentFields} payment</td>
                       <td>{head.payment_head_questions?.some((question) => question.answer_type === "file") ? "Configured" : "-"}</td>
                       <td><StatusPill status={head.is_active ? "Active" : "Inactive"} /></td>
-                      {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/master/payment-heads?edit=${head.id}`} scroll={false}>Edit</PendingLink></td> : null}
+                      {pagePermission.canEdit ? (
+                        <td>
+                          <div className="table-actions">
+                            <PendingLink className="button secondary compact" href={`/settings/payment-approvals/${head.id}`}>Approval steps</PendingLink>
+                            <PendingLink className="button secondary compact" href={`/master/payment-heads?edit=${head.id}`} scroll={false}>Edit details</PendingLink>
+                          </div>
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 12 : 11}>No payment heads added yet.</td></tr>
+                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 13 : 12}>No payment heads added yet.</td></tr>
                 )}
               </tbody>
             </table>
@@ -204,7 +223,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
             <div className="panel-head">
               <div>
                 <h2>Edit payment head</h2>
-                <p className="subtle">Existing requests keep their answers; new requests use the latest fields.</p>
+                <p className="subtle">Existing requests keep their answers; approval sequence and People-based routing are managed separately.</p>
               </div>
               <PendingLink className="icon-button" href="/master/payment-heads" scroll={false} aria-label="Close">x</PendingLink>
             </div>
@@ -214,6 +233,11 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                 <p className="subtle" style={{ marginTop: 6 }}>{searchParams.error}</p>
               </section>
             ) : null}
+            <div style={{ margin: "0 20px 16px" }}>
+              <PendingLink className="button secondary compact" href={`/settings/payment-approvals/${editHead.id}`}>
+                Configure ordered approval steps
+              </PendingLink>
+            </div>
             <PaymentHeadForm
               action={updatePaymentHead}
               initialHead={{

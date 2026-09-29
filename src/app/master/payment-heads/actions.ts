@@ -148,6 +148,9 @@ async function createPaymentHeadUnsafe(formData: FormData) {
   if (initialApprovalRoleIds.some((roleId) => finalApprovalRoleIds.includes(roleId))) {
     throw new Error("Initial and final approver roles must be different.");
   }
+  if ([...initialApprovalRoleIds, ...finalApprovalRoleIds].some((roleId) => paymentProcessRoleIds.includes(roleId))) {
+    throw new Error("Payment-processing roles cannot also be approval roles. Finance belongs in processing only.");
+  }
 
   const { data: head, error } = await supabaseAdmin
     .from("payment_heads")
@@ -169,6 +172,26 @@ async function createPaymentHeadUnsafe(formData: FormData) {
     .select("id")
     .single();
   if (error) throw new Error(error.message);
+
+  const approvalSteps = [
+    ...(initialApprovalRoleIds.length ? [{
+      candidates: initialApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "station" })),
+      is_required: true
+    }] : []),
+    {
+      candidates: finalApprovalRoleIds.map((roleId) => ({ role_id: roleId, scope: "company" })),
+      is_required: true
+    }
+  ];
+  const { error: approvalStepsError } = await supabaseAdmin.from("payment_head_approval_steps").insert(
+    approvalSteps.map((step, index) => withCompany({
+      payment_head_id: head.id,
+      step_order: index + 1,
+      candidates: step.candidates,
+      is_required: step.is_required
+    }, companyId))
+  );
+  if (approvalStepsError) throw new Error(approvalStepsError.message);
 
   if (questions.length) {
     const { error: questionError } = await supabaseAdmin.from("payment_head_questions").insert(
@@ -218,6 +241,9 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
   await validateRoleIds(paymentProcessRoleIds, companyId, "Payment Process User Role");
   if (initialApprovalRoleIds.some((roleId) => finalApprovalRoleIds.includes(roleId))) {
     throw new Error("Initial and final approver roles must be different.");
+  }
+  if ([...initialApprovalRoleIds, ...finalApprovalRoleIds].some((roleId) => paymentProcessRoleIds.includes(roleId))) {
+    throw new Error("Payment-processing roles cannot also be approval roles. Finance belongs in processing only.");
   }
 
   const { error } = await admin

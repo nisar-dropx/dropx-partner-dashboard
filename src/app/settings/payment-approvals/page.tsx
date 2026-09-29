@@ -38,7 +38,7 @@ export default async function PaymentApprovalsSettingsPage() {
       <PageHead
         eyebrow="Configuration"
         title="Payment Approval Steps"
-        subtitle="Configure the ordered approval chain per payment head - who approves first, who's next if they're unavailable, and where it escalates."
+        subtitle="Configure the ordered approval chain per payment head. Approvers are resolved live from People positions and location scope; Finance remains payment processing only."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 

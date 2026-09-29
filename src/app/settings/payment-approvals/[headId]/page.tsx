@@ -59,7 +59,7 @@ export default async function PaymentApprovalStepsPage({ params }: { params: { h
         <div className="panel-head">
           <div>
             <h2>Approval chain</h2>
-            <p className="subtle">Step 1 runs first. If a step's candidates are all unavailable and it isn't required, the request skips to the next step.</p>
+            <p className="subtle">Step 1 runs first. People is the source of truth for current position holders and station scope. An optional unmapped step is skipped; a required unmapped step blocks safely.</p>
           </div>
         </div>
         <form action={saveApprovalSteps} className="panel-body payment-approval-steps-form">

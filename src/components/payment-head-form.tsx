@@ -525,24 +525,43 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
           <p>Set the roles for each stage of the request lifecycle.</p>
         </div>
         <div className="form-grid three">
-        <label>
-          Initial Approver Role (Optional)
-          <RoleMultiSelect
-            name="initial_approval_role_ids"
-            options={roleOptions}
-            placeholder="Select initial roles (optional)"
-            selectedValues={initialHead?.initial_approval_role_ids?.length ? initialHead.initial_approval_role_ids : (initialHead?.initial_approval_role_id ? [initialHead.initial_approval_role_id] : [])}
-          />
-        </label>
-        <label>
-          Final Approval User Role
-          <RoleMultiSelect
-            name="final_approval_role_ids"
-            options={roleOptions}
-            placeholder="Select final roles"
-            selectedValues={initialHead?.final_approval_role_ids?.length ? initialHead.final_approval_role_ids : (initialHead?.final_approval_role_id ? [initialHead.final_approval_role_id] : [])}
-          />
-        </label>
+        {initialHead ? (
+          <div className="span-2 form-field-block">
+            <input
+              name="initial_approval_role_ids"
+              type="hidden"
+              value={JSON.stringify(initialHead.initial_approval_role_ids?.length ? initialHead.initial_approval_role_ids : (initialHead.initial_approval_role_id ? [initialHead.initial_approval_role_id] : []))}
+            />
+            <input
+              name="final_approval_role_ids"
+              type="hidden"
+              value={JSON.stringify(initialHead.final_approval_role_ids?.length ? initialHead.final_approval_role_ids : (initialHead.final_approval_role_id ? [initialHead.final_approval_role_id] : []))}
+            />
+            <span className="field-label">Ordered approval steps</span>
+            <p className="subtle">Managed from Payment Approval Steps so sequence, fallback priority and People location scope stay in one source of truth.</p>
+          </div>
+        ) : (
+          <>
+            <label>
+              First Approver Role (Optional Quick Setup)
+              <RoleMultiSelect
+                name="initial_approval_role_ids"
+                options={roleOptions}
+                placeholder="Select first roles (optional)"
+                selectedValues={[]}
+              />
+            </label>
+            <label>
+              Final Approval Role (Quick Setup)
+              <RoleMultiSelect
+                name="final_approval_role_ids"
+                options={roleOptions}
+                placeholder="Select final roles"
+                selectedValues={[]}
+              />
+            </label>
+          </>
+        )}
         <label>
           Payment Process User Role
           <RoleMultiSelect
