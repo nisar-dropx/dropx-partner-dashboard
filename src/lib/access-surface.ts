@@ -24,6 +24,7 @@ export const opsAccessPageCodes = [
   "ops_salary_hold",
   "ops_workforce_losses",
   "ops_workforce_mileage",
+  "ops_losses",
   "ops_rostering",
   "daily_submission",
   "cod",
