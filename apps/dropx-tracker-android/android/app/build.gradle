@@ -44,8 +44,9 @@ android {
         // agent so an account can be bound to one phone (see MainActivity.appendDeviceIdToUserAgent).
         // 40 (4.5.13) adds native BiometricPrompt unlock (DropxOnePlugin.authenticateBiometric).
         // 41 (4.5.14) stores opened documents on the phone and saves them to Downloads
-        // (DropxOnePlugin.cacheDocument / saveDocumentToDownloads).
-        versionCode 41
+        // (DropxOnePlugin.cacheDocument / saveDocumentToDownloads). Re-issued as 42, since 41 was
+        // already taken on Play.
+        versionCode 42
         versionName "4.5.14"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
