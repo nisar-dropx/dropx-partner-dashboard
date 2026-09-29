@@ -6403,6 +6403,94 @@ h3 {
   border-radius: 6px;
 }
 
+.payment-flow-pending {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  color: #1e3a8a;
+  font-size: 13px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+}
+
+.payment-flow {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.payment-flow li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 16px;
+}
+
+.payment-flow li:last-child {
+  padding-bottom: 0;
+}
+
+.payment-flow li:not(:last-child)::after {
+  position: absolute;
+  top: 28px;
+  bottom: 2px;
+  left: 12px;
+  width: 2px;
+  background: #e5e7eb;
+  content: "";
+}
+
+.payment-flow li.is-done:not(:last-child)::after {
+  background: #86efac;
+}
+
+.payment-flow-marker {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  background: #fff;
+  border: 2px solid #d1d5db;
+  border-radius: 50%;
+}
+
+.payment-flow li.is-done .payment-flow-marker { background: #16a34a; border-color: #16a34a; }
+.payment-flow li.is-current .payment-flow-marker { border-color: #2563eb; box-shadow: 0 0 0 4px #dbeafe; }
+.payment-flow li.is-returned .payment-flow-marker { background: #f59e0b; border-color: #f59e0b; }
+.payment-flow li.is-stopped .payment-flow-marker { background: #dc2626; border-color: #dc2626; }
+
+.payment-flow li > div {
+  display: grid;
+  gap: 2px;
+  padding-top: 3px;
+}
+
+.payment-flow strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.payment-flow-roles {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.payment-flow-state {
+  color: #374151;
+  font-size: 13px;
+}
+
+.payment-flow li.is-current .payment-flow-state { color: #1d4ed8; font-weight: 600; }
+.payment-flow li.is-returned .payment-flow-state { color: #b45309; font-weight: 600; }
+.payment-flow li.is-stopped .payment-flow-state { color: #b91c1c; font-weight: 600; }
+.payment-flow li.is-upcoming { opacity: .6; }
+
 .payment-view-side .payment-cancel-panel {
   border-radius: 10px;
 }

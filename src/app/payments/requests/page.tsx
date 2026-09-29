@@ -19,6 +19,8 @@ import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
 import { paymentQuestionDateBounds } from "@/lib/payment-question-date-rules";
 import { paymentRequestCancelEligibility, type CancelEligibility } from "@/lib/payment-request-cancel";
+import { buildPaymentApprovalFlow } from "@/lib/payment-approval-flow";
+import { loadApprovalSteps } from "@/lib/payment-approval-steps";
 import { cancelPaymentRequest, createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
 
 type QuestionRow = { id: string; question_text: string; answer_type: string; dropdown_options: string | null; field_stage: string | null; is_required: boolean; sort_order: number; date_rule?: string | null; date_days?: number | null };
@@ -72,6 +74,60 @@ type AnswerRow = {
   file_path: string | null;
 };
 type ApprovalRemarkRow = { action: string | null; comments: string | null; created_at: string };
+type HistoryRow = ApprovalRemarkRow & { approver_user_id: string | null; approver_role_id: string | null };
+
+async function loadApprovalFlow(companyId: string, request: PaymentRequestRow, history: HistoryRow[]) {
+  if (!supabaseAdmin) return null;
+  const admin = supabaseAdmin;
+  const [current, head, steps] = await Promise.all([
+    admin.from("payment_requests")
+      .select("current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+      .eq("company_id", companyId).eq("id", request.id).maybeSingle(),
+    admin.from("payment_heads")
+      .select("initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids")
+      .eq("company_id", companyId).eq("id", request.payment_head_id).maybeSingle(),
+    loadApprovalSteps(companyId, request.payment_head_id).catch(() => [])
+  ]);
+  const roleList = (many: unknown, one: unknown) =>
+    Array.from(new Set([...(Array.isArray(many) ? many : []), one].filter((id): id is string => typeof id === "string" && Boolean(id))));
+  const levels = steps.length
+    ? steps.map((step) => ({ stepOrder: step.step_order, roleIds: step.candidates.map((candidate) => candidate.role_id) }))
+    : [
+        { stepOrder: 1, roleIds: roleList(head.data?.initial_approval_role_ids, head.data?.initial_approval_role_id) },
+        { stepOrder: 2, roleIds: roleList(head.data?.final_approval_role_ids, head.data?.final_approval_role_id) }
+      ].filter((level) => level.roleIds.length);
+  const financeRoleIds = roleList(head.data?.payment_process_role_ids, null);
+  const flow = buildPaymentApprovalFlow(
+    { status: request.status, approval_status: request.approval_status, current_step_order: current.data?.current_step_order ?? null },
+    levels, financeRoleIds, history
+  );
+
+  const currentUserId: string | null = current.data?.current_approver_user_id ?? null;
+  const currentRoleIds = roleList(current.data?.current_approver_role_ids, current.data?.current_approver_role_id);
+  const userIds = Array.from(new Set([currentUserId, ...flow.map((step) => step.approvedByUserId), ...history.map((row) => row.approver_user_id)]
+    .filter((id): id is string => Boolean(id))));
+  const roleIds = Array.from(new Set([...flow.flatMap((step) => step.roleIds), ...currentRoleIds]));
+  const [people, roles] = await Promise.all([
+    userIds.length ? admin.from("profiles").select("id, full_name, email").eq("company_id", companyId).in("id", userIds) : Promise.resolve({ data: [] }),
+    roleIds.length ? admin.from("user_roles").select("id, name").eq("company_id", companyId).in("id", roleIds) : Promise.resolve({ data: [] })
+  ]);
+  const personName = new Map(((people.data ?? []) as Array<{ id: string; full_name: string | null; email: string | null }>)
+    .map((person) => [person.id, person.full_name || person.email || "Unknown user"]));
+  const roleName = new Map(((roles.data ?? []) as Array<{ id: string; name: string | null }>).map((role) => [role.id, role.name || "Role"]));
+  const rolesLabel = (ids: string[]) => ids.map((id) => roleName.get(id)).filter(Boolean).join(" / ") || "Not configured";
+
+  return {
+    steps: flow.map((step) => ({
+      ...step,
+      rolesText: rolesLabel(step.roleIds),
+      approvedBy: step.approvedByUserId ? personName.get(step.approvedByUserId) ?? null : null,
+      pendingWith: step.state === "current"
+        ? (currentUserId ? personName.get(currentUserId) ?? null : null) ?? (currentRoleIds.length ? `Any ${rolesLabel(currentRoleIds)}` : `Any ${rolesLabel(step.roleIds)}`)
+        : null
+    })),
+    personName
+  };
+}
 
 const NO_LOCATION_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -403,13 +459,14 @@ export default async function PaymentRequestsPage({
       .eq("payment_request_id", viewRequest.id),
     supabaseAdmin
       .from("payment_request_approvals")
-      .select("action, comments, created_at")
+      .select("action, comments, created_at, approver_user_id, approver_role_id")
       .eq("company_id", companyId)
       .or(`payment_request_id.eq.${viewRequest.id},request_id.eq.${viewRequest.id}`)
       .order("created_at", { ascending: true })
   ]) : [null, null];
   const viewAnswers = (viewAnswersResult?.data ?? []) as AnswerRow[];
-  const viewHistory = (viewHistoryResult?.data ?? []) as ApprovalRemarkRow[];
+  const viewHistory = (viewHistoryResult?.data ?? []) as HistoryRow[];
+  const viewFlow = viewRequest ? await loadApprovalFlow(companyId, viewRequest, viewHistory) : null;
   const viewQuestionText = new Map((viewHead?.payment_head_questions ?? []).map((question) => [question.id, question.question_text]));
   const viewCancel = viewRequest ? cancelEligibility(viewRequest) : null;
   const money = (value: number | null) => value == null ? "-" : `Rs ${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -711,6 +768,44 @@ export default async function PaymentRequestsPage({
 
             <div className="payment-view-layout">
               <div className="payment-view-main">
+                {viewFlow ? (() => {
+                  const pending = viewFlow.steps.find((step) => step.state === "current");
+                  return (
+                    <section className="payment-view-card">
+                      <h3>Approval flow</h3>
+                      {pending ? (
+                        <p className="payment-flow-pending">
+                          Pending at <strong>{pending.label}</strong> · with <strong>{pending.pendingWith ?? pending.rolesText}</strong>
+                        </p>
+                      ) : null}
+                      <ol className="payment-flow">
+                        {viewFlow.steps.map((step) => (
+                          <li className={`is-${step.state}`} key={step.key}>
+                            <span className="payment-flow-marker" aria-hidden="true">{step.state === "done" ? "✓" : ""}</span>
+                            <div>
+                              <strong>{step.label}</strong>
+                              <span className="payment-flow-roles">{step.rolesText}</span>
+                              <span className="payment-flow-state">
+                                {step.state === "done"
+                                  ? step.key === "finance"
+                                    ? "Paid"
+                                    : `Approved${step.approvedBy ? ` by ${step.approvedBy}` : ""}${step.approvedAt ? ` · ${formatDashboardDateTime(step.approvedAt)}` : ""}`
+                                  : step.state === "current"
+                                    ? `Pending with ${step.pendingWith ?? step.rolesText}`
+                                    : step.state === "returned"
+                                      ? "Returned to requester"
+                                      : step.state === "stopped"
+                                        ? String(viewRequest.status ?? "").toLowerCase() === "rejected" ? "Rejected here" : "Cancelled"
+                                        : "Upcoming"}
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  );
+                })() : null}
+
                 <section className="payment-view-card">
                   <h3>Beneficiary</h3>
                   <dl>
@@ -753,7 +848,10 @@ export default async function PaymentRequestsPage({
                         return (
                           <li className={`is-${action}`} key={`${entry.created_at}-${index}`}>
                             <strong>{historyLabel(action)}</strong>
-                            <span>{formatDashboardDateTime(entry.created_at)}</span>
+                            <span>
+                              {entry.approver_user_id && viewFlow?.personName.get(entry.approver_user_id) ? `${viewFlow.personName.get(entry.approver_user_id)} · ` : ""}
+                              {formatDashboardDateTime(entry.created_at)}
+                            </span>
                             {entry.comments ? <p>{entry.comments.replace(/^returned:\s*/i, "")}</p> : null}
                           </li>
                         );
