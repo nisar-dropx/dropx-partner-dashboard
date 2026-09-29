@@ -11,6 +11,7 @@ import {
   type WorkforcePaymentPolicy
 } from "@/lib/workforce-payment-policy";
 import { saveWorkforcePaymentSettings } from "./actions";
+import styles from "./policy-form.module.css";
 
 const methodOptions: Array<{ value: WorkforcePaymentMethod; label: string }> = [
   { value: "calendar_days", label: "Calendar-day attendance" },
@@ -56,7 +57,7 @@ export function WorkforcePaymentPolicyForm({
   }
 
   return (
-    <form action={saveWorkforcePaymentSettings} className="form-grid two">
+    <form action={saveWorkforcePaymentSettings} className={`${styles.form} form-grid two`}>
       <label className="span-2">Calculation method
         <select
           className="select"

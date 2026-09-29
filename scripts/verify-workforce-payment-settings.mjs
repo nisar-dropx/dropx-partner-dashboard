@@ -278,11 +278,21 @@ const formSource = readFileSync(
   new URL("../src/app/settings/workforce-payment/policy-form.tsx", import.meta.url),
   "utf8"
 );
+const formStyles = readFileSync(
+  new URL("../src/app/settings/workforce-payment/policy-form.module.css", import.meta.url),
+  "utf8"
+);
 assert.doesNotMatch(pageSource, /₹18,000 example|30-day month/i);
 assert.doesNotMatch(formSource, /24 months|Next month through/i);
 assert.match(formSource, /Applies from the selected month until another policy takes effect/);
 assert.match(formSource, /disabled=\{formDisabled \|\| !fields\.workUnitsPerPaidOff\}/);
 assert.match(formSource, /disabled=\{formDisabled \|\| !fields\.paidOffDays\}/);
+assert.match(formSource, /className=\{`\$\{styles\.form\} form-grid two`\}/);
+assert.match(formStyles, /\.form input:disabled,/);
+assert.match(formStyles, /\.form select:disabled/);
+assert.match(formStyles, /background: #eef1f5/);
+assert.match(formStyles, /cursor: not-allowed/);
+assert.match(formStyles, /opacity: 1/);
 const actionSource = readFileSync(
   new URL("../src/app/settings/workforce-payment/actions.ts", import.meta.url),
   "utf8"
