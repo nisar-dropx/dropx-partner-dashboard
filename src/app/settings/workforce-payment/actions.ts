@@ -6,31 +6,15 @@ import { redirect } from "next/navigation";
 import { requirePagePermissionOrThrow } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
+  DEFAULT_WORKFORCE_PAYMENT_POLICY,
   WORKFORCE_PAYMENT_METHODS,
+  workforcePaymentMethodFields,
   type WorkforcePaymentMethod
 } from "@/lib/workforce-payment-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
-}
-
-function indiaMonth(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit"
-  }).formatToParts(date);
-  const year = parts.find((part) => part.type === "year")?.value;
-  const month = parts.find((part) => part.type === "month")?.value;
-  if (!year || !month) throw new Error("Unable to determine the current month.");
-  return `${year}-${month}`;
-}
-
-function addMonths(monthValue: string, amount: number) {
-  const [year, month] = monthValue.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1 + amount, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function wholeNumber(value: FormDataEntryValue | null, field: string, minimum: number, maximum: number) {
@@ -81,8 +65,13 @@ export async function saveWorkforcePaymentSettings(formData: FormData) {
       throw new Error("Choose a valid workforce payment calculation method.");
     }
 
-    const paidOffDays = wholeNumber(formData.get("paid_off_days"), "Paid off days", 0, 10);
-    const workUnitsPerPaidOff = positiveNumber(formData.get("work_units_per_paid_off"), "Work units per paid off", 31);
+    const fields = workforcePaymentMethodFields(calculationMethod);
+    const paidOffDays = fields.paidOffDays
+      ? wholeNumber(formData.get("paid_off_days"), "Paid off days", 0, 10)
+      : DEFAULT_WORKFORCE_PAYMENT_POLICY.paid_off_days;
+    const workUnitsPerPaidOff = fields.workUnitsPerPaidOff
+      ? positiveNumber(formData.get("work_units_per_paid_off"), "Work units per paid off", 31)
+      : DEFAULT_WORKFORCE_PAYMENT_POLICY.work_units_per_paid_off;
     const effectiveMonth = clean(formData.get("effective_from"));
     if (!validMonth(effectiveMonth)) {
       throw new Error("Choose a valid effective month.");
@@ -92,38 +81,18 @@ export async function saveWorkforcePaymentSettings(formData: FormData) {
       throw new Error("Change reason must be from 3 to 250 characters.");
     }
 
-    const currentMonth = indiaMonth();
-    const firstAllowedMonth = addMonths(currentMonth, 1);
-    const lastAllowedMonth = addMonths(currentMonth, 24);
-    if (effectiveMonth < firstAllowedMonth || effectiveMonth > lastAllowedMonth) {
-      throw new Error(`Effective month must be from ${firstAllowedMonth} through ${lastAllowedMonth}. Once a month begins, its policy is locked.`);
-    }
     const effectiveFrom = `${effectiveMonth}-01`;
 
-    const existing = await supabaseAdmin
-      .from("workforce_payment_settings")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("effective_from", effectiveFrom)
-      .maybeSingle();
-    if (existing.error) throw new Error(existing.error.message);
-
-    const now = new Date().toISOString();
-    const payload = {
-      company_id: companyId,
-      calculation_method: calculationMethod,
-      paid_off_days: paidOffDays,
-      work_units_per_paid_off: workUnitsPerPaidOff,
-      cap_at_monthly_amount: formData.get("cap_at_monthly_amount") === "on",
-      effective_from: effectiveFrom,
-      change_reason: changeReason,
-      updated_by: authorization.userId,
-      updated_at: now,
-      ...(existing.data ? {} : { created_by: authorization.userId, created_at: now })
-    };
-    const saved = await supabaseAdmin
-      .from("workforce_payment_settings")
-      .upsert(payload, { onConflict: "company_id,effective_from" });
+    const saved = await supabaseAdmin.rpc("save_workforce_payment_setting", {
+      p_company_id: companyId,
+      p_calculation_method: calculationMethod,
+      p_paid_off_days: paidOffDays,
+      p_work_units_per_paid_off: workUnitsPerPaidOff,
+      p_cap_at_monthly_amount: formData.get("cap_at_monthly_amount") === "on",
+      p_effective_from: effectiveFrom,
+      p_change_reason: changeReason,
+      p_actor_user_id: authorization.userId
+    });
     if (saved.error) throw new Error(saved.error.message);
 
     revalidatePath("/settings");

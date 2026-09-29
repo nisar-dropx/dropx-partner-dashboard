@@ -15,6 +15,11 @@ export type WorkforcePaymentPolicy = {
   effective_from: string;
 };
 
+export type WorkforcePaymentFinalizedPeriod = {
+  period_start: string;
+  period_end: string;
+};
+
 export const DEFAULT_WORKFORCE_PAYMENT_POLICY: WorkforcePaymentPolicy = {
   calculation_method: "calendar_days",
   paid_off_days: 4,
@@ -22,6 +27,28 @@ export const DEFAULT_WORKFORCE_PAYMENT_POLICY: WorkforcePaymentPolicy = {
   cap_at_monthly_amount: true,
   effective_from: "0001-01-01"
 };
+
+export function workforcePaymentMethodFields(method: WorkforcePaymentMethod) {
+  return {
+    paidOffDays: method === "fixed_paid_offs" || method === "earned_paid_offs",
+    workUnitsPerPaidOff: method === "earned_paid_offs"
+  };
+}
+
+export function workforcePaymentMonthIsFinalized(
+  effectiveFrom: string,
+  finalizedPeriods: WorkforcePaymentFinalizedPeriod[]
+) {
+  const [year, month] = effectiveFrom.slice(0, 7).split("-").map(Number);
+  const nextMonth = month === 12
+    ? `${String(year + 1).padStart(4, "0")}-01-01`
+    : `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}-01`;
+
+  return finalizedPeriods.some((period) =>
+    period.period_end >= effectiveFrom
+    && period.period_start < nextMonth
+  );
+}
 
 const rounded = (value: number) => Math.round(value * 100) / 100;
 

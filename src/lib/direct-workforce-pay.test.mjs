@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { directPayForDay, monthlyDailyAccrual, preferredDirectPayAttendance } from "./direct-workforce-pay.ts";
-import { monthlyAttendanceAmountForDay, workforcePaymentExample, workforcePaymentPolicyForDate } from "./workforce-payment-policy.ts";
+import {
+  monthlyAttendanceAmountForDay,
+  workforcePaymentExample,
+  workforcePaymentMethodFields,
+  workforcePaymentPolicyForDate,
+  workforcePaymentMonthIsFinalized
+} from "./workforce-payment-policy.ts";
 
 test("direct pay handles monthly, present-day and hourly amounts", () => {
   const result = directPayForDay({ MONTHLY: 31000, DAILY: 500, HOURLY: 100 }, [
@@ -50,6 +56,33 @@ test("payment policies are selected by effective month and default to existing c
   assert.equal(workforcePaymentPolicyForDate(history, "2026-09-30").calculation_method, "calendar_days");
   assert.equal(workforcePaymentPolicyForDate(history, "2026-10-15").calculation_method, "fixed_paid_offs");
   assert.equal(workforcePaymentPolicyForDate(history, "2026-11-01").calculation_method, "earned_paid_offs");
+});
+
+test("settings require only the fields used by the selected payment method", () => {
+  assert.deepEqual(workforcePaymentMethodFields("calendar_days"), {
+    paidOffDays: false,
+    workUnitsPerPaidOff: false
+  });
+  assert.deepEqual(workforcePaymentMethodFields("fixed_paid_offs"), {
+    paidOffDays: true,
+    workUnitsPerPaidOff: false
+  });
+  assert.deepEqual(workforcePaymentMethodFields("earned_paid_offs"), {
+    paidOffDays: true,
+    workUnitsPerPaidOff: true
+  });
+});
+
+test("only the selected month locks when its payroll is finalized", () => {
+  assert.equal(workforcePaymentMonthIsFinalized("2026-03-01", [
+    { period_start: "2026-03-01", period_end: "2026-03-31" }
+  ]), true);
+  assert.equal(workforcePaymentMonthIsFinalized("2026-02-01", [
+    { period_start: "2026-03-01", period_end: "2026-03-31" }
+  ]), false);
+  assert.equal(workforcePaymentMonthIsFinalized("2026-12-01", [
+    { period_start: "2027-01-01", period_end: "2027-01-31" }
+  ]), false);
 });
 
 test("attendance-based monthly pay uses full, half and absent attendance units", () => {
