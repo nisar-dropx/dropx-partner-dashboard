@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { loadApprovalSteps, resolveInitialApprovalTarget, resolveStepApprover, type ApprovalStepRow } from "@/lib/payment-approval-steps";
 import { initialStageStatus } from "@/lib/payment-stage-policy";
+import { paymentRequestCancelEligibility } from "@/lib/payment-request-cancel";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
 function clean(value: FormDataEntryValue | null) {
@@ -1519,4 +1520,73 @@ export async function resubmitPaymentRequest(formData: FormData) {
   }
 
   paymentRequestsRedirect({ paymentNotice: "Payment request resubmitted successfully." });
+}
+
+export async function cancelPaymentRequest(formData: FormData) {
+  const authorization = await requirePagePermission("payment_requests", "add");
+  const companyId = requireCompanyId(authorization);
+  let requestNo = "";
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+    const admin = supabaseAdmin;
+    const requestId = required(formData.get("request_id"), "Payment request");
+    const reason = required(formData.get("cancel_reason"), "Reason for cancelling");
+    if (reason.length > 1000) throw new Error("Keep the reason under 1000 characters.");
+
+    const { data: request, error: requestError } = await admin
+      .from("payment_requests")
+      .select("id, request_no, location_id, requested_by, status, approval_status, approval_cycle")
+      .eq("id", requestId)
+      .eq("company_id", companyId)
+      .single();
+    if (requestError || !request) throw new Error("Payment request not found.");
+    if (!canAccessPaymentLocation(authorization, request.location_id)) {
+      throw new Error("You do not have access to this request location.");
+    }
+    requestNo = request.request_no ?? "";
+
+    const approvals = await admin
+      .from("payment_request_approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("action", "approved")
+      .or(`payment_request_id.eq.${request.id},request_id.eq.${request.id}`);
+    if (approvals.error) throw new Error(approvals.error.message);
+    const eligibility = paymentRequestCancelEligibility(request, authorization.userId, (approvals.count ?? 0) > 0);
+    if (!eligibility.allowed) throw new Error(eligibility.reason);
+
+    // Logged before the status change: if the log can't be written (e.g. the action check
+    // migration hasn't run), nothing changes and the requester sees the error.
+    await insertPaymentApprovalLog(withCompany({
+      payment_request_id: request.id,
+      request_id: request.id,
+      approver_user_id: authorization.userId,
+      approver_role_id: authorization.roleId,
+      approval_cycle: Number(request.approval_cycle) || 1,
+      action: "cancelled",
+      comments: reason
+    }, companyId), companyId);
+
+    const { error: updateError } = await admin
+      .from("payment_requests")
+      .update({
+        status: "cancelled",
+        approval_status: "CANCELLED",
+        current_approver_user_id: null,
+        current_approver_role_id: null,
+        current_approver_role_ids: [],
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", request.id)
+      .eq("company_id", companyId);
+    if (updateError) throw new Error(updateError.message);
+
+    revalidatePath("/payments/requests");
+    revalidatePath("/payments/approvals");
+    revalidatePath("/payments/report");
+  } catch (error) {
+    paymentRequestsRedirect({ paymentError: paymentRequestErrorMessage(error) });
+  }
+
+  paymentRequestsRedirect({ paymentNotice: `Payment request ${requestNo} cancelled.` });
 }

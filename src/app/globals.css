@@ -6146,6 +6146,100 @@ h3 {
   line-height: 1.5;
 }
 
+.payment-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.payment-cancel-wrap {
+  padding-top: 0;
+}
+
+.payment-cancel-panel {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+}
+
+.payment-cancel-panel.is-locked {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+
+.payment-cancel-panel strong {
+  color: #991b1b;
+}
+
+.payment-cancel-panel.is-locked strong {
+  color: #374151;
+}
+
+.payment-cancel-panel p {
+  margin: 0;
+}
+
+.payment-cancel-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.payment-cancel-panel .form-actions {
+  justify-content: flex-end;
+}
+
+.payment-view-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px 18px;
+  margin: 0;
+}
+
+.payment-view-grid dt {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.payment-view-grid dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.payment-view-grid .span-all {
+  grid-column: 1 / -1;
+}
+
+.payment-view-heading {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.payment-view-history {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+
+.payment-view-history li {
+  display: grid;
+  gap: 2px;
+}
+
+.payment-view-history strong {
+  text-transform: capitalize;
+}
+
+.payment-view-history p {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+}
+
 .payment-resubmit-remarks {
   display: grid;
   gap: 8px;

@@ -18,7 +18,8 @@ import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-coun
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
 import { paymentQuestionDateBounds } from "@/lib/payment-question-date-rules";
-import { createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
+import { paymentRequestCancelEligibility, type CancelEligibility } from "@/lib/payment-request-cancel";
+import { cancelPaymentRequest, createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
 
 type QuestionRow = { id: string; question_text: string; answer_type: string; dropdown_options: string | null; field_stage: string | null; is_required: boolean; sort_order: number; date_rule?: string | null; date_days?: number | null };
 type LocationRow = {
@@ -188,7 +189,7 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
 
 async function loadPaymentRequestData(companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) {
-    return { heads: [] as PaymentHeadRow[], locations: [] as LocationRow[], requests: [] as PaymentRequestRow[], error: "Supabase service role key is not configured." };
+    return { approvedRequestIds: new Set<string>(), heads: [] as PaymentHeadRow[], locations: [] as LocationRow[], requests: [] as PaymentRequestRow[], error: "Supabase service role key is not configured." };
   }
   let locationsQuery = supabaseAdmin
       .from("stations")
@@ -228,7 +229,26 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
     ...allRequests.slice(0, 20).map((request) => request.id),
     ...allRequests.filter((request) => request.requested_by === authorization.userId).map((request) => request.id)
   ]);
+  // Which of the user's own open requests already have an approval at any level (blocks Cancel).
+  const ownOpenIds = allRequests
+    .filter((request) => request.requested_by === authorization.userId)
+    .filter((request) => !["cancelled", "rejected", "processed", "processing", "approved"].includes(String(request.status ?? "").toLowerCase()))
+    .map((request) => request.id);
+  const approvedRequestIds = new Set<string>();
+  if (ownOpenIds.length) {
+    const approvals = await supabaseAdmin
+      .from("payment_request_approvals")
+      .select("payment_request_id, request_id")
+      .eq("company_id", companyId)
+      .eq("action", "approved")
+      .or(`payment_request_id.in.(${ownOpenIds.join(",")}),request_id.in.(${ownOpenIds.join(",")})`);
+    for (const row of (approvals.data ?? []) as Array<{ payment_request_id: string | null; request_id: string | null }>) {
+      if (row.payment_request_id) approvedRequestIds.add(row.payment_request_id);
+      if (row.request_id) approvedRequestIds.add(row.request_id);
+    }
+  }
   return {
+    approvedRequestIds,
     heads: ((headsResult.data ?? []) as PaymentHeadRow[]).map((head) => ({
       ...head,
       payment_head_questions: questionsForStage(head.payment_head_questions, "expense")
@@ -274,17 +294,53 @@ async function loadReturnRemark(companyId: string, requestId: string) {
   return null;
 }
 
+function CancelRequestPanel({ request, eligibility }: { request: PaymentRequestRow; eligibility: CancelEligibility }) {
+  if (!eligibility.allowed) {
+    return (
+      <div className="payment-cancel-panel is-locked">
+        <strong>Cancel request</strong>
+        <p className="subtle">{eligibility.reason}</p>
+      </div>
+    );
+  }
+  return (
+    <form action={cancelPaymentRequest} className="payment-cancel-panel">
+      <input type="hidden" name="request_id" value={request.id} />
+      <strong>Cancel request</strong>
+      <p className="subtle">Use this if the request is a duplicate or no longer needed. It can&apos;t be undone.</p>
+      <label>
+        Reason for cancelling *
+        <textarea className="field" maxLength={1000} name="cancel_reason" placeholder="e.g. Duplicate of an earlier request" required rows={2} />
+      </label>
+      <div className="form-actions">
+        <SubmitButton
+          className="button danger"
+          confirmDescription={`${request.request_no} will be cancelled and removed from the approval queue. This can't be undone.`}
+          confirmMessage="Cancel this payment request?"
+          confirmSubmitText="Cancel request"
+          confirmTitle="Cancel payment request"
+          pendingText="Cancelling"
+        >
+          Cancel request
+        </SubmitButton>
+      </div>
+    </form>
+  );
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function PaymentRequestsPage({
   searchParams
 }: {
-  searchParams?: { bank?: string; paymentError?: string; paymentNotice?: string; resubmit?: string };
+  searchParams?: { bank?: string; paymentError?: string; paymentNotice?: string; resubmit?: string; view?: string };
 }) {
   const authorization = await requirePagePermission("payment_requests", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_requests;
-  const { heads, locations, requests, error } = await loadPaymentRequestData(companyId, authorization);
+  const { approvedRequestIds, heads, locations, requests, error } = await loadPaymentRequestData(companyId, authorization);
+  const cancelEligibility = (request: PaymentRequestRow) =>
+    paymentRequestCancelEligibility(request, authorization.userId, approvedRequestIds.has(request.id));
   const savedContacts = await loadUserPaymentContacts(companyId, authorization.userId);
   const expenseActionCount = (await loadPaymentNotificationSnapshot(authorization)).badges.expense_requests ?? 0;
   const headById = new Map(heads.map((head) => [head.id, head]));
@@ -319,6 +375,29 @@ export default async function PaymentRequestsPage({
   const resubmitAnswers = (answersResult?.data ?? []) as AnswerRow[];
   const answerByQuestionId = new Map(resubmitAnswers.map((answer) => [answer.question_id, answer]));
   const returnRemarkText = returnRemark?.comments?.replace(/^returned:\s*/i, "").trim();
+
+  const viewRequest = searchParams?.view && !resubmitRequest && !bankRequest
+    ? requests.find((request) => request.id === searchParams.view) ?? null
+    : null;
+  const viewHead = viewRequest ? headById.get(viewRequest.payment_head_id) ?? null : null;
+  const [viewAnswersResult, viewHistoryResult] = viewRequest && supabaseAdmin ? await Promise.all([
+    supabaseAdmin
+      .from("payment_request_answers")
+      .select("id, question_id, answer_value, file_name, file_path")
+      .eq("company_id", companyId)
+      .eq("payment_request_id", viewRequest.id),
+    supabaseAdmin
+      .from("payment_request_approvals")
+      .select("action, comments, created_at")
+      .eq("company_id", companyId)
+      .or(`payment_request_id.eq.${viewRequest.id},request_id.eq.${viewRequest.id}`)
+      .order("created_at", { ascending: true })
+  ]) : [null, null];
+  const viewAnswers = (viewAnswersResult?.data ?? []) as AnswerRow[];
+  const viewHistory = (viewHistoryResult?.data ?? []) as ApprovalRemarkRow[];
+  const viewQuestionText = new Map((viewHead?.payment_head_questions ?? []).map((question) => [question.id, question.question_text]));
+  const viewCancel = viewRequest ? cancelEligibility(viewRequest) : null;
+  const money = (value: number | null) => value == null ? "-" : `Rs ${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
   return (
     <AppShell active="Payment Requests" pageCode="payment_requests">
@@ -394,7 +473,7 @@ export default async function PaymentRequestsPage({
                   <th>IFSC / Portal</th>
                   <th>Status</th>
                   <th>Created</th>
-                  {pagePermission.canAdd ? <th>Action</th> : null}
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -413,19 +492,20 @@ export default async function PaymentRequestsPage({
                       <td>{request.payment_mode === "online_payment" ? request.payment_portal ?? "-" : request.ifsc ?? "-"}</td>
                       <td><StatusPill status={paymentLifecycleLabel(request, authorization.userId)} /></td>
                       <td>{formatDashboardDate(request.created_at)}</td>
-                      {pagePermission.canAdd ? (
-                        <td>
-                          {canSubmitBankDetails(request, authorization.userId) ? (
+                      <td>
+                        <div className="payment-row-actions">
+                          <PendingLink className="button secondary compact" href={`/payments/requests?view=${request.id}`} scroll={false}>View</PendingLink>
+                          {pagePermission.canAdd && canSubmitBankDetails(request, authorization.userId) ? (
                             <PendingLink className="button compact" href={`/payments/requests?bank=${request.id}`} scroll={false}>Submit payout details</PendingLink>
-                          ) : isResubmittable(request, authorization.userId) ? (
+                          ) : pagePermission.canAdd && isResubmittable(request, authorization.userId) ? (
                             <PendingLink className="button secondary compact" href={`/payments/requests?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
-                          ) : "-"}
-                        </td>
-                      ) : null}
+                          ) : null}
+                        </div>
+                      </td>
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canAdd ? 12 : 11}>No payment requests added yet.</td></tr>
+                  <tr><td className="empty-cell" colSpan={12}>No payment requests added yet.</td></tr>
                 )}
               </tbody>
             </table>
@@ -586,6 +666,70 @@ export default async function PaymentRequestsPage({
                 <SubmitButton pendingText="Resubmitting">Resubmit request</SubmitButton>
               </div>
             </form>
+            <div className="panel-body payment-cancel-wrap">
+              <CancelRequestPanel eligibility={cancelEligibility(resubmitRequest)} request={resubmitRequest} />
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {viewRequest ? (
+        <div className="modal-backdrop">
+          <section className="modal-panel wide-modal" role="dialog" aria-modal="true" aria-labelledby="view-payment-title">
+            <div className="panel-head">
+              <div>
+                <h2 id="view-payment-title">{viewRequest.request_no}</h2>
+                <p className="subtle">Submitted {formatDashboardDateTime(viewRequest.created_at)}</p>
+              </div>
+              <PendingLink className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
+            </div>
+            <div className="panel-body payment-view-body">
+              <dl className="payment-view-grid">
+                <div><dt>Status</dt><dd><StatusPill status={paymentLifecycleLabel(viewRequest, authorization.userId)} /></dd></div>
+                <div><dt>Location</dt><dd>{viewRequest.location_code}</dd></div>
+                <div><dt>Payment head</dt><dd>{viewHead?.name ?? "-"}</dd></div>
+                <div><dt>Estimated</dt><dd>{money(viewRequest.amount_requested)}</dd></div>
+                <div><dt>Amount</dt><dd>{money(viewRequest.amount)}</dd></div>
+                <div><dt>Payment method</dt><dd>{viewRequest.payment_mode ? paymentModeLabel(viewRequest.payment_mode) : "-"}</dd></div>
+                <div><dt>Account holder</dt><dd>{viewRequest.account_holder_name ?? "-"}</dd></div>
+                <div><dt>Account / UPI ID</dt><dd>{viewRequest.payment_mode === "upi_payment" ? viewRequest.payment_reference ?? "-" : viewRequest.bank_account_no ?? "-"}</dd></div>
+                <div><dt>IFSC / Portal</dt><dd>{viewRequest.payment_mode === "online_payment" ? viewRequest.payment_portal ?? "-" : viewRequest.ifsc ?? "-"}</dd></div>
+                <div><dt>Contact</dt><dd>{[viewRequest.contact_no, viewRequest.email].filter(Boolean).join(" · ") || "-"}</dd></div>
+                {viewRequest.adhoc_provider_employee_id ? <div><dt>Adhoc DA</dt><dd>{viewRequest.adhoc_da_name} · {viewRequest.adhoc_provider_employee_id} · {viewRequest.adhoc_work_date}</dd></div> : null}
+                <div className="span-all"><dt>Remarks</dt><dd>{viewRequest.remarks || "-"}</dd></div>
+                {viewAnswers.map((answer) => (
+                  <div key={answer.id} className="span-all">
+                    <dt>{viewQuestionText.get(answer.question_id) ?? "Answer"}</dt>
+                    <dd>
+                      {answer.file_name ? (
+                        <a href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer.id)}`} rel="noreferrer" target="_blank">{answer.file_name}</a>
+                      ) : answer.answer_value || "-"}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {viewHistory.length ? (
+                <>
+                  <div className="section-divider" />
+                  <h3 className="payment-view-heading">History</h3>
+                  <ol className="payment-view-history">
+                    {viewHistory.map((entry, index) => (
+                      <li key={`${entry.created_at}-${index}`}>
+                        <strong>{String(entry.action ?? "").replace(/_/g, " ") || "update"}</strong>
+                        <span className="subtle">{formatDashboardDateTime(entry.created_at)}</span>
+                        {entry.comments ? <p>{entry.comments}</p> : null}
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              ) : null}
+              {pagePermission.canAdd && viewRequest.requested_by === authorization.userId && viewCancel ? (
+                <>
+                  <div className="section-divider" />
+                  <CancelRequestPanel eligibility={viewCancel} request={viewRequest} />
+                </>
+              ) : null}
+            </div>
           </section>
         </div>
       ) : null}
