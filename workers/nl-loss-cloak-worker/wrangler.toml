@@ -1,0 +1,46 @@
+name = "nl-loss-cloak-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+account_id = "ab2dba58727809ae8bf0a21edb5fe7b8"
+
+# Pin near AWS Mumbai (same as Report-auto-worker) so Amazon sees an India egress.
+[placement]
+region = "aws:ap-south-1"
+
+# Browser Rendering — Cloak login (and shared workforce login when it has expired).
+[browser]
+binding = "BROWSER"
+remote = true
+
+# SLP recovery workbooks can be large; parsing needs more than the 30s default.
+[limits]
+cpu_ms = 300000
+
+[vars]
+# Not secret: project URLs + login email. Keys/passwords are wrangler secrets (below).
+# DropX Dashboard (company) project — sessions + loss tables.
+SUPABASE_URL = "https://uimajyffojydenqsegjv.supabase.co"
+CLOAK_EMAIL = "dropxcloak@gmail.com"
+CLOAK_BASE_URL = "https://cloak.tech.amazon.dev"
+CLOAK_COUNTRY = "IN"
+CLOAK_PARTNER_SHORTCODE = "DROP"
+CLOAK_CASE_WITH = "eDSP"
+CLOAK_COGNITO_CLIENT_ID = "244vsm6r9jvqeb0hm760on5qqr"
+CLOAK_COGNITO_REGION = "us-east-1"
+WORKFORCE_BASE_URL = "https://logistics.amazon.in"
+WORKFORCE_COMPANY_ID = "b63603e9-36e2-4656-9b87-c421489a64a9"
+WORKFORCE_DSP = "DROP"
+SLP_CATALOG_STATIONS = "KOZA"
+SLP_LOOKBACK_WEEKS = "12"
+
+# NL loss hourly at :20; SLP at 07:00 and 13:00 IST. Keep in sync with src/index.ts.
+[triggers]
+crons = ["20 * * * *", "30 1,7 * * *"]
+
+# Secrets (local: .dev.vars / prod: wrangler secret put)
+# - SUPABASE_SERVICE_ROLE_KEY  (DropX Dashboard / company project key)
+# - ADMIN_API_KEY
+# - CLOAK_PASSWORD
+# - WORKFORCE_PORTAL_EMAIL / WORKFORCE_PORTAL_PASSWORD  (same as Report-auto-worker)
+# - AMAZON_EXCEL_OPEN_PASSWORD                          (same as Report-auto-worker)
