@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
     };
     const dailyByDate = new Map<string, Day>();
     const providerWorkDates = new Set<string>();
-    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:providerAttendanceResult.data??[],from:period.from,to:periodEnd});
+    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:providerAttendanceResult.data??[],policyHistory:direct.policyHistory,from:period.from,to:periodEnd});
     const providerAttendanceByMappingDate=new Map(providerAttendanceDays.map(day=>[`${day.mappingId}|${day.date}`,day]));
     const consumedProviderAttendance=new Set<string>();
     const personalAmounts=allocateOwnDailyCards((dailyResult.data||[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row),card=m?personalPaymentCard(m):null;return card?[{row,card}]:[];}));

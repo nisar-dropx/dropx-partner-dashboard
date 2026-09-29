@@ -1,3 +1,9 @@
+import {
+  monthlyAttendanceAmountForDay,
+  workforcePaymentPolicyForDate,
+  type WorkforcePaymentPolicy
+} from "./workforce-payment-policy.ts";
+
 export type DirectPayComponent = {
   component_code: string;
   component_type: string;
@@ -65,7 +71,11 @@ export function directPayForDay(
   paymentValues: Record<string, unknown> | null | undefined,
   components: DirectPayComponent[],
   date: string,
-  attendance?: DirectPayAttendance | null
+  attendance?: DirectPayAttendance | null,
+  options?: {
+    policyHistory?: Array<Partial<WorkforcePaymentPolicy>> | null;
+    cumulativeAttendanceUnitsBefore?: number;
+  }
 ) {
   const values = Object.fromEntries(Object.entries(paymentValues ?? {}).map(([key, value]) => [key.trim().toUpperCase(), value]));
   const attendanceUnit = directPayAttendanceUnit(attendance);
@@ -99,13 +109,22 @@ export function directPayForDay(
       continue;
     }
     const attendanceBased = component.calculation_source === "attendance_eligibility";
+    const monthlyAttendance = schedule === "per_month" && attendanceBased
+      ? monthlyAttendanceAmountForDay({
+        monthlyAmount: rate,
+        date,
+        attendanceUnit,
+        cumulativeAttendanceUnitsBefore: options?.cumulativeAttendanceUnitsBefore,
+        policy: workforcePaymentPolicyForDate(options?.policyHistory, date)
+      })
+      : null;
     const count = schedule === "per_month"
-      ? (attendanceBased ? attendanceUnit : 1) / new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate()
+      ? monthlyAttendance?.count ?? 1 / new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate()
       : schedule === "per_hour"
         ? minutes / 60
         : attendanceUnit;
     const amount = schedule === "per_month"
-      ? rounded(monthlyDailyAccrual(rate, date) * (attendanceBased ? attendanceUnit : 1))
+      ? monthlyAttendance?.amount ?? rounded(monthlyDailyAccrual(rate, date))
       : rounded(rate * count);
     const normalized = `${code} ${label}`.toUpperCase();
     const bucket = /VAN|VEHICLE|DOCK/.test(normalized) ? "van" : /FUEL|KILOMET|\bKM\b/.test(normalized) ? "fuel" : "salary";

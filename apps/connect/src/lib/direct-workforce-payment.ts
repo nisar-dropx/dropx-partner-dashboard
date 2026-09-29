@@ -1,3 +1,10 @@
+import {
+  monthlyAttendanceAmountForDay,
+  workforcePaymentMonthStart,
+  workforcePaymentPolicyForDate,
+  type WorkforcePaymentPolicy
+} from "../../../../src/lib/workforce-payment-policy.ts";
+
 type Relation<T> = T | T[] | null | undefined;
 
 export type DirectPaymentField = {
@@ -166,6 +173,7 @@ export function calculateDirectWorkforcePayments(input: {
   allocations: DirectPaymentAllocation[];
   methods: DirectPaymentMethod[];
   attendance: DirectAttendanceDay[];
+  policyHistory?: Array<Partial<WorkforcePaymentPolicy>> | null;
   from: string;
   to: string;
 }) {
@@ -186,15 +194,24 @@ export function calculateDirectWorkforcePayments(input: {
     attendanceByDate.set(attendance.punch_date, preferredAttendance(attendanceByDate.get(attendance.punch_date), attendance));
   }
 
-  const cursor = new Date(`${input.from}T00:00:00Z`);
+  const cursor = new Date(`${workforcePaymentMonthStart(input.from)}T00:00:00Z`);
   const final = new Date(`${input.to}T00:00:00Z`);
   if ((final.getTime() - cursor.getTime()) / 86_400_000 > 366) throw new Error("Direct payment period is too large to reconcile safely.");
+  let cumulativeMonth = "";
+  let cumulativeAttendanceUnits = 0;
   for (; cursor <= final; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
     const date = cursor.toISOString().slice(0, 10);
     const attendance = attendanceByDate.get(date);
     const allocation = allocationForDate(input.allocations, date);
     const units = workDayUnits(attendance);
-    if (!allocation) continue;
+    const month = date.slice(0, 7);
+    if (month !== cumulativeMonth) {
+      cumulativeMonth = month;
+      cumulativeAttendanceUnits = 0;
+    }
+    const cumulativeAttendanceUnitsBefore = cumulativeAttendanceUnits;
+    cumulativeAttendanceUnits += units;
+    if (date < input.from || !allocation) continue;
     const snapshotComponents = Array.isArray(allocation.payment_components)
       ? allocation.payment_components.filter((component): component is DirectPaymentComponent => Boolean(component && typeof component === "object"))
       : [];
@@ -219,12 +236,28 @@ export function calculateDirectWorkforcePayments(input: {
       const schedule = componentSchedule(component, field);
       const attendanceBased = calculationSource === "attendance_eligibility";
       const count = schedule === "per_month"
-        ? (attendanceBased ? units : 1) / daysInMonth(date)
+        ? attendanceBased
+          ? monthlyAttendanceAmountForDay({
+            monthlyAmount: rate,
+            date,
+            attendanceUnit: units,
+            cumulativeAttendanceUnitsBefore,
+            policy: workforcePaymentPolicyForDate(input.policyHistory, date)
+          }).count
+          : 1 / daysInMonth(date)
         : schedule === "per_hour"
           ? (units > 0 ? minutes / 60 : 0)
           : units;
       const calculated = schedule === "per_month"
-        ? monthlyDailyAccrual(rate, date) * (attendanceBased ? units : 1)
+        ? attendanceBased
+          ? monthlyAttendanceAmountForDay({
+            monthlyAmount: rate,
+            date,
+            attendanceUnit: units,
+            cumulativeAttendanceUnitsBefore,
+            policy: workforcePaymentPolicyForDate(input.policyHistory, date)
+          }).amount
+          : monthlyDailyAccrual(rate, date)
         : rate * count;
       return { code, label, count, rate, amount: amount(calculated), schedule };
     });

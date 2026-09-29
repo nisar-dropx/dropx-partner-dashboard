@@ -9,6 +9,10 @@ import {
   type DirectPaymentAllocation,
   type DirectPaymentMethod
 } from "@/lib/direct-workforce-payment";
+import {
+  workforcePaymentMonthStart,
+  type WorkforcePaymentPolicy
+} from "../../../../src/lib/workforce-payment-policy.ts";
 
 export type CanonicalPaymentWorker = {
   id: string;
@@ -80,16 +84,27 @@ async function directPaymentMethods(companyId: string, allocations: DirectPaymen
   return (result.data ?? []) as unknown as DirectPaymentMethod[];
 }
 
+export async function loadWorkforcePaymentPolicyHistory(companyId: string, through: string) {
+  const result = await db().from("workforce_payment_settings")
+    .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from")
+    .eq("company_id", companyId)
+    .lte("effective_from", through)
+    .order("effective_from");
+  if (result.error) throw new Error("We could not load the Workforce payment policy. Please try again.");
+  return (result.data ?? []) as WorkforcePaymentPolicy[];
+}
+
 export async function loadDirectPaymentSetup(input: {
   companyId: string;
   workforceId: string | null;
   from: string;
   to: string;
 }) {
-  if (!input.workforceId) return { allocations: [] as DirectPaymentAllocation[], methods: [] as DirectPaymentMethod[] };
+  const policyHistory = await loadWorkforcePaymentPolicyHistory(input.companyId, input.to);
+  if (!input.workforceId) return { allocations: [] as DirectPaymentAllocation[], methods: [] as DirectPaymentMethod[], policyHistory };
   const allocations = await directAllocationRows(input.companyId, input.workforceId, input.from, input.to);
   const methods = await directPaymentMethods(input.companyId, allocations);
-  return { allocations, methods };
+  return { allocations, methods, policyHistory };
 }
 
 export async function loadDirectPaymentContext(input: {
@@ -111,7 +126,7 @@ export async function loadDirectPaymentContext(input: {
     .select("id,punch_date,status,in_time,out_time,work_minutes")
     .eq("company_id", input.companyId)
     .or(attendanceIdentityFilter({ id: input.workforceId, source_profile_id: input.sourceProfileId ?? null, source_profile_type: input.sourceProfileType ?? null }))
-    .gte("punch_date", accrualFrom)
+    .gte("punch_date", workforcePaymentMonthStart(accrualFrom))
     .lte("punch_date", accrualTo)
     .order("punch_date")
     .limit(1000);

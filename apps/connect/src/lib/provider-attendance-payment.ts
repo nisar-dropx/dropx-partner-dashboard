@@ -1,3 +1,10 @@
+import {
+  monthlyAttendanceAmountForDay,
+  workforcePaymentMonthStart,
+  workforcePaymentPolicyForDate,
+  type WorkforcePaymentPolicy
+} from "../../../../src/lib/workforce-payment-policy.ts";
+
 type Relation<T> = T | T[] | null | undefined;
 
 export type ProviderAttendanceField = {
@@ -206,6 +213,7 @@ export function hasProviderAttendanceComponents(mapping: ProviderAttendanceMappi
 export function calculateProviderAttendancePayments(input: {
   mappings: ProviderAttendanceMapping[];
   attendance: ProviderAttendanceRecord[];
+  policyHistory?: Array<Partial<WorkforcePaymentPolicy>> | null;
   from: string;
   to: string;
 }) {
@@ -225,14 +233,26 @@ export function calculateProviderAttendancePayments(input: {
   }
 
   const days: ProviderAttendancePaymentDay[] = [];
-  const cursor = new Date(`${input.from}T00:00:00Z`);
+  const cursor = new Date(`${workforcePaymentMonthStart(input.from)}T00:00:00Z`);
   const final = new Date(`${input.to}T00:00:00Z`);
   if ((final.getTime() - cursor.getTime()) / 86_400_000 > 366) {
     throw new Error("Provider attendance payment period is too large to reconcile safely.");
   }
 
+  let cumulativeMonth = "";
+  let cumulativeAttendanceUnits = 0;
   for (; cursor <= final; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
     const date = cursor.toISOString().slice(0, 10);
+    const attendance = attendanceByDate.get(date);
+    const units = workDayUnits(attendance);
+    const month = date.slice(0, 7);
+    if (month !== cumulativeMonth) {
+      cumulativeMonth = month;
+      cumulativeAttendanceUnits = 0;
+    }
+    const cumulativeAttendanceUnitsBefore = cumulativeAttendanceUnits;
+    cumulativeAttendanceUnits += units;
+    if (date < input.from) continue;
     const candidates = input.mappings
       .filter((mapping) => activeOn(mapping, date))
       .map((mapping) => ({ mapping, components: attendanceComponents(mapping) }))
@@ -248,8 +268,6 @@ export function calculateProviderAttendancePayments(input: {
     }
 
     const { mapping, components } = current[0];
-    const attendance = attendanceByDate.get(date);
-    const units = workDayUnits(attendance);
     const minutes = units > 0 ? Number(attendance?.work_minutes ?? 0) : 0;
     if (!Number.isFinite(minutes) || minutes < 0) {
       throw new Error("Attendance work time is invalid. Contact Workforce.");
@@ -262,13 +280,22 @@ export function calculateProviderAttendancePayments(input: {
       const label = String(field?.label || component.label || code).trim();
       const rate = paymentValue(mapping.payment_values, code);
       const schedule = componentSchedule(component);
+      const monthlyAttendance = schedule === "per_month"
+        ? monthlyAttendanceAmountForDay({
+          monthlyAmount: rate,
+          date,
+          attendanceUnit: units,
+          cumulativeAttendanceUnitsBefore,
+          policy: workforcePaymentPolicyForDate(input.policyHistory, date)
+        })
+        : null;
       const count = schedule === "per_month"
-        ? units / daysInMonth(date)
+        ? monthlyAttendance!.count
         : schedule === "per_hour"
           ? minutes / 60
           : units;
       const calculated = schedule === "per_month"
-        ? monthlyDailyAccrual(rate, date) * units
+        ? monthlyAttendance!.amount
         : rate * count;
       return { code, label, count, rate, amount: amount(calculated), schedule };
     });

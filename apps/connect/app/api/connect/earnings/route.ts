@@ -79,7 +79,7 @@ export async function GET(request: Request) {
       const mapping=paymentMappingForDay(mappings,row),card=mapping?cardFor(mapping,String(row.work_date)):null;
       return card?[{row:row as DailyCardSource,card}]:[];
     }));
-    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:attendanceResult.data??[],from,to});
+    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:attendanceResult.data??[],policyHistory:direct.policyHistory,from,to});
     const providerAttendanceByMapping=new Map<string,typeof providerAttendanceDays>();
     for(const day of providerAttendanceDays)providerAttendanceByMapping.set(day.mappingId,[...(providerAttendanceByMapping.get(day.mappingId)??[]),day]);
     const providerEarnings = mappings.map((mapping: any) => {

@@ -36,7 +36,16 @@ const context = {
   locationScopeIds: ["1"],
   hasAllLocationAccess: false,
 };
+const emptyQuery = () => ({
+  select() { return this; },
+  eq() { return this; },
+  gte() { return this; },
+  lte() { return this; },
+  order() { return this; },
+  then(resolve) { return Promise.resolve(resolve({ data: [], error: null })); },
+});
 function dataModule(db, locations = all) {
+  const database = db ? { ...db, from: db.from ?? (() => emptyQuery()) } : db;
   return compile("./cps-data.ts", {
     "server-only": {},
     react: { cache: (fn) => fn },
@@ -49,7 +58,9 @@ function dataModule(db, locations = all) {
     },
     "./adhoc-activity": { adHocClusterLabel: (l) => l.cluster },
     "./cps": domain,
-    "@/lib/supabase-admin": { supabaseAdmin: db },
+    "@/lib/supabase-admin": { supabaseAdmin: database },
+    "@/lib/supabase-pagination": { readAllRows: async (query) => await query },
+    "@/lib/workforce-payment-policy": { workforcePaymentMonthStart: (date) => `${date.slice(0, 7)}-01` },
   });
 }
 test("forged station and intersecting filters cannot widen permitted locations", async () => {
