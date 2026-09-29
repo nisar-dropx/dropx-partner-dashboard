@@ -294,6 +294,21 @@ async function loadReturnRemark(companyId: string, requestId: string) {
   return null;
 }
 
+function historyLabel(action: string) {
+  const labels: Record<string, string> = {
+    created: "Submitted",
+    submitted: "Submitted",
+    approved: "Approved",
+    returned: "Returned",
+    resubmitted: "Resubmitted",
+    rejected: "Rejected",
+    cancelled: "Cancelled",
+    processing: "Sent for payment",
+    processed: "Paid"
+  };
+  return labels[action] ?? (action ? action.replace(/_/g, " ") : "Update");
+}
+
 function CancelRequestPanel({ request, eligibility }: { request: PaymentRequestRow; eligibility: CancelEligibility }) {
   if (!eligibility.allowed) {
     return (
@@ -314,7 +329,7 @@ function CancelRequestPanel({ request, eligibility }: { request: PaymentRequestR
       </label>
       <div className="form-actions">
         <SubmitButton
-          className="button danger"
+          className="button payment-cancel-button"
           confirmDescription={`${request.request_no} will be cancelled and removed from the approval queue. This can't be undone.`}
           confirmMessage="Cancel this payment request?"
           confirmSubmitText="Cancel request"
@@ -675,60 +690,81 @@ export default async function PaymentRequestsPage({
 
       {viewRequest ? (
         <div className="modal-backdrop">
-          <section className="modal-panel wide-modal" role="dialog" aria-modal="true" aria-labelledby="view-payment-title">
-            <div className="panel-head">
+          <section className="modal-panel payment-view-modal" role="dialog" aria-modal="true" aria-labelledby="view-payment-title">
+            <header className="payment-view-header">
               <div>
+                <span className="payment-view-eyebrow">Payment request</span>
                 <h2 id="view-payment-title">{viewRequest.request_no}</h2>
-                <p className="subtle">Submitted {formatDashboardDateTime(viewRequest.created_at)}</p>
+                <p>{viewRequest.location_code} · {viewHead?.name ?? "Payment"} · Submitted {formatDashboardDateTime(viewRequest.created_at)}</p>
               </div>
-              <PendingLink className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
+              <div className="payment-view-header-side">
+                <StatusPill status={paymentLifecycleLabel(viewRequest, authorization.userId)} />
+                <PendingLink className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
+              </div>
+            </header>
+
+            <div className="payment-view-amounts">
+              <div><span>Estimated</span><strong>{money(viewRequest.amount_requested)}</strong></div>
+              <div><span>Amount</span><strong>{money(viewRequest.amount)}</strong></div>
+              <div><span>Payment method</span><strong>{viewRequest.payment_mode ? paymentModeLabel(viewRequest.payment_mode) : "-"}</strong></div>
             </div>
-            <div className="panel-body payment-view-body">
-              <dl className="payment-view-grid">
-                <div><dt>Status</dt><dd><StatusPill status={paymentLifecycleLabel(viewRequest, authorization.userId)} /></dd></div>
-                <div><dt>Location</dt><dd>{viewRequest.location_code}</dd></div>
-                <div><dt>Payment head</dt><dd>{viewHead?.name ?? "-"}</dd></div>
-                <div><dt>Estimated</dt><dd>{money(viewRequest.amount_requested)}</dd></div>
-                <div><dt>Amount</dt><dd>{money(viewRequest.amount)}</dd></div>
-                <div><dt>Payment method</dt><dd>{viewRequest.payment_mode ? paymentModeLabel(viewRequest.payment_mode) : "-"}</dd></div>
-                <div><dt>Account holder</dt><dd>{viewRequest.account_holder_name ?? "-"}</dd></div>
-                <div><dt>Account / UPI ID</dt><dd>{viewRequest.payment_mode === "upi_payment" ? viewRequest.payment_reference ?? "-" : viewRequest.bank_account_no ?? "-"}</dd></div>
-                <div><dt>IFSC / Portal</dt><dd>{viewRequest.payment_mode === "online_payment" ? viewRequest.payment_portal ?? "-" : viewRequest.ifsc ?? "-"}</dd></div>
-                <div><dt>Contact</dt><dd>{[viewRequest.contact_no, viewRequest.email].filter(Boolean).join(" · ") || "-"}</dd></div>
-                {viewRequest.adhoc_provider_employee_id ? <div><dt>Adhoc DA</dt><dd>{viewRequest.adhoc_da_name} · {viewRequest.adhoc_provider_employee_id} · {viewRequest.adhoc_work_date}</dd></div> : null}
-                <div className="span-all"><dt>Remarks</dt><dd>{viewRequest.remarks || "-"}</dd></div>
-                {viewAnswers.map((answer) => (
-                  <div key={answer.id} className="span-all">
-                    <dt>{viewQuestionText.get(answer.question_id) ?? "Answer"}</dt>
-                    <dd>
-                      {answer.file_name ? (
-                        <a href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer.id)}`} rel="noreferrer" target="_blank">{answer.file_name}</a>
-                      ) : answer.answer_value || "-"}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              {viewHistory.length ? (
-                <>
-                  <div className="section-divider" />
-                  <h3 className="payment-view-heading">History</h3>
-                  <ol className="payment-view-history">
-                    {viewHistory.map((entry, index) => (
-                      <li key={`${entry.created_at}-${index}`}>
-                        <strong>{String(entry.action ?? "").replace(/_/g, " ") || "update"}</strong>
-                        <span className="subtle">{formatDashboardDateTime(entry.created_at)}</span>
-                        {entry.comments ? <p>{entry.comments}</p> : null}
-                      </li>
+
+            <div className="payment-view-layout">
+              <div className="payment-view-main">
+                <section className="payment-view-card">
+                  <h3>Beneficiary</h3>
+                  <dl>
+                    <div><dt>Account holder</dt><dd>{viewRequest.account_holder_name ?? "-"}</dd></div>
+                    <div><dt>{viewRequest.payment_mode === "upi_payment" ? "UPI ID" : "Account number"}</dt><dd>{viewRequest.payment_mode === "upi_payment" ? viewRequest.payment_reference ?? "-" : viewRequest.bank_account_no ?? "-"}</dd></div>
+                    {viewRequest.payment_mode === "upi_payment" ? null : (
+                      <div><dt>{viewRequest.payment_mode === "online_payment" ? "Portal" : "IFSC"}</dt><dd>{viewRequest.payment_mode === "online_payment" ? viewRequest.payment_portal ?? "-" : viewRequest.ifsc ?? "-"}</dd></div>
+                    )}
+                    <div><dt>Contact</dt><dd>{viewRequest.contact_no || "-"}</dd></div>
+                    <div><dt>Email</dt><dd>{viewRequest.email || "-"}</dd></div>
+                    {viewRequest.adhoc_provider_employee_id ? <div><dt>Adhoc DA</dt><dd>{viewRequest.adhoc_da_name} · {viewRequest.adhoc_provider_employee_id}</dd></div> : null}
+                  </dl>
+                </section>
+
+                <section className="payment-view-card">
+                  <h3>Submitted details</h3>
+                  <dl>
+                    {viewAnswers.map((answer) => (
+                      <div key={answer.id}>
+                        <dt>{viewQuestionText.get(answer.question_id) ?? "Answer"}</dt>
+                        <dd>
+                          {answer.file_name ? (
+                            <a className="payment-view-file" href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer.id)}`} rel="noreferrer" target="_blank">{answer.file_name}</a>
+                          ) : answer.answer_value || "-"}
+                        </dd>
+                      </div>
                     ))}
-                  </ol>
-                </>
-              ) : null}
-              {pagePermission.canAdd && viewRequest.requested_by === authorization.userId && viewCancel ? (
-                <>
-                  <div className="section-divider" />
+                    <div className="is-wide"><dt>Remarks</dt><dd>{viewRequest.remarks || "-"}</dd></div>
+                  </dl>
+                </section>
+              </div>
+
+              <aside className="payment-view-side">
+                <section className="payment-view-card">
+                  <h3>History</h3>
+                  {viewHistory.length ? (
+                    <ol className="payment-view-timeline">
+                      {viewHistory.map((entry, index) => {
+                        const action = String(entry.action ?? "").toLowerCase();
+                        return (
+                          <li className={`is-${action}`} key={`${entry.created_at}-${index}`}>
+                            <strong>{historyLabel(action)}</strong>
+                            <span>{formatDashboardDateTime(entry.created_at)}</span>
+                            {entry.comments ? <p>{entry.comments.replace(/^returned:\s*/i, "")}</p> : null}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  ) : <p className="subtle">No approval activity yet.</p>}
+                </section>
+                {pagePermission.canAdd && viewRequest.requested_by === authorization.userId && viewCancel ? (
                   <CancelRequestPanel eligibility={viewCancel} request={viewRequest} />
-                </>
-              ) : null}
+                ) : null}
+              </aside>
             </div>
           </section>
         </div>
