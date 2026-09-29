@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
 import { approvedLeaveDays } from "@/lib/leave-calendar-days";
 import { userFacingError } from "@/lib/user-facing-error";
+import { canCancelRegularization, cancellableRegularizationStatuses, regularizationIdsWithApproval } from "@/lib/connect-regularization-cancel";
 import { fillAttendanceCalendarGaps, loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
 import { resolveAttendanceRegularizationApprovers } from "../../../../../../src/lib/attendance-regularization-workflow";
 import { notifyAttendanceApprovalRequired } from "../../../../../../src/lib/connect-attendance-notifications";
@@ -97,7 +98,7 @@ export async function GET(request: NextRequest) {
 
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
-      .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")
+      .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at, request_kind")
       .eq("company_id", worker.companyId)
       .eq("profile_type", worker.profileType)
       .eq("profile_id", worker.profileId)
@@ -107,6 +108,10 @@ export async function GET(request: NextRequest) {
     if (requestsResult.error && !isMissingRegularizationTable(requestsResult.error.message)) {
       throw new Error(requestsResult.error.message);
     }
+    const openCorrectionIds = (requestsResult.data ?? [])
+      .filter((item) => item.request_kind == null && cancellableRegularizationStatuses.includes(String(item.status)))
+      .map((item) => String(item.id));
+    const approvedCorrectionIds = await regularizationIdsWithApproval(worker.companyId, openCorrectionIds);
 
     const requestByDate = new Map<string, Record<string, unknown>>();
     for (const item of requestsResult.data ?? []) {
@@ -120,7 +125,8 @@ export async function GET(request: NextRequest) {
           hasAttachment: Boolean(item.attachment_path),
           status: item.status,
           reviewRemarks: item.review_remarks,
-          createdAt: item.created_at
+          createdAt: item.created_at,
+          canCancel: item.request_kind == null && canCancelRegularization(item.status, approvedCorrectionIds.has(String(item.id)))
         });
       }
     }

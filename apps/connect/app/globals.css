@@ -9463,6 +9463,35 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.dx-selected-day footer button.danger,
+.dx-approval-card .dx-request-withdraw {
+  color: #b42318;
+  background: #fff4f2;
+  border: 1px solid #f0c7c2;
+}
+
+.dx-request-status.cancelled {
+  background: #f0f2f5;
+  color: #667085;
+}
+
+.dx-approval-card .dx-request-withdraw {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 34px;
+  margin-top: 10px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.dx-approval-card .dx-request-withdraw svg {
+  width: 14px;
+  height: 14px;
+}
+
 .dx-documents-head-actions {
   display: flex;
   flex: none;

@@ -42,6 +42,7 @@ type Regularization = {
   status: string;
   reviewRemarks: string;
   createdAt: string;
+  canCancel?: boolean;
 };
 type Row = AttendanceInsightRow & {
   date: string;
@@ -262,6 +263,27 @@ export function ConnectAttendance({ account, active = true }: { account: Account
       .catch((reason) => setError(userFacingError(reason, "Unable to load attendance. Please try again.")));
   }, [account.id, account.profileType, month, markLoaded]);
   setReload(() => loadAttendance(true));
+
+  const [withdrawing, setWithdrawing] = useState(false);
+  async function withdrawRegularization(requestId: string) {
+    if (!window.confirm("Withdraw this attendance correction request?")) return;
+    setWithdrawing(true); setError(""); setSupportNotice("");
+    try {
+      const response = await fetch("/api/connect/attendance/requests", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requestId })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Unable to withdraw the attendance correction.");
+      setSupportNotice(payload.notice || "Attendance correction withdrawn.");
+      loadAttendance(true);
+    } catch (reason) {
+      setError(userFacingError(reason, "Unable to withdraw the attendance correction."));
+    } finally {
+      setWithdrawing(false);
+    }
+  }
 
   const loadPunchStatus = useCallback(async () => {
     const response = await fetch(
@@ -511,6 +533,7 @@ export function ConnectAttendance({ account, active = true }: { account: Account
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
+            {selected.regularization?.canCancel ? <button className="danger" disabled={withdrawing} onClick={() => void withdrawRegularization(selected.regularization!.id)} type="button">{withdrawing ? "Withdrawing…" : "Withdraw request"}</button> : null}
             {selected.regularization?.status !== "pending"
               && selected.statusKind !== "leave"
               && selected.statusKind !== "paid_leave"

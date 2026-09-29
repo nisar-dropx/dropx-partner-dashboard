@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, LocateFixed, ReceiptText, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, LocateFixed, ReceiptText, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
@@ -18,6 +18,8 @@ type UnifiedRequest = {
   status: string;
   facts: Array<{ label: string; value: string }>;
   steps: StepTrail[];
+  /** Attendance corrections the requester can still withdraw (no approver has approved yet). */
+  withdrawId?: string;
 };
 
 function displayDate(value: string) {
@@ -124,7 +126,8 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
           { label: "Requested OUT", value: item.requestedOutTime || "—" },
           ...(item.reviewRemarks ? [{ label: reviewNoteLabel(item.status), value: item.reviewRemarks }] : [])
         ],
-        steps: (item.steps ?? []).map((step: { stepName: string; status: string }) => ({ name: step.stepName, status: step.status }))
+        steps: (item.steps ?? []).map((step: { stepName: string; status: string }) => ({ name: step.stepName, status: step.status })),
+        withdrawId: item.canCancel ? item.id : undefined
       });
     }
 
@@ -251,6 +254,28 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
 
   useEffect(() => { void load(); }, [load]);
 
+  const [withdrawingId, setWithdrawingId] = useState("");
+  const [notice, setNotice] = useState("");
+  async function withdrawAttendance(requestId: string) {
+    if (!window.confirm("Withdraw this attendance correction request?")) return;
+    setWithdrawingId(requestId); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/attendance/requests", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requestId })
+      });
+      const payload = await safeJson(response);
+      if (!response.ok) throw new Error(payload?.error || "Unable to withdraw the attendance correction.");
+      setNotice(payload?.notice || "Attendance correction withdrawn.");
+      await load(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to withdraw the attendance correction.");
+    } finally {
+      setWithdrawingId("");
+    }
+  }
+
   const monthRequests = useMemo(
     () => requests.filter((request) => String(request.submittedAt ?? "").slice(0, 7) === month),
     [requests, month]
@@ -273,6 +298,7 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
         <p>{workforce ? "Track your leave, attendance, roster and payout-related requests in one place." : "Every request you have submitted, with its current status and approval flow."}</p>
       </header>
       {error ? <div className="dx-alert error">{error}</div> : null}
+      {notice ? <div className="dx-alert ok">{notice}</div> : null}
       <div aria-label="Choose month" className="dx-requests-month" role="group">
         <button aria-label="Previous month" onClick={() => setMonth((current) => shiftMonth(current, -1))} type="button"><ChevronLeft /></button>
         <strong>{monthLabel(month)}</strong>
@@ -320,6 +346,11 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
                     </div>
                   ))}
                 </div>
+              ) : null}
+              {request.withdrawId ? (
+                <button className="dx-request-withdraw" disabled={withdrawingId === request.withdrawId} onClick={() => void withdrawAttendance(request.withdrawId!)} type="button">
+                  <RotateCcw />{withdrawingId === request.withdrawId ? "Withdrawing…" : "Withdraw"}
+                </button>
               ) : null}
             </article>
           )) : (

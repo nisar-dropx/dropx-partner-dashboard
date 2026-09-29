@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { canCancelRegularization, cancelRegularizationRequest } from "@/lib/connect-regularization-cancel";
 
 function isMissingRegularizationTable(message: unknown) {
   const text = String(message ?? "").toLowerCase();
@@ -45,7 +46,9 @@ export async function GET(request: NextRequest) {
       .order("step_order", { ascending: true });
     if (stepsResult.error && !isMissingRegularizationTable(stepsResult.error.message)) throw new Error(stepsResult.error.message);
     const stepsByRequest = new Map<string, Array<{ stepOrder: number; stepName: string; status: string }>>();
+    const approvedRequestIds = new Set<string>();
     for (const step of stepsResult.data ?? []) {
+      if (step.status === "approved") approvedRequestIds.add(step.request_id);
       const list = stepsByRequest.get(step.request_id) ?? [];
       list.push({ stepOrder: step.step_order, stepName: step.step_name, status: step.status });
       stepsByRequest.set(step.request_id, list);
@@ -63,10 +66,25 @@ export async function GET(request: NextRequest) {
         status: item.status,
         reviewRemarks: item.review_remarks,
         createdAt: item.created_at,
-        steps: stepsByRequest.get(item.id) ?? []
+        steps: stepsByRequest.get(item.id) ?? [],
+        canCancel: canCancelRegularization(item.status, approvedRequestIds.has(item.id))
       }))
     });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load attendance requests.") }, { status: 400 });
+  }
+}
+
+/** Withdraws the worker's own attendance correction while no approver has approved it. */
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => ({})) as { accountId?: unknown; profileType?: unknown; requestId?: unknown };
+    const accountId = String(body.accountId ?? "").trim();
+    if (!accountId) throw new Error("Account is required.");
+    const worker = await resolveConnectAttendanceWorker({ accountId, profileType: String(body.profileType ?? "") });
+    await cancelRegularizationRequest(worker, String(body.requestId ?? "").trim());
+    return NextResponse.json({ ok: true, notice: "Attendance correction withdrawn." });
+  } catch (error) {
+    return NextResponse.json({ error: userFacingError(error, "Unable to withdraw the attendance correction.") }, { status: 400 });
   }
 }
