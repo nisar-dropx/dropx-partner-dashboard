@@ -6,7 +6,7 @@ import {
   workforcePaymentExample,
   workforcePaymentMethodFields,
   workforcePaymentPolicyForDate,
-  workforcePaymentPolicyIntervalIsFinalized
+  workforcePaymentMonthIsFinalized
 } from "./workforce-payment-policy.ts";
 
 test("direct pay handles monthly, present-day and hourly amounts", () => {
@@ -73,20 +73,16 @@ test("settings require only the fields used by the selected payment method", () 
   });
 });
 
-test("a policy interval locks only when finalized payroll overlaps before the next change", () => {
-  const history = [
-    { effective_from: "2026-01-01" },
-    { effective_from: "2026-04-01" }
-  ];
-  assert.equal(workforcePaymentPolicyIntervalIsFinalized(history, "2026-01-01", [
+test("only the selected month locks when its payroll is finalized", () => {
+  assert.equal(workforcePaymentMonthIsFinalized("2026-03-01", [
     { period_start: "2026-03-01", period_end: "2026-03-31" }
   ]), true);
-  assert.equal(workforcePaymentPolicyIntervalIsFinalized(history, "2026-01-01", [
-    { period_start: "2026-04-01", period_end: "2026-04-30" }
+  assert.equal(workforcePaymentMonthIsFinalized("2026-02-01", [
+    { period_start: "2026-03-01", period_end: "2026-03-31" }
   ]), false);
-  assert.equal(workforcePaymentPolicyIntervalIsFinalized(history, "2026-04-01", [
-    { period_start: "2026-08-01", period_end: "2026-08-31" }
-  ]), true);
+  assert.equal(workforcePaymentMonthIsFinalized("2026-12-01", [
+    { period_start: "2027-01-01", period_end: "2027-01-31" }
+  ]), false);
 });
 
 test("attendance-based monthly pay uses full, half and absent attendance units", () => {

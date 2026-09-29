@@ -5,9 +5,10 @@ import { PendingLink } from "@/components/pending-link";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import { readAllRows } from "@/lib/supabase-pagination";
 import {
   normalizeWorkforcePaymentPolicy,
-  workforcePaymentPolicyIntervalIsFinalized,
+  workforcePaymentMonthIsFinalized,
   type WorkforcePaymentFinalizedPeriod,
   type WorkforcePaymentMethod,
   type WorkforcePaymentPolicy
@@ -75,17 +76,17 @@ async function loadPolicies(companyId: string) {
     };
   }
   const [settingsResult, payrollResult] = await Promise.all([
-    supabaseAdmin
+    readAllRows(supabaseAdmin
       .from("workforce_payment_settings")
       .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from,change_reason,created_at,updated_at")
       .eq("company_id", companyId)
-      .order("effective_from", { ascending: false }),
-    supabaseAdmin
+      .order("effective_from", { ascending: false })),
+    readAllRows(supabaseAdmin
       .from("workforce_payroll_runs")
       .select("period_start,period_end")
       .eq("company_id", companyId)
-      .in("status", ["approved", "paid"])
-      .order("period_start", { ascending: true })
+      .or("status.ilike.approved,status.ilike.paid")
+      .order("period_start", { ascending: true }))
   ]);
   if (settingsResult.error || payrollResult.error) {
     return {
@@ -183,7 +184,7 @@ export default async function WorkforcePaymentSettingsPage() {
             <div className="panel-head">
               <div>
                 <h2>Monthly attendance policy</h2>
-                <p className="subtle">A full day is 1 unit, a half day is 0.5, and an absence is 0. A policy remains editable until a payroll period that depends on it is finalized.</p>
+                <p className="subtle">A full day is 1 unit, a half day is 0.5, and an absence is 0. Each month remains editable until that month&apos;s payroll is finalized.</p>
               </div>
             </div>
             <WorkforcePaymentPolicyForm
@@ -248,11 +249,7 @@ export default async function WorkforcePaymentSettingsPage() {
                   {data.policies.length ? data.policies.map((policy) => {
                     const isScheduled = policy.effective_from > currentMonthStart;
                     const isActive = activePolicy?.id === policy.id;
-                    const isLocked = workforcePaymentPolicyIntervalIsFinalized(
-                      data.policies,
-                      policy.effective_from,
-                      data.finalizedPeriods
-                    );
+                    const isLocked = workforcePaymentMonthIsFinalized(policy.effective_from, data.finalizedPeriods);
                     return (
                       <tr key={policy.id}>
                         <td><strong>{formatMonth(policy.effective_from)}</strong></td>

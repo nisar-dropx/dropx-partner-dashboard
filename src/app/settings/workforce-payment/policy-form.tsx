@@ -5,7 +5,7 @@ import { SubmitButton } from "@/components/submit-button";
 import {
   workforcePaymentMethodFields,
   workforcePaymentPolicyForDate,
-  workforcePaymentPolicyIntervalIsFinalized,
+  workforcePaymentMonthIsFinalized,
   type WorkforcePaymentFinalizedPeriod,
   type WorkforcePaymentMethod,
   type WorkforcePaymentPolicy
@@ -42,7 +42,7 @@ export function WorkforcePaymentPolicyForm({
   const [capAtMonthlyAmount, setCapAtMonthlyAmount] = useState(initialPolicy.cap_at_monthly_amount);
   const effectiveFrom = `${effectiveMonth}-01`;
   const fields = workforcePaymentMethodFields(method);
-  const locked = workforcePaymentPolicyIntervalIsFinalized(policies, effectiveFrom, finalizedPeriods);
+  const locked = workforcePaymentMonthIsFinalized(effectiveFrom, finalizedPeriods);
   const formDisabled = !canEdit || locked;
 
   function selectMonth(month: string) {
@@ -110,7 +110,7 @@ export function WorkforcePaymentPolicyForm({
           value={effectiveMonth}
         />
         <span className="subtle">Applies from the selected month until another policy takes effect.</span>
-        {locked ? <span className="subtle" role="status"><strong>Locked:</strong> finalized payroll depends on this policy period.</span> : null}
+        {locked ? <span className="subtle" role="status"><strong>Locked:</strong> payroll for this month is finalized.</span> : null}
       </label>
       <label>Change reason
         <input

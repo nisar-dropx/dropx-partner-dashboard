@@ -83,30 +83,16 @@ export async function saveWorkforcePaymentSettings(formData: FormData) {
 
     const effectiveFrom = `${effectiveMonth}-01`;
 
-    const existing = await supabaseAdmin
-      .from("workforce_payment_settings")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("effective_from", effectiveFrom)
-      .maybeSingle();
-    if (existing.error) throw new Error(existing.error.message);
-
-    const now = new Date().toISOString();
-    const payload = {
-      company_id: companyId,
-      calculation_method: calculationMethod,
-      paid_off_days: paidOffDays,
-      work_units_per_paid_off: workUnitsPerPaidOff,
-      cap_at_monthly_amount: formData.get("cap_at_monthly_amount") === "on",
-      effective_from: effectiveFrom,
-      change_reason: changeReason,
-      updated_by: authorization.userId,
-      updated_at: now,
-      ...(existing.data ? {} : { created_by: authorization.userId, created_at: now })
-    };
-    const saved = await supabaseAdmin
-      .from("workforce_payment_settings")
-      .upsert(payload, { onConflict: "company_id,effective_from" });
+    const saved = await supabaseAdmin.rpc("save_workforce_payment_setting", {
+      p_company_id: companyId,
+      p_calculation_method: calculationMethod,
+      p_paid_off_days: paidOffDays,
+      p_work_units_per_paid_off: workUnitsPerPaidOff,
+      p_cap_at_monthly_amount: formData.get("cap_at_monthly_amount") === "on",
+      p_effective_from: effectiveFrom,
+      p_change_reason: changeReason,
+      p_actor_user_id: authorization.userId
+    });
     if (saved.error) throw new Error(saved.error.message);
 
     revalidatePath("/settings");

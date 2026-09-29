@@ -4,6 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 
 const db = new PGlite();
 const companyId = "43866344-b550-4e8a-9a2d-9d23f3d8a997";
+const actorId = "00000000-0000-4000-8000-000000000099";
 await db.exec(`
   create role anon;
   create role authenticated;
@@ -23,6 +24,7 @@ await db.exec(`
   create or replace function public.lock_workforce_payment_allocation_company(p_company_id uuid)
   returns void language plpgsql as $$ begin perform p_company_id; end; $$;
   insert into public.companies(id) values ('${companyId}');
+  insert into auth.users(id) values ('${actorId}');
 `);
 
 for (const migrationName of [
@@ -65,10 +67,10 @@ await insertPolicy({ method: "earned_paid_offs", effectiveFrom: "2024-01-01", re
 await db.exec(`delete from public.workforce_payment_settings where company_id='${companyId}' and effective_from='2024-01-01'`);
 
 await db.exec(`
-  insert into public.workforce_payroll_runs(id,company_id,period_start,period_end,status)
+  insert into public.workforce_payroll_runs(id,company_id,period_start,period_end,status,calculated_at)
   values
-    ('00000000-0000-4000-8000-000000000001','${companyId}','2025-03-01','2025-03-31','approved'),
-    ('00000000-0000-4000-8000-000000000002','${companyId}','2025-05-01','2025-05-31','paid');
+    ('00000000-0000-4000-8000-000000000001','${companyId}','2025-03-01','2025-03-31','approved',clock_timestamp()),
+    ('00000000-0000-4000-8000-000000000002','${companyId}','2025-05-01','2025-05-31','paid',clock_timestamp());
 `);
 
 await assert.rejects(() => db.exec(`
@@ -85,6 +87,65 @@ await assert.rejects(
   () => insertPolicy({ method: "earned_paid_offs", effectiveFrom: "2025-02-01", reason: "Would change finalized March" }),
   /finalized payroll/i
 );
+
+const { rows: [marchHashBefore] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${companyId}','2025-03-01','2025-03-31'
+  ) as hash
+`);
+const { rows: [februaryHashBefore] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${companyId}','2025-02-01','2025-02-28'
+  ) as hash
+`);
+
+// February remains editable even though March is finalized. The save function
+// creates a March boundary with the old values before applying February's new
+// values, so the finalized March calculation is unchanged.
+await db.exec(`
+  select public.save_workforce_payment_setting(
+    '${companyId}',
+    'earned_paid_offs',
+    4::smallint,
+    5.5::numeric,
+    true,
+    '2025-02-01',
+    'Change only the open February month',
+    '${actorId}'
+  );
+`);
+const { rows: preservedPolicies } = await db.query(`
+  select calculation_method,work_units_per_paid_off::text as work_units,effective_from::text
+  from public.workforce_payment_settings
+  where company_id='${companyId}' and effective_from in ('2025-02-01','2025-03-01')
+  order by effective_from
+`);
+assert.deepEqual(preservedPolicies, [
+  { calculation_method: "earned_paid_offs", work_units: "5.50", effective_from: "2025-02-01" },
+  { calculation_method: "calendar_days", work_units: "6.00", effective_from: "2025-03-01" }
+]);
+const { rows: [marchHashAfter] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${companyId}','2025-03-01','2025-03-31'
+  ) as hash
+`);
+assert.equal(marchHashAfter.hash, marchHashBefore.hash);
+const { rows: [februaryHashAfter] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${companyId}','2025-02-01','2025-02-28'
+  ) as hash
+`);
+assert.notEqual(februaryHashAfter.hash, februaryHashBefore.hash);
+await db.exec(`
+  update public.workforce_payroll_runs set status='paid'
+  where id='00000000-0000-4000-8000-000000000001';
+`);
+await assert.rejects(() => db.exec(`
+  select public.save_workforce_payment_setting(
+    '${companyId}','fixed_paid_offs',4::smallint,6::numeric,true,
+    '2025-03-01','Attempt to edit finalized March','${actorId}'
+  );
+`), /this month is finalized/i);
 
 // May is before this new boundary, so the later open interval remains editable.
 await insertPolicy({ method: "earned_paid_offs", effectiveFrom: "2025-06-01", reason: "Start open June policy" });
@@ -135,6 +196,30 @@ await assert.rejects(() => db.exec(`
   where company_id='${companyId}' and effective_from='2025-06-01';
 `), /finalized payroll/i);
 
+// Materializing the implicit default as a preservation boundary is not a
+// calculation change and therefore must retain the same payroll snapshot.
+const defaultCompanyId = "43866344-b550-4e8a-9a2d-9d23f3d8a998";
+await db.exec(`insert into public.companies(id) values ('${defaultCompanyId}')`);
+const { rows: [implicitDefaultHash] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${defaultCompanyId}','2025-03-01','2025-03-31'
+  ) as hash
+`);
+await db.exec(`
+  insert into public.workforce_payment_settings(
+    company_id,calculation_method,paid_off_days,work_units_per_paid_off,
+    cap_at_monthly_amount,effective_from,change_reason
+  ) values (
+    '${defaultCompanyId}','calendar_days',4,6,true,'2025-03-01','Materialize implicit default'
+  )
+`);
+const { rows: [materializedDefaultHash] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${defaultCompanyId}','2025-03-01','2025-03-31'
+  ) as hash
+`);
+assert.equal(materializedDefaultHash.hash, implicitDefaultHash.hash);
+
 // A policy after every finalized period is still allowed, with no 24-month cap.
 await insertPolicy({ method: "earned_paid_offs", effectiveFrom: "2036-01-01", reason: "Open policy after finalized history" });
 await assert.rejects(() => db.exec(`
@@ -150,7 +235,27 @@ const { rows: security } = await db.query(`
     has_table_privilege('authenticated','public.workforce_payment_settings','select') as authenticated_select,
     has_table_privilege('service_role','public.workforce_payment_settings','select') as service_select,
     has_table_privilege('service_role','public.workforce_payment_settings','insert') as service_insert,
-    has_table_privilege('service_role','public.workforce_payment_settings','update') as service_update;
+    has_table_privilege('service_role','public.workforce_payment_settings','update') as service_update,
+    has_function_privilege(
+      'public',
+      'public.save_workforce_payment_setting(uuid,text,smallint,numeric,boolean,date,text,uuid)',
+      'execute'
+    ) as public_save_execute,
+    has_function_privilege(
+      'anon',
+      'public.save_workforce_payment_setting(uuid,text,smallint,numeric,boolean,date,text,uuid)',
+      'execute'
+    ) as anon_save_execute,
+    has_function_privilege(
+      'authenticated',
+      'public.save_workforce_payment_setting(uuid,text,smallint,numeric,boolean,date,text,uuid)',
+      'execute'
+    ) as authenticated_save_execute,
+    has_function_privilege(
+      'service_role',
+      'public.save_workforce_payment_setting(uuid,text,smallint,numeric,boolean,date,text,uuid)',
+      'execute'
+    ) as service_save_execute;
 `);
 assert.deepEqual(security[0], {
   rls_enabled: true,
@@ -158,7 +263,11 @@ assert.deepEqual(security[0], {
   authenticated_select: false,
   service_select: true,
   service_insert: true,
-  service_update: true
+  service_update: true,
+  public_save_execute: false,
+  anon_save_execute: false,
+  authenticated_save_execute: false,
+  service_save_execute: true
 });
 
 const pageSource = readFileSync(
@@ -174,5 +283,10 @@ assert.doesNotMatch(formSource, /24 months|Next month through/i);
 assert.match(formSource, /Applies from the selected month until another policy takes effect/);
 assert.match(formSource, /disabled=\{formDisabled \|\| !fields\.workUnitsPerPaidOff\}/);
 assert.match(formSource, /disabled=\{formDisabled \|\| !fields\.paidOffDays\}/);
+const actionSource = readFileSync(
+  new URL("../src/app/settings/workforce-payment/actions.ts", import.meta.url),
+  "utf8"
+);
+assert.match(actionSource, /rpc\("save_workforce_payment_setting"/);
 
-console.log("Workforce payment policy editability, full-interval finalization guard, recalculation snapshot and conditional form verified.");
+console.log("Workforce payment month editability, finalized-boundary preservation, recalculation snapshot and conditional form verified.");

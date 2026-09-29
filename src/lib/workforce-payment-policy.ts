@@ -35,19 +35,18 @@ export function workforcePaymentMethodFields(method: WorkforcePaymentMethod) {
   };
 }
 
-export function workforcePaymentPolicyIntervalIsFinalized(
-  history: Array<Pick<WorkforcePaymentPolicy, "effective_from">>,
+export function workforcePaymentMonthIsFinalized(
   effectiveFrom: string,
   finalizedPeriods: WorkforcePaymentFinalizedPeriod[]
 ) {
-  const nextEffectiveFrom = history
-    .map((policy) => String(policy.effective_from ?? ""))
-    .filter((date) => date > effectiveFrom)
-    .sort()[0] ?? null;
+  const [year, month] = effectiveFrom.slice(0, 7).split("-").map(Number);
+  const nextMonth = month === 12
+    ? `${String(year + 1).padStart(4, "0")}-01-01`
+    : `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}-01`;
 
   return finalizedPeriods.some((period) =>
     period.period_end >= effectiveFrom
-    && (!nextEffectiveFrom || period.period_start < nextEffectiveFrom)
+    && period.period_start < nextMonth
   );
 }
 
