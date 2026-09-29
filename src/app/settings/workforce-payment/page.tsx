@@ -2,19 +2,17 @@ import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
-import { SubmitButton } from "@/components/submit-button";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import {
-  DEFAULT_WORKFORCE_PAYMENT_POLICY,
   normalizeWorkforcePaymentPolicy,
-  workforcePaymentExample,
-  workforcePaymentPolicyForDate,
+  workforcePaymentPolicyIntervalIsFinalized,
+  type WorkforcePaymentFinalizedPeriod,
   type WorkforcePaymentMethod,
   type WorkforcePaymentPolicy
 } from "@/lib/workforce-payment-policy";
-import { saveWorkforcePaymentSettings } from "./actions";
+import { WorkforcePaymentPolicyForm } from "./policy-form";
 
 export const dynamic = "force-dynamic";
 
@@ -54,12 +52,6 @@ function indiaMonth(date = new Date()) {
   return `${year}-${month}`;
 }
 
-function addMonths(monthValue: string, amount: number) {
-  const [year, month] = monthValue.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1 + amount, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 function loadFlash() {
   const raw = cookies().get("dropx_workforce_payment_settings_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
@@ -76,32 +68,46 @@ function loadFlash() {
 
 async function loadPolicies(companyId: string) {
   if (!supabaseAdmin) {
-    return { policies: [] as PolicyRow[], error: "Supabase service role key is not configured." };
+    return {
+      policies: [] as PolicyRow[],
+      finalizedPeriods: [] as WorkforcePaymentFinalizedPeriod[],
+      error: "Supabase service role key is not configured."
+    };
   }
-  const result = await supabaseAdmin
-    .from("workforce_payment_settings")
-    .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from,change_reason,created_at,updated_at")
-    .eq("company_id", companyId)
-    .order("effective_from", { ascending: false });
-  if (result.error) return { policies: [] as PolicyRow[], error: result.error.message };
+  const [settingsResult, payrollResult] = await Promise.all([
+    supabaseAdmin
+      .from("workforce_payment_settings")
+      .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from,change_reason,created_at,updated_at")
+      .eq("company_id", companyId)
+      .order("effective_from", { ascending: false }),
+    supabaseAdmin
+      .from("workforce_payroll_runs")
+      .select("period_start,period_end")
+      .eq("company_id", companyId)
+      .in("status", ["approved", "paid"])
+      .order("period_start", { ascending: true })
+  ]);
+  if (settingsResult.error || payrollResult.error) {
+    return {
+      policies: [] as PolicyRow[],
+      finalizedPeriods: [] as WorkforcePaymentFinalizedPeriod[],
+      error: settingsResult.error?.message ?? payrollResult.error?.message ?? "Unable to load workforce payment settings."
+    };
+  }
   return {
-    policies: (result.data ?? []).map((row) => ({
+    policies: (settingsResult.data ?? []).map((row) => ({
       ...normalizeWorkforcePaymentPolicy(row),
       id: row.id,
       change_reason: String(row.change_reason ?? ""),
       created_at: row.created_at,
       updated_at: row.updated_at
     })) as PolicyRow[],
+    finalizedPeriods: (payrollResult.data ?? []).map((row) => ({
+      period_start: String(row.period_start),
+      period_end: String(row.period_end)
+    })),
     error: null as string | null
   };
-}
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 2
-  }).format(value);
 }
 
 function formatMonth(value: string) {
@@ -132,20 +138,9 @@ export default async function WorkforcePaymentSettingsPage() {
   const flash = loadFlash();
   const currentMonth = indiaMonth();
   const currentMonthStart = `${currentMonth}-01`;
-  const firstAllowedMonth = addMonths(currentMonth, 1);
-  const nextScheduled = [...data.policies]
-    .filter((policy) => policy.effective_from > currentMonthStart)
-    .sort((left, right) => left.effective_from.localeCompare(right.effective_from))[0];
-  const effectivePolicy = nextScheduled
-    ?? workforcePaymentPolicyForDate(data.policies, currentMonthStart)
-    ?? DEFAULT_WORKFORCE_PAYMENT_POLICY;
-  const formPolicy = normalizeWorkforcePaymentPolicy(effectivePolicy);
-  const formMonth = nextScheduled?.effective_from.slice(0, 7) ?? firstAllowedMonth;
-  const lastAllowedMonth = addMonths(currentMonth, 24);
   const activePolicy = [...data.policies]
     .filter((policy) => policy.effective_from <= currentMonthStart)
     .sort((left, right) => right.effective_from.localeCompare(left.effective_from))[0];
-  const exampleAttendanceUnits = [5, 10, 26, 30];
   const exampleMethods = Object.keys(methodCopy) as WorkforcePaymentMethod[];
 
   return (
@@ -188,39 +183,21 @@ export default async function WorkforcePaymentSettingsPage() {
             <div className="panel-head">
               <div>
                 <h2>Monthly attendance policy</h2>
-                <p className="subtle">A full day is 1 unit, a half day is 0.5, and an absence is 0. Policies are scheduled before a month begins and stay locked for that entire month.</p>
+                <p className="subtle">A full day is 1 unit, a half day is 0.5, and an absence is 0. A policy remains editable until a payroll period that depends on it is finalized.</p>
               </div>
             </div>
-            <form action={saveWorkforcePaymentSettings} className="form-grid two">
-              <label className="span-2">Calculation method
-                <select className="select" defaultValue={formPolicy.calculation_method} disabled={!canEdit} name="calculation_method" required>
-                  {exampleMethods.map((method) => <option key={method} value={method}>{methodCopy[method].label}</option>)}
-                </select>
-              </label>
-              <label>Paid off days per month
-                <input className="field" defaultValue={formPolicy.paid_off_days} disabled={!canEdit} max={10} min={0} name="paid_off_days" required step={1} type="number" />
-                <span className="subtle">Used by fixed and earned paid-off methods. Default: 4.</span>
-              </label>
-              <label>Work units per paid off
-                <input className="field" defaultValue={formPolicy.work_units_per_paid_off} disabled={!canEdit} max={31} min={0.5} name="work_units_per_paid_off" required step={0.5} type="number" />
-                <span className="subtle">Used only by earned paid offs. Default: 6 attendance units.</span>
-              </label>
-              <label>Effective month
-                <input className="field" defaultValue={formMonth} disabled={!canEdit} max={lastAllowedMonth} min={firstAllowedMonth} name="effective_from" required type="month" />
-                <span className="subtle">Next month through 24 months ahead. Saving the same future month updates its scheduled policy.</span>
-              </label>
-              <label>Change reason
-                <input className="field" disabled={!canEdit} maxLength={250} minLength={3} name="change_reason" placeholder="Why is this payment rule being changed?" required />
-                <span className="subtle">Saved with the policy for payroll review and audit.</span>
-              </label>
-              <label className="checkbox-row">
-                <input defaultChecked={formPolicy.cap_at_monthly_amount} disabled={!canEdit} name="cap_at_monthly_amount" type="checkbox" />
-                <span>Cap calculated base pay at the configured monthly amount</span>
-              </label>
-              <div className="form-actions span-2 align-right">
-                <SubmitButton disabled={!canEdit} disabledText="View only">Save workforce payment policy</SubmitButton>
-              </div>
-            </form>
+            <WorkforcePaymentPolicyForm
+              canEdit={canEdit}
+              currentMonth={currentMonth}
+              finalizedPeriods={data.finalizedPeriods}
+              policies={data.policies.map((policy) => ({
+                calculation_method: policy.calculation_method,
+                paid_off_days: policy.paid_off_days,
+                work_units_per_paid_off: policy.work_units_per_paid_off,
+                cap_at_monthly_amount: policy.cap_at_monthly_amount,
+                effective_from: policy.effective_from
+              }))}
+            />
           </section>
 
           <section className="panel">
@@ -249,38 +226,6 @@ export default async function WorkforcePaymentSettingsPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <h2>₹18,000 example for a 30-day month</h2>
-                <p className="subtle">Uses {formPolicy.paid_off_days} paid offs, {formPolicy.work_units_per_paid_off} work units per earned off, and {formPolicy.cap_at_monthly_amount ? "a monthly cap" : "no monthly cap"}.</p>
-              </div>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Method</th>
-                    {exampleAttendanceUnits.map((units) => <th key={units}>{units} attendance units</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {exampleMethods.map((method) => {
-                    const examplePolicy = { ...formPolicy, calculation_method: method };
-                    return (
-                      <tr key={method}>
-                        <td><strong>{methodCopy[method].label}</strong></td>
-                        {exampleAttendanceUnits.map((units) => (
-                          <td key={units}>{formatMoney(workforcePaymentExample(examplePolicy, units, 18_000, "2026-09-30"))}</td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <div>
                 <h2>Policy history</h2>
                 <p className="subtle">Effective-dated records preserve which rule applies to each workforce payment month.</p>
               </div>
@@ -303,15 +248,20 @@ export default async function WorkforcePaymentSettingsPage() {
                   {data.policies.length ? data.policies.map((policy) => {
                     const isScheduled = policy.effective_from > currentMonthStart;
                     const isActive = activePolicy?.id === policy.id;
+                    const isLocked = workforcePaymentPolicyIntervalIsFinalized(
+                      data.policies,
+                      policy.effective_from,
+                      data.finalizedPeriods
+                    );
                     return (
                       <tr key={policy.id}>
                         <td><strong>{formatMonth(policy.effective_from)}</strong></td>
                         <td>{methodCopy[policy.calculation_method].label}</td>
-                        <td>{policy.paid_off_days}</td>
-                        <td>{policy.work_units_per_paid_off}</td>
+                        <td>{policy.calculation_method === "calendar_days" ? "-" : policy.paid_off_days}</td>
+                        <td>{policy.calculation_method === "earned_paid_offs" ? policy.work_units_per_paid_off : "-"}</td>
                         <td>{policy.cap_at_monthly_amount ? "Yes" : "No"}</td>
                         <td>{policy.change_reason}</td>
-                        <td><span className={`status-pill ${isScheduled ? "warn" : isActive ? "good" : "neutral"}`}>{isScheduled ? "Scheduled" : isActive ? "Active" : "Superseded"}</span></td>
+                        <td><span className={`status-pill ${isLocked || isScheduled ? "warn" : isActive ? "good" : "neutral"}`}>{isLocked ? "Locked" : isScheduled ? "Scheduled" : isActive ? "Active" : "Superseded"}</span></td>
                         <td>{formatUpdated(policy.updated_at ?? policy.created_at)}</td>
                       </tr>
                     );
