@@ -26,13 +26,32 @@ export async function loadEddLedger(codes: string[]) {
   if (!supabaseAdmin) throw new Error("EDD database is not configured.");
   const result = new Map<string, { packages: EddPackage[]; fetchedAt: string }>();
   if (!codes.length) return result;
-  for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await supabaseAdmin.from("edd_package_ledger")
-      .select("station_code,tracking_id,source,source_at,verification,verified_at")
-      .in("station_code", codes).gte("last_seen_at", new Date(Date.now()-7*86400000).toISOString())
-      .order("station_code").order("tracking_id").range(offset,offset+999);
-    if (error) throw new Error(`Unable to load verified EDD records: ${error.message}`);
-    for (const row of (data ?? []) as LedgerRow[]) {
+  // One station at a time, paged by tracking_id after the last row (keyset),
+  // so Postgres walks the (station_code, tracking_id) primary key in order.
+  // The old all-stations "order by station_code, tracking_id" + OFFSET query
+  // sorted every matching row (with its large JSON columns) on each page; it
+  // spilled to disk and wrote ~14 GB of temp files an hour (2026-09-29),
+  // which is what hung the whole database.
+  const since = new Date(Date.now()-7*86400000).toISOString();
+  const rows: LedgerRow[] = [];
+  for (const code of [...new Set(codes)]) {
+    let after = "";
+    for (;;) {
+      let query = supabaseAdmin.from("edd_package_ledger")
+        .select("station_code,tracking_id,source,source_at,verification,verified_at")
+        .eq("station_code", code).gte("last_seen_at", since)
+        .order("tracking_id").limit(1000);
+      if (after) query = query.gt("tracking_id", after);
+      const { data, error } = await query;
+      if (error) throw new Error(`Unable to load verified EDD records: ${error.message}`);
+      const page = (data ?? []) as LedgerRow[];
+      rows.push(...page);
+      if (page.length < 1000) break;
+      after = page[page.length - 1].tracking_id;
+    }
+  }
+  {
+    for (const row of rows) {
       if (!codes.includes(row.station_code)) continue;
       const entry = result.get(row.station_code) ?? { packages: [], fetchedAt: row.source_at };
       const pkg = { ...row.source, observedStationCode: row.station_code, trackingId: row.tracking_id, sourceAt: row.source_at, verifiedAt: row.verified_at, verification: row.verification };
@@ -46,7 +65,6 @@ export async function loadEddLedger(codes: string[]) {
       entry.fetchedAt = [entry.fetchedAt,row.source_at,row.verified_at || ""].sort().at(-1)!;
       result.set(row.station_code,entry);
     }
-    if (!data || data.length < 1000) break;
   }
   // Names can live on a delivered row whose EDD is not enriched yet. Resolve by
   // exact driver ID across this station's retained records, not just today's cohort.
