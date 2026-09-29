@@ -596,6 +596,39 @@ function attendanceVariance({
   };
 }
 
+const PART_TIME_DESIGNATION_CODES = new Set(["PTPC", "PTSSA", "PTDA"]);
+
+/**
+ * Part-time workers (employment type, or a "Part Time ..." designation such as
+ * Part Time Pickers - stored as full_time) work half of their rostered shift.
+ * Mirrors dropx-hrms src/lib/attendance-evaluation.ts isPartTimeWorker, so the
+ * DropX One / Ops attendance status matches People and payroll.
+ */
+function isPartTimeWorker(input: { employmentType?: string | null; designationCode?: string | null; designationName?: string | null }) {
+  if (input.employmentType === "part_time") return true;
+  if (PART_TIME_DESIGNATION_CODES.has(String(input.designationCode ?? "").trim().toUpperCase())) return true;
+  return /^part[\s-]*time\b/i.test(String(input.designationName ?? "").trim());
+}
+
+/** Same start, half the length: 09:00-18:00 -> 09:00-13:30 (overnight shifts handled). */
+function partTimeShift(shift: ShiftDefinition | null): ShiftDefinition | null {
+  if (!shift?.start_time || !shift.end_time) return shift;
+  const toMinutes = (value: string) => { const [h, m] = value.split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+  const start = toMinutes(shift.start_time);
+  const length = ((toMinutes(shift.end_time) - start) % 1440 + 1440) % 1440 || 1440;
+  const end = (start + Math.round(length / 2)) % 1440;
+  return { ...shift, end_time: `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}:00` };
+}
+
+/** Full-day and half-day minutes halve with the shift. */
+function partTimeRules(rules: AttendanceRules): AttendanceRules {
+  return {
+    ...rules,
+    full_day_minutes: Math.max(1, Math.round(Number(rules.full_day_minutes ?? 540) / 2)),
+    half_day_minutes: Math.max(1, Math.round(Number(rules.half_day_minutes ?? 270) / 2))
+  };
+}
+
 async function loadAttendanceScheduleContext({
   companyId,
   fromDate,
@@ -694,12 +727,34 @@ async function loadAttendanceScheduleContext({
   );
   const profileTypeById = new Map(workers.map((worker) => [worker.profileId, worker.profileType]));
 
+  // Part-time workers among these profiles (one lookup per report, not per row).
+  const [partTimeEmployees, partTimeContractors] = workerIds.length ? await Promise.all([
+    supabaseAdmin.from("employees").select("id,employment_type,designations(code,name)").eq("company_id", companyId).in("id", workerIds),
+    supabaseAdmin.from("contractors").select("id,employment_type,designation").eq("company_id", companyId).in("id", workerIds)
+  ]) : [{ data: [], error: null }, { data: [], error: null }];
+  const partTimeIds = new Set<string>();
+  for (const row of (partTimeEmployees.data ?? []) as Array<{ id: string; employment_type: string | null; designations: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null }>) {
+    const designation = relationFirst(row.designations);
+    if (isPartTimeWorker({ employmentType: row.employment_type, designationCode: designation?.code, designationName: designation?.name })) partTimeIds.add(row.id);
+  }
+  for (const row of (partTimeContractors.data ?? []) as Array<{ id: string; employment_type: string | null; designation: string | null }>) {
+    if (isPartTimeWorker({ employmentType: row.employment_type, designationName: row.designation })) partTimeIds.add(row.id);
+  }
+  const baseRules = (settingsResult.data ?? {}) as AttendanceRules;
+  const halvedRules = partTimeRules(baseRules);
+  const withPartTime = (profileId: string, schedule: ShiftSchedule): ShiftSchedule =>
+    partTimeIds.has(profileId) ? { ...schedule, shift: partTimeShift(schedule.shift) } : schedule;
+
   return {
-    rules: (settingsResult.data ?? {}) as AttendanceRules,
+    rules: baseRules,
+    /** Company rules, with full/half-day minutes halved for part-time workers. */
+    rulesFor(profileId: string | null): AttendanceRules {
+      return profileId && partTimeIds.has(profileId) ? halvedRules : baseRules;
+    },
     scheduleFor(profileId: string | null, punchDate: string): ShiftSchedule {
       if (!profileId) return { dayType: "unassigned", shift: null, source: "Unassigned" };
       const roster = rosterByWorkerDate.get(`${profileId}:${punchDate}`);
-      if (roster) return roster;
+      if (roster) return withPartTime(profileId, roster);
       const weekly = weeklyRosterValueForDate(
         weeklyIndex,
         rosterWorkerType(profileTypeById.get(profileId)),
@@ -707,7 +762,7 @@ async function loadAttendanceScheduleContext({
         punchDate
       );
       return weekly
-        ? { dayType: weekly.day_type ?? "working", shift: relationFirst(weekly.hr_shifts), source: "Roster" }
+        ? withPartTime(profileId, { dayType: weekly.day_type ?? "working", shift: relationFirst(weekly.hr_shifts), source: "Roster" })
         : { dayType: "unassigned", shift: null, source: "Unassigned" };
     }
   };
@@ -1151,7 +1206,7 @@ export async function fillAttendanceCalendarGaps({
     const attendanceStatus = attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: 0,
-      rules: scheduleContext.rules,
+      rules: scheduleContext.rulesFor(profileId),
       scheduledMinutes: 0,
       status: "",
       workMinutes: 0
@@ -1494,13 +1549,13 @@ export async function loadAttendanceReportRows({
       inTime: effectiveInTime,
       outTime: effectiveOutTime,
       punchDate: row.punch_date,
-      rules: scheduleContext.rules,
+      rules: scheduleContext.rulesFor(profileId),
       shift: schedule.shift
     });
     const attendanceStatus = creditState ? wfhCreditLabel(creditState) : attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: effectivePunchCount,
-      rules: scheduleContext.rules,
+      rules: scheduleContext.rulesFor(profileId),
       scheduledMinutes,
       status: row.status ?? "P",
       workMinutes: effectiveWorkMinutes
