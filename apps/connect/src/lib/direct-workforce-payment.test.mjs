@@ -61,6 +61,39 @@ test("attendance-based monthly components pay only full and half attendance unit
   ]);
 });
 
+test("direct monthly attendance pay follows the effective paid-off policy", () => {
+  const attendanceMonthly = component("MONTHLY", "per_month", {
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility",
+    payment_fields: { code: "MONTHLY", label: "MONTHLY", field_type: "amount", pay_schedule: "per_month", calculation_type: "fixed_monthly", calculation_source: "attendance_eligibility" }
+  });
+  const attendance = Array.from({ length: 30 }, (_, index) => day(`d${index + 1}`, `2026-09-${String(index + 1).padStart(2, "0")}`));
+  const result = calculateDirectWorkforcePayments({
+    allocations: [allocation({ payment_values: { MONTHLY: 18000 } })],
+    methods: [method([attendanceMonthly])],
+    attendance,
+    policyHistory: [{ calculation_method: "fixed_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-09-01" }],
+    from: "2026-09-01",
+    to: "2026-09-30"
+  });
+  assert.equal(Math.round(result.reduce((sum, row) => sum + row.amount, 0) * 100) / 100, 18000);
+  assert.equal(Math.round(result.slice(0, 5).reduce((sum, row) => sum + row.amount, 0) * 100) / 100, 3461.54);
+});
+
+test("mid-month direct views retain month-to-date attendance context", () => {
+  const attendanceMonthly = component("MONTHLY", "per_month", {
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility",
+    payment_fields: { code: "MONTHLY", label: "MONTHLY", field_type: "amount", pay_schedule: "per_month", calculation_type: "fixed_monthly", calculation_source: "attendance_eligibility" }
+  });
+  const attendance = Array.from({ length: 20 }, (_, index) => day(`d${index + 1}`, `2026-09-${String(index + 1).padStart(2, "0")}`));
+  const policyHistory = [{ calculation_method: "earned_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-09-01" }];
+  const full = calculateDirectWorkforcePayments({ allocations: [allocation({ payment_values: { MONTHLY: 18000 } })], methods: [method([attendanceMonthly])], attendance, policyHistory, from: "2026-09-01", to: "2026-09-20" });
+  const partial = calculateDirectWorkforcePayments({ allocations: [allocation({ payment_values: { MONTHLY: 18000 } })], methods: [method([attendanceMonthly])], attendance, policyHistory, from: "2026-09-15", to: "2026-09-20" });
+  const expected = full.filter((row) => row.date >= "2026-09-15").reduce((sum, row) => sum + row.amount, 0);
+  assert.equal(partial.reduce((sum, row) => sum + row.amount, 0), expected);
+});
+
 test("effective dates choose exactly one allocation and reject overlapping setup", () => {
   const old = allocation({ id: "old", effective_to: "2026-09-14" });
   const next = allocation({ id: "new", effective_from: "2026-09-15" });

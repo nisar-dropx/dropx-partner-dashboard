@@ -14,7 +14,10 @@ const incentiveCompiled=ts.transpileModule(readFileSync(new URL('./workforce-own
 const {ownIncentives}=await import(`data:text/javascript;base64,${Buffer.from(incentiveCompiled).toString('base64')}`);
 const personalCompiled=ts.transpileModule(readFileSync(new URL('./personal-payment-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {personalPaymentCard}=await import(`data:text/javascript;base64,${Buffer.from(personalCompiled).toString('base64')}`);
-const providerAttendanceCompiled=ts.transpileModule(readFileSync(new URL('./provider-attendance-payment.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const policyCompiled=ts.transpileModule(readFileSync(new URL('../../../../src/lib/workforce-payment-policy.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const policyUrl=`data:text/javascript;base64,${Buffer.from(policyCompiled).toString('base64')}`;
+const providerAttendanceCompiled=ts.transpileModule(readFileSync(new URL('./provider-attendance-payment.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
+ .replace('"../../../../src/lib/workforce-payment-policy.ts"',JSON.stringify(policyUrl));
 const {calculateProviderAttendancePayments,hasProviderAttendanceComponents}=await import(`data:text/javascript;base64,${Buffer.from(providerAttendanceCompiled).toString('base64')}`);
 const from='2026-09-01',to='2026-09-30';
 const row=(overrides={})=>({id:'claim-1',company_id:'company',workforce_id:'person',adjustment_type:'earning',category:'reimbursement',amount:'200.00',effective_date:'2026-09-12',status:'approved',requested_at:'2026-09-10T09:00:00Z',reviewed_at:'2026-09-11T09:00:00Z',payroll_run_id:null,...overrides});

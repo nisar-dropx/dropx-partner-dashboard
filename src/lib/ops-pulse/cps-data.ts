@@ -12,6 +12,8 @@ import {
   type CpsCostInput,
 } from "./cps";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { readAllRows } from "@/lib/supabase-pagination";
+import { workforcePaymentMonthStart } from "@/lib/workforce-payment-policy";
 
 export async function cpsScope(auth: AuthorizationContext, params: CpsParams) {
   const companyId = requireCompanyId(auth);
@@ -44,12 +46,24 @@ const snapshot = cache(
   async (company: string, from: string, to: string, codesKey: string) => {
     const codes: string[] = JSON.parse(codesKey);
     if (!supabaseAdmin) throw Error("CPS data is temporarily unavailable.");
-    const [result, facts] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
+    const [result, facts, paymentPolicy, monthAttendance] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
       p_company: company,
       p_from: from,
       p_through: to,
       p_stations: codes,
-    }), supabaseAdmin.rpc("ops_cps_source_facts", { p_company: company, p_from: from, p_through: to, p_stations: codes })]);
+    }), supabaseAdmin.rpc("ops_cps_source_facts", { p_company: company, p_from: from, p_through: to, p_stations: codes }),
+    supabaseAdmin.from("workforce_payment_settings")
+      .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from")
+      .eq("company_id", company)
+      .lte("effective_from", to)
+      .order("effective_from"),
+    readAllRows(supabaseAdmin.from("attendance_daily")
+      .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
+      .eq("company_id", company)
+      .gte("punch_date", workforcePaymentMonthStart(from))
+      .lte("punch_date", to)
+      .order("punch_date")
+      .order("id"))]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
       throw Error("CPS data could not be loaded. Please retry shortly.");
@@ -61,7 +75,11 @@ const snapshot = cache(
     )
       throw Error("CPS returned an incomplete response.");
     if (facts.error || !facts.data || !Array.isArray(facts.data.shipments)) throw Error("Live workforce cost sources could not be loaded. Please retry.");
-    return rebuildCps(result.data as CpsSnapshot, facts.data as CpsFacts);
+    if (paymentPolicy.error || monthAttendance.error) throw Error("Workforce attendance payment policy could not be loaded. Please retry.");
+    const sourceFacts = facts.data as CpsFacts;
+    sourceFacts.payment_policy_history = paymentPolicy.data ?? [];
+    sourceFacts.attendance = monthAttendance.data ?? [];
+    return rebuildCps(result.data as CpsSnapshot, sourceFacts);
   },
 );
 export async function loadCpsSnapshot(

@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
-import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { hasPermission, isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -116,6 +116,7 @@ export default async function SettingsPage() {
   const authorization = await requirePagePermission("app_settings", "access");
   const companyId = requireCompanyId(authorization);
   const canManageAmazonConnectors = isCompanyOwner(authorization);
+  const canViewWorkforcePayment = hasPermission(authorization, "payment_settings", "access");
   const [whatsAppStatus, wheelseyeStatus, metaStatus, metaLeadsStatus, domainStatus, verificationApiStatus] = await Promise.all([
     loadWhatsAppStatus(companyId),
     loadWheelseyeStatus(companyId),
@@ -214,6 +215,17 @@ export default async function SettingsPage() {
               <p className="subtle">Approval flow for location expense payment requests.</p>
             </div>
           </PendingLink>
+          {canViewWorkforcePayment ? (
+            <PendingLink className="settings-tile actionable" href="/settings/workforce-payment">
+              <div>
+                <h3>Workforce Payment</h3>
+                <p className="subtle">Configure attendance-based monthly pay and paid weekly-off rules.</p>
+              </div>
+              <span className="settings-tile-actions">
+                <span className="button secondary compact">Configure</span>
+              </span>
+            </PendingLink>
+          ) : null}
           <PendingLink className="settings-tile actionable" href="/settings/payment-approvals">
             <div>
               <h3>Payment Approval Steps</h3>

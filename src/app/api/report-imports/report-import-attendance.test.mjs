@@ -51,8 +51,9 @@ test("report-import attendance components use daily units, monthly accrual and w
   assert.equal(missing.total, 0);
 });
 
-test("report-import production components retain count-times-rate calculation", async () => {
+test("report-import components retain nested calculations and historical mapping status", async () => {
   const route = await readFile(new URL("./route.ts", import.meta.url), "utf8");
   assert.match(route, /const amount = productionComponent\s*\? productionForSource\(row, source\) \* rate/);
-  assert.match(route, /: attendanceComponent\s*\? directPayForDay/);
+  assert.match(route, /: attendanceComponent\s*\? includeAttendancePayment \? directPayForDay/);
+  assert.match(route, /\.eq\("company_id", companyId\)\.in\("status", \["active", "closed"\]\)/);
 });

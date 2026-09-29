@@ -63,6 +63,17 @@ test("monthly and hourly provider heads use calendar proration and worked minute
   ]);
 });
 
+test("provider monthly attendance pay uses the same paid-off policy as direct pay", () => {
+  const result = calculateProviderAttendancePayments({
+    mappings: [mapping({ payment_methods: { id: "method", payment_method_components: [component("MONTHLY", "per_month")] } })],
+    attendance: Array.from({ length: 10 }, (_, index) => attendance(`a${index + 1}`, `2026-09-${String(index + 1).padStart(2, "0")}`)),
+    policyHistory: [{ calculation_method: "earned_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-09-01" }],
+    from: "2026-09-01",
+    to: "2026-09-10"
+  });
+  assert.equal(Math.round(result.reduce((sum, day) => sum + day.amount, 0) * 100) / 100, 6600);
+});
+
 test("production and legacy amount components remain outside provider attendance calculation", () => {
   const production = component("DELIVERY", null, {
     component_type: "production",

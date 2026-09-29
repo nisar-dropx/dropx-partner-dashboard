@@ -5,11 +5,12 @@ import crypto from "crypto";
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { directPayForDay } from "@/lib/direct-workforce-pay";
+import { directPayAttendanceUnit, directPayForDay } from "@/lib/direct-workforce-pay";
 import { getServiceAuthorization, ServiceAuthError } from "@/lib/service-auth";
 import { loadCodLocations, locationModelName, providerName } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
 import {
   buildReportImportAttendanceByWorkforceDate,
   canonicalWorkforceForMapping,
@@ -822,7 +823,7 @@ async function loadAmazonMappingAttendance(
 ) {
   const emptyIndex = createReportImportWorkforceIndex([]);
   if (!supabaseAdmin || !sourceRows.length || !mappings.length) {
-    return { attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(), workforceIndex: emptyIndex };
+    return { attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(), cumulativeAttendanceUnitsBefore: new Map<string, number>(), workforceIndex: emptyIndex };
   }
 
   const canonicalIds = [...new Set(mappings.map((mapping) => mapping.workforce_id).filter((id): id is string => Boolean(id)))];
@@ -856,7 +857,7 @@ async function loadAmazonMappingAttendance(
     return worker ? [[worker.id, worker] as const] : [];
   })).values()];
   if (!canonicalWorkers.length) {
-    return { attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(), workforceIndex };
+    return { attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(), cumulativeAttendanceUnitsBefore: new Map<string, number>(), workforceIndex };
   }
 
   const mappingEmployeeIds = mappings.map((mapping) => mapping.employee_id);
@@ -902,7 +903,7 @@ async function loadAmazonMappingAttendance(
         .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
         .eq("company_id", companyId)
         .in(group.column, group.ids.slice(index, index + 100))
-        .gte("punch_date", from)
+        .gte("punch_date", workforcePaymentMonthStart(from))
         .lte("punch_date", to)
         .order("punch_date")
         .order("id")));
@@ -914,10 +915,25 @@ async function loadAmazonMappingAttendance(
   const attendanceRows = [...new Map(attendanceResults
     .flatMap((result) => result.data ?? [])
     .map((row) => [row.id, row as ReportImportAttendanceRow])).values()];
-  return {
-    attendanceByWorkforceDate: buildReportImportAttendanceByWorkforceDate(attendanceRows, workforceIndex),
-    workforceIndex
-  };
+  const attendanceByWorkforceDate = buildReportImportAttendanceByWorkforceDate(attendanceRows, workforceIndex);
+  const cumulativeAttendanceUnitsBefore = new Map<string, number>();
+  for (const worker of canonicalWorkers) {
+    const entries = [...attendanceByWorkforceDate.entries()]
+      .filter(([entry]) => entry.startsWith(`${worker.id}|`))
+      .sort(([left], [right]) => left.localeCompare(right));
+    let month = "";
+    let running = 0;
+    for (const [entry, attendance] of entries) {
+      const date = entry.slice(worker.id.length + 1);
+      if (date.slice(0, 7) !== month) {
+        month = date.slice(0, 7);
+        running = 0;
+      }
+      cumulativeAttendanceUnitsBefore.set(entry, running);
+      running += directPayAttendanceUnit(attendance);
+    }
+  }
+  return { attendanceByWorkforceDate, cumulativeAttendanceUnitsBefore, workforceIndex };
 }
 
 async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnType<typeof aggregateAmazonRows>) {
@@ -925,16 +941,23 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
   const rows = sourceRows as AmazonAggregateRow[];
   const stationCodes = [...new Set(rows.map((row) => row.station_code))];
   const providerMemberIds = [...new Set(rows.map((row) => row.provider_employee_id))];
-  const [stationsResult, providersResult] = await Promise.all([
+  const policyThrough = rows.map((row) => row.work_date).sort().at(-1)!;
+  const [stationsResult, providersResult, paymentPolicyResult] = await Promise.all([
     supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).in("station_code", stationCodes),
-    supabaseAdmin.from("providers").select("id,code,name").eq("company_id", companyId)
+    supabaseAdmin.from("providers").select("id,code,name").eq("company_id", companyId),
+    supabaseAdmin.from("workforce_payment_settings")
+      .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from")
+      .eq("company_id", companyId)
+      .lte("effective_from", policyThrough)
+      .order("effective_from")
   ]);
-  if (stationsResult.error || providersResult.error) return rows;
+  if (stationsResult.error || providersResult.error || paymentPolicyResult.error) return rows;
+  const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
   const amazonProviderIds = (providersResult.data ?? []).filter((provider) => /amazon/i.test(`${provider.code ?? ""} ${provider.name ?? ""}`)).map((provider) => provider.id);
   if (!amazonProviderIds.length) return rows;
   const mappingsResult = await supabaseAdmin.from("field_executive_provider_mappings")
     .select("provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,pay_type,delivery_rate,pickup_rate,mfn_rate,mfn_return_rate,guarantee_amount,guarantee_schedule,fuel_rate,workforce_id,employee_id,contractor_id,field_executive_id")
-    .eq("company_id", companyId).eq("status", "active")
+    .eq("company_id", companyId).in("status", ["active", "closed"])
     .in("provider_id", amazonProviderIds).in("provider_member_id", providerMemberIds);
   if (mappingsResult.error) return rows;
   const methodIds = [...new Set((mappingsResult.data ?? []).map((mapping) => mapping.payment_method_id).filter(Boolean))] as string[];
@@ -963,10 +986,12 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     )
     : {
       attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(),
+      cumulativeAttendanceUnitsBefore: new Map<string, number>(),
       workforceIndex: createReportImportWorkforceIndex([])
     };
   if (!attendanceContext) return rows;
 
+  const consumedAttendancePayments = new Set<string>();
   return rows.map((row) => {
     const stationId = stationIdByCode.get(row.station_code);
     const mapping = (mappingsResult.data ?? []).find((candidate) => (
@@ -1021,17 +1046,25 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       const attendance = worker
         ? attendanceContext.attendanceByWorkforceDate.get(`${worker.id}|${row.work_date}`)
         : undefined;
+      const attendancePaymentKey = worker ? `${worker.id}|${row.work_date}|${componentCode}` : "";
+      const includeAttendancePayment = Boolean(attendancePaymentKey) && !consumedAttendancePayments.has(attendancePaymentKey);
+      if (attendanceComponent && includeAttendancePayment) consumedAttendancePayments.add(attendancePaymentKey);
       const amount = productionComponent
         ? productionForSource(row, source) * rate
         : attendanceComponent
-          ? directPayForDay({ [componentCode]: rate }, [{
+          ? includeAttendancePayment ? directPayForDay({ [componentCode]: rate }, [{
             component_code: componentCode,
             component_type: component.component_type,
             label: field?.label,
             pay_schedule: schedule,
             calculation_type: calculationType,
             calculation_source: "attendance_eligibility"
-          }], row.work_date, attendance).total
+          }], row.work_date, attendance, {
+            policyHistory: paymentPolicyHistory,
+            cumulativeAttendanceUnitsBefore: worker
+              ? attendanceContext.cumulativeAttendanceUnitsBefore.get(`${worker.id}|${row.work_date}`) ?? 0
+              : 0
+          }).total : 0
         : schedule === "per_month" || calculationType === "fixed_monthly"
           ? rate / daysInMonth(row.work_date)
           : rate;

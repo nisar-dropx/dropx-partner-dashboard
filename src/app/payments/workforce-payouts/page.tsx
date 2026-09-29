@@ -7,9 +7,10 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { calculateAutomaticDeductionLines, type AutomaticDeductionHead } from "@/lib/workforce-deductions";
-import { allocationActiveOn, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
+import { allocationActiveOn, directPayAttendanceUnit, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
+import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -47,14 +48,15 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
   let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
-  const [locationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult] = await Promise.all([
+  const [locationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult] = await Promise.all([
     locationsQuery,
     supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name), payment_methods(name)").eq("company_id", companyId).in("status", ["active", "closed"]).not("payment_method_id", "is", null).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${fromDate}`),
     readAllRows(supabaseAdmin.from("workforce_payment_allocations").select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, payment_methods:payment_methods!workforce_payment_allocations_method_company_fk(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${fromDate}`).order("effective_from").order("id")),
     supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
-    supabaseAdmin.from("workforce_deduction_heads").select("code, name, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true)
+    supabaseAdmin.from("workforce_deduction_heads").select("code, name, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true),
+    supabaseAdmin.from("workforce_payment_settings").select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from")
   ]);
-  const error = locationsResult.error?.message || mappingsResult.error?.message || directAllocationsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message;
+  const error = locationsResult.error?.message || mappingsResult.error?.message || directAllocationsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message || paymentPolicyResult.error?.message;
   if (error) return { rows: [] as WorkforcePayoutRow[], error };
   const locations = locationsResult.data ?? [];
   const allowed = new Set(locations.map((row) => row.id));
@@ -104,7 +106,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
           .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
           .eq("company_id", companyId)
           .in(group.column, group.ids.slice(index, index + 100))
-          .gte("punch_date", fromDate)
+          .gte("punch_date", workforcePaymentMonthStart(fromDate))
           .lte("punch_date", toDate)
           .order("punch_date")
           .order("id"));
@@ -137,6 +139,24 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const current = attendanceByWorkerDate.get(key);
     attendanceByWorkerDate.set(key, preferredDirectPayAttendance(current, row));
   }
+  const cumulativeAttendanceUnitsBefore = new Map<string, number>();
+  for (const worker of canonicalWorkers) {
+    const entries = [...attendanceByWorkerDate.entries()]
+      .filter(([key]) => key.startsWith(`${worker.id}|`))
+      .sort(([left], [right]) => left.localeCompare(right));
+    let month = "";
+    let running = 0;
+    for (const [key, attendance] of entries) {
+      const date = key.slice(String(worker.id).length + 1);
+      if (date.slice(0, 7) !== month) {
+        month = date.slice(0, 7);
+        running = 0;
+      }
+      cumulativeAttendanceUnitsBefore.set(key, running);
+      running += directPayAttendanceUnit(attendance);
+    }
+  }
+  const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
   const dateRange = (from: string, to: string) => {
     const dates: string[] = [];
     for (let cursor = new Date(`${from}T00:00:00Z`); cursor <= new Date(`${to}T00:00:00Z`); cursor.setUTCDate(cursor.getUTCDate() + 1)) dates.push(cursor.toISOString().slice(0, 10));
@@ -191,7 +211,14 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       const rows = eligibleDaily.filter((daily) => String(daily.work_date) === date);
       const productionLines = productionRules.map((rule) => { const count = rows.reduce((sum, daily) => sum + metricValue(daily, rule.source), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
       const ownedAttendanceComponents = attendanceDates.includes(date) ? attendanceComponents : [];
-      const attendancePay = directPayForDay(mapping.payment_values, ownedAttendanceComponents, date, attendanceByWorkerDate.get(`${worker?.id}|${date}`));
+      const workerDateKey = `${worker?.id}|${date}`;
+      const attendancePay = directPayForDay(
+        mapping.payment_values,
+        ownedAttendanceComponents,
+        date,
+        attendanceByWorkerDate.get(workerDateKey),
+        { policyHistory: paymentPolicyHistory, cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0 }
+      );
       missingAttendanceConfiguration ||= ownedAttendanceComponents.length > 0 && attendancePay.missing;
       const attendanceLines = attendancePay.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount }));
       const lines = [...productionLines, ...attendanceLines];
@@ -238,7 +265,14 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       const activeFrom = [fromDate, String(allocation.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
       const activeTo = [toDate, today(), String(allocation.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
-        const calculation = directPayForDay(allocation.payment_values, components, date, attendanceByWorkerDate.get(`${workforceId}|${date}`));
+        const workerDateKey = `${workforceId}|${date}`;
+        const calculation = directPayForDay(
+          allocation.payment_values,
+          components,
+          date,
+          attendanceByWorkerDate.get(workerDateKey),
+          { policyHistory: paymentPolicyHistory, cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0 }
+        );
         return { date, baseAmount: calculation.total, missing: calculation.missing, lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount })) };
       }) : [];
     }).sort((left, right) => right.date.localeCompare(left.date));

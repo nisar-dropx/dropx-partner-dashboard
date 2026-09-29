@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
+const policy={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payment-policy.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(policy.exports,policy);
 const direct={exports:{}};
-new Function('exports','module',ts.transpileModule(readFileSync(new URL('../direct-workforce-pay.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(direct.exports,direct);
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../direct-workforce-pay.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(direct.exports,direct,(id)=>{if(id==='./workforce-payment-policy.ts')return policy.exports;throw new Error(`Unexpected import ${id}`);});
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../direct-workforce-pay')return direct.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -63,6 +65,13 @@ test('provider rate cards gate fixed schedules by attendance without changing pr
  assert.deepEqual([present.salary,half.salary,absent.salary,missing.salary],[1500,750,0,0]);
  assert.deepEqual([present.variable,half.variable,absent.variable,missing.variable],[1000,1000,1000,1000]);
  assert.ok([present,half,absent,missing].every(result=>result.missing===false));
+});
+test('provider rate cards apply the configured monthly paid-off policy cumulatively',()=>{
+ const card={payment_method_id:'fixed',payment_values:{MONTHLY:18000}};
+ const components=[{component_code:'MONTHLY',component_type:'amount',pay_schedule:'per_month',calculation_type:'fixed_monthly',calculation_source:'attendance_eligibility'}];
+ const policyHistory=[{calculation_method:'fixed_paid_offs',paid_off_days:4,work_units_per_paid_off:6,cap_at_monthly_amount:true,effective_from:'2026-09-01'}];
+ const fifth=calculateRateCard(card,components,{},'2026-09-05',true,{punch_date:'2026-09-05',status:'P'},policyHistory,4);
+ assert.equal(fifth.salary,692.31);
 });
 test('provider attendance pay creates fixed rows on worked days without a shipment upload',()=>{
  const f=facts();f.shipments=[];f.mappings[0].payment_values={DAILY:600,MONTHLY:3000,HOURLY:100};

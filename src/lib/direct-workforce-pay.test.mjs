@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { directPayForDay, monthlyDailyAccrual, preferredDirectPayAttendance } from "./direct-workforce-pay.ts";
+import { monthlyAttendanceAmountForDay, workforcePaymentExample, workforcePaymentPolicyForDate } from "./workforce-payment-policy.ts";
 
 test("direct pay handles monthly, present-day and hourly amounts", () => {
   const result = directPayForDay({ MONTHLY: 31000, DAILY: 500, HOURLY: 100 }, [
@@ -17,6 +18,38 @@ test("monthly accrual conserves paise across a month", () => {
   const total = Array.from({ length: 30 }, (_, index) => monthlyDailyAccrual(1000, `2026-09-${String(index + 1).padStart(2, "0")}`))
     .reduce((sum, amount) => sum + amount, 0);
   assert.equal(Math.round(total * 100) / 100, 1000);
+});
+
+test("workforce monthly policy supports fixed and earned paid offs without exceeding the monthly amount", () => {
+  const fixed = { calculation_method: "fixed_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-09-01" };
+  const earned = { ...fixed, calculation_method: "earned_paid_offs" };
+  assert.equal(workforcePaymentExample(fixed, 5), 3461.54);
+  assert.equal(workforcePaymentExample(fixed, 10), 6923.08);
+  assert.equal(workforcePaymentExample(fixed, 26), 18000);
+  assert.equal(workforcePaymentExample(fixed, 30), 18000);
+  assert.equal(workforcePaymentExample(earned, 5), 3000);
+  assert.equal(workforcePaymentExample(earned, 10), 6600);
+  assert.equal(workforcePaymentExample(earned, 26), 18000);
+  assert.equal(workforcePaymentExample(earned, 30), 18000);
+});
+
+test("earned paid off is credited on the configured attendance threshold", () => {
+  const policy = { calculation_method: "earned_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-09-01" };
+  const fifth = monthlyAttendanceAmountForDay({ monthlyAmount: 18000, date: "2026-09-05", attendanceUnit: 1, cumulativeAttendanceUnitsBefore: 4, policy });
+  const sixth = monthlyAttendanceAmountForDay({ monthlyAmount: 18000, date: "2026-09-06", attendanceUnit: 1, cumulativeAttendanceUnitsBefore: 5, policy });
+  assert.equal(fifth.amount, 600);
+  assert.equal(sixth.amount, 1200);
+  assert.equal(sixth.creditedPaidOffUnits, 1);
+});
+
+test("payment policies are selected by effective month and default to existing calendar attendance", () => {
+  const history = [
+    { calculation_method: "fixed_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-10-01" },
+    { calculation_method: "earned_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-11-01" }
+  ];
+  assert.equal(workforcePaymentPolicyForDate(history, "2026-09-30").calculation_method, "calendar_days");
+  assert.equal(workforcePaymentPolicyForDate(history, "2026-10-15").calculation_method, "fixed_paid_offs");
+  assert.equal(workforcePaymentPolicyForDate(history, "2026-11-01").calculation_method, "earned_paid_offs");
 });
 
 test("attendance-based monthly pay uses full, half and absent attendance units", () => {
