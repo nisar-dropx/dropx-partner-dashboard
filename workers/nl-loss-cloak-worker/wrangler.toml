@@ -18,10 +18,9 @@ remote = true
 cpu_ms = 300000
 
 [vars]
-# Not secret: project URLs + login email. Keys/passwords are wrangler secrets (below).
+# Not secret: project URL. Keys/passwords are wrangler secrets (below).
 # DropX Dashboard (company) project — sessions + loss tables.
 SUPABASE_URL = "https://uimajyffojydenqsegjv.supabase.co"
-CLOAK_EMAIL = "dropxcloak@gmail.com"
 CLOAK_BASE_URL = "https://cloak.tech.amazon.dev"
 CLOAK_COUNTRY = "IN"
 CLOAK_PARTNER_SHORTCODE = "DROP"
@@ -41,6 +40,6 @@ crons = ["20 * * * *", "30 1,7 * * *"]
 # Secrets (local: .dev.vars / prod: wrangler secret put)
 # - SUPABASE_SERVICE_ROLE_KEY  (DropX Dashboard / company project key)
 # - ADMIN_API_KEY
-# - CLOAK_PASSWORD
+# - CLOAK_EMAIL / CLOAK_PASSWORD
 # - WORKFORCE_PORTAL_EMAIL / WORKFORCE_PORTAL_PASSWORD  (same as Report-auto-worker)
 # - AMAZON_EXCEL_OPEN_PASSWORD                          (same as Report-auto-worker)

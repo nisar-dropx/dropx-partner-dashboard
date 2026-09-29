@@ -67,10 +67,16 @@ export async function loginAndCaptureCloakSession(
         continue;
       }
       if (captured) return { ok: true, auth: { cookie: captured }, cacheResets: resets };
+      const names = (await collectCookieHeader(page, baseUrl)).split('; ').map((c) => c.split('=')[0]).filter(Boolean);
+      const bodyText = await page
+        .evaluate(() => (globalThis as unknown as { document: { body?: { innerText?: string } } }).document.body?.innerText ?? '')
+        .catch(() => '');
       return {
         ok: false,
         code: 'CAPTURE_TIMEOUT',
-        error: 'Logged in but Cloak never set Cognito access/id token cookies.',
+        error:
+          `Logged in but no Cognito tokens found (url=${page.url().split('?')[0]}; cookies=[${names.join(',')}]; ` +
+          `page="${bodyText.replace(/\s+/g, ' ').slice(0, 160)}").`,
       };
     }
 
@@ -211,9 +217,33 @@ async function waitForCookies(page: Page, baseUrl: string, clientId: string): Pr
     if (await hasCacheError(page)) return 'cache_error';
     const cookie = await collectCookieHeader(page, baseUrl);
     if (isCloakCookieComplete(cookie, clientId)) return cookie;
+    // Amplify's default storage is localStorage — lift its Cognito keys into cookie form,
+    // which is what Cloak's API reads.
+    const fromStorage = await cognitoKeysFromLocalStorage(page, clientId);
+    if (fromStorage) {
+      const merged = [cookie, fromStorage].filter(Boolean).join('; ');
+      if (isCloakCookieComplete(merged, clientId)) return merged;
+    }
     await sleep(1500);
   }
   return null;
+}
+
+async function cognitoKeysFromLocalStorage(page: Page, clientId: string): Promise<string | null> {
+  const pairs = await page
+    .evaluate((prefix) => {
+      const ls = (globalThis as unknown as { localStorage?: { length: number; key(i: number): string | null; getItem(k: string): string | null } }).localStorage;
+      const out: Array<[string, string]> = [];
+      if (!ls) return out;
+      for (let i = 0; i < ls.length; i++) {
+        const k = ls.key(i);
+        if (k && k.startsWith(prefix)) out.push([k, ls.getItem(k) ?? '']);
+      }
+      return out;
+    }, `CognitoIdentityServiceProvider.${clientId}.`)
+    .catch(() => [] as Array<[string, string]>);
+  if (!pairs.length) return null;
+  return pairs.map(([k, v]) => `${k}=${encodeURIComponent(v).replace(/%2E/g, '.')}`).join('; ');
 }
 
 async function collectCookieHeader(page: Page, baseUrl: string): Promise<string> {
