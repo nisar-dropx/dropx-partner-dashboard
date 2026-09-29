@@ -46,11 +46,14 @@ try{
  await sync([newHead]);assert.equal((await audits()).length,auditCount,'closed history remains untouched');
  await db.exec('set role authenticated');await assert.rejects(sync([newHead]),/permission denied/);
  await db.exec('reset role');
- const started=(await db.query('select ops_start_people_review($1,$2,$3,$4,$5) id',[company,cm,station,JSON.stringify({source_date:'2026-09-29'}),JSON.stringify([first,newHead])])).rows[0].id;
+ // Fixed past dates: the fixture review above is dated current_date, and ops_start_people_review
+ // reuses an existing review for the same station and date, so a date equal to today would
+ // return that fixture instead of creating a new review.
+ const started=(await db.query('select ops_start_people_review($1,$2,$3,$4,$5) id',[company,cm,station,JSON.stringify({source_date:'2001-01-01'}),JSON.stringify([first,newHead])])).rows[0].id;
  assert.equal((await db.query('select routing_source from ops_performance_review_steps where review_id=$1',[started])).rows[0].routing_source,'people');
  await db.query("update ops_performance_review_steps set status='skipped',bypassed_at=now() where review_id=$1 and reviewer_user_id=$2",[started,cm]);
  await db.query('select ops_sync_people_review_routes($1,$2)',[company,JSON.stringify([{reviewId:started,chain:[first,newHead],error:null}])]);
  assert.equal((await db.query("select count(*)::int n from ops_performance_review_steps where review_id=$1 and reviewer_user_id=$2 and status='pending'",[started,cm])).rows[0].n,0,'explicit bypass is not recreated');
- await assert.rejects(db.query('select ops_start_people_review($1,$2,$3,$4,$5)',[company,cm,station,JSON.stringify({source_date:'2026-09-30'}),null]),/reporting line/);
+ await assert.rejects(db.query('select ops_start_people_review($1,$2,$3,$4,$5)',[company,cm,station,JSON.stringify({source_date:'2001-01-02'}),null]),/reporting line/);
  console.log('People review PostgreSQL checks passed: pending reassignment, completed preservation, idempotence, proxy safety, missing mapping, stale completion, tenant isolation, service-only access and new review provenance.');
 }finally{await db.close();}
