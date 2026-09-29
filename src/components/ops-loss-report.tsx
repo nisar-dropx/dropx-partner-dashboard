@@ -1,72 +1,103 @@
-import styles from "@/components/workforce-hold-desk.module.css";
+import Link from "next/link";
+import styles from "@/components/ops-loss-report.module.css";
+import { OpsLossCases } from "@/components/ops-loss-cases";
 import type { LossReportView } from "@/lib/ops-pulse/loss-reports";
 
-const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value);
-const time = (value: string | null) => value ? `${new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : "—";
-/** Keep wide Amazon files readable: identity columns first, at most 12 columns in the detail table. */
-const MAX_COLUMNS = 12;
+export type LossTab = { key: string; label: string; href: string };
 
-export function OpsLossReport({ title, intro, basePath, query = {}, view, tabs }: {
+const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
+const time = (value: string | null) => value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+
+export function LossTabs({ tabs, active }: { tabs: LossTab[]; active: string }) {
+  return <nav className={styles.tabs} aria-label="Loss reports">
+    {tabs.map((t) => <Link key={t.key} href={t.href} prefetch className={`${styles.tab} ${t.key === active ? styles.activeTab : ""}`} aria-current={t.key === active ? "page" : undefined}>{t.label}</Link>)}
+  </nav>;
+}
+
+export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }: {
   title: string;
   intro: string;
   basePath: string;
-  query?: Record<string, string>;
   view: LossReportView;
-  tabs?: React.ReactNode;
+  tabs: LossTab[];
+  activeTab: string;
 }) {
   const { run, totals, rows, selectedStation } = view;
   const hasAmount = Boolean(run?.amount_column);
   const totalRows = totals.reduce((s, t) => s + t.row_count, 0);
   const totalAmount = totals.reduce((s, t) => s + t.total_amount, 0);
-  const href = (station?: string) => {
-    const params = new URLSearchParams(query);
-    if (station) params.set("station", station);
-    const qs = params.toString();
-    return qs ? `${basePath}?${qs}` : basePath;
-  };
-  const columns = run ? [
-    ...[run.reference_column, run.station_column, run.amount_column].filter((c): c is string => Boolean(c)),
-    ...run.headers.filter((h) => h !== run.reference_column && h !== run.station_column && h !== run.amount_column)
-  ].slice(0, MAX_COLUMNS) : [];
+  const top = totals[0];
+  const maxShare = hasAmount ? Math.max(...totals.map((t) => t.total_amount), 1) : Math.max(...totals.map((t) => t.row_count), 1);
+  const selected = totals.find((t) => t.station_code === selectedStation);
 
-  return <div className={styles.desk}>
-    <section className="panel">
-      <header className="panel-head"><div>
+  return <div className={styles.workspace}>
+    <header className={styles.header}>
+      <div>
+        <span className={styles.eyebrow}>Team Ops · Losses</span>
         <h1>{title}</h1>
         <p>{intro}</p>
-        {run ? <p>
-          Source: {run.source_file ?? "Amazon report"}{run.period_label ? ` · Period ${run.period_label}` : ""}{run.source_week ? ` · ${run.source_week}` : ""}
-          <br />Last updated {time(run.finished_at)}{run.source_created_at ? ` · Amazon published ${run.source_created_at}` : ""}
-          {view.scopedToAll ? null : <><br />Showing only the stations you have access to.</>}
-        </p> : null}
-      </div></header>
-      {tabs}
-      {view.lastFailure ? <p role="status">The latest refresh failed ({time(view.lastFailure.finished_at)}). Showing the last successful pull. {view.lastFailure.error}</p> : null}
-      {!run ? <p role="status" style={{ padding: 20 }}>No report has been pulled yet. It appears here automatically after the loss worker's next run.</p> : null}
-      {run ? <div className="table-wrap"><table>
-        <thead><tr><th>Station</th><th>Cases</th>{hasAmount ? <th>Loss amount</th> : null}<th></th></tr></thead>
-        <tbody>
-          {totals.map((t) => <tr key={t.station_code} aria-current={t.station_code === selectedStation ? "true" : undefined}>
-            <td><strong>{t.station_code}</strong>{t.station_name ? <><br />{t.station_name}</> : null}</td>
-            <td>{t.row_count.toLocaleString("en-IN")}</td>
-            {hasAmount ? <td>{money(t.total_amount)}</td> : null}
-            <td><a className="button secondary" href={href(t.station_code)}>View cases</a></td>
-          </tr>)}
-          {!totals.length ? <tr><td colSpan={hasAmount ? 4 : 3}>No losses for your stations in this report.</td></tr> : null}
-        </tbody>
-        {totals.length > 1 ? <tfoot><tr><th>Total</th><th>{totalRows.toLocaleString("en-IN")}</th>{hasAmount ? <th>{money(totalAmount)}</th> : null}<th></th></tr></tfoot> : null}
-      </table></div> : null}
-    </section>
+      </div>
+      <LossTabs tabs={tabs} active={activeTab} />
+    </header>
 
-    {run && selectedStation ? <section className="panel">
-      <header className="panel-head"><h2>{selectedStation} · {rows.length.toLocaleString("en-IN")} cases</h2><a className="button secondary" href={href()}>Close</a></header>
-      <div className="table-wrap"><table>
-        <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-        <tbody>
-          {rows.map((r) => <tr key={r.id}>{columns.map((c) => <td key={c}>{r.raw[c] ?? ""}</td>)}</tr>)}
-          {!rows.length ? <tr><td colSpan={Math.max(columns.length, 1)}>No cases.</td></tr> : null}
-        </tbody>
-      </table></div>
-    </section> : null}
+    {run ? <div className={styles.context}>
+      <span>Source <strong>{(run.source_file ?? "Amazon report").trim()}</strong></span>
+      {run.period_label ? <><i className={styles.dot} /><span>Period <strong>{run.period_label}</strong></span></> : null}
+      {run.source_week ? <><i className={styles.dot} /><span>{run.source_week}</span></> : null}
+      <i className={styles.dot} /><span>Updated <strong>{time(run.finished_at)}</strong></span>
+      {view.scopedToAll ? null : <><i className={styles.dot} /><span>Your stations only</span></>}
+    </div> : null}
+
+    {view.lastFailure ? <div className={styles.notice} role="status">
+      <strong>The latest refresh didn&apos;t complete ({time(view.lastFailure.finished_at)}).</strong> {run ? "Showing the last successful pull." : "This page fills in on the next successful pull."}
+      <details><summary>Technical details</summary><code>{view.lastFailure.error}</code></details>
+    </div> : null}
+
+    {!run ? <section className={styles.panel}><div className={styles.empty}><strong>No report pulled yet</strong>It appears here automatically after the loss worker&apos;s next successful run.</div></section> : <>
+      <div className={styles.metrics}>
+        {hasAmount ? <div className={`${styles.metric} ${styles.orange}`}><span>Total loss</span><strong>{money(totalAmount)}</strong><small>across your stations</small></div> : null}
+        <div className={`${styles.metric} ${styles.blue}`}><span>Cases</span><strong>{totalRows.toLocaleString("en-IN")}</strong><small>{run.total_rows.toLocaleString("en-IN")} in the full file</small></div>
+        <div className={`${styles.metric} ${styles.purple}`}><span>Stations affected</span><strong>{totals.length}</strong><small>with at least one case</small></div>
+        <div className={`${styles.metric} ${styles.green}`}><span>Highest station</span><strong>{top ? top.station_code : "—"}</strong><small>{top ? (hasAmount ? money(top.total_amount) : `${top.row_count} cases`) : "no cases"}</small></div>
+      </div>
+
+      <section className={styles.panel}>
+        <div className={styles.panelHead}><div><h2>Station-wise losses</h2><p>Select a station to see its cases.</p></div></div>
+        <div className={styles.tableWrap}><table className={styles.table}>
+          <thead><tr><th>Station</th><th className={styles.numeric}>Cases</th>{hasAmount ? <th className={styles.numeric}>Loss amount</th> : null}<th>Share</th><th /></tr></thead>
+          <tbody>
+            {totals.map((t) => {
+              const value = hasAmount ? t.total_amount : t.row_count;
+              const pct = hasAmount ? (totalAmount ? t.total_amount / totalAmount : 0) : (totalRows ? t.row_count / totalRows : 0);
+              const isSelected = t.station_code === selectedStation;
+              return <tr key={t.station_code} className={isSelected ? styles.selectedRow : undefined}>
+                <td className={styles.station}><strong>{t.station_code}</strong>{t.station_name ? <small>{t.station_name}</small> : null}</td>
+                <td className={styles.numeric}>{t.row_count.toLocaleString("en-IN")}</td>
+                {hasAmount ? <td className={styles.numeric}><strong>{money(t.total_amount)}</strong></td> : null}
+                <td><div className={styles.share}><div className={styles.bar}><span style={{ width: `${Math.max(3, (value / maxShare) * 100)}%` }} /></div><em>{(pct * 100).toFixed(1)}%</em></div></td>
+                <td className={styles.numeric}>{isSelected
+                  ? <Link href={basePath} scroll={false} className={styles.button}>Hide cases</Link>
+                  : <Link href={`${basePath}?station=${encodeURIComponent(t.station_code)}`} scroll={false} className={`${styles.button} ${styles.primary}`}>View cases</Link>}</td>
+              </tr>;
+            })}
+            {!totals.length ? <tr><td colSpan={hasAmount ? 5 : 4}><div className={styles.empty}><strong>No losses for your stations</strong>Nothing in this report is mapped to a station you can access.</div></td></tr> : null}
+          </tbody>
+          {totals.length > 1 ? <tfoot><tr><td>Total</td><td className={styles.numeric}>{totalRows.toLocaleString("en-IN")}</td>{hasAmount ? <td className={styles.numeric}>{money(totalAmount)}</td> : null}<td /><td /></tr></tfoot> : null}
+        </table></div>
+      </section>
+
+      {selected ? <OpsLossCases
+        key={selected.station_code}
+        station={selected.station_code}
+        stationName={selected.station_name}
+        rows={rows.map((r) => r.raw)}
+        headers={run.headers}
+        referenceColumn={run.reference_column}
+        stationColumn={run.station_column}
+        amountColumn={run.amount_column}
+        closeHref={basePath}
+        fileLabel={`${activeTab}-${selected.station_code}`}
+      /> : null}
+    </>}
   </div>;
 }
