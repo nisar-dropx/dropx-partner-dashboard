@@ -12,13 +12,13 @@ const sections: Record<string, { report: LossReportKind; label: string; title: s
 };
 const tabs: LossTab[] = Object.entries(sections).map(([key, s]) => ({ key, label: s.label, href: `/attendance/losses/${key}` }));
 
-export default async function LossesSectionPage({ params, searchParams = {} }: { params: { section: string }; searchParams?: { station?: string } }) {
+export default async function LossesSectionPage({ params, searchParams = {} }: { params: { section: string }; searchParams?: { station?: string; period?: string } }) {
   const section = sections[params.section];
   if (!section) notFound();
   const auth = await requirePagePermission("ops_losses", "access");
   let content;
   try {
-    const view = await loadLossReport(auth, section.report, searchParams.station);
+    const view = await loadLossReport(auth, section.report, searchParams.station, searchParams.period);
     content = <OpsLossReport title={section.title} intro={section.intro} basePath={`/attendance/losses/${params.section}`} view={view} tabs={tabs} activeTab={params.section} />;
   } catch (e) {
     content = <section className="panel" style={{ padding: 24 }}><h1>Losses</h1><p role="alert">{e instanceof Error ? e.message : "Loss report could not be loaded."}</p></section>;

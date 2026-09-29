@@ -39,6 +39,9 @@ export type LossReportView = {
   rows: LossRow[];
   selectedStation: string | null;
   scopedToAll: boolean;
+  /** SLP only: file periods (newest first) and the one being viewed (null = all). */
+  periods: string[];
+  selectedPeriod: string | null;
 };
 
 const NONE = "00000000-0000-0000-0000-000000000000";
@@ -68,7 +71,7 @@ async function allowedStations(auth: AuthorizationContext, companyId: string) {
   return { codes: auth.hasAllLocationAccess ? null : new Set(names.keys()), names };
 }
 
-export async function loadLossReport(auth: AuthorizationContext, report: LossReportKind, station?: string | null): Promise<LossReportView> {
+export async function loadLossReport(auth: AuthorizationContext, report: LossReportKind, station?: string | null, period?: string | null): Promise<LossReportView> {
   if (!supabaseAdmin) throw new Error("Database is unavailable.");
   const companyId = requireCompanyId(auth);
   // Scope + latest runs are independent — one round trip instead of three.
@@ -86,27 +89,53 @@ export async function loadLossReport(auth: AuthorizationContext, report: LossRep
   // Unchanged pulls only bump checked_at, so a failure matters only if it's newer than the last good check.
   const lastGood = run ? Date.parse(run.checked_at ?? run.finished_at ?? "") || 0 : 0;
   const lastFailure = failure?.error && Date.parse(failure.finished_at ?? "") > lastGood ? failure : null;
-  const empty = { run, lastFailure, totals: [], rows: [], selectedStation: null, scopedToAll: codes === null };
+  const empty = { run, lastFailure, totals: [], rows: [], selectedStation: null, scopedToAll: codes === null, periods: [] as string[], selectedPeriod: null };
   if (!run) return empty;
   if (codes && !codes.size) return empty;
 
-  let totalsQuery = supabaseAdmin.from("loss_report_station_totals").select("station_code,row_count,total_amount").eq("run_id", run.id);
-  if (codes) totalsQuery = totalsQuery.in("station_code", [...codes]);
-  const totalsResult = await readAllRows(totalsQuery.order("station_code"));
-  if (totalsResult.error) throw new Error("Station totals could not be loaded.");
-  const totals: LossStationTotal[] = (totalsResult.data ?? [])
-    .map((r) => ({ station_code: r.station_code, station_name: names.get(r.station_code) ?? null, row_count: Number(r.row_count), total_amount: Number(r.total_amount) }))
-    .sort((a, b) => b.total_amount - a.total_amount || b.row_count - a.row_count);
+  let totals: LossStationTotal[];
+  let periods: string[] = [];
+  let selectedPeriod: string | null = null;
+  const withName = (t: Omit<LossStationTotal, "station_name">): LossStationTotal => ({ ...t, station_name: names.get(t.station_code) ?? null });
+  if (report === "nl") {
+    let totalsQuery = supabaseAdmin.from("loss_report_station_totals").select("station_code,row_count,total_amount").eq("run_id", run.id);
+    if (codes) totalsQuery = totalsQuery.in("station_code", [...codes]);
+    const totalsResult = await readAllRows(totalsQuery.order("station_code"));
+    if (totalsResult.error) throw new Error("Station totals could not be loaded.");
+    totals = (totalsResult.data ?? []).map((r) => withName({ station_code: r.station_code, row_count: Number(r.row_count), total_amount: Number(r.total_amount) }));
+  } else {
+    // SLP files are small (~100 cases across all periods): one narrow query gives periods + per-period totals.
+    let q = supabaseAdmin.from("loss_cases").select("station_code,amount,period,impact_date").eq("report", report);
+    if (codes) q = q.in("station_code", [...codes]);
+    const result = await readAllRows(q);
+    if (result.error) throw new Error("Station totals could not be loaded.");
+    const all = (result.data ?? []) as Array<{ station_code: string | null; amount: number | null; period: string | null; impact_date: string | null }>;
+    const latestByPeriod = new Map<string, string>();
+    for (const r of all) if (r.period) latestByPeriod.set(r.period, [latestByPeriod.get(r.period) ?? "", r.impact_date ?? ""].sort().pop()!);
+    periods = [...latestByPeriod.entries()].sort((x, y) => y[1].localeCompare(x[1])).map(([p]) => p);
+    selectedPeriod = period && periods.includes(period) ? period : null;
+    const agg = new Map<string, { row_count: number; total_amount: number }>();
+    for (const r of all) {
+      if (selectedPeriod && r.period !== selectedPeriod) continue;
+      const key = r.station_code ?? "UNMAPPED";
+      const x = agg.get(key) ?? { row_count: 0, total_amount: 0 };
+      x.row_count += 1;
+      x.total_amount += Number(r.amount ?? 0);
+      agg.set(key, x);
+    }
+    totals = [...agg.entries()].map(([station_code, x]) => withName({ station_code, ...x }));
+  }
+  totals.sort((a, b) => b.total_amount - a.total_amount || b.row_count - a.row_count);
 
   const selected = String(station ?? "").trim().toUpperCase() || null;
   const selectedAllowed = selected && totals.some((t) => t.station_code === selected) ? selected : null;
   let rows: LossRow[] = [];
   if (selectedAllowed) {
     const rowResult = await readAllRows(
-      supabaseAdmin.from("loss_cases").select(CASE_COLUMNS).eq("report", report).eq("station_code", selectedAllowed).order("amount", { ascending: false, nullsFirst: false })
+      (selectedPeriod ? supabaseAdmin.from("loss_cases").select(CASE_COLUMNS).eq("report", report).eq("period", selectedPeriod) : supabaseAdmin.from("loss_cases").select(CASE_COLUMNS).eq("report", report)).eq("station_code", selectedAllowed).order("amount", { ascending: false, nullsFirst: false })
     );
     if (rowResult.error) throw new Error("Station rows could not be loaded.");
     rows = (rowResult.data ?? []) as LossRow[];
   }
-  return { run, lastFailure, totals, rows, selectedStation: selectedAllowed, scopedToAll: codes === null };
+  return { run, lastFailure, totals, rows, selectedStation: selectedAllowed, scopedToAll: codes === null, periods, selectedPeriod };
 }

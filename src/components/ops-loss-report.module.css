@@ -61,3 +61,4 @@
 @media(prefers-reduced-motion:reduce){.skeleton{animation:none}}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:nowrap}
 .nowrap{white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.chips>span{font-size:11px;font-weight:650;color:var(--loss-muted);margin-right:4px}.chip{display:inline-flex;align-items:center;padding:7px 12px;border:1px solid #dfe5ed;border-radius:999px;background:#fff;font-size:12px;font-weight:600;color:#4c5d75;text-decoration:none}.chip:hover{border-color:#b5c2d3}.activeChip{background:#fff0e7;border-color:#f3c6ad;color:#cf5a24}

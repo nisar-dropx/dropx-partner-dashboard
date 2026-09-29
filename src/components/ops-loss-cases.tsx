@@ -34,16 +34,17 @@ function cellText(row: LossRow, col: Column): string {
   return String(v);
 }
 
-export function OpsLossCases({ report, station, stationName, rows, closeHref, fileLabel }: {
+export function OpsLossCases({ report, station, stationName, rows, closeHref, fileLabel, showPeriod = false }: {
   report: "nl" | "slp";
   station: string;
   stationName: string | null;
   rows: LossRow[];
   closeHref: string;
   fileLabel: string;
+  showPeriod?: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const columns = useMemo(() => COLUMNS[report].filter((c) => rows.some((r) => r[c.key] != null && r[c.key] !== "")), [report, rows]);
+  const columns = useMemo(() => COLUMNS[report].filter((c) => (c.key !== "period" || showPeriod || report === "nl") && rows.some((r) => r[c.key] != null && r[c.key] !== "")), [report, rows, showPeriod]);
   const approxCount = useMemo(() => rows.filter((r) => r.tid_approximate).length, [rows]);
 
   const shown = useMemo(() => {

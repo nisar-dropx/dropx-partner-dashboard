@@ -29,6 +29,14 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
   const top = totals[0];
   const maxShare = hasAmount ? Math.max(...totals.map((t) => t.total_amount), 1) : Math.max(...totals.map((t) => t.row_count), 1);
   const selected = totals.find((t) => t.station_code === selectedStation);
+  const href = (opts: { station?: string | null; period?: string | null }) => {
+    const q = new URLSearchParams();
+    const p = opts.period === undefined ? view.selectedPeriod : opts.period;
+    if (p) q.set("period", p);
+    if (opts.station) q.set("station", opts.station);
+    const qs = q.toString();
+    return qs ? `${basePath}?${qs}` : basePath;
+  };
 
   return <div className={styles.workspace}>
     <header className={styles.header}>
@@ -41,9 +49,8 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
     </header>
 
     {run ? <div className={styles.context}>
-      <span>Source <strong>{(run.source_file ?? "Amazon report").trim()}</strong></span>
-      {run.period_label ? <><i className={styles.dot} /><span>Period <strong>{run.period_label}</strong></span></> : null}
-      {run.source_week ? <><i className={styles.dot} /><span>{run.source_week}</span></> : null}
+      <span>Source <strong>{view.periods.length > 1 ? `${view.periods.length} Amazon files` : (run.source_file ?? "Amazon report").trim()}</strong></span>
+      {!view.periods.length && run.period_label ? <><i className={styles.dot} /><span>Period <strong>{run.period_label}</strong></span></> : null}
       <i className={styles.dot} /><span>Data changed <strong>{time(run.finished_at)}</strong></span>
       {run.checked_at && run.checked_at !== run.finished_at ? <><i className={styles.dot} /><span>Last checked <strong>{time(run.checked_at)}</strong></span></> : null}
       {view.scopedToAll ? null : <><i className={styles.dot} /><span>Your stations only</span></>}
@@ -54,10 +61,16 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
       <details><summary>Technical details</summary><code>{view.lastFailure.error}</code></details>
     </div> : null}
 
+    {view.periods.length > 1 ? <nav className={styles.chips} aria-label="Period">
+      <span>Period</span>
+      <Link href={href({ period: null })} scroll={false} className={`${styles.chip} ${!view.selectedPeriod ? styles.activeChip : ""}`}>All periods</Link>
+      {view.periods.map((p) => <Link key={p} href={href({ period: p })} scroll={false} className={`${styles.chip} ${view.selectedPeriod === p ? styles.activeChip : ""}`}>{p}</Link>)}
+    </nav> : null}
+
     {!run ? <section className={styles.panel}><div className={styles.empty}><strong>No report pulled yet</strong>It appears here automatically after the loss worker&apos;s next successful run.</div></section> : <>
       <div className={styles.metrics}>
         {hasAmount ? <div className={`${styles.metric} ${styles.orange}`}><span>Total loss</span><strong>{money(totalAmount)}</strong><small>across your stations</small></div> : null}
-        <div className={`${styles.metric} ${styles.blue}`}><span>Cases</span><strong>{totalRows.toLocaleString("en-IN")}</strong><small>{run.total_rows.toLocaleString("en-IN")} in the full file</small></div>
+        <div className={`${styles.metric} ${styles.blue}`}><span>Cases</span><strong>{totalRows.toLocaleString("en-IN")}</strong><small>{view.selectedPeriod ? `in ${view.selectedPeriod}` : `${run.total_rows.toLocaleString("en-IN")} in Amazon's ${view.periods.length > 1 ? "files" : "file"}`}</small></div>
         <div className={`${styles.metric} ${styles.purple}`}><span>Stations affected</span><strong>{totals.length}</strong><small>with at least one case</small></div>
         <div className={`${styles.metric} ${styles.green}`}><span>Highest station</span><strong>{top ? top.station_code : "—"}</strong><small>{top ? (hasAmount ? money(top.total_amount) : `${top.row_count} cases`) : "no cases"}</small></div>
       </div>
@@ -77,8 +90,8 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
                 {hasAmount ? <td className={styles.numeric}><strong>{money(t.total_amount)}</strong></td> : null}
                 <td><div className={styles.share}><div className={styles.bar}><span style={{ width: `${Math.max(3, (value / maxShare) * 100)}%` }} /></div><em>{(pct * 100).toFixed(1)}%</em></div></td>
                 <td className={styles.numeric}>{isSelected
-                  ? <Link href={basePath} scroll={false} className={styles.button}>Hide cases</Link>
-                  : <Link href={`${basePath}?station=${encodeURIComponent(t.station_code)}`} scroll={false} className={`${styles.button} ${styles.primary}`}>View cases</Link>}</td>
+                  ? <Link href={href({ station: null })} scroll={false} className={styles.button}>Hide cases</Link>
+                  : <Link href={href({ station: t.station_code })} scroll={false} className={`${styles.button} ${styles.primary}`}>View cases</Link>}</td>
               </tr>;
             })}
             {!totals.length ? <tr><td colSpan={hasAmount ? 5 : 4}><div className={styles.empty}><strong>No losses for your stations</strong>Nothing in this report is mapped to a station you can access.</div></td></tr> : null}
@@ -93,7 +106,8 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
         station={selected.station_code}
         stationName={selected.station_name}
         rows={rows}
-        closeHref={basePath}
+        closeHref={href({ station: null })}
+        showPeriod={view.periods.length > 1 && !view.selectedPeriod}
         fileLabel={`${activeTab}-${selected.station_code}`}
       /> : null}
     </>}
