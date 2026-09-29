@@ -26,7 +26,7 @@ export async function GET() {
     if (!accounts.length) {
       await supabaseAdmin
         .from("connect_login_sessions")
-        .update({ revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ revoked_at: new Date().toISOString() })
         .eq("id", session.id);
       cookies().delete(connectSessionCookieName);
       return NextResponse.json({
@@ -48,7 +48,7 @@ export async function DELETE() {
       const sessionHash = createHash("sha256").update(token).digest("hex");
       await supabaseAdmin
         .from("connect_login_sessions")
-        .update({ revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ revoked_at: new Date().toISOString() })
         .eq("session_hash", sessionHash);
     }
     cookies().delete(connectSessionCookieName);

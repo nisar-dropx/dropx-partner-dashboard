@@ -117,7 +117,7 @@ export async function bindDevice({
   if (otherAppSessions.length) {
     const revoke = await supabaseAdmin
       .from("connect_login_sessions")
-      .update({ revoked_at: now, updated_at: now })
+      .update({ revoked_at: now })
       .in("id", otherAppSessions);
     if (revoke.error) throw new Error(revoke.error.message);
   }
