@@ -10,6 +10,21 @@ function clean(value: unknown) { return String(value ?? "").trim(); }
 function numberOrNull(value: unknown) { const parsed = Number(value); return value == null || value === "" || !Number.isFinite(parsed) ? null : parsed; }
 function required(value: unknown, label: string) { const result = clean(value); if (!result) throw new Error(`${label} is required.`); return result; }
 function setupError(message: string) { return /does not exist|schema cache|could not find the table/i.test(message) ? `${message} Apply the Fleet Control migration before using this action.` : message; }
+const evidenceTypes = ["none", "photo", "video", "document", "any"];
+function evidenceRule(typeValue: unknown, minimumValue: unknown) {
+  const type = evidenceTypes.includes(clean(typeValue)) ? clean(typeValue) : "none";
+  return { type, minimum: type === "none" ? 0 : Math.max(0, Math.min(10, Number(minimumValue ?? 0) || 0)) };
+}
+function checklistEvidenceRules(guidanceValue: unknown, responseType: unknown) {
+  const raw = clean(guidanceValue);
+  const pass = raw.match(/^\[evidence-pass:(none|photo|video|document|any):(\d+)\]/i);
+  const afterPass = raw.replace(/^\[evidence-pass:(?:none|photo|video|document|any):\d+\]\s*/i, "");
+  const fail = afterPass.match(/^\[evidence-fail:(none|photo|video|document|any):(\d+)\]/i);
+  const legacy = raw.match(/^\[evidence:(none|photo|video|document|any):(\d+)\]/i);
+  const fallbackType = legacy?.[1]?.toLowerCase() || (responseType === "photo" ? "photo" : responseType === "video" ? "video" : "none");
+  const fallbackMinimum = legacy ? Number(legacy[2]) || 0 : fallbackType === "none" ? 0 : 1;
+  return { pass: evidenceRule(pass?.[1] || (legacy ? fallbackType : "none"), pass?.[2] || (legacy ? fallbackMinimum : 0)), fail: evidenceRule(fail?.[1] || fallbackType, fail?.[2] || fallbackMinimum) };
+}
 
 async function access() {
   const authorization = await getAuthorization();
@@ -31,8 +46,11 @@ export async function POST(request: Request) {
     if (action === "service.create") return await createService(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.schedule") return await scheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.reschedule") return await rescheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.start") return await startAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.complete") return await completeAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "checklist.create") return await createChecklistItem(context.companyId, context.canManageSettings, body);
+    if (action === "checklist.update") return await updateChecklistItem(context.companyId, context.canManageSettings, body);
+    if (action === "checklist.remove") return await removeChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "settings.update") return await updateSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "member.upsert") return await upsertMember(context.companyId, context.authorization.userId, context.canManageSettings, body);
     return NextResponse.json({ error: "Unsupported Fleet Control action." }, { status: 400 });
@@ -121,12 +139,27 @@ async function rescheduleAudit(companyId: string, userId: string, allowed: boole
   return NextResponse.json({ ok: true, message: "Audit moved to the new date." });
 }
 
+async function startAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const auditId = required(body.auditId, "Audit");
+  const audit = await supabaseAdmin!.from("fleet_audits").select("id,status").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  if (audit.error) throw new Error(audit.error.message);
+  if (!audit.data) throw new Error("Audit was not found.");
+  if (audit.data.status === "in_progress") return NextResponse.json({ ok: true, message: "Audit is already in progress." });
+  if (audit.data.status !== "scheduled") throw new Error("Only a scheduled audit can be started.");
+  const update = await supabaseAdmin!.from("fleet_audits").update({ status: "in_progress", started_at: new Date().toISOString(), assigned_to: userId, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId).eq("status", "scheduled");
+  if (update.error) throw new Error(update.error.message);
+  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_started", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: {} });
+  return NextResponse.json({ ok: true, message: "Audit started. Complete the checklist and attach the required evidence." });
+}
+
 async function completeAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
   const auditId = required(body.auditId, "Audit");
-  const auditResult = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,template_id,scheduled_for,scheduled_reason,fleet_vehicles!inner(vehicle_no,station_code,model)").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  const auditResult = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,template_id,scheduled_for,scheduled_reason,status,fleet_vehicles!inner(vehicle_no,station_code,model)").eq("company_id", companyId).eq("id", auditId).maybeSingle();
   if (auditResult.error) throw new Error(auditResult.error.message);
   if (!auditResult.data) throw new Error("Audit was not found.");
+  if (!["scheduled", "in_progress"].includes(clean(auditResult.data.status))) throw new Error("Only an open audit can be completed.");
   const responses = Array.isArray(body.responses) ? body.responses : [];
   if (responses.length) {
     const rows = responses.map((response: Payload) => ({ company_id: companyId, audit_id: auditId, checklist_item_id: required(response.itemId, "Checklist item"), response_value: { value: response.value }, passed: response.passed == null ? null : Boolean(response.passed), comments: clean(response.comments) || null, responded_by: userId }));
@@ -141,12 +174,15 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
   const checklistRules = await checklistRuleQuery;
   if (checklistRules.error) throw new Error(checklistRules.error.message);
   for (const item of checklistRules.data ?? []) {
-    const marker = clean(item.guidance).match(/^\[evidence:(none|photo|video|document|any):(\d+)\]/i);
-    const evidenceType = marker?.[1]?.toLowerCase() || (item.response_type === "photo" ? "photo" : item.response_type === "video" ? "video" : "none");
-    const minimum = marker ? Math.max(0, Number(marker[2]) || 0) : evidenceType === "none" ? 0 : 1;
-    if (!item.is_required || !minimum) continue;
+    const response = responses.find((entry: Payload) => clean(entry.itemId) === item.id);
+    if (item.is_required && !clean(response?.value)) throw new Error(`${item.label} must be completed before the audit can be submitted.`);
+    const rules = checklistEvidenceRules(item.guidance, item.response_type);
+    const selectedRule = response?.passed === false ? rules.fail : rules.pass;
+    const evidenceType = selectedRule.type;
+    const minimum = selectedRule.minimum;
+    if (!minimum) continue;
     const attached = evidence.filter((entry: Payload) => clean(entry.itemId) === item.id && (evidenceType === "any" || clean(entry.type) === evidenceType)).length;
-    if (attached < minimum) throw new Error(`${item.label} requires ${minimum} ${evidenceType === "any" ? "attachment" : evidenceType} evidence ${minimum === 1 ? "link" : "links"}.`);
+    if (attached < minimum) throw new Error(`${item.label} requires ${minimum} ${evidenceType === "any" ? "attachment" : evidenceType} ${minimum === 1 ? "link" : "links"} when marked ${response?.passed === false ? "non-compliant" : "compliant"}.`);
   }
   if (evidence.length) {
     const saved = await supabaseAdmin!.from("fleet_audit_evidence").insert(evidence.map((item: Payload) => ({ company_id: companyId, audit_id: auditId, checklist_item_id: clean(item.itemId) || null, media_type: ["photo", "video", "document"].includes(clean(item.type)) ? clean(item.type) : "photo", media_url: clean(item.url), caption: clean(item.caption) || null, captured_at: clean(item.capturedAt) || null, uploaded_by: userId })));
@@ -187,13 +223,35 @@ async function createChecklistItem(companyId: string, allowed: boolean, body: Pa
   const templateId = required(body.templateId, "Template");
   const template = await supabaseAdmin!.from("fleet_audit_templates").select("id").eq("company_id", companyId).eq("id", templateId).maybeSingle();
   if (template.error) throw new Error(template.error.message); if (!template.data) throw new Error("Audit template was not found.");
-  const responseType = clean(body.responseType) || "pass_fail";
-  const evidenceType = ["photo", "video", "document", "any"].includes(clean(body.evidenceType)) ? clean(body.evidenceType) : responseType === "photo" ? "photo" : responseType === "video" ? "video" : "none";
-  const minEvidence = evidenceType === "none" ? 0 : Math.max(0, Math.min(10, Number(body.minEvidence ?? 1) || 0));
-  const guidance = `[evidence:${evidenceType}:${minEvidence}] ${clean(body.guidance)}`.trim();
-  const result = await supabaseAdmin!.from("fleet_audit_checklist_items").insert({ company_id: companyId, template_id: templateId, category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance, response_type: responseType, is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999) }).select("id").single();
+  const values = checklistItemValues(body);
+  const result = await supabaseAdmin!.from("fleet_audit_checklist_items").insert({ company_id: companyId, template_id: templateId, ...values }).select("id").single();
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, id: result.data.id, message: "Checklist item added." });
+}
+
+function checklistItemValues(body: Payload) {
+  const pass = evidenceRule(body.passEvidenceType, body.passMinEvidence);
+  const fail = evidenceRule(body.failEvidenceType, body.failMinEvidence);
+  const guidance = `[evidence-pass:${pass.type}:${pass.minimum}] [evidence-fail:${fail.type}:${fail.minimum}] ${clean(body.guidance)}`.trim();
+  return { category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance, response_type: clean(body.responseType) || "pass_fail", is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999), is_active: true };
+}
+
+async function updateChecklistItem(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const itemId = required(body.itemId, "Checklist item");
+  const result = await supabaseAdmin!.from("fleet_audit_checklist_items").update(checklistItemValues(body)).eq("company_id", companyId).eq("id", itemId).select("id").maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Checklist item was not found.");
+  return NextResponse.json({ ok: true, message: "Checklist item updated." });
+}
+
+async function removeChecklistItem(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const itemId = required(body.itemId, "Checklist item");
+  const result = await supabaseAdmin!.from("fleet_audit_checklist_items").update({ is_active: false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", itemId).eq("is_active", true).select("id").maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Checklist item was already removed or could not be found.");
+  return NextResponse.json({ ok: true, message: "Checklist item removed from future audits." });
 }
 
 async function updateSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
