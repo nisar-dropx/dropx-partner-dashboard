@@ -10,12 +10,16 @@ const editableFields = [
   "rc_location",
   "model",
   "fuel_type",
+  "ownership_type",
   "registration_expiry",
   "insurance_expiry",
   "puc_expiry",
   "fitness_expiry",
   "tax_expiry",
   "status",
+  "non_operational_since",
+  "expected_operational_date",
+  "status_comment",
   "transfer_date",
   "sale_date",
   "dispose_date"
@@ -28,6 +32,7 @@ export async function POST(request: Request) {
   const body = await request.json();
   const payload: Record<string, string | null> = { ...sanitizePayload(body), company_id: access.companyId };
   if (!payload.status) payload.status = "active";
+  if (!payload.ownership_type) payload.ownership_type = "own";
   if (!payload.vehicle_no) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
   if (!payload.station_code) return NextResponse.json({ error: "Location is required." }, { status: 400 });
   if (!payload.model) return NextResponse.json({ error: "Model is required." }, { status: 400 });
@@ -61,10 +66,16 @@ export async function PATCH(request: Request) {
   if (payload.station_code && !canAccessStation(access.stationCodes, payload.station_code)) {
     return NextResponse.json({ error: "This location is not allocated to your user." }, { status: 403 });
   }
+  if (payload.status) {
+    const active = payload.status === "active";
+    payload.status_comment = active ? null : (payload.status_comment || normalizeText(body.status_reason) || null);
+    payload.non_operational_since = active ? null : (payload.non_operational_since || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
+    payload.expected_operational_date = active ? null : (payload.expected_operational_date || null);
+  }
 
   let { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .update({ ...payload, updated_at: new Date().toISOString() })
+    .update({ ...payload, ...(payload.status ? { status_updated_at: new Date().toISOString(), status_updated_by: access.authorization.userId } : {}), updated_at: new Date().toISOString() })
     .eq("company_id", access.companyId)
     .eq("vehicle_no", vehicleNo)
     .select()
@@ -195,7 +206,7 @@ async function requireVehicleScope(companyId: string, vehicleNo: string, station
   if (!supabaseAdmin) return { error: setupError("Supabase service role key is not configured.") };
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("id,station_code,status")
+    .select("id,station_code,status,non_operational_since,expected_operational_date,status_comment")
     .eq("company_id", companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();

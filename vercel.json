@@ -1,11 +1,28 @@
 {
-  "regions": ["sin1"],
+  "regions": [
+    "sin1"
+  ],
   "crons": [
-    {"path":"/api/cron/portal-notifications","schedule":"*/5 * * * *"},
-    { "path": "/api/cron/edd-review-history", "schedule": "*/15 * * * *" },
-    { "path": "/api/cron/edd-review-history?checkpoint=eod", "schedule": "25 18 * * *" },
-    { "path": "/api/cron/edd-stock-refresh", "schedule": "* * * * *" },
-    { "path": "/api/cron/edd-verification", "schedule": "* * * * *" },
+    {
+      "path": "/api/cron/portal-notifications",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/edd-review-history",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/edd-review-history?checkpoint=eod",
+      "schedule": "25 18 * * *"
+    },
+    {
+      "path": "/api/cron/edd-stock-refresh",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/edd-verification",
+      "schedule": "* * * * *"
+    },
     {
       "path": "/api/cron/business-document-expiry",
       "schedule": "30 5 * * *"
@@ -45,6 +62,10 @@
     {
       "path": "/api/cron/payment-approval-reminders",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/fleet-daily-status",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

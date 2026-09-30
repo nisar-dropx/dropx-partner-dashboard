@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowDownUp, Download, RefreshCw, Search, Route, Fuel, Gauge, CircleAlert } from 'lucide-react';
+import { ArrowDownUp, RefreshCw, Search, Route, Fuel, Gauge, CircleAlert } from 'lucide-react';
 import { dailyFleetCsv, istDate, shiftDay, sortDailyRows, validateReportRange, type DailyFleetReport, type DailyFleetRow, type SortColumn } from '@/lib/fleet/daily-report';
 import { FleetMultiSelect } from '@/components/fleet-multi-select';
+import { FleetExportButtons } from '@/components/fleet-export-buttons';
 import type { FleetControlData } from '@/lib/fleet-control';
 import './fleet-daily-report.css';
 
@@ -26,7 +27,7 @@ export function FleetReports({ fuelReports }: { fuelReports: ReactNode }) {
     {view === 'daily' ? <DailyFleetReportView /> : fuelReports}
   </div>;
 }
-export function DailyFleetReportView({ stationOptions: masterStations = [] }: { stationOptions?: FleetControlData["stationOptions"] }) {
+export function DailyFleetReportView({ focus = 'mileage', stationOptions: masterStations = [] }: { focus?: 'mileage' | 'fuel'; stationOptions?: FleetControlData["stationOptions"] }) {
   const today = istDate();
   const yesterday = shiftDay(today, -1);
   const [range, setRange] = useState({ from: yesterday, to: yesterday });
@@ -47,6 +48,7 @@ export function DailyFleetReportView({ stationOptions: masterStations = [] }: { 
   const [version, setVersion] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
+  const [groupBy, setGroupBy] = useState<'vehicle' | 'station'>('vehicle');
   const syncController = useRef<AbortController | null>(null);
 
   useEffect(() => () => syncController.current?.abort(), []);
@@ -83,15 +85,22 @@ export function DailyFleetReportView({ stationOptions: masterStations = [] }: { 
   const draftError = validateReportRange(draft.from, draft.to, today);
   const datesChanged = draft.from !== range.from || draft.to !== range.to;
   const refreshDisabled = loading || syncing || !rows.length || range.from < shiftDay(today, -31) || (Date.parse(range.to) - Date.parse(range.from)) / 86_400_000 >= 7;
+  const stationRows = useMemo(() => {
+    const values = new Map<string, { station: string; km: number; litres: number; amount: number; transactions: number; vehicles: Set<string>; sources: Set<string> }>();
+    rows.forEach((row) => { const item = values.get(row.station_code) ?? { station: row.station_code, km: 0, litres: 0, amount: 0, transactions: 0, vehicles: new Set<string>(), sources: new Set<string>() }; item.km += row.km ?? 0; item.litres += row.litres ?? 0; item.amount += row.fuelAmount ?? 0; item.transactions += row.fuelTransactions; item.vehicles.add(row.vehicle_no); row.fuelSources.forEach((source) => item.sources.add(source)); values.set(row.station_code, item); });
+    return [...values.values()].sort((a, b) => focus === 'fuel' ? b.amount - a.amount : b.km - a.km);
+  }, [rows, focus]);
+  const providerTotals = useMemo(() => {
+    const values = new Map<string, { vehicleDays: number }>();
+    rows.forEach((row) => row.fuelSources.forEach((source) => { const item = values.get(source) ?? { vehicleDays: 0 }; item.vehicleDays += 1; values.set(source, item); }));
+    return [...values.entries()].sort((a, b) => b[1].vehicleDays - a[1].vehicleDays);
+  }, [rows]);
 
   function quickRange(period: string) {
     const selected = period === 'today' ? { from: today, to: today } : period === 'week' ? { from: shiftDay(yesterday, -6), to: yesterday } : period === 'month' ? { from: today.slice(0, 7) + '-01', to: today } : { from: yesterday, to: yesterday };
     setDraft(selected); setRange(selected); setSyncMessage('');
   }
-  function download() {
-    const href = URL.createObjectURL(new Blob([dailyFleetCsv(rows)], { type: 'text/csv;charset=utf-8;' }));
-    const link = document.createElement('a'); link.href = href; link.download = `fleet-daily-km-mileage-${range.from}-${range.to}.csv`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(href), 1000);
-  }
+
   async function refreshGps() {
     const pairs = rows.map(row => ({ vehicle: row.vehicle_no, date: row.date }));
     const controller = new AbortController(); syncController.current = controller;
@@ -114,8 +123,8 @@ export function DailyFleetReportView({ stationOptions: masterStations = [] }: { 
 
   return <div className="daily-fleet-report">
     <header className="daily-report-heading">
-      <div><span className="daily-eyebrow">FLEET PERFORMANCE</span><h2>Daily vehicle km &amp; mileage</h2><p>Distance travelled, fuel purchases and estimated mileage in one view.</p></div>
-      <button className="fleet-btn ghost" type="button" disabled={loading || syncing || !rows.length} onClick={download}><Download size={16} /> Download CSV</button>
+      <div><span className="daily-eyebrow">{focus === 'fuel' ? 'FUEL CONTROL' : 'FLEET PERFORMANCE'}</span><h2>{focus === 'fuel' ? 'Fuel log' : 'Distance & mileage'}</h2><p>{focus === 'fuel' ? 'BPCL, IOCL and Paytm/Paytap fuel activity with vehicle and station views.' : 'Daily kilometres and estimated mileage by vehicle or station.'}</p></div>
+      <FleetExportButtons report={{ title: focus === 'fuel' ? 'Fleet fuel report' : 'Fleet distance and mileage report', subtitle: `${range.from} to ${range.to} · active filters applied`, fileName: `fleet-${focus}-${range.from}-${range.to}`, headers: ['Date', 'Vehicle', 'Station', 'Model', 'Fuel type', 'Distance km', 'Fuel litres', 'Fuel amount', 'Mileage km/L', 'Cost/km', 'Transactions', 'Status', 'Providers'], rows: rows.map(row => [row.date, row.vehicle_no, row.station_code, row.model, row.fuel_type, row.km, row.litres, row.fuelAmount, row.mileage, row.costPerKm, row.fuelTransactions, statusLabel[row.dataStatus], row.fuelSources.join(', ')]) }} />
     </header>
     <section className="daily-filter-card" aria-label="Daily fleet report filters">
       <div className="daily-quick-ranges" aria-label="Quick date ranges">{[['yesterday', 'Yesterday'], ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'This month']].map(([value, label]) => <button key={value} type="button" disabled={syncing} onClick={() => quickRange(value)}>{label}</button>)}<span>All dates in IST</span></div>
@@ -135,6 +144,7 @@ export function DailyFleetReportView({ stationOptions: masterStations = [] }: { 
         <FleetMultiSelect allLabel="All vehicle-days" disabled={syncing} label="Data availability" onChange={setStatuses} options={Object.entries(statusLabel).map(([value, label]) => ({ value, label }))} values={statuses} />
         <button className="daily-clear" type="button" disabled={syncing} onClick={() => { setSearch(''); setStations([]); setClusters([]); setRegions([]); setSelectedVehicles([]); setFuelTypes([]); setStatuses([]); }}>Clear filters</button>
       </div>
+      <div className="daily-group-switch"><span>Summarise by</span><button className={groupBy === 'vehicle' ? 'active' : ''} onClick={() => setGroupBy('vehicle')} type="button">Vehicle-wise</button><button className={groupBy === 'station' ? 'active' : ''} onClick={() => setGroupBy('station')} type="button">Station-wise</button></div>
     </section>
     {error ? <div className="daily-error" role="alert">{error} <button type="button" onClick={() => setVersion(v => v + 1)}>Retry</button></div> : null}
     {loading ? <div className="daily-loading" role="status">Loading daily distance and fuel records…</div> : report ? <>
@@ -144,11 +154,12 @@ export function DailyFleetReportView({ stationOptions: masterStations = [] }: { 
         <article><Gauge size={18} /><span>Estimated mileage</span><strong>{numeric(totals.matchedLitres ? totals.matchedKm / totals.matchedLitres : null, 2)} <small>km/L</small></strong><p>Days with both distance and fuel</p></article>
         <article className={totals.missing ? 'daily-metric-warning' : ''}><CircleAlert size={18} /><span>Distance unavailable</span><strong>{totals.missing}</strong><p>Vehicle-days needing GPS data</p></article>
       </section>
+      {focus === 'fuel' ? <section className="daily-provider-strip"><article><strong>BPCL</strong><span>{providerTotals.find(([name]) => /bpcl/i.test(name)) ? `${providerTotals.find(([name]) => /bpcl/i.test(name))![1].vehicleDays} vehicle-days` : 'No records'}</span></article><article><strong>IOCL</strong><span>{providerTotals.find(([name]) => /ioc|iocl/i.test(name)) ? `${providerTotals.find(([name]) => /ioc|iocl/i.test(name))![1].vehicleDays} vehicle-days` : 'No records'}</span></article><article><strong>Paytm / Paytap</strong><span>{providerTotals.find(([name]) => /paytm|paytap/i.test(name)) ? `${providerTotals.find(([name]) => /paytm|paytap/i.test(name))![1].vehicleDays} vehicle-days` : 'No records yet'}</span></article><article><strong>Other / unmapped</strong><span>{providerTotals.filter(([name]) => !/bpcl|ioc|iocl|paytm|paytap/i.test(name)).reduce((sum, [, value]) => sum + value.vehicleDays, 0) || 'None'}</span></article></section> : null}
       <div className="daily-data-note"><strong>How mileage is calculated</strong><p>Estimated km/L = that day’s recorded kilometres ÷ fuel purchased that day. Purchases are not measured fuel consumption; refuelling timing can make this ratio vary. “—” means the data is unavailable or GPS quality needs review. Stopped/cached GPS fixes are filtered automatically. Only a remaining incomplete or inconsistent moving track needs review and is excluded from totals and mileage. Km/L applies to petrol and diesel; CNG/EV consumption is not available in this feed. Today is provisional. Stations reflect current vehicle allocation.</p></div>
       <div className="daily-results-heading"><div><h3>Daily vehicle register</h3><p>{dateLabel(range.from)}–{dateLabel(range.to)} · {new Set(rows.map(r => r.vehicle_no)).size} vehicles · {rows.length} vehicle-days</p></div><div className="daily-refresh-actions"><button type="button" className="fleet-btn ghost" disabled={loading || syncing} onClick={() => setVersion(v => v + 1)}>Reload report</button><button type="button" className="fleet-btn primary" onClick={refreshGps} disabled={refreshDisabled}><RefreshCw size={15} /> Refresh GPS</button>{syncing ? <button type="button" className="fleet-btn ghost" onClick={() => syncController.current?.abort()}>Stop</button> : null}</div></div>
       <p className="daily-freshness">Latest saved distance: {dateLabel(report.latestKmDate)} · Latest fuel date: {dateLabel(report.latestFuelDate)}. GPS refresh covers the filtered vehicles for up to 7 days at a time, within the last 31 days.</p>
       {syncMessage ? <div className="daily-sync-message" role="status" aria-live="polite">{syncMessage}</div> : null}
-      {!rows.length ? <div className="daily-loading">No vehicle-days match these filters. Try another date range or clear the filters.</div> : <>
+      {!rows.length ? <div className="daily-loading">No vehicle-days match these filters. Try another date range or clear the filters.</div> : groupBy === 'station' ? <div className="daily-table-scroll" tabIndex={0} aria-label="Station summary"><table className="daily-table"><thead><tr><th>Station</th><th>Vehicles</th><th>Distance km</th><th>Fuel litres</th><th>Fuel spend</th><th>Est. mileage</th><th>Transactions</th><th>Providers</th></tr></thead><tbody>{stationRows.map((row) => <tr key={row.station}><td><strong>{row.station}</strong><small>{stationByCode.get(row.station)?.name ?? 'Current placement'}</small></td><td>{row.vehicles.size}</td><td className="daily-number">{numeric(row.km)}</td><td className="daily-number">{numeric(row.litres, 2)}</td><td className="daily-number">₹{numeric(row.amount, 0)}</td><td className="daily-number">{numeric(row.litres ? row.km / row.litres : null, 2)}</td><td className="daily-number">{row.transactions}</td><td>{[...row.sources].join(', ') || '—'}</td></tr>)}</tbody></table></div> : <>
         <div className="daily-table-scroll" tabIndex={0} aria-label="Daily vehicle kilometre and mileage table"><table className="daily-table"><thead><tr>{columns.map(column => <th key={column.key} aria-sort={sort.column === column.key ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'}><button type="button" onClick={() => sortColumn(column.key)}>{column.label}<ArrowDownUp size={12} /><small>{column.unit ?? ' '}</small></button></th>)}<th>Data availability</th><th>Details</th></tr></thead><tbody>{pageRows.map(row => <DailyRow key={`${row.vehicle_no}|${row.date}`} row={row} />)}</tbody></table></div>
         <footer className="daily-pagination"><span>Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, rows.length)} of {rows.length}</span><label>Rows per page<select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}>{[25, 50, 100].map(size => <option key={size}>{size}</option>)}</select></label><div><button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>Previous</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>Next</button></div></footer>
       </>}

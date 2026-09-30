@@ -1,8 +1,9 @@
 "use client";
 
-import { Activity, ArrowDownUp, Download, Gauge, MapPin, RefreshCw, Route, Search } from "lucide-react";
+import { Activity, ArrowDownUp, Fuel, Gauge, MapPin, RefreshCw, Route, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DailyFleetReportView } from "@/components/fleet-daily-report";
+import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { RouteMap } from "@/components/fleet-dashboard";
 import { FleetMultiSelect } from "@/components/fleet-multi-select";
 import type { FleetControlData } from "@/lib/fleet-control";
@@ -47,21 +48,11 @@ type RouteHistory = {
 
 const number = (value: number, digits = 1) => value.toLocaleString("en-IN", { maximumFractionDigits: digits });
 const isoToday = () => new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-function downloadCsv(rows: GpsRow[], stationByVehicle: Map<string, string>) {
-  const cell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-  const data = [
-    ["Vehicle", "Current placement", "Speed km/h", "Ignition", "GPS time", "Latitude", "Longitude"],
-    ...rows.map((row) => [row.vehicle_no, stationByVehicle.get(row.vehicle_no) ?? "Unmapped", row.speed, row.ignition ? "ON" : "OFF", row.gps_time ?? "", row.latitude, row.longitude])
-  ];
-  const url = URL.createObjectURL(new Blob(["\uFEFF" + data.map((row) => row.map(cell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url; link.download = `fleet-live-gps-${isoToday()}.csv`; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: FleetControlData["stationOptions"] }) {
-  const [view, setView] = useState<"live" | "efficiency">("live");
+  const [view, setView] = useState<"live" | "mileage" | "fuel">("live");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -72,7 +63,7 @@ export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: Fle
   const [regions, setRegions] = useState<string[]>([]);
   const [ignition, setIgnition] = useState<string[]>([]);
   const [sort, setSort] = useState<{ key: "vehicle" | "speed" | "time"; direction: "asc" | "desc" }>({ key: "vehicle", direction: "asc" });
-  const [movementDate, setMovementDate] = useState(isoToday());
+  const [movementDate, setMovementDate] = useState(shiftDate(isoToday(), -1));
   const [route, setRoute] = useState<RouteHistory | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
 
@@ -146,10 +137,11 @@ export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: Fle
   return <div className="fc-tracking-workspace">
     <nav className="fc-view-switch" aria-label="Vehicle tracking views">
       <button className={view === "live" ? "active" : ""} onClick={() => setView("live")} type="button"><MapPin size={16} /> Live tracking</button>
-      <button className={view === "efficiency" ? "active" : ""} onClick={() => setView("efficiency")} type="button"><Gauge size={16} /> Distance, fuel &amp; mileage</button>
+      <button className={view === "mileage" ? "active" : ""} onClick={() => setView("mileage")} type="button"><Gauge size={16} /> Mileage</button>
+      <button className={view === "fuel" ? "active" : ""} onClick={() => setView("fuel")} type="button"><Fuel size={16} /> Fuel log</button>
     </nav>
 
-    {view === "efficiency" ? <DailyFleetReportView stationOptions={stationOptions} /> : <>
+    {view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
       <div className="fc-section-head fc-tracking-heading"><div><span className="fc-eyebrow">WheelsEye live feed</span><h1>Vehicle tracking</h1><p>Current GPS position and historical movement for vehicles that have tracking configured.</p></div><button className="fc-button secondary" disabled={refreshing} onClick={() => loadLive(true)} type="button"><RefreshCw className={refreshing ? "spin" : ""} size={16} /> Refresh live</button></div>
       {summary?.error ? <div className="fc-flash error"><span>{summary.error}</span></div> : null}
       <section className="fc-tracking-kpis">
@@ -167,13 +159,13 @@ export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: Fle
             <FleetMultiSelect allLabel="All placements" label="Current placement" onChange={setPlacements} options={visiblePlacements.map((value) => ({ value, label: value, helper: stationByCode.get(value)?.name }))} values={placements} />
             <FleetMultiSelect allLabel="All states" label="Ignition" onChange={setIgnition} options={[{ value: "on", label: "On" }, { value: "off", label: "Off" }]} searchable={false} values={ignition} />
           </div>
-          <div className="fc-gps-list-head"><button onClick={() => changeSort("vehicle")} type="button">Vehicle <ArrowDownUp size={12} /></button><button onClick={() => changeSort("speed")} type="button">Speed <ArrowDownUp size={12} /></button><button onClick={() => downloadCsv(rows, stationByVehicle)} type="button"><Download size={13} /> CSV</button></div>
+          <div className="fc-gps-list-head"><button onClick={() => changeSort("vehicle")} type="button">Vehicle <ArrowDownUp size={12} /></button><button onClick={() => changeSort("speed")} type="button">Speed <ArrowDownUp size={12} /></button><FleetExportButtons compact report={{ title: "Fleet live GPS report", subtitle: `Generated ${isoToday()} · active filters applied`, fileName: `fleet-live-gps-${isoToday()}`, headers: ["Vehicle", "Current placement", "Speed km/h", "Ignition", "GPS time", "Latitude", "Longitude"], rows: rows.map((row) => [row.vehicle_no, stationByVehicle.get(row.vehicle_no) ?? "Unmapped", row.speed, row.ignition ? "ON" : "OFF", row.gps_time ?? "", row.latitude, row.longitude]) }} /></div>
           <div className="fc-gps-rows">{loading ? <div className="fc-empty compact">Loading tracked vehicles…</div> : rows.map((row) => <button className={selected?.vehicle_no === row.vehicle_no ? "active" : ""} key={row.vehicle_no} onClick={() => { setSelectedVehicle(row.vehicle_no); setRoute(null); }} type="button"><span className={row.ignition ? "online" : "offline"}><i /></span><div><strong>{row.vehicle_no}</strong><small>{stationByVehicle.get(row.vehicle_no) ?? "Unmapped"} · {modelByVehicle.get(row.vehicle_no) ?? "Vehicle"}</small></div><b>{number(row.speed)} km/h</b></button>)}{!loading && !rows.length ? <div className="fc-empty compact">No GPS vehicle matches the filters.</div> : null}</div>
         </aside>
         <article className="fc-panel fc-gps-map-panel">
           <div className="fc-gps-detail-head"><div><small>Selected vehicle</small><h2>{selected?.vehicle_no ?? "No tracked vehicle"}</h2><p>{selected ? `${stationByVehicle.get(selected.vehicle_no) ?? "Unmapped"} · ${modelByVehicle.get(selected.vehicle_no) ?? "Vehicle"}` : "Connect WheelsEye to see live positions."}</p></div>{selected ? <div><span className={`fc-live-pill ${selected.ignition ? "on" : "off"}`}><i /> Ignition {selected.ignition ? "on" : "off"}</span><strong>{number(selected.speed)} km/h</strong></div> : null}</div>
           <div className="fc-map-wrap"><RouteMap currentPoint={selected ? { lat: selected.latitude, lng: selected.longitude } : null} points={route?.points ?? []} /></div>
-          <div className="fc-movement-controls"><label><span>Movement date</span><input max={isoToday()} onChange={(event) => setMovementDate(event.target.value)} type="date" value={movementDate} /></label><button className="fc-button primary" disabled={!selected || routeLoading} onClick={loadMovement} type="button"><Route size={15} /> {routeLoading ? "Loading movement…" : "Load movement"}</button>{selected ? <a href={`https://maps.google.com/?q=${selected.latitude},${selected.longitude}`} rel="noreferrer" target="_blank">Open current point</a> : null}</div>
+          <div className="fc-movement-controls"><label><span>Journey date</span><input max={isoToday()} onChange={(event) => setMovementDate(event.target.value)} type="date" value={movementDate} /></label><button onClick={() => setMovementDate(shiftDate(isoToday(), -1))} type="button">Previous day</button><button onClick={() => setMovementDate(isoToday())} type="button">Today</button><button className="fc-button primary" disabled={!selected || routeLoading} onClick={loadMovement} type="button"><Route size={15} /> {routeLoading ? "Loading journey…" : "Load route & km"}</button>{selected ? <a href={`https://maps.google.com/?q=${selected.latitude},${selected.longitude}`} rel="noreferrer" target="_blank">Open current point</a> : null}</div>
           {route?.summary ? <div className="fc-route-summary"><div><small>Route distance</small><strong>{route.summary.distanceReliable === false ? "Needs review" : `${number(route.summary.km)} km`}</strong></div><div><small>Max speed</small><strong>{number(route.summary.maxSpeed)} km/h</strong></div><div><small>Moving time</small><strong>{number(route.summary.movingMinutes, 0)} min</strong></div><div><small>GPS points</small><strong>{number(route.summary.pointCount, 0)}</strong></div></div> : null}
           {route?.summary?.qualityReason ? <p className="fc-route-note">{route.summary.qualityReason}</p> : route?.error ? <p className="fc-route-note error">{route.error}</p> : null}
         </article>

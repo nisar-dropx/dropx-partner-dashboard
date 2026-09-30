@@ -75,3 +75,7 @@
 .daily-status.gps_review { background: #fef2f2; color: #b91c1c; }
 
 .daily-table .daily-gps-filtered { color: #0369a1; font-weight: 600; }
+.daily-group-switch { display: flex; align-items: center; gap: 6px; margin-top: 13px; padding-top: 12px; border-top: 1px solid #edf0f4; }.daily-group-switch > span { margin-right: 3px; color: #6e798c; font-size: 10px; font-weight: 750; }.daily-group-switch button { min-height: 30px; padding: 0 11px; border: 1px solid #dfe5ec; border-radius: 7px; color: #5f6d80; background: #fff; cursor: pointer; font-size: 10px; font-weight: 750; }.daily-group-switch button.active { color: #fff; border-color: #1d2b3f; background: #1d2b3f; }
+.daily-provider-strip { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 9px; margin: -5px 0 18px; }.daily-provider-strip article { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border: 1px solid #e1e6ee; border-radius: 9px; background: #fff; }.daily-provider-strip strong { font-size: 10px; }.daily-provider-strip span { color: #657287; font-size: 10px; font-weight: 700; }
+@media(max-width:760px) { .daily-provider-strip { grid-template-columns: 1fr 1fr; } }
+@media(max-width:560px) { .daily-group-switch { align-items: stretch; flex-direction: column; }.daily-provider-strip { grid-template-columns: 1fr; } }

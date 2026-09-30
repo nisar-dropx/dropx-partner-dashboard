@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  Download,
   Eye,
   Film,
   Link as LinkIcon,
@@ -20,6 +19,7 @@ import {
   X
 } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
+import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import type { FleetAudit, FleetAuditMode, FleetControlData, FleetControlVehicle, FleetChecklistItem } from "@/lib/fleet-control";
 
 type AuditView = "programme" | "calendar" | "history";
@@ -32,15 +32,8 @@ const modeMeta = {
 
 const dateLabel = (value: string) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}T12:00:00+05:30`));
 const monthLabel = (value: string) => new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}-01T12:00:00+05:30`));
-const csvCell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
 const isClosedVehicle = (vehicle: FleetControlVehicle) => ["sold", "disposed", "returned"].includes(vehicle.status);
 
-function downloadCsv(name: string, rows: unknown[][]) {
-  const content = "\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function monthShift(month: string, delta: number) {
   const date = new Date(`${month}-01T12:00:00+05:30`);
@@ -81,6 +74,27 @@ function EvidenceInputs({ item, response }: { item: FleetChecklistItem; response
   </div>;
 }
 
+function AuditChecklist({ items, onResponse, responses }: { items: FleetChecklistItem[]; onResponse: (itemId: string, value: string) => void; responses: Record<string, string> }) {
+  const groups = [...new Set(items.map((item) => item.category || "General"))].map((category) => ({ category, items: items.filter((item) => (item.category || "General") === category) }));
+  let offset = 0;
+  return <div className="fc-audit-groups">{groups.map((group, groupIndex) => {
+    const start = offset; offset += group.items.length;
+    const answered = group.items.filter((item) => responses[item.id]).length;
+    return <details className="fc-audit-group" key={group.category} open={groupIndex === 0}>
+      <summary><span><strong>{group.category}</strong><small>{group.items.length} checks</small></span><b>{answered}/{group.items.length} answered</b></summary>
+      <div className="fc-audit-items">{group.items.map((item, index) => {
+        const response = responses[item.id] ?? "";
+        const failed = response === "fail" || response === "no";
+        return <section className={`fc-audit-check ${failed ? "failed" : ""}`} key={item.id}>
+          <label><div><span className="fc-check-number">{start + index + 1}</span><strong>{item.label}{item.isRequired ? " *" : ""}</strong><small>{item.guidance || "Confirm the condition and select the result."}</small><em>Pass: {item.passMinEvidence ? `${item.passMinEvidence} ${item.passEvidenceType}` : "no attachment"} · Fail: {item.failMinEvidence ? `${item.failMinEvidence} ${item.failEvidenceType}` : "no attachment"}{item.failRemarksRequired ? " + remark" : ""}</em></div>{["pass_fail","yes_no"].includes(item.responseType) ? <select name={`item_${item.id}`} onChange={(event) => onResponse(item.id, event.target.value)} required={item.isRequired} value={response}><option value="">Select result</option><option value="pass">Compliant / Yes</option><option value="fail">Non-compliant / No</option><option value="na">Not applicable</option></select> : item.responseType === "number" ? <input name={`item_${item.id}`} onChange={(event) => onResponse(item.id, event.target.value ? "pass" : "")} required={item.isRequired} type="number" /> : item.responseType === "date" ? <input name={`item_${item.id}`} onChange={(event) => onResponse(item.id, event.target.value ? "pass" : "")} required={item.isRequired} type="date" /> : <input name={`item_${item.id}`} onChange={(event) => onResponse(item.id, event.target.value ? "pass" : "")} placeholder="Response" required={item.isRequired} />}</label>
+          {failed ? <label className="fc-audit-comment"><span>Why is this non-compliant?{item.failRemarksRequired ? " *" : ""}</span><textarea name={`comment_${item.id}`} placeholder="Record the issue, condition or missing document" required={item.failRemarksRequired} rows={2} /></label> : null}
+          <EvidenceInputs item={item} response={response} />
+        </section>;
+      })}</div>
+    </details>;
+  })}</div>;
+}
+
 export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles }: {
   audits: FleetAudit[];
   data: FleetControlData;
@@ -91,6 +105,7 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles }: {
   const [month, setMonth] = useState(data.today.slice(0, 7));
   const [schedule, setSchedule] = useState<ScheduleDraft | null>(null);
   const [reschedule, setReschedule] = useState<FleetAudit | null>(null);
+  const [cancelling, setCancelling] = useState<FleetAudit | null>(null);
   const [complete, setComplete] = useState<FleetAudit | null>(null);
   const [responseDraft, setResponseDraft] = useState<Record<string, string>>({});
   const [inspect, setInspect] = useState<FleetAudit | null>(null);
@@ -100,6 +115,10 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles }: {
   const monthAudits = useMemo(() => audits.filter((audit) => audit.scheduledFor.startsWith(month)), [audits, month]);
   const dates = suggestedDates(month);
   const auditFor = (vehicleId: string, mode: FleetAuditMode) => monthAudits.find((audit) => audit.vehicleId === vehicleId && audit.auditMode === mode && audit.status !== "cancelled");
+  const checklistFor = (audit: FleetAudit) => {
+    const templateId = audit.templateId ?? data.auditTemplates.find((template) => template.isDefault)?.id;
+    return data.checklistItems.filter((item) => item.templateId === templateId && (item.auditMode === "both" || item.auditMode === audit.auditMode));
+  };
   const coveredVehicles = activeVehicles.filter((vehicle) => auditFor(vehicle.id, "video") && auditFor(vehicle.id, "physical")).length;
   const videoCoverage = activeVehicles.filter((vehicle) => auditFor(vehicle.id, "video")).length;
   const physicalCoverage = activeVehicles.filter((vehicle) => auditFor(vehicle.id, "physical")).length;
@@ -140,8 +159,7 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles }: {
     event.preventDefault();
     if (!complete) return;
     const form = new FormData(event.currentTarget);
-    const templateId = complete.templateId ?? data.auditTemplates.find((template) => template.isDefault)?.id;
-    const items = data.checklistItems.filter((item) => item.templateId === templateId);
+    const items = checklistFor(complete);
     const responses = items.map((item) => { const value = String(form.get(`item_${item.id}`) ?? ""); return { itemId: item.id, value, passed: value === "pass" || value === "yes" ? true : value === "fail" || value === "no" ? false : null, comments: String(form.get(`comment_${item.id}`) ?? "") }; });
     const evidence = [
       ...items.flatMap((item) => { const rule = evidenceFor(item, String(form.get(`item_${item.id}`) ?? "")); return Array.from({ length: rule.minimum }, (_, index) => ({ itemId: item.id, type: rule.type === "any" ? "document" : rule.type, url: String(form.get(`evidence_${item.id}_${index}`) ?? ""), caption: `${item.label} · ${rule.outcome} evidence ${index + 1}` })); }),
@@ -171,6 +189,7 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles }: {
       <div className="fc-inline-actions">
         {["scheduled", "in_progress"].includes(audit.status) && data.capabilities.canManageFleet ? <button className="fc-start-audit" onClick={() => openAudit(audit)} type="button">{audit.status === "scheduled" ? "Start audit" : "Continue audit"}</button> : null}
         {["scheduled", "in_progress"].includes(audit.status) && data.capabilities.canManageFleet ? <button onClick={() => setReschedule(audit)} type="button">Move</button> : null}
+        {audit.status === "scheduled" && data.capabilities.canManageFleet ? <button className="danger" onClick={() => setCancelling(audit)} type="button">Remove</button> : null}
         {audit.evidence.length ? <button onClick={() => setInspect(audit)} type="button"><Eye size={12} /> Evidence</button> : null}
       </div>
     </> : data.capabilities.canManageFleet ? <button className="fc-schedule-slot" onClick={() => openSchedule(vehicleId, mode)} type="button"><Plus size={13} /> Schedule {modeMeta[mode].short.toLowerCase()}</button> : null}
@@ -190,7 +209,7 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles }: {
         <button className={view === "history" ? "active" : ""} onClick={() => setView("history")} type="button"><ShieldCheck size={14} /> Audit log</button>
       </div>
       <div className="fc-month-switch"><button aria-label="Previous month" onClick={() => setMonth(monthShift(month, -1))} type="button"><ChevronLeft size={16} /></button><strong>{monthLabel(month)}</strong><button aria-label="Next month" onClick={() => setMonth(monthShift(month, 1))} type="button"><ChevronRight size={16} /></button></div>
-      <button className="fc-download-link" onClick={() => downloadCsv(`fleet-audit-programme-${month}.csv`, [["Vehicle", "Station", "Audit mode", "Scheduled date", "Status", "Score", "Evidence"], ...monthAudits.map((audit) => [audit.vehicleNo, audit.stationCode, modeMeta[audit.auditMode].label, audit.scheduledFor, audit.status, audit.score ?? "", audit.evidenceCount])])} type="button"><Download size={14} /> Download</button>
+      <FleetExportButtons compact report={{ title: "Vehicle audit programme", subtitle: monthLabel(month), fileName: `fleet-audit-programme-${month}`, headers: ["Vehicle", "Station", "Audit mode", "Scheduled date", "Status", "Score", "Evidence"], rows: monthAudits.map((audit) => [audit.vehicleNo, audit.stationCode, modeMeta[audit.auditMode].label, audit.scheduledFor, audit.status, audit.score, audit.evidenceCount]) }} />
     </div>
     <section className="fc-audit-kpis">
       <article className={coveredVehicles === activeVehicles.length && activeVehicles.length ? "good" : "warn"}><small>Fully covered vehicles</small><strong>{coveredVehicles}<span>/{activeVehicles.length}</span></strong><p>Both monthly audits planned</p></article>
@@ -203,19 +222,22 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles }: {
 
     {view === "calendar" ? <section className="fc-audit-calendar"><div className="fc-calendar-weekdays">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((day) => <span key={day}>{day}</span>)}</div><div className="fc-calendar-grid">{calendarCells.map((day, index) => <div className={!day ? "empty" : ""} key={`${day}-${index}`}>{day ? <><b>{day}</b>{monthAudits.filter((audit) => Number(audit.scheduledFor.slice(8, 10)) === day).map((audit) => { const Icon = modeMeta[audit.auditMode].icon; return <button className={audit.auditMode} key={audit.id} onClick={() => ["scheduled","in_progress"].includes(audit.status) ? openAudit(audit) : setInspect(audit)} type="button"><Icon size={11} /><span>{audit.vehicleNo}</span><small>{audit.status === "scheduled" ? "Start audit" : audit.status === "in_progress" ? "Continue audit" : audit.status}</small></button>; })}</> : null}</div>)}</div></section> : null}
 
-    {view === "history" ? <div className="fc-table-panel fc-audit-log"><div className="fc-table-toolbar"><span>{audits.length} audit records</span></div><div className="fc-table-scroll"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Mode</th><th>Reason</th><th>Status</th><th>Score</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.id}><td data-label="Date">{dateLabel(audit.scheduledFor)}</td><td data-label="Vehicle"><strong>{audit.vehicleNo}</strong><small className="fc-cell-note">{audit.stationCode}</small></td><td data-label="Mode"><span className={`fc-audit-mode ${audit.auditMode}`}>{audit.auditMode === "video" ? <Video size={12} /> : <UserRoundCheck size={12} />}{modeMeta[audit.auditMode].label}</span></td><td data-label="Reason">{audit.scheduledReason}</td><td data-label="Status"><AuditState audit={audit} /></td><td data-label="Score">{audit.score == null ? "—" : `${audit.score}%`}</td><td data-label="Evidence">{audit.evidenceCount}</td><td data-label="Action"><div className="fc-inline-actions">{["scheduled","in_progress"].includes(audit.status) && data.capabilities.canManageFleet ? <button className="fc-start-audit" onClick={() => openAudit(audit)} type="button">{audit.status === "scheduled" ? "Start audit" : "Continue"}</button> : null}{["scheduled","in_progress"].includes(audit.status) && data.capabilities.canManageFleet ? <button onClick={() => setReschedule(audit)} type="button">Move</button> : null}{audit.evidence.length ? <button onClick={() => setInspect(audit)} type="button">View</button> : null}</div></td></tr>)}</tbody></table></div></div> : null}
+    {view === "history" ? <div className="fc-table-panel fc-audit-log"><div className="fc-table-toolbar"><span>{audits.length} audit records</span></div><div className="fc-table-scroll"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Mode</th><th>Reason</th><th>Status</th><th>Score</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.id}><td data-label="Date">{dateLabel(audit.scheduledFor)}</td><td data-label="Vehicle"><strong>{audit.vehicleNo}</strong><small className="fc-cell-note">{audit.stationCode}</small></td><td data-label="Mode"><span className={`fc-audit-mode ${audit.auditMode}`}>{audit.auditMode === "video" ? <Video size={12} /> : <UserRoundCheck size={12} />}{modeMeta[audit.auditMode].label}</span></td><td data-label="Reason">{audit.scheduledReason}</td><td data-label="Status"><AuditState audit={audit} /></td><td data-label="Score">{audit.score == null ? "—" : `${audit.score}%`}</td><td data-label="Evidence">{audit.evidenceCount}</td><td data-label="Action"><div className="fc-inline-actions">{["scheduled","in_progress"].includes(audit.status) && data.capabilities.canManageFleet ? <button className="fc-start-audit" onClick={() => openAudit(audit)} type="button">{audit.status === "scheduled" ? "Start audit" : "Continue"}</button> : null}{["scheduled","in_progress"].includes(audit.status) && data.capabilities.canManageFleet ? <button onClick={() => setReschedule(audit)} type="button">Move</button> : null}{audit.status === "scheduled" && data.capabilities.canManageFleet ? <button className="danger" onClick={() => setCancelling(audit)} type="button">Remove</button> : null}{audit.evidence.length ? <button onClick={() => setInspect(audit)} type="button">View</button> : null}</div></td></tr>)}</tbody></table></div></div> : null}
 
     {schedule ? <div className="fc-modal-backdrop"><section className="fc-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setSchedule(null)} type="button"><X size={18} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><CalendarDays size={23} /></span><div><small>Monthly audit programme</small><h2>Schedule vehicle audits</h2><p>Plan the video review and physical inspection as separate controls.</p></div></div><form className="fc-add-form" onSubmit={submitSchedule}><label className="full"><span>Vehicle</span><select name="vehicleId" onChange={(event) => setSchedule({ ...schedule, vehicleId: event.target.value })} required value={schedule.vehicleId}><option value="">Select vehicle</option>{activeVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.vehicleNo} · {vehicle.stationCode} · {vehicle.model}</option>)}</select></label><label className="full"><span>Audit requirement</span><select name="auditMode" onChange={(event) => setSchedule({ ...schedule, mode: event.target.value as ScheduleDraft["mode"] })} value={schedule.mode}><option value="both">Both monthly audits</option><option value="video">Video review only</option><option value="physical">Physical inspection only</option></select></label>{schedule.mode !== "physical" ? <label><span>Video review date</span><input defaultValue={dates.video} max={`${month}-31`} min={`${month}-01`} name="videoDate" required type="date" /></label> : null}{schedule.mode !== "video" ? <label><span>Physical inspection date</span><input defaultValue={dates.physical} max={`${month}-31`} min={`${month}-01`} name="physicalDate" required type="date" /></label> : null}<label className="full"><span>Checklist template</span><select name="templateId"><option value="">Default routine audit</option>{data.auditTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.itemCount} checks</option>)}</select></label><label className="full"><span>Programme note</span><input defaultValue={schedule.reason} name="scheduledReason" required /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setSchedule(null)} type="button">Cancel</button><button className="fc-button primary" disabled={saving === "audit.schedule"} type="submit">{saving === "audit.schedule" ? "Scheduling…" : "Schedule audit"}</button></div></form></section></div> : null}
 
     {reschedule ? <div className="fc-modal-backdrop"><section className="fc-modal fc-reschedule-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setReschedule(null)} type="button"><X size={18} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><MoveRight size={23} /></span><div><small>{reschedule.vehicleNo} · {modeMeta[reschedule.auditMode].label}</small><h2>Move scheduled audit</h2><p>The audit stays in the programme and its completion history is retained.</p></div></div><form className="fc-add-form" onSubmit={submitReschedule}><label><span>Current date</span><input disabled value={reschedule.scheduledFor} /></label><label><span>New date</span><input defaultValue={reschedule.scheduledFor} name="scheduledFor" required type="date" /></label><label className="full"><span>Reason for moving</span><input name="rescheduleReason" placeholder="Inspector leave, vehicle at workshop, route conflict…" required /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setReschedule(null)} type="button">Keep current date</button><button className="fc-button primary" disabled={saving === "audit.reschedule"} type="submit">Move audit</button></div></form></section></div> : null}
 
+    {cancelling ? <div className="fc-modal-backdrop"><section className="fc-modal fc-reschedule-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setCancelling(null)} type="button"><X size={18} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><CalendarDays size={23} /></span><div><small>{cancelling.vehicleNo} · {modeMeta[cancelling.auditMode].label}</small><h2>Remove scheduled audit</h2><p>This opens the monthly slot again so it can be scheduled later. The cancellation remains in the audit log.</p></div></div><form className="fc-add-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); if (await act("audit.cancel", { auditId: cancelling.id, reason: form.get("reason") })) setCancelling(null); }}><label className="full"><span>Reason for removing</span><input name="reason" placeholder="Scheduled by mistake, vehicle unavailable…" required /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setCancelling(null)} type="button">Keep audit</button><button className="fc-button danger" disabled={saving === "audit.cancel"} type="submit">Remove schedule</button></div></form></section></div> : null}
+
     {complete ? <div className="fc-modal-backdrop"><section className="fc-modal audit fc-conduct-audit"><button aria-label="Close" className="fc-modal-close" onClick={() => setComplete(null)} type="button"><X size={18} /></button>
       <div className="fc-modal-title"><span className="fc-vehicle-big">{complete.auditMode === "video" ? <Film size={23} /> : <UserRoundCheck size={23} />}</span><div><small>Audit in progress · {complete.stationCode} · {dateLabel(complete.scheduledFor)}</small><h2>{complete.vehicleNo} · {modeMeta[complete.auditMode].label}</h2><p>Complete every required check, attach outcome-specific evidence and submit the audit.</p></div></div>
       <form className="fc-audit-form" onSubmit={submitCompletion}>
-        <div className="fc-audit-execution-head"><div><strong>Vehicle audit checklist</strong><small>{data.checklistItems.filter((item) => item.templateId === (complete.templateId ?? data.auditTemplates.find((template) => template.isDefault)?.id)).length} configured controls</small></div><span>{Object.values(responseDraft).filter(Boolean).length} answered</span></div>
-        <div className="fc-audit-items">{data.checklistItems.filter((item) => item.templateId === (complete.templateId ?? data.auditTemplates.find((template) => template.isDefault)?.id)).map((item, index) => <section className="fc-audit-check" key={item.id}><label><div><span className="fc-check-number">{index + 1}</span><strong>{item.label}{item.isRequired ? " *" : ""}</strong><small>{item.category} · {item.guidance || "No additional guidance"}</small><em>Compliant: {item.passMinEvidence ? `${item.passMinEvidence} ${item.passEvidenceType}` : "no attachment"} · Non-compliant: {item.failMinEvidence ? `${item.failMinEvidence} ${item.failEvidenceType}` : "no attachment"}</em></div>{["pass_fail","yes_no"].includes(item.responseType) ? <select name={`item_${item.id}`} onChange={(event) => setResponseDraft((current) => ({ ...current, [item.id]: event.target.value }))} required={item.isRequired} value={responseDraft[item.id] ?? ""}><option value="">Select result</option><option value="pass">Compliant / Yes</option><option value="fail">Non-compliant / No</option><option value="na">Not applicable</option></select> : item.responseType === "number" ? <input name={`item_${item.id}`} onChange={(event) => setResponseDraft((current) => ({ ...current, [item.id]: event.target.value ? "pass" : "" }))} required={item.isRequired} type="number" /> : item.responseType === "date" ? <input name={`item_${item.id}`} onChange={(event) => setResponseDraft((current) => ({ ...current, [item.id]: event.target.value ? "pass" : "" }))} required={item.isRequired} type="date" /> : <input name={`item_${item.id}`} onChange={(event) => setResponseDraft((current) => ({ ...current, [item.id]: event.target.value ? "pass" : "" }))} placeholder="Response" required={item.isRequired} />}</label><EvidenceInputs item={item} response={responseDraft[item.id] ?? ""} /></section>)}{!data.checklistItems.some((item) => item.templateId === (complete.templateId ?? data.auditTemplates.find((template) => template.isDefault)?.id)) ? <div className="fc-empty"><ListChecks size={32} /><strong>No checklist is configured for this audit</strong><p>Open Masters → Vehicle Audit and add controls before conducting this audit.</p></div> : null}</div>
+        <div className="fc-audit-execution-head"><div><strong>{complete.auditMode === "physical" ? "Physical vehicle and driving checklist" : "Video vehicle checklist"}</strong><small>{checklistFor(complete).length} controls for this audit mode</small></div><span>{Object.values(responseDraft).filter(Boolean).length} answered</span></div>
+        <AuditChecklist items={checklistFor(complete)} onResponse={(itemId, value) => setResponseDraft((current) => ({ ...current, [itemId]: value }))} responses={responseDraft} />
+        {!checklistFor(complete).length ? <div className="fc-empty"><ListChecks size={32} /><strong>No checklist is configured for this audit</strong><p>Open Masters → Vehicle Audit and add controls for {complete.auditMode} audits.</p></div> : null}
         <div className="fc-audit-fields"><label><span>Odometer km</span><input min="0" name="odometerKm" type="number" /></label>{complete.auditMode === "video" ? <label className="full"><span>Complete walk-around video link *</span><input name="walkAroundVideoUrl" placeholder="Paste a shareable video link" required type="url" /></label> : null}<label className="full"><span>Audit summary</span><textarea name="summary" placeholder="Overall condition and key observations" rows={3} /></label><label><span>Finding category</span><input name="findingCategory" placeholder="Tyres, body, documents…" /></label><label><span>Severity</span><select name="severity"><option value="medium">Medium</option><option value="low">Low</option><option value="high">High</option><option value="critical">Critical</option></select></label><label className="full"><span>Finding</span><textarea name="finding" placeholder="Describe the issue found" rows={2} /></label><label className="full"><span>Required action</span><input name="actionRequired" placeholder="Repair, replace, upload document…" /></label><label><span>Expected completion</span><input name="expectedCompletionDate" type="date" /></label><label className="fc-toggle"><input defaultChecked={data.settings.auditEmailEnabled} name="sendEmail" type="checkbox" /><span>Email findings to station and approvers</span></label></div>
-        <div className="fc-form-actions sticky"><button className="fc-button secondary" onClick={() => setComplete(null)} type="button">Close</button><button className="fc-button primary" disabled={saving === "audit.complete" || !data.checklistItems.some((item) => item.templateId === (complete.templateId ?? data.auditTemplates.find((template) => template.isDefault)?.id))} type="submit">{saving === "audit.complete" ? "Submitting…" : "Complete audit"}</button></div>
+        <div className="fc-form-actions sticky"><button className="fc-button secondary" onClick={() => setComplete(null)} type="button">Close</button><button className="fc-button primary" disabled={saving === "audit.complete" || !checklistFor(complete).length} type="submit">{saving === "audit.complete" ? "Submitting…" : "Complete audit"}</button></div>
       </form>
     </section></div> : null}
 

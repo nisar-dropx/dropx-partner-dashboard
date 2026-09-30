@@ -17,13 +17,16 @@ function evidenceRule(typeValue: unknown, minimumValue: unknown) {
 }
 function checklistEvidenceRules(guidanceValue: unknown, responseType: unknown) {
   const raw = clean(guidanceValue);
-  const pass = raw.match(/^\[evidence-pass:(none|photo|video|document|any):(\d+)\]/i);
-  const afterPass = raw.replace(/^\[evidence-pass:(?:none|photo|video|document|any):\d+\]\s*/i, "");
+  const remarksMarker = raw.match(/^\[remarks-fail:(required|optional)\]\s*/i);
+  const failRemarksRequired = remarksMarker ? remarksMarker[1].toLowerCase() === "required" : ["pass_fail", "yes_no"].includes(clean(responseType));
+  const withoutRemarks = raw.replace(/^\[remarks-fail:(?:required|optional)\]\s*/i, "");
+  const pass = withoutRemarks.match(/^\[evidence-pass:(none|photo|video|document|any):(\d+)\]/i);
+  const afterPass = withoutRemarks.replace(/^\[evidence-pass:(?:none|photo|video|document|any):\d+\]\s*/i, "");
   const fail = afterPass.match(/^\[evidence-fail:(none|photo|video|document|any):(\d+)\]/i);
   const legacy = raw.match(/^\[evidence:(none|photo|video|document|any):(\d+)\]/i);
   const fallbackType = legacy?.[1]?.toLowerCase() || (responseType === "photo" ? "photo" : responseType === "video" ? "video" : "none");
   const fallbackMinimum = legacy ? Number(legacy[2]) || 0 : fallbackType === "none" ? 0 : 1;
-  return { pass: evidenceRule(pass?.[1] || (legacy ? fallbackType : "none"), pass?.[2] || (legacy ? fallbackMinimum : 0)), fail: evidenceRule(fail?.[1] || fallbackType, fail?.[2] || fallbackMinimum) };
+  return { pass: evidenceRule(pass?.[1] || (legacy ? fallbackType : "none"), pass?.[2] || (legacy ? fallbackMinimum : 0)), fail: evidenceRule(fail?.[1] || fallbackType, fail?.[2] || fallbackMinimum), failRemarksRequired };
 }
 
 async function access() {
@@ -44,8 +47,10 @@ export async function POST(request: Request) {
   const action = clean(body.action);
   try {
     if (action === "service.create") return await createService(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "service.schedule") return await scheduleService(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.schedule") return await scheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.reschedule") return await rescheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.cancel") return await cancelAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.start") return await startAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.complete") return await completeAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "checklist.create") return await createChecklistItem(context.companyId, context.canManageSettings, body);
@@ -53,6 +58,8 @@ export async function POST(request: Request) {
     if (action === "checklist.remove") return await removeChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "settings.update") return await updateSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "member.upsert") return await upsertMember(context.companyId, context.authorization.userId, context.canManageSettings, body);
+    if (action === "status-recipient.upsert") return await upsertStatusRecipient(context.companyId, context.authorization.userId, context.canManageSettings, body);
+    if (action === "status-recipient.remove") return await removeStatusRecipient(context.companyId, context.canManageSettings, body);
     return NextResponse.json({ error: "Unsupported Fleet Control action." }, { status: 400 });
   } catch (error) {
     return NextResponse.json({ error: setupError(error instanceof Error ? error.message : "Fleet action failed.") }, { status: 400 });
@@ -79,6 +86,30 @@ async function createService(companyId: string, userId: string, allowed: boolean
   }).select("id").single();
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, id: result.data.id, message: "Service history saved." });
+}
+
+async function scheduleService(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet maintenance permission denied." }, { status: 403 });
+  const vehicleId = required(body.vehicleId, "Vehicle");
+  await assertVehicle(companyId, vehicleId);
+  const serviceDate = required(body.serviceDate, "Next service date");
+  const values = {
+    service_date: serviceDate,
+    service_type: clean(body.serviceType) || "Regular Service",
+    next_service_date: serviceDate,
+    next_service_odometer_km: numberOrNull(body.nextServiceOdometerKm),
+    description: clean(body.description) || "Scheduled from the vehicle service plan",
+    status: "scheduled",
+    amount: 0,
+    updated_at: new Date().toISOString()
+  };
+  const existing = await supabaseAdmin!.from("fleet_service_history").select("id").eq("company_id", companyId).eq("vehicle_id", vehicleId).eq("status", "scheduled").order("service_date", { ascending: true }).limit(1).maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+  const result = existing.data?.id
+    ? await supabaseAdmin!.from("fleet_service_history").update(values).eq("company_id", companyId).eq("id", existing.data.id).select("id").single()
+    : await supabaseAdmin!.from("fleet_service_history").insert({ company_id: companyId, vehicle_id: vehicleId, created_by: userId, ...values }).select("id").single();
+  if (result.error) throw new Error(result.error.message);
+  return NextResponse.json({ ok: true, id: result.data.id, message: existing.data?.id ? "Next service plan updated." : "Next service scheduled." });
 }
 
 async function scheduleAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
@@ -139,6 +170,20 @@ async function rescheduleAudit(companyId: string, userId: string, allowed: boole
   return NextResponse.json({ ok: true, message: "Audit moved to the new date." });
 }
 
+async function cancelAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const auditId = required(body.auditId, "Audit");
+  const reason = required(body.reason, "Cancellation reason");
+  const current = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,scheduled_for,scheduled_reason,status").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  if (current.error) throw new Error(current.error.message);
+  if (!current.data) throw new Error("Audit was not found.");
+  if (clean(current.data.status) !== "scheduled") throw new Error("Only an audit that has not started can be removed from the schedule.");
+  const update = await supabaseAdmin!.from("fleet_audits").update({ status: "cancelled", summary: `Schedule removed: ${reason}`, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId).eq("status", "scheduled");
+  if (update.error) throw new Error(update.error.message);
+  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_cancelled", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: { scheduled_for: current.data.scheduled_for, reason } });
+  return NextResponse.json({ ok: true, message: "Audit removed from the schedule. The monthly slot is open again." });
+}
+
 async function startAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
   const auditId = required(body.auditId, "Audit");
@@ -169,15 +214,16 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
   const evidence = Array.isArray(body.evidence) ? body.evidence.filter((item: Payload) => clean(item.url)) : [];
   const auditMode = /^\[mode:video\]/i.test(clean(auditResult.data.scheduled_reason)) ? "video" : "physical";
   if (auditMode === "video" && !evidence.some((item: Payload) => clean(item.type) === "video")) throw new Error("A complete walk-around video link is required for the remote video audit.");
-  let checklistRuleQuery = supabaseAdmin!.from("fleet_audit_checklist_items").select("id,label,guidance,response_type,is_required").eq("company_id", companyId).eq("is_active", true);
+  let checklistRuleQuery = supabaseAdmin!.from("fleet_audit_checklist_items").select("id,label,guidance,response_type,is_required,audit_mode").eq("company_id", companyId).eq("is_active", true);
   if (auditResult.data.template_id) checklistRuleQuery = checklistRuleQuery.eq("template_id", auditResult.data.template_id);
   const checklistRules = await checklistRuleQuery;
   if (checklistRules.error) throw new Error(checklistRules.error.message);
-  for (const item of checklistRules.data ?? []) {
+  for (const item of (checklistRules.data ?? []).filter((row: any) => !row.audit_mode || row.audit_mode === "both" || row.audit_mode === auditMode)) {
     const response = responses.find((entry: Payload) => clean(entry.itemId) === item.id);
     if (item.is_required && !clean(response?.value)) throw new Error(`${item.label} must be completed before the audit can be submitted.`);
     const rules = checklistEvidenceRules(item.guidance, item.response_type);
     const selectedRule = response?.passed === false ? rules.fail : rules.pass;
+    if (response?.passed === false && rules.failRemarksRequired && !clean(response?.comments)) throw new Error(`${item.label} requires a remark when marked non-compliant.`);
     const evidenceType = selectedRule.type;
     const minimum = selectedRule.minimum;
     if (!minimum) continue;
@@ -232,8 +278,8 @@ async function createChecklistItem(companyId: string, allowed: boolean, body: Pa
 function checklistItemValues(body: Payload) {
   const pass = evidenceRule(body.passEvidenceType, body.passMinEvidence);
   const fail = evidenceRule(body.failEvidenceType, body.failMinEvidence);
-  const guidance = `[evidence-pass:${pass.type}:${pass.minimum}] [evidence-fail:${fail.type}:${fail.minimum}] ${clean(body.guidance)}`.trim();
-  return { category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance, response_type: clean(body.responseType) || "pass_fail", is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999), is_active: true };
+  const guidance = `[remarks-fail:${body.failRemarksRequired === false ? "optional" : "required"}] [evidence-pass:${pass.type}:${pass.minimum}] [evidence-fail:${fail.type}:${fail.minimum}] ${clean(body.guidance)}`.trim();
+  return { audit_mode: ["video", "physical"].includes(clean(body.auditMode)) ? clean(body.auditMode) : "both", category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance, response_type: clean(body.responseType) || "pass_fail", is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999), is_active: true };
 }
 
 async function updateChecklistItem(companyId: string, allowed: boolean, body: Payload) {
@@ -256,9 +302,29 @@ async function removeChecklistItem(companyId: string, allowed: boolean, body: Pa
 
 async function updateSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
-  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, default_audit_cadence_days: Number(body.defaultAuditCadenceDays ?? 30), document_warning_days: Number(body.documentWarningDays ?? 30), service_warning_days: Number(body.serviceWarningDays ?? 14), auto_suggest_audits: Boolean(body.autoSuggestAudits), breakdown_vehicle_link_required: Boolean(body.breakdownVehicleLinkRequired), audit_email_enabled: Boolean(body.auditEmailEnabled), audit_video_required: Boolean(body.auditVideoRequired), updated_by: userId, updated_at: new Date().toISOString() });
+  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, default_audit_cadence_days: Number(body.defaultAuditCadenceDays ?? 30), document_warning_days: Number(body.documentWarningDays ?? 30), service_warning_days: Number(body.serviceWarningDays ?? 14), auto_suggest_audits: Boolean(body.autoSuggestAudits), breakdown_vehicle_link_required: Boolean(body.breakdownVehicleLinkRequired), audit_email_enabled: Boolean(body.auditEmailEnabled), audit_video_required: Boolean(body.auditVideoRequired), daily_status_email_enabled: Boolean(body.dailyStatusEmailEnabled), daily_status_send_time: clean(body.dailyStatusSendTime) || "20:30", daily_status_only_affected: body.dailyStatusOnlyAffected !== false, updated_by: userId, updated_at: new Date().toISOString() });
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, message: "Fleet settings updated." });
+}
+
+async function upsertStatusRecipient(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const email = required(body.email, "Recipient email").toLowerCase();
+  if (!emailPattern.test(email)) throw new Error("Enter a valid recipient email.");
+  const stationCodes = Array.isArray(body.stationCodes) ? [...new Set(body.stationCodes.map((value: unknown) => clean(value).toUpperCase()).filter(Boolean))] : [];
+  const values = { company_id: companyId, name: clean(body.name) || email, email, station_codes: stationCodes, source: "manual", is_active: true, created_by: userId, updated_at: new Date().toISOString() };
+  const result = await supabaseAdmin!.from("fleet_status_report_recipients").upsert(values, { onConflict: "company_id,email" }).select("id").single();
+  if (result.error) throw new Error(result.error.message);
+  return NextResponse.json({ ok: true, id: result.data.id, message: "Daily status recipient saved." });
+}
+
+async function removeStatusRecipient(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const recipientId = required(body.recipientId, "Recipient");
+  const result = await supabaseAdmin!.from("fleet_status_report_recipients").update({ is_active: false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", recipientId).select("id").maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Recipient was not found.");
+  return NextResponse.json({ ok: true, message: "Daily status recipient removed." });
 }
 
 async function upsertMember(companyId: string, userId: string, allowed: boolean, body: Payload) {

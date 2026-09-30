@@ -72,6 +72,7 @@ export type AdHocActivityEntry = {
   countedInTotal: boolean;
   paymentHeadCode?: string;
   paymentHeadName?: string;
+  approvalStatus?: string;
 };
 
 export type AdHocActivityStation = {
@@ -393,7 +394,8 @@ export async function loadAdHocActivity(
         remark: requestRemark(request),
         countedInTotal: true,
         paymentHeadCode: String(head.code ?? "").trim(),
-        paymentHeadName: String(head.name ?? head.code ?? "Ad-hoc request").trim()
+        paymentHeadName: String(head.name ?? head.code ?? "Ad-hoc request").trim(),
+        approvalStatus: normalized(request.approval_status || request.status).toLowerCase()
       });
     }
     station.totalCount += 1;

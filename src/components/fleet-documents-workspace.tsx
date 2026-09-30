@@ -4,6 +4,7 @@ import { AlertTriangle, Check, Download, Eye, FileCheck2, FilePlus2, PencilLine,
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { FleetMultiSelect } from "@/components/fleet-multi-select";
+import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { FleetControlData, FleetControlVehicle, FleetDocumentDefinition, FleetVehicleDocument } from "@/lib/fleet-control";
 
@@ -46,11 +47,6 @@ function validityText(row: DocumentRow) {
   return `${row.days} days left`;
 }
 
-function downloadCsv(name: string, rows: unknown[][]) {
-  const csv = rows.map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url);
-}
 
 export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControlData; vehicles: FleetControlVehicle[] }) {
   const router = useRouter();
@@ -62,6 +58,7 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
   const [vehicleNos, setVehicleNos] = useState<string[]>([]);
   const [documentTypes, setDocumentTypes] = useState<string[]>([]);
   const [states, setStates] = useState<string[]>([]);
+  const [workspaceMode, setWorkspaceMode] = useState<"action" | "register">("action");
   const [sort, setSort] = useState("urgency");
   const [uploadRow, setUploadRow] = useState<DocumentRow | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -88,9 +85,10 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
       && (!stations.length || stations.includes(row.vehicle.stationCode))
       && (!vehicleNos.length || vehicleNos.includes(row.vehicle.vehicleNo))
       && (!documentTypes.length || documentTypes.includes(row.type.value))
+      && (workspaceMode === "register" || ["expired", "urgent", "file_missing", "validity_missing", "due"].includes(row.state))
       && (!states.length || states.includes(row.state))
       && (!needle || `${row.vehicle.vehicleNo} ${row.vehicle.stationCode} ${row.vehicle.model} ${row.type.label} ${row.document?.fileName ?? ""}`.toLowerCase().includes(needle));
-  }).sort((a, b) => sort === "vehicle" ? a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) || a.type.sortOrder - b.type.sortOrder : sort === "station" ? a.vehicle.stationCode.localeCompare(b.vehicle.stationCode) || a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) : sort === "expiry" ? (a.expiryDate ?? "9999").localeCompare(b.expiryDate ?? "9999") : stateRank(a.state) - stateRank(b.state) || (a.days ?? 9999) - (b.days ?? 9999)), [clusters, data.stationOptions, documentTypes, query, regions, rows, sort, states, stations, vehicleNos]);
+  }).sort((a, b) => sort === "vehicle" ? a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) || a.type.sortOrder - b.type.sortOrder : sort === "station" ? a.vehicle.stationCode.localeCompare(b.vehicle.stationCode) || a.vehicle.vehicleNo.localeCompare(b.vehicle.vehicleNo) : sort === "expiry" ? (a.expiryDate ?? "9999").localeCompare(b.expiryDate ?? "9999") : stateRank(a.state) - stateRank(b.state) || (a.days ?? 9999) - (b.days ?? 9999)), [clusters, data.stationOptions, documentTypes, query, regions, rows, sort, states, stations, vehicleNos, workspaceMode]);
 
   const counts = useMemo(() => ({
     all: rows.length,
@@ -139,12 +137,13 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
     <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle compliance</span><h1>Vehicle documents</h1><p>Act on missing files and time-bound validity. Registration follows Fitness unless a separate RC date is recorded.</p></div>{data.capabilities.canManageDocuments ? <button className="fc-button primary" onClick={() => openUpload()} type="button"><Upload size={17} /> Upload document</button> : null}</div>
     {message ? <div className={`fc-flash ${message.tone}`}><span>{message.tone === "notice" ? <Check size={17} /> : <AlertTriangle size={17} />}{message.text}</span><button aria-label="Dismiss" onClick={() => setMessage(null)} type="button"><X size={16} /></button></div> : null}
 
+    <div className="fc-document-mode"><nav className="fc-view-switch compact"><button className={workspaceMode === "action" ? "active" : ""} onClick={() => { setWorkspaceMode("action"); setStates([]); }} type="button"><AlertTriangle size={14} /> Action queue</button><button className={workspaceMode === "register" ? "active" : ""} onClick={() => { setWorkspaceMode("register"); setStates([]); }} type="button"><FileCheck2 size={14} /> Complete register</button></nav><p>{workspaceMode === "action" ? "Only missing, expiring and overdue controls are shown." : "Every vehicle and document rule is shown."}</p></div>
     <div className="fc-document-kpis compact">
-      <button className={!states.length ? "active" : ""} onClick={() => setStates([])} type="button"><small>All controls</small><strong>{counts.all}</strong><span>{vehicles.length} vehicles</span></button>
-      <button className={states.length === 4 ? "active expired" : "expired"} onClick={() => setStates(["expired", "urgent", "file_missing", "validity_missing"])} type="button"><small>Action required</small><strong>{counts.action}</strong><span>Fix now</span></button>
-      <button className={states.length === 1 && states[0] === "due" ? "active due" : "due"} onClick={() => setStates(["due"])} type="button"><small>Due soon</small><strong>{counts.due}</strong><span>Within reminder window</span></button>
-      <button className={states.length === 1 && states[0] === "current" ? "active valid" : "valid"} onClick={() => setStates(["current"])} type="button"><small>Current</small><strong>{counts.current}</strong><span>No action</span></button>
-      <button className={states.length === 1 && states[0] === "linked" ? "active linked" : "linked"} onClick={() => setStates(["linked"])} type="button"><small>Linked validity</small><strong>{counts.linked}</strong><span>RC follows Fitness</span></button>
+      <button className={workspaceMode === "register" && !states.length ? "active" : ""} onClick={() => { setWorkspaceMode("register"); setStates([]); }} type="button"><small>All controls</small><strong>{counts.all}</strong><span>{vehicles.length} vehicles</span></button>
+      <button className={states.length === 4 ? "active expired" : "expired"} onClick={() => { setWorkspaceMode("register"); setStates(["expired", "urgent", "file_missing", "validity_missing"]); }} type="button"><small>Action required</small><strong>{counts.action}</strong><span>Fix now</span></button>
+      <button className={states.length === 1 && states[0] === "due" ? "active due" : "due"} onClick={() => { setWorkspaceMode("register"); setStates(["due"]); }} type="button"><small>Due soon</small><strong>{counts.due}</strong><span>Within reminder window</span></button>
+      <button className={states.length === 1 && states[0] === "current" ? "active valid" : "valid"} onClick={() => { setWorkspaceMode("register"); setStates(["current"]); }} type="button"><small>Current</small><strong>{counts.current}</strong><span>No action</span></button>
+      <button className={states.length === 1 && states[0] === "linked" ? "active linked" : "linked"} onClick={() => { setWorkspaceMode("register"); setStates(["linked"]); }} type="button"><small>Linked validity</small><strong>{counts.linked}</strong><span>RC follows Fitness</span></button>
     </div>
 
     <div className="fc-document-filters">
@@ -158,7 +157,7 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
     </div>
 
     <div className="fc-table-panel">
-      <div className="fc-table-toolbar"><span>{filteredRows.length} controls</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setSort(event.target.value)} value={sort}><option value="urgency">Action priority</option><option value="expiry">Validity date</option><option value="vehicle">Vehicle</option><option value="station">Station</option></select></label><button onClick={() => downloadCsv(`fleet-documents-${data.today}.csv`, [["Vehicle", "Station", "Document", "Validity", "Status", "Days", "File"], ...filteredRows.map((row) => [row.vehicle.vehicleNo, row.vehicle.stationCode, row.type.label, row.expiryDate, stateLabels[row.state], row.days, row.document?.fileName])])} type="button"><Download size={15} /> Download</button></div></div>
+      <div className="fc-table-toolbar"><span>{filteredRows.length} controls</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setSort(event.target.value)} value={sort}><option value="urgency">Action priority</option><option value="expiry">Validity date</option><option value="vehicle">Vehicle</option><option value="station">Station</option></select></label><FleetExportButtons compact report={{ title: "Vehicle document compliance report", subtitle: `Generated ${data.today} · active filters applied`, fileName: `fleet-documents-${data.today}`, headers: ["Vehicle", "Station", "Document", "Validity", "Status", "Days", "File"], rows: filteredRows.map((row) => [row.vehicle.vehicleNo, row.vehicle.stationCode, row.type.label, row.expiryDate, stateLabels[row.state], row.days, row.document?.fileName]) }} /></div></div>
       <div className="fc-table-scroll"><table className="fc-documents-table compact"><thead><tr><th>Vehicle</th><th>Document rule</th><th>Validity & status</th><th>File</th><th>Next action</th></tr></thead><tbody>{filteredRows.map((row) => <tr key={`${row.vehicle.vehicleNo}-${row.type.value}`}><td><strong>{row.vehicle.vehicleNo}</strong><small className="fc-cell-note">{row.vehicle.stationCode} · {row.vehicle.model}</small></td><td><strong>{row.type.label}</strong><small className="fc-cell-note">{row.type.expiryMode === "linked_fitness" ? "Validity follows Fitness" : row.type.expiryMode === "required" ? `Validity required · alert ${row.type.reminderDays} d before` : "Validity date optional"}</small></td><td><strong className={["expired", "urgent"].includes(row.state) ? "fc-date-risk" : ""}>{row.state === "linked" ? "As per Fitness" : formatDate(row.expiryDate)}</strong><small className="fc-cell-note">{validityText(row)}</small><span className={`fc-doc-state ${row.state}`}><i />{stateLabels[row.state]}</span></td><td>{row.document ? <><strong className="fc-doc-file">{row.document.fileName}</strong><small className="fc-cell-note">Uploaded {formatDate(row.document.uploadedAt?.slice(0, 10) ?? null)}</small></> : <span className="fc-cell-muted">No file uploaded</span>}</td><td><div className="fc-doc-actions">{row.document?.viewUrl ? <a aria-label="View document" href={row.document.viewUrl} rel="noreferrer" target="_blank"><Eye size={15} /></a> : null}{row.document?.downloadUrl ? <a aria-label="Download document" href={row.document.downloadUrl}><Download size={15} /></a> : null}{data.capabilities.canManageDocuments && row.document && row.type.expiryMode === "required" ? <button className={row.state === "validity_missing" ? "renew" : "secondary"} onClick={() => setValidityRow(row)} type="button"><PencilLine size={14} />{row.state === "validity_missing" ? "Set validity" : "Edit date"}</button> : null}{data.capabilities.canManageDocuments ? <button className={["expired", "urgent", "file_missing"].includes(row.state) ? "renew" : "secondary"} onClick={() => openUpload(row)} type="button"><FilePlus2 size={14} />{row.document ? "Replace" : "Upload"}</button> : null}</div></td></tr>)}</tbody></table></div>
       {!filteredRows.length ? <div className="fc-empty"><FileCheck2 size={34} /><strong>No matching documents</strong><p>Change the vehicle, station, document or status filter.</p></div> : null}
     </div>
