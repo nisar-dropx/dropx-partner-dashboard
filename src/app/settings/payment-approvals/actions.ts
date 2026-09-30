@@ -38,7 +38,7 @@ export async function saveApprovalSteps(formData: FormData) {
 
   const headResult = await supabaseAdmin
     .from("payment_heads")
-    .select("id, payment_process_role_ids")
+    .select("id, code, payment_process_role_ids")
     .eq("company_id", companyId)
     .eq("id", paymentHeadId)
     .maybeSingle();
@@ -58,7 +58,8 @@ export async function saveApprovalSteps(formData: FormData) {
     const financeApprovalCodes = (rolesResult.data ?? [])
       .filter((role) => /(^|_)(FIN|FINMGR|FINANCE|ACCOUNT|ACCOUNTS)(_|$)/.test(String(role.code ?? "").toUpperCase()))
       .map((role) => role.code);
-    if (financeApprovalCodes.length) {
+    const isDropxOneReimbursement = headResult.data.code === "EMPLOYEE_REIMBURSEMENT";
+    if (financeApprovalCodes.length && !isDropxOneReimbursement) {
       throw new Error("Finance and Accounts roles process payments and cannot be approval candidates.");
     }
 
@@ -69,7 +70,7 @@ export async function saveApprovalSteps(formData: FormData) {
 
   const processorRoleIds = new Set((headResult.data.payment_process_role_ids ?? []) as string[]);
   const processorApprovers = roleIds.filter((roleId) => processorRoleIds.has(roleId));
-  if (processorApprovers.length) {
+  if (processorApprovers.length && headResult.data.code !== "EMPLOYEE_REIMBURSEMENT") {
     throw new Error("Payment-processing roles cannot also be approval candidates. Finance belongs in processing only.");
   }
 
