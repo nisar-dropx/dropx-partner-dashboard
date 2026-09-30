@@ -77,6 +77,24 @@ const unavailableAuth = moduleAt("src/lib/authorization.ts", {
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
 });
 assert.equal(await unavailableAuth.getAuthorization(), null, "an upstream auth error fails closed as an unavailable session instead of leaving the route unresolved");
+const claimsFallbackAuth = moduleAt("src/lib/authorization.ts", {
+  ...mocks,
+  "@/lib/supabase-server": {
+    createServerSupabaseClient: () => ({
+      auth: {
+        getUser: async () => {
+          const error = new Error("This operation was aborted");
+          error.name = "AbortError";
+          throw error;
+        },
+        getClaims: async () => ({ data: { claims: { sub: "owner", email: "nisar@dropxlogistics.com" } } })
+      }
+    })
+  }
+});
+const claimsFallbackAuthorization = await claimsFallbackAuth.getAuthorization();
+assert.equal(claimsFallbackAuthorization?.userId, "owner", "a valid signed session survives a transient Auth API failure");
+assert.equal(claimsFallbackAuthorization?.email, "nisar@dropxlogistics.com");
 const ownerBefore = await auth.getAuthorization();
 assert.equal(ownerBefore.designationName, "Managing Partner");
 assert.equal(ownerBefore.roleCode, "OWNER");

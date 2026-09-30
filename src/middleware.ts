@@ -6,6 +6,7 @@ import { TimeoutError, withTimeout } from "@/lib/with-timeout";
 import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
 
 const AUTH_TIMEOUT_MS = 5000;
+const AUTH_CLAIMS_TIMEOUT_MS = 3000;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -115,6 +116,45 @@ function decodeCookieValue(value: string) {
   const binary = atob(padded);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+function isTransientAuthFailure(error: unknown) {
+  if (error instanceof TimeoutError) return true;
+  const candidate = error as { name?: unknown; message?: unknown; status?: unknown } | null;
+  const name = String(candidate?.name ?? "").toLowerCase();
+  const message = String(candidate?.message ?? "").toLowerCase();
+  const status = Number(candidate?.status ?? 0);
+  return name === "aborterror" ||
+    status >= 500 ||
+    message.includes("abort") ||
+    message.includes("timeout") ||
+    message.includes("network") ||
+    message.includes("fetch failed");
+}
+
+async function hasVerifiedSessionClaims(supabase: {
+  auth: {
+    getClaims?: () => Promise<{ data?: { claims?: Record<string, unknown> | null } | null }>;
+  };
+}) {
+  const getClaims = supabase.auth.getClaims;
+  if (typeof getClaims !== "function") return false;
+  try {
+    const result = await withTimeout(getClaims.call(supabase.auth), AUTH_CLAIMS_TIMEOUT_MS, "Session claim check");
+    return typeof result.data?.claims?.sub === "string";
+  } catch {
+    return false;
+  }
+}
+
+function unavailableSessionResponse() {
+  return new NextResponse("We could not verify your signed-in session. Please reload this page.", {
+    status: 503,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "retry-after": "5"
+    }
+  });
 }
 
 export async function middleware(request: NextRequest) {
@@ -294,18 +334,29 @@ export async function middleware(request: NextRequest) {
     }
   });
 
+  let needsClaimVerification = false;
   try {
-    const { data } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
+    const { data, error } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
     if (!data.user) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("next", request.nextUrl.pathname);
-      return NextResponse.redirect(loginUrl);
+      if (isTransientAuthFailure(error)) {
+        needsClaimVerification = true;
+      } else {
+        const loginUrl = new URL("/login", request.url);
+        loginUrl.searchParams.set("next", request.nextUrl.pathname);
+        return NextResponse.redirect(loginUrl);
+      }
     }
   } catch (error) {
-    // Middleware is only a fast best-effort gate; the page-level auth check
-    // is authoritative, so a stuck Supabase call here should let the request
-    // through rather than hang until the platform kills the invocation.
-    if (!(error instanceof TimeoutError)) throw error;
+    if (!isTransientAuthFailure(error)) throw error;
+    needsClaimVerification = true;
+  }
+
+  // A transient Auth API failure is not proof that a browser session is
+  // invalid. Verify its signed JWT claims before allowing the request through;
+  // otherwise return a retryable response instead of logging the user out or
+  // treating an unverified request as authenticated.
+  if (needsClaimVerification && !(await hasVerifiedSessionClaims(supabase))) {
+    return unavailableSessionResponse();
   }
 
   if (isPlatformAdminHost && path === "/") {
