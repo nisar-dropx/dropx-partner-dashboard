@@ -21,6 +21,7 @@ import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
 import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityExceptionEventMetadata } from "@/lib/onboarding-identity";
+import { biometricBelongsToPeople, peopleIdentityForDualRole } from "@/lib/workforce-dual-role";
 import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
@@ -351,8 +352,11 @@ export async function createFieldExecutive(formData: FormData) {
       designationName: designation
     });
     assertOnboardingIdentityAllowed(identityEvaluation, table === "workforce");
+    // Second role for someone already in People (e.g. an SSA who also works as
+    // a DA): the Workforce record reuses their People DropX ID and biometric ID.
+    const peopleIdentity = table === "workforce" ? await peopleIdentityForDualRole(companyId, identityEvaluation) : null;
     const workerCategory = config.category;
-    const biometricId = await generateConfiguredBiometricId({
+    const biometricId = peopleIdentity?.biometricId ?? await generateConfiguredBiometricId({
       category: workerCategory,
       companyId,
       designationName: designation,
@@ -361,7 +365,7 @@ export async function createFieldExecutive(formData: FormData) {
     });
     if (biometricId && !/^\d{1,20}$/.test(biometricId)) throw new Error("Biometric enrolment ID must be numeric.");
 
-    const dropxId = await generateConfiguredWorkerId({
+    const dropxId = peopleIdentity?.dropxId ?? await generateConfiguredWorkerId({
       category: workerCategory,
       companyId,
       designationName: designation,
@@ -443,7 +447,7 @@ export async function createFieldExecutive(formData: FormData) {
       }
     }
 
-    if (config.profileType !== "field_executive") {
+    if (config.profileType !== "field_executive" && !(peopleIdentity && await biometricBelongsToPeople(companyId, biometricId))) {
       await syncBiometricEnrolment({
         companyId,
         createdBy: authorization.userId,
@@ -467,7 +471,7 @@ export async function createFieldExecutive(formData: FormData) {
         to_status: "pending",
         actor_user_id: authorization.userId,
         source_portal: applicationSource,
-        metadata: { designation, location_id: locationId, ...identityExceptionEventMetadata(identityEvaluation) }
+        metadata: { designation, location_id: locationId, ...identityExceptionEventMetadata(identityEvaluation), ...(peopleIdentity ? { dual_role_people_profile: { source_type: peopleIdentity.sourceType, source_id: peopleIdentity.sourceId, designation: peopleIdentity.designation, shared_dropx_id: peopleIdentity.dropxId, shared_biometric_id: peopleIdentity.biometricId } } : {}) }
       });
     }
 
@@ -750,11 +754,17 @@ export async function reviewFieldExecutiveProfile(formData: FormData) {
     }
 
     const reviewedAt = new Date().toISOString();
+    // A Workforce second role for an existing person (e.g. an SSA also working
+    // as a DA) needs its identity exception approved to activate.
+    const exceptionFlag = action === "approve" && table === "workforce"
+      ? await supabaseAdmin.from("workforce").select("identity_exception_required").eq("id", id).eq("company_id", companyId).maybeSingle()
+      : null;
     const update = action === "approve"
       ? {
           onboarding_status: "active",
           profile_return_remarks: null,
           profile_returned_at: null,
+          ...(exceptionFlag?.data?.identity_exception_required ? { identity_exception_approved_at: reviewedAt, identity_exception_approved_by: authorization.userId } : {}),
           updated_at: reviewedAt
         }
       : {

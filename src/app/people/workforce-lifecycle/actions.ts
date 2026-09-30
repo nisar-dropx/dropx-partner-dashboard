@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
+import { biometricBelongsToPeople } from "@/lib/workforce-dual-role";
 import { requireCompanyId } from "@/lib/company-scope";
 import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -31,7 +32,7 @@ async function requireScopedApplicant(id: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, full_name, location_id, designation_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status")
+    .select("id, full_name, location_id, designation_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status, identity_exception_required")
     .eq("company_id", companyId)
     .eq("id", id)
     .maybeSingle();
@@ -169,10 +170,15 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
       provider_employee_id: providerId || null,
       is_active: true,
       lifecycle_status: "active",
+      // Approving this onboarding also approves a second role for someone who
+      // already exists (e.g. an SSA who also works as a DA) - the database
+      // refuses to activate it without this explicit approval.
+      ...(applicant.identity_exception_required ? { identity_exception_approved_at: reviewedAt, identity_exception_approved_by: authorization.userId } : {}),
       updated_at: reviewedAt
     }).eq("company_id", companyId).eq("id", id);
     if (approval.error) throw new Error(approval.error.message);
-    try {
+    // A dual-role DA shares the People biometric ID; the enrolment stays with People.
+    if (!await biometricBelongsToPeople(companyId, applicant.biometric_id)) try {
       await syncBiometricEnrolment({
         accountId: id,
         companyId,

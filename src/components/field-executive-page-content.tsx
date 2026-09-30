@@ -61,6 +61,8 @@ type DesignationCategoryFilter = "workforce" | "contractors" | "vendors" | "work
 
 type ExecutiveRow = {
   id: string;
+  /** Dual role: this person's People designation (same DropX ID), e.g. SSA for an SSA who also works as a DA. */
+  people_designation?: string | null;
   dropx_id: string | null;
   full_name: string;
   mobile_country_code?: string | null;
@@ -305,6 +307,7 @@ function FieldExecutiveDetails({
           <ExecutiveDetail label="ID" value={executive.dropx_id} />
           <ExecutiveDetail label="Full name" value={executive.full_name} />
           <ExecutiveDetail label="Designation" value={executive.designation} />
+          {executive.people_designation ? <ExecutiveDetail label="Also in People as" value={`${executive.people_designation} (same DropX ID and biometric ID)`} /> : null}
           <ExecutiveDetail label="Date of join" value={formatDashboardDate(executive.date_of_join)} />
           <ExecutiveDetail label="Location" value={location?.station_name || location?.station_code} />
           <ExecutiveDetail label="Status" value={fieldExecutiveStatus(executive, canonicalWorkforce)} />
@@ -785,6 +788,26 @@ async function loadFieldExecutiveData(
   const visibleExecutiveRows = ((executivesResult.data ?? []) as unknown as ExecutiveRow[])
     .filter((executive) => authorization.hasAllLocationAccess || allowedLocationIds.has(executive.location_id))
     .filter((executive) => ownerAccess || allowedDesignationNames.has(String(executive.designation ?? "")));
+  // Dual role (e.g. SSA in People + DA in Workforce, same DropX ID): show both designations.
+  if (targetRegister === "workforce" && supabaseAdmin) {
+    const ids = [...new Set(visibleExecutiveRows.map((row) => row.dropx_id).filter((value): value is string => Boolean(value)))];
+    if (ids.length) {
+      const [peopleContractors, peopleEmployees] = await Promise.all([
+        supabaseAdmin.from("contractors").select("dropx_id,designation").eq("company_id", companyId).in("dropx_id", ids).is("deleted_at", null).eq("is_active", true),
+        supabaseAdmin.from("employees").select("employee_code,designations(name)").eq("company_id", companyId).in("employee_code", ids).is("deleted_at", null).eq("is_active", true)
+      ]);
+      const peopleDesignation = new Map<string, string>();
+      for (const row of peopleContractors.data ?? []) if (row.dropx_id && row.designation) peopleDesignation.set(String(row.dropx_id).toUpperCase(), String(row.designation));
+      for (const row of peopleEmployees.data ?? []) {
+        const designation = firstRelation(row.designations as unknown as { name?: string } | Array<{ name?: string }> | null);
+        if (row.employee_code && designation?.name) peopleDesignation.set(String(row.employee_code).toUpperCase(), designation.name);
+      }
+      for (const row of visibleExecutiveRows) {
+        const other = row.dropx_id ? peopleDesignation.get(row.dropx_id.toUpperCase()) : undefined;
+        if (other && other !== row.designation) row.people_designation = other;
+      }
+    }
+  }
   const partnerStates = targetRegister === "workforce" && supabaseAdmin ? await loadPartnerOnboardingStates(supabaseAdmin, companyId, visibleExecutiveRows.map(row=>row.id)) : new Map();
   const executives = visibleExecutiveRows
     .map((executive) => {
@@ -800,7 +823,7 @@ async function loadFieldExecutiveData(
       location: location?.station_code || "-",
       provider: firstRelation(location?.providers)?.name || "-",
       model: model?.code || model?.name || "-",
-      designation: executive.designation || "-",
+      designation: executive.people_designation ? `${executive.designation || "-"} + ${executive.people_designation} (People)` : executive.designation || "-",
       canEdit: canAccessDesignationPortal(
         designations.find((designation) => designation.name === executive.designation),
         accessSurface,
