@@ -342,6 +342,28 @@ export async function GET(request: NextRequest) {
 
     responseRows.sort((left, right) => left.date.localeCompare(right.date));
 
+    // Regularization window (HRMS > Attendance policy): the rolling backdate
+    // window plus the "month closes on day N of next month" rule. Same rule as
+    // hr_regularization_window_open, which also guards the insert.
+    const windowSettings = await supabaseAdmin.from("hr_company_settings")
+      .select("regularization_max_backdate_days,regularization_close_day").eq("company_id", worker.companyId).maybeSingle();
+    const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    const backdateDays = Number(windowSettings.data?.regularization_max_backdate_days ?? 30);
+    const closeDay = windowSettings.data?.regularization_close_day == null ? null : Number(windowSettings.data.regularization_close_day);
+    const earliest = new Date(`${todayIst}T00:00:00Z`);
+    earliest.setUTCDate(earliest.getUTCDate() - backdateDays);
+    const earliestDate = earliest.toISOString().slice(0, 10);
+    const closesOn = (date: string) => {
+      if (closeDay === null) return null;
+      const [year, month] = date.split("-").map(Number);
+      return new Date(Date.UTC(year, month, closeDay)).toISOString().slice(0, 10);
+    };
+    const withWindow = responseRows.map((row) => {
+      const closeDate = closesOn(row.date);
+      const open = row.date <= todayIst && row.date >= earliestDate && (!closeDate || todayIst <= closeDate);
+      return { ...row, regularizationOpen: open, regularizationClosesOn: closeDate };
+    });
+
     return NextResponse.json({
       month: range.label,
       summary: {
@@ -355,7 +377,7 @@ export async function GET(request: NextRequest) {
         earlyOut,
         misPunch
       },
-      rows: responseRows
+      rows: withWindow
     });
   } catch (error) {
     return errorResponse(error, "Unable to load attendance.");

@@ -18045,3 +18045,5 @@ img.dx-selfie-live {
 .dx-announcement-file-note { display: grid; justify-items: center; gap: 6px; padding: 28px 18px; color: #475467; text-align: center; font-size: 12px; }
 .dx-announcement-file-note svg { width: 30px; height: 30px; color: #6941c6; }
 .dx-announcement-file-note strong { color: #101828; font-size: 14px; }
+
+.dx-regularization-closed { display: block; width: 100%; color: #b54708; font-size: 12px; line-height: 1.4; }

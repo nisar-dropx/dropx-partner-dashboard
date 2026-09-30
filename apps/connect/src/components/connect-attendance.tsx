@@ -59,6 +59,9 @@ type Row = AttendanceInsightRow & {
   punchCount: number;
   remark: string;
   regularization: Regularization | null;
+  /** False once the regularization window for this day has closed (HRMS attendance policy). */
+  regularizationOpen?: boolean;
+  regularizationClosesOn?: string | null;
 };
 type Attendance = {
   month: string;
@@ -541,7 +544,11 @@ export function ConnectAttendance({ account, active = true }: { account: Account
               && selected.workMode !== "business_trip"
               && !["week-off", "paid-leave", "leave"].includes(selectedInsight.calendarClass)
               && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
+              && selected.regularizationOpen !== false
               ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button>
+              : null}
+            {selected.regularizationOpen === false && selected.regularization?.status !== "pending" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
+              ? <small className="dx-regularization-closed">Regularization closed{selected.regularizationClosesOn ? ` on ${new Date(`${selected.regularizationClosesOn}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}` : ""} for this day. Contact HR if it needs correcting.</small>
               : null}
           </footer>
         </div> : null}
