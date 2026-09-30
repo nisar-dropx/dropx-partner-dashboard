@@ -48,12 +48,19 @@ export async function saveApprovalSteps(formData: FormData) {
   if (roleIds.length) {
     const rolesResult = await supabaseAdmin
       .from("user_roles")
-      .select("id")
+      .select("id, code")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .in("id", roleIds);
     if (rolesResult.error) throw new Error(rolesResult.error.message);
     if ((rolesResult.data ?? []).length !== roleIds.length) throw new Error("Every approval candidate must be an active role.");
+
+    const financeApprovalCodes = (rolesResult.data ?? [])
+      .filter((role) => /(^|_)(FIN|FINMGR|FINANCE|ACCOUNT|ACCOUNTS)(_|$)/.test(String(role.code ?? "").toUpperCase()))
+      .map((role) => role.code);
+    if (financeApprovalCodes.length) {
+      throw new Error("Finance and Accounts roles process payments and cannot be approval candidates.");
+    }
 
     const editableRoleIds = await roleIdsWithPageEditAccess(companyId, roleIds, "payment_approvals");
     const unauthorizedRoleIds = roleIds.filter((roleId) => !editableRoleIds.has(roleId));
