@@ -66,7 +66,7 @@ export type AuthorizationContext = {
 const noPermission: PagePermission = { canView: false, canAdd: false, canEdit: false };
 
 const groupedParentPermissions: Record<string, string[]> = {
-  fleet: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"],
+  fleet: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports", "fleet_audits", "fleet_settings", "fleet_masters"],
   capacity: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"],
   cod: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"],
   ops_pulse: [
@@ -123,6 +123,9 @@ const groupedParentPermissions: Record<string, string[]> = {
     "fleet_live_gps",
     "fleet_maintenance",
     "fleet_reports",
+    "fleet_audits",
+    "fleet_settings",
+    "fleet_masters",
     "master_locations",
     "master_providers",
     "master_models",
@@ -187,7 +190,7 @@ function inheritGroupedParentPermissions(permissions: Record<string, PagePermiss
 }
 
 const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string) => {
-  const requiredCodes = ["people_all", "people_review", "people_exceptions", "asset_audits", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "performance_review", "performance_review_cluster_filter", "performance_review_status", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold", "ops_workforce_losses", "ops_workforce_mileage", "ops_rostering", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "edd_dashboard", "station_edd", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master", "finance_pricing", "finance_rent", "finance_assets", "finance_revenue", "finance_pnl"];
+  const requiredCodes = ["people_all", "people_review", "people_exceptions", "asset_audits", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "performance_review", "performance_review_cluster_filter", "performance_review_status", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold", "ops_workforce_losses", "ops_workforce_mileage", "ops_rostering", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "edd_dashboard", "station_edd", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master", "fleet_audits", "fleet_settings", "fleet_masters", "finance_pricing", "finance_rent", "finance_assets", "finance_revenue", "finance_pnl"];
   const { data, error } = await supabaseAdmin!
     .from("app_pages")
     .select("code")

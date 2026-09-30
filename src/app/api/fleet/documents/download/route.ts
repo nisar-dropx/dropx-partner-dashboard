@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { type AuthorizationContext, getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -26,6 +26,13 @@ export async function GET(request: Request) {
     const asDownload = searchParams.get("download") === "1";
     if (!vehicleNo || !documentType) {
       return NextResponse.json({ error: "Vehicle and document type are required." }, { status: 400 });
+    }
+    const stationCodes = await resolveFleetLocationAccess(authorization, companyId);
+    if (stationCodes) {
+      const vehicle = await supabaseAdmin.from("fleet_vehicles").select("station_code").eq("company_id", companyId).eq("vehicle_no", vehicleNo).maybeSingle();
+      if (vehicle.error) throw new Error(vehicle.error.message);
+      if (!vehicle.data) return NextResponse.json({ error: "Vehicle not found." }, { status: 404 });
+      if (!stationCodes.includes(normalizeText(vehicle.data.station_code).toUpperCase())) return NextResponse.json({ error: "This vehicle is not allocated to your user." }, { status: 403 });
     }
 
     const { data, error } = await supabaseAdmin
@@ -57,6 +64,14 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load document." }, { status: 500 });
   }
+}
+
+async function resolveFleetLocationAccess(authorization: AuthorizationContext, companyId: string) {
+  if (authorization.isMasterOwner || authorization.hasAllLocationAccess) return null;
+  if (!supabaseAdmin || !authorization.locationScopeIds.length) return [];
+  const { data, error } = await supabaseAdmin.from("stations").select("station_code").eq("company_id", companyId).eq("is_active", true).in("id", authorization.locationScopeIds);
+  if (error) return [];
+  return Array.from(new Set((data ?? []).map((row) => normalizeText(row.station_code).toUpperCase()).filter(Boolean)));
 }
 
 function normalizeText(value: unknown) {

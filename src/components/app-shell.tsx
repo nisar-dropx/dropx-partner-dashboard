@@ -1,4 +1,5 @@
 import { OpsPulseBrand } from "@/components/ops-pulse-brand";
+import { FleetBrand } from "@/components/fleet-brand";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { signOut } from "@/app/login/actions";
@@ -13,9 +14,9 @@ import { SidebarNav } from "@/components/sidebar-nav";
 import { UserMenu } from "@/components/user-menu";
 import { OwnerPreviewSwitcher } from "@/components/owner-preview-switcher";
 import { redirect } from "next/navigation";
-import { opsAccessPageCodes } from "@/lib/access-surface";
+import { fleetAccessPageCodes, opsAccessPageCodes } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
-import { firstAllowedHref, navItems } from "@/lib/app-navigation";
+import { firstAllowedHref, navItems, type NavItem } from "@/lib/app-navigation";
 import { requireCompanyId } from "@/lib/company-scope";
 import { financeNavItems, hasFinancePortalAccess } from "@/lib/finance/navigation";
 import { isFinanceHostName } from "@/lib/finance/surface";
@@ -29,6 +30,21 @@ import { hasPeoplePortalAccess, peopleNavItems } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+const fleetAdminNavItems: NavItem[] = [
+  { code: "fleet_action_center", label: "Command Center", href: "/fleet-control?section=overview", icon: "#" },
+  { code: "fleet_vehicle_view", label: "Vehicles", href: "/fleet-control?section=vehicles", icon: "V" },
+  { code: "fleet_date_view", label: "Vehicle Documents", href: "/fleet-control?section=documents", icon: "D" },
+  { code: "fleet_tracking", label: "Tracking & Efficiency", href: "/fleet-control?section=tracking", icon: "T" },
+  { code: "fleet_maintenance", label: "Service History", href: "/fleet-control?section=service", icon: "S" },
+  { code: "fleet_audits", label: "Vehicle Audits", href: "/fleet-control?section=audits", icon: "A" },
+  { code: "payment_approvals", label: "Vehicle Payments", href: "/fleet-control?section=approvals", icon: "P" },
+  { code: "fleet_reports", label: "Ad-hoc Capacity", href: "/fleet-control?section=adhoc", icon: "+" },
+  { code: "users", label: "Users", href: "/users?section=users", icon: "U" },
+  { code: "users", label: "User Roles", href: "/users?section=roles", icon: "R" },
+  { code: "fleet_settings", label: "Settings", href: "/fleet-control?section=settings", icon: "S" },
+  { code: "fleet_masters", label: "Masters", href: "/fleet-control?section=masters", icon: "M" }
+];
+
 export async function AppShell({ children, active, pageCode }: { children: ReactNode; active: string; pageCode?: string }) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
@@ -36,15 +52,18 @@ export async function AppShell({ children, active, pageCode }: { children: React
   const isOpsHost = host === "ops.dropxlogistics.com" || host.startsWith("ops-");
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
+  const isFleetHost = host === "fleet.dropxlogistics.com" || host.startsWith("fleet-");
   const hasCurrentPortalAccess = isOpsHost
     ? isCompanyOwner(authorization) || opsAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
     : isPeopleHost
       ? hasPeoplePortalAccess(authorization)
       : isFinanceHost
         ? hasFinancePortalAccess(authorization)
-        : Boolean(firstAllowedHref(authorization));
+        : isFleetHost
+          ? isCompanyOwner(authorization) || fleetAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
+          : Boolean(firstAllowedHref(authorization));
   if (!hasCurrentPortalAccess) {
-    redirect(`/unauthorized?page=${isOpsHost ? "ops_portal" : isPeopleHost ? "people_portal" : isFinanceHost ? "finance_portal" : "dashboard_portal"}&reason=access`);
+    redirect(`/unauthorized?page=${isOpsHost ? "ops_portal" : isPeopleHost ? "people_portal" : isFinanceHost ? "finance_portal" : isFleetHost ? "fleet_portal" : "dashboard_portal"}&reason=access`);
   }
   const opsAppUrl = process.env.OPS_APP_URL?.trim();
   const opsLocationsResult = isOpsHost
@@ -61,7 +80,9 @@ export async function AppShell({ children, active, pageCode }: { children: React
       ? peopleNavItems
       : isFinanceHost
         ? financeNavItems
-        : navItems.map((item) => item.code === "ops_pulse" && opsAppUrl ? { ...item, href: opsAppUrl } : item);
+        : isFleetHost
+          ? fleetAdminNavItems
+          : navItems.map((item) => item.code === "ops_pulse" && opsAppUrl ? { ...item, href: opsAppUrl } : item);
   let shellNavItems = baseShellNavItems;
   if (isPeopleHost && supabaseAdmin && authorization.companyId) {
     const categoryResult = await supabaseAdmin
@@ -135,18 +156,18 @@ export async function AppShell({ children, active, pageCode }: { children: React
     <AppShellFrame
       desktopActions={topActions}
       mobileActions={topActions}
-      mobileBrand={isOpsHost ? <OpsPulseBrand /> : undefined}
+      mobileBrand={isOpsHost ? <OpsPulseBrand /> : isFleetHost ? <FleetBrand compact /> : undefined}
       sidebar={(
         <aside className="sidebar">
           <div className="brand">
-            <img className="brand-logo" src="/dropx-logo.png" alt="DropX" />
-            {isOpsHost ? (
+            {isFleetHost ? <FleetBrand compact /> : <img className="brand-logo" src="/dropx-logo.png" alt="DropX" />}
+            {!isFleetHost && isOpsHost ? (
               <OpsPulseBrand />
-            ) : isPeopleHost ? (
+            ) : !isFleetHost && isPeopleHost ? (
               <div className="people-brand-lockup">
                 <strong>People</strong>
               </div>
-            ) : isFinanceHost ? (
+            ) : !isFleetHost && isFinanceHost ? (
               <div className="people-brand-lockup"><strong>Finance</strong></div>
             ) : null}
           </div>
@@ -161,7 +182,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
         </aside>
       )}
     >
-      <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : isPeopleHost ? "DropX People" : isFinanceHost ? "DropX Finance" : "DropX Dashboard"} />
+      <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : isPeopleHost ? "DropX People" : isFinanceHost ? "DropX Finance" : isFleetHost ? "DropX Fleet" : "DropX Dashboard"} />
       <InboxNotificationListener enabled={inboxNotificationsEnabled} />
       {authorization.isPreview ? <div className="owner-preview-banner"><strong>Read-only user preview</strong><span>You are viewing this portal as {authorization.fullName}. Exit preview to make changes.</span></div> : null}
       {children}

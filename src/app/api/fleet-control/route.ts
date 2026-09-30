@@ -16,7 +16,7 @@ async function access() {
   if (!authorization) return { error: NextResponse.json({ error: "Login required." }, { status: 401 }) };
   const companyId = requireCompanyId(authorization);
   const canManageFleet = authorization.isMasterOwner || hasPermission(authorization, "fleet_maintenance", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
-  const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "app_settings", "edit") || hasPermission(authorization, "users", "edit");
+  const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit") || hasPermission(authorization, "app_settings", "edit") || hasPermission(authorization, "users", "edit");
   return { authorization, companyId, canManageFleet, canManageSettings };
 }
 

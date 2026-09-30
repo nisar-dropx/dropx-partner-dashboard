@@ -21,6 +21,7 @@ export default async function FleetControlPage({ searchParams }: { searchParams?
   const companyId = requireCompanyId(authorization);
   const canEnter = hasPermission(authorization, "fleet_action_center", "access")
     || hasPermission(authorization, "fleet_vehicle_view", "access")
+    || hasPermission(authorization, "fleet_date_view", "access")
     || hasPermission(authorization, "payment_approvals", "access")
     || await hasActiveFleetMembership(companyId, authorization.userId);
   if (!canEnter) redirect("/unauthorized?page=fleet_action_center&reason=access");

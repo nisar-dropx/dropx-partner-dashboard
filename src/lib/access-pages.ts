@@ -21,13 +21,16 @@ export const accessPages = [
   { code: "fleet", name: "Fleet", sort_order: 45 },
   { code: "fleet_action_center", name: "Action Center", sort_order: 46 },
   { code: "fleet_vehicle_view", name: "Vehicles", sort_order: 47 },
-  { code: "fleet_date_view", name: "Documents", sort_order: 48 },
+  { code: "fleet_date_view", name: "Vehicle Documents", sort_order: 48 },
   { code: "fleet_station_view", name: "Station View", sort_order: 50 },
   { code: "fleet_tracking", name: "Tracking", sort_order: 51 },
   { code: "fleet_fuel_log", name: "Fuel Log", sort_order: 52 },
   { code: "fleet_live_gps", name: "Live GPS", sort_order: 53 },
   { code: "fleet_maintenance", name: "Maintenance", sort_order: 54 },
   { code: "fleet_reports", name: "Fleet Report", sort_order: 55 },
+  { code: "fleet_audits", name: "Vehicle Audits", sort_order: 56 },
+  { code: "fleet_settings", name: "Fleet Settings", sort_order: 57 },
+  { code: "fleet_masters", name: "Fleet Masters", sort_order: 58 },
   { code: "imports", name: "Report Imports", sort_order: 70 },
   { code: "ops_pulse", name: "Ops Pulse", sort_order: 84 },
   { code: "performance", name: "Performance", sort_order: 84 },
@@ -501,7 +504,10 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     "fleet_fuel_log",
     "fleet_live_gps",
     "fleet_maintenance",
-    "fleet_reports"
+    "fleet_reports",
+    "fleet_audits",
+    "fleet_settings",
+    "fleet_masters"
   ], false);
   if (pageTopologyChanged) {
     const categoryCodes = categoryPages.map((page) => page.code);

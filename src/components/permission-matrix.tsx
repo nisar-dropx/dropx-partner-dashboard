@@ -37,7 +37,7 @@ const dashboardGroups: PermissionGroup[] = [
   },
   { key: "executive_id_onboarding", label: "Executive ID Onboarding", codes: ["executive_id_onboarding"] },
   { key: "provider_mapping", label: "ID Mapping", codes: ["provider_mapping"] },
-  { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"], hiddenCodes: ["fleet"] },
+  { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports", "fleet_audits", "fleet_settings", "fleet_masters"], hiddenCodes: ["fleet"] },
   { key: "imports", label: "Report Imports", codes: ["imports"] },
   { key: "inbox", label: "Inbox", codes: ["inbox"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
@@ -63,7 +63,7 @@ const opsGroups: PermissionGroup[] = [
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_reports"], hiddenCodes: ["payments"] },
   { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },
-  { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"], hiddenCodes: ["fleet"] },
+  { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports", "fleet_audits", "fleet_settings", "fleet_masters"], hiddenCodes: ["fleet"] },
   { key: "ops_reports", label: "Reports", codes: ["ops_reports"] },
   { key: "ops_masters", label: "Ops Masters", codes: ["cod_master", "master_locations", "master_providers", "master_models", "performance_master", "capacity_master", "service_network_master"] },
   { key: "users", label: "Users & Access", codes: ["users"] }
@@ -85,6 +85,14 @@ const peopleGroups: PermissionGroup[] = [
   { key: "users", label: "Users & Access", codes: ["users"] },
   { key: "master_data", label: "People Masters", codes: ["master_locations", "master_providers", "payment_methods", "master_payment_banks", "master_payment_heads", "master_contacts", "workforce_categories", "workforce_whatsapp", "designations", "biometric_devices", "master_documents", "master_imports"], hiddenCodes: ["master_data"] },
   { key: "settings", label: "Settings", codes: ["app_settings"] }
+];
+
+const fleetGroups: PermissionGroup[] = [
+  { key: "fleet_workspace", label: "Fleet Workspace", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports", "fleet_audits"], hiddenCodes: ["fleet"] },
+  { key: "fleet_payments", label: "Vehicle Payments", codes: ["payment_approvals", "payment_reports"] },
+  { key: "fleet_users", label: "Users and User Roles", codes: ["users"] },
+  { key: "fleet_settings", label: "Settings", codes: ["fleet_settings"] },
+  { key: "fleet_masters", label: "Masters", codes: ["fleet_masters"] }
 ];
 
 function emptyPermissionState(pages: PermissionPage[]) {
@@ -115,7 +123,7 @@ export function PermissionMatrix({
   });
 
   const groups = useMemo(() => {
-    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : dashboardGroups;
+    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : surface === "fleet" ? fleetGroups : dashboardGroups;
     const definedGroups = definitions.map((definition) => ({
       ...definition,
       pages: pages.filter((page) => definition.codes.includes(page.code) || definition.matches?.(page)),

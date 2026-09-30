@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  BookOpenCheck,
   Check,
   CircleDollarSign,
   ClipboardCheck,
@@ -27,7 +28,7 @@ import {
   Settings,
   ShieldCheck,
   Truck,
-  UserCog,
+  Users,
   Video,
   Wrench,
   X
@@ -36,22 +37,31 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PaymentApprovalActionForm } from "@/components/payment-approval-action-form";
 import { FleetBrand } from "@/components/fleet-brand";
 import { FleetAdHocCapacity } from "@/components/fleet-adhoc-capacity";
+import { FleetDocumentsWorkspace } from "@/components/fleet-documents-workspace";
 import { FleetMultiSelect, type FleetFilterOption } from "@/components/fleet-multi-select";
 import { FleetTrackingWorkspace } from "@/components/fleet-tracking-workspace";
+import { SearchableSelect } from "@/components/searchable-select";
 import type { FleetAudit, FleetAuditSuggestion, FleetControlData, FleetControlPayment, FleetControlVehicle } from "@/lib/fleet-control";
 
-type Section = "overview" | "vehicles" | "tracking" | "service" | "audits" | "approvals" | "adhoc" | "settings";
+type Section = "overview" | "vehicles" | "documents" | "tracking" | "service" | "audits" | "approvals" | "adhoc" | "settings" | "masters";
 
-const sections: Array<{ key: Section; label: string; icon: typeof LayoutDashboard }> = [
+const workspaceSections: Array<{ key: Section; label: string; icon: typeof LayoutDashboard }> = [
   { key: "overview", label: "Command Center", icon: LayoutDashboard },
   { key: "vehicles", label: "Vehicles", icon: Truck },
+  { key: "documents", label: "Vehicle Documents", icon: FileCheck2 },
   { key: "tracking", label: "Tracking & Efficiency", icon: Gauge },
   { key: "service", label: "Service History", icon: History },
   { key: "audits", label: "Vehicle Audits", icon: ClipboardCheck },
   { key: "approvals", label: "Vehicle Payments", icon: CircleDollarSign },
-  { key: "adhoc", label: "Ad-hoc Capacity", icon: Activity },
-  { key: "settings", label: "Settings & Access", icon: Settings }
+  { key: "adhoc", label: "Ad-hoc Capacity", icon: Activity }
 ];
+
+const administrationSections: Array<{ key: Section; label: string; icon: typeof LayoutDashboard }> = [
+  { key: "settings", label: "Settings", icon: Settings },
+  { key: "masters", label: "Masters", icon: BookOpenCheck }
+];
+
+const sections = [...workspaceSections, ...administrationSections];
 
 const validSections = new Set(sections.map((section) => section.key));
 const statusOptions = [
@@ -156,7 +166,10 @@ export function FleetControlDashboard({
   returnAction: (formData: FormData) => Promise<void>;
 }) {
   const router = useRouter();
-  const [section, setSection] = useState<Section>(validSections.has(initialSection as Section) ? initialSection as Section : "overview");
+  const visibleSectionSet = new Set(data.capabilities.visibleSections as Section[]);
+  const firstVisibleSection = sections.find((item) => visibleSectionSet.has(item.key))?.key ?? "overview";
+  const requestedSection = validSections.has(initialSection as Section) ? initialSection as Section : firstVisibleSection;
+  const [section, setSection] = useState<Section>(visibleSectionSet.has(requestedSection) ? requestedSection : firstVisibleSection);
   const [mobileNav, setMobileNav] = useState(false);
   const [query, setQuery] = useState("");
   const [stations, setStations] = useState<string[]>([]);
@@ -172,7 +185,11 @@ export function FleetControlDashboard({
   const [auditSort, setAuditSort] = useState("date_desc");
   const [paymentSort, setPaymentSort] = useState("date_desc");
   const [vehicles, setVehicles] = useState(data.vehicles);
+  const [movements, setMovements] = useState(data.movements);
   const [selectedVehicle, setSelectedVehicle] = useState<FleetControlVehicle | null>(null);
+  const [placementStation, setPlacementStation] = useState("");
+  const [placementReason, setPlacementReason] = useState("");
+  const [placementHistoryOpen, setPlacementHistoryOpen] = useState(true);
   const [selectedPayment, setSelectedPayment] = useState<FleetControlPayment | null>(() => data.payments.find((payment) => payment.id === initialRequestId) ?? null);
   const [paymentDetail, setPaymentDetail] = useState<FleetPaymentDetail | null>(null);
   const [paymentDetailError, setPaymentDetailError] = useState("");
@@ -197,11 +214,19 @@ export function FleetControlDashboard({
   useEffect(() => {
     const updateFromUrl = () => {
       const value = new URLSearchParams(window.location.search).get("section") as Section | null;
-      setSection(value && validSections.has(value) ? value : "overview");
+      setSection(value && validSections.has(value) && visibleSectionSet.has(value) ? value : firstVisibleSection);
     };
     window.addEventListener("popstate", updateFromUrl);
     return () => window.removeEventListener("popstate", updateFromUrl);
   }, []);
+
+  useEffect(() => {
+    if (!selectedVehicle) return;
+    setPlacementStation(selectedVehicle.stationCode);
+    setPlacementReason("");
+  }, [selectedVehicle?.vehicleNo]);
+
+  useEffect(() => setMovements(data.movements), [data.movements]);
 
   useEffect(() => {
     if (!selectedPayment) { setPaymentDetail(null); setPaymentDetailError(""); return; }
@@ -219,6 +244,7 @@ export function FleetControlDashboard({
   }, [selectedPayment]);
 
   function changeSection(next: Section) {
+    if (!visibleSectionSet.has(next)) return;
     setSection(next);
     setMobileNav(false);
     const params = new URLSearchParams(window.location.search);
@@ -253,7 +279,7 @@ export function FleetControlDashboard({
   const underService = vehicles.filter((vehicle) => ["under_service", "breakdown"].includes(vehicle.status)).length;
   const availability = vehicles.length ? Math.round((active / vehicles.length) * 100) : 0;
   const pendingPayments = data.payments.filter((payment) => payment.canApprove);
-  const attentionVehicles = vehicles.filter((vehicle) => vehicle.nextDocumentDays != null && vehicle.nextDocumentDays <= 30);
+  const attentionVehicles = vehicles.filter((vehicle) => (vehicle.nextDocumentDays != null && vehicle.nextDocumentDays <= 30) || data.documentTypes.some((type) => !data.documents.some((document) => document.vehicleNo === vehicle.vehicleNo && document.documentType === type.value)));
   const todayAdHoc = data.adHocRows.filter((row) => row.date === data.today);
 
   async function updateVehicleStatus(vehicle: FleetControlVehicle, apiStatus: string, nextKey: string, nextLabel: string) {
@@ -276,6 +302,24 @@ export function FleetControlDashboard({
     } finally {
       setSavingVehicle(null);
     }
+  }
+
+  async function updateVehiclePlacement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedVehicle || !placementStation || placementStation === selectedVehicle.stationCode) return;
+    const previousStation = selectedVehicle.stationCode;
+    setSavingVehicle(selectedVehicle.vehicleNo); setFlash(null);
+    try {
+      const response = await fetch("/api/fleet/vehicles", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vehicle_no: selectedVehicle.vehicleNo, station_code: placementStation, transfer_date: data.today, transfer_reason: placementReason }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Vehicle placement could not be updated.");
+      setVehicles((current) => current.map((vehicle) => vehicle.id === selectedVehicle.id ? { ...vehicle, stationCode: placementStation } : vehicle));
+      setSelectedVehicle((current) => current ? { ...current, stationCode: placementStation } : current);
+      setMovements((current) => [{ id: `local-${Date.now()}`, vehicleId: selectedVehicle.id, vehicleNo: selectedVehicle.vehicleNo, fromStation: previousStation, toStation: placementStation, reason: placementReason || "Placement changed in Fleet", movedAt: new Date().toISOString(), movedBy: data.operator.name }, ...current]);
+      setFlash({ type: "notice", text: `${selectedVehicle.vehicleNo} moved from ${previousStation} to ${placementStation}.` });
+      setPlacementReason(""); router.refresh();
+    } catch (error) { setFlash({ type: "error", text: error instanceof Error ? error.message : "Vehicle placement could not be updated." }); }
+    finally { setSavingVehicle(null); }
   }
 
   async function createVehicle(event: FormEvent<HTMLFormElement>) {
@@ -346,10 +390,19 @@ export function FleetControlDashboard({
         <div className="fc-brand"><FleetBrand compact /></div>
         <div className="fc-nav-label">Workspace</div>
         <nav className="fc-nav">
-          {sections.map((item) => {
+          {workspaceSections.filter((item) => visibleSectionSet.has(item.key)).map((item) => {
             const Icon = item.icon;
             const badge = item.key === "approvals" && pendingPayments.length ? pendingPayments.length : item.key === "audits" && data.counts.auditsDue ? data.counts.auditsDue : item.key === "adhoc" && todayAdHoc.length ? todayAdHoc.length : null;
             return <button className={section === item.key ? "active" : ""} key={item.key} onClick={() => changeSection(item.key)} type="button"><Icon size={18} /><span>{item.label}</span>{badge ? <em>{badge}</em> : null}</button>;
+          })}
+        </nav>
+        <div className="fc-nav-label fc-nav-label-admin">Administration</div>
+        <nav className="fc-nav">
+          {data.capabilities.canAccessUsers ? <a href="/users?section=users"><Users size={18} /><span>Users</span></a> : null}
+          {data.capabilities.canAccessUsers ? <a href="/users?section=roles"><ShieldCheck size={18} /><span>User Roles</span></a> : null}
+          {administrationSections.filter((item) => visibleSectionSet.has(item.key)).map((item) => {
+            const Icon = item.icon;
+            return <button className={section === item.key ? "active" : ""} key={item.key} onClick={() => changeSection(item.key)} type="button"><Icon size={18} /><span>{item.label}</span></button>;
           })}
         </nav>
         <div className="fc-sidebar-spacer" />
@@ -424,7 +477,7 @@ export function FleetControlDashboard({
               </article>
 
               <article className="fc-panel fc-doc-panel">
-                <div className="fc-panel-head"><div><span className="fc-eyebrow">Compliance</span><h2>Documents to renew</h2></div><button onClick={() => changeSection("vehicles")} type="button">Vehicle master <ArrowRight size={15} /></button></div>
+                <div className="fc-panel-head"><div><span className="fc-eyebrow">Compliance</span><h2>Documents to renew</h2></div><button onClick={() => changeSection("documents")} type="button">Open documents <ArrowRight size={15} /></button></div>
                 <div className="fc-doc-list">
                   {attentionVehicles.slice(0, 5).map((vehicle) => <button key={vehicle.vehicleNo} onClick={() => { setSelectedVehicle(vehicle); changeSection("vehicles"); }} type="button"><span className={vehicle.nextDocumentDays != null && vehicle.nextDocumentDays < 0 ? "overdue" : "due"}><FileCheck2 size={17} /></span><div><strong>{vehicle.vehicleNo}</strong><small>{documentMessage(vehicle)}</small></div><b>{vehicle.stationCode}</b></button>)}
                   {!attentionVehicles.length ? <div className="fc-empty compact"><FileCheck2 size={30} /><strong>Documents are in order</strong><p>No expiry falls within the next 30 days.</p></div> : null}
@@ -445,6 +498,8 @@ export function FleetControlDashboard({
               {!filteredVehicles.length ? <div className="fc-empty"><Search size={32} /><strong>No matching vehicle</strong><p>Change the search or vehicle placement filter.</p></div> : null}
             </div>
           </section> : null}
+
+          {section === "documents" ? <FleetDocumentsWorkspace data={data} vehicles={vehicles} /> : null}
 
           {section === "service" ? <section className="fc-section">
             <div className="fc-section-head"><div><span className="fc-eyebrow">Maintenance lifecycle</span><h1>Service history</h1><p>Every repair, workshop bill, service due point and vehicle downtime in one timeline.</p></div>{data.capabilities.canManageFleet ? <button className="fc-button primary" onClick={() => setServiceModal(true)} type="button"><Plus size={17} /> Record service</button> : null}</div>
@@ -500,16 +555,29 @@ export function FleetControlDashboard({
           {section === "adhoc" ? <section className="fc-section"><FleetAdHocCapacity rows={data.adHocRows} stationOptions={data.stationOptions} today={data.today} /></section> : null}
 
           {section === "settings" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Administration</span><h1>Settings & access</h1><p>Control audit policy, checklist masters, designation access and Fleet integrations.</p></div></div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Administration</span><h1>Settings</h1><p>Control Fleet policy, automated reminders and connected vehicle data.</p></div></div>
             <div className="fc-settings-grid"><article className="fc-panel fc-settings-card"><div className="fc-panel-head"><div><span className="fc-eyebrow">Fleet policy</span><h2>Audit and service rules</h2></div><Settings size={20} /></div><form className="fc-settings-form" onSubmit={submitSettings}><label><span>Routine audit cadence</span><div><input defaultValue={data.settings.defaultAuditCadenceDays} min="1" name="defaultAuditCadenceDays" type="number" /><small>days</small></div></label><label><span>Document warning</span><div><input defaultValue={data.settings.documentWarningDays} min="1" name="documentWarningDays" type="number" /><small>days</small></div></label><label><span>Service warning</span><div><input defaultValue={data.settings.serviceWarningDays} min="1" name="serviceWarningDays" type="number" /><small>days</small></div></label><label className="fc-toggle"><input defaultChecked={data.settings.autoSuggestAudits} name="autoSuggestAudits" type="checkbox" /><span>System audit suggestions</span></label><label className="fc-toggle"><input defaultChecked={data.settings.auditVideoRequired} name="auditVideoRequired" type="checkbox" /><span>Require walk-around video</span></label><label className="fc-toggle"><input defaultChecked={data.settings.auditEmailEnabled} name="auditEmailEnabled" type="checkbox" /><span>Email audit findings</span></label><label className="fc-toggle"><input defaultChecked={data.settings.breakdownVehicleLinkRequired} name="breakdownVehicleLinkRequired" type="checkbox" /><span>Activate breakdown-to-vehicle link</span><small>Keep off until the ad-hoc request form is released.</small></label>{data.capabilities.canManageSettings ? <button className="fc-button primary" disabled={savingAction === "settings.update"} type="submit">Save policy</button> : null}</form></article>
               <article className="fc-panel fc-settings-card"><div className="fc-panel-head"><div><span className="fc-eyebrow">Integrations</span><h2>Connected vehicle data</h2></div><PlugZap size={20} /></div><div className="fc-integration-list">{data.integrations.map((integration) => <div key={integration.key}><span className={`fc-integration-mark ${integration.key}`}>{integration.key === "paytap" ? "P" : "W"}</span><div><strong>{integration.name}</strong><p>{integration.purpose}</p><small>{integration.detail}{integration.lastSyncAt ? ` · Last sync ${date(integration.lastSyncAt)}` : ""}</small></div><b className={integration.status}>{integration.status.replaceAll("_", " ")}</b></div>)}</div></article>
             </div>
-            <div className="fc-settings-grid lower"><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Master</span><h2>Routine audit checklist</h2><p>{data.checklistItems.length} configured controls</p></div>{data.capabilities.canManageSettings ? <button onClick={() => setChecklistModal(true)} type="button">Add item <Plus size={14} /></button> : null}</div><div className="fc-master-list">{data.checklistItems.map((item) => <div key={item.id}><span>{item.sortOrder}</span><div><strong>{item.label}</strong><small>{item.category} · {item.responseType.replaceAll("_", " ")} · {item.failureSeverity}</small></div>{item.isRequired ? <b>Required</b> : null}</div>)}</div></article><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Designation access</span><h2>People-controlled roles</h2><p>People designation decides eligibility; Fleet configures menus and actions.</p></div>{data.capabilities.canManageSettings ? <a className="fc-row-action" href="/users?section=roles">Configure access <ExternalLink size={13} /></a> : null}</div><div className="fc-member-list">{data.designationAccess.map((item) => <div key={item.id}><span><UserCog size={17} /></span><div><strong>{item.name}</strong><small>{item.code} · {item.locationAccessMode === "all_locations" ? "All placements" : "People-managed scope"}</small></div><b>{item.roleId ? "Configured" : "Setup required"}</b></div>)}{!data.designationAccess.length ? <div className="fc-empty compact"><UserCog size={30} /><strong>No People designation enabled</strong><p>Enable Fleet for a designation in People, then configure its Fleet menus here.</p></div> : null}</div><div className="fc-access-links"><a href="https://people.dropxlogistics.com/master/designations">People Designation Master <ExternalLink size={13} /></a><a href="/users?section=roles">Fleet menu capabilities <ArrowRight size={13} /></a></div></article></div>
+          </section> : null}
+
+          {section === "masters" ? <section className="fc-section">
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Configuration</span><h1>Masters</h1><p>Maintain reusable Fleet checklists and audit templates without mixing them with system settings.</p></div></div>
+            <div className="fc-settings-grid lower"><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Audit master</span><h2>Routine audit checklist</h2><p>{data.checklistItems.length} configured controls</p></div>{data.capabilities.canManageSettings ? <button onClick={() => setChecklistModal(true)} type="button">Add item <Plus size={14} /></button> : null}</div><div className="fc-master-list">{data.checklistItems.map((item) => <div key={item.id}><span>{item.sortOrder}</span><div><strong>{item.label}</strong><small>{item.category} · {item.responseType.replaceAll("_", " ")} · {item.failureSeverity}</small></div>{item.isRequired ? <b>Required</b> : null}</div>)}</div></article><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Template master</span><h2>Audit templates</h2><p>{data.auditTemplates.length} reusable templates</p></div></div><div className="fc-master-list">{data.auditTemplates.map((template, index) => <div key={template.id}><span>{index + 1}</span><div><strong>{template.name}</strong><small>{template.itemCount} configured checks</small></div><b>Active</b></div>)}{!data.auditTemplates.length ? <div className="fc-empty compact"><ListChecks size={30} /><strong>No audit template configured</strong><p>The routine audit checklist remains the default template.</p></div> : null}</div></article></div>
           </section> : null}
         </div>
       </section>
 
-      {selectedVehicle ? <div className="fc-modal-backdrop" role="presentation"><section aria-label={`Manage ${selectedVehicle.vehicleNo}`} className="fc-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setSelectedVehicle(null)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Truck size={25} /></span><div><small>{selectedVehicle.stationCode} · {selectedVehicle.fuelType}</small><h2>{selectedVehicle.vehicleNo}</h2><p>{selectedVehicle.model}</p></div></div><div className="fc-document-grid">{[["Registration", selectedVehicle.registrationExpiry], ["Insurance", selectedVehicle.insuranceExpiry], ["PUC", selectedVehicle.pucExpiry], ["Fitness", selectedVehicle.fitnessExpiry], ["Tax", selectedVehicle.taxExpiry]].map(([label, value]) => <div key={label}><small>{label}</small><strong>{date(value)}</strong></div>)}</div><div className="fc-status-control"><small>Operational status</small><div>{statusOptions.map((option) => <button className={selectedVehicle.status === option.key ? "active" : ""} disabled={!data.capabilities.canEditVehicles || savingVehicle === selectedVehicle.vehicleNo} key={option.key} onClick={() => updateVehicleStatus(selectedVehicle, option.api, option.key, option.label)} type="button"><i />{option.label}</button>)}</div></div>{!data.capabilities.canEditVehicles ? <div className="fc-readonly-note"><ShieldCheck size={18} /><span><strong>View-only vehicle access</strong><small>Your role cannot change operational status.</small></span></div> : null}</section></div> : null}
+      {selectedVehicle ? <div className="fc-modal-backdrop" role="presentation"><section aria-label={`Manage ${selectedVehicle.vehicleNo}`} className="fc-modal wide fc-vehicle-manage"><button aria-label="Close" className="fc-modal-close" onClick={() => setSelectedVehicle(null)} type="button"><X size={19} /></button>
+        <div className="fc-modal-title"><span className="fc-vehicle-big"><Truck size={25} /></span><div><small>{selectedVehicle.stationCode} · {selectedVehicle.fuelType}</small><h2>{selectedVehicle.vehicleNo}</h2><p>{selectedVehicle.model}</p></div></div>
+        <div className="fc-status-control"><small>Operational status</small><div>{statusOptions.map((option) => <button className={selectedVehicle.status === option.key ? "active" : ""} disabled={!data.capabilities.canEditVehicles || savingVehicle === selectedVehicle.vehicleNo} key={option.key} onClick={() => updateVehicleStatus(selectedVehicle, option.api, option.key, option.label)} type="button"><i />{option.label}</button>)}</div></div>
+        <div className="fc-manage-grid">
+          <section className="fc-manage-card"><div className="fc-manage-card-head"><span><Truck size={17} /></span><div><strong>Vehicle placement</strong><small>Move this vehicle to another active station</small></div></div><form className="fc-placement-form" onSubmit={updateVehiclePlacement}><label><span>Station code</span><SearchableSelect disabled={!data.capabilities.canEditVehicles} name="station_code" onValueChange={setPlacementStation} options={data.stationOptions.map((station) => ({ value: station.code, label: station.code, helper: `${station.name} · ${station.cluster} · ${station.region}` }))} placeholder="Search station code or name" required value={placementStation} /></label><label><span>Transfer reason</span><input disabled={!data.capabilities.canEditVehicles} onChange={(event) => setPlacementReason(event.target.value)} placeholder="Route reallocation, replacement, service return…" value={placementReason} /></label>{data.capabilities.canEditVehicles ? <button className="fc-button primary" disabled={!placementStation || placementStation === selectedVehicle.stationCode || savingVehicle === selectedVehicle.vehicleNo} type="submit">{savingVehicle === selectedVehicle.vehicleNo ? "Saving…" : "Change location"}</button> : null}</form></section>
+          <section className="fc-manage-card"><div className="fc-manage-card-head"><span><FileCheck2 size={17} /></span><div><strong>Document compliance</strong><small>Current expiry and stored file readiness</small></div><button onClick={() => { setSelectedVehicle(null); changeSection("documents"); }} type="button">Open all <ArrowRight size={14} /></button></div><div className="fc-manage-docs">{data.documentTypes.map((type) => { const stored = data.documents.find((document) => document.vehicleNo === selectedVehicle.vehicleNo && document.documentType === type.value); const key = ({ FLEET_REGISTRATION: "registrationExpiry", FLEET_INSURANCE: "insuranceExpiry", FLEET_PUC: "pucExpiry", FLEET_FITNESS: "fitnessExpiry", FLEET_TAX: "taxExpiry" } as Record<string, keyof FleetControlVehicle>)[type.value]; const expiry = stored?.expiryDate ?? (key ? selectedVehicle[key] as string | null : null); return <div key={type.value}><span className={stored ? "ready" : "missing"}>{stored ? <Check size={12} /> : <AlertTriangle size={12} />}</span><div><strong>{type.label}</strong><small>{expiry ? date(expiry) : "Expiry not recorded"}</small></div>{stored?.viewUrl ? <a aria-label={`View ${type.label}`} href={stored.viewUrl} rel="noreferrer" target="_blank"><Eye size={14} /></a> : null}</div>; })}</div></section>
+        </div>
+        <section className="fc-placement-history"><button aria-expanded={placementHistoryOpen} onClick={() => setPlacementHistoryOpen((value) => !value)} type="button"><span><History size={17} /><div><strong>Placement history</strong><small>Where this vehicle was allocated and when it moved</small></div></span><b>{movements.filter((item) => item.vehicleId === selectedVehicle.id || item.vehicleNo === selectedVehicle.vehicleNo).length} moves</b></button>{placementHistoryOpen ? <div className="fc-placement-timeline">{movements.filter((item) => item.vehicleId === selectedVehicle.id || item.vehicleNo === selectedVehicle.vehicleNo).map((item) => <article key={item.id}><i /><div><header><strong>{item.fromStation} <ArrowRight size={12} /> {item.toStation}</strong><time>{dateTime(item.movedAt)}</time></header><p>{item.reason}</p><small>Moved by {item.movedBy}</small></div></article>)}{!movements.some((item) => item.vehicleId === selectedVehicle.id || item.vehicleNo === selectedVehicle.vehicleNo) ? <article><i /><div><header><strong>Current placement · {selectedVehicle.stationCode}</strong><time>{dateTime(selectedVehicle.createdAt)}</time></header><p>Initial location from the vehicle master</p><small>No earlier movement has been recorded in Fleet.</small></div></article> : null}</div> : null}</section>
+        {!data.capabilities.canEditVehicles ? <div className="fc-readonly-note"><ShieldCheck size={18} /><span><strong>View-only vehicle access</strong><small>Your role can review status, documents and movement history.</small></span></div> : null}
+      </section></div> : null}
 
       {addVehicle ? <div className="fc-modal-backdrop" role="presentation"><section aria-label="Add vehicle" className="fc-modal wide"><button aria-label="Close" className="fc-modal-close" onClick={() => setAddVehicle(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Plus size={25} /></span><div><small>Vehicle master</small><h2>Add a fleet vehicle</h2><p>Start with allocation and compliance details.</p></div></div><form className="fc-add-form" onSubmit={createVehicle}><label><span>Vehicle number</span><input autoFocus name="vehicle_no" placeholder="KL 00 XX 0000" required /></label><label><span>Station</span><select name="station_code" required><option value="">Select station</option>{data.stationOptions.map((option) => <option key={option.code} value={option.code}>{option.code} · {option.name}</option>)}</select></label><label><span>Model</span><input name="model" placeholder="Vehicle make and model" required /></label><label><span>Fuel type</span><select name="fuel_type" required><option value="">Select fuel</option><option>Diesel</option><option>Petrol</option><option>CNG</option><option>EV</option></select></label><label><span>Status</span><select defaultValue="active" name="status"><option value="active">Active</option><option value="repair">Under service</option><option value="breakdown">Breakdown</option><option value="inactive">Inactive</option></select></label><label><span>RC location</span><input name="rc_location" placeholder="RTO / station" /></label><label><span>Insurance expiry</span><input name="insurance_expiry" type="date" /></label><label><span>PUC expiry</span><input name="puc_expiry" type="date" /></label><label><span>Fitness expiry</span><input name="fitness_expiry" type="date" /></label><label><span>Tax expiry</span><input name="tax_expiry" type="date" /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setAddVehicle(false)} type="button">Cancel</button><button className="fc-button primary" disabled={savingVehicle === "NEW"} type="submit">{savingVehicle === "NEW" ? "Adding…" : "Add vehicle"}</button></div></form></section></div> : null}
 

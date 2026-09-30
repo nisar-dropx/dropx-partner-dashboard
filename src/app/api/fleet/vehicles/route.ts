@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { type AuthorizationContext, getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { writeEventLog } from "@/lib/event-log";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const editableFields = [
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
   if ("error" in access) return access.error;
   const body = await request.json();
   const payload: Record<string, string | null> = { ...sanitizePayload(body), company_id: access.companyId };
+  if (!payload.status) payload.status = "active";
   if (!payload.vehicle_no) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
   if (!payload.station_code) return NextResponse.json({ error: "Location is required." }, { status: 400 });
   if (!payload.model) return NextResponse.json({ error: "Model is required." }, { status: 400 });
@@ -85,6 +87,30 @@ export async function PATCH(request: Request) {
   }
 
   if (error) return mutationError(error.message);
+  const fromStation = normalizeText(guard.vehicle.station_code).toUpperCase() || "UNASSIGNED";
+  const toStation = normalizeText(data?.station_code).toUpperCase() || fromStation;
+  if (fromStation !== toStation) {
+    await writeEventLog({
+      companyId: access.companyId,
+      platform: "dashboard",
+      eventCode: "fleet_vehicle_transferred",
+      module: "fleet",
+      action: "update",
+      outcome: "success",
+      actorType: "fleet_user",
+      actorUserId: access.authorization.userId,
+      actorLabel: access.authorization.fullName || access.authorization.email,
+      actorIdentifier: access.authorization.email,
+      subjectType: "fleet_vehicle",
+      subjectId: guard.vehicle.id,
+      subjectCode: vehicleNo,
+      subjectLabel: vehicleNo,
+      route: "/api/fleet/vehicles",
+      method: "PATCH",
+      metadata: { from_station: fromStation, to_station: toStation, reason: normalizeText(body.transfer_reason) || "Placement changed in Fleet" },
+      request
+    });
+  }
   return NextResponse.json({ vehicle: data });
 }
 
@@ -116,7 +142,7 @@ async function requireFleetMutationPermission(action: "add" | "edit") {
     ? hasPermission(authorization, "fleet_vehicle_view", "add") || hasPermission(authorization, "fleet", "add")
     : hasPermission(authorization, "fleet_vehicle_view", "edit") || hasPermission(authorization, "fleet_date_view", "edit") || hasPermission(authorization, "fleet", "edit");
   if (!allowed) return { error: NextResponse.json({ error: "Fleet permission denied." }, { status: 403 }) };
-  return { companyId, stationCodes: await resolveFleetLocationAccess(authorization, companyId) };
+  return { companyId, authorization, stationCodes: await resolveFleetLocationAccess(authorization, companyId) };
 }
 
 async function resolveFleetLocationAccess(authorization: AuthorizationContext, companyId: string) {
@@ -142,20 +168,20 @@ function canAccessStation(stationCodes: string[] | null, stationCode: string | n
 }
 
 async function requireVehicleScope(companyId: string, vehicleNo: string, stationCodes: string[] | null) {
-  if (!supabaseAdmin || !stationCodes) return { ok: true };
+  if (!supabaseAdmin) return { error: setupError("Supabase service role key is not configured.") };
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("station_code")
+    .select("id,station_code")
     .eq("company_id", companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();
 
   if (error) return { error: mutationError(error.message) };
   if (!data) return { error: NextResponse.json({ error: "Vehicle not found." }, { status: 404 }) };
-  if (!canAccessStation(stationCodes, data.station_code)) {
+  if (stationCodes && !canAccessStation(stationCodes, data.station_code)) {
     return { error: NextResponse.json({ error: "This vehicle is not allocated to your user." }, { status: 403 }) };
   }
-  return { ok: true };
+  return { ok: true, vehicle: data };
 }
 
 function sanitizePayload(input: Record<string, unknown>) {
@@ -167,7 +193,6 @@ function sanitizePayload(input: Record<string, unknown>) {
   });
   if (payload.vehicle_no) payload.vehicle_no = payload.vehicle_no.toUpperCase();
   if (payload.station_code) payload.station_code = payload.station_code.toUpperCase();
-  if (!payload.status) payload.status = "active";
   return payload;
 }
 

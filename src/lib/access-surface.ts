@@ -72,7 +72,10 @@ export const opsAccessPageCodes = [
   "fleet_fuel_log",
   "fleet_live_gps",
   "fleet_maintenance",
-  "fleet_reports"
+  "fleet_reports",
+  "fleet_audits",
+  "fleet_settings",
+  "fleet_masters"
 ] as const;
 
 const opsPageCodes = new Set<string>(opsAccessPageCodes);
@@ -98,7 +101,10 @@ const sharedPageCodes = new Set([
   "fleet_fuel_log",
   "fleet_live_gps",
   "fleet_maintenance",
-  "fleet_reports"
+  "fleet_reports",
+  "fleet_audits",
+  "fleet_settings",
+  "fleet_masters"
 ]);
 
 const peoplePageCodes = new Set([
@@ -168,7 +174,7 @@ const financePageCodes = new Set([
   "payment_settings"
 ]);
 
-const fleetPageCodes = new Set([
+export const fleetAccessPageCodes = [
   "users",
   "payment_approvals",
   "payment_reports",
@@ -181,8 +187,13 @@ const fleetPageCodes = new Set([
   "fleet_fuel_log",
   "fleet_live_gps",
   "fleet_maintenance",
-  "fleet_reports"
-]);
+  "fleet_reports",
+  "fleet_audits",
+  "fleet_settings",
+  "fleet_masters"
+] as const;
+
+const fleetPageCodes = new Set<string>(fleetAccessPageCodes);
 
 export function currentAccessSurface(): AccessSurface {
   const host = (

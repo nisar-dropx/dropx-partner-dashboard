@@ -712,7 +712,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     }));
 
   return (
-    <AppShell active="Users & Access">
+    <AppShell active={accessSurface === "fleet" ? showRolesSection ? "User Roles" : "Users" : "Users & Access"}>
       <PageHead
         eyebrow={`${accessSurfaceLabel(accessSurface)} admin setup`}
         title={showRolesSection

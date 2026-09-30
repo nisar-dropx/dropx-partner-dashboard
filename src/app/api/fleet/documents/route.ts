@@ -2,12 +2,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { type AuthorizationContext, getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const bucketName = "fleet-documents";
 const fallbackDocumentTypes = new Set(["FLEET_REGISTRATION", "FLEET_INSURANCE", "FLEET_PUC", "FLEET_FITNESS", "FLEET_TAX"]);
+const expiryColumnByType: Record<string, string> = { FLEET_REGISTRATION: "registration_expiry", FLEET_INSURANCE: "insurance_expiry", FLEET_PUC: "puc_expiry", FLEET_FITNESS: "fitness_expiry", FLEET_TAX: "tax_expiry" };
+const allowedContentTypes = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
 
 export async function GET(request: Request) {
   if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
@@ -16,6 +18,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const vehicleNo = normalizeText(searchParams.get("vehicle_no")).toUpperCase();
   if (!vehicleNo) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
+  const vehicle = await requireVehicleScope(access.companyId, vehicleNo, access.stationCodes);
+  if ("error" in vehicle) return vehicle.error;
 
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicle_documents")
@@ -63,17 +67,23 @@ export async function POST(request: Request) {
   const file = formData.get("file");
 
   if (!vehicleNo) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
-  const validDocumentType = await isValidDocumentType(access.companyId, documentType);
-  if (!validDocumentType) return NextResponse.json({ error: "Valid active document type is required." }, { status: 400 });
+  const documentPolicy = await loadDocumentTypePolicy(access.companyId, documentType);
+  if (!documentPolicy.valid) return NextResponse.json({ error: "Valid active document type is required." }, { status: 400 });
+  if (documentPolicy.requiresExpiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate ?? "")) return NextResponse.json({ error: "Expiry date is required for this document type." }, { status: 400 });
   if (!(file instanceof File) || !file.size) return NextResponse.json({ error: "Document file is required." }, { status: 400 });
+  if (file.size > 20 * 1024 * 1024) return NextResponse.json({ error: "Document must be 20 MB or smaller." }, { status: 400 });
+  if (file.type && !allowedContentTypes.has(file.type)) return NextResponse.json({ error: "Upload a PDF, JPG, PNG or WebP file." }, { status: 400 });
   const vehicleResult = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("vehicle_no")
+    .select("vehicle_no,station_code")
     .eq("company_id", access.companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();
   if (vehicleResult.error) return mutationError(vehicleResult.error.message);
   if (!vehicleResult.data) return NextResponse.json({ error: "Vehicle not found for this company." }, { status: 404 });
+  if (access.stationCodes && !access.stationCodes.includes(normalizeText(vehicleResult.data.station_code).toUpperCase())) {
+    return NextResponse.json({ error: "This vehicle is not allocated to your user." }, { status: 403 });
+  }
 
   await ensureBucket();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -121,23 +131,33 @@ export async function POST(request: Request) {
     .select()
     .single();
 
-  if (error) return mutationError(error.message);
-  return NextResponse.json({ document: data });
+  if (error) {
+    await supabaseAdmin.storage.from(bucketName).remove([storagePath]);
+    await supabaseAdmin.from("fleet_vehicle_documents").update({ is_active: true, replaced_at: null, delete_after: null }).eq("company_id", access.companyId).eq("vehicle_no", vehicleNo).eq("document_type", documentType).eq("replaced_at", now.toISOString());
+    return mutationError(error.message);
+  }
+  const expiryColumn = expiryColumnByType[documentType];
+  if (expiryColumn) {
+    await supabaseAdmin.from("fleet_vehicles").update({ [expiryColumn]: expiryDate, updated_at: now.toISOString() }).eq("company_id", access.companyId).eq("vehicle_no", vehicleNo);
+  }
+  const fileUrl = `/api/fleet/documents/download?vehicle_no=${encodeURIComponent(vehicleNo)}&document_type=${encodeURIComponent(documentType)}`;
+  return NextResponse.json({ document: { ...data, signed_url: fileUrl, download_url: `${fileUrl}&download=1` } });
 }
 
-async function isValidDocumentType(companyId: string, documentType: string) {
-  if (!documentType) return false;
-  if (!supabaseAdmin) return fallbackDocumentTypes.has(documentType);
+async function loadDocumentTypePolicy(companyId: string, documentType: string) {
+  if (!documentType) return { valid: false, requiresExpiry: false };
+  if (!supabaseAdmin) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackDocumentTypes.has(documentType) };
   const { data, error } = await supabaseAdmin
     .from("document_types")
-    .select("id")
+    .select("id,requires_expiry")
     .eq("company_id", companyId)
     .in("code", Array.from(new Set([documentType, documentType.toLowerCase()])))
     .eq("document_module", "fleet")
     .eq("is_active", true)
     .limit(1);
-  if (error) return fallbackDocumentTypes.has(documentType);
-  return Boolean(data?.length) || fallbackDocumentTypes.has(documentType);
+  if (error) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackDocumentTypes.has(documentType) };
+  const configured = data?.[0];
+  return configured ? { valid: true, requiresExpiry: configured.requires_expiry !== false } : { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackDocumentTypes.has(documentType) };
 }
 
 async function requireDocumentPermission(action: "access" | "edit") {
@@ -147,7 +167,24 @@ async function requireDocumentPermission(action: "access" | "edit") {
   const allowed = action === "access"
     ? hasPermission(authorization, "fleet_vehicle_view", "access") || hasPermission(authorization, "fleet_date_view", "access") || hasPermission(authorization, "fleet", "access")
     : hasPermission(authorization, "fleet_vehicle_view", "edit") || hasPermission(authorization, "fleet_date_view", "edit") || hasPermission(authorization, "fleet", "edit");
-  return allowed ? { companyId } : { error: NextResponse.json({ error: "Fleet document permission denied." }, { status: 403 }) };
+  return allowed ? { companyId, stationCodes: await resolveFleetLocationAccess(authorization, companyId) } : { error: NextResponse.json({ error: "Fleet document permission denied." }, { status: 403 }) };
+}
+
+async function resolveFleetLocationAccess(authorization: AuthorizationContext, companyId: string) {
+  if (authorization.isMasterOwner || authorization.hasAllLocationAccess) return null;
+  if (!supabaseAdmin || !authorization.locationScopeIds.length) return [];
+  const { data, error } = await supabaseAdmin.from("stations").select("station_code").eq("company_id", companyId).eq("is_active", true).in("id", authorization.locationScopeIds);
+  if (error) return [];
+  return Array.from(new Set((data ?? []).map((row) => normalizeText(row.station_code).toUpperCase()).filter(Boolean)));
+}
+
+async function requireVehicleScope(companyId: string, vehicleNo: string, stationCodes: string[] | null) {
+  if (!supabaseAdmin) return { error: setupError("Supabase service role key is not configured.") };
+  const { data, error } = await supabaseAdmin.from("fleet_vehicles").select("station_code").eq("company_id", companyId).eq("vehicle_no", vehicleNo).maybeSingle();
+  if (error) return { error: mutationError(error.message) };
+  if (!data) return { error: NextResponse.json({ error: "Vehicle not found." }, { status: 404 }) };
+  if (stationCodes && !stationCodes.includes(normalizeText(data.station_code).toUpperCase())) return { error: NextResponse.json({ error: "This vehicle is not allocated to your user." }, { status: 403 }) };
+  return { ok: true };
 }
 
 async function ensureBucket() {
