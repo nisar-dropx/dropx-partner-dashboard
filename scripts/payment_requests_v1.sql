@@ -264,6 +264,7 @@ alter table public.payment_request_answers add column if not exists answer_value
 alter table public.payment_request_answers add column if not exists file_path text;
 alter table public.payment_request_answers add column if not exists file_name text;
 alter table public.payment_request_answers add column if not exists file_size bigint;
+alter table public.payment_request_answers add column if not exists attachments jsonb not null default '[]'::jsonb;
 alter table public.payment_request_answers add column if not exists created_at timestamptz not null default now();
 alter table public.payment_request_answers add column if not exists updated_at timestamptz not null default now();
 

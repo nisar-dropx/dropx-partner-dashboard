@@ -76,11 +76,12 @@ function inputForQuestion(question: PaymentQuestion, disabled = false) {
           accept={paymentFileAccept(question.dropdown_options)}
           className="field"
           disabled={disabled}
+          multiple
           name={`files[${question.id}]`}
           required={question.is_required}
           type="file"
         />
-        <span className="helper-text">Allowed: {paymentFileGroupLabels(question.dropdown_options).join(", ")}</span>
+        <span className="helper-text">Upload up to 3 files. Allowed: {paymentFileGroupLabels(question.dropdown_options).join(", ")}</span>
       </>
     );
   }

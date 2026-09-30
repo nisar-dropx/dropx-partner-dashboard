@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Search, X } from "lucide-react";
+import { Check, ChevronDown, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -140,11 +140,23 @@ export function PaymentApprovalFilters({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(search);
+  const [draftStations, setDraftStations] = useState(selectedStations);
+  const [draftPaymentHeads, setDraftPaymentHeads] = useState(selectedPaymentHeads);
+  const [draftDates, setDraftDates] = useState(selectedDates);
   const hasFacetFilters = selectedStations.length > 0 || selectedPaymentHeads.length > 0 || selectedDates.length > 0;
+  const hasDraftChanges = !sameValues(draftStations, selectedStations)
+    || !sameValues(draftPaymentHeads, selectedPaymentHeads)
+    || !sameValues(draftDates, selectedDates);
 
   useEffect(() => {
     setQuery(search);
   }, [search]);
+
+  useEffect(() => {
+    setDraftStations(selectedStations);
+    setDraftPaymentHeads(selectedPaymentHeads);
+    setDraftDates(selectedDates);
+  }, [selectedDates, selectedPaymentHeads, selectedStations]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -183,29 +195,48 @@ export function PaymentApprovalFilters({
       <ApprovalMultiSelect
         allLabel="All stations"
         label="Stations"
-        onChange={(values) => updateMultiParam(router, pathname, searchParams, "station", values)}
+        onChange={setDraftStations}
         options={stationOptions}
-        selectedValues={selectedStations}
+        selectedValues={draftStations}
       />
       <ApprovalMultiSelect
         allLabel="All payment heads"
         label="Payment heads"
-        onChange={(values) => updateMultiParam(router, pathname, searchParams, "head", values)}
+        onChange={setDraftPaymentHeads}
         options={paymentHeadOptions}
-        selectedValues={selectedPaymentHeads}
+        selectedValues={draftPaymentHeads}
       />
       <ApprovalMultiSelect
         allLabel="All dates"
         label="Created dates"
-        onChange={(values) => updateMultiParam(router, pathname, searchParams, "date", values)}
+        onChange={setDraftDates}
         options={dateOptions}
-        selectedValues={selectedDates}
+        selectedValues={draftDates}
       />
+      <button
+        aria-label="Apply station, payment head, and date filters"
+        className="button compact payment-approval-apply-filters"
+        disabled={!hasDraftChanges}
+        onClick={() => applyFacetFilters(router, pathname, searchParams, {
+          stations: draftStations,
+          paymentHeads: draftPaymentHeads,
+          dates: draftDates
+        })}
+        type="button"
+      >
+        <Check aria-hidden="true" size={14} />
+        Apply filters
+      </button>
       {hasFacetFilters ? (
         <button
           aria-label="Clear station, payment head, and date filters"
           className="button secondary compact payment-approval-clear-filters"
-          onClick={() => clearFacetFilters(router, pathname, searchParams)}
+          onClick={() => {
+            setDraftStations([]);
+            setDraftPaymentHeads([]);
+            setDraftDates([]);
+            clearFacetFilters(router, pathname, searchParams);
+          }}
           type="button"
         >
           <X aria-hidden="true" size={14} />
@@ -216,18 +247,25 @@ export function PaymentApprovalFilters({
   );
 }
 
-function updateMultiParam(
+function applyFacetFilters(
   router: ReturnType<typeof useRouter>,
   pathname: string,
   searchParams: ReturnType<typeof useSearchParams>,
-  key: string,
-  values: string[]
+  values: { stations: string[]; paymentHeads: string[]; dates: string[] }
 ) {
   const params = new URLSearchParams(searchParams.toString());
-  params.delete(key);
-  values.forEach((value) => params.append(key, value));
+  ["station", "head", "date"].forEach((key) => params.delete(key));
+  values.stations.forEach((value) => params.append("station", value));
+  values.paymentHeads.forEach((value) => params.append("head", value));
+  values.dates.forEach((value) => params.append("date", value));
   params.delete("manage");
   pushParams(router, pathname, searchParams, params);
+}
+
+function sameValues(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
 }
 
 function clearFacetFilters(

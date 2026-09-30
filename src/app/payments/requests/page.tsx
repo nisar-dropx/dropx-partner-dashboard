@@ -11,6 +11,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
+import { paymentRequestAttachments } from "@/lib/payment-request-attachments";
 import { loadUserPaymentContacts } from "@/lib/payment-contacts";
 import { paymentStatusLabel } from "@/lib/payment-status-label";
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
@@ -72,6 +73,8 @@ type AnswerRow = {
   answer_value: string | null;
   file_name: string | null;
   file_path: string | null;
+  file_size?: number | null;
+  attachments?: unknown;
 };
 type ApprovalRemarkRow = { action: string | null; comments: string | null; created_at: string };
 type HistoryRow = ApprovalRemarkRow & { approver_user_id: string | null; approver_role_id: string | null };
@@ -175,6 +178,7 @@ function questionsForStage(questions: QuestionRow[] | null | undefined, stage: "
 
 function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
   const name = `answers[${question.id}]`;
+  const attachments = paymentRequestAttachments(answer);
   if (question.answer_type === "dropdown") {
     return (
       <select className="field" name={name} required={question.is_required} defaultValue={answer?.answer_value ?? ""}>
@@ -198,29 +202,23 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
   if (question.answer_type === "file") {
     return (
       <>
-        {answer?.file_name ? (
+        {attachments.length ? (
           <p className="subtle payment-attachment-cell" style={{ margin: "4px 0 8px" }}>
-            Current file:{" "}
-            <a
-              href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer.id)}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {answer.file_name}
-            </a>
+            Current files: {attachments.map((attachment, index) => <span key={attachment.path}>{index ? ", " : ""}<a href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer!.id)}&attachment_index=${index}`} target="_blank" rel="noreferrer">{attachment.name}</a></span>)}
           </p>
         ) : null}
         <input
           accept={paymentFileAccept(question.dropdown_options)}
           className="field"
+          multiple
           name={`files[${question.id}]`}
-          required={question.is_required && !answer?.file_name}
+          required={question.is_required && !attachments.length}
           type="file"
         />
         <p className="subtle" style={{ margin: "4px 0 0" }}>
-          {answer?.file_name
-            ? "Choose a file to replace the current one, or leave blank to keep it."
-            : `Allowed: ${paymentFileGroupLabels(question.dropdown_options).join(", ")}`}
+          {attachments.length
+            ? "Choose up to 3 files to replace the current attachment set, or leave blank to keep it."
+            : `Upload up to 3 files. Allowed: ${paymentFileGroupLabels(question.dropdown_options).join(", ")}`}
         </p>
       </>
     );
@@ -439,7 +437,7 @@ export default async function PaymentRequestsPage({
   const resubmitQuestions = questionsForStage(resubmitHead?.payment_head_questions, "payment");
   const answersResult = resubmitRequest && supabaseAdmin ? await supabaseAdmin
     .from("payment_request_answers")
-    .select("id, question_id, answer_value, file_name, file_path")
+    .select("id, question_id, answer_value, file_name, file_path, file_size, attachments")
     .eq("company_id", companyId)
     .eq("payment_request_id", resubmitRequest.id) : null;
   const returnRemark = resubmitRequest ? await loadReturnRemark(companyId, resubmitRequest.id) : null;

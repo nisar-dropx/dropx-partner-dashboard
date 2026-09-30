@@ -11,6 +11,7 @@ import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format"
 import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
 import { paymentApprovalAmount } from "@/lib/payment-approval-amount";
 import { paymentShipmentCount } from "@/lib/payment-shipment-count";
+import { paymentRequestAttachments } from "@/lib/payment-request-attachments";
 import {
   matchesPaymentApprovalFacets,
   paymentApprovalDateKey,
@@ -52,6 +53,8 @@ type RequestRow = {
   final_approval_role_ids: string[] | null;
   requested_by: string | null;
   approval_cycle: number | null;
+  current_step_order: number | null;
+  total_steps: number | null;
   created_at: string;
   updated_at: string | null;
   processed_at: string | null;
@@ -67,6 +70,8 @@ type AnswerRow = {
   answer_value: string | null;
   file_path: string | null;
   file_name: string | null;
+  file_size?: number | null;
+  attachments?: unknown;
   payment_head_questions?: { question_text: string; answer_type: string } | null;
 };
 
@@ -200,6 +205,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       final_approval_role_ids,
       requested_by,
       approval_cycle,
+      current_step_order,
+      total_steps,
       created_at,
       updated_at,
       processed_at,
@@ -296,28 +303,12 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     ].join(" ").toLowerCase();
     return haystack.includes(normalizedSearch);
   });
-  const selectedRequestId = requests[0]?.id ?? null;
-  const [answersResult, logsData] = selectedRequestId ? await Promise.all([
-    supabaseAdmin
-      .from("payment_request_answers")
-      .select("id, answer_value, file_path, file_name, payment_head_questions ( question_text, answer_type )")
-      .eq("company_id", companyId)
-      .eq("payment_request_id", selectedRequestId),
-    loadApprovalLogs(companyId, selectedRequestId)
-  ]) : [{ data: [], error: null }, { logs: [], error: null }];
-
   return {
     requests,
-    selectedRequest: requests[0] ?? null,
-    answers: ((answersResult.data ?? []) as unknown as AnswerRow[]).map((answer) => ({
-      ...answer,
-      payment_head_questions: firstRelation(answer.payment_head_questions)
-    })),
-    logs: logsData.logs,
     canDownloadProcessData: Boolean(authorization.roleId && (processHeadsResult.count ?? 0) > 0),
     filterOptions: { stations: stationOptions, paymentHeads: paymentHeadOptions, dates: dateOptions },
     selectedFilters,
-    error: requestsResult.error?.message || answersResult.error?.message || logsData.error || processHeadsResult.error?.message || null
+    error: requestsResult.error?.message || processHeadsResult.error?.message || null
   };
 }
 
@@ -353,32 +344,31 @@ export default async function PaymentApprovalsPage({
   const manageId = firstSearchParam(searchParams?.manage);
   const selectedRequest = manageId ? requests.find((request) => request.id === manageId) ?? null : null;
   const selectedAmount = selectedRequest ? paymentApprovalAmount(selectedRequest) : null;
-  const selectedLocationResult = selectedRequest && supabaseAdmin
-    ? await supabaseAdmin
-        .from("stations")
-        .select("station_code, station_name, city")
-        .eq("company_id", companyId)
-        .eq(selectedRequest.location_id ? "id" : "station_code", selectedRequest.location_id || selectedRequest.location_code)
-        .maybeSingle()
-    : null;
-  const selectedLocationName = selectedLocationResult?.data?.station_name || selectedLocationResult?.data?.city || "";
-  const selectedLocationLabel = selectedRequest
-    ? `${selectedRequest.location_code}${selectedLocationName ? ` - ${selectedLocationName}` : ""}`
-    : "";
-  const detailData = selectedRequest && supabaseAdmin ? await Promise.all([
+  const selectedDetailData = selectedRequest && supabaseAdmin ? await Promise.all([
+    supabaseAdmin
+      .from("stations")
+      .select("station_code, station_name, city")
+      .eq("company_id", companyId)
+      .eq(selectedRequest.location_id ? "id" : "station_code", selectedRequest.location_id || selectedRequest.location_code)
+      .maybeSingle(),
     supabaseAdmin
       .from("payment_request_answers")
-      .select("id, answer_value, file_path, file_name, payment_head_questions ( question_text, answer_type )")
+      .select("id, answer_value, file_path, file_name, file_size, attachments, payment_head_questions ( question_text, answer_type )")
       .eq("company_id", companyId)
       .eq("payment_request_id", selectedRequest.id),
     loadApprovalLogs(companyId, selectedRequest.id)
   ]) : null;
-  const answers = ((detailData?.[0].data ?? []) as unknown as AnswerRow[]).map((answer) => ({
+  const selectedLocationResult = selectedDetailData?.[0] ?? null;
+  const selectedLocationName = selectedLocationResult?.data?.station_name || selectedLocationResult?.data?.city || "";
+  const selectedLocationLabel = selectedRequest
+    ? `${selectedRequest.location_code}${selectedLocationName ? ` - ${selectedLocationName}` : ""}`
+    : "";
+  const answers = ((selectedDetailData?.[1].data ?? []) as unknown as AnswerRow[]).map((answer) => ({
     ...answer,
     payment_head_questions: firstRelation(answer.payment_head_questions)
   }));
   const shipmentCount = paymentShipmentCount(answers);
-  const logs = detailData?.[1].logs ?? [];
+  const logs = selectedDetailData?.[2].logs ?? [];
   const currentApprovalCycle = Number(selectedRequest?.approval_cycle) || 1;
   const isResubmitted = selectedRequest ? isResubmittedPaymentStage(selectedRequest) : false;
   const currentUserAlreadyActed = !isResubmitted && logs.some(
@@ -431,7 +421,7 @@ export default async function PaymentApprovalsPage({
       <PageHead
         eyebrow="Payments"
         title="Approvals"
-        subtitle="Approve or reject payment requests currently assigned to you."
+        subtitle="Review the requests assigned to you, inspect the evidence, and record a clear decision."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
@@ -505,7 +495,7 @@ export default async function PaymentApprovalsPage({
                       <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
                       <td><StatusPill status={paymentStatusLabel(request)} /></td>
                       <td>{formatDashboardDate(request.created_at)}</td>
-                      {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false}>Manage</PendingLink></td> : null}
+                      {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false}>Review</PendingLink></td> : null}
                     </tr>
                   );
                 }) : (
@@ -519,10 +509,10 @@ export default async function PaymentApprovalsPage({
 
       {selectedRequest ? (
         <div className="modal-backdrop">
-          <section className="modal-panel wide" aria-label="Manage payment approval">
+          <section className="modal-panel wide" aria-label="Review payment approval">
             <div className="panel-head">
               <div>
-                <h2>Manage payment request</h2>
+                <h2>Review payment request</h2>
                 <div className="payment-modal-reference">
                   <span>{selectedRequest.request_no}</span>
                   <strong className="payment-location-highlight">{selectedLocationLabel}</strong>
@@ -537,11 +527,15 @@ export default async function PaymentApprovalsPage({
                   <p className="subtle" style={{ marginTop: 6 }}>{firstSearchParam(searchParams?.approvalError)}</p>
                 </div>
               ) : null}
-              <div className="form-grid three">
-                <label>Payment Head<input className="field" readOnly value={selectedRequest.payment_heads?.name ?? "-"} /></label>
-                <label>{selectedAmount?.isEstimated ? "Estimated Amount" : "Amount"}<input className="field" readOnly value={selectedAmount?.text ?? "-"} /></label>
-                <label>Status<input className="field" readOnly value={paymentStatusLabel(selectedRequest)} /></label>
-                {shipmentCount !== null ? <label>Number of Shipments<input className="field" readOnly value={shipmentCount.toLocaleString("en-IN")} /></label> : null}
+              <div className="payment-review-summary-cards">
+                <article><small>Payment head</small><strong>{selectedRequest.payment_heads?.name ?? "-"}</strong></article>
+                <article><small>{selectedAmount?.isEstimated ? "Estimated Amount" : "Amount"}</small><strong>{selectedAmount?.text ?? "-"}</strong></article>
+                <article><small>Approval status</small><strong>{paymentStatusLabel(selectedRequest)}</strong></article>
+                <article><small>Location</small><strong>{selectedLocationLabel}</strong>{shipmentCount !== null ? <span>{shipmentCount.toLocaleString("en-IN")} shipments</span> : null}</article>
+              </div>
+              <details className="payment-review-additional-details">
+                <summary><span>Payment and beneficiary details</span><small>Open only when needed</small></summary>
+                <div className="form-grid three">
                 <label>Payment Method<input className="field" readOnly value={selectedRequest.payment_mode === "upi_payment" ? "UPI Payment" : selectedRequest.payment_mode === "online_payment" ? "Online Payment" : "Bank Transfer"} /></label>
                 {hasDisplayValue(selectedRequest.account_holder_name) ? <label>Acc Holder Name<input className="field" readOnly value={selectedRequest.account_holder_name ?? "-"} /></label> : null}
                 {selectedRequest.payment_mode === "upi_payment" && hasDisplayValue(selectedRequest.payment_reference) ? <label>UPI ID<input className="field" readOnly value={selectedRequest.payment_reference ?? "-"} /></label> : null}
@@ -551,39 +545,66 @@ export default async function PaymentApprovalsPage({
                 {(selectedRequest.payment_mode ?? "account_transfer") === "account_transfer" && hasDisplayValue(selectedRequest.ifsc) ? <label>IFSC<input className="field" readOnly value={selectedRequest.ifsc ?? "-"} /></label> : null}
                 {hasDisplayValue(selectedRequest.contact_no) ? <label>Contact No<input className="field" readOnly value={selectedRequest.contact_no ?? "-"} /></label> : null}
                 {hasDisplayValue(selectedRequest.email) ? <label>Email<input className="field" readOnly value={selectedRequest.email ?? "-"} /></label> : null}
-              </div>
+                </div>
+              </details>
               {answers.length ? (
                 <>
                   <div className="section-divider" />
-                  <h3>Request details</h3>
+                  <div className="payment-review-section-head">
+                    <div><h3>Request details</h3><p>Fields and evidence supplied with this request.</p></div>
+                    <span>{answers.reduce((count, answer) => count + paymentRequestAttachments(answer).length, 0)} attachments</span>
+                  </div>
                   <div className="table-wrap">
                     <table>
                       <tbody>
-                        {answers.map((answer) => (
-                          <tr key={answer.id}>
-                            <th>{answer.payment_head_questions?.question_text ?? "Field"}</th>
-                            <td>
-                              {answer.file_name ? (
-                                <span className="payment-attachment-cell">
-                                  <span>{answer.file_name}</span>
-                                  <a
-                                    className="icon-button payment-attachment-view"
-                                    href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer.id)}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    aria-label={`View ${answer.file_name}`}
-                                    title="View attachment"
-                                  >
-                                    <Eye size={16} />
-                                  </a>
-                                </span>
-                              ) : answer.answer_value || "-"}
-                            </td>
-                          </tr>
-                        ))}
+                        {answers.map((answer) => {
+                          const attachments = paymentRequestAttachments(answer);
+                          return (
+                            <tr key={answer.id}>
+                              <th>{answer.payment_head_questions?.question_text ?? "Field"}</th>
+                              <td>
+                                {attachments.length ? (
+                                  <span className="payment-attachment-list">
+                                    {attachments.map((attachment, index) => (
+                                      <span className="payment-attachment-cell" key={`${attachment.path}-${index}`}>
+                                        <span>{attachment.name}</span>
+                                        <a
+                                          className="icon-button payment-attachment-view"
+                                          href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer.id)}&attachment_index=${index}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          aria-label={`View ${attachment.name}`}
+                                          title="View attachment"
+                                        >
+                                          <Eye size={16} />
+                                        </a>
+                                      </span>
+                                    ))}
+                                  </span>
+                                ) : answer.answer_value || "-"}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
+                </>
+              ) : null}
+              {canShowApprovalActions ? (
+                <>
+                  <div className="section-divider" />
+                  <PaymentApprovalActionForm
+                    approveAction={handleApprovePaymentApproval}
+                    currentStep={selectedRequest.current_step_order}
+                    rejectAction={handleRejectPaymentApproval}
+                    requestNo={selectedRequest.request_no}
+                    requestRemarks={selectedRequest.remarks}
+                    requestId={selectedRequest.id}
+                    returnAction={handleReturnPaymentApproval}
+                    status={currentStatus}
+                    totalSteps={selectedRequest.total_steps}
+                  />
                 </>
               ) : null}
               {lifecycleRows.length ? (
@@ -614,19 +635,6 @@ export default async function PaymentApprovalsPage({
                   <div className="form-grid two">
                     <label className="span-2">Request Remarks<textarea className="field" readOnly rows={3} value={selectedRequest.remarks ?? "-"} /></label>
                   </div>
-                </>
-              ) : null}
-              {canShowApprovalActions ? (
-                <>
-                  <div className="section-divider" />
-                  <PaymentApprovalActionForm
-                    approveAction={handleApprovePaymentApproval}
-                    rejectAction={handleRejectPaymentApproval}
-                    requestRemarks={selectedRequest.remarks}
-                    requestId={selectedRequest.id}
-                    returnAction={handleReturnPaymentApproval}
-                    status={currentStatus}
-                  />
                 </>
               ) : null}
               {pagePermission.canEdit && currentUserAlreadyActed ? (

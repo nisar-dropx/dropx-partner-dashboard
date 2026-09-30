@@ -11,6 +11,11 @@ import { validatePaymentFile } from "@/lib/payment-file-types";
 import { normalizePaymentModes, paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { validatePaymentQuestionDate } from "@/lib/payment-question-date-rules";
+import {
+  MAX_PAYMENT_REQUEST_ATTACHMENTS,
+  paymentRequestAttachments,
+  type PaymentRequestAttachment
+} from "@/lib/payment-request-attachments";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { loadApprovalSteps, resolveInitialApprovalTarget, resolveStepApprover, type ApprovalStepRow } from "@/lib/payment-approval-steps";
@@ -127,6 +132,58 @@ function validateQuestionDates(formData: FormData, questions: PaymentQuestionFor
 function validateQuestionFile(file: File, question: PaymentQuestionForAction) {
   const error = validatePaymentFile(file, question.dropdown_options);
   if (error) throw new Error(`${question.question_text || "File upload"}: ${error}`);
+}
+
+function submittedQuestionFiles(formData: FormData, questionId: string) {
+  return formData.getAll(`files[${questionId}]`).filter((entry): entry is File => entry instanceof File && entry.size > 0);
+}
+
+function validateQuestionFiles(files: File[], question: PaymentQuestionForAction) {
+  if (files.length > MAX_PAYMENT_REQUEST_ATTACHMENTS) {
+    throw new Error(`${question.question_text || "File upload"}: upload no more than ${MAX_PAYMENT_REQUEST_ATTACHMENTS} attachments.`);
+  }
+  files.forEach((file) => validateQuestionFile(file, question));
+}
+
+async function uploadQuestionFiles(
+  admin: NonNullable<typeof supabaseAdmin>,
+  companyId: string,
+  requestId: string,
+  questionId: string,
+  files: File[]
+): Promise<PaymentRequestAttachment[]> {
+  const uploaded: PaymentRequestAttachment[] = [];
+  for (const [index, file] of files.entries()) {
+    const path = `${companyId}/${requestId}/${questionId}/${Date.now()}-${index + 1}-${safeFileName(file.name)}`;
+    const { error } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
+    if (error) {
+      if (uploaded.length) await admin.storage.from("payment-request-documents").remove(uploaded.map((attachment) => attachment.path));
+      throw new Error(error.message);
+    }
+    uploaded.push({ path, name: file.name, size: file.size });
+  }
+  return uploaded;
+}
+
+async function removeQuestionFiles(admin: NonNullable<typeof supabaseAdmin>, answer: {
+  file_path?: string | null;
+  file_name?: string | null;
+  file_size?: number | null;
+  attachments?: unknown;
+} | null | undefined) {
+  const paths = paymentRequestAttachments(answer).map((attachment) => attachment.path);
+  if (paths.length) await admin.storage.from("payment-request-documents").remove(paths);
+}
+
+function fileAnswerPayload(attachments: PaymentRequestAttachment[]) {
+  const first = attachments[0] ?? null;
+  return {
+    answer_value: first?.name ?? null,
+    file_path: first?.path ?? null,
+    file_name: first?.name ?? null,
+    file_size: first?.size ?? null,
+    attachments
+  };
 }
 
 function questionStage(question: PaymentQuestionForAction) {
@@ -295,9 +352,9 @@ export async function createExpenseRequest(formData: FormData) {
     validateQuestionDates(formData, expenseQuestions);
     const fileQuestions = expenseQuestions.filter((question) => question.answer_type === "file");
     for (const question of fileQuestions) {
-      const file = formData.get(`files[${question.id}]`);
-      if (file instanceof File && file.size > 0) validateQuestionFile(file, question);
-      if (question.is_required && !(file instanceof File && file.size > 0)) {
+      const files = submittedQuestionFiles(formData, question.id);
+      validateQuestionFiles(files, question);
+      if (question.is_required && !files.length) {
         throw new Error("Required file upload is missing.");
       }
     }
@@ -396,43 +453,31 @@ export async function createExpenseRequest(formData: FormData) {
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
     if (questionIds.length) {
       const questionById = new Map(expenseQuestions.map((question) => [question.id, question]));
-      const answers = await Promise.all(questionIds.map(async (questionId) => {
+      const answers = [];
+      for (const questionId of questionIds) {
         const question = questionById.get(questionId);
         if (question?.answer_type === "file") {
-          const file = formData.get(`files[${questionId}]`);
-          if (file instanceof File && file.size > 0) {
-            validateQuestionFile(file, question);
-            const path = `${companyId}/${request.id}/${questionId}/${Date.now()}-${safeFileName(file.name)}`;
-            const { error: uploadError } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
-            if (uploadError) throw new Error(uploadError.message);
-            return withCompany({
-              payment_request_id: request.id,
-              question_id: questionId,
-              answer_value: file.name,
-              file_path: path,
-              file_name: file.name,
-              file_size: file.size
-            }, companyId);
-          }
-          return withCompany({
+          const files = submittedQuestionFiles(formData, questionId);
+          validateQuestionFiles(files, question);
+          const attachments = await uploadQuestionFiles(admin, companyId, request.id, questionId, files);
+          answers.push(withCompany({
             payment_request_id: request.id,
             question_id: questionId,
-            answer_value: null,
-            file_path: null,
-            file_name: null,
-            file_size: null
-          }, companyId);
+            ...fileAnswerPayload(attachments)
+          }, companyId));
+          continue;
         }
 
-        return withCompany({
+        answers.push(withCompany({
           payment_request_id: request.id,
           question_id: questionId,
           answer_value: clean(formData.get(`answers[${questionId}]`)),
           file_path: null,
           file_name: null,
-          file_size: null
-        }, companyId);
-      }));
+          file_size: null,
+          attachments: []
+        }, companyId));
+      }
       const { error: answersError } = await admin.from("payment_request_answers").insert(answers);
       if (answersError) throw new Error(answersError.message);
     }
@@ -595,9 +640,9 @@ export async function createPaymentRequest(formData: FormData) {
     validateQuestionDates(formData, paymentQuestions);
     const fileQuestions = paymentQuestions.filter((question) => question.answer_type === "file");
     for (const question of fileQuestions) {
-      const file = formData.get(`files[${question.id}]`);
-      if (file instanceof File && file.size > 0) validateQuestionFile(file, question);
-      if (question.is_required && !(file instanceof File && file.size > 0)) {
+      const files = submittedQuestionFiles(formData, question.id);
+      validateQuestionFiles(files, question);
+      if (question.is_required && !files.length) {
         throw new Error("Required file upload is missing.");
       }
     }
@@ -739,43 +784,31 @@ export async function createPaymentRequest(formData: FormData) {
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
     if (questionIds.length) {
       const questionById = new Map(paymentQuestions.map((question) => [question.id, question]));
-      const answers = await Promise.all(questionIds.map(async (questionId) => {
+      const answers = [];
+      for (const questionId of questionIds) {
         const question = questionById.get(questionId);
         if (question?.answer_type === "file") {
-          const file = formData.get(`files[${questionId}]`);
-          if (file instanceof File && file.size > 0) {
-            validateQuestionFile(file, question);
-            const path = `${companyId}/${request.id}/${questionId}/${Date.now()}-${safeFileName(file.name)}`;
-            const { error: uploadError } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
-            if (uploadError) throw new Error(uploadError.message);
-            return withCompany({
-              payment_request_id: request.id,
-              question_id: questionId,
-              answer_value: file.name,
-              file_path: path,
-              file_name: file.name,
-              file_size: file.size
-            }, companyId);
-          }
-          return withCompany({
+          const files = submittedQuestionFiles(formData, questionId);
+          validateQuestionFiles(files, question);
+          const attachments = await uploadQuestionFiles(admin, companyId, request.id, questionId, files);
+          answers.push(withCompany({
             payment_request_id: request.id,
             question_id: questionId,
-            answer_value: null,
-            file_path: null,
-            file_name: null,
-            file_size: null
-          }, companyId);
+            ...fileAnswerPayload(attachments)
+          }, companyId));
+          continue;
         }
 
-        return withCompany({
+        answers.push(withCompany({
           payment_request_id: request.id,
           question_id: questionId,
           answer_value: clean(formData.get(`answers[${questionId}]`)),
           file_path: null,
           file_name: null,
-          file_size: null
-        }, companyId);
-      }));
+          file_size: null,
+          attachments: []
+        }, companyId));
+      }
       const { error: answersError } = await admin.from("payment_request_answers").insert(answers);
       if (answersError) throw new Error(answersError.message);
     }
@@ -915,49 +948,44 @@ export async function submitPaymentBankDetails(formData: FormData) {
     validateQuestionDates(formData, paymentQuestions);
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
     const questionById = new Map(paymentQuestions.map((question) => [question.id, question]));
-    const questionAnswers = await Promise.all(questionIds.map(async (questionId) => {
+    const questionAnswers = [];
+    for (const questionId of questionIds) {
       const question = questionById.get(questionId);
-      if (!question) return null;
+      if (!question) continue;
       if (question.answer_type === "file") {
-        const file = formData.get(`files[${questionId}]`);
-        if (file instanceof File && file.size > 0) {
-          validateQuestionFile(file, question);
-          const path = `${companyId}/${request.id}/${questionId}/${Date.now()}-${safeFileName(file.name)}`;
-          const { error: uploadError } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
-          if (uploadError) throw new Error(uploadError.message);
-          return withCompany({
-            payment_request_id: request.id,
-            question_id: questionId,
-            answer_value: file.name,
-            file_path: path,
-            file_name: file.name,
-            file_size: file.size
-          }, companyId);
-        }
-        if (question.is_required) throw new Error("Required file upload is missing.");
-        return withCompany({
+        const files = submittedQuestionFiles(formData, questionId);
+        validateQuestionFiles(files, question);
+        if (question.is_required && !files.length) throw new Error("Required file upload is missing.");
+        const attachments = await uploadQuestionFiles(admin, companyId, request.id, questionId, files);
+        questionAnswers.push(withCompany({
           payment_request_id: request.id,
           question_id: questionId,
-          answer_value: null,
-          file_path: null,
-          file_name: null,
-          file_size: null
-        }, companyId);
+          ...fileAnswerPayload(attachments)
+        }, companyId));
+        continue;
       }
 
       const answerValue = clean(formData.get(`answers[${questionId}]`));
       if (question.is_required && !answerValue) throw new Error("Required payment detail is missing.");
-      return withCompany({
+      questionAnswers.push(withCompany({
         payment_request_id: request.id,
         question_id: questionId,
         answer_value: answerValue,
         file_path: null,
         file_name: null,
-        file_size: null
-      }, companyId);
-    }));
-    const answersToSave = questionAnswers.filter((answer): answer is Exclude<(typeof questionAnswers)[number], null> => Boolean(answer));
+        file_size: null,
+        attachments: []
+      }, companyId));
+    }
+    const answersToSave = questionAnswers;
     if (answersToSave.length) {
+      const { data: existingAnswers, error: existingAnswersError } = await admin
+        .from("payment_request_answers")
+        .select("id, question_id, file_path, file_name, file_size, attachments")
+        .eq("company_id", companyId)
+        .eq("payment_request_id", request.id)
+        .in("question_id", answersToSave.map((answer) => String(answer.question_id)));
+      if (existingAnswersError) throw new Error(existingAnswersError.message);
       const { error: deleteAnswersError } = await admin
         .from("payment_request_answers")
         .delete()
@@ -965,6 +993,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
         .eq("payment_request_id", request.id)
         .in("question_id", answersToSave.map((answer) => String(answer.question_id)));
       if (deleteAnswersError) throw new Error(deleteAnswersError.message);
+      await Promise.all((existingAnswers ?? []).map((answer) => removeQuestionFiles(admin, answer)));
       const { error: answersError } = await admin.from("payment_request_answers").insert(answersToSave);
       if (answersError) throw new Error(answersError.message);
     }
@@ -1129,7 +1158,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
 
     const { data: existingAnswers, error: existingAnswersError } = await admin
       .from("payment_request_answers")
-      .select("id, question_id, file_name, file_path")
+      .select("id, question_id, file_name, file_path, file_size, attachments")
       .eq("company_id", companyId)
       .eq("payment_request_id", request.id);
     if (existingAnswersError) throw new Error(existingAnswersError.message);
@@ -1149,18 +1178,13 @@ export async function resubmitExpenseRequest(formData: FormData) {
       }, companyId) as Record<string, unknown>;
 
       if (question.answer_type === "file") {
-        const file = formData.get(`files[${questionId}]`);
-        if (file instanceof File && file.size > 0) {
-          validateQuestionFile(file, question);
-          const path = `${companyId}/${request.id}/${questionId}/${Date.now()}-${safeFileName(file.name)}`;
-          const { error: uploadError } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
-          if (uploadError) throw new Error(uploadError.message);
-          if (existingAnswer?.file_path) await admin.storage.from("payment-request-documents").remove([existingAnswer.file_path]);
-          answerPayload.answer_value = file.name;
-          answerPayload.file_path = path;
-          answerPayload.file_name = file.name;
-          answerPayload.file_size = file.size;
-        } else if (question.is_required && !existingAnswer?.file_name) {
+        const files = submittedQuestionFiles(formData, questionId);
+        validateQuestionFiles(files, question);
+        if (files.length) {
+          const attachments = await uploadQuestionFiles(admin, companyId, request.id, questionId, files);
+          await removeQuestionFiles(admin, existingAnswer);
+          Object.assign(answerPayload, fileAnswerPayload(attachments));
+        } else if (question.is_required && !paymentRequestAttachments(existingAnswer).length) {
           throw new Error("Required file upload is missing.");
         } else {
           continue;
@@ -1396,7 +1420,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
 
     const { data: existingAnswers } = await admin
       .from("payment_request_answers")
-      .select("id, question_id, file_name, file_path")
+      .select("id, question_id, file_name, file_path, file_size, attachments")
       .eq("company_id", companyId)
       .eq("payment_request_id", request.id);
     const existingAnswerByQuestionId = new Map((existingAnswers ?? []).map((answer) => [answer.question_id, answer]));
@@ -1417,18 +1441,13 @@ export async function resubmitPaymentRequest(formData: FormData) {
         }, companyId) as Record<string, unknown>;
 
         if (question.answer_type === "file") {
-          const file = formData.get(`files[${questionId}]`);
-          if (file instanceof File && file.size > 0) {
-            validateQuestionFile(file, question);
-            const path = `${companyId}/${request.id}/${questionId}/${Date.now()}-${safeFileName(file.name)}`;
-            const { error: uploadError } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
-            if (uploadError) throw new Error(uploadError.message);
-            if (existingAnswer?.file_path) await admin.storage.from("payment-request-documents").remove([existingAnswer.file_path]);
-            answerPayload.answer_value = file.name;
-            answerPayload.file_path = path;
-            answerPayload.file_name = file.name;
-            answerPayload.file_size = file.size;
-          } else if (question.is_required && !existingAnswer?.file_name) {
+          const files = submittedQuestionFiles(formData, questionId);
+          validateQuestionFiles(files, question);
+          if (files.length) {
+            const attachments = await uploadQuestionFiles(admin, companyId, request.id, questionId, files);
+            await removeQuestionFiles(admin, existingAnswer);
+            Object.assign(answerPayload, fileAnswerPayload(attachments));
+          } else if (question.is_required && !paymentRequestAttachments(existingAnswer).length) {
             throw new Error("Required file upload is missing.");
           } else {
             continue;

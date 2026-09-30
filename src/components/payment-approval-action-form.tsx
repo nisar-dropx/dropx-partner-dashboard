@@ -5,8 +5,11 @@ import { useFormStatus } from "react-dom";
 
 type PaymentApprovalActionFormProps = {
   requestId: string;
+  requestNo: string;
   requestRemarks?: string | null;
   status: string;
+  currentStep?: number | null;
+  totalSteps?: number | null;
   approveAction: (formData: FormData) => void | Promise<void>;
   returnAction: (formData: FormData) => void | Promise<void>;
   rejectAction: (formData: FormData) => void | Promise<void>;
@@ -48,8 +51,11 @@ function PaymentApprovalButton({
 
 export function PaymentApprovalActionForm({
   requestId,
+  requestNo,
   requestRemarks,
   status,
+  currentStep,
+  totalSteps,
   approveAction,
   returnAction,
   rejectAction
@@ -69,7 +75,15 @@ export function PaymentApprovalActionForm({
     }
 
     const valid = remarks.reportValidity();
-    if (valid) setPendingAction(actionName);
+    if (!valid) return false;
+
+    const confirmation = actionName === "approve"
+      ? `Approve ${requestNo}? This moves the request to the next configured step.`
+      : actionName === "reject"
+        ? `Reject ${requestNo}? The requester will be notified of this final decision.`
+        : null;
+    if (confirmation && !window.confirm(confirmation)) return false;
+    setPendingAction(actionName);
     return valid;
   }
 
@@ -77,14 +91,18 @@ export function PaymentApprovalActionForm({
     <form className="payment-approval-action-form">
       <input name="request_id" type="hidden" value={requestId} />
       <input name="status" type="hidden" value={status} />
-      {requestRemarks?.trim() ? (
-        <p className="payment-requestor-remarks">
-          <strong>Remark:</strong> {requestRemarks}
-        </p>
-      ) : null}
+      <div className="payment-approval-decision-intro">
+        <div>
+          <strong>Decision required</strong>
+          <span>{currentStep && totalSteps ? `Approval step ${currentStep} of ${totalSteps}` : "Review the request and supporting evidence before deciding."}</span>
+        </div>
+        <span className="status-pill warn">Awaiting your action</span>
+      </div>
+      {requestRemarks?.trim() ? <p className="payment-requestor-remarks"><strong>Requester note:</strong> {requestRemarks}</p> : null}
       <label>
-        Remarks
+        Decision note
         <textarea className="field" name="comments" ref={remarksRef} rows={2} />
+        <small>Optional when approving. Required when returning or rejecting.</small>
       </label>
       <div className="payment-approval-action-buttons">
         <PaymentApprovalButton
@@ -94,7 +112,7 @@ export function PaymentApprovalActionForm({
           onBeforeSubmit={() => validateAction("approve")}
           pendingAction={pendingAction}
         >
-          Approve
+          Approve &amp; continue
         </PaymentApprovalButton>
         <PaymentApprovalButton
           actionName="return"
@@ -103,7 +121,7 @@ export function PaymentApprovalActionForm({
           onBeforeSubmit={() => validateAction("return")}
           pendingAction={pendingAction}
         >
-          Return
+          Return for correction
         </PaymentApprovalButton>
         <PaymentApprovalButton
           actionName="reject"
@@ -112,7 +130,7 @@ export function PaymentApprovalActionForm({
           onBeforeSubmit={() => validateAction("reject")}
           pendingAction={pendingAction}
         >
-          Reject
+          Reject request
         </PaymentApprovalButton>
       </div>
     </form>
