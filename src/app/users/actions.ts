@@ -401,16 +401,49 @@ export async function configureSurfaceLocationRole(formData: FormData) {
   }
 }
 
-export async function saveLocationPortalAccess(formData: FormData) {
-  try {
-    const authorization = await requirePagePermission("users", "edit");
-    const companyId = requireCompanyId(authorization);
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-    if (currentAdminAccessSurface() !== "dashboard") throw new Error("Location portal access is managed only in the main Dashboard.");
+type LocationPortalProduct = typeof locationPortalProducts[number];
+type LocationPortalRole = { id: string; code: string };
+type LocationPortalSaveContext = {
+  dashboardRole: LocationPortalRole;
+  productRoles: Map<LocationPortalProduct, LocationPortalRole>;
+};
 
-    const locationId = required(formData.get("location_id"), "Location");
-    const selectedProducts = [...new Set(formData.getAll("product_codes").map((value) => String(value).trim().toLowerCase()))]
-      .filter((value): value is typeof locationPortalProducts[number] => locationPortalProducts.includes(value as typeof locationPortalProducts[number]));
+async function prepareLocationPortalSave(companyId: string): Promise<LocationPortalSaveContext> {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const roleResult = await supabaseAdmin.from("user_roles").select("id,code").eq("company_id", companyId).eq("code", "LOCATION").eq("is_active", true).maybeSingle();
+  if (roleResult.error || !roleResult.data) throw new Error(roleResult.error?.message ?? "The built-in Dashboard Location role is unavailable.");
+
+  const database = supabaseAdmin;
+  const productRoleResults = await Promise.all(locationPortalProducts.map(async (productCode) => {
+    const code = `${productCode.toUpperCase()}_LOCATION`;
+    const existing = await database.from("user_roles").select("id,code").eq("company_id", companyId).eq("code", code).eq("is_active", true).maybeSingle();
+    if (existing.error) throw new Error(existing.error.message);
+    if (existing.data) return [productCode, existing.data] as const;
+    const created = await database.from("user_roles").insert({
+      company_id: companyId,
+      product_code: productCode,
+      code,
+      name: "Location Account",
+      parent_role_id: null,
+      location_access_mode: "role_based",
+      is_system: false,
+      is_active: true
+    }).select("id,code").single();
+    if (created.error || !created.data) throw new Error(created.error?.message ?? `${productCode} Location Account role could not be created.`);
+    return [productCode, created.data] as const;
+  }));
+
+  return { dashboardRole: roleResult.data, productRoles: new Map(productRoleResults) };
+}
+
+async function applyLocationPortalAccess(
+  authorization: AuthorizationContext,
+  companyId: string,
+  context: LocationPortalSaveContext,
+  locationId: string,
+  selectedProducts: LocationPortalProduct[]
+) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     const stationResult = await supabaseAdmin.from("stations").select("id,station_code,station_name,station_email,is_active")
       .eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle();
     if (stationResult.error || !stationResult.data) throw new Error(stationResult.error?.message ?? "Active location was not found.");
@@ -420,29 +453,6 @@ export async function saveLocationPortalAccess(formData: FormData) {
     const profileResult = await supabaseAdmin.from("profiles").select("id,email,location_scope_ids,is_active,invite_method")
       .eq("company_id", companyId).ilike("email", stationEmail).eq("is_active", true).maybeSingle();
     if (profileResult.error || !profileResult.data) throw new Error(profileResult.error?.message ?? "The location mailbox identity is not linked. Save the mailbox in Location Master, then try again.");
-    const roleResult = await supabaseAdmin.from("user_roles").select("id,code").eq("company_id", companyId).eq("code", "LOCATION").eq("is_active", true).maybeSingle();
-    if (roleResult.error || !roleResult.data) throw new Error(roleResult.error?.message ?? "The built-in Dashboard Location role is unavailable.");
-
-    const database = supabaseAdmin;
-    const productRoleResults = await Promise.all(locationPortalProducts.map(async (productCode) => {
-      const code = `${productCode.toUpperCase()}_LOCATION`;
-      const existing = await database.from("user_roles").select("id,code").eq("company_id", companyId).eq("code", code).eq("is_active", true).maybeSingle();
-      if (existing.error) throw new Error(existing.error.message);
-      if (existing.data) return [productCode, existing.data] as const;
-      const created = await database.from("user_roles").insert({
-        company_id: companyId,
-        product_code: productCode,
-        code,
-        name: "Location Account",
-        parent_role_id: null,
-        location_access_mode: "role_based",
-        is_system: false,
-        is_active: true
-      }).select("id,code").single();
-      if (created.error || !created.data) throw new Error(created.error?.message ?? `${productCode} Location Account role could not be created.`);
-      return [productCode, created.data] as const;
-    }));
-    const productRoles = new Map(productRoleResults);
 
     const sameMailboxStations = await supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("is_active", true).ilike("station_email", stationEmail);
     if (sameMailboxStations.error) throw new Error(sameMailboxStations.error.message);
@@ -459,7 +469,7 @@ export async function saveLocationPortalAccess(formData: FormData) {
       const protectedGrant = Boolean(existing?.source_system && protectedMembershipSources.has(existing.source_system));
       if (selectedProducts.includes(productCode)) {
         if (protectedGrant) continue;
-        const productRole = productRoles.get(productCode);
+        const productRole = context.productRoles.get(productCode);
         if (!productRole) throw new Error(`${productCode} Location Account role is unavailable.`);
         const save = await supabaseAdmin.from("company_product_memberships").upsert({
           company_id: companyId,
@@ -485,7 +495,7 @@ export async function saveLocationPortalAccess(formData: FormData) {
     }
 
     const nextProfileScope = [...new Set([...(profileResult.data.location_scope_ids ?? []), ...stationScopeIds])];
-    const profileSave = await supabaseAdmin.from("profiles").update({ role_id: roleResult.data.id, location_scope_ids: nextProfileScope, invite_method: "Location Master" })
+    const profileSave = await supabaseAdmin.from("profiles").update({ role_id: context.dashboardRole.id, location_scope_ids: nextProfileScope, invite_method: "Location Master" })
       .eq("id", profileResult.data.id).eq("company_id", companyId);
     if (profileSave.error) throw new Error(profileSave.error.message);
 
@@ -498,11 +508,72 @@ export async function saveLocationPortalAccess(formData: FormData) {
       new_values: { products: selectedProducts, station_email: stationEmail, location_scope_ids: stationScopeIds },
       reason: "Dashboard-owned location portal access"
     });
+    const protectedProducts = (existingResult.data ?? [])
+      .filter((membership) => membership.is_active && membership.source_system && protectedMembershipSources.has(membership.source_system))
+      .map((membership) => membership.product_code as LocationPortalProduct);
+    return { locationId, productCodes: [...new Set([...selectedProducts, ...protectedProducts])] };
+}
+
+export async function saveLocationPortalAccess(formData: FormData) {
+  try {
+    const authorization = await requirePagePermission("users", "edit");
+    const companyId = requireCompanyId(authorization);
+    if (currentAdminAccessSurface() !== "dashboard") throw new Error("Location portal access is managed only in the main Dashboard.");
+    const locationId = required(formData.get("location_id"), "Location");
+    const selectedProducts = [...new Set(formData.getAll("product_codes").map((value) => String(value).trim().toLowerCase()))]
+      .filter((value): value is LocationPortalProduct => locationPortalProducts.includes(value as LocationPortalProduct));
+    const context = await prepareLocationPortalSave(companyId);
+    await applyLocationPortalAccess(authorization, companyId, context, locationId, selectedProducts);
     revalidatePath("/users");
   } catch (error) {
     usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Location portal access could not be saved." });
   }
   usersRedirect({ section: "roles", userNotice: "Location portal access saved." });
+}
+
+export async function saveLocationPortalAccessBatch(updates: Array<{ locationId: string; productCodes: string[] }>) {
+  const emptyResult = { ok: false, savedLocationIds: [] as string[], savedAccess: [] as Array<{ locationId: string; productCodes: string[] }>, errors: [] as Array<{ locationId: string; message: string }>, message: "No access changes were provided." };
+  try {
+    const authorization = await requirePagePermission("users", "edit");
+    const companyId = requireCompanyId(authorization);
+    if (currentAdminAccessSurface() !== "dashboard") throw new Error("Location portal access is managed only in the main Dashboard.");
+    if (!Array.isArray(updates) || !updates.length) return emptyResult;
+
+    const normalized = new Map<string, LocationPortalProduct[]>();
+    for (const update of updates.slice(0, 100)) {
+      const locationId = String(update?.locationId ?? "").trim();
+      if (!locationId) continue;
+      const productCodes = Array.isArray(update?.productCodes)
+        ? [...new Set(update.productCodes.map((value) => String(value).trim().toLowerCase()))]
+          .filter((value): value is LocationPortalProduct => locationPortalProducts.includes(value as LocationPortalProduct))
+        : [];
+      normalized.set(locationId, productCodes);
+    }
+    if (!normalized.size) return emptyResult;
+
+    const context = await prepareLocationPortalSave(companyId);
+    const entries = [...normalized.entries()];
+    const savedAccess: Array<{ locationId: string; productCodes: string[] }> = [];
+    const errors: Array<{ locationId: string; message: string }> = [];
+
+    for (let index = 0; index < entries.length; index += 4) {
+      const batch = entries.slice(index, index + 4);
+      const results = await Promise.allSettled(batch.map(([locationId, productCodes]) => applyLocationPortalAccess(authorization, companyId, context, locationId, productCodes)));
+      results.forEach((result, resultIndex) => {
+        const locationId = batch[resultIndex][0];
+        if (result.status === "fulfilled") savedAccess.push(result.value);
+        else errors.push({ locationId, message: result.reason instanceof Error ? result.reason.message : "Location access could not be saved." });
+      });
+    }
+
+    const savedLocationIds = savedAccess.map((item) => item.locationId);
+    const message = errors.length
+      ? `${savedLocationIds.length} location${savedLocationIds.length === 1 ? "" : "s"} saved; ${errors.length} need attention.`
+      : `${savedLocationIds.length} location${savedLocationIds.length === 1 ? "" : "s"} updated without reloading the page.`;
+    return { ok: errors.length === 0, savedLocationIds, savedAccess, errors, message };
+  } catch (error) {
+    return { ...emptyResult, errors: [{ locationId: "", message: error instanceof Error ? error.message : "Location portal access could not be saved." }], message: error instanceof Error ? error.message : "Location portal access could not be saved." };
+  }
 }
 
 export async function reconcilePeopleAccessArchitecture() {

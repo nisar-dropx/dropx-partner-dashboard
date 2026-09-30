@@ -1,0 +1,157 @@
+.searchRow,
+.bulkBar,
+.footerBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.searchRow {
+  justify-content: space-between;
+}
+
+.search {
+  width: min(430px, 100%);
+}
+
+.bulkBar {
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: #f8fafc;
+}
+
+.bulkLabel {
+  min-width: 90px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.bulkGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bulkGroup strong {
+  padding-left: 5px;
+  color: #334155;
+  font-size: 11px;
+}
+
+.miniButton {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.miniButton:hover:not(:disabled) {
+  background: #fff1e8;
+  color: #c2410c;
+}
+
+.miniButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.selectedRow {
+  background: #fffaf5;
+}
+
+.dirtyRow {
+  box-shadow: inset 3px 0 #f97316;
+}
+
+.portalCell {
+  min-width: 120px;
+}
+
+.checkLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.checkLabel input {
+  width: 15px;
+  height: 15px;
+  accent-color: #f05a28;
+}
+
+.rowStatus {
+  min-width: 105px;
+}
+
+.unsaved {
+  color: #c2410c;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.saved {
+  color: #15803d;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.footerBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid #fed7aa;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedback {
+  margin: 0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.feedbackError {
+  color: #b91c1c;
+}
+
+@media (max-width: 760px) {
+  .bulkBar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .footerBar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .footerActions > button {
+    flex: 1;
+  }
+}

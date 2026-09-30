@@ -16,7 +16,7 @@ import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { configureSurfaceDesignationRole, configureSurfaceLocationRole, createUserRole, deleteUser, deleteUserRole, reconcilePeopleAccessArchitecture, saveLocationPortalAccess, updateUserRole } from "./actions";
+import { configureSurfaceDesignationRole, configureSurfaceLocationRole, createUserRole, deleteUser, deleteUserRole, reconcilePeopleAccessArchitecture, saveLocationPortalAccessBatch, updateUserRole } from "./actions";
 
 type AppPageRow = {
   id: string;
@@ -827,7 +827,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         canEdit={pagePermission.canEdit}
         products={locationBusinessProducts.map((product) => ({ code: product.code, label: product.label }))}
         rows={dashboardLocationAccess.locations}
-        saveAction={saveLocationPortalAccess}
+        saveAction={saveLocationPortalAccessBatch}
       />
       ) : null}
 
