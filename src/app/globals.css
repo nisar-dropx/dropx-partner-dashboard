@@ -20725,6 +20725,10 @@ td strong,
 @media (max-width: 1100px) { .payout-filters { grid-template-columns: repeat(3, minmax(170px, 1fr)); } .deduction-head-create, .deduction-head-row { grid-template-columns: repeat(2, minmax(180px,1fr)); } }
 .workforce-payout-detail-table th, .workforce-payout-detail-table td { white-space: nowrap; }
 .workforce-payout-detail-table thead tr:first-child th { vertical-align: middle; }
+.workforce-payout-detail-table .work-days-group { text-align: center; background: #eff6ff; border-left: 1px solid #bfd7f5; border-right: 1px solid #bfd7f5; color: #175cd3; }
+.workforce-payout-detail-table .work-days-cell { text-align: center; background: #f8fbff; border-left: 1px solid #d7e8fb; border-right: 1px solid #d7e8fb; }
+.workforce-payout-detail-table .payment-method-group { text-align: center; background: #ecfdf3; border-left: 1px solid #b7e4ca; border-right: 1px solid #b7e4ca; color: #087a54; }
+.workforce-payout-detail-table .payment-method-amount { text-align: right; background: #f6fef9; border-left: 1px solid #d4efdf; border-right: 1px solid #d4efdf; }
 .workforce-payout-detail-table .production-group { text-align: center; background: #fff7ed; border-left: 1px solid #f0d8bd; border-right: 1px solid #f0d8bd; color: #a84a10; }
 .workforce-payout-detail-table .deduction-group { background: #fff3e8; color: #b54708; }
 .workforce-payout-detail-table tr.payout-pan-aadhaar-unlinked td { background: #fff0df; color: #9a3412; }

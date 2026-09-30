@@ -4,13 +4,24 @@ import { useMemo, useState, type ReactElement } from "react";
 
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; name: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
-  location: string; provider: string; model: string; paymentMethod: string; production: number;
+  location: string; provider: string; model: string; paymentMethod: string; workDays: number; workDaysSource: string; production: number;
+  paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
   productionBreakdown: Array<{ code: string; label: string; count: number; rate: number; amount: number }>;
-  dailyBreakdown: Array<{ date: string; baseAmount: number; lines: Array<{ code: string; label: string; count: number; rate: number; amount: number }> }>;
+  dailyBreakdown: Array<{
+    date: string;
+    workDayUnits: number;
+    attendanceSource: string;
+    methodAmounts: Array<{ id: string; label: string; amount: number }>;
+    baseAmount: number;
+    lines: Array<{ code: string; label: string; count: number; rate: number; amount: number }>;
+  }>;
   baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED"; netAmount: number; status: string;
 };
 
 function money(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`; }
+function units(value: number) { return value.toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
+function workDaysValue(value: number, source: string) { return source.toLowerCase().includes("unavailable") ? "" : value; }
+function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
 
 export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   const [search, setSearch] = useState("");
@@ -22,12 +33,13 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   const [size, setSize] = useState("20");
   const [expandedId, setExpandedId] = useState("");
   const options = (key: keyof WorkforcePayoutRow) => Array.from(new Set(rows.map((row) => String(row[key] || "-")).filter(Boolean))).sort();
+  const methodOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [rows]);
   const filtered = useMemo(() => rows.filter((row) => {
     const term = search.trim().toLowerCase();
     return (!term || `${row.dropxId} ${row.name} ${row.providerMemberId} ${row.providerMemberName}`.toLowerCase().includes(term))
       && (location === "all" || row.location === location)
       && (provider === "all" || row.provider === provider)
-      && (method === "all" || row.paymentMethod === method)
+      && (method === "all" || row.paymentMethodBreakdown.some((item) => item.label === method))
       && (status === "all" || row.status === status);
   }), [rows, search, location, provider, method, status]);
   const pageSize = size === "all" ? Math.max(filtered.length, 1) : Number(size);
@@ -45,17 +57,24 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
       return leftIndex - rightIndex;
     });
   }, [rows]);
+  const paymentMethodColumns = useMemo(() => {
+    const values = new Map<string, string>();
+    rows.forEach((row) => row.paymentMethodBreakdown.forEach((item) => values.set(item.id, item.label)));
+    return Array.from(values, ([id, label]) => ({ id, label })).sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+  }, [rows]);
   const deductionColumns = useMemo(() => {
     const values = new Map<string, string>();
     rows.forEach((row) => row.deductionBreakdown.forEach((item) => values.set(item.code, item.label)));
     return Array.from(values, ([code, label]) => ({ code, label })).sort((left, right) => left.label.localeCompare(right.label));
   }, [rows]);
+  const tableColumnCount = 15 + paymentMethodColumns.length + deductionColumns.length + productionColumns.length * 3;
 
   function exportRows() {
+    const paymentMethodHeaders = paymentMethodColumns.map((item) => `${item.label} Amount`);
     const productionHeaders = productionColumns.flatMap((item) => [`${item.label} Count`, `${item.label} Rate`, `${item.label} Amount`]);
     const deductionHeaders = deductionColumns.map((item) => `${item.label} Deduction`);
-    const columns = ["DropX ID","Registered Worker","Payment Source","Source ID","Location Code","Provider / Allocation","Model / Basis","Payment Method",...productionHeaders,"Base Amount","Additional Payments","Gross Payment",...deductionHeaders,"Gross Deductions","Net Pay","PAN-Aadhaar Status","Status"];
-    const csv = [columns, ...filtered.map((r) => [r.dropxId,r.name,r.providerMemberName,r.providerMemberId,r.location,r.provider,r.model,r.paymentMethod,...productionColumns.flatMap((column) => { const item = r.productionBreakdown.find((value) => value.code === column.code); return [item?.count ?? 0,item?.rate ?? 0,item?.amount ?? 0]; }),r.baseAmount,r.additions,r.grossPayment,...deductionColumns.map((column) => r.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0),r.deductions,r.netAmount,r.panAadhaarStatus,r.status])]
+    const columns = ["DropX ID","Registered Worker","Payment Source","Source ID","Location Code","Provider / Allocation","Model / Basis","Payment Method","Work Days","Attendance Source",...paymentMethodHeaders,...productionHeaders,"Base Amount","Additional Payments","Gross Payment",...deductionHeaders,"Gross Deductions","Net Pay","PAN-Aadhaar Status","Status"];
+    const csv = [columns, ...filtered.map((r) => [r.dropxId,r.name,r.providerMemberName,r.providerMemberId,r.location,r.provider,r.model,r.paymentMethod,workDaysValue(r.workDays, r.workDaysSource),r.workDaysSource,...paymentMethodColumns.map((column) => r.paymentMethodBreakdown.find((item) => item.id === column.id)?.amount ?? 0),...productionColumns.flatMap((column) => { const item = r.productionBreakdown.find((value) => value.code === column.code); return [item?.count ?? 0,item?.rate ?? 0,item?.amount ?? 0]; }),r.baseAmount,r.additions,r.grossPayment,...deductionColumns.map((column) => r.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0),r.deductions,r.netAmount,r.panAadhaarStatus,r.status])]
       .map((line) => line.map((value) => `"${String(value).replaceAll('"','""')}"`).join(",")).join("\r\n");
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = "workforce-payouts.csv"; link.click(); URL.revokeObjectURL(link.href);
   }
@@ -63,22 +82,129 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   return <>
     <div className="payout-filters">
       <label>Search<input className="field" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="DropX ID, worker or payment source" /></label>
-      <label>Location<select className="field" value={location} onChange={(e) => { setLocation(e.target.value); setPage(1); }}><option value="all">All allocated locations</option>{options("location").map((v) => <option key={v}>{v}</option>)}</select></label>
-      <label>Provider<select className="field" value={provider} onChange={(e) => { setProvider(e.target.value); setPage(1); }}><option value="all">All providers</option>{options("provider").map((v) => <option key={v}>{v}</option>)}</select></label>
-      <label>Payment method<select className="field" value={method} onChange={(e) => { setMethod(e.target.value); setPage(1); }}><option value="all">All methods</option>{options("paymentMethod").map((v) => <option key={v}>{v}</option>)}</select></label>
-      <label>Status<select className="field" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}><option value="all">All statuses</option>{options("status").map((v) => <option key={v}>{v}</option>)}</select></label>
-      <label>Rows<select className="field" value={size} onChange={(e) => { setSize(e.target.value); setPage(1); }}>{["20","50","100","500","1000","all"].map((v) => <option value={v} key={v}>{v === "all" ? "All" : v}</option>)}</select></label>
+      <label>Location<select className="field" value={location} onChange={(event) => { setLocation(event.target.value); setPage(1); }}><option value="all">All allocated locations</option>{options("location").map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>Provider<select className="field" value={provider} onChange={(event) => { setProvider(event.target.value); setPage(1); }}><option value="all">All providers</option>{options("provider").map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>Payment method<select className="field" value={method} onChange={(event) => { setMethod(event.target.value); setPage(1); }}><option value="all">All methods</option>{methodOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>Status<select className="field" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="all">All statuses</option>{options("status").map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>Rows<select className="field" value={size} onChange={(event) => { setSize(event.target.value); setPage(1); }}>{["20","50","100","500","1000","all"].map((value) => <option value={value} key={value}>{value === "all" ? "All" : value}</option>)}</select></label>
       <button className="button secondary" type="button" onClick={exportRows}>Export</button>
     </div>
-    <div className="table-wrap"><table className="workforce-payout-table workforce-payout-detail-table"><thead><tr><th rowSpan={2}>DropX ID</th><th rowSpan={2}>Registered Worker</th><th rowSpan={2}>Payment Source</th><th rowSpan={2}>Location Code</th><th rowSpan={2}>Provider / Basis</th><th rowSpan={2}>Payment Method</th>{productionColumns.map((column) => <th className="production-group" colSpan={3} key={column.code}>{column.label}</th>)}<th rowSpan={2}>Base Amount</th><th rowSpan={2}>Additional Payments</th><th rowSpan={2}>Gross Payment</th>{deductionColumns.map((column) => <th rowSpan={2} className="deduction-group" key={column.code}>{column.label}</th>)}<th rowSpan={2}>Gross Deductions</th><th rowSpan={2}>Net Pay</th><th rowSpan={2}>PAN–Aadhaar</th><th rowSpan={2}>Status</th><th rowSpan={2}>Action</th></tr><tr>{productionColumns.flatMap((column) => [<th key={`${column.code}-count`}>Units</th>,<th key={`${column.code}-rate`}>Rate</th>,<th key={`${column.code}-amount`}>Amount</th>])}</tr></thead>
-      <tbody>{visible.length ? visible.flatMap((row) => {
-        const expanded = expandedId === row.id;
-        const span = 14 + deductionColumns.length + productionColumns.length * 3;
-        return [<tr key={row.id} className={row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}><td><strong>{row.dropxId}</strong></td><td><strong>{row.name}</strong></td><td><strong>{row.providerMemberName}</strong><small>{row.providerMemberId}</small></td><td><strong>{row.location}</strong></td><td>{row.provider}<small>{row.model}</small></td><td>{row.paymentMethod}</td>{productionColumns.flatMap((column) => { const item = row.productionBreakdown.find((value) => value.code === column.code); return [<td key={`${column.code}-count`}>{(item?.count ?? 0).toLocaleString("en-IN")}</td>,<td key={`${column.code}-rate`}>{money(item?.rate ?? 0)}</td>,<td key={`${column.code}-amount`}><strong>{money(item?.amount ?? 0)}</strong></td>]; })}<td>{money(row.baseAmount)}</td><td className="positive">+ {money(row.additions)}</td><td><strong>{money(row.grossPayment)}</strong></td>{deductionColumns.map((column) => <td className="negative" key={column.code}>- {money(row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0)}</td>)}<td className="negative">- {money(row.deductions)}</td><td><strong>{money(row.netAmount)}</strong></td><td><span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus}</span></td><td><span className="status-pill warn">{row.status}</span></td><td><button aria-expanded={expanded} className="button secondary compact" onClick={() => setExpandedId((current) => current === row.id ? "" : row.id)} type="button">{expanded ? "Close" : "Breakup"}</button></td></tr>,
-          expanded ? <tr className="payout-daily-detail-row" key={`${row.id}-daily`}><td colSpan={span}><section className="payout-daily-detail"><header><span><small>DropX associate</small><strong>{row.name}</strong></span><span><small>Partner ID</small><strong>{row.providerMemberId}</strong></span><span><small>Partner name</small><strong>{row.providerMemberName}</strong></span></header><div className="table-wrap"><table><thead><tr><th>Date</th>{productionColumns.map((column) => <th key={column.code}>{column.label}</th>)}<th>Payment</th></tr></thead><tbody>{row.dailyBreakdown.map((day) => <tr key={day.date}><td><strong>{day.date.split("-").reverse().join("/")}</strong></td>{productionColumns.map((column) => { const line = day.lines.find((item) => item.code === column.code); return <td key={column.code}><strong>{(line?.count ?? 0).toLocaleString("en-IN")}</strong><small>{money(line?.amount ?? 0)}</small></td>; })}<td><strong>{money(day.baseAmount)}</strong></td></tr>)}</tbody></table></div></section></td></tr> : null
-        ].filter(Boolean) as ReactElement[];
-      }) : <tr><td className="empty-cell" colSpan={14 + deductionColumns.length + productionColumns.length * 3}>No workforce payouts match the selected period and filters.</td></tr>}</tbody>
-    </table></div>
-    <div className="pagination"><span>Showing {filtered.length ? (safePage - 1) * pageSize + 1 : 0}–{Math.min(safePage * pageSize, filtered.length)} of {filtered.length}</span><div><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>Previous</button><span>Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage(safePage + 1)}>Next</button></div></div>
+    <div className="table-wrap">
+      <table className="workforce-payout-table workforce-payout-detail-table">
+        <thead>
+          <tr>
+            <th rowSpan={2}>DropX ID</th>
+            <th rowSpan={2}>Registered Worker</th>
+            <th rowSpan={2}>Payment Source</th>
+            <th rowSpan={2}>Location Code</th>
+            <th rowSpan={2}>Provider / Basis</th>
+            <th rowSpan={2}>Payment Method</th>
+            <th className="work-days-group" rowSpan={2}>Work Days</th>
+            {paymentMethodColumns.map((column) => <th className="payment-method-group" colSpan={1} key={column.id}>{column.label}</th>)}
+            {productionColumns.map((column) => <th className="production-group" colSpan={3} key={column.code}>{column.label}</th>)}
+            <th rowSpan={2}>Base Amount</th>
+            <th rowSpan={2}>Additional Payments</th>
+            <th rowSpan={2}>Gross Payment</th>
+            {deductionColumns.map((column) => <th rowSpan={2} className="deduction-group" key={column.code}>{column.label}</th>)}
+            <th rowSpan={2}>Gross Deductions</th>
+            <th rowSpan={2}>Net Pay</th>
+            <th rowSpan={2}>PAN–Aadhaar</th>
+            <th rowSpan={2}>Status</th>
+            <th rowSpan={2}>Action</th>
+          </tr>
+          <tr>
+            {paymentMethodColumns.map((column) => <th className="payment-method-amount" key={`method-${column.id}-amount`}>Amount</th>)}
+            {productionColumns.flatMap((column) => [
+              <th key={`production-${column.code}-count`}>Units</th>,
+              <th key={`production-${column.code}-rate`}>Rate</th>,
+              <th key={`production-${column.code}-amount`}>Amount</th>
+            ])}
+          </tr>
+        </thead>
+        <tbody>
+          {visible.length ? visible.flatMap((row) => {
+            const expanded = expandedId === row.id;
+            return [
+              <tr key={row.id} className={row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
+                <td><strong>{row.dropxId}</strong></td>
+                <td><strong>{row.name}</strong></td>
+                <td><strong>{row.providerMemberName}</strong><small>{row.providerMemberId}</small></td>
+                <td><strong>{row.location}</strong></td>
+                <td>{row.provider}<small>{row.model}</small></td>
+                <td>{row.paymentMethod}</td>
+                <td className="work-days-cell"><strong>{workDaysDisplay(row.workDays, row.workDaysSource)}</strong><small>{row.workDaysSource}</small></td>
+                {paymentMethodColumns.map((column) => <td className="payment-method-amount" key={`method-${column.id}`}><strong>{money(row.paymentMethodBreakdown.find((item) => item.id === column.id)?.amount ?? 0)}</strong></td>)}
+                {productionColumns.flatMap((column) => {
+                  const item = row.productionBreakdown.find((value) => value.code === column.code);
+                  return [
+                    <td key={`production-${column.code}-count`}>{units(item?.count ?? 0)}</td>,
+                    <td key={`production-${column.code}-rate`}>{money(item?.rate ?? 0)}</td>,
+                    <td key={`production-${column.code}-amount`}><strong>{money(item?.amount ?? 0)}</strong></td>
+                  ];
+                })}
+                <td>{money(row.baseAmount)}</td>
+                <td className="positive">+ {money(row.additions)}</td>
+                <td><strong>{money(row.grossPayment)}</strong></td>
+                {deductionColumns.map((column) => <td className="negative" key={column.code}>- {money(row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0)}</td>)}
+                <td className="negative">- {money(row.deductions)}</td>
+                <td><strong>{money(row.netAmount)}</strong></td>
+                <td><span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus}</span></td>
+                <td><span className="status-pill warn">{row.status}</span></td>
+                <td><button aria-expanded={expanded} className="button secondary compact" onClick={() => setExpandedId((current) => current === row.id ? "" : row.id)} type="button">{expanded ? "Close" : "Breakup"}</button></td>
+              </tr>,
+              expanded ? <tr className="payout-daily-detail-row" key={`${row.id}-daily`}>
+                <td colSpan={tableColumnCount}>
+                  <section className="payout-daily-detail">
+                    <header>
+                      <span><small>DropX associate</small><strong>{row.name}</strong></span>
+                      <span><small>Partner ID</small><strong>{row.providerMemberId}</strong></span>
+                      <span><small>Partner name</small><strong>{row.providerMemberName}</strong></span>
+                    </header>
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th rowSpan={2}>Date</th>
+                            <th className="work-days-group" rowSpan={2}>Work Days</th>
+                            {paymentMethodColumns.map((column) => <th className="payment-method-group" colSpan={1} key={column.id}>{column.label}</th>)}
+                            {productionColumns.map((column) => <th className="production-group" colSpan={3} key={column.code}>{column.label}</th>)}
+                            <th rowSpan={2}>Daily Payment</th>
+                          </tr>
+                          <tr>
+                            {paymentMethodColumns.map((column) => <th className="payment-method-amount" key={`daily-method-${column.id}-amount`}>Amount</th>)}
+                            {productionColumns.flatMap((column) => [
+                              <th key={`daily-production-${column.code}-count`}>Units</th>,
+                              <th key={`daily-production-${column.code}-rate`}>Rate</th>,
+                              <th key={`daily-production-${column.code}-amount`}>Amount</th>
+                            ])}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.dailyBreakdown.map((day) => <tr key={day.date}>
+                            <td><strong>{day.date.split("-").reverse().join("/")}</strong></td>
+                            <td className="work-days-cell"><strong>{workDaysDisplay(day.workDayUnits, day.attendanceSource)}</strong><small>{day.attendanceSource}</small></td>
+                            {paymentMethodColumns.map((column) => <td className="payment-method-amount" key={`daily-method-${column.id}`}><strong>{money(day.methodAmounts.find((item) => item.id === column.id)?.amount ?? 0)}</strong></td>)}
+                            {productionColumns.flatMap((column) => {
+                              const line = day.lines.find((item) => item.code === column.code);
+                              return [
+                                <td key={`daily-production-${column.code}-count`}>{units(line?.count ?? 0)}</td>,
+                                <td key={`daily-production-${column.code}-rate`}>{money(line?.rate ?? 0)}</td>,
+                                <td key={`daily-production-${column.code}-amount`}><strong>{money(line?.amount ?? 0)}</strong></td>
+                              ];
+                            })}
+                            <td><strong>{money(day.baseAmount)}</strong></td>
+                          </tr>)}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </td>
+              </tr> : null
+            ].filter(Boolean) as ReactElement[];
+          }) : <tr><td className="empty-cell" colSpan={tableColumnCount}>No workforce payouts match the selected period and filters.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+    <div className="pagination"><span>Showing {filtered.length ? (safePage - 1) * pageSize + 1 : 0}–{Math.min(safePage * pageSize, filtered.length)} of {filtered.length}</span><div><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)} type="button">Previous</button><span>Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage(safePage + 1)} type="button">Next</button></div></div>
   </>;
 }

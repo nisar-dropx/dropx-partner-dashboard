@@ -17,6 +17,11 @@ import {
   workforceAttendanceCaptureSettingForDate,
   type WorkforceAttendanceCaptureSetting
 } from "@/lib/workforce-attendance-capture";
+import {
+  attendanceCaptureLabel,
+  summarizePaymentMethodAmounts,
+  summarizeWorkDays
+} from "@/lib/workforce-payout-summary";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -56,7 +61,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   const [locationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult, attendanceCaptureResult] = await Promise.all([
     locationsQuery,
-    supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name,code), payment_methods(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${workforcePaymentMonthStart(fromDate)}`),
+    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name,code), payment_methods(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${workforcePaymentMonthStart(fromDate)}`).order("id")),
     readAllRows(supabaseAdmin.from("workforce_payment_allocations").select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, payment_methods:payment_methods!workforce_payment_allocations_method_company_fk(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${fromDate}`).order("effective_from").order("id")),
     supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
     supabaseAdmin.from("workforce_deduction_heads").select("code, name, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true),
@@ -87,7 +92,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
     fieldExecutiveIds.length ? supabaseAdmin.from("workforce").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIds) : Promise.resolve({ data: [], error: null }),
     workforceIds.length ? supabaseAdmin.from("connect_profile_verifications").select("account_id, verified").eq("company_id", companyId).eq("profile_type", "workforce").eq("kind", "pan_aadhaar").in("account_id", workforceIds) : Promise.resolve({ data: [], error: null }),
-    paymentMethodIds.length ? supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", paymentMethodIds) : Promise.resolve({ data: [], error: null })
+    paymentMethodIds.length ? readAllRows(supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", paymentMethodIds).order("id")) : Promise.resolve({ data: [], error: null })
   ]);
   if (workforceBySourceResult.error || workforceByIdResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error || panAadhaarResult.error || methodComponentsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceBySourceResult.error?.message || workforceByIdResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || panAadhaarResult.error?.message || methodComponentsResult.error?.message || "Unable to load payout data." };
   const workerBySource = new Map<string, any>();
@@ -149,15 +154,19 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const attendanceCaptureHistory = (attendanceCaptureResult.data ?? []) as WorkforceAttendanceCaptureSetting[];
   const stationCodeById = new Map(locations.map((location: any) => [String(location.id), String(location.station_code ?? "").trim().toUpperCase()]));
   const compactIdentity = (value: unknown) => String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const mappingsByProviderMember = new Map<string, any[]>();
+  for (const mapping of allMappings) {
+    const key = String(mapping.provider_member_id ?? "").trim().toUpperCase();
+    if (key) mappingsByProviderMember.set(key, [...(mappingsByProviderMember.get(key) ?? []), mapping]);
+  }
   const shipmentDeliveriesByWorkerDate = aggregateShipmentDeliveriesByWorkforceDay((metricsResult.data ?? []).flatMap((row: any) => {
     const date = String(row.work_date ?? "");
     const rowStation = String(row.station_code ?? "").trim().toUpperCase();
     const rowClient = compactIdentity(row.client);
-    const candidates = allMappings.filter((mapping: any) => {
+    const candidates = (mappingsByProviderMember.get(String(row.provider_employee_id ?? "").trim().toUpperCase()) ?? []).filter((mapping: any) => {
       const provider = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
       const providerIdentity = compactIdentity(`${provider?.code ?? ""} ${provider?.name ?? ""}`);
-      return String(mapping.provider_member_id ?? "").trim().toUpperCase() === String(row.provider_employee_id ?? "").trim().toUpperCase()
-        && String(mapping.effective_from) <= date
+      return String(mapping.effective_from) <= date
         && (!mapping.effective_to || String(mapping.effective_to) >= date)
         && (!mapping.station_id || stationCodeById.get(String(mapping.station_id)) === rowStation)
         && (!rowClient || providerIdentity.includes(rowClient));
@@ -235,8 +244,12 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   };
   const providerRows = mappings.map((mapping: any) => {
     const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const providerDailyRows = metricsByProviderMember.get(mapping.provider_member_id) ?? []; const providerMemberName = providerDailyRows.find((daily) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
+    const paymentMethod: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
+    const paymentMethodId = String(mapping.payment_method_id);
+    const paymentMethodName = String(paymentMethod?.name ?? "-");
     const activeFrom = [fromDate, String(mapping.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
     const activeTo = [toDate, today(), String(mapping.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
+    const activeDates = activeFrom <= activeTo ? dateRange(activeFrom, activeTo) : [];
     const eligibleDaily = activeFrom <= activeTo ? providerDailyRows.filter((daily) => daily.work_date >= activeFrom && daily.work_date <= activeTo) : [];
     const productionRules = allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).flatMap((item: any) => {
       const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
@@ -247,13 +260,15 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const attendanceDates = attendanceComponents.length && worker?.id && activeFrom <= activeTo
       ? dateRange(activeFrom, activeTo).filter((date) => attendanceOwnerOn(worker.id, date) === String(mapping.id))
       : [];
-    const dates = [...new Set([...eligibleDaily.map((daily) => String(daily.work_date)), ...attendanceDates])];
+    const dates = [...new Set([...activeDates, ...eligibleDaily.map((daily) => String(daily.work_date))])];
     let missingAttendanceConfiguration = false;
     const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = dates.sort().reverse().map((date) => {
       const rows = eligibleDaily.filter((daily) => String(daily.work_date) === date);
       const productionLines = productionRules.map((rule) => { const count = rows.reduce((sum, daily) => sum + metricValue(daily, rule.source), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
       const ownedAttendanceComponents = attendanceDates.includes(date) ? attendanceComponents : [];
       const workerDateKey = `${worker?.id}|${date}`;
+      const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
+      const workDayUnits = directPayAttendanceUnit(attendanceByWorkerDate.get(workerDateKey));
       const attendancePay = directPayForDay(
         mapping.payment_values,
         ownedAttendanceComponents,
@@ -262,13 +277,21 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         {
           policyHistory: paymentPolicyHistory,
           cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0,
-          attendanceSource: workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date).capture_method
+          attendanceSource: captureSetting.capture_method
         }
       );
       missingAttendanceConfiguration ||= ownedAttendanceComponents.length > 0 && attendancePay.missing;
       const attendanceLines = attendancePay.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount }));
       const lines = [...productionLines, ...attendanceLines];
-      return { date, lines, baseAmount: Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100 };
+      const baseAmount = Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
+      return {
+        date,
+        lines,
+        baseAmount,
+        workDayUnits,
+        attendanceSource: attendanceCaptureLabel(captureSetting.capture_method),
+        methodAmounts: summarizePaymentMethodAmounts([{ methodId: paymentMethodId, label: paymentMethodName, amount: baseAmount }])
+      };
     });
     const lineMap = new Map<string, { code: string; label: string; count: number; rate: number; amount: number }>();
     for (const day of dailyBreakdown) for (const line of day.lines) {
@@ -277,12 +300,21 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     }
     const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [...lineMap.values()].map((line) => ({ ...line, count: Math.round(line.count * 100) / 100, amount: Math.round(line.amount * 100) / 100 }));
     const production = productionBreakdown.reduce((sum, line) => sum + line.count, 0);
-    const baseAmount = Math.round(productionBreakdown.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
+    const baseAmount = Math.round(dailyBreakdown.reduce((sum, day) => sum + day.baseAmount, 0) * 100) / 100;
+    const { workDays, source: workDaysSource } = summarizeWorkDays(activeDates.map((date) => {
+      const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
+      return {
+        date,
+        attendanceUnit: directPayAttendanceUnit(attendanceByWorkerDate.get(`${worker?.id}|${date}`)),
+        source: captureSetting.capture_method
+      };
+    }));
+    const paymentMethodBreakdown = summarizePaymentMethodAmounts([{ methodId: paymentMethodId, label: paymentMethodName, amount: baseAmount }]);
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
     const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) }); const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0); const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
     const additions = 0; const grossPayment = baseAmount + additions;
     const status = missingAttendanceConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
-    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status } satisfies WorkforcePayoutRow;
+    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, workDays, workDaysSource, paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status } satisfies WorkforcePayoutRow;
   });
   if (providerAttendanceConflict) return { rows: [] as WorkforcePayoutRow[], error: "Conflicting provider attendance payment setups exist for the same workforce date. Resolve the duplicate rate cards before calculating payroll." };
   const overlappingPaymentSetup = mappings.some((mapping: any) => {
@@ -301,7 +333,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   ]);
   const directRows: WorkforcePayoutRow[] = [...allocationsByWorkforce.entries()].map(([workforceId, workerAllocations]) => {
     const worker = workerBySource.get(workforceId);
-    const dailyBreakdown = workerAllocations.flatMap((allocation: any) => {
+    const rawDailyBreakdown = workerAllocations.flatMap((allocation: any) => {
       const snapshotComponents = Array.isArray(allocation.payment_components)
         ? allocation.payment_components.filter((component: unknown): component is DirectPayComponent => Boolean(component && typeof component === "object"))
         : [];
@@ -310,6 +342,9 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         : componentsByMethod.get(String(allocation.payment_method_id)) ?? [];
       const needsAttendanceSource = components.some((component: DirectPayComponent) => component.component_type !== "production"
         && component.calculation_source === "attendance_eligibility");
+      const method: any = Array.isArray(allocation.payment_methods) ? allocation.payment_methods[0] : allocation.payment_methods;
+      const methodId = String(allocation.payment_method_id);
+      const methodName = String(method?.name ?? "-");
       const activeFrom = [fromDate, String(allocation.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
       const activeTo = [toDate, today(), String(allocation.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
@@ -326,26 +361,62 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
             attendanceSource: captureSetting.capture_method
           }
         );
-        return { date, baseAmount: calculation.total, missing: calculation.missing || (needsAttendanceSource && captureSetting.capture_method === "shipment_data"), lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount })) };
+        return {
+          date,
+          baseAmount: calculation.total,
+          missing: calculation.missing || (needsAttendanceSource && captureSetting.capture_method === "shipment_data"),
+          lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount })),
+          workDayUnits: calculation.attendanceUnit,
+          attendanceSource: captureSetting.capture_method === "shipment_data" ? "Shipment data unavailable" : attendanceCaptureLabel(captureSetting.capture_method),
+          captureMethod: captureSetting.capture_method,
+          methodAmounts: summarizePaymentMethodAmounts([{ methodId, label: methodName, amount: calculation.total }])
+        };
       }) : [];
     }).sort((left, right) => right.date.localeCompare(left.date));
+    const dailyByDate = new Map<string, WorkforcePayoutRow["dailyBreakdown"][number] & { missing: boolean }>();
+    for (const day of rawDailyBreakdown) {
+      const current = dailyByDate.get(day.date);
+      dailyByDate.set(day.date, {
+        date: day.date,
+        baseAmount: Math.round(((current?.baseAmount ?? 0) + day.baseAmount) * 100) / 100,
+        missing: Boolean(current?.missing || day.missing),
+        lines: [...(current?.lines ?? []), ...day.lines],
+        workDayUnits: Math.max(current?.workDayUnits ?? 0, day.workDayUnits),
+        attendanceSource: current && current.attendanceSource !== day.attendanceSource ? "Mixed" : day.attendanceSource,
+        methodAmounts: summarizePaymentMethodAmounts([...(current?.methodAmounts ?? []).map((item) => ({ methodId: item.id, label: item.label, amount: item.amount })), ...day.methodAmounts.map((item) => ({ methodId: item.id, label: item.label, amount: item.amount }))])
+      });
+    }
+    const dailyBreakdown = [...dailyByDate.values()].sort((left, right) => right.date.localeCompare(left.date));
     const lineMap = new Map<string, { code: string; label: string; count: number; rate: number; amount: number }>();
     for (const day of dailyBreakdown) for (const line of day.lines) {
       const current = lineMap.get(line.code) ?? { ...line, count: 0, amount: 0 };
-      current.count += line.count; current.amount += line.amount; lineMap.set(line.code, current);
+      current.count += line.count;
+      current.amount += line.amount;
+      lineMap.set(line.code, current);
     }
-    const productionBreakdown = [...lineMap.values()].map((line) => ({ ...line, count: Math.round(line.count * 100) / 100, rate: line.count ? Math.round(line.amount / line.count * 100) / 100 : line.rate, amount: Math.round(line.amount * 100) / 100 }));
+    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [...lineMap.values()].map((line) => ({
+      ...line,
+      count: Math.round(line.count * 100) / 100,
+      rate: line.count ? Math.round(line.amount / line.count * 100) / 100 : line.rate,
+      amount: Math.round(line.amount * 100) / 100
+    }));
     const baseAmount = Math.round(dailyBreakdown.reduce((sum, day) => sum + day.baseAmount, 0) * 100) / 100;
+    const workDaySummary = summarizeWorkDays(rawDailyBreakdown.map((day) => ({ date: day.date, attendanceUnit: day.workDayUnits, source: day.captureMethod })));
+    const shipmentWorkDaysUnavailable = rawDailyBreakdown.some((day) => day.captureMethod === "shipment_data");
+    const workDays = workDaySummary.workDays;
+    const workDaysSource = shipmentWorkDaysUnavailable ? "Shipment data unavailable" : workDaySummary.source;
+    const configuredMethodAmounts = workerAllocations.map((allocation: any) => {
+      const method: any = Array.isArray(allocation.payment_methods) ? allocation.payment_methods[0] : allocation.payment_methods;
+      return { methodId: String(allocation.payment_method_id), label: String(method?.name ?? "-"), amount: 0 };
+    });
+    const paymentMethodBreakdown = summarizePaymentMethodAmounts([...configuredMethodAmounts, ...rawDailyBreakdown.flatMap((day) => day.methodAmounts.map((item) => ({ methodId: item.id, label: item.label, amount: item.amount })))]);
     const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, { categoryCode: "workforce", panNumber: worker?.pan_number ?? null });
     const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
     const panAadhaarLinked = panAadhaarLinkedByWorkforceId.get(workforceId) === true;
     const locationIds = [...new Set(workerAllocations.map((allocation: any) => String(allocation.station_id ?? "")).filter(Boolean))];
     const locationLabels = [...new Set(locationIds.map((id) => locationById.get(id)?.station_code ?? "-"))];
-    const methodNames = [...new Set(workerAllocations.map((allocation: any) => {
-      const method: any = Array.isArray(allocation.payment_methods) ? allocation.payment_methods[0] : allocation.payment_methods;
-      return method?.name ?? "-";
-    }))];
-    return { id: `direct-${workforceId}`, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationIds[0] ?? null, location: locationLabels.join(" / ") || "-", provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / "), production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines }) => ({ date, baseAmount, lines })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" };
+    const methodNames = paymentMethodBreakdown.map((item) => item.label);
+    return { id: `direct-${workforceId}`, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationIds[0] ?? null, location: locationLabels.join(" / ") || "-", provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", workDays, workDaysSource, paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: shipmentWorkDaysUnavailable || dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" };
   });
   const rows = [...providerRows, ...directRows];
   return { rows, error: null };
