@@ -89,7 +89,9 @@ function currentRoleLabel(request: PaymentReportRequest) {
 
 function approvalStepLabel(request: PaymentReportRequest) {
   if (!request.current_step_order) return "-";
-  return request.total_steps ? `${request.current_step_order} of ${request.total_steps}` : String(request.current_step_order);
+  const currentStep = Number(request.current_step_order) || 0;
+  const totalSteps = Math.max(Number(request.total_steps) || 0, currentStep);
+  return totalSteps ? `${currentStep} of ${totalSteps}` : String(currentStep);
 }
 
 function formatDateTime(value: string) {

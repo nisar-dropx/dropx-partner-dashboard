@@ -62,6 +62,9 @@ export function PaymentApprovalActionForm({
 }: PaymentApprovalActionFormProps) {
   const remarksRef = useRef<HTMLTextAreaElement>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const displayedCurrentStep = Number(currentStep) || 0;
+  const displayedTotalSteps = Math.max(Number(totalSteps) || 0, displayedCurrentStep);
+  const isFinalApprovalStep = displayedCurrentStep > 0 && displayedTotalSteps > 0 && displayedCurrentStep >= displayedTotalSteps;
 
   function validateAction(actionName: string) {
     const remarks = remarksRef.current;
@@ -94,7 +97,9 @@ export function PaymentApprovalActionForm({
       <div className="payment-approval-decision-intro">
         <div>
           <strong>Decision required</strong>
-          <span>{currentStep && totalSteps ? `Approval step ${currentStep} of ${totalSteps}` : "Review the request and supporting evidence before deciding."}</span>
+          <span>{displayedCurrentStep && displayedTotalSteps
+            ? `${isFinalApprovalStep ? "Final approval" : "Approval"} step ${displayedCurrentStep} of ${displayedTotalSteps}`
+            : "Review the request and supporting evidence before deciding."}</span>
         </div>
         <span className="status-pill warn">Awaiting your action</span>
       </div>
@@ -112,7 +117,7 @@ export function PaymentApprovalActionForm({
           onBeforeSubmit={() => validateAction("approve")}
           pendingAction={pendingAction}
         >
-          Approve &amp; continue
+          {isFinalApprovalStep ? "Approve final" : "Approve & continue"}
         </PaymentApprovalButton>
         <PaymentApprovalButton
           actionName="return"

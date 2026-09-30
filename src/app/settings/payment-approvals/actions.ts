@@ -105,7 +105,34 @@ export async function saveApprovalSteps(formData: FormData) {
     .eq("id", paymentHeadId);
   if (mirrorResult.error) throw new Error(mirrorResult.error.message);
 
+  // Approval actions resolve from the current ordered workflow. Keep the
+  // cached display total and audit snapshot in sync immediately when that
+  // workflow is edited, so existing requests never show impossible progress
+  // such as "step 4 of 3". Requests already beyond a newly shortened flow are
+  // deliberately left intact for an explicit routing decision.
+  if (rows.length) {
+    const progressResult = await supabaseAdmin
+      .from("payment_requests")
+      .update({
+        total_steps: rows.length,
+        approval_steps_snapshot: steps.map((step, index) => ({
+          step_order: index + 1,
+          candidates: step.candidates,
+          is_required: step.is_required
+        })),
+        updated_at: new Date().toISOString()
+      })
+      .eq("company_id", companyId)
+      .eq("payment_head_id", paymentHeadId)
+      .lte("current_step_order", rows.length)
+      .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
+      .not("approval_status", "in", "(FINAL_APPROVED,PROCESSED,PROCESSING,RETURNED,REJECTED,CANCELLED)");
+    if (progressResult.error) throw new Error(progressResult.error.message);
+  }
+
   revalidatePath(`/settings/payment-approvals/${paymentHeadId}`);
   revalidatePath("/settings/payment-approvals");
   revalidatePath("/master/payment-heads");
+  revalidatePath("/payments/approvals");
+  revalidatePath("/payments/report");
 }
