@@ -9,6 +9,7 @@ import { minimumAgeError } from "../lib/profile-age";
 import { ConnectExitManagement } from "./connect-exit-management";
 import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
 import { userFacingError } from "../lib/user-facing-error";
+import { compressFormImages, formFileBytes, MAX_UPLOAD_REQUEST_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from "../lib/compress-form-images";
 
 export type AppAccount = {
   id: string;
@@ -590,7 +591,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
         data.set("agreement_version", String(profile.agreement.version));
       }
       currentChecks.forEach((item) => data.append("profile_verification_results", JSON.stringify(item)));
+      await compressFormImages(data);
+      if (formFileBytes(data) > MAX_UPLOAD_REQUEST_BYTES) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
       const response = await fetch(endpoint, { method: "POST", body: data });
+      if (response.status === 413) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to save profile.");
       setProfile(payload.profile);
@@ -631,7 +635,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
         const file = form.get(slot);
         if (file instanceof File && file.size > 0) data.set(slot, file);
       }
+      await compressFormImages(data);
+      if (formFileBytes(data) > MAX_UPLOAD_REQUEST_BYTES) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
       const response = await fetch("/api/connect/profile-draft", { method: "POST", body: data });
+      if (response.status === 413) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to save draft.");
       const draft = payload.draft as ProfileDraft;

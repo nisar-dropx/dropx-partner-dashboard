@@ -642,6 +642,8 @@ export async function POST(request: Request) {
       notice: isFieldExecutive ? "Registration submitted to the HO Workforce team for review." : "Profile saved successfully."
     });
   } catch (error) {
+    // The user only sees a friendly message; keep the real cause in the logs.
+    console.error("[connect/field-executive-profile] save failed", error);
     return NextResponse.json({ error: userFacingError(error, "Unable to save profile.") }, { status: 400 });
   }
 }

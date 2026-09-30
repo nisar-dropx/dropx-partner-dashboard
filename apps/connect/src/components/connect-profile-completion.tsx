@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { compressFormImages, formFileBytes, MAX_UPLOAD_REQUEST_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from "../lib/compress-form-images";
 
 type ConnectAccount = {
   id: string;
@@ -209,10 +210,13 @@ export function ConnectProfileCompletion({
         throw new Error("ESI No can contain only letters and numbers.");
       }
       formData.set("employee_id", account.id);
+      await compressFormImages(formData);
+      if (formFileBytes(formData) > MAX_UPLOAD_REQUEST_BYTES) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
       const response = await fetch("/api/connect/profile", {
         method: "POST",
         body: formData
       });
+      if (response.status === 413) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
       const payload = await response.json() as { profile?: ProfilePayload; error?: string; notice?: string };
       if (!response.ok) throw new Error(payload.error || "Unable to save profile.");
       if (payload.profile) setProfile(payload.profile);

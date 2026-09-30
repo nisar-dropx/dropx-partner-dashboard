@@ -441,6 +441,8 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, profile: await serializeEmployee(employee), notice: "Profile saved successfully." });
   } catch (error) {
+    // The user only sees a friendly message; keep the real cause in the logs.
+    console.error("[connect/profile] save failed", error);
     return NextResponse.json({ error: userFacingError(error, "Unable to save profile.") }, { status: 400 });
   }
 }
