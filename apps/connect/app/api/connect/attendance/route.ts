@@ -360,7 +360,8 @@ export async function GET(request: NextRequest) {
     };
     const withWindow = responseRows.map((row) => {
       const closeDate = closesOn(row.date);
-      const open = row.date <= todayIst && row.date >= earliestDate && (!closeDate || todayIst <= closeDate);
+      // With a close day set, the month rule alone decides; otherwise the backdate window.
+      const open = row.date <= todayIst && (closeDate ? todayIst <= closeDate : row.date >= earliestDate);
       return { ...row, regularizationOpen: open, regularizationClosesOn: closeDate };
     });
 
