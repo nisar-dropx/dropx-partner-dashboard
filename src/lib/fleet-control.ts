@@ -16,7 +16,7 @@ export type FleetControlVehicle = {
   nextDocument: string | null; nextDocumentDate: string | null; nextDocumentDays: number | null;
   lastServiceDate: string | null; nextServiceDate: string | null; nextServiceOdometerKm: number | null; lastAuditDate: string | null;
 };
-export type FleetDocumentDefinition = { value: string; label: string; requiresExpiry: boolean; reminderDays: number; sortOrder: number };
+export type FleetDocumentDefinition = { value: string; label: string; requiresExpiry: boolean; expiryMode: "required" | "optional" | "linked_fitness"; reminderDays: number; sortOrder: number };
 export type FleetVehicleDocument = { id: string; vehicleNo: string; documentType: string; fileName: string; contentType: string; fileSize: number | null; expiryDate: string | null; uploadedAt: string | null; viewUrl: string; downloadUrl: string };
 export type FleetVehicleMovement = { id: string; vehicleId: string; vehicleNo: string; fromStation: string; toStation: string; reason: string; movedAt: string; movedBy: string };
 export type FleetControlPayment = { id: string; requestNo: string; stationCode: string; head: string; amount: number; requestedBy: string; requestedAt: string; workDate: string | null; status: string; statusLabel: string; remarks: string; canApprove: boolean };
@@ -44,11 +44,11 @@ type PaymentRow = { id: string; request_no: string | null; location_id: string |
 
 const expiryFields = [["Registration", "registration_expiry"], ["Insurance", "insurance_expiry"], ["PUC", "puc_expiry"], ["Fitness", "fitness_expiry"], ["Tax", "tax_expiry"]] as const;
 const defaultDocumentTypes: FleetDocumentDefinition[] = [
-  { value: "FLEET_REGISTRATION", label: "Registration certificate", requiresExpiry: true, reminderDays: 30, sortOrder: 10 },
-  { value: "FLEET_INSURANCE", label: "Insurance", requiresExpiry: true, reminderDays: 30, sortOrder: 20 },
-  { value: "FLEET_PUC", label: "Pollution certificate (PUC)", requiresExpiry: true, reminderDays: 15, sortOrder: 30 },
-  { value: "FLEET_FITNESS", label: "Fitness certificate", requiresExpiry: true, reminderDays: 30, sortOrder: 40 },
-  { value: "FLEET_TAX", label: "Road tax", requiresExpiry: true, reminderDays: 30, sortOrder: 50 }
+  { value: "FLEET_REGISTRATION", label: "Registration certificate", requiresExpiry: false, expiryMode: "linked_fitness", reminderDays: 30, sortOrder: 10 },
+  { value: "FLEET_INSURANCE", label: "Insurance", requiresExpiry: true, expiryMode: "required", reminderDays: 30, sortOrder: 20 },
+  { value: "FLEET_PUC", label: "Pollution certificate (PUC)", requiresExpiry: true, expiryMode: "required", reminderDays: 15, sortOrder: 30 },
+  { value: "FLEET_FITNESS", label: "Fitness certificate", requiresExpiry: true, expiryMode: "required", reminderDays: 30, sortOrder: 40 },
+  { value: "FLEET_TAX", label: "Road tax", requiresExpiry: true, expiryMode: "required", reminderDays: 30, sortOrder: 50 }
 ];
 function text(value: unknown) { return String(value ?? "").trim(); }
 function normalized(value: unknown) { return text(value).toUpperCase().replace(/[^A-Z0-9]+/g, "_"); }
@@ -56,7 +56,7 @@ function numberValue(value: unknown) { const parsed = Number(value ?? 0); return
 function nullableNumber(value: unknown) { const parsed = Number(value); return value == null || value === "" || !Number.isFinite(parsed) ? null : parsed; }
 function firstRelation<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 function isFeatureSetupError(message: string) { return /does not exist|schema cache|could not find the table/i.test(message); }
-export function fleetVehicleStatus(value: unknown) { const status = normalized(value || "active"); if (["REPAIR", "UNDER_SERVICE", "SERVICE"].includes(status)) return { key: "under_service", label: "Under service" }; if (status === "BREAKDOWN") return { key: "breakdown", label: "Breakdown" }; if (status === "ACTIVE") return { key: "active", label: "Active" }; if (status === "SOLD") return { key: "sold", label: "Sold" }; if (status === "RETURNED") return { key: "returned", label: "Returned" }; if (status === "DISPOSED") return { key: "disposed", label: "Disposed" }; return { key: "inactive", label: "Inactive" }; }
+export function fleetVehicleStatus(value: unknown) { const status = normalized(value || "active"); if (["REPAIR", "UNDER_SERVICE", "SERVICE"].includes(status)) return { key: "under_service", label: "Under service" }; const labels: Record<string, string> = { ACTIVE: "Active", BREAKDOWN: "Breakdown", INACTIVE: "Inactive", RETURNED: "Returned", SOLD: "Sold", DISPOSED: "Disposed" }; const customLabel = status.toLowerCase().split("_").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" "); return { key: status.toLowerCase(), label: (labels[status] ?? customLabel) || "Inactive" }; }
 function isPendingPayment(row: PaymentRow) { const state = normalized(row.approval_status || row.status); if (["FINAL_APPROVED", "APPROVED", "REJECTED", "RETURNED", "CANCELLED", "PROCESSING", "PROCESSED", "PAID"].includes(state)) return false; return Boolean(row.current_approver_user_id || row.current_approver_role_id || row.current_approver_role_ids?.length) || ["PENDING", "RE_PENDING", "RESUBMITTED", "SUBMITTED"].includes(state) || state.endsWith("_APPROVED"); }
 function paymentStatus(row: PaymentRow) { const state = normalized(row.approval_status || row.status); if (state === "FINAL_APPROVED" || state === "APPROVED") return "Approved"; if (state === "PROCESSING") return "Processing"; if (state === "PROCESSED" || state === "PAID") return "Paid"; if (state === "RETURNED") return "Returned"; if (state === "REJECTED") return "Rejected"; if (state.endsWith("_APPROVED")) return "In approval"; return "Pending"; }
 function dayDifference(date: string, today: string) { if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null; return Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000); }
@@ -136,7 +136,7 @@ export async function loadFleetControlData(companyId: string, authorization: Aut
     supabaseAdmin.from("dashboard_app_event_logs").select("id,subject_id,subject_code,actor_label,metadata,created_at").eq("company_id", companyId).eq("module", "fleet").eq("event_code", "fleet_vehicle_transferred").in("subject_id", scoped).order("created_at", { ascending: false }).limit(1000)
   ]);
   const featureErrors = [serviceResult, auditResult, templateResult, checklistResult, settingsResult, membershipResult, evidenceResult].flatMap((result) => result.error ? [result.error.message] : []); const featureReady = !featureErrors.some(isFeatureSetupError); featureErrors.filter((message) => !isFeatureSetupError(message)).forEach((message) => errors.push(message));
-  const documentTypes: FleetDocumentDefinition[] = documentTypesResult.error || !(documentTypesResult.data?.length) ? defaultDocumentTypes : documentTypesResult.data.map((row: any) => ({ value: text(row.code).toUpperCase(), label: text(row.name) || text(row.code), requiresExpiry: row.requires_expiry !== false, reminderDays: numberValue(row.reminder_days) || 30, sortOrder: numberValue(row.sort_order) }));
+  const documentTypes: FleetDocumentDefinition[] = documentTypesResult.error || !(documentTypesResult.data?.length) ? defaultDocumentTypes : documentTypesResult.data.map((row: any) => { const value = text(row.code).toUpperCase(); const expiryMode = value === "FLEET_REGISTRATION" ? "linked_fitness" as const : row.requires_expiry !== false ? "required" as const : "optional" as const; return { value, label: text(row.name) || text(row.code), requiresExpiry: expiryMode === "required", expiryMode, reminderDays: numberValue(row.reminder_days) || 30, sortOrder: numberValue(row.sort_order) }; });
   if (documentTypesResult.error && !isFeatureSetupError(documentTypesResult.error.message)) errors.push(documentTypesResult.error.message);
   const documents: FleetVehicleDocument[] = (documentsResult.data ?? []).map((row: any) => { const vehicleNo = text(row.vehicle_no).toUpperCase(); const documentType = text(row.document_type).toUpperCase(); const fileUrl = `/api/fleet/documents/download?vehicle_no=${encodeURIComponent(vehicleNo)}&document_type=${encodeURIComponent(documentType)}`; return { id: row.id, vehicleNo, documentType, fileName: text(row.file_name), contentType: text(row.content_type), fileSize: nullableNumber(row.file_size), expiryDate: row.expiry_date, uploadedAt: row.uploaded_at, viewUrl: fileUrl, downloadUrl: `${fileUrl}&download=1` }; });
   if (documentsResult.error && !isFeatureSetupError(documentsResult.error.message)) errors.push(documentsResult.error.message);

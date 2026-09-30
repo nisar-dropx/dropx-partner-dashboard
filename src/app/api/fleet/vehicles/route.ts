@@ -111,6 +111,30 @@ export async function PATCH(request: Request) {
       request
     });
   }
+  const fromStatus = normalizeText(guard.vehicle.status).toLowerCase();
+  const toStatus = normalizeText(data?.status).toLowerCase() || fromStatus;
+  if (fromStatus !== toStatus) {
+    await writeEventLog({
+      companyId: access.companyId,
+      platform: "dashboard",
+      eventCode: "fleet_vehicle_status_changed",
+      module: "fleet",
+      action: "update",
+      outcome: "success",
+      actorType: "fleet_user",
+      actorUserId: access.authorization.userId,
+      actorLabel: access.authorization.fullName || access.authorization.email,
+      actorIdentifier: access.authorization.email,
+      subjectType: "fleet_vehicle",
+      subjectId: guard.vehicle.id,
+      subjectCode: vehicleNo,
+      subjectLabel: vehicleNo,
+      route: "/api/fleet/vehicles",
+      method: "PATCH",
+      metadata: { from_status: fromStatus, to_status: toStatus, reason: normalizeText(body.status_reason) || "Status changed in Fleet" },
+      request
+    });
+  }
   return NextResponse.json({ vehicle: data });
 }
 
@@ -171,7 +195,7 @@ async function requireVehicleScope(companyId: string, vehicleNo: string, station
   if (!supabaseAdmin) return { error: setupError("Supabase service role key is not configured.") };
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("id,station_code")
+    .select("id,station_code,status")
     .eq("company_id", companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();

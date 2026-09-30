@@ -1,21 +1,21 @@
 "use client";
 
-import { AlertTriangle, Check, Download, Eye, FileCheck2, FilePlus2, Search, Upload, X } from "lucide-react";
+import { AlertTriangle, Check, Download, Eye, FileCheck2, FilePlus2, PencilLine, Search, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { FleetMultiSelect } from "@/components/fleet-multi-select";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { FleetControlData, FleetControlVehicle, FleetDocumentDefinition, FleetVehicleDocument } from "@/lib/fleet-control";
 
-type DocumentState = "valid" | "expiring" | "urgent" | "expired" | "missing" | "expiry_missing";
+type DocumentState = "current" | "due" | "urgent" | "expired" | "file_missing" | "validity_missing" | "linked";
 type DocumentRow = { vehicle: FleetControlVehicle; type: FleetDocumentDefinition; document: FleetVehicleDocument | null; expiryDate: string | null; days: number | null; state: DocumentState };
 
-const stateLabels: Record<DocumentState, string> = { valid: "Valid", expiring: "Expires in 8–30 days", urgent: "Expires in 0–7 days", expired: "Expired", missing: "Document missing", expiry_missing: "Expiry missing" };
+const stateLabels: Record<DocumentState, string> = { current: "Current", due: "Due soon", urgent: "Due in 7 days", expired: "Expired", file_missing: "File missing", validity_missing: "Set validity", linked: "Follows fitness" };
 const legacyExpiry: Record<string, keyof FleetControlVehicle> = { FLEET_REGISTRATION: "registrationExpiry", FLEET_INSURANCE: "insuranceExpiry", FLEET_PUC: "pucExpiry", FLEET_FITNESS: "fitnessExpiry", FLEET_TAX: "taxExpiry" };
 
 function daysUntil(value: string | null, today: string) {
-  if (!value) return null;
-  const difference = Date.parse(`${value}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`);
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value.slice(0, 10))) return null;
+  const difference = Date.parse(`${value.slice(0, 10)}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`);
   return Number.isFinite(difference) ? Math.round(difference / 86_400_000) : null;
 }
 
@@ -25,22 +25,31 @@ function formatDate(value: string | null) {
   return Number.isFinite(parsed.getTime()) ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(parsed) : value;
 }
 
-function rowState(document: FleetVehicleDocument | null, expiryDate: string | null, requiresExpiry: boolean, today: string): { state: DocumentState; days: number | null } {
-  if (!document) return { state: "missing", days: daysUntil(expiryDate, today) };
-  if (!requiresExpiry) return { state: "valid", days: null };
+function rowState(document: FleetVehicleDocument | null, expiryDate: string | null, type: FleetDocumentDefinition, today: string): { state: DocumentState; days: number | null } {
+  if (!document) return { state: "file_missing", days: daysUntil(expiryDate, today) };
   const days = daysUntil(expiryDate, today);
-  if (days == null) return { state: "expiry_missing", days };
+  if (type.expiryMode === "linked_fitness" && days == null) return { state: "linked", days: null };
+  if (type.expiryMode === "optional" && days == null) return { state: "current", days: null };
+  if (type.expiryMode === "required" && days == null) return { state: "validity_missing", days: null };
+  if (days == null) return { state: "current", days: null };
   if (days < 0) return { state: "expired", days };
   if (days <= 7) return { state: "urgent", days };
-  if (days <= 30) return { state: "expiring", days };
-  return { state: "valid", days };
+  if (days <= type.reminderDays) return { state: "due", days };
+  return { state: "current", days };
+}
+
+function validityText(row: DocumentRow) {
+  if (row.state === "linked") return "Valid with fitness certificate";
+  if (row.type.expiryMode === "optional" && row.days == null) return "No validity date required";
+  if (row.days == null) return row.state === "file_missing" ? "Add the document file" : "Validity date required";
+  if (row.days < 0) return `${Math.abs(row.days)} days overdue`;
+  return `${row.days} days left`;
 }
 
 function downloadCsv(name: string, rows: unknown[][]) {
   const csv = rows.map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url);
+  const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url);
 }
 
 export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControlData; vehicles: FleetControlVehicle[] }) {
@@ -58,6 +67,7 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadVehicle, setUploadVehicle] = useState("");
   const [uploadType, setUploadType] = useState("");
+  const [validityRow, setValidityRow] = useState<DocumentRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "notice" | "error"; text: string } | null>(null);
 
@@ -67,7 +77,7 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
     const document = documents.find((item) => item.vehicleNo === vehicle.vehicleNo && item.documentType === type.value) ?? null;
     const fallbackKey = legacyExpiry[type.value];
     const expiryDate = document?.expiryDate ?? (fallbackKey ? (vehicle[fallbackKey] as string | null) : null);
-    return { vehicle, type, document, expiryDate, ...rowState(document, expiryDate, type.requiresExpiry, data.today) };
+    return { vehicle, type, document, expiryDate, ...rowState(document, expiryDate, type, data.today) };
   })), [data.documentTypes, data.today, documents, vehicles]);
 
   const filteredRows = useMemo(() => rows.filter((row) => {
@@ -84,19 +94,16 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
 
   const counts = useMemo(() => ({
     all: rows.length,
-    valid: rows.filter((row) => row.state === "valid").length,
-    expiring: rows.filter((row) => row.state === "expiring").length,
-    urgent: rows.filter((row) => row.state === "urgent").length,
-    expired: rows.filter((row) => row.state === "expired").length,
-    missing: rows.filter((row) => row.state === "missing" || row.state === "expiry_missing").length
+    action: rows.filter((row) => ["expired", "urgent", "file_missing", "validity_missing"].includes(row.state)).length,
+    due: rows.filter((row) => row.state === "due").length,
+    current: rows.filter((row) => row.state === "current").length,
+    linked: rows.filter((row) => row.state === "linked").length
   }), [rows]);
 
+  const selectedType = data.documentTypes.find((type) => type.value === uploadType);
+
   function openUpload(row?: DocumentRow) {
-    setUploadRow(row ?? null);
-    setUploadVehicle(row?.vehicle.vehicleNo ?? "");
-    setUploadType(row?.type.value ?? "");
-    setUploadOpen(true);
-    setMessage(null);
+    setUploadRow(row ?? null); setUploadVehicle(row?.vehicle.vehicleNo ?? ""); setUploadType(row?.type.value ?? ""); setUploadOpen(true); setMessage(null);
   }
 
   async function refreshVehicleDocuments(vehicleNo: string) {
@@ -108,37 +115,36 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
   }
 
   async function submitUpload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const vehicleNo = String(form.get("vehicle_no") ?? "").toUpperCase();
-    setSaving(true); setMessage(null);
+    event.preventDefault(); const form = new FormData(event.currentTarget); const vehicleNo = String(form.get("vehicle_no") ?? "").toUpperCase(); setSaving(true); setMessage(null);
     try {
-      const response = await fetch("/api/fleet/documents", { method: "POST", body: form });
-      const payload = await response.json();
+      const response = await fetch("/api/fleet/documents", { method: "POST", body: form }); const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Document could not be uploaded.");
-      await refreshVehicleDocuments(vehicleNo);
-      setUploadOpen(false);
-      setMessage({ tone: "notice", text: `${data.documentTypes.find((item) => item.value === String(form.get("document_type")))?.label ?? "Document"} saved for ${vehicleNo}.` });
-      router.refresh();
-    } catch (error) {
-      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Document could not be uploaded." });
-    } finally { setSaving(false); }
+      await refreshVehicleDocuments(vehicleNo); setUploadOpen(false); setMessage({ tone: "notice", text: `${data.documentTypes.find((item) => item.value === String(form.get("document_type")))?.label ?? "Document"} saved for ${vehicleNo}.` }); router.refresh();
+    } catch (error) { setMessage({ tone: "error", text: error instanceof Error ? error.message : "Document could not be uploaded." }); } finally { setSaving(false); }
+  }
+
+  async function submitValidity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!validityRow) return; const form = new FormData(event.currentTarget); setSaving(true); setMessage(null);
+    try {
+      const response = await fetch("/api/fleet/documents", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vehicle_no: validityRow.vehicle.vehicleNo, document_type: validityRow.type.value, expiry_date: form.get("expiry_date") }) });
+      const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Validity could not be updated.");
+      await refreshVehicleDocuments(validityRow.vehicle.vehicleNo); setValidityRow(null); setMessage({ tone: "notice", text: `${validityRow.type.label} validity updated for ${validityRow.vehicle.vehicleNo}.` }); router.refresh();
+    } catch (error) { setMessage({ tone: "error", text: error instanceof Error ? error.message : "Validity could not be updated." }); } finally { setSaving(false); }
   }
 
   const uniqueStations = [...new Set(vehicles.map((vehicle) => vehicle.stationCode))].sort();
   const uniqueClusters = [...new Set(data.stationOptions.map((station) => station.cluster))].filter(Boolean).sort();
   const uniqueRegions = [...new Set(data.stationOptions.map((station) => station.region))].filter(Boolean).sort();
   return <section className="fc-section fc-documents-workspace">
-    <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle compliance</span><h1>Vehicle documents</h1><p>See every required file, expiry risk and missing document, then renew it from the same workspace.</p></div>{data.capabilities.canManageDocuments ? <button className="fc-button primary" onClick={() => openUpload()} type="button"><Upload size={17} /> Upload document</button> : null}</div>
+    <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle compliance</span><h1>Vehicle documents</h1><p>Act on missing files and time-bound validity. Registration follows Fitness unless a separate RC date is recorded.</p></div>{data.capabilities.canManageDocuments ? <button className="fc-button primary" onClick={() => openUpload()} type="button"><Upload size={17} /> Upload document</button> : null}</div>
     {message ? <div className={`fc-flash ${message.tone}`}><span>{message.tone === "notice" ? <Check size={17} /> : <AlertTriangle size={17} />}{message.text}</span><button aria-label="Dismiss" onClick={() => setMessage(null)} type="button"><X size={16} /></button></div> : null}
 
-    <div className="fc-document-kpis">
-      <button className={!states.length ? "active" : ""} onClick={() => setStates([])} type="button"><small>Required records</small><strong>{counts.all}</strong><span>Across {vehicles.length} vehicles</span></button>
-      <button className={states.length === 1 && states[0] === "valid" ? "active valid" : "valid"} onClick={() => setStates(["valid"])} type="button"><small>Valid</small><strong>{counts.valid}</strong><span>Files in order</span></button>
-      <button className={states.length === 1 && states[0] === "expiring" ? "active due" : "due"} onClick={() => setStates(["expiring"])} type="button"><small>Expires in 8–30 d</small><strong>{counts.expiring}</strong><span>Plan renewal</span></button>
-      <button className={states.length === 1 && states[0] === "urgent" ? "active urgent" : "urgent"} onClick={() => setStates(["urgent"])} type="button"><small>Expires in 0–7 d</small><strong>{counts.urgent}</strong><span>Renew now</span></button>
-      <button className={states.length === 1 && states[0] === "expired" ? "active expired" : "expired"} onClick={() => setStates(["expired"])} type="button"><small>Expired</small><strong>{counts.expired}</strong><span>Vehicle at risk</span></button>
-      <button className={states.includes("missing") ? "active missing" : "missing"} onClick={() => setStates(["missing", "expiry_missing"])} type="button"><small>Missing</small><strong>{counts.missing}</strong><span>Upload required</span></button>
+    <div className="fc-document-kpis compact">
+      <button className={!states.length ? "active" : ""} onClick={() => setStates([])} type="button"><small>All controls</small><strong>{counts.all}</strong><span>{vehicles.length} vehicles</span></button>
+      <button className={states.length === 4 ? "active expired" : "expired"} onClick={() => setStates(["expired", "urgent", "file_missing", "validity_missing"])} type="button"><small>Action required</small><strong>{counts.action}</strong><span>Fix now</span></button>
+      <button className={states.length === 1 && states[0] === "due" ? "active due" : "due"} onClick={() => setStates(["due"])} type="button"><small>Due soon</small><strong>{counts.due}</strong><span>Within reminder window</span></button>
+      <button className={states.length === 1 && states[0] === "current" ? "active valid" : "valid"} onClick={() => setStates(["current"])} type="button"><small>Current</small><strong>{counts.current}</strong><span>No action</span></button>
+      <button className={states.length === 1 && states[0] === "linked" ? "active linked" : "linked"} onClick={() => setStates(["linked"])} type="button"><small>Linked validity</small><strong>{counts.linked}</strong><span>RC follows Fitness</span></button>
     </div>
 
     <div className="fc-document-filters">
@@ -148,19 +154,21 @@ export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControl
       <FleetMultiSelect allLabel="All stations" label="Station" onChange={setStations} options={uniqueStations.map((value) => ({ value, label: value }))} values={stations} />
       <FleetMultiSelect allLabel="All vehicles" label="Vehicle" onChange={setVehicleNos} options={vehicles.map((vehicle) => ({ value: vehicle.vehicleNo, label: vehicle.vehicleNo, helper: `${vehicle.stationCode} · ${vehicle.model}` }))} values={vehicleNos} />
       <FleetMultiSelect allLabel="All document types" label="Document" onChange={setDocumentTypes} options={data.documentTypes.map((type) => ({ value: type.value, label: type.label }))} values={documentTypes} />
-      <FleetMultiSelect allLabel="All expiry states" label="Expiry status" onChange={setStates} options={Object.entries(stateLabels).map(([value, label]) => ({ value, label }))} values={states} />
+      <FleetMultiSelect allLabel="All states" label="Status" onChange={setStates} options={Object.entries(stateLabels).map(([value, label]) => ({ value, label }))} values={states} />
     </div>
 
     <div className="fc-table-panel">
-      <div className="fc-table-toolbar"><span>{filteredRows.length} document records</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setSort(event.target.value)} value={sort}><option value="urgency">Action priority</option><option value="expiry">Expiry date</option><option value="vehicle">Vehicle</option><option value="station">Station</option></select></label><button onClick={() => downloadCsv(`fleet-documents-${data.today}.csv`, [["Vehicle", "Station", "Document", "Expiry", "Status", "Days", "File"], ...filteredRows.map((row) => [row.vehicle.vehicleNo, row.vehicle.stationCode, row.type.label, row.expiryDate, stateLabels[row.state], row.days, row.document?.fileName])])} type="button"><Download size={15} /> Download</button></div></div>
-      <div className="fc-table-scroll"><table className="fc-documents-table"><thead><tr><th>Vehicle</th><th>Station</th><th>Document</th><th>Expiry</th><th>Status</th><th>File</th><th>Action</th></tr></thead><tbody>{filteredRows.map((row) => <tr key={`${row.vehicle.vehicleNo}-${row.type.value}`}><td><strong>{row.vehicle.vehicleNo}</strong><small className="fc-cell-note">{row.vehicle.model}</small></td><td><b className="fc-station-chip">{row.vehicle.stationCode}</b></td><td><strong>{row.type.label}</strong><small className="fc-cell-note">Reminder {row.type.reminderDays} days before</small></td><td><strong className={["expired", "urgent"].includes(row.state) ? "fc-date-risk" : ""}>{formatDate(row.expiryDate)}</strong><small className="fc-cell-note">{row.days == null ? "No expiry recorded" : row.days < 0 ? `${Math.abs(row.days)} days overdue` : `${row.days} days left`}</small></td><td><span className={`fc-doc-state ${row.state}`}><i />{stateLabels[row.state]}</span></td><td>{row.document ? <><strong className="fc-doc-file">{row.document.fileName}</strong><small className="fc-cell-note">Uploaded {formatDate(row.document.uploadedAt?.slice(0, 10) ?? null)}</small></> : <span className="fc-cell-muted">No file</span>}</td><td><div className="fc-doc-actions">{row.document?.viewUrl ? <a aria-label="View document" href={row.document.viewUrl} rel="noreferrer" target="_blank"><Eye size={15} /></a> : null}{row.document?.downloadUrl ? <a aria-label="Download document" href={row.document.downloadUrl}><Download size={15} /></a> : null}{data.capabilities.canManageDocuments ? <button className={row.state === "valid" ? "secondary" : "renew"} onClick={() => openUpload(row)} type="button"><FilePlus2 size={14} />{row.document ? "Renew" : "Upload"}</button> : null}</div></td></tr>)}</tbody></table></div>
-      {!filteredRows.length ? <div className="fc-empty"><FileCheck2 size={34} /><strong>No matching documents</strong><p>Change the vehicle, station, document or expiry filter.</p></div> : null}
+      <div className="fc-table-toolbar"><span>{filteredRows.length} controls</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setSort(event.target.value)} value={sort}><option value="urgency">Action priority</option><option value="expiry">Validity date</option><option value="vehicle">Vehicle</option><option value="station">Station</option></select></label><button onClick={() => downloadCsv(`fleet-documents-${data.today}.csv`, [["Vehicle", "Station", "Document", "Validity", "Status", "Days", "File"], ...filteredRows.map((row) => [row.vehicle.vehicleNo, row.vehicle.stationCode, row.type.label, row.expiryDate, stateLabels[row.state], row.days, row.document?.fileName])])} type="button"><Download size={15} /> Download</button></div></div>
+      <div className="fc-table-scroll"><table className="fc-documents-table compact"><thead><tr><th>Vehicle</th><th>Document rule</th><th>Validity & status</th><th>File</th><th>Next action</th></tr></thead><tbody>{filteredRows.map((row) => <tr key={`${row.vehicle.vehicleNo}-${row.type.value}`}><td><strong>{row.vehicle.vehicleNo}</strong><small className="fc-cell-note">{row.vehicle.stationCode} · {row.vehicle.model}</small></td><td><strong>{row.type.label}</strong><small className="fc-cell-note">{row.type.expiryMode === "linked_fitness" ? "Validity follows Fitness" : row.type.expiryMode === "required" ? `Validity required · alert ${row.type.reminderDays} d before` : "Validity date optional"}</small></td><td><strong className={["expired", "urgent"].includes(row.state) ? "fc-date-risk" : ""}>{row.state === "linked" ? "As per Fitness" : formatDate(row.expiryDate)}</strong><small className="fc-cell-note">{validityText(row)}</small><span className={`fc-doc-state ${row.state}`}><i />{stateLabels[row.state]}</span></td><td>{row.document ? <><strong className="fc-doc-file">{row.document.fileName}</strong><small className="fc-cell-note">Uploaded {formatDate(row.document.uploadedAt?.slice(0, 10) ?? null)}</small></> : <span className="fc-cell-muted">No file uploaded</span>}</td><td><div className="fc-doc-actions">{row.document?.viewUrl ? <a aria-label="View document" href={row.document.viewUrl} rel="noreferrer" target="_blank"><Eye size={15} /></a> : null}{row.document?.downloadUrl ? <a aria-label="Download document" href={row.document.downloadUrl}><Download size={15} /></a> : null}{data.capabilities.canManageDocuments && row.document && row.type.expiryMode === "required" ? <button className={row.state === "validity_missing" ? "renew" : "secondary"} onClick={() => setValidityRow(row)} type="button"><PencilLine size={14} />{row.state === "validity_missing" ? "Set validity" : "Edit date"}</button> : null}{data.capabilities.canManageDocuments ? <button className={["expired", "urgent", "file_missing"].includes(row.state) ? "renew" : "secondary"} onClick={() => openUpload(row)} type="button"><FilePlus2 size={14} />{row.document ? "Replace" : "Upload"}</button> : null}</div></td></tr>)}</tbody></table></div>
+      {!filteredRows.length ? <div className="fc-empty"><FileCheck2 size={34} /><strong>No matching documents</strong><p>Change the vehicle, station, document or status filter.</p></div> : null}
     </div>
 
-    {uploadOpen ? <div className="fc-modal-backdrop"><section aria-label="Upload vehicle document" className="fc-modal fc-document-upload"><button aria-label="Close" className="fc-modal-close" onClick={() => setUploadOpen(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Upload size={23} /></span><div><small>Document control</small><h2>{uploadRow?.document ? "Renew vehicle document" : "Upload vehicle document"}</h2><p>The new file becomes active; a replaced file is retained for 30 days.</p></div></div><form className="fc-add-form" onSubmit={submitUpload}><label className="full"><span>Vehicle</span><SearchableSelect name="vehicle_no" onValueChange={setUploadVehicle} options={vehicles.map((vehicle) => ({ value: vehicle.vehicleNo, label: vehicle.vehicleNo, helper: `${vehicle.stationCode} · ${vehicle.model}` }))} placeholder="Search vehicle number" required value={uploadVehicle} /></label><label className="full"><span>Document type</span><SearchableSelect name="document_type" onValueChange={setUploadType} options={data.documentTypes.map((type) => ({ value: type.value, label: type.label }))} placeholder="Search document type" required value={uploadType} /></label><label><span>New expiry date</span><input defaultValue={uploadRow?.expiryDate ?? ""} name="expiry_date" required={data.documentTypes.find((type) => type.value === uploadType)?.requiresExpiry !== false} type="date" /></label><label><span>Document file</span><input accept="application/pdf,image/jpeg,image/png,image/webp" name="file" required type="file" /><small>PDF, JPG, PNG or WebP · maximum 20 MB</small></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setUploadOpen(false)} type="button">Cancel</button><button className="fc-button primary" disabled={saving} type="submit">{saving ? "Uploading…" : "Save document"}</button></div></form></section></div> : null}
+    {uploadOpen ? <div className="fc-modal-backdrop"><section aria-label="Upload vehicle document" className="fc-modal fc-document-upload"><button aria-label="Close" className="fc-modal-close" onClick={() => setUploadOpen(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Upload size={23} /></span><div><small>Document control</small><h2>{uploadRow?.document ? "Replace vehicle document" : "Upload vehicle document"}</h2><p>The new file becomes active; a replaced file is retained for 30 days.</p></div></div><form className="fc-add-form" onSubmit={submitUpload}><label className="full"><span>Vehicle</span><SearchableSelect name="vehicle_no" onValueChange={setUploadVehicle} options={vehicles.map((vehicle) => ({ value: vehicle.vehicleNo, label: vehicle.vehicleNo, helper: `${vehicle.stationCode} · ${vehicle.model}` }))} placeholder="Search vehicle number" required value={uploadVehicle} /></label><label className="full"><span>Document type</span><SearchableSelect name="document_type" onValueChange={setUploadType} options={data.documentTypes.map((type) => ({ value: type.value, label: type.label }))} placeholder="Search document type" required value={uploadType} /></label>{selectedType?.expiryMode === "required" ? <label><span>Valid until</span><input defaultValue={uploadRow?.expiryDate?.slice(0, 10) ?? ""} name="expiry_date" required type="date" /><small>Required for compliance alerts.</small></label> : <input name="expiry_date" type="hidden" value="" />}<label className={selectedType?.expiryMode === "required" ? "" : "full"}><span>Document file</span><input accept="application/pdf,image/jpeg,image/png,image/webp" name="file" required type="file" /><small>{selectedType?.expiryMode === "linked_fitness" ? "RC validity is tracked through the Fitness certificate. " : ""}PDF, JPG, PNG or WebP · maximum 20 MB</small></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setUploadOpen(false)} type="button">Cancel</button><button className="fc-button primary" disabled={saving} type="submit">{saving ? "Uploading…" : "Save document"}</button></div></form></section></div> : null}
+
+    {validityRow ? <div className="fc-modal-backdrop"><section aria-label="Update document validity" className="fc-modal fc-validity-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setValidityRow(null)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><PencilLine size={22} /></span><div><small>{validityRow.vehicle.vehicleNo}</small><h2>Update {validityRow.type.label} validity</h2><p>Correct the date without uploading the same file again.</p></div></div><form className="fc-add-form" onSubmit={submitValidity}><label className="full"><span>Valid until</span><input autoFocus defaultValue={validityRow.expiryDate?.slice(0, 10) ?? ""} name="expiry_date" required type="date" /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setValidityRow(null)} type="button">Cancel</button><button className="fc-button primary" disabled={saving} type="submit">{saving ? "Saving…" : "Update validity"}</button></div></form></section></div> : null}
   </section>;
 }
 
 function stateRank(state: DocumentState) {
-  return ({ expired: 0, missing: 1, expiry_missing: 2, urgent: 3, expiring: 4, valid: 5 } as Record<DocumentState, number>)[state];
+  return ({ expired: 0, urgent: 1, file_missing: 2, validity_missing: 3, due: 4, current: 5, linked: 6 } as Record<DocumentState, number>)[state];
 }

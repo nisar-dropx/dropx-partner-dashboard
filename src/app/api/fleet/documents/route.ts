@@ -144,9 +144,41 @@ export async function POST(request: Request) {
   return NextResponse.json({ document: { ...data, signed_url: fileUrl, download_url: `${fileUrl}&download=1` } });
 }
 
+export async function PATCH(request: Request) {
+  if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
+  const access = await requireDocumentPermission("edit");
+  if ("error" in access) return access.error;
+  const body = await request.json();
+  const vehicleNo = normalizeText(body.vehicle_no).toUpperCase();
+  const documentType = normalizeText(body.document_type).toUpperCase();
+  const expiryDate = normalizeText(body.expiry_date);
+  if (!vehicleNo || !documentType) return NextResponse.json({ error: "Vehicle and document type are required." }, { status: 400 });
+  const policy = await loadDocumentTypePolicy(access.companyId, documentType);
+  if (!policy.valid) return NextResponse.json({ error: "Valid active document type is required." }, { status: 400 });
+  if (policy.requiresExpiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) return NextResponse.json({ error: "Enter a valid expiry date." }, { status: 400 });
+  const scoped = await requireVehicleScope(access.companyId, vehicleNo, access.stationCodes);
+  if ("error" in scoped) return scoped.error;
+  const result = await supabaseAdmin.from("fleet_vehicle_documents")
+    .update({ expiry_date: expiryDate || null })
+    .eq("company_id", access.companyId)
+    .eq("vehicle_no", vehicleNo)
+    .eq("document_type", documentType)
+    .eq("is_active", true)
+    .select("id")
+    .limit(1);
+  if (result.error) return mutationError(result.error.message);
+  if (!result.data?.length) return NextResponse.json({ error: "Upload the document file before setting its validity." }, { status: 409 });
+  const expiryColumn = expiryColumnByType[documentType];
+  if (expiryColumn) {
+    const vehicleUpdate = await supabaseAdmin.from("fleet_vehicles").update({ [expiryColumn]: expiryDate || null, updated_at: new Date().toISOString() }).eq("company_id", access.companyId).eq("vehicle_no", vehicleNo);
+    if (vehicleUpdate.error) return mutationError(vehicleUpdate.error.message);
+  }
+  return NextResponse.json({ ok: true, expiry_date: expiryDate || null });
+}
+
 async function loadDocumentTypePolicy(companyId: string, documentType: string) {
   if (!documentType) return { valid: false, requiresExpiry: false };
-  if (!supabaseAdmin) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackDocumentTypes.has(documentType) };
+  if (!supabaseAdmin) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackRequiresExpiry(documentType) };
   const { data, error } = await supabaseAdmin
     .from("document_types")
     .select("id,requires_expiry")
@@ -155,9 +187,14 @@ async function loadDocumentTypePolicy(companyId: string, documentType: string) {
     .eq("document_module", "fleet")
     .eq("is_active", true)
     .limit(1);
-  if (error) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackDocumentTypes.has(documentType) };
+  if (error) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackRequiresExpiry(documentType) };
   const configured = data?.[0];
-  return configured ? { valid: true, requiresExpiry: configured.requires_expiry !== false } : { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackDocumentTypes.has(documentType) };
+  if (documentType === "FLEET_REGISTRATION") return { valid: Boolean(configured) || fallbackDocumentTypes.has(documentType), requiresExpiry: false };
+  return configured ? { valid: true, requiresExpiry: configured.requires_expiry !== false } : { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackRequiresExpiry(documentType) };
+}
+
+function fallbackRequiresExpiry(documentType: string) {
+  return fallbackDocumentTypes.has(documentType) && documentType !== "FLEET_REGISTRATION";
 }
 
 async function requireDocumentPermission(action: "access" | "edit") {
