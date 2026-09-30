@@ -422,14 +422,21 @@ export async function approvePaymentRequest(formData: FormData) {
         updated_by: authorization.userId
       });
     } else {
-      // Everyone who has approved in this cycle (including this approval), so a
-      // person who already approved is not routed the same request again.
-      const priorApprovals = await supabaseAdmin.from("payment_request_approvals")
-        .select("approver_user_id")
+      // Everyone who has approved this request since it was last sent back to
+      // the station (including this approval), so a person who already approved
+      // is not routed the same request again. Counted across approval cycles: a
+      // cycle can restart without the request changing (e.g. its payment head's
+      // flow was reconfigured), and those earlier approvals still stand. A
+      // return / resubmit / rejection means the request changed, so approvals
+      // before it do not count.
+      const history = await supabaseAdmin.from("payment_request_approvals")
+        .select("action, approver_user_id, created_at")
         .eq("payment_request_id", request.id)
-        .eq("approval_cycle", approvalCycle)
-        .eq("action", "approved");
-      const approvedUserIds = new Set<string>([authorization.userId, ...((priorApprovals.data ?? []).map((row) => row.approver_user_id).filter((id): id is string => Boolean(id)))]);
+        .in("action", ["approved", "returned", "resubmitted", "rejected"])
+        .order("created_at", { ascending: true });
+      const lastSentBack = (history.data ?? []).filter((row) => row.action !== "approved").at(-1)?.created_at ?? null;
+      const priorApprovals = (history.data ?? []).filter((row) => row.action === "approved" && (!lastSentBack || row.created_at > lastSentBack));
+      const approvedUserIds = new Set<string>([authorization.userId, ...priorApprovals.map((row) => row.approver_user_id).filter((id): id is string => Boolean(id))]);
       const advance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id, approvedUserIds);
       if (advance.done) {
         await updatePaymentRequest(request.id, companyId, {
