@@ -4,7 +4,7 @@ export type ReviewPerson = {
   code: string; role: string; locationId: string | null;
   canManage: boolean; oversight: boolean; userIds: string[]; scopeIds: string[]; allLocations: boolean;
 };
-export type PeopleReviewGraph = { people: ReviewPerson[]; relationships: { subjectId: string; managerId: string }[] };
+export type PeopleReviewGraph = { people: ReviewPerson[]; relationships: { subjectId: string; managerId: string }[]; parentStationById?: Map<string, string> };
 export type PeopleReviewStage = {
   reviewerName: string; reviewerRole: string; reviewerUserId: string;
   personId: string; assignmentId: string; designationId: string; routingSource: 'people';
@@ -21,6 +21,20 @@ export function resolvePeopleReviewRoute(graph: PeopleReviewGraph, stationId: st
   }
   const eligible = (p: ReviewPerson) => p.canManage && !p.oversight && !stationRole(p);
   let roots = graph.people.filter(p => p.locationId === stationId && (managers.has(p.id) || eligible(p)));
+  // A sub-station with nobody posted to it (its staff sit under the mother
+  // station, e.g. XAPL under GNTI) is reviewed by its mother station's route.
+  const parentId = graph.parentStationById?.get(stationId);
+  if (!roots.length && parentId && parentId !== stationId) {
+    const parentRoute = resolvePeopleReviewRoute({ ...graph, parentStationById: undefined }, parentId);
+    if (!parentRoute.error) {
+      const outside = parentRoute.chain.find(stage => {
+        const person = byId.get(stage.assignmentId);
+        return person && !person.allLocations && !person.scopeIds.includes(stationId);
+      });
+      if (outside) return { chain: [], error: `${outside.reviewerName} does not have OpsPulse access to this station in People.` };
+      return parentRoute;
+    }
+  }
   // Scope is only a seed when People has no station posting; relationships still define the entire route.
   if (!roots.length) roots = graph.people.filter(p => eligible(p) && (p.allLocations || p.scopeIds.includes(stationId)));
   const fail = (error: string): PeopleReviewRoute => ({ chain: [], error });

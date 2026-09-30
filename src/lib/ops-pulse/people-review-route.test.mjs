@@ -28,3 +28,11 @@ test('People stages display and do not require a hardcoded National level',()=>{
 });
 
 test('a disabled manager in an existing reporting line is a mapping issue, not a skipped approval',()=>{const g=graph();g.people[3].canManage=false;assert.match(resolvePeopleReviewRoute(g,'station').error,/not enabled/);});
+test('a sub-station with nobody posted uses its mother station route (no conflicting scope seeds)',()=>{
+ const g=graph();
+ g.people.push(person('finance','FIN',{scopeIds:['station','sub']}));
+ g.people=g.people.map(p=>({...p,scopeIds:[...new Set([...p.scopeIds,'sub'])]}));
+ g.relationships.push({subjectId:'finance',managerId:'owner'});
+ g.parentStationById=new Map([['sub','station']]);
+ assert.deepEqual(resolvePeopleReviewRoute(g,'sub').chain.map(p=>p.personId),['cluster','area','inayath']);
+});
