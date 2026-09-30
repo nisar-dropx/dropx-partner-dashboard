@@ -11738,7 +11738,8 @@ body {
 }
 .dx-selfie-frame {
   position: relative;
-  width: min(78vw, 340px);
+  /* The dvh cap keeps the whole screen (header, circle, score, buttons) visible on short phones. */
+  width: min(78vw, 340px, 46dvh);
   aspect-ratio: 1;
   border-radius: 50%;
   overflow: hidden;
@@ -11788,16 +11789,20 @@ img.dx-selfie-live {
 }
 .dx-selfie-score {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  justify-content: center;
+  gap: 4px 8px;
+  max-width: 100%;
   padding: 8px 14px;
   background: #1c212b;
   border: 1px solid #2c3340;
   border-radius: 999px;
+  text-align: center;
 }
 .dx-selfie-score strong {
-  font-size: 22px;
-  line-height: 1;
+  font-size: clamp(16px, 5vw, 22px);
+  line-height: 1.1;
 }
 .dx-selfie-score span {
   font-size: 12px;
@@ -17330,10 +17335,14 @@ html.native-app .dx-app-install {
   z-index: 1;
   display: grid;
   grid-template-rows: auto 1fr auto;
+  /* Without an explicit 0-min column the grid grows to its widest child (the step pill), pushing
+     the camera circle and close button past the right edge on narrow phones. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   width: 100%;
   max-width: none;
   max-height: none;
+  overflow-x: hidden;
   overflow-y: auto;
   padding:
     max(18px, env(safe-area-inset-top))
@@ -17384,7 +17393,8 @@ html.native-app .dx-app-install {
 }
 .dx-selfie-frame {
   position: relative;
-  width: min(78vw, 340px);
+  /* The dvh cap keeps the whole screen (header, circle, score, buttons) visible on short phones. */
+  width: min(78vw, 340px, 46dvh);
   aspect-ratio: 1;
   border-radius: 50%;
   overflow: hidden;
@@ -17434,16 +17444,20 @@ img.dx-selfie-live {
 }
 .dx-selfie-score {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  justify-content: center;
+  gap: 4px 8px;
+  max-width: 100%;
   padding: 8px 14px;
   background: #1c212b;
   border: 1px solid #2c3340;
   border-radius: 999px;
+  text-align: center;
 }
 .dx-selfie-score strong {
-  font-size: 22px;
-  line-height: 1;
+  font-size: clamp(16px, 5vw, 22px);
+  line-height: 1.1;
 }
 .dx-selfie-score span {
   font-size: 12px;
@@ -17500,6 +17514,13 @@ img.dx-selfie-live {
 .dx-selfie-panel-actions svg {
   width: 16px;
   height: 16px;
+}
+/* In a phone browser (not the DropX One app), Safari's floating bottom toolbar sits over the page
+   and hid the Capture/Cancel buttons; leave room for it. */
+@media (pointer: coarse) {
+  html:not(.native-app) .dx-selfie-panel {
+    padding-bottom: calc(max(18px, env(safe-area-inset-bottom)) + 72px);
+  }
 }
 .dx-verified-photo-card {
   display: grid;
