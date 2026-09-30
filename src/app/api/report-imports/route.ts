@@ -338,13 +338,44 @@ function readHawkeyeLongFormatRows(rows: SheetRow[]): HawkeyeDateBatch[] | null 
     return null;
   }
   const headers = rows[headerIndex].map(clean);
-  const stationIndex = headers.findIndex((label) => key(label) === "stationcode");
-  const cityIndex = headers.findIndex((label) => key(label) === "city");
-  const stationTypeIndex = headers.findIndex((label) => key(label) === "stationfacilitytype");
-  const dateIndex = headers.findIndex((label) => key(label) === "reportdate");
-  const metricNameIndex = headers.findIndex((label) => key(label).startsWith("metricname"));
-  const valueIndex = headers.findIndex((label) => key(label).startsWith("metricvalue"));
+  let stationIndex = headers.findIndex((label) => key(label) === "stationcode");
+  let cityIndex = headers.findIndex((label) => key(label) === "city");
+  let stationTypeIndex = headers.findIndex((label) => key(label) === "stationfacilitytype");
+  let dateIndex = headers.findIndex((label) => key(label) === "reportdate");
+  let metricNameIndex = headers.findIndex((label) => key(label).startsWith("metricname"));
+  let valueIndex = headers.findIndex((label) => key(label).startsWith("metricvalue"));
   if (stationIndex < 0 || dateIndex < 0 || metricNameIndex < 0 || valueIndex < 0) return null;
+
+  // Seen 2026-09-30: an export whose header row carries a stray "0.00%" column while the data
+  // rows drop City entirely (AWEZ | EDSP | 9/29/2026 12:00:00 AM | AFN Prem DEA% | 0.9), so the
+  // header positions no longer line up with the data. When the header's Report_date column
+  // doesn't hold a date on the first data row, locate the columns from that row's content:
+  // station first, then any label cells (city / facility type), the date, the metric name,
+  // and the numeric value.
+  // Strict on purpose: parseAmazonDate falls back to `new Date(text)`, which happily turns a
+  // metric value like "0.9" into a date.
+  const looksLikeDate = (cell: unknown) =>
+    cell instanceof Date || /^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})/.test(clean(cell));
+  const sampleRow = rows.slice(headerIndex + 1).find((row) => row.some((cell) => clean(cell)));
+  if (sampleRow && !looksLikeDate(sampleRow[dateIndex])) {
+    const inferredDate = sampleRow.findIndex((cell, index) => index > 0 && looksLikeDate(cell) && kolkataDateFromCell(cell));
+    if (inferredDate < 0) return null;
+    const isNumeric = (cell: unknown) => {
+      const text = clean(cell).replace(/,/g, "").replace(/%$/, "");
+      return text !== "" && Number.isFinite(Number(text));
+    };
+    const inferredMetric = sampleRow.findIndex((cell, index) => index > inferredDate && clean(cell) && !isNumeric(cell));
+    const inferredValue = sampleRow.findIndex((cell, index) => index > inferredMetric && isNumeric(cell));
+    if (inferredMetric < 0 || inferredValue < 0) return null;
+    const labelColumns = sampleRow.map((_, index) => index).filter((index) => index > 0 && index < inferredDate);
+    stationIndex = 0;
+    dateIndex = inferredDate;
+    metricNameIndex = inferredMetric;
+    valueIndex = inferredValue;
+    // One label cell = facility type only (City dropped); two = City then facility type.
+    stationTypeIndex = labelColumns.length ? labelColumns[labelColumns.length - 1]! : -1;
+    cityIndex = labelColumns.length > 1 ? labelColumns[0]! : -1;
+  }
 
   // Same broken-export scale check as the wide format, run per metric name across the whole
   // file (not just the first 5 rows — a long file's first 5 rows are usually all the same
