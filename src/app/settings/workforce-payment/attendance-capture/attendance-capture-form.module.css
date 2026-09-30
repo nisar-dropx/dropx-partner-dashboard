@@ -1,0 +1,20 @@
+.form input:disabled,
+.form select:disabled {
+  background: #eef1f5;
+  border-color: #c7ced8;
+  color: #667085;
+  cursor: not-allowed;
+  opacity: 1;
+  -webkit-text-fill-color: #667085;
+}
+
+.form input:disabled::placeholder {
+  color: #98a2b3;
+  -webkit-text-fill-color: #98a2b3;
+}
+
+.threshold:disabled {
+  background: #e4e7ec;
+  border-color: #c7ced8;
+  color: #667085;
+}

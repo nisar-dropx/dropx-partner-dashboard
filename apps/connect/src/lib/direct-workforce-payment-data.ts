@@ -13,6 +13,10 @@ import {
   workforcePaymentMonthStart,
   type WorkforcePaymentPolicy
 } from "../../../../src/lib/workforce-payment-policy.ts";
+import {
+  workforceAttendanceCaptureSettingForDate,
+  type WorkforceAttendanceCaptureSetting
+} from "../../../../src/lib/workforce-attendance-capture.ts";
 
 export type CanonicalPaymentWorker = {
   id: string;
@@ -94,17 +98,30 @@ export async function loadWorkforcePaymentPolicyHistory(companyId: string, throu
   return (result.data ?? []) as WorkforcePaymentPolicy[];
 }
 
+export async function loadWorkforceAttendanceCaptureHistory(companyId: string, through: string) {
+  const result = await db().from("workforce_attendance_capture_settings")
+    .select("id,capture_method,minimum_daily_deliveries,effective_from")
+    .eq("company_id", companyId)
+    .lte("effective_from", through)
+    .order("effective_from");
+  if (result.error) throw new Error("We could not load the Workforce attendance source. Please try again.");
+  return (result.data ?? []) as WorkforceAttendanceCaptureSetting[];
+}
+
 export async function loadDirectPaymentSetup(input: {
   companyId: string;
   workforceId: string | null;
   from: string;
   to: string;
 }) {
-  const policyHistory = await loadWorkforcePaymentPolicyHistory(input.companyId, input.to);
-  if (!input.workforceId) return { allocations: [] as DirectPaymentAllocation[], methods: [] as DirectPaymentMethod[], policyHistory };
+  const [policyHistory, attendanceCaptureHistory] = await Promise.all([
+    loadWorkforcePaymentPolicyHistory(input.companyId, input.to),
+    loadWorkforceAttendanceCaptureHistory(input.companyId, input.to)
+  ]);
+  if (!input.workforceId) return { allocations: [] as DirectPaymentAllocation[], methods: [] as DirectPaymentMethod[], policyHistory, attendanceCaptureHistory };
   const allocations = await directAllocationRows(input.companyId, input.workforceId, input.from, input.to);
   const methods = await directPaymentMethods(input.companyId, allocations);
-  return { allocations, methods, policyHistory };
+  return { allocations, methods, policyHistory, attendanceCaptureHistory };
 }
 
 export async function loadDirectPaymentContext(input: {
@@ -122,6 +139,24 @@ export async function loadDirectPaymentContext(input: {
   const accrualFrom = [input.from, input.employmentFrom || input.from].sort().at(-1)!;
   const accrualTo = [input.to, input.employmentTo || input.to].sort()[0];
   if (accrualFrom > accrualTo) return { ...setup, attendance: [] as DirectAttendanceDay[], days: [] };
+  const methodsById = new Map(setup.methods.map((method) => [method.id, method]));
+  const needsAttendanceSource = setup.allocations.some((allocation) => {
+    const components = allocation.payment_components?.length
+      ? allocation.payment_components
+      : methodsById.get(allocation.payment_method_id)?.payment_method_components ?? [];
+    return components.some((component) => {
+      const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
+      return String(field?.calculation_source ?? component.calculation_source ?? "").trim().toLowerCase() === "attendance_eligibility";
+    });
+  });
+  if (needsAttendanceSource) {
+    for (let cursor = new Date(`${accrualFrom}T00:00:00Z`); cursor <= new Date(`${accrualTo}T00:00:00Z`); cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      const date = cursor.toISOString().slice(0, 10);
+      if (workforceAttendanceCaptureSettingForDate(setup.attendanceCaptureHistory, date).capture_method === "shipment_data") {
+        throw new Error("Shipment attendance requires a provider mapping. Direct-pay workforce must use biometric attendance or a separately supported attendance source.");
+      }
+    }
+  }
   const attendanceResult = await db().from("attendance_daily")
     .select("id,punch_date,status,in_time,out_time,work_minutes")
     .eq("company_id", input.companyId)

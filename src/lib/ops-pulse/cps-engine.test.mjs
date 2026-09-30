@@ -6,8 +6,10 @@ const policy={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payment-policy.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(policy.exports,policy);
 const direct={exports:{}};
 new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../direct-workforce-pay.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(direct.exports,direct,(id)=>{if(id==='./workforce-payment-policy.ts')return policy.exports;throw new Error(`Unexpected import ${id}`);});
+const attendanceCapture={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-attendance-capture.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(attendanceCapture.exports,attendanceCapture);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -27,6 +29,40 @@ test('live mapping correction replaces stale import payout without reupload',()=
 test('DELIVERY rates cover Amazon plus SWA and van rent stays out of DA',()=>{
  const f=facts();f.components.push({payment_method_id:'per-packet',component_code:'VAN_RENT_PER_DAY',component_type:'amount',pay_schedule:'per_day'});f.mappings[0].payment_values.VAN_RENT_PER_DAY=700;
  const r=rebuildCps(base(),f);assert.equal(r.daily[0].da_variable,1000);assert.equal(r.daily[0].van,700);assert.equal(r.daily[0].total,1700);assert.equal(r.associates[0].da_total_pay,1000);
+});
+test('shipment capture awards one attendance day at the inclusive delivery threshold',()=>{
+ const f=facts();
+ f.components=[{payment_method_id:'attendance',component_code:'DAILY',component_type:'amount',label:'Fixed pay per day',pay_schedule:'per_day',calculation_type:'fixed_daily',calculation_source:'attendance_eligibility'}];
+ f.mappings[0].payment_method_id='attendance';f.mappings[0].payment_values={DAILY:800};
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:100,effective_from:'2026-09-01'}];
+ let r=rebuildCps(base(),f);assert.equal(r.associates[0].mg_pay,800);assert.equal(r.people[0].paid_days,1);
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:101,effective_from:'2026-09-01'}];
+ r=rebuildCps(base(),f);assert.equal(r.associates[0].mg_pay,0);assert.equal(r.people[0].paid_days,1);
+});
+test('shipment attendance aggregates a worker across stations outside the selected CPS view',()=>{
+ const f=facts();
+ f.shipments[0]={...f.shipments[0],amazon_delivery:60,swa_delivery:0,total_delivery:60,total_activity:60};
+ f.components=[{payment_method_id:'attendance',component_code:'DAILY',component_type:'amount',label:'Fixed pay per day',pay_schedule:'per_day',calculation_type:'fixed_daily',calculation_source:'attendance_eligibility'}];
+ f.mappings[0].payment_method_id='attendance';f.mappings[0].payment_values={DAILY:800};
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:100,effective_from:'2026-09-01'}];
+ f.attendance_mappings=[f.mappings[0],{...f.mappings[0],id:'m2',provider_member_id:'AM2',station_id:'station-b'}];
+ f.attendance_workforce=f.workforce;f.attendance_providers=f.providers;f.attendance_stations=f.stations;
+ f.attendance_shipments=[f.shipments[0],{...f.shipments[0],id:'s2',station_code:'B',provider_employee_id:'AM2',amazon_delivery:50,total_delivery:50,total_activity:50}];
+ const r=rebuildCps(base([day('A','2026-09-01',60)]),f);
+ assert.equal(r.associates[0].mg_pay,800);
+});
+test('historical shipment mappings contribute to earned paid-off units in a later range',()=>{
+ const f=facts();
+ f.shipments=[{...f.shipments[0],id:'s-new',work_date:'2026-09-10',provider_employee_id:'NEW',amazon_delivery:1,swa_delivery:0,total_delivery:1,total_activity:1}];
+ f.mappings[0]={...f.mappings[0],id:'m-new',provider_member_id:'NEW',effective_from:'2026-09-10',payment_method_id:'attendance',payment_values:{MONTHLY:3000}};
+ f.components=[{payment_method_id:'attendance',component_code:'MONTHLY',component_type:'amount',label:'Monthly pay',pay_schedule:'per_month',calculation_type:'fixed_monthly',calculation_source:'attendance_eligibility'}];
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
+ f.payment_policy_history=[{calculation_method:'earned_paid_offs',paid_off_days:4,work_units_per_paid_off:2,cap_at_monthly_amount:true,effective_from:'2026-09-01'}];
+ f.attendance_mappings=[{...f.mappings[0],id:'m-old',provider_member_id:'OLD',effective_from:'2026-09-01',effective_to:'2026-09-09'},f.mappings[0]];
+ f.attendance_workforce=f.workforce;f.attendance_providers=f.providers;f.attendance_stations=f.stations;
+ f.attendance_shipments=[{...f.shipments[0],id:'s-old',work_date:'2026-09-01',provider_employee_id:'OLD'},f.shipments[0]];
+ const r=rebuildCps(base([day('A','2026-09-10',1)]),f);
+ assert.equal(r.associates[0].mg_pay,200);
 });
 test('salary accrues on days with no uploaded row and MTD equals daily sums',()=>{
  const f=facts();f.mappings[0].payment_values={SALARY:30000};f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];

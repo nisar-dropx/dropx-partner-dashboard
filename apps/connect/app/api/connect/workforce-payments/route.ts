@@ -8,7 +8,12 @@ import {personalPaymentCard} from '@/lib/personal-payment-card';
 import {allocateOwnDailyCards} from '@/lib/workforce-daily-card';
 import {assertNoProviderDirectOverlap,type DirectPaymentComponent} from '@/lib/direct-workforce-payment';
 import {attendanceIdentityFilter,loadDirectPaymentContext,loadDirectPaymentSetup,paymentMethodById,resolveCanonicalPaymentWorker} from '@/lib/direct-workforce-payment-data';
-import {calculateProviderAttendancePayments,consumeProviderAttendanceAmount,hasProviderAttendanceComponents,type ProviderAttendanceMapping,type ProviderAttendanceMethod} from '@/lib/provider-attendance-payment';
+import {calculateProviderAttendancePayments,consumeProviderAttendanceAmount,hasProviderAttendanceComponents,type ProviderAttendanceMapping,type ProviderAttendanceMethod,type ProviderAttendanceRecord} from '@/lib/provider-attendance-payment';
+import {
+  aggregateShipmentDeliveriesByWorkforceDay,
+  shipmentAttendanceRecord,
+  workforceAttendanceCaptureSettingForDate
+} from '../../../../../../src/lib/workforce-attendance-capture.ts';
 export const dynamic='force-dynamic';
 
 type Mapping = {
@@ -156,7 +161,21 @@ export async function GET(request: NextRequest) {
     };
     const dailyByDate = new Map<string, Day>();
     const providerWorkDates = new Set<string>();
-    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:providerAttendanceResult.data??[],policyHistory:direct.policyHistory,from:period.from,to:periodEnd});
+    const shipmentAttendanceByDay=aggregateShipmentDeliveriesByWorkforceDay((dailyResult.data??[]).flatMap(row=>{
+      const date=String(row.work_date??'');
+      return workforce?.id && paymentMappingForDay(mappings,row)
+        ? [{workforce_id:workforce.id,work_date:date,total_delivery:Number(row.total_delivery??0)}]
+        : [];
+    }));
+    const providerAttendance:ProviderAttendanceRecord[]=[...(providerAttendanceResult.data??[]).filter(row=>
+      workforceAttendanceCaptureSettingForDate(direct.attendanceCaptureHistory,String(row.punch_date)).capture_method==='biometric'
+    )];
+    if(workforce?.id) for(const [workerDate,totalDeliveries] of shipmentAttendanceByDay) {
+      const date=workerDate.slice(workforce.id.length+1);
+      const capture=workforceAttendanceCaptureSettingForDate(direct.attendanceCaptureHistory,date);
+      if(capture.capture_method==='shipment_data') providerAttendance.push({id:`shipment:${workforce.id}:${date}`,...shipmentAttendanceRecord(date,totalDeliveries,capture)});
+    }
+    const providerAttendanceDays=calculateProviderAttendancePayments({mappings:mappings as unknown as ProviderAttendanceMapping[],attendance:providerAttendance,policyHistory:direct.policyHistory,attendanceCaptureHistory:direct.attendanceCaptureHistory,from:period.from,to:periodEnd});
     const providerAttendanceByMappingDate=new Map(providerAttendanceDays.map(day=>[`${day.mappingId}|${day.date}`,day]));
     const consumedProviderAttendance=new Set<string>();
     const personalAmounts=allocateOwnDailyCards((dailyResult.data||[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row),card=m?personalPaymentCard(m):null;return card?[{row,card}]:[];}));

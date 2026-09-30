@@ -11,6 +11,12 @@ import { allocationActiveOn, directPayAttendanceUnit, directPayForDay, preferred
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
+import {
+  aggregateShipmentDeliveriesByWorkforceDay,
+  shipmentAttendanceRecord,
+  workforceAttendanceCaptureSettingForDate,
+  type WorkforceAttendanceCaptureSetting
+} from "@/lib/workforce-attendance-capture";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -48,33 +54,34 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
   let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
-  const [locationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult] = await Promise.all([
+  const [locationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult, attendanceCaptureResult] = await Promise.all([
     locationsQuery,
-    supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name), payment_methods(name)").eq("company_id", companyId).in("status", ["active", "closed"]).not("payment_method_id", "is", null).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${fromDate}`),
+    supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name,code), payment_methods(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${workforcePaymentMonthStart(fromDate)}`),
     readAllRows(supabaseAdmin.from("workforce_payment_allocations").select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, payment_methods:payment_methods!workforce_payment_allocations_method_company_fk(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${fromDate}`).order("effective_from").order("id")),
     supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
     supabaseAdmin.from("workforce_deduction_heads").select("code, name, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true),
-    supabaseAdmin.from("workforce_payment_settings").select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from")
+    supabaseAdmin.from("workforce_payment_settings").select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from"),
+    supabaseAdmin.from("workforce_attendance_capture_settings").select("id,capture_method,minimum_daily_deliveries,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from")
   ]);
-  const error = locationsResult.error?.message || mappingsResult.error?.message || directAllocationsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message || paymentPolicyResult.error?.message;
+  const error = locationsResult.error?.message || mappingsResult.error?.message || directAllocationsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message || paymentPolicyResult.error?.message || attendanceCaptureResult.error?.message;
   if (error) return { rows: [] as WorkforcePayoutRow[], error };
   const locations = locationsResult.data ?? [];
   const allowed = new Set(locations.map((row) => row.id));
   const allMappings = mappingsResult.data ?? [];
-  const mappings = allMappings.filter((row: any) => allowed.has(row.station_id));
+  const mappings = allMappings.filter((row: any) => allowed.has(row.station_id) && row.payment_method_id && String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
   const directAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
   const directWorkforceIds = Array.from(new Set(directAllocations.map((row: any) => row.workforce_id).filter(Boolean)));
   const sourceIds = Array.from(new Set([...allMappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]), ...directWorkforceIds].filter(Boolean)));
   const contractorIds = Array.from(new Set(mappings.map((row: any) => row.contractor_id).filter(Boolean)));
   const employeeIds = Array.from(new Set(mappings.map((row: any) => row.employee_id).filter(Boolean)));
   const fieldExecutiveIds = Array.from(new Set(mappings.map((row: any) => row.field_executive_id).filter(Boolean)));
-  const providerMemberIds = Array.from(new Set(mappings.map((row: any) => row.provider_member_id).filter(Boolean)));
+  const providerMemberIds = Array.from(new Set(allMappings.map((row: any) => row.provider_member_id).filter(Boolean)));
   const workforceIds = Array.from(new Set([...mappings.map((row: any) => row.workforce_id), ...directWorkforceIds].filter(Boolean)));
   const paymentMethodIds = Array.from(new Set([...allMappings, ...directAllocations].map((row: any) => row.payment_method_id).filter(Boolean)));
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    providerMemberIds.length ? supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", fromDate).lte("work_date", toDate).limit(50000) : Promise.resolve({ data: [], error: null }),
+    providerMemberIds.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, station_code, client, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
@@ -138,6 +145,41 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const key = `${canonicalWorkforceId}|${row.punch_date}`;
     const current = attendanceByWorkerDate.get(key);
     attendanceByWorkerDate.set(key, preferredDirectPayAttendance(current, row));
+  }
+  const attendanceCaptureHistory = (attendanceCaptureResult.data ?? []) as WorkforceAttendanceCaptureSetting[];
+  const stationCodeById = new Map(locations.map((location: any) => [String(location.id), String(location.station_code ?? "").trim().toUpperCase()]));
+  const compactIdentity = (value: unknown) => String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const shipmentDeliveriesByWorkerDate = aggregateShipmentDeliveriesByWorkforceDay((metricsResult.data ?? []).flatMap((row: any) => {
+    const date = String(row.work_date ?? "");
+    const rowStation = String(row.station_code ?? "").trim().toUpperCase();
+    const rowClient = compactIdentity(row.client);
+    const candidates = allMappings.filter((mapping: any) => {
+      const provider = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
+      const providerIdentity = compactIdentity(`${provider?.code ?? ""} ${provider?.name ?? ""}`);
+      return String(mapping.provider_member_id ?? "").trim().toUpperCase() === String(row.provider_employee_id ?? "").trim().toUpperCase()
+        && String(mapping.effective_from) <= date
+        && (!mapping.effective_to || String(mapping.effective_to) >= date)
+        && (!mapping.station_id || stationCodeById.get(String(mapping.station_id)) === rowStation)
+        && (!rowClient || providerIdentity.includes(rowClient));
+    });
+    const workforceForShipment = [...new Set(candidates.map((mapping: any) => {
+      const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
+      return workerBySource.get(sourceId)?.id;
+    }).filter(Boolean))];
+    return workforceForShipment.length === 1
+      ? [{ workforce_id: String(workforceForShipment[0]), work_date: date, total_delivery: Number(row.total_delivery ?? 0) }]
+      : [];
+  }));
+  for (const worker of canonicalWorkers) {
+    const cursor = new Date(`${workforcePaymentMonthStart(fromDate)}T00:00:00Z`);
+    const lastDate = new Date(`${toDate}T00:00:00Z`);
+    for (; cursor <= lastDate; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      const date = cursor.toISOString().slice(0, 10);
+      const capture = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
+      if (capture.capture_method !== "shipment_data") continue;
+      const key = `${worker.id}|${date}`;
+      attendanceByWorkerDate.set(key, shipmentAttendanceRecord(date, shipmentDeliveriesByWorkerDate.get(key) ?? 0, capture));
+    }
   }
   const cumulativeAttendanceUnitsBefore = new Map<string, number>();
   for (const worker of canonicalWorkers) {
@@ -217,7 +259,11 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         ownedAttendanceComponents,
         date,
         attendanceByWorkerDate.get(workerDateKey),
-        { policyHistory: paymentPolicyHistory, cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0 }
+        {
+          policyHistory: paymentPolicyHistory,
+          cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0,
+          attendanceSource: workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date).capture_method
+        }
       );
       missingAttendanceConfiguration ||= ownedAttendanceComponents.length > 0 && attendancePay.missing;
       const attendanceLines = attendancePay.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount }));
@@ -262,18 +308,25 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       const components = snapshotComponents.length
         ? snapshotComponents
         : componentsByMethod.get(String(allocation.payment_method_id)) ?? [];
+      const needsAttendanceSource = components.some((component: DirectPayComponent) => component.component_type !== "production"
+        && component.calculation_source === "attendance_eligibility");
       const activeFrom = [fromDate, String(allocation.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
       const activeTo = [toDate, today(), String(allocation.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
         const workerDateKey = `${workforceId}|${date}`;
+        const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
         const calculation = directPayForDay(
           allocation.payment_values,
           components,
           date,
           attendanceByWorkerDate.get(workerDateKey),
-          { policyHistory: paymentPolicyHistory, cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0 }
+          {
+            policyHistory: paymentPolicyHistory,
+            cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0,
+            attendanceSource: captureSetting.capture_method
+          }
         );
-        return { date, baseAmount: calculation.total, missing: calculation.missing, lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount })) };
+        return { date, baseAmount: calculation.total, missing: calculation.missing || (needsAttendanceSource && captureSetting.capture_method === "shipment_data"), lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount })) };
       }) : [];
     }).sort((left, right) => right.date.localeCompare(left.date));
     const lineMap = new Map<string, { code: string; label: string; count: number; rate: number; amount: number }>();

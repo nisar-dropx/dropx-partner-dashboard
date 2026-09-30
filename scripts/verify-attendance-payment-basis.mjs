@@ -38,7 +38,8 @@ assert.match(dashboardPayout, /const attendanceOwnerOn[\s\S]*const candidates = 
   "provider attendance ownership must not change with the viewer's location scope");
 assert.match(connectCalculator, /attendanceBased[\s\S]*units/);
 assert.match(connectPaymentData, /and\(workforce_id\.is\.null,\$\{sourceColumn\}\.eq\.\$\{worker\.source_profile_id\}\)/);
-assert.match(reportImportRoute, /field_executive_provider_mappings[\s\S]*workforce_id,employee_id,contractor_id,field_executive_id/);
+assert.match(reportImportRoute, /const amazonMappingSelect = "[^"]*workforce_id,employee_id,contractor_id,field_executive_id"/);
+assert.match(reportImportRoute, /field_executive_provider_mappings[\s\S]*\.select\(amazonMappingSelect\)/);
 assert.match(reportImportRoute, /attendance_daily[\s\S]*workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes/);
 assert.match(reportImportRoute, /productionComponent[\s\S]*productionForSource[\s\S]*attendanceComponent[\s\S]*directPayForDay/);
 assert.match(directAllocationActions, /save_workforce_payment_allocation_v2/);

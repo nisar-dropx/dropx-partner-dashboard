@@ -137,3 +137,15 @@ test("a shipment on a non-owner mapping cannot suppress the attendance owner's a
   assert.equal(attendanceOwnerAmount, 800);
   assert.equal(consumeProviderAttendanceAmount(providerAttendanceDays[0], consumed), 0);
 });
+
+test("shipment attendance cannot be used to invent worked hours", () => {
+  assert.throws(() => calculateProviderAttendancePayments({
+    mappings: [mapping({
+      payment_methods: { id: "method", payment_method_components: [component("HOURLY", "per_hour")] }
+    })],
+    attendance: [attendance("shipment:map-a:2026-09-01", "2026-09-01", "P", null)],
+    attendanceSource: "shipment_data",
+    from: "2026-09-01",
+    to: "2026-09-01"
+  }), /cannot calculate per-hour payment/i);
+});

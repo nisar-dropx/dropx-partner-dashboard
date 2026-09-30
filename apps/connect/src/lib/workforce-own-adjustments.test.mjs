@@ -16,8 +16,12 @@ const personalCompiled=ts.transpileModule(readFileSync(new URL('./personal-payme
 const {personalPaymentCard}=await import(`data:text/javascript;base64,${Buffer.from(personalCompiled).toString('base64')}`);
 const policyCompiled=ts.transpileModule(readFileSync(new URL('../../../../src/lib/workforce-payment-policy.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const policyUrl=`data:text/javascript;base64,${Buffer.from(policyCompiled).toString('base64')}`;
+const attendanceCaptureCompiled=ts.transpileModule(readFileSync(new URL('../../../../src/lib/workforce-attendance-capture.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const attendanceCaptureUrl=`data:text/javascript;base64,${Buffer.from(attendanceCaptureCompiled).toString('base64')}`;
+const attendanceCapture=await import(attendanceCaptureUrl);
 const providerAttendanceCompiled=ts.transpileModule(readFileSync(new URL('./provider-attendance-payment.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
- .replace('"../../../../src/lib/workforce-payment-policy.ts"',JSON.stringify(policyUrl));
+ .replace('"../../../../src/lib/workforce-payment-policy.ts"',JSON.stringify(policyUrl))
+ .replace('"../../../../src/lib/workforce-attendance-capture.ts"',JSON.stringify(attendanceCaptureUrl));
 const {calculateProviderAttendancePayments,hasProviderAttendanceComponents}=await import(`data:text/javascript;base64,${Buffer.from(providerAttendanceCompiled).toString('base64')}`);
 const from='2026-09-01',to='2026-09-30';
 const row=(overrides={})=>({id:'claim-1',company_id:'company',workforce_id:'person',adjustment_type:'earning',category:'reimbursement',amount:'200.00',effective_date:'2026-09-12',status:'approved',requested_at:'2026-09-10T09:00:00Z',reviewed_at:'2026-09-11T09:00:00Z',payroll_run_id:null,...overrides});
@@ -132,6 +136,7 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null)
   'next/server':{NextResponse:{json:(body,init)=>new Response(JSON.stringify(body),{...init,headers:{'Content-Type':'application/json',...init?.headers}})}},
   '../../../../src/lib/connect-auth':{requireConnectAccount:authenticate},
   '../../../../src/lib/supabase-admin':{supabaseAdmin:db},
+  '../../../../../../src/lib/workforce-attendance-capture.ts':attendanceCapture,
   '@/lib/workforce-own-adjustments':{loadOwnAdjustmentLedger},
   '@/lib/workforce-daily-card':{allocateOwnDailyCards},
   '@/lib/personal-payment-card':{personalPaymentCard},

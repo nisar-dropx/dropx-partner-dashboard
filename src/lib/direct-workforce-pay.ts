@@ -75,6 +75,7 @@ export function directPayForDay(
   options?: {
     policyHistory?: Array<Partial<WorkforcePaymentPolicy>> | null;
     cumulativeAttendanceUnitsBefore?: number;
+    attendanceSource?: "biometric" | "shipment_data";
   }
 ) {
   const values = Object.fromEntries(Object.entries(paymentValues ?? {}).map(([key, value]) => [key.trim().toUpperCase(), value]));
@@ -109,6 +110,13 @@ export function directPayForDay(
       continue;
     }
     const attendanceBased = component.calculation_source === "attendance_eligibility";
+    if (attendanceBased && schedule === "per_hour" && options?.attendanceSource === "shipment_data") {
+      // Shipment totals prove that the daily threshold was met, but they do
+      // not contain worked minutes. Paying an hourly head from this source
+      // would silently invent time, so leave the row incomplete for review.
+      missing = true;
+      continue;
+    }
     const monthlyAttendance = schedule === "per_month" && attendanceBased
       ? monthlyAttendanceAmountForDay({
         monthlyAmount: rate,

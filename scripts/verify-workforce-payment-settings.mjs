@@ -29,7 +29,8 @@ await db.exec(`
 
 for (const migrationName of [
   "20260929150000_workforce_payment_settings.sql",
-  "20260929180000_workforce_payment_policy_editability.sql"
+  "20260929180000_workforce_payment_policy_editability.sql",
+  "20260930134308_workforce_attendance_capture_settings.sql"
 ]) {
   await db.exec(readFileSync(
     new URL(`../supabase/migrations/${migrationName}`, import.meta.url),
@@ -228,6 +229,131 @@ await assert.rejects(() => db.exec(`
   where company_id='${companyId}' and effective_from='2036-01-01';
 `), /finalized payroll/i);
 
+const attendanceCompanyId = "43866344-b550-4e8a-9a2d-9d23f3d8a996";
+await db.exec(`insert into public.companies(id) values ('${attendanceCompanyId}')`);
+const { rows: [implicitBiometricHash] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${attendanceCompanyId}','2025-01-01','2025-01-31'
+  ) as hash
+`);
+await db.exec(`
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','biometric',null,'2025-01-01',
+    'Materialize default biometric capture','${actorId}'
+  )
+`);
+const { rows: [explicitBiometricHash] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${attendanceCompanyId}','2025-01-01','2025-01-31'
+  ) as hash
+`);
+assert.equal(explicitBiometricHash.hash, implicitBiometricHash.hash);
+
+await assert.rejects(() => db.exec(`
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','biometric',1,'2025-02-01',
+    'Biometric cannot keep a shipment threshold','${actorId}'
+  )
+`), /only to shipment-data/i);
+await assert.rejects(() => db.exec(`
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','shipment_data',0,'2025-02-01',
+    'Reject a non-positive shipment threshold','${actorId}'
+  )
+`), /positive daily delivery threshold/i);
+
+const { rows: [februaryBiometricHash] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${attendanceCompanyId}','2025-02-01','2025-02-28'
+  ) as hash
+`);
+await db.exec(`
+  insert into public.workforce_payroll_runs(id,company_id,period_start,period_end,status,calculated_at)
+  values (
+    '00000000-0000-4000-8000-000000000011','${attendanceCompanyId}',
+    '2025-03-01','2025-03-31','approved',clock_timestamp()
+  )
+`);
+const { rows: [finalizedMarch] } = await db.query(`
+  select workforce_payment_policy_snapshot_hash as hash
+  from public.workforce_payroll_runs
+  where id='00000000-0000-4000-8000-000000000011'
+`);
+
+await db.exec(`
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','shipment_data',10,'2025-02-01',
+    'Use an inclusive shipment attendance threshold','${actorId}'
+  )
+`);
+const { rows: captureBoundaries } = await db.query(`
+  select capture_method,minimum_daily_deliveries,effective_from::text
+  from public.workforce_attendance_capture_settings
+  where company_id='${attendanceCompanyId}'
+    and effective_from in ('2025-02-01','2025-03-01')
+  order by effective_from
+`);
+assert.deepEqual(captureBoundaries, [
+  { capture_method: "shipment_data", minimum_daily_deliveries: 10, effective_from: "2025-02-01" },
+  { capture_method: "biometric", minimum_daily_deliveries: null, effective_from: "2025-03-01" }
+]);
+const { rows: [preservedMarch] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${attendanceCompanyId}','2025-03-01','2025-03-31'
+  ) as hash
+`);
+assert.equal(preservedMarch.hash, finalizedMarch.hash);
+const { rows: [shipmentFebruaryHash] } = await db.query(`
+  select public.workforce_payment_policy_snapshot_hash(
+    '${attendanceCompanyId}','2025-02-01','2025-02-28'
+  ) as hash
+`);
+assert.notEqual(shipmentFebruaryHash.hash, februaryBiometricHash.hash);
+await assert.rejects(() => db.exec(`
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','shipment_data',12,'2025-03-01',
+    'Attempt to change finalized attendance capture','${actorId}'
+  )
+`), /this month is finalized/i);
+
+await db.exec(`
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','shipment_data',8,'2025-04-01',
+    'Configure April shipment attendance','${actorId}'
+  );
+  insert into public.workforce_payroll_runs(id,company_id,period_start,period_end,status,calculated_at)
+  values (
+    '00000000-0000-4000-8000-000000000012','${attendanceCompanyId}',
+    '2025-04-01','2025-04-30','draft',clock_timestamp()
+  );
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','shipment_data',9,'2025-04-01',
+    'Revise April before payroll finalization','${actorId}'
+  );
+`);
+await assert.rejects(() => db.exec(`
+  update public.workforce_payroll_runs set status='review'
+  where id='00000000-0000-4000-8000-000000000012'
+`), /recalculate/i);
+await db.exec(`
+  update public.workforce_payroll_runs set calculated_at=clock_timestamp()
+  where id='00000000-0000-4000-8000-000000000012';
+  update public.workforce_payroll_runs set status='review'
+  where id='00000000-0000-4000-8000-000000000012';
+`);
+
+const { rows: captureAudit } = await db.query(`
+  select operation,count(*)::int as count
+  from public.workforce_attendance_capture_setting_history
+  where company_id='${attendanceCompanyId}'
+  group by operation
+  order by operation
+`);
+assert.deepEqual(captureAudit, [
+  { operation: "insert", count: 4 },
+  { operation: "update", count: 1 }
+]);
+
 const { rows: security } = await db.query(`
   select
     (select relrowsecurity from pg_class where oid='public.workforce_payment_settings'::regclass) as rls_enabled,
@@ -270,16 +396,48 @@ assert.deepEqual(security[0], {
   service_save_execute: true
 });
 
+const { rows: [captureSecurity] } = await db.query(`
+  select
+    (select relrowsecurity from pg_class where oid='public.workforce_attendance_capture_settings'::regclass) as settings_rls,
+    (select relrowsecurity from pg_class where oid='public.workforce_attendance_capture_setting_history'::regclass) as history_rls,
+    has_table_privilege('anon','public.workforce_attendance_capture_settings','select') as anon_select,
+    has_table_privilege('authenticated','public.workforce_attendance_capture_settings','select') as authenticated_select,
+    has_table_privilege('service_role','public.workforce_attendance_capture_settings','select') as service_select,
+    has_table_privilege('service_role','public.workforce_attendance_capture_settings','insert') as service_insert,
+    has_table_privilege('service_role','public.workforce_attendance_capture_settings','update') as service_update,
+    has_function_privilege(
+      'public',
+      'public.save_workforce_attendance_capture_setting(uuid,text,integer,date,text,uuid)',
+      'execute'
+    ) as public_save_execute,
+    has_function_privilege(
+      'service_role',
+      'public.save_workforce_attendance_capture_setting(uuid,text,integer,date,text,uuid)',
+      'execute'
+    ) as service_save_execute
+`);
+assert.deepEqual(captureSecurity, {
+  settings_rls: true,
+  history_rls: true,
+  anon_select: false,
+  authenticated_select: false,
+  service_select: true,
+  service_insert: true,
+  service_update: true,
+  public_save_execute: false,
+  service_save_execute: true
+});
+
 const pageSource = readFileSync(
-  new URL("../src/app/settings/workforce-payment/page.tsx", import.meta.url),
+  new URL("../src/app/settings/workforce-payment/payout-method/page.tsx", import.meta.url),
   "utf8"
 );
 const formSource = readFileSync(
-  new URL("../src/app/settings/workforce-payment/policy-form.tsx", import.meta.url),
+  new URL("../src/app/settings/workforce-payment/payout-method/policy-form.tsx", import.meta.url),
   "utf8"
 );
 const formStyles = readFileSync(
-  new URL("../src/app/settings/workforce-payment/policy-form.module.css", import.meta.url),
+  new URL("../src/app/settings/workforce-payment/payout-method/policy-form.module.css", import.meta.url),
   "utf8"
 );
 assert.doesNotMatch(pageSource, /₹18,000 example|30-day month/i);
@@ -294,9 +452,52 @@ assert.match(formStyles, /background: #eef1f5/);
 assert.match(formStyles, /cursor: not-allowed/);
 assert.match(formStyles, /opacity: 1/);
 const actionSource = readFileSync(
-  new URL("../src/app/settings/workforce-payment/actions.ts", import.meta.url),
+  new URL("../src/app/settings/workforce-payment/payout-method/actions.ts", import.meta.url),
   "utf8"
 );
 assert.match(actionSource, /rpc\("save_workforce_payment_setting"/);
+assert.match(actionSource, /redirect\("\/settings\/workforce-payment\/payout-method"\)/);
 
-console.log("Workforce payment month editability, finalized-boundary preservation, recalculation snapshot and conditional form verified.");
+const hubSource = readFileSync(
+  new URL("../src/app/settings/workforce-payment/page.tsx", import.meta.url),
+  "utf8"
+);
+assert.match(hubSource, /requirePagePermission\("payment_settings", "access"\)/);
+assert.match(hubSource, /href="\/settings\/workforce-payment\/payout-method"/);
+assert.match(hubSource, /href="\/settings\/workforce-payment\/attendance-capture"/);
+const settingsPageSource = readFileSync(
+  new URL("../src/app/settings/page.tsx", import.meta.url),
+  "utf8"
+);
+assert.match(settingsPageSource, /Configure attendance capture and attendance-based monthly payout rules/);
+
+const attendancePageSource = readFileSync(
+  new URL("../src/app/settings/workforce-payment/attendance-capture/page.tsx", import.meta.url),
+  "utf8"
+);
+const attendanceFormSource = readFileSync(
+  new URL("../src/app/settings/workforce-payment/attendance-capture/attendance-capture-form.tsx", import.meta.url),
+  "utf8"
+);
+const attendanceFormStyles = readFileSync(
+  new URL("../src/app/settings/workforce-payment/attendance-capture/attendance-capture-form.module.css", import.meta.url),
+  "utf8"
+);
+const attendanceActionSource = readFileSync(
+  new URL("../src/app/settings/workforce-payment/attendance-capture/actions.ts", import.meta.url),
+  "utf8"
+);
+assert.match(attendancePageSource, /from\("workforce_attendance_capture_settings"\)/);
+assert.match(attendancePageSource, /requirePagePermission\("payment_settings", "access"\)/);
+assert.match(attendanceFormSource, /disabled=\{formDisabled \|\| !usesShipmentData\}/);
+assert.match(attendanceFormSource, /workforcePaymentMonthIsFinalized/);
+assert.match(attendanceFormSource, /disabledText=\{!canEdit \? "View only" : "Month locked"\}/);
+assert.match(attendanceFormSource, /name="minimum_daily_deliveries"/);
+assert.match(attendanceFormSource, /type="month"/);
+assert.match(attendanceFormStyles, /\.threshold:disabled[\s\S]*background: #e4e7ec/);
+assert.match(attendanceActionSource, /rpc\("save_workforce_attendance_capture_setting"/);
+assert.match(attendanceActionSource, /p_capture_method: captureMethod/);
+assert.match(attendanceActionSource, /p_minimum_daily_deliveries: minimumDailyDeliveries/);
+assert.match(attendanceActionSource, /p_effective_from: `\$\{effectiveMonth\}-01`/);
+
+console.log("Workforce payment routing, attendance capture scaffold, month editability, finalized-boundary preservation, recalculation snapshot and conditional forms verified.");

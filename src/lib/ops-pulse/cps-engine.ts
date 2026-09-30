@@ -12,6 +12,12 @@ import {
   workforcePaymentPolicyForDate,
   type WorkforcePaymentPolicy,
 } from '../workforce-payment-policy';
+import {
+  aggregateShipmentDeliveriesByWorkforceDay,
+  shipmentAttendanceRecord,
+  workforceAttendanceCaptureSettingForDate,
+  type WorkforceAttendanceCaptureSetting,
+} from '../workforce-attendance-capture';
 
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
@@ -22,7 +28,13 @@ export type CpsFacts = {
   people_rules: CpsCostInput[];
   allocations?: RecordRow[];
   attendance?: RecordRow[];
+  attendance_shipments?: RecordRow[];
+  attendance_mappings?: RecordRow[];
+  attendance_workforce?: RecordRow[];
+  attendance_providers?: RecordRow[];
+  attendance_stations?: RecordRow[];
   payment_policy_history?: WorkforcePaymentPolicy[];
+  attendance_capture_history?: WorkforceAttendanceCaptureSetting[];
   policy_history?: RecordRow[];
   rent_coverage?: RecordRow[];
   manual_inputs?: CpsCostInput[];
@@ -96,7 +108,8 @@ export function calculateRateCard(
   includeFixed: boolean,
   attendance?: DirectPayAttendance | null,
   paymentPolicyHistory?: WorkforcePaymentPolicy[] | null,
-  cumulativeAttendanceUnitsBefore = 0
+  cumulativeAttendanceUnitsBefore = 0,
+  attendanceSource: 'biometric' | 'shipment_data' = 'biometric'
 ) {
   const cost={salary:0,variable:0,fuel:0,van:0,missing:false};
   if (r.payment_method_id && !components.length) cost.missing=true;
@@ -115,6 +128,7 @@ export function calculateRateCard(
     const daily=/day/i.test(String(c.pay_schedule));
     const attendanceBased=!isProduction && c.calculation_source==='attendance_eligibility';
     if(attendanceBased && !monthly && !hourly && !daily) {cost.missing=true;continue;}
+    if(attendanceBased && hourly && attendanceSource==='shipment_data') {cost.missing=true;continue;}
     const attendanceUnit=attendanceBased ? directPayAttendanceUnit(attendance) : 1;
     const workedHours=attendanceUnit>0 ? Math.max(0,num(attendance?.work_minutes))/60 : 0;
     const attendanceAmount=monthly
@@ -156,6 +170,15 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const components=new Map<string,RecordRow[]>();
   facts.components.forEach(c=>components.set(c.payment_method_id,[...(components.get(c.payment_method_id)??[]),c]));
   const providers=new Map(facts.providers.map(p=>[p.id,compact(`${p.code} ${p.name}`)]));
+  const attendanceWorkforceRows=facts.attendance_workforce??facts.workforce;
+  const attendanceWorkforce=new Map(attendanceWorkforceRows.map(w=>[w.id,w]));
+  const attendanceCanonical=(m:RecordRow):RecordRow|undefined=>attendanceWorkforce.get(m.workforce_id)??attendanceWorkforceRows.find(w=>
+    (w.source_profile_type==='employee'&&w.source_profile_id===m.employee_id&&m.employee_id)||
+    (w.source_profile_type==='contractor'&&w.source_profile_id===m.contractor_id&&m.contractor_id)||
+    (w.source_profile_type==='field_executive'&&w.source_profile_id===m.field_executive_id&&m.field_executive_id));
+  const attendanceMappings=(facts.attendance_mappings??facts.mappings).map((m):RecordRow=>({...m,worker:attendanceCanonical(m)}));
+  const attendanceProviders=new Map((facts.attendance_providers??facts.providers).map(p=>[p.id,compact(`${p.code} ${p.name}`)]));
+  const attendanceStationById=new Map((facts.attendance_stations??facts.stations).map(s=>[s.id,s]));
   const attendanceByWorkerDate=new Map<string,RecordRow>();
   for(const row of facts.attendance??[]) {
     if(!row.punch_date) continue;
@@ -166,6 +189,27 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     if(!attendanceWorker) continue;
     const k=`${attendanceWorker.id}|${row.punch_date}`,existing=attendanceByWorkerDate.get(k);
     attendanceByWorkerDate.set(k,preferredDirectPayAttendance(existing as DirectPayAttendance|undefined,row as DirectPayAttendance) as RecordRow);
+  }
+  const shipmentDeliveries=aggregateShipmentDeliveriesByWorkforceDay((facts.attendance_shipments??facts.shipments??[]).flatMap(row=>{
+    if(!row.work_date) return [];
+    const matches=attendanceMappings.filter(m=>key(m.provider_member_id)===key(row.provider_employee_id) && activeOn(m,row.work_date) &&
+      (!m.station_id || attendanceStationById.get(m.station_id)?.station_code===row.station_code) &&
+      (attendanceProviders.get(m.provider_id)??'').includes(compact(row.client)));
+    const identities=[...new Set(matches.map(m=>m.worker?.id).filter(Boolean))];
+    return identities.length===1 ? [{workforce_id:identities[0],work_date:String(row.work_date),total_delivery:num(row.total_delivery)}] : [];
+  }));
+  for(const [workerDate] of attendanceByWorkerDate) {
+    const date=workerDate.slice(workerDate.lastIndexOf('|')+1);
+    if(workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date).capture_method==='shipment_data') {
+      attendanceByWorkerDate.delete(workerDate);
+    }
+  }
+  for(const [workerDate,totalDeliveries] of shipmentDeliveries) {
+    const date=workerDate.slice(workerDate.lastIndexOf('|')+1);
+    const capture=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
+    if(capture.capture_method==='shipment_data') {
+      attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,totalDeliveries,capture) as RecordRow);
+    }
   }
   const cumulativeAttendanceUnitsBefore=new Map<string,number>();
   for(const worker of facts.workforce) {
@@ -256,7 +300,8 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       card,cs,aggregate,g.date,true,
       attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined,
       facts.payment_policy_history,
-      cumulativeAttendanceUnitsBefore.get(workerDateKey)??0
+      cumulativeAttendanceUnitsBefore.get(workerDateKey)??0,
+      workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,g.date).capture_method
     ) : {salary:0,variable:0,fuel:0,van:0,missing:true};
     const issue=conflict ? 'Conflicting rate cards' : !card ? 'Payment setup missing' : costs.missing ? 'Rate values or production source missing' : '';
     if(issue) {
@@ -348,12 +393,18 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       const snapshotComponents=Array.isArray(latest.payment_components) ? latest.payment_components.filter((component:unknown)=>component&&typeof component==='object') as DirectPayComponent[] : [];
       const directComponents=snapshotComponents.length ? snapshotComponents : (components.get(latest.payment_method_id)??[]) as DirectPayComponent[];
       const workerDateKey=`${w.id}|${date}`;
+      const captureSetting=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
+      const needsAttendanceSource=directComponents.some(component=>component.component_type!=='production' && component.calculation_source==='attendance_eligibility');
+      if(needsAttendanceSource && captureSetting.capture_method==='shipment_data') {
+        gap('Shipment attendance unavailable without provider mapping',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
+        continue;
+      }
       const result=directPayForDay(
         latest.payment_values,
         directComponents,
         date,
         attendanceByWorkerDate.get(workerDateKey) as {punch_date:string;status?:string|null;in_time?:string|null;out_time?:string|null;work_minutes?:number|string|null}|undefined,
-        {policyHistory:facts.payment_policy_history,cumulativeAttendanceUnitsBefore:cumulativeAttendanceUnitsBefore.get(workerDateKey)??0}
+        {policyHistory:facts.payment_policy_history,cumulativeAttendanceUnitsBefore:cumulativeAttendanceUnitsBefore.get(workerDateKey)??0,attendanceSource:captureSetting.capture_method}
       );
       if(result.missing) {
         gap('Direct payment allocation incomplete',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');

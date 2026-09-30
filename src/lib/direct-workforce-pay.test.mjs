@@ -145,3 +145,18 @@ test("duplicate daily rows select the strongest attendance record deterministica
   );
   assert.equal(selected.status, "HD");
 });
+
+test("shipment attendance fails closed for hourly payment heads", () => {
+  const result = directPayForDay({ HOURLY: 100 }, [{
+    component_code: "HOURLY",
+    component_type: "amount",
+    pay_schedule: "per_hour",
+    calculation_source: "attendance_eligibility"
+  }], "2026-09-01", { punch_date: "2026-09-01", status: "P" }, {
+    attendanceSource: "shipment_data"
+  });
+
+  assert.equal(result.total, 0);
+  assert.equal(result.missing, true);
+  assert.deepEqual(result.lines, []);
+});

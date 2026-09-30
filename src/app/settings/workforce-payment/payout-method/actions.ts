@@ -51,7 +51,7 @@ function settingsRedirect(params: { error?: string; notice?: string }): never {
     path: "/settings",
     sameSite: "lax"
   });
-  redirect("/settings/workforce-payment");
+  redirect("/settings/workforce-payment/payout-method");
 }
 
 export async function saveWorkforcePaymentSettings(formData: FormData) {
@@ -97,6 +97,7 @@ export async function saveWorkforcePaymentSettings(formData: FormData) {
 
     revalidatePath("/settings");
     revalidatePath("/settings/workforce-payment");
+    revalidatePath("/settings/workforce-payment/payout-method");
     revalidatePath("/payments/workforce-payouts");
   } catch (error) {
     if (isRedirectError(error)) throw error;

@@ -5,7 +5,11 @@ import { directPayForDay } from "../../../lib/direct-workforce-pay.ts";
 import {
   buildReportImportAttendanceByWorkforceDate,
   canonicalWorkforceForMapping,
-  createReportImportWorkforceIndex
+  createReportImportWorkforceIndex,
+  reportImportMappingIdentityGroups,
+  reportImportMappingMatchesShipment,
+  reportImportMappingStatus,
+  selectReportImportMapping
 } from "./report-import-attendance.ts";
 
 test("report imports resolve legacy attendance identities through canonical Workforce profiles", () => {
@@ -53,7 +57,74 @@ test("report-import attendance components use daily units, monthly accrual and w
 
 test("report-import components retain nested calculations and historical mapping status", async () => {
   const route = await readFile(new URL("./route.ts", import.meta.url), "utf8");
-  assert.match(route, /const amount = productionComponent\s*\? productionForSource\(row, source\) \* rate/);
-  assert.match(route, /: attendanceComponent\s*\? includeAttendancePayment \? directPayForDay/);
+  assert.match(route, /const attendanceCalculation = directPayForDay/);
+  assert.match(route, /reportImportMappingStatus\(configured, attendanceConfigurationMissing\)/);
   assert.match(route, /\.eq\("company_id", companyId\)\.in\("status", \["active", "closed"\]\)/);
+  assert.match(route, /\.in\(group\.column, group\.ids\.slice/);
+  assert.match(route, /\.or\(`effective_to\.is\.null,effective_to\.gte\.\$\{historyFrom\}`\)/);
+});
+
+test("shipment identity matching scopes reused provider IDs by station and provider", () => {
+  const scope = {
+    stationCodeById: new Map([["station-a", "BLR1"], ["station-b", "BLR2"]]),
+    providerLabelsById: new Map([["amazon", ["Amazon", "AMZ"]], ["flipkart", ["Flipkart"]]])
+  };
+  const shipment = {
+    client: "Amazon",
+    provider_employee_id: "DA-100",
+    station_code: "BLR1",
+    work_date: "2026-09-10"
+  };
+  const base = {
+    effective_from: "2026-09-01",
+    effective_to: null,
+    provider_member_id: "da-100"
+  };
+
+  assert.equal(reportImportMappingMatchesShipment({ ...base, provider_id: "amazon", station_id: "station-a" }, shipment, scope), true);
+  assert.equal(reportImportMappingMatchesShipment({ ...base, provider_id: "amazon", station_id: "station-b" }, shipment, scope), false);
+  assert.equal(reportImportMappingMatchesShipment({ ...base, provider_id: "flipkart", station_id: "station-a" }, shipment, scope), false);
+
+  const workforceIndex = createReportImportWorkforceIndex([
+    { id: "worker-a" },
+    { id: "worker-b" }
+  ]);
+  const scoped = selectReportImportMapping([
+    { ...base, id: "mapping-b", provider_id: "amazon", station_id: "station-b", workforce_id: "worker-b" },
+    { ...base, id: "mapping-a", provider_id: "amazon", station_id: "station-a", workforce_id: "worker-a" }
+  ], shipment, scope, workforceIndex);
+  assert.equal(scoped.status, "matched");
+  assert.equal(scoped.mapping?.id, "mapping-a");
+
+  const conflict = selectReportImportMapping([
+    { ...base, id: "mapping-a", provider_id: "amazon", station_id: "station-a", workforce_id: "worker-a" },
+    { ...base, id: "mapping-b", provider_id: "amazon", station_id: "station-a", workforce_id: "worker-b" }
+  ], shipment, scope, workforceIndex);
+  assert.equal(conflict.status, "identity_conflict");
+  assert.equal(conflict.mapping, null);
+});
+
+test("mapping history expands from canonical identity so an earlier provider ID can be loaded", () => {
+  assert.deepEqual(reportImportMappingIdentityGroups([
+    { workforce_id: "worker-1", employee_id: "employee-1" },
+    { workforce_id: "worker-1", employee_id: "employee-1" }
+  ]), [
+    { column: "workforce_id", ids: ["worker-1"] },
+    { column: "employee_id", ids: ["employee-1"] }
+  ]);
+});
+
+test("shipment hourly attendance is visibly unavailable instead of mapped at zero", () => {
+  const calculation = directPayForDay({ HOURLY: 100 }, [{
+    component_code: "HOURLY",
+    component_type: "amount",
+    pay_schedule: "per_hour",
+    calculation_source: "attendance_eligibility"
+  }], "2026-09-10", { punch_date: "2026-09-10", status: "P", work_minutes: 0 }, {
+    attendanceSource: "shipment_data"
+  });
+
+  assert.equal(calculation.total, 0);
+  assert.equal(calculation.missing, true);
+  assert.equal(reportImportMappingStatus(true, calculation.missing), "Attendance calculation unavailable");
 });

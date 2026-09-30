@@ -4,6 +4,10 @@ import {
   workforcePaymentPolicyForDate,
   type WorkforcePaymentPolicy
 } from "../../../../src/lib/workforce-payment-policy.ts";
+import {
+  workforceAttendanceCaptureSettingForDate,
+  type WorkforceAttendanceCaptureSetting
+} from "../../../../src/lib/workforce-attendance-capture.ts";
 
 type Relation<T> = T | T[] | null | undefined;
 
@@ -214,6 +218,8 @@ export function calculateProviderAttendancePayments(input: {
   mappings: ProviderAttendanceMapping[];
   attendance: ProviderAttendanceRecord[];
   policyHistory?: Array<Partial<WorkforcePaymentPolicy>> | null;
+  attendanceCaptureHistory?: Array<Partial<WorkforceAttendanceCaptureSetting>> | null;
+  attendanceSource?: "biometric" | "shipment_data";
   from: string;
   to: string;
 }) {
@@ -268,6 +274,8 @@ export function calculateProviderAttendancePayments(input: {
     }
 
     const { mapping, components } = current[0];
+    const attendanceSource = input.attendanceSource
+      ?? workforceAttendanceCaptureSettingForDate(input.attendanceCaptureHistory, date).capture_method;
     const minutes = units > 0 ? Number(attendance?.work_minutes ?? 0) : 0;
     if (!Number.isFinite(minutes) || minutes < 0) {
       throw new Error("Attendance work time is invalid. Contact Workforce.");
@@ -280,6 +288,9 @@ export function calculateProviderAttendancePayments(input: {
       const label = String(field?.label || component.label || code).trim();
       const rate = paymentValue(mapping.payment_values, code);
       const schedule = componentSchedule(component);
+      if (schedule === "per_hour" && attendanceSource === "shipment_data") {
+        throw new Error("Shipment attendance cannot calculate per-hour payment because worked time is unavailable. Contact Workforce.");
+      }
       const monthlyAttendance = schedule === "per_month"
         ? monthlyAttendanceAmountForDay({
           monthlyAmount: rate,

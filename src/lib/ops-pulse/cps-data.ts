@@ -14,6 +14,7 @@ import {
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { workforcePaymentMonthStart } from "@/lib/workforce-payment-policy";
+import type { WorkforceAttendanceCaptureSetting } from "@/lib/workforce-attendance-capture";
 
 export async function cpsScope(auth: AuthorizationContext, params: CpsParams) {
   const companyId = requireCompanyId(auth);
@@ -46,7 +47,8 @@ const snapshot = cache(
   async (company: string, from: string, to: string, codesKey: string) => {
     const codes: string[] = JSON.parse(codesKey);
     if (!supabaseAdmin) throw Error("CPS data is temporarily unavailable.");
-    const [result, facts, paymentPolicy, monthAttendance] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
+    const attendanceFrom = workforcePaymentMonthStart(from);
+    const [result, facts, paymentPolicy, attendanceCapture, monthAttendance, monthSourceFacts] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
       p_company: company,
       p_from: from,
       p_through: to,
@@ -57,13 +59,26 @@ const snapshot = cache(
       .eq("company_id", company)
       .lte("effective_from", to)
       .order("effective_from"),
+    supabaseAdmin.from("workforce_attendance_capture_settings")
+      .select("id,capture_method,minimum_daily_deliveries,effective_from")
+      .eq("company_id", company)
+      .lte("effective_from", to)
+      .order("effective_from"),
     readAllRows(supabaseAdmin.from("attendance_daily")
       .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
       .eq("company_id", company)
       .gte("punch_date", workforcePaymentMonthStart(from))
       .lte("punch_date", to)
       .order("punch_date")
-      .order("id"))]);
+      .order("id")),
+    attendanceFrom === from
+      ? Promise.resolve({ data: null, error: null })
+      : supabaseAdmin.rpc("ops_cps_source_facts", {
+        p_company: company,
+        p_from: attendanceFrom,
+        p_through: to,
+        p_stations: codes
+      })]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
       throw Error("CPS data could not be loaded. Please retry shortly.");
@@ -75,10 +90,17 @@ const snapshot = cache(
     )
       throw Error("CPS returned an incomplete response.");
     if (facts.error || !facts.data || !Array.isArray(facts.data.shipments)) throw Error("Live workforce cost sources could not be loaded. Please retry.");
-    if (paymentPolicy.error || monthAttendance.error) throw Error("Workforce attendance payment policy could not be loaded. Please retry.");
+    if (paymentPolicy.error || attendanceCapture.error || monthAttendance.error || monthSourceFacts.error) throw Error("Workforce attendance payment policy could not be loaded. Please retry.");
     const sourceFacts = facts.data as CpsFacts;
+    const attendanceFacts = (monthSourceFacts.data ?? sourceFacts) as CpsFacts;
     sourceFacts.payment_policy_history = paymentPolicy.data ?? [];
+    sourceFacts.attendance_capture_history = (attendanceCapture.data ?? []) as WorkforceAttendanceCaptureSetting[];
     sourceFacts.attendance = monthAttendance.data ?? [];
+    sourceFacts.attendance_shipments = attendanceFacts.shipments ?? [];
+    sourceFacts.attendance_mappings = attendanceFacts.mappings ?? [];
+    sourceFacts.attendance_workforce = attendanceFacts.workforce ?? [];
+    sourceFacts.attendance_providers = attendanceFacts.providers ?? [];
+    sourceFacts.attendance_stations = attendanceFacts.stations ?? [];
     return rebuildCps(result.data as CpsSnapshot, sourceFacts);
   },
 );

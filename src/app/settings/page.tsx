@@ -219,7 +219,7 @@ export default async function SettingsPage() {
             <PendingLink className="settings-tile actionable" href="/settings/workforce-payment">
               <div>
                 <h3>Workforce Payment</h3>
-                <p className="subtle">Configure attendance-based monthly pay and paid weekly-off rules.</p>
+                <p className="subtle">Configure attendance capture and attendance-based monthly payout rules.</p>
               </div>
               <span className="settings-tile-actions">
                 <span className="button secondary compact">Configure</span>

@@ -5,6 +5,22 @@ export type ReportImportMappingIdentity = {
   field_executive_id?: string | null;
 };
 
+export type ReportImportProviderMappingIdentity = ReportImportMappingIdentity & {
+  id?: string | null;
+  provider_id?: string | null;
+  provider_member_id?: string | null;
+  station_id?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+};
+
+export type ReportImportShipmentIdentity = {
+  provider_employee_id?: string | null;
+  station_code?: string | null;
+  client?: string | null;
+  work_date: string;
+};
+
 export type ReportImportWorkforceIdentity = {
   id: string;
   source_profile_type?: string | null;
@@ -33,6 +49,102 @@ const sourceTypes = ["employee", "contractor", "field_executive"] as const;
 
 function sourceKey(type: string, id: string) {
   return `${type.trim().toLowerCase()}:${id}`;
+}
+
+function normalizedIdentity(value: unknown) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function normalizedScope(value: unknown) {
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+export function reportImportMappingMatchesShipment(
+  mapping: ReportImportProviderMappingIdentity,
+  shipment: ReportImportShipmentIdentity,
+  scope: {
+    providerLabelsById: Map<string, string[]>;
+    stationCodeById: Map<string, string>;
+  }
+) {
+  if (
+    !mapping.effective_from
+    || mapping.effective_from > shipment.work_date
+    || (mapping.effective_to && mapping.effective_to < shipment.work_date)
+    || normalizedIdentity(mapping.provider_member_id) !== normalizedIdentity(shipment.provider_employee_id)
+  ) {
+    return false;
+  }
+
+  if (mapping.station_id) {
+    const stationCode = scope.stationCodeById.get(mapping.station_id);
+    if (!stationCode || normalizedScope(stationCode) !== normalizedScope(shipment.station_code)) return false;
+  }
+
+  if (mapping.provider_id) {
+    const client = normalizedScope(shipment.client);
+    const providerLabels = scope.providerLabelsById.get(mapping.provider_id) ?? [];
+    if (!client || !providerLabels.some((label) => {
+      const provider = normalizedScope(label);
+      return provider === client || provider.includes(client) || client.includes(provider);
+    })) return false;
+  }
+
+  return true;
+}
+
+export function reportImportMappingIdentityGroups(mappings: ReportImportMappingIdentity[]) {
+  return ([
+    { column: "workforce_id", ids: [...new Set(mappings.map((mapping) => mapping.workforce_id).filter((id): id is string => Boolean(id)))] },
+    { column: "employee_id", ids: [...new Set(mappings.map((mapping) => mapping.employee_id).filter((id): id is string => Boolean(id)))] },
+    { column: "contractor_id", ids: [...new Set(mappings.map((mapping) => mapping.contractor_id).filter((id): id is string => Boolean(id)))] },
+    { column: "field_executive_id", ids: [...new Set(mappings.map((mapping) => mapping.field_executive_id).filter((id): id is string => Boolean(id)))] }
+  ] as const).filter((group) => group.ids.length);
+}
+
+export function reportImportMappingIdentitySeedsForWorkforce(rows: ReportImportWorkforceIdentity[]) {
+  return rows.flatMap((row) => {
+    const canonicalSeed: ReportImportMappingIdentity = {
+      workforce_id: row.id,
+      employee_id: row.id,
+      contractor_id: row.id,
+      field_executive_id: row.id
+    };
+    const sourceId = String(row.source_profile_id ?? "").trim();
+    const sourceType = String(row.source_profile_type ?? "").trim().toLowerCase();
+    if (!sourceId || !sourceTypes.includes(sourceType as (typeof sourceTypes)[number])) return [canonicalSeed];
+    return [canonicalSeed, { [`${sourceType}_id`]: sourceId } as ReportImportMappingIdentity];
+  });
+}
+
+export function resolveReportImportShipmentMapping<T extends ReportImportProviderMappingIdentity>(
+  mappings: T[],
+  shipment: ReportImportShipmentIdentity,
+  scope: {
+    providerLabelsById: Map<string, string[]>;
+    stationCodeById: Map<string, string>;
+  },
+  workforceIndex: ReportImportWorkforceIndex
+) {
+  const candidates = mappings.filter((mapping) => reportImportMappingMatchesShipment(mapping, shipment, scope));
+  if (!candidates.length) return { mapping: null, status: "Unmapped" as const };
+  const workers = candidates.map((mapping) => canonicalWorkforceForMapping(mapping, workforceIndex));
+  if (workers.some((worker) => !worker) || new Set(workers.map((worker) => worker?.id)).size !== 1) {
+    return { mapping: null, status: "Conflicting or missing DropX identity" as const };
+  }
+  const mapping = [...candidates].sort((left, right) => (
+    String(right.effective_from ?? "").localeCompare(String(left.effective_from ?? ""))
+    || String(right.id ?? "").localeCompare(String(left.id ?? ""))
+  ))[0];
+  return { mapping, status: null };
+}
+
+export function reportImportMappingStatus(configured: boolean, attendanceConfigurationMissing: boolean) {
+  return attendanceConfigurationMissing
+    ? "Attendance calculation unavailable"
+    : configured
+      ? "Mapped"
+      : "Payment setup missing";
 }
 
 function attendanceUnit(row?: ReportImportAttendanceRow | null) {
@@ -86,6 +198,32 @@ export function canonicalWorkforceForMapping(
     if (worker) return worker;
   }
   return undefined;
+}
+
+export function selectReportImportMapping<T extends ReportImportProviderMappingIdentity>(
+  mappings: T[],
+  shipment: ReportImportShipmentIdentity,
+  scope: {
+    providerLabelsById: Map<string, string[]>;
+    stationCodeById: Map<string, string>;
+  },
+  workforceIndex?: ReportImportWorkforceIndex
+): { mapping: T | null; status: "matched" | "unmapped" | "identity_conflict" } {
+  const candidates = mappings
+    .filter((mapping) => reportImportMappingMatchesShipment(mapping, shipment, scope))
+    .sort((left, right) => String(right.effective_from ?? "").localeCompare(String(left.effective_from ?? ""))
+      || String(right.id ?? "").localeCompare(String(left.id ?? "")));
+  if (!candidates.length) return { mapping: null, status: "unmapped" };
+
+  if (workforceIndex) {
+    const workers = candidates.map((mapping) => canonicalWorkforceForMapping(mapping, workforceIndex));
+    const workforceIds = new Set(workers.map((worker) => worker?.id).filter(Boolean));
+    if (workers.some((worker) => !worker) || workforceIds.size !== 1) {
+      return { mapping: null, status: "identity_conflict" };
+    }
+  }
+
+  return { mapping: candidates[0], status: "matched" };
 }
 
 export function canonicalWorkforceForAttendance(
