@@ -87,6 +87,7 @@ const administration: NavItem[] = [
     icon: "*",
     children: [
       { code: "cod_master", label: "COD Master", href: "/master/cod-master" },
+      { code: "station_audit_master", label: "Audit Master", href: "/master/audits" },
       { code: "master_locations", label: "Station Master", href: "/master/location" },
       { code: "master_providers", label: "Client / Provider Master", href: "/master/providers" },
       { code: "master_models", label: "Operation Models", href: "/master/models" }
@@ -116,6 +117,7 @@ function modelOperations(mode: OperatingMode): NavItem {
         { code: "ops_pulse", label: "Shift Control", href: "/?view=shift" },
         { code: "ops_pulse", label: "Hourly Performance", href: "/?view=hourly" },
         { code: "daily_submission", label: "Attendance & Reporting", href: "/daily-submission" },
+        { code: "station_audits", label: "Station Audits", href: "/audits" },
         { code: "cod_reports", label: "Exceptions", href: "/cod/reports?client=amazon" }
       ]
     };
@@ -127,6 +129,7 @@ function modelOperations(mode: OperatingMode): NavItem {
       icon: "O",
       children: [
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
+        { code: "station_audits", label: "Station Audits", href: "/audits" },
         { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=flipkart" },
         { code: "cod_reports", label: "Daily COD Review", href: "/cod/pending" }
       ]
@@ -141,6 +144,7 @@ function modelOperations(mode: OperatingMode): NavItem {
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
       { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" },
+      { code: "station_audits", label: "Station Audits", href: "/audits" },
       { code: "cod_reports", label: "Daily COD Review", href: "/cod/pending" }
     ]
   };

@@ -58,6 +58,8 @@ export const accessPages = [
   { code: "cod_reports", name: "COD Reports", sort_order: 90 },
   { code: "cod_portal_checks", name: "COD Portal Checks", sort_order: 91 },
   { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 94 },
+  { code: "station_audits", name: "Station Audits", sort_order: 94 },
+  { code: "station_audit_master", name: "Audit Master", sort_order: 94 },
   { code: "edd_dashboard", name: "Delivery Performance", sort_order: 95 },
   { code: "station_edd", name: "EDD", sort_order: 96 },
   { code: "cps", name: "CPS", sort_order: 73 },
@@ -481,7 +483,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     "cod_validation",
     "cod_reports",
     "cod_portal_checks",
-    "cod_cash_in_associate"
+    "cod_cash_in_associate",
+    "station_audits"
   ], false);
   if (pageTopologyChanged) await copyLegacyGroupPermissions(supabase, companyId, "settings", [
     "master_locations",
@@ -491,7 +494,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     "master_payment_banks",
     "master_payment_heads",
     "designations",
-    "biometric_devices"
+    "biometric_devices",
+    "station_audit_master"
   ], true);
   if (pageTopologyChanged) await copyLegacyGroupPermissions(supabase, companyId, "fleet", [
     "fleet_action_center",
@@ -511,6 +515,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "executive_id_onboarding");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "cod_cash_in_associate");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_executive_reconciliation"], "cod_cash_in_associate");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports", "cod_executive_reconciliation"], "station_audits");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["cod_master"], "station_audit_master");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "performance");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance_review"], "performance_review_status");
