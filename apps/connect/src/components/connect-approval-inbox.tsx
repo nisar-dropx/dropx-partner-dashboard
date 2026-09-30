@@ -1795,6 +1795,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               saving={saving}
             />
           ))}
+          <ReimbursementApprovalHistory account={account} />
           {expenseOversight.length ? <section className="dx-expense-oversight">
             <header><span><strong>Organisation reimbursement visibility</strong><small>Read-only access · approval is available only when you are the assigned reporting-manager layer.</small></span><em>{expenseOversight.length} recent</em></header>
             <div>
@@ -2059,5 +2060,91 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
 
       <p className="dx-approval-footnote"><ClipboardCheck /> Only requests you are authorised to review appear here. Open a request to see the details and approval history.</p>
     </section>
+  );
+}
+
+type ReimbursementHistoryItem = ReimbursementApproval & {
+  status: string;
+  decision_note?: string | null;
+  decided_at?: string | null;
+  claim: ReimbursementApproval["claim"] & { status?: string; total_approved?: number | null; trip_from?: string | null; trip_to?: string | null };
+};
+
+/**
+ * The approver's own decided reimbursement claims: closed by default, loaded
+ * when opened, 10 per page, and each claim expands to its full details.
+ */
+function ReimbursementApprovalHistory({ account }: { account: AppAccount }) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<{ items: ReimbursementHistoryItem[]; total: number; pageSize: number } | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+
+  const loadPage = useCallback(async (nextPage: number) => {
+    setLoadingHistory(true);
+    setHistoryError("");
+    try {
+      const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, kind: "approval_history", page: String(nextPage) });
+      const response = await fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load your approval history.");
+      setData(payload.history);
+      setPage(nextPage);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Unable to load your approval history.");
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [account.id, account.profileType]);
+
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const decidedOn = (value?: string | null) => value ? new Date(value).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "—";
+
+  return (
+    <details className="dx-approval-history" open={open} onToggle={(event) => {
+      const isOpen = (event.currentTarget as HTMLDetailsElement).open;
+      setOpen(isOpen);
+      if (isOpen && !data && !loadingHistory) void loadPage(1);
+    }}>
+      <summary><span><strong>My approval history</strong><small>Claims you have approved, returned or rejected</small></span>{data ? <em>{data.total}</em> : null}</summary>
+      {open ? <div className="dx-approval-history-body">
+        {historyError ? <p className="dx-approval-error">{historyError}</p> : null}
+        {loadingHistory && !data ? <p className="dx-approval-history-empty">Loading…</p> : null}
+        {data && !data.items.length ? <p className="dx-approval-history-empty">No reimbursement claims decided by you yet.</p> : null}
+        {data?.items.map((item) => {
+          const lines = item.claim.hr_expense_items ?? [];
+          return <details className="dx-approval-history-item" key={item.id}>
+            <summary>
+              <span><strong>{item.claim.requesterName}</strong><small>{item.claim.claim_no} · {item.step_name} · {decidedOn(item.decided_at)}</small></span>
+              <span className="dx-approval-history-side"><b>{money(item.claim.total_claimed)}</b><i className={`dx-request-status ${item.status}`}>{statusLabel(item.status)}</i></span>
+            </summary>
+            <dl className="dx-approval-facts">
+              <div><dt>Claimant</dt><dd>{item.claim.requesterName}{item.claim.requesterCode ? ` · ${item.claim.requesterCode}` : ""}</dd></div>
+              <div><dt>Purpose</dt><dd>{item.claim.purpose}</dd></div>
+              {item.claim.trip_from || item.claim.trip_to ? <div><dt>Trip</dt><dd>{item.claim.trip_from ? displayDate(item.claim.trip_from) : "—"} – {item.claim.trip_to ? displayDate(item.claim.trip_to) : "—"}</dd></div> : null}
+              <div><dt>Claimed</dt><dd>{money(item.claim.total_claimed)}{item.claim.total_approved != null ? ` · approved ${money(item.claim.total_approved)}` : ""}</dd></div>
+              <div><dt>Claim status now</dt><dd>{statusLabel(item.claim.status ?? "")}</dd></div>
+              <div><dt>Your decision</dt><dd>{statusLabel(item.status)} on {decidedOn(item.decided_at)}{item.decision_note ? ` · ${item.decision_note}` : ""}</dd></div>
+            </dl>
+            {lines.length ? <table className="dx-approval-history-table"><thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Amount</th></tr></thead><tbody>
+              {lines.map((line) => {
+                const category = Array.isArray(line.hr_expense_categories) ? line.hr_expense_categories[0] : line.hr_expense_categories;
+                return <tr key={line.id}><td>{displayDate(line.expense_date)}</td><td>{category?.name ?? "—"}</td><td>{[line.merchant, line.description].filter(Boolean).join(" · ") || "—"}</td><td>{money(line.amount)}</td></tr>;
+              })}
+            </tbody></table> : null}
+            {item.claim.attachments?.length ? <p className="dx-approval-history-files">{item.claim.attachments.map((file) => file.url
+              ? <a href={file.url} key={file.id} rel="noreferrer" target="_blank">{file.file_name}</a>
+              : <span key={file.id}>{file.file_name}</span>)}</p> : null}
+            <ApprovalJourneyCell journey={item.journey} submittedAt={item.claim.submitted_at} submittedBy={item.claim.requesterName} currentStep={item.step_name} />
+          </details>;
+        })}
+        {data && pages > 1 ? <nav className="dx-approval-history-pages" aria-label="Approval history pages">
+          <button disabled={page <= 1 || loadingHistory} onClick={() => void loadPage(page - 1)} type="button">Previous</button>
+          <span>Page {page} of {pages}</span>
+          <button disabled={page >= pages || loadingHistory} onClick={() => void loadPage(page + 1)} type="button">Next</button>
+        </nav> : null}
+      </div> : null}
+    </details>
   );
 }

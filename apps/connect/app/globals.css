@@ -18047,3 +18047,29 @@ img.dx-selfie-live {
 .dx-announcement-file-note strong { color: #101828; font-size: 14px; }
 
 .dx-regularization-closed { display: block; width: 100%; color: #b54708; font-size: 12px; line-height: 1.4; }
+
+
+/* Reimbursement approval history (approver) */
+.dx-approval-history { margin-top: 14px; border: 1px solid #e4e7ec; border-radius: 12px; background: #fff; }
+.dx-approval-history > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.dx-approval-history > summary::-webkit-details-marker { display: none; }
+.dx-approval-history > summary span { display: grid; gap: 2px; }
+.dx-approval-history > summary small { color: #667085; font-size: 12px; }
+.dx-approval-history > summary em { min-width: 26px; padding: 2px 8px; border-radius: 999px; background: #f2f4f7; color: #344054; font-size: 12px; font-style: normal; font-weight: 700; text-align: center; }
+.dx-approval-history-body { display: grid; gap: 8px; padding: 0 12px 12px; }
+.dx-approval-history-empty { margin: 0; color: #667085; font-size: 13px; }
+.dx-approval-history-item { border: 1px solid #eaecf0; border-radius: 10px; background: #fcfcfd; }
+.dx-approval-history-item > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; cursor: pointer; list-style: none; }
+.dx-approval-history-item > summary::-webkit-details-marker { display: none; }
+.dx-approval-history-item > summary > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.dx-approval-history-item > summary small { color: #667085; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dx-approval-history-side { display: grid; justify-items: end; gap: 3px; }
+.dx-approval-history-side i { font-style: normal; font-size: 11px; }
+.dx-approval-history-item[open] { background: #fff; }
+.dx-approval-history-item[open] > summary { border-bottom: 1px solid #eaecf0; }
+.dx-approval-history-item > dl, .dx-approval-history-item > table, .dx-approval-history-item > p, .dx-approval-history-item > div { margin: 10px 12px; }
+.dx-approval-history-table { width: calc(100% - 24px); border-collapse: collapse; font-size: 12.5px; }
+.dx-approval-history-table th, .dx-approval-history-table td { padding: 6px 4px; border-bottom: 1px solid #f2f4f7; text-align: left; }
+.dx-approval-history-table td:last-child, .dx-approval-history-table th:last-child { text-align: right; }
+.dx-approval-history-files { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12.5px; }
+.dx-approval-history-pages { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 4px; font-size: 13px; }

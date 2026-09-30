@@ -85,6 +85,54 @@ async function approvalPayload(companyId: string, userIds: string[]) {
   }));
 }
 
+/**
+ * Claims this approver has already decided (approved / returned / rejected),
+ * newest decision first, with the full claim, items, bills and journey.
+ * Paged: 10 per page.
+ */
+const APPROVAL_HISTORY_PAGE_SIZE = 10;
+async function approvalHistoryPayload(companyId: string, userIds: string[], page: number) {
+  if (!userIds.length) return { items: [], page: 1, pageSize: APPROVAL_HISTORY_PAGE_SIZE, total: 0 };
+  const from = (page - 1) * APPROVAL_HISTORY_PAGE_SIZE;
+  const result = await db().from("hr_expense_approval_steps")
+    .select("id,claim_id,step_order,step_name,stage_code,status,decision_note,decided_at,hr_expense_claims(id,claim_no,purpose,total_claimed,total_approved,trip_from,trip_to,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))", { count: "exact" })
+    .eq("company_id", companyId)
+    .or(`approver_user_id.in.(${userIds.join(",")}),decided_by.in.(${userIds.join(",")})`)
+    .in("status", ["approved", "returned", "rejected"])
+    .order("decided_at", { ascending: false, nullsFirst: false })
+    .range(from, from + APPROVAL_HISTORY_PAGE_SIZE - 1);
+  if (result.error) throw new Error(result.error.message);
+  const rows = await Promise.all((result.data ?? []).flatMap((step) => {
+    const claim = relation(step.hr_expense_claims);
+    if (!claim) return [];
+    const employee = relation(claim.employees);
+    const contractor = relation(claim.contractors);
+    return [(async () => ({
+      kind: "claim" as const,
+      ...step,
+      claim: {
+        ...claim,
+        requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+        requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+        attachments: await signedAttachments(claim.hr_expense_attachments)
+      }
+    }))()];
+  }));
+  const journeys = await loadApprovalJourneySteps(companyId, rows.map((row) => row.claim.id), {
+    table: "hr_expense_approval_steps", parentColumn: "claim_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["decided_by", "approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return {
+    items: rows.map((row) => ({
+      ...row,
+      journey: approvalJourneySummary(row.claim.submitted_at, row.claim.requesterName, row.step_name, journeys.get(row.claim.id) ?? [])
+    })),
+    page,
+    pageSize: APPROVAL_HISTORY_PAGE_SIZE,
+    total: result.count ?? rows.length
+  };
+}
+
 /** Same current-owner rule as People and the decision RPC; oversight is read-only. */
 async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
@@ -375,6 +423,11 @@ export async function GET(request: Request) {
     if (kind === "approval_guide") {
       const guide = await expenseApprovalGuidePayload(account);
       return NextResponse.json({ guide }, { headers: { "Cache-Control": "private, no-store" } });
+    }
+    if (kind === "approval_history") {
+      const page = Math.max(1, Math.min(500, Number(url.searchParams.get("page")) || 1));
+      const history = await approvalHistoryPayload(account.companyId, await resolveConnectActorUserIds(account), page);
+      return NextResponse.json({ history }, { headers: { "Cache-Control": "private, no-store" } });
     }
     if (kind === "oversight_claim") {
       const claimId = clean(url.searchParams.get("claimId"));
