@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useFormStatus } from "react-dom";
 import { SubmitButton } from "@/components/submit-button";
 import {
   workforcePaymentMethodFields,
@@ -24,6 +25,16 @@ type EditablePolicy = Pick<
   "calculation_method" | "paid_off_days" | "work_units_per_paid_off" | "cap_at_monthly_amount" | "effective_from"
 >;
 
+function FormPendingState({ setPending }: { setPending: Dispatch<SetStateAction<boolean>> }) {
+  const { pending } = useFormStatus();
+
+  useEffect(() => {
+    setPending(pending);
+  }, [pending, setPending]);
+
+  return null;
+}
+
 export function WorkforcePaymentPolicyForm({
   canEdit,
   currentMonth,
@@ -36,6 +47,13 @@ export function WorkforcePaymentPolicyForm({
   policies: EditablePolicy[];
 }) {
   const initialPolicy = workforcePaymentPolicyForDate(policies, `${currentMonth}-01`);
+  const formRef = useRef<HTMLFormElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const firstFieldRef = useRef<HTMLSelectElement>(null);
+  const effectiveMonthRef = useRef<HTMLInputElement>(null);
+  const returnFocusToEditRef = useRef(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [effectiveMonth, setEffectiveMonth] = useState(currentMonth);
   const [method, setMethod] = useState<WorkforcePaymentMethod>(initialPolicy.calculation_method);
   const [paidOffDays, setPaidOffDays] = useState(String(initialPolicy.paid_off_days));
@@ -44,7 +62,29 @@ export function WorkforcePaymentPolicyForm({
   const effectiveFrom = `${effectiveMonth}-01`;
   const fields = workforcePaymentMethodFields(method);
   const locked = workforcePaymentMonthIsFinalized(effectiveFrom, finalizedPeriods);
-  const formDisabled = !canEdit || locked;
+  const formDisabled = !canEdit || !isEditing || isSubmitting || locked;
+
+  useEffect(() => {
+    if (isEditing) {
+      (locked ? effectiveMonthRef.current : firstFieldRef.current)?.focus();
+      return;
+    }
+    if (returnFocusToEditRef.current) {
+      returnFocusToEditRef.current = false;
+      editButtonRef.current?.focus();
+    }
+  }, [isEditing, locked]);
+
+  function cancelEditing() {
+    setEffectiveMonth(currentMonth);
+    setMethod(initialPolicy.calculation_method);
+    setPaidOffDays(String(initialPolicy.paid_off_days));
+    setWorkUnitsPerPaidOff(String(initialPolicy.work_units_per_paid_off));
+    setCapAtMonthlyAmount(initialPolicy.cap_at_monthly_amount);
+    formRef.current?.reset();
+    returnFocusToEditRef.current = true;
+    setIsEditing(false);
+  }
 
   function selectMonth(month: string) {
     setEffectiveMonth(month);
@@ -57,13 +97,24 @@ export function WorkforcePaymentPolicyForm({
   }
 
   return (
-    <form action={saveWorkforcePaymentSettings} className={`${styles.form} form-grid two`}>
+    <form action={saveWorkforcePaymentSettings} className={`${styles.form} form-grid two`} ref={formRef}>
+      <FormPendingState setPending={setIsSubmitting} />
+      <div className={`${styles.editControls} span-2`}>
+        {canEdit ? (
+          isEditing ? (
+            <button className="button secondary" disabled={isSubmitting} onClick={cancelEditing} type="button">Cancel editing</button>
+          ) : (
+            <button className="button" onClick={() => setIsEditing(true)} ref={editButtonRef} type="button">Edit</button>
+          )
+        ) : <span className="subtle" role="status">View only</span>}
+      </div>
       <label className="span-2">Calculation method
         <select
           className="select"
           disabled={formDisabled}
           name="calculation_method"
           onChange={(event) => setMethod(event.target.value as WorkforcePaymentMethod)}
+          ref={firstFieldRef}
           required
           value={method}
         >
@@ -103,9 +154,10 @@ export function WorkforcePaymentPolicyForm({
       <label>Effective month
         <input
           className="field"
-          disabled={!canEdit}
+          disabled={!canEdit || !isEditing || isSubmitting}
           name="effective_from"
           onChange={(event) => selectMonth(event.target.value)}
+          ref={effectiveMonthRef}
           required
           type="month"
           value={effectiveMonth}
@@ -135,11 +187,13 @@ export function WorkforcePaymentPolicyForm({
         />
         <span>Cap calculated base pay at the configured monthly amount</span>
       </label>
-      <div className="form-actions span-2 align-right">
-        <SubmitButton disabled={formDisabled} disabledText={!canEdit ? "View only" : "Month locked"}>
-          Save workforce payment policy
-        </SubmitButton>
-      </div>
+      {isEditing ? (
+        <div className="form-actions span-2 align-right">
+          <SubmitButton disabled={formDisabled} disabledText={!canEdit ? "View only" : "Month locked"}>
+            Save workforce payment policy
+          </SubmitButton>
+        </div>
+      ) : null}
     </form>
   );
 }

@@ -1,3 +1,8 @@
+.editControls {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .form input:disabled,
 .form select:disabled {
   background: #eef1f5;

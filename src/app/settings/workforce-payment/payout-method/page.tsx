@@ -143,6 +143,9 @@ export default async function WorkforcePaymentSettingsPage() {
     .filter((policy) => policy.effective_from <= currentMonthStart)
     .sort((left, right) => right.effective_from.localeCompare(left.effective_from))[0];
   const exampleMethods = Object.keys(methodCopy) as WorkforcePaymentMethod[];
+  const formRevision = data.policies
+    .map((policy) => `${policy.id}:${policy.updated_at ?? policy.created_at ?? policy.effective_from}`)
+    .join("|") || "default";
 
   return (
     <AppShell active="Settings" pageCode="payment_settings">
@@ -191,6 +194,7 @@ export default async function WorkforcePaymentSettingsPage() {
               canEdit={canEdit}
               currentMonth={currentMonth}
               finalizedPeriods={data.finalizedPeriods}
+              key={formRevision}
               policies={data.policies.map((policy) => ({
                 calculation_method: policy.calculation_method,
                 paid_off_days: policy.paid_off_days,

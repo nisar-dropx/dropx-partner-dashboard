@@ -24,6 +24,7 @@ type AttendanceCaptureSettingRow = {
   minimum_daily_deliveries: number | null;
   effective_from: string;
   change_reason: string;
+  updated_at: string | null;
 };
 
 const methodCopy: Record<WorkforceAttendanceCaptureMethod, { label: string; description: string }> = {
@@ -73,7 +74,7 @@ async function loadSettings(companyId: string) {
   const [settingsResult, payrollResult] = await Promise.all([
     readAllRows(supabaseAdmin
       .from("workforce_attendance_capture_settings")
-      .select("capture_method,minimum_daily_deliveries,effective_from,change_reason")
+      .select("capture_method,minimum_daily_deliveries,effective_from,change_reason,updated_at")
       .eq("company_id", companyId)
       .order("effective_from", { ascending: false })),
     readAllRows(supabaseAdmin
@@ -93,7 +94,8 @@ async function loadSettings(companyId: string) {
   return {
     settings: (settingsResult.data ?? []).map((row) => ({
       ...normalizeWorkforceAttendanceCaptureSetting(row),
-      change_reason: String(row.change_reason ?? "")
+      change_reason: String(row.change_reason ?? ""),
+      updated_at: row.updated_at
     })) as AttendanceCaptureSettingRow[],
     finalizedPeriods: (payrollResult.data ?? []).map((row) => ({
       period_start: String(row.period_start),
@@ -120,6 +122,9 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
   const currentMonth = indiaMonth();
   const currentMonthStart = `${currentMonth}-01`;
   const activeSetting = data.settings.find((setting) => setting.effective_from <= currentMonthStart);
+  const formRevision = data.settings
+    .map((setting) => `${setting.effective_from}:${setting.updated_at ?? setting.capture_method}`)
+    .join("|") || "default";
 
   return (
     <AppShell active="Settings" pageCode="payment_settings">
@@ -168,6 +173,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
               canEdit={canEdit}
               currentMonth={currentMonth}
               finalizedPeriods={data.finalizedPeriods}
+              key={formRevision}
               settings={data.settings.map((setting): WorkforceAttendanceCaptureSetting => ({
                 capture_method: setting.capture_method,
                 minimum_daily_deliveries: setting.minimum_daily_deliveries,
