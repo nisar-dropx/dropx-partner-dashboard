@@ -3,6 +3,7 @@
 import { LockKeyhole, ScanLine, ShieldCheck, Wrench } from "lucide-react";
 import { signInWithGoogle } from "@/app/login/actions";
 import { FleetBrand } from "@/components/fleet-brand";
+import { FleetAppInstall } from "@/components/fleet-app-install";
 
 export function FleetLoginPanel({ initialMessage, nextPath = "/" }: { initialMessage?: string | null; nextPath?: string }) {
   return (
@@ -31,6 +32,7 @@ export function FleetLoginPanel({ initialMessage, nextPath = "/" }: { initialMes
             <input name="next" type="hidden" value={nextPath} />
             <button className="fleet-google-login" type="submit"><img src="/google-g.svg" alt="" />Continue with DropX Google</button>
           </form>
+          <FleetAppInstall />
           <p className="fleet-login-footnote">Access is limited to active users enabled for Fleet operations.</p>
         </div>
         <p className="fleet-login-legal">DropX Fleet · Vehicle operations</p>

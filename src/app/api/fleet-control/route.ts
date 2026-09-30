@@ -30,6 +30,7 @@ export async function POST(request: Request) {
   try {
     if (action === "service.create") return await createService(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.schedule") return await scheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.reschedule") return await rescheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.complete") return await completeAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "checklist.create") return await createChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "settings.update") return await updateSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
@@ -72,18 +73,58 @@ async function scheduleAudit(companyId: string, userId: string, allowed: boolean
     if (template.error) throw new Error(template.error.message);
     templateId = template.data?.id ?? null;
   }
-  const result = await supabaseAdmin!.from("fleet_audits").insert({ company_id: companyId, vehicle_id: vehicleId, template_id: templateId,
-    scheduled_for: required(body.scheduledFor, "Scheduled date"), scheduled_reason: clean(body.scheduledReason) || "Routine audit",
+  const requestedMode = clean(body.auditMode) || "physical";
+  const modes = requestedMode === "both" ? ["video", "physical"] : [requestedMode];
+  if (modes.some((mode) => !["video", "physical"].includes(mode))) throw new Error("Choose video review, physical inspection or both audits.");
+  const reason = clean(body.scheduledReason) || "Routine monthly audit";
+  const rows = modes.map((mode) => ({ company_id: companyId, vehicle_id: vehicleId, template_id: templateId,
+    scheduled_for: required(mode === "video" ? body.videoDate || body.scheduledFor : body.physicalDate || body.scheduledFor, `${mode === "video" ? "Video review" : "Physical inspection"} date`),
+    scheduled_reason: `[mode:${mode}] ${reason}`,
     risk_score: Math.max(0, Math.min(100, Number(body.riskScore ?? 0))), status: "scheduled", assigned_to: clean(body.assignedTo) || null, created_by: userId
-  }).select("id").single();
+  }));
+  if (new Set(rows.map((row) => row.scheduled_for.slice(0, 7))).size > 1) throw new Error("Both audits must be scheduled in the same month.");
+  const duplicateChecks = await Promise.all(rows.map((row) => {
+    const monthStart = `${row.scheduled_for.slice(0, 7)}-01`;
+    const nextMonth = new Date(`${monthStart}T12:00:00+05:30`); nextMonth.setMonth(nextMonth.getMonth() + 1);
+    const nextMonthStart = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+    return supabaseAdmin!.from("fleet_audits").select("id").eq("company_id", companyId).eq("vehicle_id", vehicleId).gte("scheduled_for", monthStart).lt("scheduled_for", nextMonthStart).like("scheduled_reason", `${row.scheduled_reason.split(" ")[0]}%`).neq("status", "cancelled").limit(1);
+  }));
+  const duplicateError = duplicateChecks.find((check) => check.error)?.error;
+  if (duplicateError) throw new Error(duplicateError.message);
+  const newRows = rows.filter((_, index) => !(duplicateChecks[index].data ?? []).length);
+  if (!newRows.length) return NextResponse.json({ ok: true, ids: [], message: "This vehicle already has the selected monthly audit scheduled." });
+  const result = await supabaseAdmin!.from("fleet_audits").insert(newRows).select("id");
   if (result.error) throw new Error(result.error.message);
-  return NextResponse.json({ ok: true, id: result.data.id, message: "Vehicle audit scheduled." });
+  return NextResponse.json({ ok: true, ids: (result.data ?? []).map((row) => row.id), message: newRows.length === 2 ? "Both monthly vehicle audits scheduled." : modes.length === 2 ? "Missing monthly audit scheduled; the existing audit was kept." : "Vehicle audit scheduled." });
+}
+
+async function rescheduleAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const auditId = required(body.auditId, "Audit");
+  const scheduledFor = required(body.scheduledFor, "New audit date");
+  const reason = required(body.rescheduleReason, "Reschedule reason");
+  const current = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,scheduled_for,scheduled_reason,status").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  if (current.error) throw new Error(current.error.message);
+  if (!current.data) throw new Error("Audit was not found.");
+  if (!['scheduled','in_progress'].includes(clean(current.data.status))) throw new Error("Only an open audit can be moved.");
+  const mode = /^\[mode:video\]/i.test(clean(current.data.scheduled_reason)) ? "video" : "physical";
+  const monthStart = `${scheduledFor.slice(0, 7)}-01`;
+  const nextMonth = new Date(`${monthStart}T12:00:00+05:30`); nextMonth.setMonth(nextMonth.getMonth() + 1);
+  const nextMonthStart = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+  const duplicate = await supabaseAdmin!.from("fleet_audits").select("id").eq("company_id", companyId).eq("vehicle_id", current.data.vehicle_id).neq("id", auditId).gte("scheduled_for", monthStart).lt("scheduled_for", nextMonthStart).like("scheduled_reason", `[mode:${mode}]%`).neq("status", "cancelled").limit(1);
+  if (duplicate.error) throw new Error(duplicate.error.message);
+  if ((duplicate.data ?? []).length) throw new Error(`This vehicle already has a ${mode === "video" ? "video review" : "physical inspection"} in the selected month.`);
+  const plainReason = clean(current.data.scheduled_reason).replace(/^\[mode:(?:video|physical)\]\s*/i, "").replace(/\s*\[moved:[^\]]+\]\s*$/i, "") || "Routine monthly audit";
+  const update = await supabaseAdmin!.from("fleet_audits").update({ scheduled_for: scheduledFor, scheduled_reason: `[mode:${mode}] ${plainReason} [moved:${clean(current.data.scheduled_for)}|${reason}]`, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId);
+  if (update.error) throw new Error(update.error.message);
+  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_rescheduled", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: { from_date: current.data.scheduled_for, to_date: scheduledFor, reason } });
+  return NextResponse.json({ ok: true, message: "Audit moved to the new date." });
 }
 
 async function completeAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
   const auditId = required(body.auditId, "Audit");
-  const auditResult = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,scheduled_for,fleet_vehicles!inner(vehicle_no,station_code,model)").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  const auditResult = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,template_id,scheduled_for,scheduled_reason,fleet_vehicles!inner(vehicle_no,station_code,model)").eq("company_id", companyId).eq("id", auditId).maybeSingle();
   if (auditResult.error) throw new Error(auditResult.error.message);
   if (!auditResult.data) throw new Error("Audit was not found.");
   const responses = Array.isArray(body.responses) ? body.responses : [];
@@ -93,6 +134,20 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
     if (saved.error) throw new Error(saved.error.message);
   }
   const evidence = Array.isArray(body.evidence) ? body.evidence.filter((item: Payload) => clean(item.url)) : [];
+  const auditMode = /^\[mode:video\]/i.test(clean(auditResult.data.scheduled_reason)) ? "video" : "physical";
+  if (auditMode === "video" && !evidence.some((item: Payload) => clean(item.type) === "video")) throw new Error("A complete walk-around video link is required for the remote video audit.");
+  let checklistRuleQuery = supabaseAdmin!.from("fleet_audit_checklist_items").select("id,label,guidance,response_type,is_required").eq("company_id", companyId).eq("is_active", true);
+  if (auditResult.data.template_id) checklistRuleQuery = checklistRuleQuery.eq("template_id", auditResult.data.template_id);
+  const checklistRules = await checklistRuleQuery;
+  if (checklistRules.error) throw new Error(checklistRules.error.message);
+  for (const item of checklistRules.data ?? []) {
+    const marker = clean(item.guidance).match(/^\[evidence:(none|photo|video|document|any):(\d+)\]/i);
+    const evidenceType = marker?.[1]?.toLowerCase() || (item.response_type === "photo" ? "photo" : item.response_type === "video" ? "video" : "none");
+    const minimum = marker ? Math.max(0, Number(marker[2]) || 0) : evidenceType === "none" ? 0 : 1;
+    if (!item.is_required || !minimum) continue;
+    const attached = evidence.filter((entry: Payload) => clean(entry.itemId) === item.id && (evidenceType === "any" || clean(entry.type) === evidenceType)).length;
+    if (attached < minimum) throw new Error(`${item.label} requires ${minimum} ${evidenceType === "any" ? "attachment" : evidenceType} evidence ${minimum === 1 ? "link" : "links"}.`);
+  }
   if (evidence.length) {
     const saved = await supabaseAdmin!.from("fleet_audit_evidence").insert(evidence.map((item: Payload) => ({ company_id: companyId, audit_id: auditId, checklist_item_id: clean(item.itemId) || null, media_type: ["photo", "video", "document"].includes(clean(item.type)) ? clean(item.type) : "photo", media_url: clean(item.url), caption: clean(item.caption) || null, captured_at: clean(item.capturedAt) || null, uploaded_by: userId })));
     if (saved.error) throw new Error(saved.error.message);
@@ -132,7 +187,11 @@ async function createChecklistItem(companyId: string, allowed: boolean, body: Pa
   const templateId = required(body.templateId, "Template");
   const template = await supabaseAdmin!.from("fleet_audit_templates").select("id").eq("company_id", companyId).eq("id", templateId).maybeSingle();
   if (template.error) throw new Error(template.error.message); if (!template.data) throw new Error("Audit template was not found.");
-  const result = await supabaseAdmin!.from("fleet_audit_checklist_items").insert({ company_id: companyId, template_id: templateId, category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance: clean(body.guidance) || null, response_type: clean(body.responseType) || "pass_fail", is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999) }).select("id").single();
+  const responseType = clean(body.responseType) || "pass_fail";
+  const evidenceType = ["photo", "video", "document", "any"].includes(clean(body.evidenceType)) ? clean(body.evidenceType) : responseType === "photo" ? "photo" : responseType === "video" ? "video" : "none";
+  const minEvidence = evidenceType === "none" ? 0 : Math.max(0, Math.min(10, Number(body.minEvidence ?? 1) || 0));
+  const guidance = `[evidence:${evidenceType}:${minEvidence}] ${clean(body.guidance)}`.trim();
+  const result = await supabaseAdmin!.from("fleet_audit_checklist_items").insert({ company_id: companyId, template_id: templateId, category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance, response_type: responseType, is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999) }).select("id").single();
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, id: result.data.id, message: "Checklist item added." });
 }

@@ -1,9 +1,13 @@
-const CACHE_NAME = "dropx-opspulse-static-v2";
+const CACHE_NAME = "dropx-portals-static-v3";
 const PRE_CACHE = [
   "/manifest.webmanifest",
   "/opspulse/icon-192.png?v=2",
   "/opspulse/icon-512.png?v=2",
-  "/opspulse/icon-maskable-512.png?v=2"
+  "/opspulse/icon-maskable-512.png?v=2",
+  "/fleet-manifest.webmanifest",
+  "/fleet-control/icon-192.png",
+  "/fleet-control/icon-512.png",
+  "/fleet-control/icon-maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -24,7 +28,9 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   const isStatic = url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/opspulse/") ||
-    url.pathname === "/manifest.webmanifest";
+    url.pathname.startsWith("/fleet-control/") ||
+    url.pathname === "/manifest.webmanifest" ||
+    url.pathname === "/fleet-manifest.webmanifest";
   if (!isStatic) return;
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {

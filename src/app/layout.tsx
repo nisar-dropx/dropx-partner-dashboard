@@ -12,6 +12,11 @@ function isOpsHost() {
   return host === "ops.dropxlogistics.com" || host.startsWith("ops-");
 }
 
+function isFleetHost() {
+  const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
+  return host === "fleet.dropxlogistics.com" || host.startsWith("fleet-");
+}
+
 function isPeopleHost() {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
   return isPeopleHostName(host);
@@ -24,7 +29,13 @@ export function generateMetadata(): Metadata {
       title: { default: "DropX Fleet", template: "%s · DropX Fleet" },
       description: "DropX Fleet for vehicle availability, payment approvals, tracking, service and audits.",
       applicationName: "DropX Fleet",
-      icons: { icon: "/fleet-control/mark.svg", shortcut: "/fleet-control/mark.svg" }
+      manifest: "/fleet-manifest.webmanifest",
+      appleWebApp: { capable: true, statusBarStyle: "default", title: "DropX Fleet" },
+      icons: {
+        icon: [{ url: "/fleet-control/icon-192.png", sizes: "192x192", type: "image/png" }],
+        shortcut: "/fleet-control/mark.svg",
+        apple: [{ url: "/fleet-control/icon-192.png", sizes: "192x192", type: "image/png" }]
+      }
     };
   }
   if (isFinanceHostName(host)) {
@@ -65,10 +76,11 @@ export function generateMetadata(): Metadata {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const opsHost = isOpsHost();
+  const fleetHost = isFleetHost();
   return (
     <html lang="en">
       <body>
-        {opsHost ? <OpsPwaRegister /> : null}
+        {opsHost || fleetHost ? <OpsPwaRegister /> : null}
         {children}
       </body>
     </html>

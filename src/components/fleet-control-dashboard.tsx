@@ -34,14 +34,16 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { PaymentApprovalActionForm } from "@/components/payment-approval-action-form";
+import { PaymentApprovalActionForm, type PaymentActionResult } from "@/components/payment-approval-action-form";
+import { FleetAuditsWorkspace } from "@/components/fleet-audits-workspace";
 import { FleetBrand } from "@/components/fleet-brand";
+import { FleetAppInstall } from "@/components/fleet-app-install";
 import { FleetAdHocCapacity } from "@/components/fleet-adhoc-capacity";
 import { FleetDocumentsWorkspace } from "@/components/fleet-documents-workspace";
 import { FleetMultiSelect, type FleetFilterOption } from "@/components/fleet-multi-select";
 import { FleetTrackingWorkspace } from "@/components/fleet-tracking-workspace";
 import { SearchableSelect } from "@/components/searchable-select";
-import type { FleetAudit, FleetAuditSuggestion, FleetControlData, FleetControlPayment, FleetControlVehicle } from "@/lib/fleet-control";
+import type { FleetControlData, FleetControlPayment, FleetControlVehicle } from "@/lib/fleet-control";
 
 type Section = "overview" | "vehicles" | "documents" | "tracking" | "service" | "audits" | "approvals" | "adhoc" | "settings" | "masters";
 
@@ -53,7 +55,7 @@ const workspaceSections: Array<{ key: Section; label: string; icon: typeof Layou
   { key: "service", label: "Service History", icon: History },
   { key: "audits", label: "Vehicle Audits", icon: ClipboardCheck },
   { key: "approvals", label: "Vehicle Payments", icon: CircleDollarSign },
-  { key: "adhoc", label: "Ad-hoc Capacity", icon: Activity }
+  { key: "adhoc", label: "Ad Hoc Usage", icon: Activity }
 ];
 
 const administrationSections: Array<{ key: Section; label: string; icon: typeof LayoutDashboard }> = [
@@ -179,14 +181,13 @@ export function FleetControlDashboard({
   const [regions, setRegions] = useState<string[]>([]);
   const [vehicleStatuses, setVehicleStatuses] = useState<string[]>([]);
   const [serviceStatuses, setServiceStatuses] = useState<string[]>([]);
-  const [auditStatuses, setAuditStatuses] = useState<string[]>([]);
   const [paymentStatuses, setPaymentStatuses] = useState<string[]>([]);
   const [paymentHeads, setPaymentHeads] = useState<string[]>([]);
   const [vehicleSort, setVehicleSort] = useState("vehicle");
   const [serviceSort, setServiceSort] = useState("date_desc");
-  const [auditSort, setAuditSort] = useState("date_desc");
   const [paymentSort, setPaymentSort] = useState("date_desc");
   const [vehicles, setVehicles] = useState(data.vehicles);
+  const [payments, setPayments] = useState(data.payments);
   const [movements, setMovements] = useState(data.movements);
   const [selectedVehicle, setSelectedVehicle] = useState<FleetControlVehicle | null>(null);
   const [placementStation, setPlacementStation] = useState("");
@@ -198,12 +199,11 @@ export function FleetControlDashboard({
   const [paymentDetail, setPaymentDetail] = useState<FleetPaymentDetail | null>(null);
   const [paymentDetailError, setPaymentDetailError] = useState("");
   const [paymentDetailLoading, setPaymentDetailLoading] = useState(false);
+  const [paymentDetailVersion, setPaymentDetailVersion] = useState(0);
   const [savingVehicle, setSavingVehicle] = useState<string | null>(null);
   const [flash, setFlash] = useState(message);
   const [addVehicle, setAddVehicle] = useState(false);
   const [serviceModal, setServiceModal] = useState(false);
-  const [auditModal, setAuditModal] = useState<FleetAuditSuggestion | null | "manual">(null);
-  const [completeAudit, setCompleteAudit] = useState<FleetAudit | null>(null);
   const [checklistModal, setChecklistModal] = useState(false);
   const [savingAction, setSavingAction] = useState<string | null>(null);
 
@@ -237,6 +237,7 @@ export function FleetControlDashboard({
   }, [selectedVehicle?.vehicleNo]);
 
   useEffect(() => setMovements(data.movements), [data.movements]);
+  useEffect(() => setPayments(data.payments), [data.payments]);
 
   useEffect(() => {
     if (!selectedPayment) { setPaymentDetail(null); setPaymentDetailError(""); return; }
@@ -251,7 +252,7 @@ export function FleetControlDashboard({
       .catch((error) => { if (error?.name !== "AbortError") setPaymentDetailError(error instanceof Error ? error.message : "Unable to load payment evidence and history."); })
       .finally(() => { if (!controller.signal.aborted) setPaymentDetailLoading(false); });
     return () => controller.abort();
-  }, [selectedPayment]);
+  }, [selectedPayment, paymentDetailVersion]);
 
   function changeSection(next: Section) {
     if (!visibleSectionSet.has(next)) return;
@@ -270,10 +271,10 @@ export function FleetControlDashboard({
     return inScope(vehicle.stationCode) && (!vehicleStatuses.length || vehicleStatuses.includes(vehicle.status)) && (!needle || `${vehicle.vehicleNo} ${vehicle.model} ${vehicle.stationCode} ${vehicle.statusLabel}`.toLowerCase().includes(needle));
   }).sort((a, b) => vehicleSort === "placement" ? a.stationCode.localeCompare(b.stationCode) || a.vehicleNo.localeCompare(b.vehicleNo) : vehicleSort === "status" ? a.statusLabel.localeCompare(b.statusLabel) || a.vehicleNo.localeCompare(b.vehicleNo) : vehicleSort === "document" ? (a.nextDocumentDays ?? 9999) - (b.nextDocumentDays ?? 9999) : a.vehicleNo.localeCompare(b.vehicleNo)), [query, stations, clusters, regions, vehicleStatuses, vehicleSort, vehicles, stationByCode]);
 
-  const filteredPayments = useMemo(() => data.payments.filter((payment) => {
+  const filteredPayments = useMemo(() => payments.filter((payment) => {
     const needle = query.trim().toLowerCase();
     return inScope(payment.stationCode) && (!paymentStatuses.length || paymentStatuses.includes(payment.statusLabel)) && (!paymentHeads.length || paymentHeads.includes(payment.head)) && (!needle || `${payment.requestNo} ${payment.head} ${payment.stationCode} ${payment.requestedBy} ${payment.statusLabel}`.toLowerCase().includes(needle));
-  }).sort((a, b) => paymentSort === "amount_desc" ? b.amount - a.amount : paymentSort === "placement" ? a.stationCode.localeCompare(b.stationCode) : paymentSort === "head" ? a.head.localeCompare(b.head) : b.requestedAt.localeCompare(a.requestedAt)), [data.payments, paymentSort, query, stations, clusters, regions, paymentStatuses, paymentHeads, stationByCode]);
+  }).sort((a, b) => paymentSort === "amount_desc" ? b.amount - a.amount : paymentSort === "placement" ? a.stationCode.localeCompare(b.stationCode) : paymentSort === "head" ? a.head.localeCompare(b.head) : b.requestedAt.localeCompare(a.requestedAt)), [payments, paymentSort, query, stations, clusters, regions, paymentStatuses, paymentHeads, stationByCode]);
 
   const filteredService = useMemo(() => data.serviceHistory.filter((item) => {
     const needle = query.trim().toLowerCase();
@@ -282,13 +283,17 @@ export function FleetControlDashboard({
 
   const filteredAudits = useMemo(() => data.audits.filter((item) => {
     const needle = query.trim().toLowerCase();
-    return inScope(item.stationCode) && (!auditStatuses.length || auditStatuses.includes(item.status)) && (!needle || `${item.vehicleNo} ${item.stationCode} ${item.status} ${item.scheduledReason}`.toLowerCase().includes(needle));
-  }).sort((a, b) => auditSort === "risk_desc" ? b.riskScore - a.riskScore : auditSort === "vehicle" ? a.vehicleNo.localeCompare(b.vehicleNo) : auditSort === "status" ? a.status.localeCompare(b.status) : b.scheduledFor.localeCompare(a.scheduledFor)), [auditSort, data.audits, query, stations, clusters, regions, auditStatuses, stationByCode]);
+    return inScope(item.stationCode) && (!needle || `${item.vehicleNo} ${item.stationCode} ${item.status} ${item.scheduledReason}`.toLowerCase().includes(needle));
+  }), [data.audits, query, stations, clusters, regions, stationByCode]);
+  const auditVehicles = useMemo(() => vehicles.filter((vehicle) => {
+    const needle = query.trim().toLowerCase();
+    return inScope(vehicle.stationCode) && (!needle || `${vehicle.vehicleNo} ${vehicle.model} ${vehicle.stationCode} ${vehicle.statusLabel}`.toLowerCase().includes(needle));
+  }), [vehicles, query, stations, clusters, regions, stationByCode]);
 
   const active = vehicles.filter((vehicle) => vehicle.status === "active").length;
   const underService = vehicles.filter((vehicle) => ["under_service", "breakdown"].includes(vehicle.status)).length;
   const availability = vehicles.length ? Math.round((active / vehicles.length) * 100) : 0;
-  const pendingPayments = data.payments.filter((payment) => payment.canApprove);
+  const pendingPayments = payments.filter((payment) => payment.canApprove);
   const attentionVehicles = vehicles.filter((vehicle) => (vehicle.nextDocumentDays != null && vehicle.nextDocumentDays <= 30) || data.documentTypes.some((type) => !data.documents.some((document) => document.vehicleNo === vehicle.vehicleNo && document.documentType === type.value)));
   const todayAdHoc = data.adHocRows.filter((row) => row.date === data.today);
 
@@ -375,26 +380,25 @@ export function FleetControlDashboard({
     await fleetAction("service.create", values, () => setServiceModal(false));
   }
 
-  async function submitAuditSchedule(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-    await fleetAction("audit.schedule", values, () => setAuditModal(null));
+  async function submitChecklist(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await fleetAction("checklist.create", { ...Object.fromEntries(form.entries()), isRequired: form.get("isRequired") === "on" }, () => setChecklistModal(false));
   }
-
-  async function submitAuditCompletion(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!completeAudit) return; const form = new FormData(event.currentTarget);
-    const items = data.checklistItems.filter((item) => item.templateId === completeAudit.templateId);
-    const responses = items.map((item) => { const value = String(form.get(`item_${item.id}`) ?? ""); return { itemId: item.id, value, passed: value === "pass" || value === "yes" ? true : value === "fail" || value === "no" ? false : null, comments: String(form.get(`comment_${item.id}`) ?? "") }; });
-    const evidence = [{ type: "photo", url: String(form.get("photoUrl") ?? ""), caption: "Vehicle audit photo evidence" }, { type: "video", url: String(form.get("videoUrl") ?? ""), caption: "Vehicle walk-around audit video" }].filter((item) => item.url);
-    const finding = String(form.get("finding") ?? "");
-    await fleetAction("audit.complete", { auditId: completeAudit.id, odometerKm: form.get("odometerKm"), summary: form.get("summary"), sendEmail: form.get("sendEmail") === "on", responses, evidence, findings: finding ? [{ category: form.get("findingCategory"), finding, severity: form.get("severity"), actionRequired: form.get("actionRequired"), expectedCompletionDate: form.get("expectedCompletionDate") }] : [] }, () => setCompleteAudit(null));
-  }
-
-  async function submitChecklist(event: FormEvent<HTMLFormElement>) { event.preventDefault(); await fleetAction("checklist.create", Object.fromEntries(new FormData(event.currentTarget).entries()), () => setChecklistModal(false)); }
   async function submitSettings(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); await fleetAction("settings.update", { ...Object.fromEntries(form.entries()), autoSuggestAudits: form.get("autoSuggestAudits") === "on", auditEmailEnabled: form.get("auditEmailEnabled") === "on", auditVideoRequired: form.get("auditVideoRequired") === "on", breakdownVehicleLinkRequired: form.get("breakdownVehicleLinkRequired") === "on" }); }
 
   const title = sections.find((item) => item.key === section)?.label ?? "Command Center";
   const scopeProps = { clusters, onClusters: setClusters, onRegions: setRegions, onStations: setStations, regions, stationOptions: data.stationOptions, stations };
   const uniqueOptions = (values: string[]) => [...new Set(values.filter(Boolean))].sort().map((value) => ({ value, label: actionLabel(value) }));
+
+  function finishPaymentAction(result: PaymentActionResult) {
+    if (!selectedPayment) return;
+    const updated = { ...selectedPayment, canApprove: false, status: result.status, statusLabel: result.statusLabel };
+    setPayments((current) => current.map((payment) => payment.id === updated.id ? updated : payment));
+    setSelectedPayment(updated);
+    setPaymentDetailVersion((value) => value + 1);
+    setFlash({ type: "notice", text: result.message });
+  }
 
   return (
     <main className="fc-app">
@@ -453,6 +457,7 @@ export function FleetControlDashboard({
                 <p>One control room for availability, vehicle expenses, documents and daily ad-hoc van demand.</p>
               </div>
               <div className="fc-hero-actions">
+                <FleetAppInstall compact />
                 <button className="fc-button secondary" onClick={() => changeSection("tracking")} type="button"><Gauge size={16} /> Live GPS & mileage</button>
                 {data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}
               </div>
@@ -462,7 +467,7 @@ export function FleetControlDashboard({
               <article><span className="mint"><Truck size={19} /></span><div><small>Fleet availability</small><strong>{availability}%</strong><p>{active} of {vehicles.length} vehicles active</p></div><b className="up">Live</b></article>
               <article><span className="amber"><Wrench size={19} /></span><div><small>Under service</small><strong>{underService}</strong><p>{vehicles.filter((vehicle) => vehicle.status === "breakdown").length} breakdown today</p></div><b>Action</b></article>
               <article><span className="blue"><CircleDollarSign size={19} /></span><div><small>Awaiting your approval</small><strong>{money(data.counts.pendingAmount)}</strong><p>{pendingPayments.length} vehicle payment requests</p></div><b className={pendingPayments.length ? "hot" : "up"}>{pendingPayments.length ? "Review" : "Clear"}</b></article>
-              <article><span className="purple"><Activity size={19} /></span><div><small>Ad-hoc capacity today</small><strong>{todayAdHoc.length}</strong><p>{todayAdHoc.filter((row) => row.requestType === "Van").length} vans · {todayAdHoc.filter((row) => row.requestType === "Driver").length} drivers</p></div><b>View only</b></article>
+              <article><span className="purple"><Activity size={19} /></span><div><small>Ad Hoc usage today</small><strong>{todayAdHoc.length}</strong><p>{todayAdHoc.filter((row) => row.requestType === "Van").length} vans · {todayAdHoc.filter((row) => row.requestType === "Driver").length} drivers</p></div><b>View only</b></article>
             </section>
 
             <section className="fc-overview-grid">
@@ -482,7 +487,7 @@ export function FleetControlDashboard({
               </article>
 
               <article className="fc-panel fc-ad-hoc-panel">
-                <div className="fc-panel-head"><div><span className="fc-eyebrow">Live requests</span><h2>Ad-hoc capacity</h2></div><button onClick={() => changeSection("adhoc")} type="button">Open summary <ArrowRight size={15} /></button></div>
+                <div className="fc-panel-head"><div><span className="fc-eyebrow">Live requests</span><h2>Ad Hoc usage</h2></div><button onClick={() => changeSection("adhoc")} type="button">Open usage <ArrowRight size={15} /></button></div>
                 <div className="fc-activity-list">
                   {todayAdHoc.slice(0, 5).map((row) => <div key={`${row.id}-${row.date}`}><span>{row.stationCode}</span><div><strong>{row.requestType} · {row.reason}</strong><small>{row.reference} · {row.source}</small></div><b>{money(row.amount)}</b></div>)}
                   {!todayAdHoc.length ? <div className="fc-empty compact"><Activity size={30} /><strong>No ad-hoc request today</strong><p>Submitted van and driver requests will appear here.</p></div> : null}
@@ -522,16 +527,14 @@ export function FleetControlDashboard({
           </section> : null}
 
           {section === "audits" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Routine assurance</span><h1>Vehicle audits</h1><p>Risk-ranked recommendations, configurable checks, photo and video evidence, actions and audit email history.</p></div>{data.capabilities.canManageFleet ? <button className="fc-button primary" onClick={() => setAuditModal("manual")} type="button"><Plus size={17} /> Schedule audit</button> : null}</div>
-            <FleetScopeFilters {...scopeProps} onStatuses={setAuditStatuses} statusOptions={uniqueOptions(data.audits.map((item) => item.status))} statuses={auditStatuses} />
+            <FleetScopeFilters {...scopeProps} />
             {!data.featureReady ? <div className="fc-setup-banner"><ListChecks size={20} /><div><strong>Fleet workflow migration is ready</strong><p>Apply the included migration to activate service history, audits, evidence and access management.</p></div></div> : null}
-            <div className="fc-audit-layout"><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">System suggestions</span><h2>Vehicles to audit next</h2><p>Risk combines status, documents, service and audit age.</p></div><b>{data.auditSuggestions.length}</b></div><div className="fc-recommendations">{data.auditSuggestions.slice(0,8).map((item) => <div key={item.vehicleId}><span className={`fc-risk ${item.riskScore >= 50 ? "high" : "medium"}`}>{item.riskScore}</span><div><strong>{item.vehicleNo} <small>{item.stationCode}</small></strong><p>{item.reasons.join(" · ")}</p></div>{data.capabilities.canManageFleet ? <button onClick={() => setAuditModal(item)} type="button">Schedule</button> : null}</div>)}{!data.auditSuggestions.length ? <div className="fc-empty compact"><ShieldCheck size={30} /><strong>No risk-based audit is due</strong><p>Scheduled audits and future risk signals will appear here.</p></div> : null}</div></article><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Audit programme</span><h2>Control summary</h2></div></div><div className="fc-audit-summary"><div><strong>{data.auditTemplates[0]?.cadenceDays ?? data.settings.defaultAuditCadenceDays} days</strong><small>Routine cadence</small></div><div><strong>{data.checklistItems.length}</strong><small>Checklist controls</small></div><div><strong>{data.audits.filter((item) => item.status === "failed").length}</strong><small>Failed audits</small></div><div><strong>{data.audits.reduce((sum,item) => sum + item.evidenceCount,0)}</strong><small>Evidence files</small></div></div><div className="fc-evidence-callout"><Video size={20} /><div><strong>Walk-around video required</strong><p>Completed audits retain photos, video links, findings, actions and email delivery status.</p></div></div></article></div>
-            <div className="fc-table-panel"><div className="fc-table-toolbar"><span>{filteredAudits.length} scheduled and completed audits</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setAuditSort(event.target.value)} value={auditSort}><option value="date_desc">Latest scheduled</option><option value="risk_desc">Highest risk</option><option value="vehicle">Vehicle</option><option value="status">Status</option></select></label><button onClick={() => downloadCsv(`fleet-audits-${data.today}.csv`, [["Scheduled","Vehicle","Placement","Reason","Risk","Status","Score","Evidence","Email"], ...filteredAudits.map((item) => [item.scheduledFor,item.vehicleNo,item.stationCode,item.scheduledReason,item.riskScore,item.status,item.score,item.evidenceCount,item.emailStatus])])} type="button"><Download size={15} /> Download</button></div></div><div className="fc-table-scroll"><table><thead><tr><th>Scheduled</th><th>Vehicle</th><th>Reason</th><th>Risk</th><th>Status</th><th>Score</th><th>Evidence</th><th>Email</th><th>Action</th></tr></thead><tbody>{filteredAudits.map((item) => <tr key={item.id}><td>{date(item.scheduledFor)}</td><td><strong>{item.vehicleNo}</strong><small className="fc-cell-note">{item.stationCode}</small></td><td>{item.scheduledReason}</td><td><span className={`fc-risk ${item.riskScore >= 50 ? "high" : "medium"}`}>{item.riskScore}</span></td><td><span className={`fc-status ${item.status === "passed" ? "good" : item.status === "failed" ? "bad" : "warn"}`}><i />{item.status}</span></td><td>{item.score == null ? "—" : `${item.score}%`}</td><td>{item.evidenceCount}</td><td>{item.emailStatus.replaceAll("_", " ")}</td><td>{["scheduled","in_progress"].includes(item.status) && data.capabilities.canManageFleet ? <button className="fc-row-action" onClick={() => setCompleteAudit(item)} type="button">Perform <ArrowRight size={14} /></button> : "—"}</td></tr>)}</tbody></table></div>{!filteredAudits.length ? <div className="fc-empty"><ClipboardCheck size={34} /><strong>No matching audit records</strong><p>Change the search or vehicle placement filter.</p></div> : null}</div>
+            <FleetAuditsWorkspace audits={filteredAudits} data={data} onChanged={() => router.refresh()} vehicles={auditVehicles} />
           </section> : null}
 
           {section === "approvals" ? <section className="fc-section">
             <div className="fc-section-head"><div><span className="fc-eyebrow">Fleet-owned payments</span><h1>Approval desk</h1><p>Approve maintenance, service, repair, tyre and compliance expenses routed to the Fleet Manager.</p></div><button className="fc-button secondary" onClick={() => downloadCsv(`fleet-payments-${data.today}.csv`, [["Request", "Placement", "Head", "Amount", "Requested by", "Created", "Status"], ...filteredPayments.map((payment) => [payment.requestNo, payment.stationCode, payment.head, payment.amount, payment.requestedBy, payment.requestedAt, payment.statusLabel])])} type="button"><Download size={16} /> Download</button></div>
-            <div className="fc-scope-filters fc-payment-filters"><FleetScopeFilters {...scopeProps} onStatuses={setPaymentStatuses} statusOptions={uniqueOptions(data.payments.map((item) => item.statusLabel))} statuses={paymentStatuses} /><FleetMultiSelect allLabel="All payment heads" label="Payment head" onChange={setPaymentHeads} options={uniqueOptions(data.payments.map((item) => item.head))} values={paymentHeads} /></div>
+            <div className="fc-scope-filters fc-payment-filters"><FleetScopeFilters {...scopeProps} onStatuses={setPaymentStatuses} statusOptions={uniqueOptions(payments.map((item) => item.statusLabel))} statuses={paymentStatuses} /><FleetMultiSelect allLabel="All payment heads" label="Payment head" onChange={setPaymentHeads} options={uniqueOptions(payments.map((item) => item.head))} values={paymentHeads} /></div>
             <div className="fc-approval-layout">
               <div className="fc-panel fc-queue">
                 <div className="fc-panel-head"><div><h2>Your queue</h2><p>{pendingPayments.length} requests awaiting action</p></div><label className="fc-queue-sort">Sort<select onChange={(event) => setPaymentSort(event.target.value)} value={paymentSort}><option value="date_desc">Latest</option><option value="amount_desc">Amount</option><option value="placement">Placement</option><option value="head">Payment head</option></select></label></div>
@@ -557,7 +560,7 @@ export function FleetControlDashboard({
                       {paymentDetailLoading ? <div className="fc-detail-loading">Loading approval trail…</div> : <div className="fc-flow-list">{paymentDetail?.history.map((entry, index) => <article key={entry.id}><i className={entry.action.toLowerCase()} /><div><header><strong>{actionLabel(entry.action)}</strong><time>{dateTime(entry.createdAt)}</time></header><p>{entry.actor}<span>{entry.role}</span></p>{entry.comments ? <small>{entry.comments}</small> : null}</div>{index < (paymentDetail?.history.length ?? 0) - 1 ? <b /> : null}</article>)}{!paymentDetail?.history.length ? <p className="fc-flow-empty">No approval action has been recorded yet.</p> : null}{paymentDetail?.currentStage ? <article className="current"><i /><div><header><strong>Current approval</strong><time>Now</time></header><p>{paymentDetail.currentStage}</p><small>Awaiting decision</small></div></article> : null}</div>}
                     </section>
                   </div>
-                  {selectedPayment.canApprove ? <PaymentApprovalActionForm approveAction={approveAction} rejectAction={rejectAction} requestId={selectedPayment.id} requestRemarks={null} returnAction={returnAction} status="pending" /> : <div className="fc-readonly-note"><ShieldCheck size={18} /><span><strong>Decision trail protected</strong><small>This request is not currently assigned to you for approval.</small></span></div>}
+                  {selectedPayment.canApprove ? <PaymentApprovalActionForm approveAction={approveAction} endpoint="/api/fleet-control/payment-action" onComplete={finishPaymentAction} rejectAction={rejectAction} requestId={selectedPayment.id} requestRemarks={null} returnAction={returnAction} status="pending" /> : <div className="fc-readonly-note"><ShieldCheck size={18} /><span><strong>Decision recorded</strong><small>This request is no longer waiting for your approval. The trail above has updated without reloading the page.</small></span></div>}
                 </> : <div className="fc-empty detail"><CircleDollarSign size={40} /><strong>Select a payment request</strong><p>Review the request, amount, station remarks and current approval stage.</p></div>}
               </div>
             </div>
@@ -576,7 +579,7 @@ export function FleetControlDashboard({
 
           {section === "masters" ? <section className="fc-section">
             <div className="fc-section-head"><div><span className="fc-eyebrow">Configuration</span><h1>Masters</h1><p>Maintain reusable Fleet checklists and audit templates without mixing them with system settings.</p></div></div>
-            <div className="fc-settings-grid lower"><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Audit master</span><h2>Routine audit checklist</h2><p>{data.checklistItems.length} configured controls</p></div>{data.capabilities.canManageSettings ? <button onClick={() => setChecklistModal(true)} type="button">Add item <Plus size={14} /></button> : null}</div><div className="fc-master-list">{data.checklistItems.map((item) => <div key={item.id}><span>{item.sortOrder}</span><div><strong>{item.label}</strong><small>{item.category} · {item.responseType.replaceAll("_", " ")} · {item.failureSeverity}</small></div>{item.isRequired ? <b>Required</b> : null}</div>)}</div></article><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Template master</span><h2>Audit templates</h2><p>{data.auditTemplates.length} reusable templates</p></div></div><div className="fc-master-list">{data.auditTemplates.map((template, index) => <div key={template.id}><span>{index + 1}</span><div><strong>{template.name}</strong><small>{template.itemCount} configured checks</small></div><b>Active</b></div>)}{!data.auditTemplates.length ? <div className="fc-empty compact"><ListChecks size={30} /><strong>No audit template configured</strong><p>The routine audit checklist remains the default template.</p></div> : null}</div></article></div>
+            <div className="fc-settings-grid lower"><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Audit master</span><h2>Routine audit checklist</h2><p>{data.checklistItems.length} configured controls</p></div>{data.capabilities.canManageSettings ? <button onClick={() => setChecklistModal(true)} type="button">Add item <Plus size={14} /></button> : null}</div><div className="fc-master-list">{data.checklistItems.map((item) => <div key={item.id}><span>{item.sortOrder}</span><div><strong>{item.label}</strong><small>{item.category} · {item.responseType.replaceAll("_", " ")} · {item.failureSeverity} · {item.minEvidence ? `${item.minEvidence} ${item.evidenceType} evidence` : "no evidence required"}</small></div>{item.isRequired ? <b>Required</b> : <b>Optional</b>}</div>)}</div></article><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Template master</span><h2>Audit templates</h2><p>{data.auditTemplates.length} reusable templates</p></div></div><div className="fc-master-list">{data.auditTemplates.map((template, index) => <div key={template.id}><span>{index + 1}</span><div><strong>{template.name}</strong><small>{template.itemCount} configured checks</small></div><b>Active</b></div>)}{!data.auditTemplates.length ? <div className="fc-empty compact"><ListChecks size={30} /><strong>No audit template configured</strong><p>The routine audit checklist remains the default template.</p></div> : null}</div></article></div>
           </section> : null}
         </div>
       </section>
@@ -596,11 +599,7 @@ export function FleetControlDashboard({
 
       {serviceModal ? <div className="fc-modal-backdrop"><section className="fc-modal wide"><button aria-label="Close" className="fc-modal-close" onClick={() => setServiceModal(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Wrench size={24} /></span><div><small>Maintenance</small><h2>Record service or repair</h2><p>Link cost, bill evidence and the next due point to the vehicle.</p></div></div><form className="fc-add-form" onSubmit={submitService}><label><span>Vehicle</span><select name="vehicleId" required><option value="">Select vehicle</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.vehicleNo} · {vehicle.stationCode}</option>)}</select></label><label><span>Service date</span><input defaultValue={data.today} name="serviceDate" required type="date" /></label><label><span>Service / issue type</span><select name="serviceType" required><option>Regular Service</option><option>Tyre Change</option><option>Tyre Puncture</option><option>Oil Change</option><option>Brake Service</option><option>Battery Check/Replacement</option><option>Electrical/Lighting</option><option>Clutch & Transmission</option><option>Body & Chassis Repair</option><option>Accident</option><option>AD BLUE</option><option>Water Service</option><option>Breakdown Repair</option><option>Other</option></select></label><label><span>Status</span><select name="status"><option value="completed">Completed</option><option value="scheduled">Scheduled</option><option value="in_progress">In progress</option></select></label><label><span>Odometer km</span><input min="0" name="odometerKm" type="number" /></label><label><span>Amount</span><input min="0" name="amount" step="0.01" type="number" /></label><label><span>Workshop / technician</span><input name="vendorName" /></label><label><span>Workshop contact</span><input name="vendorContact" /></label><label className="full"><span>Description</span><textarea name="description" rows={3} /></label><label className="full"><span>Bill / Drive evidence link</span><input name="invoiceUrl" placeholder="https://" type="url" /></label><label><span>Next service date</span><input name="nextServiceDate" type="date" /></label><label><span>Next service odometer</span><input min="0" name="nextServiceOdometerKm" type="number" /></label><label><span>Downtime hours</span><input min="0" name="downtimeHours" step="0.5" type="number" /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setServiceModal(false)} type="button">Cancel</button><button className="fc-button primary" disabled={savingAction === "service.create"} type="submit">Save service</button></div></form></section></div> : null}
 
-      {auditModal ? <div className="fc-modal-backdrop"><section className="fc-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setAuditModal(null)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><ClipboardCheck size={24} /></span><div><small>Audit programme</small><h2>Schedule vehicle audit</h2><p>Use the default routine checklist or a configured template.</p></div></div><form className="fc-add-form" onSubmit={submitAuditSchedule}><label className="full"><span>Vehicle</span><select defaultValue={auditModal === "manual" ? "" : auditModal.vehicleId} name="vehicleId" required><option value="">Select vehicle</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.vehicleNo} · {vehicle.stationCode} · {vehicle.model}</option>)}</select></label><label><span>Audit date</span><input defaultValue={auditModal === "manual" ? data.today : auditModal.recommendedFor} name="scheduledFor" required type="date" /></label><label><span>Checklist template</span><select name="templateId"><option value="">Default routine audit</option>{data.auditTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.itemCount} checks</option>)}</select></label><label className="full"><span>Reason</span><input defaultValue={auditModal === "manual" ? "Routine scheduled audit" : auditModal.reasons.join("; ")} name="scheduledReason" required /></label><input name="riskScore" type="hidden" value={auditModal === "manual" ? 0 : auditModal.riskScore} /><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setAuditModal(null)} type="button">Cancel</button><button className="fc-button primary" disabled={savingAction === "audit.schedule"} type="submit">Schedule audit</button></div></form></section></div> : null}
-
-      {completeAudit ? <div className="fc-modal-backdrop"><section className="fc-modal audit"><button aria-label="Close" className="fc-modal-close" onClick={() => setCompleteAudit(null)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><ListChecks size={24} /></span><div><small>{completeAudit.stationCode} · {date(completeAudit.scheduledFor)}</small><h2>{completeAudit.vehicleNo} audit</h2><p>Complete every required control and attach the inspection evidence.</p></div></div><form className="fc-audit-form" onSubmit={submitAuditCompletion}><div className="fc-audit-items">{data.checklistItems.filter((item) => item.templateId === completeAudit.templateId).map((item) => <label key={item.id}><div><strong>{item.label}{item.isRequired ? " *" : ""}</strong><small>{item.category} · {item.guidance}</small></div>{["pass_fail","yes_no"].includes(item.responseType) ? <select defaultValue="" name={`item_${item.id}`} required={item.isRequired}><option value="">Select</option><option value="pass">Pass / Yes</option><option value="fail">Fail / No</option><option value="na">Not applicable</option></select> : item.responseType === "number" ? <input name={`item_${item.id}`} type="number" /> : <input name={`item_${item.id}`} placeholder="Response" />}</label>)}</div><div className="fc-audit-fields"><label><span>Odometer km</span><input min="0" name="odometerKm" type="number" /></label><label><span>Photo evidence link</span><input name="photoUrl" placeholder="Drive or storage URL" type="url" /></label><label className="full"><span>Walk-around video link *</span><input name="videoUrl" placeholder="Drive or storage URL" required={data.settings.auditVideoRequired} type="url" /></label><label className="full"><span>Audit summary</span><textarea name="summary" rows={3} /></label><label><span>Finding category</span><input name="findingCategory" placeholder="Tyres, body, documents…" /></label><label><span>Severity</span><select name="severity"><option value="medium">Medium</option><option value="low">Low</option><option value="high">High</option><option value="critical">Critical</option></select></label><label className="full"><span>Finding</span><textarea name="finding" rows={2} /></label><label className="full"><span>Required action</span><input name="actionRequired" /></label><label><span>Expected completion</span><input name="expectedCompletionDate" type="date" /></label><label className="fc-toggle"><input defaultChecked={data.settings.auditEmailEnabled} name="sendEmail" type="checkbox" /><span>Email findings to station and approvers</span></label></div><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setCompleteAudit(null)} type="button">Save later</button><button className="fc-button primary" disabled={savingAction === "audit.complete"} type="submit">Complete audit</button></div></form></section></div> : null}
-
-      {checklistModal ? <div className="fc-modal-backdrop"><section className="fc-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setChecklistModal(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><ListChecks size={24} /></span><div><small>Checklist master</small><h2>Add an audit control</h2><p>Configure response, criticality and inspector guidance.</p></div></div><form className="fc-add-form" onSubmit={submitChecklist}><label className="full"><span>Template</span><select name="templateId" required>{data.auditTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label><label><span>Category</span><input name="category" required /></label><label><span>Severity on failure</span><select name="failureSeverity"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></label><label className="full"><span>Checklist item</span><input name="label" required /></label><label className="full"><span>Inspector guidance</span><textarea name="guidance" rows={3} /></label><label><span>Response type</span><select name="responseType"><option value="pass_fail">Pass / fail</option><option value="yes_no">Yes / no</option><option value="number">Number</option><option value="text">Text</option><option value="date">Date</option><option value="photo">Photo</option><option value="video">Video</option></select></label><label><span>Sort order</span><input defaultValue={data.checklistItems.length * 10 + 10} min="0" name="sortOrder" type="number" /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setChecklistModal(false)} type="button">Cancel</button><button className="fc-button primary" disabled={savingAction === "checklist.create"} type="submit">Add control</button></div></form></section></div> : null}
+      {checklistModal ? <div className="fc-modal-backdrop"><section className="fc-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setChecklistModal(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><ListChecks size={24} /></span><div><small>Checklist master</small><h2>Add an audit control</h2><p>Configure response, criticality and inspector guidance.</p></div></div><form className="fc-add-form" onSubmit={submitChecklist}><label className="full"><span>Template</span><select name="templateId" required>{data.auditTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label><label><span>Category</span><input name="category" required /></label><label><span>Severity on failure</span><select name="failureSeverity"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></label><label className="full"><span>Checklist item</span><input name="label" required /></label><label className="full"><span>Inspector guidance</span><textarea name="guidance" rows={3} /></label><label><span>Response type</span><select name="responseType"><option value="pass_fail">Pass / fail</option><option value="yes_no">Yes / no</option><option value="number">Number</option><option value="text">Text</option><option value="date">Date</option><option value="photo">Photo</option><option value="video">Video</option></select></label><label><span>Sort order</span><input defaultValue={data.checklistItems.length * 10 + 10} min="0" name="sortOrder" type="number" /></label><label><span>Evidence type</span><select defaultValue="none" name="evidenceType"><option value="none">No attachment</option><option value="photo">Photo</option><option value="video">Video link</option><option value="document">Document</option><option value="any">Any evidence</option></select></label><label><span>Minimum attachments</span><input defaultValue="0" max="10" min="0" name="minEvidence" type="number" /></label><label className="fc-toggle full"><input defaultChecked name="isRequired" type="checkbox" /><span>Required checklist control</span></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setChecklistModal(false)} type="button">Cancel</button><button className="fc-button primary" disabled={savingAction === "checklist.create"} type="submit">Add control</button></div></form></section></div> : null}
 
     </main>
   );

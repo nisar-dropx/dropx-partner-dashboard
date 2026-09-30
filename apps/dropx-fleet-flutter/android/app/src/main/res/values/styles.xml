@@ -1,0 +1,1 @@
+<resources><style name="LaunchTheme" parent="@android:style/Theme.Material.Light.NoActionBar"><item name="android:windowBackground">#202432</item></style><style name="NormalTheme" parent="@android:style/Theme.Material.Light.NoActionBar"><item name="android:windowBackground">#F7F7F8</item></style></resources>
