@@ -7,6 +7,7 @@ const oneRoute = read("apps/connect/app/api/connect/workforce-payments/route.ts"
 const oneBreakup = read("apps/connect/src/components/connect-daily-payment-breakdown.tsx");
 const workforcePage = read("src/app/payments/workforce-payouts/page.tsx");
 const workforceTable = read("src/components/workforce-payout-table.tsx");
+const workforcePeriodFilter = read("src/components/workforce-payout-period-filter.tsx");
 
 assert.match(oneRoute, /provider_employee_name/, "DropX One must return the Amazon associate name");
 assert.match(oneRoute, /const deliveries = Number\(row\.total_delivery/, "Delivery must use the combined total_delivery count");
@@ -35,5 +36,17 @@ assert.match(workforceTable, /"Attendance Source"/, "The Workforce payout export
 assert.match(workforceTable, /DropX associate/, "Workforce must identify the registered associate");
 assert.match(workforceTable, /Partner ID/, "Workforce must show the mapped partner ID without coupling the shared UI to Amazon");
 assert.match(workforceTable, /Partner name/, "Workforce must show the source partner-account name");
+assert.match(workforceTable, /useState<PayoutTableView>\("overview"\)/, "Workforce must open in the understandable overview view");
+assert.match(workforceTable, /label: "Overview"[\s\S]*label: "Production"[\s\S]*label: "Deductions"[\s\S]*label: "All details"/, "Workforce must provide focused worksheet views");
+assert.match(workforceTable, /aria-pressed=\{view === option\.id\}/, "Workforce worksheet views must expose their selected state");
+assert.match(workforceTable, /Export full CSV/, "Workforce must make the full-fidelity export clear");
+assert.match(workforceTable, /const tableColumnCount = view === "overview"[\s\S]*productionColumns\.length \* 3/, "Workforce detail and empty rows must span the active worksheet view");
+assert.match(workforceTable, /payout-daily-production/, "Workforce daily breakup must condense production lines instead of repeating the full worksheet");
+
+assert.match(workforcePage, /<WorkforcePayoutPeriodFilter/, "Workforce must use the focused period selector");
+assert.match(workforcePeriodFilter, /mode === "monthly"[\s\S]*name="month"/, "Monthly mode must show only its month input");
+assert.match(workforcePeriodFilter, /mode === "daily"[\s\S]*name="day"/, "Daily mode must show only its day input");
+assert.match(workforcePeriodFilter, /mode === "range"[\s\S]*name="from"[\s\S]*name="to"/, "Range mode must show its from and to inputs");
+assert.match(workforceTable, /scrollTo\(\{ left: 0, behavior: "smooth" \}\)/, "Opening a breakup from a horizontally scrolled row must reveal its left-aligned details");
 
 console.log("Workforce payment breakup verification passed.");
