@@ -1,19 +1,20 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; name: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   location: string; provider: string; model: string; paymentMethod: string; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
-  productionBreakdown: Array<{ code: string; label: string; count: number; rate: number; amount: number }>;
+  productionBreakdown: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number }>;
   dailyBreakdown: Array<{
     date: string;
     workDayUnits: number;
     attendanceSource: string;
     methodAmounts: Array<{ id: string; label: string; amount: number }>;
     baseAmount: number;
-    lines: Array<{ code: string; label: string; count: number; rate: number; amount: number }>;
+    lines: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number }>;
   }>;
   baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED"; netAmount: number; status: string;
 };
@@ -64,27 +65,6 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const productionColumns = useMemo(() => {
-    const values = new Map<string, string>();
-    rows.forEach((row) => row.productionBreakdown.forEach((item) => values.set(item.code, item.label)));
-    const preferred = ["DELIVERY", "CRETURN", "SELLER_PICKUP", "SLLLER_RETURN"];
-    return Array.from(values, ([code, label]) => ({ code, label })).sort((left, right) => {
-      const leftIndex = preferred.indexOf(left.code); const rightIndex = preferred.indexOf(right.code);
-      if (leftIndex === -1 && rightIndex === -1) return left.label.localeCompare(right.label);
-      if (leftIndex === -1) return 1; if (rightIndex === -1) return -1;
-      return leftIndex - rightIndex;
-    });
-  }, [rows]);
-  const paymentMethodColumns = useMemo(() => {
-    const values = new Map<string, string>();
-    rows.forEach((row) => row.paymentMethodBreakdown.forEach((item) => values.set(item.id, item.label)));
-    return Array.from(values, ([id, label]) => ({ id, label })).sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
-  }, [rows]);
-  const deductionColumns = useMemo(() => {
-    const values = new Map<string, string>();
-    rows.forEach((row) => row.deductionBreakdown.forEach((item) => values.set(item.code, item.label)));
-    return Array.from(values, ([code, label]) => ({ code, label })).sort((left, right) => left.label.localeCompare(right.label));
-  }, [rows]);
   const activeFilterCount = [location, provider, method, status].filter((value) => value !== "all").length;
   const tableColumnCount = 11;
 
@@ -151,12 +131,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
 
   function exportRows() {
     const exportableRows = rows.filter((row) => matchesFilters(row, search, location, provider, method, status));
-    const paymentMethodHeaders = paymentMethodColumns.map((item) => `${item.label} Amount`);
-    const productionHeaders = productionColumns.flatMap((item) => [`${item.label} Count`, `${item.label} Rate`, `${item.label} Amount`]);
-    const deductionHeaders = deductionColumns.map((item) => `${item.label} Deduction`);
-    const columns = ["DropX ID",`Registered ${subjectLabel}`,"Payment Source","Source ID","Location Code","Provider / Allocation","Model / Basis","Payment Method","Work Days","Attendance Source",...paymentMethodHeaders,...productionHeaders,"Base Amount","Additional Payments","Gross Payment",...deductionHeaders,"Gross Deductions","Net Pay","PAN-Aadhaar Status","Status"];
-    const csv = [columns, ...exportableRows.map((row) => [row.dropxId,row.name,row.providerMemberName,row.providerMemberId,row.location,row.provider,row.model,row.paymentMethod,workDaysValue(row.workDays, row.workDaysSource),row.workDaysSource,...paymentMethodColumns.map((column) => row.paymentMethodBreakdown.find((item) => item.id === column.id)?.amount ?? 0),...productionColumns.flatMap((column) => { const item = row.productionBreakdown.find((value) => value.code === column.code); return [item?.count ?? 0,item?.rate ?? 0,item?.amount ?? 0]; }),row.baseAmount,row.additions,row.grossPayment,...deductionColumns.map((column) => row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0),row.deductions,row.netAmount,row.panAadhaarStatus,row.status])]
-      .map((line) => line.map((value) => `"${String(value).replaceAll('"','""')}"`).join(",")).join("\r\n");
+    const csv = buildWorkforcePayoutCsv(exportableRows, subjectLabel);
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `${audience}-payouts.csv`; link.click(); URL.revokeObjectURL(link.href);
   }
 
