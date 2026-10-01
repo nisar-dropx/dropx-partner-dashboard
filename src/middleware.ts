@@ -356,7 +356,22 @@ export async function middleware(request: NextRequest) {
   // otherwise return a retryable response instead of logging the user out or
   // treating an unverified request as authenticated.
   if (needsClaimVerification && !(await hasVerifiedSessionClaims(supabase))) {
-    return unavailableSessionResponse();
+    try {
+      const { data, error } = await withTimeout(
+        supabase.auth.getUser(),
+        AUTH_TIMEOUT_MS,
+        "Session check (retry)"
+      );
+      if (!data.user) {
+        if (isTransientAuthFailure(error)) return unavailableSessionResponse();
+        const loginUrl = new URL("/login", request.url);
+        loginUrl.searchParams.set("next", request.nextUrl.pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+    } catch (error) {
+      if (!isTransientAuthFailure(error)) throw error;
+      return unavailableSessionResponse();
+    }
   }
 
   if (isPlatformAdminHost && path === "/") {
