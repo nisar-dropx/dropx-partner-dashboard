@@ -412,6 +412,7 @@ async function saveExecutiveMappingRow(
   allowedLocationIds: Set<string> | null
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const admin = supabaseAdmin;
 
   const id = rowRequired(formData, index, "id", "Field executive");
   const sourceType = rowRequired(formData, index, "source_type", "Worker source");
@@ -606,10 +607,10 @@ async function saveExecutiveMappingRow(
 
   const updateLegacyWorker = async () => {
     const workerUpdate = sourceType === "employee"
-      ? supabaseAdmin.from("employees").update({ employee_code: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
+      ? admin.from("employees").update({ employee_code: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
       : sourceType === "contractor"
-        ? supabaseAdmin.from("contractors").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
-        : supabaseAdmin.from("workforce").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
+        ? admin.from("contractors").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
+        : admin.from("workforce").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
     const { error } = await workerUpdate;
     if (error) throw new Error(error.message);
   };
@@ -672,8 +673,7 @@ async function saveExecutiveMappingRow(
 
   if (existingError) throw new Error(existingError.message);
   if (!existingMapping) throw new Error(`Row ${index + 1}: Mapping history row was not found.`);
-  const existingWorkerId = sourceType === "workforce" ? existingMapping.workforce_id
-    : sourceType === "employee" ? existingMapping.employee_id
+  const existingWorkerId = sourceType === "employee" ? existingMapping.employee_id
       : sourceType === "contractor" ? existingMapping.contractor_id
         : existingMapping.field_executive_id;
   if (existingWorkerId !== id) throw new Error(`Row ${index + 1}: Mapping history does not belong to this worker.`);
