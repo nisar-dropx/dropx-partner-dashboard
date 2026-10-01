@@ -333,7 +333,6 @@ async function loadSurfaceDesignationAccess(companyId: string, surface: ReturnTy
 const businessProducts = [
   { code: "people", label: "People", href: "https://people.dropxlogistics.com/users?section=roles" },
   { code: "operations", label: "OpsPulse", href: "https://ops.dropxlogistics.com/users?section=roles" },
-  { code: "workforce", label: "Workforce", href: "https://workforce.dropxlogistics.com/users?section=roles" },
   { code: "recruit", label: "Recruit", href: "https://recruit.dropxlogistics.com/settings/access" },
   { code: "finance", label: "Finance", href: "https://fin.dropxlogistics.com/users?section=roles" }
 ] as const;
