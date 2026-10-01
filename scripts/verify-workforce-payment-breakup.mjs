@@ -35,6 +35,8 @@ assert.match(workforceTable, />Work Days</, "The Workforce payout table must dis
 assert.match(workforceTable, />Gross Payment</, "The Workforce payout table must show gross payment");
 assert.match(workforceTable, />Gross Deductions</, "The Workforce payout table must show gross deductions");
 assert.match(workforceTable, />Net Pay</, "The Workforce payout table must show net pay");
+assert.match(workforceTable, /<th scope="col">Payment Method<\/th>/, "The main Workforce payout view must label the Payment Method column");
+assert.match(workforceTable, /<td><strong>\{row\.paymentMethod\}<\/strong><\/td>/, "Each main Workforce payout row must show its payment method");
 assert.doesNotMatch(workforceTable, /overview-method-|daily-method-/, "The visible worksheet must not render global payment-method columns");
 assert.match(workforceTable, /"Attendance Source"/, "The Workforce payout export must identify the attendance source");
 assert.match(workforceTable, /DropX associate/, "Workforce must identify the registered associate");
@@ -42,9 +44,14 @@ assert.match(workforceTable, /Partner ID/, "Workforce must show the mapped partn
 assert.match(workforceTable, /Partner name/, "Workforce must show the source partner-account name");
 assert.doesNotMatch(workforceTable, /PayoutTableView|VIEW_OPTIONS|aria-pressed/, "Workforce must use one compact totals worksheet instead of multiple dense views");
 assert.match(workforceTable, /Export full CSV/, "Workforce must make the full-fidelity export clear");
-assert.match(workforceTable, /const tableColumnCount = 10/, "Workforce detail and empty rows must span the compact totals worksheet");
+assert.match(workforceTable, /const tableColumnCount = 11/, "Workforce detail and empty rows must span the compact totals worksheet");
 assert.match(workforceTable, /Payment totals[\s\S]*Deduction totals/, "Workforce breakup must show period payment and deduction totals");
 assert.match(workforceTable, /row\.productionBreakdown\.filter\(\(item\) => item\.amount !== 0\)/, "Workforce breakup must show only the worker's non-zero payment totals");
+assert.match(workforceTable, />Payment<\/th><th scope="col">Units<\/th><th scope="col">Rate<\/th><th scope="col">Total<\/th>/, "Workforce breakup must show payment units, rate, and total");
+assert.match(workforceTable, /paymentTotals\.map\(\(item\)[\s\S]*units\(item\.count\)[\s\S]*rateMoney\(item\.rate\)[\s\S]*money\(item\.amount\)/, "Workforce breakup must use the calculated units, rate, and amount without recalculating them");
+assert.match(workforceTable, /colSpan=\{4\}>No payment amount for this period\./, "The empty payment row must span all four breakup columns");
+assert.match(workforceTable, /<th colSpan=\{3\} scope="row">Gross payment<\/th>/, "The gross payment footer must align with the Total column");
+assert.doesNotMatch(workforceTable, /item\.count\s*\*\s*item\.rate|item\.amount\s*\/\s*item\.count/, "The payout table must display precomputed values without recalculating them");
 assert.doesNotMatch(workforceTable, /row\.dailyBreakdown\.map/, "Workforce breakup must not render day-wise rows");
 assert.match(workforceTable, /aria-label="Workforce payout horizontal scrollbar"/, "Workforce must expose an always-visible synchronized horizontal scrollbar");
 assert.match(workforceTable, /stickyScrollElement\.scrollLeft = tableWrapElement\.scrollLeft[\s\S]*tableWrapElement\.scrollLeft = stickyScrollElement\.scrollLeft/, "Workforce horizontal scrollbars must stay synchronized");
