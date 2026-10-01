@@ -57,6 +57,7 @@ export const opsAccessPageCodes = [
   "expense_requests",
   "payment_requests",
   "payment_approvals",
+  "ops_workforce_payouts",
   "payment_reports",
   "master_locations",
   "master_providers",
