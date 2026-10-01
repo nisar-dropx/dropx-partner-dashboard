@@ -18,7 +18,7 @@ import {
   selectedPaymentApprovalValues,
   type PaymentApprovalFacetSelection
 } from "@/lib/payment-approval-filtering";
-import { isResubmittedPaymentStage, paymentStatusLabel } from "@/lib/payment-status-label";
+import { isResubmittedPaymentStage, paymentApprovalStatusTone, paymentStatusLabel } from "@/lib/payment-status-label";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import {
   handleApprovePaymentApproval,
@@ -466,6 +466,13 @@ export default async function PaymentApprovalsPage({
             stationOptions={filterOptions.stations}
             status={currentStatus}
           />
+          <div className="payment-approval-stage-legend" aria-label="Approval status colour guide">
+            <span>Milestones</span>
+            <StatusPill status="Initial review" tone="payment-stage-initial" />
+            <StatusPill status="In progress" tone="payment-stage-progress" />
+            <StatusPill status="Final approval" tone="payment-stage-final" />
+            <StatusPill status="Approved" tone="payment-stage-approved" />
+          </div>
           <div className="table-wrap">
             <table>
               <thead>
@@ -493,7 +500,7 @@ export default async function PaymentApprovalsPage({
                         {displayAmount.isEstimated ? <small className="subtle" style={{ display: "block" }}>Estimated</small> : null}
                       </td>
                       <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
-                      <td><StatusPill status={paymentStatusLabel(request)} /></td>
+                      <td><StatusPill status={paymentStatusLabel(request)} tone={paymentApprovalStatusTone(request)} /></td>
                       <td>{formatDashboardDate(request.created_at)}</td>
                       {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false}>Review</PendingLink></td> : null}
                     </tr>
@@ -530,7 +537,7 @@ export default async function PaymentApprovalsPage({
               <div className="payment-review-summary-cards">
                 <article><small>Payment head</small><strong>{selectedRequest.payment_heads?.name ?? "-"}</strong></article>
                 <article><small>{selectedAmount?.isEstimated ? "Estimated Amount" : "Amount"}</small><strong>{selectedAmount?.text ?? "-"}</strong></article>
-                <article><small>Approval status</small><strong>{paymentStatusLabel(selectedRequest)}</strong></article>
+                <article><small>Approval status</small><StatusPill status={paymentStatusLabel(selectedRequest)} tone={paymentApprovalStatusTone(selectedRequest)} /></article>
                 <article><small>Location</small><strong>{selectedLocationLabel}</strong>{shipmentCount !== null ? <span>{shipmentCount.toLocaleString("en-IN")} shipments</span> : null}</article>
               </div>
               <details className="payment-review-additional-details">

@@ -13,7 +13,7 @@ import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format"
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
 import { paymentRequestAttachments } from "@/lib/payment-request-attachments";
 import { loadUserPaymentContacts } from "@/lib/payment-contacts";
-import { paymentStatusLabel } from "@/lib/payment-status-label";
+import { paymentApprovalStatusTone, paymentStatusLabel } from "@/lib/payment-status-label";
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
@@ -560,7 +560,7 @@ export default async function PaymentRequestsPage({
                       <td>{request.account_holder_name ?? "-"}</td>
                       <td>{request.payment_mode === "upi_payment" ? request.payment_reference ?? "-" : request.bank_account_no ?? "-"}</td>
                       <td>{request.payment_mode === "online_payment" ? request.payment_portal ?? "-" : request.ifsc ?? "-"}</td>
-                      <td><StatusPill status={paymentLifecycleLabel(request, authorization.userId)} /></td>
+                      <td><StatusPill status={paymentLifecycleLabel(request, authorization.userId)} tone={paymentApprovalStatusTone(request)} /></td>
                       <td>{formatDashboardDate(request.created_at)}</td>
                       <td>
                         <div className="payment-row-actions">
@@ -753,7 +753,7 @@ export default async function PaymentRequestsPage({
                 <p>{viewRequest.location_code} · {viewHead?.name ?? "Payment"} · Submitted {formatDashboardDateTime(viewRequest.created_at)}</p>
               </div>
               <div className="payment-view-header-side">
-                <StatusPill status={paymentLifecycleLabel(viewRequest, authorization.userId)} />
+                <StatusPill status={paymentLifecycleLabel(viewRequest, authorization.userId)} tone={paymentApprovalStatusTone(viewRequest)} />
                 <PendingLink className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
               </div>
             </header>

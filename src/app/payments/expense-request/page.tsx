@@ -13,7 +13,7 @@ import { formatDashboardDate } from "@/lib/date-format";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
 import { paymentRequestAttachments } from "@/lib/payment-request-attachments";
 import { loadUserPaymentContacts } from "@/lib/payment-contacts";
-import { paymentStatusLabel } from "@/lib/payment-status-label";
+import { paymentApprovalStatusTone, paymentStatusLabel } from "@/lib/payment-status-label";
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
@@ -436,7 +436,7 @@ export default async function ExpenseRequestPage({
                     <td>{request.location_code}</td>
                     <td>{headById.get(request.payment_head_id)?.name ?? "-"}</td>
                     <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
-                    <td><StatusPill status={displayApprovalStatus(request)} /></td>
+                    <td><StatusPill status={displayApprovalStatus(request)} tone={paymentApprovalStatusTone(request)} /></td>
                     <td>{formatDashboardDate(request.created_at)}</td>
                     {pagePermission.canAdd ? (
                       <td>

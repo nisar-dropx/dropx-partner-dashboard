@@ -1,6 +1,6 @@
-export function StatusPill({ status }: { status: string }) {
+export function StatusPill({ status, tone }: { status: string; tone?: string }) {
   const lower = status.toLowerCase();
-  const tone = lower.includes("under review") || lower.includes("under_review")
+  const inferredTone = lower.includes("under review") || lower.includes("under_review")
     ? "under-review"
     : lower.includes("returned") || lower.includes("correction")
     ? "returned"
@@ -40,5 +40,5 @@ export function StatusPill({ status }: { status: string }) {
           ? "warn"
         : "";
 
-  return <span className={`status-pill ${tone}`}>{status}</span>;
+  return <span className={`status-pill ${tone ?? inferredTone}`}>{status}</span>;
 }

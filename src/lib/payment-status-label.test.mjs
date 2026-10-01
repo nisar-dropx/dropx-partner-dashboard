@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { paymentStatusLabel } from "./payment-status-label.ts";
+import { paymentApprovalStatusTone, paymentStatusLabel } from "./payment-status-label.ts";
 
 test("final assigned approval is never labelled as initial approval", () => {
   assert.equal(paymentStatusLabel({
@@ -11,6 +11,15 @@ test("final assigned approval is never labelled as initial approval", () => {
     current_step_order: 4,
     total_steps: 4
   }), "Final Approval Pending");
+});
+
+test("approval milestones have distinct visual tones", () => {
+  assert.equal(paymentApprovalStatusTone("Pending Initial Approval"), "payment-stage-initial");
+  assert.equal(paymentApprovalStatusTone("Approval In Progress"), "payment-stage-progress");
+  assert.equal(paymentApprovalStatusTone("Final Approval Pending"), "payment-stage-final");
+  assert.equal(paymentApprovalStatusTone("Final Approved"), "payment-stage-approved");
+  assert.equal(paymentApprovalStatusTone("Processing"), "payment-stage-processing");
+  assert.equal(paymentApprovalStatusTone("Processed"), "payment-stage-complete");
 });
 
 test("middle approval stages and completed requests have distinct labels", () => {

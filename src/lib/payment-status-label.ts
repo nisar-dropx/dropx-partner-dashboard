@@ -47,3 +47,26 @@ export function paymentStatusLabel(request: PaymentStatusLike) {
     ? effectiveStatus.toLowerCase().split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
     : "-";
 }
+
+/**
+ * Keeps the colour used for a payment request tied to its workflow milestone,
+ * rather than relying on generic words such as "approved" or "pending".
+ */
+export function paymentApprovalStatusTone(requestOrLabel: PaymentStatusLike | string) {
+  const label = typeof requestOrLabel === "string"
+    ? requestOrLabel
+    : paymentStatusLabel(requestOrLabel);
+  const normalized = label.trim().toLowerCase();
+
+  if (normalized.includes("rejected") || normalized.includes("cancelled")) return "payment-stage-stopped";
+  if (normalized.includes("returned")) return "payment-stage-returned";
+  if (normalized.includes("processed")) return "payment-stage-complete";
+  if (normalized.includes("processing")) return "payment-stage-processing";
+  if (normalized.includes("final approved")) return "payment-stage-approved";
+  if (normalized.includes("final approval")) return "payment-stage-final";
+  if (normalized.includes("approval in progress")) return "payment-stage-progress";
+  if (normalized.includes("initial approval") || normalized.includes("resubmitted") || normalized.includes("payout details")) {
+    return "payment-stage-initial";
+  }
+  return undefined;
+}

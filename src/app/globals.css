@@ -7270,6 +7270,60 @@ h3 {
   color: #175cd3;
 }
 
+/* Payment approval stages use workflow colours so milestone meaning is clear at a glance. */
+.status-pill.payment-stage-initial {
+  background: #fff4df;
+  color: #b54708;
+}
+
+.status-pill.payment-stage-progress {
+  background: #eaf2ff;
+  color: #175cd3;
+}
+
+.status-pill.payment-stage-final {
+  background: #f2e9ff;
+  color: #6941c6;
+}
+
+.status-pill.payment-stage-approved,
+.status-pill.payment-stage-complete {
+  background: #e9f8ef;
+  color: #047647;
+}
+
+.status-pill.payment-stage-processing {
+  background: #e6f4ff;
+  color: #0b70ad;
+}
+
+.status-pill.payment-stage-returned {
+  background: #fff0e8;
+  color: #c2410c;
+}
+
+.status-pill.payment-stage-stopped {
+  background: #feeceb;
+  color: #b42318;
+}
+
+.payment-approval-stage-legend {
+  align-items: center;
+  border-bottom: 1px solid #e4e7ec;
+  color: #667085;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.payment-approval-stage-legend > span:first-child {
+  color: #475467;
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 2px;
+}
+
 .table-wrap {
   border-color: #e4e7ec;
   border-radius: 8px;

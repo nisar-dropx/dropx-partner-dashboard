@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
-import { paymentStatusLabel } from "@/lib/payment-status-label";
+import { paymentApprovalStatusTone, paymentStatusLabel } from "@/lib/payment-status-label";
 
 export type PaymentReportAnswer = {
   id: string;
@@ -379,7 +379,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
                 <td>{request.ifsc ?? "-"}</td>
                 <td>{currentOwnerLabel(request)}<br /><span className="subtle">{currentRoleLabel(request)}</span></td>
                 <td>{approvalStepLabel(request)}</td>
-                <td><StatusPill status={reportStatusLabel(request)} /></td>
+                <td><StatusPill status={reportStatusLabel(request)} tone={paymentApprovalStatusTone(request)} /></td>
                 <td>{request.supporting_document_path ? "Uploaded" : "-"}</td>
                 <td>{formatDate(request.created_at)}</td>
               </tr>
