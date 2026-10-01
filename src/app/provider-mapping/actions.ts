@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { matchNames } from "@/lib/name-match";
+import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -286,7 +287,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (invalidPaymentValue) { skipped(invalidPaymentValue); continue; }
       const workerColumn = worker.sourceType === "workforce" ? "workforce_id" : worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
-        .select("id, effective_from")
+        .select("id, effective_from, effective_to")
         .eq("company_id", companyId)
         .eq(workerColumn, worker.id)
         .is("effective_to", null)
@@ -302,8 +303,41 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
         pay_type: paymentMethod.code
       } : {};
       const requestedEffectiveFrom = effectiveFrom || String(existing?.effective_from ?? fallbackEffectiveFrom);
+      const closureError = existing ? ongoingMappingClosureError({
+        existingEffectiveFrom: String(existing.effective_from),
+        existingEffectiveTo: existing.effective_to,
+        requestedEffectiveFrom,
+        requestedEffectiveTo: effectiveTo || null
+      }) : null;
+      if (closureError) { skipped(closureError); continue; }
 
       if (existing && paymentMethod && effectiveFrom && effectiveFrom > String(existing.effective_from)) {
+        if (worker.sourceType === "workforce") {
+          const { error } = await supabaseAdmin.rpc("workforce_save_joining_mapping", {
+            p_company: companyId,
+            p_actor: authorization.userId,
+            p_workforce: worker.id,
+            p_mapping: existing.id,
+            p_dropx: worker.dropxId,
+            p_payload: {
+              provider_id: providerId,
+              provider_member_id: uploadRow.providerMemberId,
+              station_id: worker.stationId,
+              effective_from: effectiveFrom,
+              effective_to: effectiveTo || null,
+              payment_method_id: paymentMethod.id,
+              payment_values: paymentValues,
+              pay_type: paymentMethod.code,
+              status: effectiveTo ? "closed" : "active"
+            },
+            p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
+            p_actor_name: authorization.fullName || authorization.email || "Dashboard mapping reviewer"
+          });
+          if (error) { skipped(error.message); continue; }
+          saved += 1;
+          reportRows.push({ ...reportRow, result: "Mapped", reason: "ID and payment allocation mapped." });
+          continue;
+        }
         const closingDate = previousDate(effectiveFrom);
         const { error: closeError } = await supabaseAdmin.from("field_executive_provider_mappings").update({ effective_to: closingDate, status: "closed", updated_at: new Date().toISOString() }).eq("id", existing.id).eq("company_id", companyId);
         if (closeError) { skipped(closeError.message); continue; }
@@ -570,16 +604,55 @@ async function saveExecutiveMappingRow(
     updated_at: new Date().toISOString()
   }, companyId);
 
-  const workerUpdate = sourceType === "employee"
-    ? supabaseAdmin.from("employees").update({ employee_code: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
-    : sourceType === "contractor"
-      ? supabaseAdmin.from("contractors").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
-      : supabaseAdmin.from("workforce").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
-  const { error: executiveError } = await workerUpdate;
+  const updateLegacyWorker = async () => {
+    const workerUpdate = sourceType === "employee"
+      ? supabaseAdmin.from("employees").update({ employee_code: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
+      : sourceType === "contractor"
+        ? supabaseAdmin.from("contractors").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
+        : supabaseAdmin.from("workforce").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
+    const { error } = await workerUpdate;
+    if (error) throw new Error(error.message);
+  };
 
-  if (executiveError) throw new Error(executiveError.message);
+  if (sourceType === "workforce") {
+    let existingMapping: { effective_from: string; effective_to: string | null } | null = null;
+    if (mappingId) {
+      const { data, error } = await supabaseAdmin
+        .from("field_executive_provider_mappings")
+        .select("effective_from, effective_to")
+        .eq("id", mappingId)
+        .eq("company_id", companyId)
+        .eq("workforce_id", id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error(`Row ${index + 1}: Mapping history row was not found.`);
+      existingMapping = data;
+    }
+
+    const closureError = existingMapping ? ongoingMappingClosureError({
+      existingEffectiveFrom: existingMapping.effective_from,
+      existingEffectiveTo: existingMapping.effective_to,
+      requestedEffectiveFrom: effectiveFrom,
+      requestedEffectiveTo: effectiveTo
+    }) : null;
+    if (closureError) throw new Error(`Row ${index + 1}: ${closureError}`);
+
+    const { error } = await supabaseAdmin.rpc("workforce_save_joining_mapping", {
+      p_company: companyId,
+      p_actor: createdBy,
+      p_workforce: id,
+      p_mapping: mappingId,
+      p_dropx: dropxId,
+      p_payload: mappingPayload,
+      p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
+      p_actor_name: "Dashboard mapping reviewer"
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
 
   if (!mappingId) {
+    await updateLegacyWorker();
     const { error } = await supabaseAdmin
       .from("field_executive_provider_mappings")
       .insert({
@@ -604,6 +677,14 @@ async function saveExecutiveMappingRow(
       : sourceType === "contractor" ? existingMapping.contractor_id
         : existingMapping.field_executive_id;
   if (existingWorkerId !== id) throw new Error(`Row ${index + 1}: Mapping history does not belong to this worker.`);
+  const closureError = ongoingMappingClosureError({
+    existingEffectiveFrom: existingMapping.effective_from,
+    existingEffectiveTo: existingMapping.effective_to,
+    requestedEffectiveFrom: effectiveFrom,
+    requestedEffectiveTo: effectiveTo
+  });
+  if (closureError) throw new Error(`Row ${index + 1}: ${closureError}`);
+  await updateLegacyWorker();
 
   if (effectiveFrom > existingMapping.effective_from) {
     const closingDate = previousDate(effectiveFrom);
