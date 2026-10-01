@@ -2,6 +2,7 @@ import {loadCodExceptions} from './cod-exceptions';
 import 'server-only';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {buildCodPendingRows,isCodReportStation,validReportDate,type PendingStation,type PendingSlip} from './cod-pending';
+import {buildCodNoUpdateStreaks,previousReportDate,type CodDailyUpdateFact} from './cod-no-update-streak';
 export async function pagedCodRows<T>(query:(offset:number)=>PromiseLike<{data:unknown[]|null;error:{message:string}|null}>):Promise<T[]> {
  const rows:T[]=[];
  for(let offset=0;offset<100000;offset+=1000){const result=await query(offset);if(result.error)throw new Error(result.error.message);rows.push(...(result.data||[]) as T[]);if((result.data?.length||0)<1000)return rows;}
@@ -18,4 +19,15 @@ export async function loadCodPendingReport(db:SupabaseClient,companyId:string,sc
  const slips=await pagedCodRows<PendingSlip>(offset=>db.from('cod_submissions').select('id,location_id,deposit_date,cod_period_from,cod_period_to,cod_date,remittance_code,reference_no,deposited_amount,validated_amount,validation_status,returned_at,return_reason,returned_by_name,proof_version,ai_status,ai_summary,ai_result,proof_checked_at,last_updater_name,remarks,validation_remarks,submitter_name,created_at,attachments,deposit_slip_attachments').eq('company_id',companyId).eq('deposit_date',date).in('location_id',stations.map(s=>s.id)).order('id').range(offset,offset+999));
  const exceptions=await loadCodExceptions(db,companyId,scope,all,date);
  return buildCodPendingRows(stations,slips,date,new Date(),exceptions);
+}
+export async function loadCodNoUpdateStreaks(db:SupabaseClient,companyId:string,stations:PendingStation[],date:string) {
+ if(!companyId||!validReportDate(date))throw new Error('Choose a valid report date.');
+ if(!stations.length)return [];
+ const ids=stations.map(station=>station.id),start=previousReportDate(date,6);
+ const [submissions,exceptions]=await Promise.all([
+  pagedCodRows<{location_id:string|null;deposit_date:string|null}>(offset=>db.from('cod_submissions').select('location_id,deposit_date').eq('company_id',companyId).in('location_id',ids).gte('deposit_date',start).lte('deposit_date',date).order('id').range(offset,offset+999)),
+  pagedCodRows<{location_id:string|null;report_date:string|null}>(offset=>db.from('cod_daily_exceptions').select('location_id,report_date').eq('company_id',companyId).in('location_id',ids).gte('report_date',start).lte('report_date',date).order('id').range(offset,offset+999))
+ ]);
+ const updates:CodDailyUpdateFact[]=[...submissions.map(row=>({location_id:row.location_id,report_date:row.deposit_date})),...exceptions];
+ return buildCodNoUpdateStreaks(stations,updates,date);
 }

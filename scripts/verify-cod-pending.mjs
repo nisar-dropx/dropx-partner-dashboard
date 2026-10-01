@@ -4,7 +4,7 @@ import {createRequire} from 'node:module';
 import ts from 'typescript';
 const require=createRequire(import.meta.url);
 function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>deps[n]??require(n),exports);return exports;}
-const policy=compile('src/lib/ops-pulse/cod-pending.ts'),ageing=compile('src/lib/ops-pulse/cod-ageing.ts');
+const policy=compile('src/lib/ops-pulse/cod-pending.ts'),ageing=compile('src/lib/ops-pulse/cod-ageing.ts'),streakPolicy=compile('src/lib/ops-pulse/cod-no-update-streak.ts');
 const station={is_active:true,id:'s1',station_code:'NLRC',station_name:'Station one',providers:{code:'AMAZON'},location_models:{code:'EDSP'}};
 const other={...station,id:'s2',station_code:'GNTI'};
 const date='2026-09-02',now=new Date('2026-09-02T15:00:00Z');
@@ -58,7 +58,7 @@ assert.ok(!policy.codPendingCsv(eligibleRows).includes('ERSE'));
 assert.ok(!policy.codPendingCsv(eligibleRows).includes('TCC3'));
 assert.equal(scope.resolveCodRecipients([station,inactive],[{...memberships[0],location_scope_ids:['closed']}],roles,profiles,new Set(['r']),'example.com').length,0);
 for(const email of ['store@example.com','closed@example.com'])assert.equal(scope.resolveCodRecipients([station],allMembership,roles,[{...profiles[0],email}],new Set(['r']),'example.com',[station,nowStore,inactive]).length,0,'Prefiltered report must not lose excluded mailbox protection');
-const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./cod-pending-mail-scope':scope,'./ops-pulse/cod-return-policy':compile('src/lib/ops-pulse/cod-return-policy.ts')});
+const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./ops-pulse/cod-no-update-streak':streakPolicy,'./cod-pending-mail-scope':scope,'./ops-pulse/cod-return-policy':compile('src/lib/ops-pulse/cod-return-policy.ts')});
 const source={uploadDate:date,dataDate:'2026-09-01',batchId:'batch1',importedAt:'2026-09-02T08:30:00Z',fileName:'file.csv',error:null,stations:[age,{...age,stationCode:'GNTI',total:999999}]};
 const recipients=[{email:'user@example.com',name:'User',stationIds:['s1']}];
 const evening=digest.buildCodDigestMessages(rows,source,recipients,date,'evening','OpsPulse | COD report | {{month}} {{year}}')[0];
@@ -69,6 +69,19 @@ assert.match(evening.html,/YES — uploaded/);
 const locationMail=digest.buildCodDigestMessages(rows,source,[{...recipients[0],canViewPendingReport:false}],date,'morning',evening.subject)[0];
 assert.ok(locationMail.html.includes('/cod/submission?deposit_date='+date));
 assert.ok(!locationMail.html.includes('/cod/pending'));
+const streakStations=[station,other,...['s3','s4','s5','s6','s7'].map((id,index)=>({...station,id,station_code:'ST0'+(index+3)}))];
+const dailyUpdates=[
+ {location_id:'s1',report_date:date},{location_id:'s2',report_date:'2026-09-01'},
+ {location_id:'s3',report_date:'2026-08-31'},{location_id:'s4',report_date:'2026-08-29'},
+ {location_id:'s5',report_date:'2026-08-27'},{location_id:'s7',report_date:date}
+];
+const streaks=streakPolicy.buildCodNoUpdateStreaks(streakStations,dailyUpdates,date);
+assert.deepEqual(streaks.map(row=>[row.stationId,row.days]),[['s6',7],['s5',6],['s4',4],['s3',2],['s2',1]]);
+const streakRows=policy.buildCodPendingRows(streakStations,[slip],date,now,[{id:'e',location_id:'s7',report_date:date,kind:'No Cash',reason:'No cash',email_check_status:'Not applicable'}]);
+const streakMail=digest.buildCodDigestMessages(streakRows,source,[{email:'user@example.com',name:'User',stationIds:streakStations.map(row=>row.id)}],date,'evening',evening.subject,streaks)[0];
+for(const label of ['1 day','2 days','3–4 days','5–6 days','7+ days'])assert.match(streakMail.html,new RegExp(label.replace('+','\\+')));
+for(const code of ['GNTI','ST03','ST04','ST05','ST06'])assert.match(streakMail.html,new RegExp(code));
+assert.match(streakMail.text,/Consecutive days without a COD update/);
 assert.equal(rows.find(r=>r.station.id==='s1').slipUploaded,true);
 assert.equal(rows.find(r=>r.station.id==='s2').slipUploaded,false);
 const delivery=compile('src/lib/portal-digest-delivery.ts',{'server-only':{},'./timeout-fetch':{timeoutFetch:f=>f},'./adhoc-digest-scope':{},'./cod-pending-mail-scope':{},'./ops-pulse/cod-pending-data':{}});
@@ -85,7 +98,7 @@ assert.equal(delivery.dueReportDate({...limited,config:{...limited.config,schedu
 assert.equal(delivery.dueReportDate({...limited,config:{...limited.config,schedule_time:'09:00',day_offset:-1}},new Date('2026-09-04T03:30:00Z')),null);
 assert.notEqual(delivery.digestThreadKey('c','ops','cod_pending_evening','u','2026-09'),delivery.digestThreadKey('c','ops','cod_pending_evening','u','2026-10'));
 // Loader integration: failed imports do not create a zero report; morning has the same source cutoff.
-const data=compile('src/lib/ops-pulse/cod-pending-data.ts',{'server-only':{},'./cod-pending':policy,'./cod-exceptions':{loadCodExceptions:async()=>[]}});
+const data=compile('src/lib/ops-pulse/cod-pending-data.ts',{'server-only':{},'./cod-pending':policy,'./cod-no-update-streak':streakPolicy,'./cod-exceptions':{loadCodExceptions:async()=>[]}});
 let pages=0;await assert.rejects(()=>data.pagedCodRows(async()=>{pages++;return {data:null,error:{message:'db failure'}}}),/db failure/);assert.equal(pages,1);
 let filters=[];const fakeDb={from(table){const q={};for(const method of ['select','eq','is','gte','lte','in','order','limit','range'])q[method]=(...args)=>{filters.push([table,method,...args]);return q;};q.maybeSingle=async()=>({data:{id:'batch1',file_name:'file',created_at:'2026-09-02T08:30:00Z',completed_at:'2026-09-02T08:31:00Z',row_count:0},error:null});q.then=(a,b)=>Promise.resolve({data:[],count:0,error:null}).then(a,b);return q;}};
 const ageData=compile('src/lib/ops-pulse/cod-ageing-data.ts',{'server-only':{},'./review-cod':{},'./cod-pending-data':data,'./cod-pending':policy,'./cod-ageing':ageing});
@@ -94,6 +107,10 @@ const loaded=await ageData.loadCodAgeing(fakeDb,'company',date,['NLRC']);assert.
 filters=[];await data.loadCodPendingReport(fakeDb,'company',['s1'],false,date);
 assert.ok(filters.some(f=>f[0]==='stations'&&f[1]==='eq'&&f[2]==='is_active'&&f[3]===true));
 assert.ok(filters.some(f=>f[0]==='stations'&&f[1]==='select'&&f[2].includes('is_active')));
+filters=[];const loadedStreaks=await data.loadCodNoUpdateStreaks(fakeDb,'company',[station],date);
+assert.deepEqual(loadedStreaks,[{stationId:'s1',stationCode:'NLRC',days:7}]);
+assert.ok(filters.some(f=>f[0]==='cod_submissions'&&f[1]==='gte'&&f[2]==='deposit_date'&&f[3]==='2026-08-27'));
+assert.ok(filters.some(f=>f[0]==='cod_daily_exceptions'&&f[1]==='gte'&&f[2]==='report_date'&&f[3]==='2026-08-27'));
 const directoryTables={stations:[station,nowStore,inactive],company_product_memberships:allMembership,user_roles:roles,profiles:[{...profiles[0],email:'store@example.com'}],app_pages:[{id:'cod'}],role_page_permissions:[{role_id:'r',can_view:true}]};
 const directoryDb={from(table){const q={};for(const method of ['select','eq','in','order','range'])q[method]=()=>q;q.then=(ok,fail)=>Promise.resolve({data:directoryTables[table]||[],error:null}).then(ok,fail);return q;}};
 const mailLoader=compile('src/lib/cod-pending-mail-scope.ts',{'server-only':{},'./ops-pulse/cod-pending-data':data,'./ops-pulse/cod-pending':policy});
