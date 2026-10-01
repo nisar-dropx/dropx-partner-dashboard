@@ -19,6 +19,7 @@ export type WorkforcePayoutRow = {
 };
 
 function money(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`; }
+function rateMoney(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function units(value: number) { return value.toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
 function workDaysValue(value: number, source: string) { return source.toLowerCase().includes("unavailable") ? "" : value; }
 function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
@@ -83,7 +84,7 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
     return Array.from(values, ([code, label]) => ({ code, label })).sort((left, right) => left.label.localeCompare(right.label));
   }, [rows]);
   const activeFilterCount = [location, provider, method, status].filter((value) => value !== "all").length;
-  const tableColumnCount = 10;
+  const tableColumnCount = 11;
 
   useEffect(() => {
     const tableWrap = tableWrapRef.current;
@@ -184,6 +185,7 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
           <th className="payout-sticky-worker" scope="col">Worker / payment source</th>
           <th scope="col">Location</th>
           <th scope="col">Allocation</th>
+          <th scope="col">Payment Method</th>
           <th className="work-days-group" scope="col">Work Days</th>
           <th scope="col">Gross Payment</th>
           <th scope="col">Gross Deductions</th>
@@ -203,6 +205,7 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
                 <td><strong>{row.location}</strong></td>
                 <td><strong>{row.provider}</strong><small>{row.model}</small></td>
+                <td><strong>{row.paymentMethod}</strong></td>
                 <td className="work-days-cell"><strong>{workDaysDisplay(row.workDays, row.workDaysSource)}</strong><small>{row.workDaysSource}</small></td>
                 <td className="payout-money"><strong>{money(row.grossPayment)}</strong></td>
                 <td className="negative payout-money">{row.deductions ? `- ${money(row.deductions)}` : "—"}</td>
@@ -229,13 +232,13 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
                         <div className="table-wrap payout-total-table-wrap">
                           <table>
                             <caption className="sr-only">Payment-head totals for {row.name}</caption>
-                            <thead><tr><th scope="col">Payment</th><th scope="col">Total</th></tr></thead>
+                            <thead><tr><th scope="col">Payment</th><th scope="col">Units</th><th scope="col">Rate</th><th scope="col">Total</th></tr></thead>
                             <tbody>
-                              {paymentTotals.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="payout-money"><strong>{money(item.amount)}</strong></td></tr>)}
-                              {row.additions ? <tr><td><strong>Additional payments</strong></td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
-                              {!paymentTotals.length && !row.additions ? <tr><td className="empty-cell" colSpan={2}>No payment amount for this period.</td></tr> : null}
+                              {paymentTotals.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="payout-money">{units(item.count)}</td><td className="payout-money">{rateMoney(item.rate)}</td><td className="payout-money"><strong>{money(item.amount)}</strong></td></tr>)}
+                              {row.additions ? <tr><td><strong>Additional payments</strong></td><td className="payout-money">—</td><td className="payout-money">—</td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
+                              {!paymentTotals.length && !row.additions ? <tr><td className="empty-cell" colSpan={4}>No payment amount for this period.</td></tr> : null}
                             </tbody>
-                            <tfoot><tr><th scope="row">Gross payment</th><td className="payout-money"><strong>{money(row.grossPayment)}</strong></td></tr></tfoot>
+                            <tfoot><tr><th colSpan={3} scope="row">Gross payment</th><td className="payout-money"><strong>{money(row.grossPayment)}</strong></td></tr></tfoot>
                           </table>
                         </div>
                       </section>
