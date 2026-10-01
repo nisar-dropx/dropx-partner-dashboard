@@ -342,7 +342,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
         const { error: closeError } = await supabaseAdmin.from("field_executive_provider_mappings").update({ effective_to: closingDate, status: "closed", updated_at: new Date().toISOString() }).eq("id", existing.id).eq("company_id", companyId);
         if (closeError) { skipped(closeError.message); continue; }
         const { error: insertError } = await supabaseAdmin.from("field_executive_provider_mappings").insert(withCompany({
-          workforce_id: worker.sourceType === "workforce" ? worker.id : null,
+          workforce_id: null,
           field_executive_id: worker.sourceType === "field_executive" ? worker.id : null,
           employee_id: worker.sourceType === "employee" ? worker.id : null,
           contractor_id: worker.sourceType === "contractor" ? worker.id : null,
