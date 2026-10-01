@@ -8,7 +8,7 @@ const MODEL='gpt-5-mini';
 type Job=CodSubmissionRow&{company_id:string;proof_version:number;proof_check_token:string};
 async function claimCodProofJob(){
  if(!supabaseAdmin)throw new Error('Database unavailable.');
- const claimed=await supabaseAdmin.rpc('claim_cod_proof_check_v5');
+ const claimed=await supabaseAdmin.rpc('claim_cod_proof_check_v6');
  if(claimed.error)throw new Error(claimed.error.message);
  const rpcJob=claimed.data?.[0] as Job|undefined;
  if(rpcJob)return rpcJob;
