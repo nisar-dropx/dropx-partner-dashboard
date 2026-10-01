@@ -33,14 +33,14 @@ function dateValue(formData: FormData, key: string, label: string, optional = fa
   return value;
 }
 
-function directAllocationRedirect(params: { error?: string; notice?: string }) {
+function directAllocationRedirect(params: { error?: string; notice?: string }, audience: "workforce" | "helpers" = "workforce") {
   cookies().set("dropx_direct_payment_allocation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 15,
     path: "/provider-mapping/direct-pay",
     sameSite: "lax"
   });
-  redirect("/provider-mapping/direct-pay");
+  redirect(audience === "helpers" ? "/provider-mapping/direct-pay?audience=helpers" : "/provider-mapping/direct-pay");
 }
 
 export async function saveDirectPaymentAllocation(formData: FormData) {
@@ -51,9 +51,11 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
     redirect("/unauthorized?page=provider_mapping&action=edit");
   }
 
+  const audience = text(formData.get("subject_type")) === "helpers" ? "helpers" : "workforce";
+
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const workforceId = required(formData, "workforce_id", "Workforce member");
+    const personId = required(formData, audience === "helpers" ? "helper_id" : "workforce_id", audience === "helpers" ? "Helper" : "Workforce member");
     const paymentMethodId = required(formData, "payment_method_id", "Payment method");
     const effectiveFrom = dateValue(formData, "effective_from", "Effective from")!;
     const effectiveTo = dateValue(formData, "effective_to", "Effective to", true);
@@ -61,50 +63,64 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
       throw new Error("Effective to cannot be before effective from.");
     }
 
-    const workerResult = await supabaseAdmin
-      .from("workforce")
-      .select("id, full_name, location_id, designation_id, designation, is_active")
-      .eq("id", workforceId)
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (workerResult.error) throw new Error(workerResult.error.message);
-    if (!workerResult.data) throw new Error("The workforce member is no longer active.");
-    const worker = workerResult.data;
-    const designationResult = await supabaseAdmin
-      .from("designations")
-      .select("id, code, name, is_active, is_field_operations, provider_mapping_required")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .eq("is_field_operations", true)
-      .eq("provider_mapping_required", false);
-    if (designationResult.error) throw new Error(designationResult.error.message);
-    const designationText = String(worker.designation ?? "").trim().toLowerCase();
-    const designation = (designationResult.data ?? []).find((row) => row.id === worker.designation_id
-      || [row.name, row.code].some((value) => String(value ?? "").trim().toLowerCase() === designationText));
-    if (!designation) {
-      throw new Error("This designation is not enabled for direct workforce payment allocation.");
+    let person: { id: string; full_name: string; location_id: string | null; designation_id?: string | null; designation?: string | null } | null = null;
+    if (audience === "helpers") {
+      const helperResult = await supabaseAdmin
+        .from("helpers")
+        .select("id, full_name, location_id, designation, is_active, onboarding_status")
+        .eq("id", personId)
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .eq("onboarding_status", "active")
+        .maybeSingle();
+      if (helperResult.error) throw new Error(helperResult.error.message);
+      if (!helperResult.data) throw new Error("The Helper is no longer active.");
+      person = helperResult.data;
+    } else {
+      const workerResult = await supabaseAdmin
+        .from("workforce")
+        .select("id, full_name, location_id, designation_id, designation, is_active")
+        .eq("id", personId)
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (workerResult.error) throw new Error(workerResult.error.message);
+      if (!workerResult.data) throw new Error("The workforce member is no longer active.");
+      person = workerResult.data;
+
+      const designationResult = await supabaseAdmin
+        .from("designations")
+        .select("id, code, name, is_active, is_field_operations, provider_mapping_required")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .eq("is_field_operations", true)
+        .eq("provider_mapping_required", false);
+      if (designationResult.error) throw new Error(designationResult.error.message);
+      const designationText = String(person.designation ?? "").trim().toLowerCase();
+      const designation = (designationResult.data ?? []).find((row) => row.id === person?.designation_id
+        || [row.name, row.code].some((value) => String(value ?? "").trim().toLowerCase() === designationText));
+      if (!designation) throw new Error("This designation is not enabled for direct workforce payment allocation.");
     }
 
-    if (!worker.location_id) {
-      throw new Error("Assign an active location to this workforce member before allocating direct payment.");
+    if (!person.location_id) {
+      throw new Error(`Assign an active location to this ${audience === "helpers" ? "Helper" : "workforce member"} before allocating direct payment.`);
     }
     const stationResult = await supabaseAdmin
       .from("stations")
       .select("id")
-      .eq("id", worker.location_id)
+      .eq("id", person.location_id)
       .eq("company_id", companyId)
       .eq("is_active", true)
       .maybeSingle();
     if (stationResult.error) throw new Error(stationResult.error.message);
     if (!stationResult.data) {
-      throw new Error("The workforce member's location is not active for this company.");
+      throw new Error(`The ${audience === "helpers" ? "Helper's" : "workforce member's"} location is not active for this company.`);
     }
 
     const allLocationAccess = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
-    if (!allLocationAccess && !authorization.locationScopeIds.includes(worker.location_id)) {
-      throw new Error("This workforce member's location is not allocated to your account.");
+    if (!allLocationAccess && !authorization.locationScopeIds.includes(person.location_id)) {
+      throw new Error(`This ${audience === "helpers" ? "Helper's" : "workforce member's"} location is not allocated to your account.`);
     }
 
     const methodResult = await supabaseAdmin
@@ -137,16 +153,27 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
     }
     const paymentValues = normalizeDirectPaymentValues(components, rawValues);
 
-    const saveResult = await supabaseAdmin.rpc("save_workforce_payment_allocation_v2", {
-      p_company_id: companyId,
-      p_workforce_id: workforceId,
-      p_payment_method_id: paymentMethodId,
-      p_payment_values: paymentValues,
-      p_effective_from: effectiveFrom,
-      p_effective_to: effectiveTo,
-      p_change_reason: text(formData.get("change_reason")),
-      p_actor_user_id: authorization.userId
-    });
+    const saveResult = audience === "helpers"
+      ? await supabaseAdmin.rpc("save_helper_payment_allocation", {
+        p_company_id: companyId,
+        p_helper_id: personId,
+        p_payment_method_id: paymentMethodId,
+        p_payment_values: paymentValues,
+        p_effective_from: effectiveFrom,
+        p_effective_to: effectiveTo,
+        p_change_reason: text(formData.get("change_reason")),
+        p_actor_user_id: authorization.userId
+      })
+      : await supabaseAdmin.rpc("save_workforce_payment_allocation_v2", {
+        p_company_id: companyId,
+        p_workforce_id: personId,
+        p_payment_method_id: paymentMethodId,
+        p_payment_values: paymentValues,
+        p_effective_from: effectiveFrom,
+        p_effective_to: effectiveTo,
+        p_change_reason: text(formData.get("change_reason")),
+        p_actor_user_id: authorization.userId
+      });
     if (saveResult.error) throw new Error(saveResult.error.message);
 
     revalidateTag("ops-cps");
@@ -156,8 +183,8 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
   } catch (error) {
     directAllocationRedirect({
       error: error instanceof Error ? error.message : "Unable to save the direct payment allocation."
-    });
+    }, audience);
   }
 
-  directAllocationRedirect({ notice: "Direct payment allocation saved with effective-dated history." });
+  directAllocationRedirect({ notice: `${audience === "helpers" ? "Helper" : "Workforce"} payment allocation saved with effective-dated history.` }, audience);
 }

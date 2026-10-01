@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { WorkforceFinanceQueue } from "@/components/workforce-finance-queue";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -23,6 +24,7 @@ import {
   summarizePaymentMethodAmounts,
   summarizeWorkDays
 } from "@/lib/workforce-payout-summary";
+import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -426,9 +428,33 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
 export const dynamic = "force-dynamic";
 export default async function WorkforcePayoutsPage({ searchParams = {} }: { searchParams?: Record<string, string | string[] | undefined> }) {
   const period = resolvePeriod(searchParams);
-  const authorization = await requirePagePermission("workforce_payouts", "access"); const companyId = requireCompanyId(authorization); const { rows, error } = await loadRows(companyId, authorization, period.fromDate, period.toDate);
-  return <AppShell active="Workforce Payouts" pageCode="workforce_payouts"><PageHead title="Workforce Payouts" action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
-    <WorkforceFinanceQueue companyId={companyId} authorization={authorization} status={typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : undefined}/>
-    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load payouts</strong><p className="subtle">{error}</p></div></section> : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable rows={rows} /></section>}
+  const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
+  const authorization = await requirePagePermission("workforce_payouts", "access");
+  const companyId = requireCompanyId(authorization);
+  const { rows, error } = audience === "helpers"
+    ? await loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
+    : await loadRows(companyId, authorization, period.fromDate, period.toDate);
+  const audienceHref = (nextAudience: "workforce" | "helpers") => {
+    const params = new URLSearchParams({
+      audience: nextAudience,
+      period: period.mode,
+      month: period.month,
+      day: period.day,
+      from: period.from,
+      to: period.to
+    });
+    const payrollStatus = typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : "";
+    if (payrollStatus) params.set("payrollStatus", payrollStatus);
+    return `/payments/workforce-payouts?${params.toString()}`;
+  };
+  const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
+
+  return <AppShell active="Workforce Payouts" pageCode="workforce_payouts"><PageHead title="Workforce Payments" action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
+    <nav aria-label="Payment population" className="performance-tabs">
+      <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
+      <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
+    </nav>
+    <WorkforceFinanceQueue audience={audience} companyId={companyId} authorization={authorization} period={period} status={typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : undefined}/>
+    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section> : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} payrollStatus={typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : undefined} /></div><WorkforcePayoutTable key={audience} audience={audience} rows={rows} /></section>}
   </AppShell>;
 }

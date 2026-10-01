@@ -10,6 +10,10 @@ const workforceTable = read("src/components/workforce-payout-table.tsx");
 const globalStyles = read("src/app/globals.css");
 const workforcePeriodFilter = read("src/components/workforce-payout-period-filter.tsx");
 const workforceFinanceQueue = read("src/components/workforce-finance-queue.tsx");
+const helperPayoutLoader = read("src/lib/helper-payout-loader.ts");
+const directAllocationPage = read("src/app/provider-mapping/direct-pay/page.tsx");
+const directAllocationAction = read("src/app/provider-mapping/direct-pay/actions.ts");
+const directAllocationWorksheet = read("src/components/direct-payment-allocation-worksheet.tsx");
 
 assert.match(oneRoute, /provider_employee_name/, "DropX One must return the Amazon associate name");
 assert.match(oneRoute, /const deliveries = Number\(row\.total_delivery/, "Delivery must use the combined total_delivery count");
@@ -58,7 +62,7 @@ assert.match(workforceTable, /colSpan=\{4\}>No payment amount for this period\./
 assert.match(workforceTable, /<th colSpan=\{3\} scope="row">Gross payment<\/th>/, "The gross payment footer must align with the Total column");
 assert.doesNotMatch(workforceTable, /item\.count\s*\*\s*item\.rate|item\.amount\s*\/\s*item\.count/, "The payout table must display precomputed values without recalculating them");
 assert.doesNotMatch(workforceTable, /row\.dailyBreakdown\.map/, "Workforce breakup must not render day-wise rows");
-assert.match(workforceTable, /aria-label="Workforce payout horizontal scrollbar"/, "Workforce must expose an always-visible synchronized horizontal scrollbar");
+assert.match(workforceTable, /aria-label=\{`\$\{subjectLabel\} payout horizontal scrollbar`\}/, "Workforce and Helper views must expose an always-visible synchronized horizontal scrollbar");
 assert.match(workforceTable, /stickyScrollElement\.scrollLeft = tableWrapElement\.scrollLeft[\s\S]*tableWrapElement\.scrollLeft = stickyScrollElement\.scrollLeft/, "Workforce horizontal scrollbars must stay synchronized");
 assert.match(workforceTable, /new ResizeObserver\(updateStickyScroll\)/, "Workforce horizontal scrollbar must react to table size changes");
 assert.match(globalStyles, /\.workforce-payout-table \.payout-money\s*\{\s*text-align:\s*right;\s*\}/, "The shared payout numeric alignment rule must remain right-aligned");
@@ -70,5 +74,25 @@ assert.match(workforcePeriodFilter, /mode === "range"[\s\S]*name="from"[\s\S]*na
 assert.match(workforceTable, /scrollTo\(\{ left: 0, behavior: "smooth" \}\)/, "Opening a breakup from a horizontally scrolled row must reveal its left-aligned details");
 assert.doesNotMatch(workforcePage, /Live estimate worksheet|Only workforce in your allocated locations|Calculate provider production/, "Workforce payout top copy must stay compact");
 assert.doesNotMatch(workforceFinanceQueue, /Frozen associate amounts from Workforce/, "Confirmed payroll must not repeat the workflow explainer");
+
+assert.match(workforcePage, />Workforce<\/Link>[\s\S]*>Helpers<\/Link>/, "Payouts must expose Workforce and Helpers in the same window");
+assert.match(workforcePage, /loadHelperPayoutRows/, "The Helpers tab must use its isolated payout loader");
+assert.match(helperPayoutLoader, /from\("helper_payment_allocations"\)/, "Helper payouts must use Helper allocation history");
+assert.match(helperPayoutLoader, /from\("helpers"\)/, "Helper payouts must resolve current Helper identities");
+assert.match(helperPayoutLoader, /\.eq\("profile_type", "worker"\)/, "Helper PAN-Aadhaar verification must use the worker profile type");
+assert.match(helperPayoutLoader, /categoryCode:\s*"workers"/, "Helper deductions must use the Helpers category code");
+assert.match(helperPayoutLoader, /\.in\("enrolment_id", biometricVariants/, "Helper work days must resolve recorded biometric attendance");
+assert.match(helperPayoutLoader, /from\("biometric_enrolments"\)[\s\S]*\.eq\("profile_type", "worker"\)/, "Helper attendance must use the effective-dated worker enrolment history");
+assert.match(helperPayoutLoader, /biometricIdBelongsOnlyToProfile\(helperId, "worker",[\s\S]*rowOwnedByAnotherProfile/, "Helper attendance must fail closed when a biometric ID belongs to another profile on the work date");
+assert.match(helperPayoutLoader, /attendanceSource:\s*"biometric"/, "Provider-independent Helper payment must calculate from biometric attendance");
+assert.doesNotMatch(helperPayoutLoader, /from\("stations"\)[\s\S]{0,160}\.eq\("is_active", true\)/, "Historical Helper payouts must remain visible after a station is deactivated");
+assert.doesNotMatch(helperPayoutLoader, /field_executive_provider_mappings|provider_member_id/, "Helper payout calculation must not require provider mapping");
+assert.match(directAllocationPage, /from\("helper_payment_allocations"\)/, "Helper payment methods must be allocatable from the direct-pay worksheet");
+assert.match(directAllocationAction, /save_helper_payment_allocation/, "Helper allocations must save through the validated Helper RPC");
+assert.match(directAllocationWorksheet, /name="subject_type"[\s\S]*value=\{audience\}/, "The allocation worksheet must post the selected Workforce or Helpers population");
+assert.match(workforcePeriodFilter, /name="audience"/, "Changing a payout period must preserve the selected population tab");
+assert.match(workforcePeriodFilter, /name="payrollStatus"/, "Changing a payout period must preserve the confirmed-payroll status filter");
+assert.match(workforceFinanceQueue, /name="period"[\s\S]*name="month"[\s\S]*name="day"[\s\S]*name="from"[\s\S]*name="to"/, "Changing the confirmed-payroll status must preserve the selected payout period");
+assert.match(workforcePage, /<WorkforcePayoutTable key=\{audience\}/, "Switching Workforce and Helpers must reset client-side row filters");
 
 console.log("Workforce payment breakup verification passed.");
