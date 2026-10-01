@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compOffValidUntil, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
+import { compOffApplyUntil, compOffValidUntil, leaveDatesOutsideWindow, leaveDateWindow } from './leave-date-window.ts';
 
 test('CL/SL: whole current month and next month (mid-month)', () => {
   assert.deepEqual(leaveDateWindow({ code: 'CASUAL', balanceMode: 'annual_balance', today: '2026-09-25' }), { earliest: '2026-09-01', latest: '2026-10-31' });
@@ -45,4 +45,26 @@ test('holiday comp-off (source comp_off_earned) lapses after its configured days
 test('a comp-off credit that never lapses is usable until the no-lapse limit', () => {
   assert.equal(compOffValidUntil('2026-09-10', 'comp_off_earned', { weekOffLapsesMonthly: true, holidayLapseDays: null }, '2026-10-31'), '2026-10-31');
   assert.equal(compOffValidUntil('2026-09-13', 'comp_off_earned_week_off', { weekOffLapsesMonthly: false, holidayLapseDays: null }, '2026-10-31'), '2026-10-31');
+});
+
+test('week-off comp-off: can still be applied until the month close day, for earning-month dates only', () => {
+  const lapse = { weekOffLapsesMonthly: true, holidayLapseDays: null };
+  const validUntil = compOffValidUntil('2026-09-13', 'comp_off_earned_week_off', lapse, '2026-11-30');
+  const applyUntil = compOffApplyUntil('comp_off_earned_week_off', validUntil, lapse, 2);
+  assert.equal(applyUntil, '2026-10-02');
+  const credits = [{ referenceDate: '2026-09-13', validUntil, applyUntil }];
+  for (const today of ['2026-10-01', '2026-10-02']) {
+    const window = leaveDateWindow({ code: 'WOFFCOMP', balanceMode: 'earned_balance', today, credits });
+    assert.deepEqual(window, { earliest: '2026-09-14', latest: '2026-09-30' });
+    assert.equal(leaveDatesOutsideWindow(window, '2026-09-20', '2026-09-20', 'Week-off Comp Off'), null);
+    assert.equal(leaveDatesOutsideWindow(window, '2026-10-01', '2026-10-01', 'Week-off Comp Off'), 'Week-off Comp Off must end by 30/09/2026.');
+  }
+  assert.equal(leaveDateWindow({ code: 'WOFFCOMP', balanceMode: 'earned_balance', today: '2026-10-03', credits }), null);
+});
+
+test('comp-off apply-until: no close day, or holiday credit, keeps validUntil', () => {
+  const lapse = { weekOffLapsesMonthly: true, holidayLapseDays: 14 };
+  assert.equal(compOffApplyUntil('comp_off_earned_week_off', '2026-09-30', lapse, null), '2026-09-30');
+  assert.equal(compOffApplyUntil('comp_off_earned', '2026-09-24', lapse, 2), '2026-09-24');
+  assert.equal(compOffApplyUntil('comp_off_earned_week_off', '2026-12-31', lapse, 2), '2027-01-02');
 });

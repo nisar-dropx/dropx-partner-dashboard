@@ -7,14 +7,19 @@
  *   the 1st and 2nd of a month, dates in the previous month are allowed too
  *   (a short window to record leave already taken).
  * - Comp-off (earned by working a week off or holiday): from the day after
- *   the day worked, until the credit lapses - week-off comp-off lapses at the
- *   end of the calendar month it was earned in; holiday comp-off after the
- *   configured number of days.
+ *   the day worked, until the credit lapses - week-off comp-off covers dates
+ *   up to the end of the calendar month it was earned in, and can be applied
+ *   for until the attendance month close day of the next month; holiday
+ *   comp-off after the configured number of days.
  * - Every other leave type: today onwards (unchanged).
  */
 export type LeaveDateWindow = { earliest: string; latest: string | null };
 
-export type CompOffCredit = { referenceDate: string; validUntil: string };
+/**
+ * validUntil: the last leave date this credit can cover.
+ * applyUntil: the last day a request using it can be submitted (defaults to validUntil).
+ */
+export type CompOffCredit = { referenceDate: string; validUntil: string; applyUntil?: string };
 
 const BACKDATE_GRACE_DAY = 2;
 
@@ -63,6 +68,25 @@ export function compOffValidUntil(
   return settings.holidayLapseDays != null ? addDays(referenceDate, settings.holidayLapseDays) : noLapseLatest;
 }
 
+/**
+ * Last day a request using this credit can still be submitted. A monthly-lapsing week-off
+ * credit follows the attendance month close (hr_company_settings.regularization_close_day):
+ * with close day 2, September credits can be applied for (September dates only) until
+ * 2 October, and hr_lapse_week_off_comp_off lapses them on 3 October.
+ */
+export function compOffApplyUntil(
+  source: string,
+  validUntil: string,
+  settings: { weekOffLapsesMonthly: boolean },
+  closeDay: number | null
+) {
+  if (/week_off/.test(source) && settings.weekOffLapsesMonthly && closeDay != null && closeDay > 0) {
+    const { year, month } = parts(validUntil);
+    return iso(year, month + 1, closeDay);
+  }
+  return validUntil;
+}
+
 export function leaveDateWindow(input: {
   code: string;
   balanceMode: string;
@@ -71,7 +95,7 @@ export function leaveDateWindow(input: {
 }): LeaveDateWindow | null {
   const { code, balanceMode, today } = input;
   if (balanceMode === "earned_balance") {
-    const live = (input.credits ?? []).filter((credit) => credit.validUntil >= today);
+    const live = (input.credits ?? []).filter((credit) => (credit.applyUntil ?? credit.validUntil) >= today);
     if (!live.length) return null;
     const earliest = addDays(live.reduce((min, credit) => (credit.referenceDate < min ? credit.referenceDate : min), live[0].referenceDate), 1);
     const latest = live.reduce((max, credit) => (credit.validUntil > max ? credit.validUntil : max), live[0].validUntil);

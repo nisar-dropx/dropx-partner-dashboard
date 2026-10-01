@@ -42,7 +42,7 @@ export type AttendanceReportRow = {
   lateMinutes: number;
   earlyOutMinutes: number;
   remark: string;
-  workMode: "onsite" | "wfh";
+  workMode: "onsite" | "wfh" | "business_trip";
   wfhCreditState?: WfhCreditState | null;
   deviceSerial: string;
   labels: Record<string, string>;
@@ -1552,7 +1552,10 @@ export async function loadAttendanceReportRows({
       rules: scheduleContext.rulesFor(profileId),
       shift: schedule.shift
     });
-    const attendanceStatus = creditState ? wfhCreditLabel(creditState) : attendanceDayStatus({
+    // An approved business trip is attendance credit, like WFH: no punch times are recorded,
+    // but the day is a full present day.
+    const businessTripCredit = row.work_mode === "business_trip" && !effectiveInTime && !effectiveOutTime && effectivePunchCount === 0;
+    const attendanceStatus = creditState ? wfhCreditLabel(creditState) : businessTripCredit ? "Full Day" : attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: effectivePunchCount,
       rules: scheduleContext.rulesFor(profileId),
@@ -1586,7 +1589,7 @@ export async function loadAttendanceReportRows({
       lateMinutes: variance.lateMinutes,
       earlyOutMinutes: variance.earlyOutMinutes,
       remark: effectiveRemark,
-      workMode: row.work_mode === "wfh" ? "wfh" as const : "onsite" as const,
+      workMode: row.work_mode === "wfh" ? "wfh" as const : row.work_mode === "business_trip" ? "business_trip" as const : "onsite" as const,
       deviceSerial: firstDevice,
       labels
     };

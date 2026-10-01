@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     const needsReview = rows.filter((row) => row.attendanceStatus === "Needs Review").length;
     const lateIn = rows.filter((row) => row.lateMinutes > 0).length;
     const earlyOut = rows.filter((row) => row.earlyOutMinutes > 0).length;
-    const misPunch = rows.filter((row) => row.workMode !== "wfh" && (
+    const misPunch = rows.filter((row) => row.workMode !== "wfh" && row.workMode !== "business_trip" && (
       row.punchCount < 2 ||
       !row.outTime ||
       row.remark.toLowerCase().includes("single") ||

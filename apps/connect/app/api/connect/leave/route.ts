@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveBalance, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
 import { notifyConnectLeaveSubmitted } from "../../../../src/lib/connect-leave-notifications";
-import { compOffValidUntil, lastOfMonth, leaveDatesOutsideWindow, leaveDateWindow, type LeaveDateWindow } from "../../../../src/lib/leave-date-window";
+import { compOffApplyUntil, compOffValidUntil, lastOfMonth, leaveDatesOutsideWindow, leaveDateWindow, type LeaveDateWindow } from "../../../../src/lib/leave-date-window";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -128,9 +128,11 @@ async function leaveWindowFor(
   if (leaveType.balance_mode !== "earned_balance") {
     return leaveDateWindow({ code: leaveType.code, balanceMode: leaveType.balance_mode, today });
   }
-  const [settings, credits] = await Promise.all([
+  const [settings, companySettings, credits] = await Promise.all([
     db().from("hr_leave_types").select("comp_off_week_off_lapses_monthly,comp_off_holiday_lapse_days")
       .eq("company_id", account.companyId).eq("id", leaveType.leave_type_id).maybeSingle(),
+    db().from("hr_company_settings").select("regularization_close_day")
+      .eq("company_id", account.companyId).maybeSingle(),
     db().from("hr_leave_balance_ledger").select("reference_date,source")
       .eq("company_id", account.companyId).eq("worker_type", type).eq("worker_id", account.id)
       .eq("leave_type_id", leaveType.leave_type_id).eq("entry_type", "credit").eq("leave_year", 0)
@@ -138,6 +140,8 @@ async function leaveWindowFor(
   ]);
   if (settings.error) throw new Error(settings.error.message);
   if (credits.error) throw new Error(credits.error.message);
+  if (companySettings.error) throw new Error(companySettings.error.message);
+  const closeDay = companySettings.data?.regularization_close_day == null ? null : Number(companySettings.data.regularization_close_day);
   const lapse = {
     weekOffLapsesMonthly: Boolean(settings.data?.comp_off_week_off_lapses_monthly),
     holidayLapseDays: settings.data?.comp_off_holiday_lapse_days ?? null
@@ -147,10 +151,15 @@ async function leaveWindowFor(
     code: leaveType.code,
     balanceMode: leaveType.balance_mode,
     today,
-    credits: (credits.data ?? []).map((credit) => ({
-      referenceDate: String(credit.reference_date),
-      validUntil: compOffValidUntil(String(credit.reference_date), String(credit.source ?? ""), lapse, noLapseLatest)
-    }))
+    credits: (credits.data ?? []).map((credit) => {
+      const source = String(credit.source ?? "");
+      const validUntil = compOffValidUntil(String(credit.reference_date), source, lapse, noLapseLatest);
+      return {
+        referenceDate: String(credit.reference_date),
+        validUntil,
+        applyUntil: compOffApplyUntil(source, validUntil, lapse, closeDay)
+      };
+    })
   });
 }
 
