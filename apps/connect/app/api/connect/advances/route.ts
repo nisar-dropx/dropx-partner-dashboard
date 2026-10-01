@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
+import { loadApprovalJourneySteps, type ApprovalJourneyStep } from "../../../../src/lib/connect-approval-journey";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function clean(value: unknown) {
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       noteColumn: "decision_note"
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : "";
-      if (/does not exist|schema cache/i.test(message)) return new Map();
+      if (/does not exist|schema cache/i.test(message)) return new Map<string, ApprovalJourneyStep[]>();
       throw error;
     });
 
@@ -99,7 +99,7 @@ export async function GET(request: Request) {
         note: row.decision_note,
         recovery: row.recovery_mode,
         installments: row.requested_installments,
-        steps: (journeys.get(row.id) ?? []).map((step) => ({
+        steps: (journeys.get(row.id) ?? []).map((step: ApprovalJourneyStep) => ({
           stepName: step.actorName ? `${step.actorName} · ${step.label}` : step.label,
           status: step.status,
           note: step.note
