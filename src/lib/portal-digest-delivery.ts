@@ -73,8 +73,10 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
    let sending=false;
    let transport:ReturnType<typeof nodemailer.createTransport>|undefined;
    try {
+    const manualCod=delivery.event_key==='cod_pending_current';
+    const controlEventKey=manualCod?'cod_pending_evening':delivery.event_key;
     const [controlResult,smtpResult,profileResult,threadResult]=await Promise.all([
-     db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",delivery.event_key).single(),
+     db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",controlEventKey).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
      db.from("profiles").select("id").eq("company_id",delivery.company_id).eq("is_active",true).ilike("email",delivery.recipient_email).limit(1),
      db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:[delivery.event_key]).eq("recipient_email",delivery.recipient_email).eq("report_month",delivery.report_date.slice(0,7)).order("last_sent_at",{ascending:false}).limit(1).maybeSingle()
@@ -82,7 +84,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
     if(delivery.event_key.startsWith('cod_pending_')) {
-     if(dueReportDate(controlResult.data as DigestControl)!==delivery.report_date)throw new Error('COD reminder delivery window ended; held for verification.');
+     if(!manualCod&&dueReportDate(controlResult.data as DigestControl)!==delivery.report_date)throw new Error('COD reminder delivery window ended; held for verification.');
      const scopeKey=delivery.company_id+':'+delivery.report_date;
      if(!codScopes.has(scopeKey))codScopes.set(scopeKey,(async()=>{
       const rows=await loadCodPendingReport(db,delivery.company_id,[],true,delivery.report_date);
@@ -122,8 +124,9 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     if(!smtp.smtp_host||!smtp.smtp_from||!smtp.smtp_pass)throw new Error("Company SMTP is incomplete");
     const domain=String((controlResult.data as DigestControl).config.email_domain||"");
     if(!domain||!delivery.recipient_email.endsWith("@"+domain)||/[\r\n<>]/.test(delivery.recipient_email))throw new Error("Recipient is outside configured company email domain");
-    const key=digestThreadKey(delivery.company_id,portal,delivery.event_key,delivery.recipient_email,month);
-    const messageId="<portal-digest-"+key.slice(0,32)+"-"+delivery.report_date+"@"+domain+">";
+    const threadEventKey=manualCod?'cod_pending_evening':delivery.event_key;
+    const key=digestThreadKey(delivery.company_id,portal,threadEventKey,delivery.recipient_email,month);
+    const messageId="<portal-digest-"+key.slice(0,32)+"-"+delivery.report_date+(manualCod?"-manual-"+delivery.id.replace(/[^a-zA-Z0-9]/g,'').slice(0,12):"")+"@"+domain+">";
     const root=thread?.root_message_id||messageId,subject=thread?.subject||delivery.subject;
     const prepared=await db.from("portal_digest_deliveries").update({thread_key:key,message_id:messageId,root_message_id:root,in_reply_to:thread?.last_message_id||null,subject}).eq("id",delivery.id).eq("status","sending");
     if(prepared.error)throw new Error(prepared.error.message);

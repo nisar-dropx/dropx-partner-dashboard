@@ -158,6 +158,9 @@ const responses={
 const mailDb={rpc:async(name)=>name==='portal_finish_digest'?{data:true,error:null}:{data:[{id:'delivery1',company_id:'c',event_key:'cod_pending_morning',recipient_email:'user@example.com',report_date:currentDate,subject:'COD | monthly',html:'mock',body:'mock'}],error:null},from(table){const q=new Proxy({}, {get(_,key){if(key==='then')return(resolve)=>resolve({data:responses[table],error:null});return(...args)=>{if(table==='portal_digest_threads')threadFilters.push([key,...args]);return q;};}});return q;}};
 const sent=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});
 assert.equal(sent.accepted,1);assert.equal(mailOptions.inReplyTo,'<evening-last@example.com>');assert.deepEqual(mailOptions.references,['<evening-root@example.com>','<evening-last@example.com>']);assert.ok(threadFilters.some(f=>f[0]==='in'&&f[1]==='event_key'&&f[2].includes('cod_pending_evening')));
+mailOptions=null;mailDb.rpc=async name=>name==='portal_finish_digest'?{data:true,error:null}:{data:[{id:'manual-delivery',company_id:'c',event_key:'cod_pending_current',recipient_email:'user@example.com',report_date:currentDate,subject:'COD | monthly',html:'mock',body:'mock'}],error:null};
+const manual=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});
+assert.equal(manual.accepted,1);assert.equal(mailOptions.inReplyTo,'<evening-last@example.com>');assert.match(mailOptions.messageId,/-manual-manualdeliv/);
 mailOptions=null;responses.portal_digest_deliveries={scope_summary:{stationIds:['s2']}};
 const held=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});assert.equal(held.skipped,1);assert.equal(mailOptions,null);
 responses.portal_digest_deliveries={scope_summary:{stationIds:['s1','now']}};
