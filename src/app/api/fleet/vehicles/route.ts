@@ -20,6 +20,8 @@ const editableFields = [
   "non_operational_since",
   "expected_operational_date",
   "status_comment",
+  "status_reason_id",
+  "status_reason_key",
   "transfer_date",
   "sale_date",
   "dispose_date"
@@ -67,10 +69,25 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "This location is not allocated to your user." }, { status: 403 });
   }
   if (payload.status) {
-    const active = payload.status === "active";
-    payload.status_comment = active ? null : (payload.status_comment || normalizeText(body.status_reason) || null);
-    payload.non_operational_since = active ? null : (payload.non_operational_since || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
-    payload.expected_operational_date = active ? null : (payload.expected_operational_date || null);
+    const definition = await supabaseAdmin.from("fleet_vehicle_status_master").select("id,status_key,label,is_operational,requires_reason,requires_expected_date").eq("company_id", access.companyId).eq("status_key", payload.status).eq("is_active", true).maybeSingle();
+    if (definition.error) return mutationError(definition.error.message);
+    if (!definition.data) return NextResponse.json({ error: "Choose an active status from Fleet Masters." }, { status: 400 });
+    const operational = Boolean(definition.data.is_operational);
+    let reason: { id: string; reason_key: string; label: string } | null = null;
+    const reasonId = normalizeText(body.status_reason_id);
+    if (!operational && reasonId) {
+      const result = await supabaseAdmin.from("fleet_vehicle_status_reason_master").select("id,reason_key,label").eq("company_id", access.companyId).eq("status_id", definition.data.id).eq("id", reasonId).eq("is_active", true).maybeSingle();
+      if (result.error) return mutationError(result.error.message);
+      reason = result.data;
+    }
+    if (!operational && definition.data.requires_reason && !reason) return NextResponse.json({ error: `Choose a reason for ${definition.data.label}.` }, { status: 400 });
+    payload.status_reason_id = operational ? null : reason?.id ?? null;
+    payload.status_reason_key = operational ? null : reason?.reason_key ?? null;
+    payload.status_comment = operational ? null : (payload.status_comment || null);
+    payload.non_operational_since = operational ? null : (payload.non_operational_since || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
+    payload.expected_operational_date = operational ? null : (payload.expected_operational_date || null);
+    if (!operational && definition.data.requires_expected_date && !payload.expected_operational_date) return NextResponse.json({ error: `Expected operational date is required for ${definition.data.label}.` }, { status: 400 });
+    body.status_reason_label = reason?.label ?? "";
   }
 
   let { data, error } = await supabaseAdmin
@@ -124,7 +141,8 @@ export async function PATCH(request: Request) {
   }
   const fromStatus = normalizeText(guard.vehicle.status).toLowerCase();
   const toStatus = normalizeText(data?.status).toLowerCase() || fromStatus;
-  if (fromStatus !== toStatus) {
+  const reasonChanged = normalizeText(guard.vehicle.status_reason_id) !== normalizeText(data?.status_reason_id) || normalizeText(guard.vehicle.status_comment) !== normalizeText(data?.status_comment);
+  if (fromStatus !== toStatus || reasonChanged) {
     await writeEventLog({
       companyId: access.companyId,
       platform: "dashboard",
@@ -142,7 +160,7 @@ export async function PATCH(request: Request) {
       subjectLabel: vehicleNo,
       route: "/api/fleet/vehicles",
       method: "PATCH",
-      metadata: { from_status: fromStatus, to_status: toStatus, reason: normalizeText(body.status_reason) || "Status changed in Fleet" },
+      metadata: { from_status: fromStatus, to_status: toStatus, reason_key: normalizeText(data?.status_reason_key), reason: normalizeText(body.status_reason_label) || "Status updated in Fleet", comment: normalizeText(data?.status_comment) },
       request
     });
   }
@@ -206,7 +224,7 @@ async function requireVehicleScope(companyId: string, vehicleNo: string, station
   if (!supabaseAdmin) return { error: setupError("Supabase service role key is not configured.") };
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("id,station_code,status,non_operational_since,expected_operational_date,status_comment")
+    .select("id,station_code,status,non_operational_since,expected_operational_date,status_comment,status_reason_id,status_reason_key")
     .eq("company_id", companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();

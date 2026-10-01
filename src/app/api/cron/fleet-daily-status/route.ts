@@ -29,7 +29,7 @@ async function processCompany(company: { id: string; name: string | null }, date
   const locations = locationsResult.locations.filter(isAdHocActivityLocation);
   const activity = await loadAdHocActivity(company.id, locations, date, date);
   const [vehiclesResult, recipientsResult] = await Promise.all([
-    supabaseAdmin.from("fleet_vehicles").select("vehicle_no,station_code,model,ownership_type,status,non_operational_since,expected_operational_date,status_comment").eq("company_id",company.id),
+    supabaseAdmin.from("fleet_vehicles").select("vehicle_no,station_code,model,ownership_type,status,non_operational_since,expected_operational_date,status_comment,status_reason_key").eq("company_id",company.id),
     supabaseAdmin.from("fleet_status_report_recipients").select("name,email,station_codes").eq("company_id",company.id).eq("is_active",true)
   ]);
   if (vehiclesResult.error || recipientsResult.error || activity.error) throw new Error(vehiclesResult.error?.message || recipientsResult.error?.message || activity.error || "Fleet data could not be loaded.");

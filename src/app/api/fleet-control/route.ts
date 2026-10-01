@@ -56,6 +56,10 @@ export async function POST(request: Request) {
     if (action === "checklist.create") return await createChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "checklist.update") return await updateChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "checklist.remove") return await removeChecklistItem(context.companyId, context.canManageSettings, body);
+    if (action === "vehicle-status.upsert") return await upsertVehicleStatus(context.companyId, context.canManageSettings, body);
+    if (action === "vehicle-status.remove") return await removeVehicleStatus(context.companyId, context.canManageSettings, body);
+    if (action === "vehicle-status-reason.upsert") return await upsertVehicleStatusReason(context.companyId, context.canManageSettings, body);
+    if (action === "vehicle-status-reason.remove") return await removeVehicleStatusReason(context.companyId, context.canManageSettings, body);
     if (action === "settings.update") return await updateSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "member.upsert") return await upsertMember(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "status-recipient.upsert") return await upsertStatusRecipient(context.companyId, context.authorization.userId, context.canManageSettings, body);
@@ -298,6 +302,77 @@ async function removeChecklistItem(companyId: string, allowed: boolean, body: Pa
   if (result.error) throw new Error(result.error.message);
   if (!result.data) throw new Error("Checklist item was already removed or could not be found.");
   return NextResponse.json({ ok: true, message: "Checklist item removed from future audits." });
+}
+
+function masterKey(value: unknown, label: string) {
+  const key = clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!key) throw new Error(`${label} is required.`);
+  return key;
+}
+
+async function upsertVehicleStatus(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = clean(body.id);
+  const values = {
+    company_id: companyId,
+    status_key: masterKey(body.key || body.label, "Status key"),
+    label: required(body.label, "Status name"),
+    helper_text: clean(body.helper) || null,
+    tone: ["good", "info", "warn", "bad", "neutral"].includes(clean(body.tone)) ? clean(body.tone) : "neutral",
+    is_operational: Boolean(body.isOperational),
+    is_terminal: Boolean(body.isTerminal),
+    requires_reason: Boolean(body.requiresReason),
+    requires_expected_date: Boolean(body.requiresExpectedDate),
+    sort_order: Number(body.sortOrder ?? 100),
+    is_active: true,
+    updated_at: new Date().toISOString()
+  };
+  const result = id
+    ? await supabaseAdmin!.from("fleet_vehicle_status_master").update(values).eq("company_id", companyId).eq("id", id).select("id").maybeSingle()
+    : await supabaseAdmin!.from("fleet_vehicle_status_master").insert(values).select("id").single();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Vehicle status was not found.");
+  return NextResponse.json({ ok: true, id: result.data.id, message: id ? "Vehicle status updated." : "Vehicle status added." });
+}
+
+async function removeVehicleStatus(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = required(body.id, "Vehicle status");
+  const current = await supabaseAdmin!.from("fleet_vehicle_status_master").select("status_key").eq("company_id", companyId).eq("id", id).maybeSingle();
+  if (current.error) throw new Error(current.error.message);
+  if (!current.data) throw new Error("Vehicle status was not found.");
+  if (current.data.status_key === "active") throw new Error("Active is the required operational status and cannot be removed.");
+  const inUse = await supabaseAdmin!.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("status", current.data.status_key);
+  if (inUse.error) throw new Error(inUse.error.message);
+  if (inUse.count) throw new Error(`Move ${inUse.count} vehicle${inUse.count === 1 ? "" : "s"} to another status before removing this one.`);
+  const result = await supabaseAdmin!.from("fleet_vehicle_status_master").update({ is_active: false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", id);
+  if (result.error) throw new Error(result.error.message);
+  return NextResponse.json({ ok: true, message: "Vehicle status removed from new updates." });
+}
+
+async function upsertVehicleStatusReason(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = clean(body.id);
+  const statusId = required(body.statusId, "Vehicle status");
+  const status = await supabaseAdmin!.from("fleet_vehicle_status_master").select("id").eq("company_id", companyId).eq("id", statusId).maybeSingle();
+  if (status.error) throw new Error(status.error.message);
+  if (!status.data) throw new Error("Vehicle status was not found.");
+  const values = { company_id: companyId, status_id: statusId, reason_key: masterKey(body.key || body.label, "Reason key"), label: required(body.label, "Reason name"), helper_text: clean(body.helper) || null, sort_order: Number(body.sortOrder ?? 100), is_active: true, updated_at: new Date().toISOString() };
+  const result = id
+    ? await supabaseAdmin!.from("fleet_vehicle_status_reason_master").update(values).eq("company_id", companyId).eq("id", id).select("id").maybeSingle()
+    : await supabaseAdmin!.from("fleet_vehicle_status_reason_master").insert(values).select("id").single();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Status reason was not found.");
+  return NextResponse.json({ ok: true, id: result.data.id, message: id ? "Status reason updated." : "Status reason added." });
+}
+
+async function removeVehicleStatusReason(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = required(body.id, "Status reason");
+  const result = await supabaseAdmin!.from("fleet_vehicle_status_reason_master").update({ is_active: false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", id).select("id").maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Status reason was not found.");
+  return NextResponse.json({ ok: true, message: "Status reason removed from new updates." });
 }
 
 async function updateSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
