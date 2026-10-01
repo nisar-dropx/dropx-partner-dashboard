@@ -222,7 +222,7 @@ async function logApprovalAction(companyId: string, requestId: string, actorUser
     payment_request_id: requestId,
     sequence_no: sequenceNo,
     role_code: code,
-    status: action,
+    status: "pending",
     approver_user_id: actorUserId,
     approver_role_id: actorRoleId,
     action,
@@ -233,7 +233,7 @@ async function logApprovalAction(companyId: string, requestId: string, actorUser
 }
 
 async function applyApproverTarget(companyId: string, requestId: string, roleCodeLabel: string, target: ApproverTarget, nextStepOrder: number | null) {
-  await db().from("payment_requests").update({
+  const updated = await db().from("payment_requests").update({
     status: target ? `${roleCodeLabel}_APPROVED` : "NO_APPROVER_CONFIGURED",
     approval_status: target ? `${roleCodeLabel}_APPROVED` : "NO_APPROVER_CONFIGURED",
     current_step_order: nextStepOrder,
@@ -242,6 +242,19 @@ async function applyApproverTarget(companyId: string, requestId: string, roleCod
     current_approver_role_ids: target?.roleId ? [target.roleId] : [],
     updated_at: new Date().toISOString()
   }).eq("id", requestId).eq("company_id", companyId);
+  if (updated.error) throw new Error(updated.error.message);
+}
+
+async function closePaymentRequest(companyId: string, requestId: string, status: "approved" | "returned" | "rejected", approvalStatus: string) {
+  const updated = await db().from("payment_requests").update({
+    status,
+    approval_status: approvalStatus,
+    current_approver_user_id: null,
+    current_approver_role_id: null,
+    current_approver_role_ids: [],
+    updated_at: new Date().toISOString()
+  }).eq("id", requestId).eq("company_id", companyId);
+  if (updated.error) throw new Error(updated.error.message);
 }
 
 export async function decideConnectPaymentApproval(companyId: string, actorUserIds: string[], requestId: string, decision: "approved" | "returned" | "rejected", comments: string) {
@@ -260,22 +273,14 @@ export async function decideConnectPaymentApproval(companyId: string, actorUserI
   if (decision === "rejected") {
     if (!comments.trim()) throw new Error("Reject remarks are required.");
     await logApprovalAction(companyId, requestId, actorUserId, actorRoleId, "rejected", comments);
-    await db().from("payment_requests").update({
-      status: "rejected", approval_status: "REJECTED",
-      current_approver_user_id: null, current_approver_role_id: null, current_approver_role_ids: [],
-      updated_at: new Date().toISOString()
-    }).eq("id", requestId).eq("company_id", companyId);
+    await closePaymentRequest(companyId, requestId, "rejected", "REJECTED");
     return;
   }
 
   if (decision === "returned") {
     if (!comments.trim()) throw new Error("Return remarks are required.");
     await logApprovalAction(companyId, requestId, actorUserId, actorRoleId, "returned", comments);
-    await db().from("payment_requests").update({
-      status: "returned", approval_status: "RETURNED",
-      current_approver_user_id: null, current_approver_role_id: null, current_approver_role_ids: [],
-      updated_at: new Date().toISOString()
-    }).eq("id", requestId).eq("company_id", companyId);
+    await closePaymentRequest(companyId, requestId, "returned", "RETURNED");
     return;
   }
 
@@ -287,22 +292,14 @@ export async function decideConnectPaymentApproval(companyId: string, actorUserI
     // only be routed here via the step engine in the first place (payment
     // requests without steps still resolve through the legacy ops-only flat
     // arrays), so finalize outright rather than guessing a next step.
-    await db().from("payment_requests").update({
-      status: "approved", approval_status: "FINAL_APPROVED",
-      current_approver_user_id: null, current_approver_role_id: null, current_approver_role_ids: [],
-      updated_at: new Date().toISOString()
-    }).eq("id", requestId).eq("company_id", companyId);
+    await closePaymentRequest(companyId, requestId, "approved", "FINAL_APPROVED");
     return;
   }
 
   const storedStepOrder = Number(request.current_step_order) || 1;
   const advance = await advanceApproval(companyId, steps, storedStepOrder, request.location_id);
   if (advance.done) {
-    await db().from("payment_requests").update({
-      status: "approved", approval_status: "FINAL_APPROVED",
-      current_approver_user_id: null, current_approver_role_id: null, current_approver_role_ids: [],
-      updated_at: new Date().toISOString()
-    }).eq("id", requestId).eq("company_id", companyId);
+    await closePaymentRequest(companyId, requestId, "approved", "FINAL_APPROVED");
     return;
   }
 

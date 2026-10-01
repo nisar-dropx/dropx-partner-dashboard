@@ -15,7 +15,8 @@ import {
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
-import type { OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
+import { OpsRosterDecisionHistory } from "@/components/ops-roster-decision-history";
+import type { OpsRosterDecision, OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
 import { formatShiftClock } from "@/lib/roster-plan-preference";
 import { isRosterChangePastDeadline, rosterChangeDeadlineMessage } from "@/lib/roster-change-deadline";
 import {
@@ -122,7 +123,9 @@ export function OpsRosterPlanner({
   routeReady,
   today,
   nowIso,
-  changeDeadlineHour
+  changeDeadlineHour,
+  decisions,
+  historyPeople
 }: {
   stationId: string;
   stationCode: string;
@@ -141,6 +144,8 @@ export function OpsRosterPlanner({
   today: string;
   nowIso: string;
   changeDeadlineHour: number;
+  decisions: OpsRosterDecision[];
+  historyPeople: OpsRosterPerson[];
 }) {
   const router = useRouter();
   const initial = useMemo(() => initialAssignments(plan?.entries ?? []), [plan?.entries]);
@@ -1031,6 +1036,7 @@ export function OpsRosterPlanner({
         </li>
       </ol>
     </section> : null}
+    <OpsRosterDecisionHistory weekStart={weekStart} decisions={decisions} people={[...people, ...historyPeople]} shifts={shifts} />
     {pointerDrag?.active ? <div ref={dragGhostRef} className={styles.dragGhost} style={{ left: pointerDrag.x, top: pointerDrag.y }} aria-hidden="true"><GripVertical size={13} /> {pointerDrag.label}</div> : null}
     {cellPicker ? <><button type="button" className={styles.pickerBackdrop} aria-label="Close shift picker" onClick={() => setCellPicker(null)} /><div className={styles.picker} role="dialog" aria-label={`Change shift for ${cellPicker.person.name} on ${dateLabel(cellPicker.date)}`} style={{ top: cellPicker.top, left: cellPicker.left }}><header className={styles.pickerHead}><strong>{cellPicker.person.name}</strong><small>{dayLabel(cellPicker.date)} · {dateLabel(cellPicker.date)}</small></header><div className={styles.pickerList}>{shifts.map((shift) => <button key={shift.id} type="button" className={styles.pickerOption} style={{ "--shift-color": shift.color || "#cb4b65" } as CSSProperties} onClick={() => applyPickerTool({ kind: "shift", shiftId: shift.id })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>{shift.code}</strong><small>{compactTime(shift.startTime)} – {compactTime(shift.endTime)}</small></span></button>)}<button type="button" className={`${styles.pickerOption} ${styles.off}`} onClick={() => applyPickerTool({ kind: "weekly_off" })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Week Off</strong><small>Rest day</small></span></button><button type="button" className={`${styles.pickerOption} ${styles.clear}`} onClick={() => applyPickerTool({ kind: "clear" })}><Eraser size={14} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Remove</strong><small>Clear this assignment</small></span></button></div></div></> : null}
     {(draggingLabel || pointerDrag?.active) && draggingAssignment ? <div className={styles.removeHint} role="status">Drag outside the grid to remove this assignment</div> : null}

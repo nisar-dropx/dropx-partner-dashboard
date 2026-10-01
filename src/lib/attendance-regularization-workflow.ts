@@ -1,7 +1,7 @@
 import "server-only";
 
 import { resolveConfiguredApprovalWorkflow, type ConfiguredApprovalStep } from "@/lib/approval-workflow-routing";
-import { isTeamLeadDesignation } from "@/lib/approval-designation-labels";
+import { isManagingPartnerDesignation, isTeamLeadDesignation } from "@/lib/approval-designation-labels";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -73,6 +73,25 @@ async function managerLevels(companyId: string) {
   return Math.max(1, Math.min(Number(settings.data?.regularization_manager_levels ?? 2), 2));
 }
 
+/** Company setting can ask for two managers, but a route with level 2 off stops at the reporting manager. */
+async function routeManagerLevelCap(companyId: string, routeId: string) {
+  const route = await db().from("hr_approval_workflow_routes")
+    .select("level_2_required")
+    .eq("company_id", companyId)
+    .eq("id", routeId)
+    .maybeSingle();
+  if (route.error) throw new Error(route.error.message);
+  return route.data?.level_2_required ? 2 : 1;
+}
+
+function isAttendanceExecutiveStop(designation: { name: string; code: string | null } | null) {
+  if (!designation) return false;
+  if (isManagingPartnerDesignation(designation)) return true;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase();
+  return code === "NH" || code === "NATIONAL_HEAD" || name.includes("national head");
+}
+
 async function resolveChainFallbackSteps(input: {
   companyId: string;
   workerType: "employee" | "contractor";
@@ -124,6 +143,7 @@ async function resolveChainFallbackSteps(input: {
       designationLabel = designation.data ? { name: designation.data.name, code: designation.data.code } : null;
     }
     if (isTeamLeadDesignation(designationLabel)) continue;
+    if (isAttendanceExecutiveStop(designationLabel)) continue;
 
     const managerEngagement = await db().from("hr_engagements").select("person_id,status,worker_type,employee_id,contractor_id")
       .eq("company_id", input.companyId).eq("id", managerAssignment.data.engagement_id).maybeSingle();
@@ -167,7 +187,9 @@ async function resolveChainFallbackSteps(input: {
  * 1. Use configured route from Approval Workflow Master for up to two manager levels.
  * 2. If the route cannot resolve enough managers, walk the reporting chain and pick the
  *    next available non-team-lead manager with DropX One access.
- * 3. If no manager can be resolved, route directly to HR.
+ *    Business Head counts. National Head and the Managing Partner do not.
+ * 3. A route that does not require level 2 stops at the reporting manager.
+ * 4. If no manager can be resolved, route directly to HR.
  */
 export async function resolveAttendanceRegularizationApprovers(
   companyId: string,
@@ -190,17 +212,18 @@ export async function resolveAttendanceRegularizationApprovers(
 
     if (configured?.steps.length) {
       let steps = configured.steps.map(mapStep);
-      if (steps.length < levels) {
+      const targetLevels = Math.min(levels, await routeManagerLevelCap(companyId, configured.routeId));
+      if (steps.length < targetLevels) {
         const chainSteps = await resolveChainFallbackSteps({
           companyId,
           workerType,
           workerId,
           asOf: today,
-          managerLevels: levels
+          managerLevels: targetLevels
         });
         const seenPeople = new Set(steps.map((step) => step.approver_person_id));
         for (const step of chainSteps) {
-          if (steps.length >= levels) break;
+          if (steps.length >= targetLevels) break;
           if (seenPeople.has(step.approver_person_id)) continue;
           seenPeople.add(step.approver_person_id);
           steps.push(step);

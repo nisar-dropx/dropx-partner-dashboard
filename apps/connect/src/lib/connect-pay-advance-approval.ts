@@ -5,10 +5,12 @@ export type PayAdvanceApproval = {
 };
 
 export function payAdvanceDecision(value: unknown, note: unknown) {
-  if (value !== "approved" && value !== "rejected") throw new Error("Choose Approve or Reject.");
+  if (value !== "approved" && value !== "rejected" && value !== "returned") throw new Error("Choose Approve, Return, or Reject.");
   const cleanedNote = String(note ?? "").trim();
   if (cleanedNote.length > 500) throw new Error("Keep the review note within 500 characters.");
-  if (value === "rejected" && cleanedNote.length < 3) throw new Error("Add a reason when rejecting a pay advance.");
+  if ((value === "rejected" || value === "returned") && cleanedNote.length < 3) {
+    throw new Error(value === "returned" ? "Add a short note explaining why the request is being returned." : "Add a reason when rejecting a pay advance.");
+  }
   return { decision: value, note: cleanedNote || null };
 }
 

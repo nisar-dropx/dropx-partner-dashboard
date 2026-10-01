@@ -16,6 +16,7 @@ import type { ConnectAccount } from "./connect-auth";
 import { connectApproverIdentity } from "./connect-expense-data";
 import { userFacingError } from "./user-facing-error";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "./connect-approval-journey";
+import { isHrHeadDesignation } from "./approval-designation-labels";
 
 type Decision = "approved" | "returned" | "rejected";
 
@@ -134,17 +135,16 @@ async function approverUserIds(account: ConnectAccount) {
   return resolveConnectActorUserIds(account);
 }
 
-/** People HR / Owner roles that may finalize attendance after manager approval. Line managers with attendance.approve must not see this company queue. */
+/** Only the HR Head seat may finalize attendance. Managing Partner, Owner, and HR Executive must not. */
 const CONNECT_ATTENDANCE_HR_ROLE_CODES = new Set([
-  "OWNER",
-  "OWNER_BREAK_GLASS",
-  "PEOPLE_MANAGING_PARTNER",
   "HR_HEAD",
   "HR_HAEAD",
-  "HR_OPERATIONS",
-  "HR_EXECUTIVE",
+  "HRM",
   "PEOPLE_HRM",
-  "PEOPLE_HRE"
+  "OPERATIONS_HRM",
+  "WORKFORCE_HRM",
+  "RECRUIT_HRM",
+  "HR_MANAGER"
 ]);
 
 function isConnectAttendanceHrRoleCode(value: unknown) {
@@ -416,7 +416,7 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
 }
 
 async function canApproveUnassignedRosterHr(account: ConnectAccount) {
-  if (/owner/i.test(account.role ?? "")) return true;
+  if (isHrHeadDesignation({ name: account.role ?? "", code: account.designationCode })) return true;
   const userId = await approverUserId(account);
   if (!userId) return false;
   return canConnectFinalizeAttendance(account.companyId, userId);

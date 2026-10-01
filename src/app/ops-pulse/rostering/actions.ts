@@ -988,19 +988,18 @@ export async function decideOpsRoster(input: { planId: string; stepId: string; d
     if (!step || step.status !== "pending") return { ok: false, message: "This approval is no longer pending." };
     const plan = await loadPlan(companyId, authorization, input.planId);
     if (plan.status !== "pending_approval") return { ok: false, message: "This roster is no longer awaiting approval." };
-    // The HR stage is an open slot (no single resolved approver — anyone holding an
-    // HR/People approval permission may act on it, via canApproveOpsRosterHr). Unlike a
-    // named manager-chain step, that open slot has no structural guarantee the acting
+    // The HR stage is an open slot with no named approver. Only the HR Head may act on it.
+    // Unlike a named manager-chain step, that open slot has no structural guarantee the acting
     // user isn't also the person who submitted this roster for approval — someone who
-    // both plans a station's roster and holds an HR role could otherwise approve their
+    // both plans a station's roster and is HR Head could otherwise approve their
     // own submission at this stage. The manager-chain stage doesn't need this check: its
     // candidates are already built with the submitter stripped out (see
     // locationRosterApprovalChain), so any approver_user_id assigned there is guaranteed
     // to be someone other than the submitter.
     const isOpenHrSlot = step.stage_type === "hr" && !step.approver_user_id;
-    const authorised = isCompanyOwner(authorization)
-      || step.approver_user_id === authorization.userId
-      || (isOpenHrSlot && canApproveOpsRosterHr(authorization) && plan.submitted_by !== authorization.userId);
+    const authorised = step.approver_user_id === authorization.userId
+      || (isOpenHrSlot && canApproveOpsRosterHr(authorization) && plan.submitted_by !== authorization.userId)
+      || (!isOpenHrSlot && isCompanyOwner(authorization));
     if (!authorised) {
       return {
         ok: false,

@@ -99,6 +99,34 @@ export function isManagingPartnerDesignation(designation: DesignationLabel | nul
     || name.includes("managing partner");
 }
 
+/** The HR Head seat only. HR Executive and other HR roles are not this seat. */
+export function isHrHeadDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase().replaceAll("-", " ").replace(/\s+/g, " ").trim();
+  return code === "HRM"
+    || code === "HR_HEAD"
+    || code === "PEOPLE_HRM"
+    || code === "OPERATIONS_HRM"
+    || code === "WORKFORCE_HRM"
+    || code === "RECRUIT_HRM"
+    || name === "hr head"
+    || name.includes("hr head");
+}
+
+/** Access-role codes that are the HR Head seat, including the live HR_HAEAD typo. */
+export function isHrHeadRoleCode(code: string | null | undefined) {
+  const value = String(code ?? "").trim().toUpperCase();
+  return value === "HR_HEAD"
+    || value === "HR_HAEAD"
+    || value === "HRM"
+    || value === "PEOPLE_HRM"
+    || value === "OPERATIONS_HRM"
+    || value === "WORKFORCE_HRM"
+    || value === "RECRUIT_HRM"
+    || value === "HR_MANAGER";
+}
+
 export function isHrPeopleDesignation(designation: DesignationLabel | null | undefined) {
   if (!designation) return false;
   if (isManagingPartnerDesignation(designation)) return false;

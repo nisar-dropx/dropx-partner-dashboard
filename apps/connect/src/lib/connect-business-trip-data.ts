@@ -183,7 +183,14 @@ export async function listConnectBusinessTripRequests(companyId: string, workerI
     }
     throw new Error(result.error.message);
   }
-  const attachments=await loadTimeOffAttachments(companyId,"business-trip",(result.data??[]).map(row=>row.id));
+  const requestIds = (result.data ?? []).map((row) => row.id);
+  const [attachments, journeys] = await Promise.all([
+    loadTimeOffAttachments(companyId, "business-trip", requestIds),
+    loadApprovalJourneySteps(companyId, requestIds, {
+      table: "hr_business_trip_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+      actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+    })
+  ]);
   return {
     policy: {
       enabled: access.policy.is_enabled,
@@ -206,7 +213,12 @@ export async function listConnectBusinessTripRequests(companyId: string, workerI
       hrReviewerName: request.hr_reviewer_name,
       requestedAt: request.requested_at,
       appliedDates: request.applied_dates ?? [],
-      skippedDates: request.skipped_dates ?? []
+      skippedDates: request.skipped_dates ?? [],
+      steps: (journeys.get(request.id) ?? []).map((step) => ({
+        stepName: step.actorName ? `${step.actorName} · ${step.label}` : step.label,
+        status: step.status,
+        note: step.note
+      }))
     })),
     summary: {
       pending: (result.data ?? []).filter((item) => ["pending_manager", "pending_hr"].includes(String(item.status))).length

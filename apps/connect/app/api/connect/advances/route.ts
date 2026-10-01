@@ -1,25 +1,114 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
+import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
+import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
-const dashboardUrl = process.env.DASHBOARD_URL?.replace(/\/$/, "") || "https://dashboard.dropxlogistics.com";
-
-async function forward(request: NextRequest, method: "GET" | "POST" | "PATCH") {
-  const target = new URL("/api/connect/advances", dashboardUrl);
-  request.nextUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
-  const response = await fetch(target, {
-    method,
-    cache: "no-store",
-    headers: {
-      cookie: request.headers.get("cookie") ?? "",
-      ...(method !== "GET" ? { "content-type": request.headers.get("content-type") ?? "application/json" } : {})
-    },
-    body: method !== "GET" ? await request.arrayBuffer() : undefined
-  });
-  return new NextResponse(await response.text(), {
-    status: response.status,
-    headers: { "content-type": response.headers.get("content-type") ?? "application/json" }
-  });
+function clean(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-export function GET(request: NextRequest) { return forward(request, "GET"); }
-export function POST(request: NextRequest) { return forward(request, "POST"); }
-export function PATCH(request: NextRequest) { return forward(request, "PATCH"); }
+function db() {
+  if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
+  return supabaseAdmin;
+}
+
+async function accountFromRequest(url: URL) {
+  const accountId = clean(url.searchParams.get("accountId"));
+  const profileType = clean(url.searchParams.get("profileType"));
+  if (!accountId || !profileType) throw new Error("Account is required.");
+  const account = await requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
+  return account;
+}
+
+function ownerReviewStatus(status: string) {
+  if (status === "approved") return "approved";
+  if (status === "rejected") return "rejected";
+  if (status === "cancelled" || status === "closed") return "skipped";
+  return "pending";
+}
+
+export async function GET(request: Request) {
+  try {
+    const account = await accountFromRequest(new URL(request.url));
+    const workerType = account.profileType === "employee" || account.profileType === "contractor"
+      ? account.profileType
+      : null;
+
+    const paymentResult = await db().from("payment_advance_requests")
+      .select("id,amount,purpose,status,approved_amount,decision_comment,requested_at")
+      .eq("company_id", account.companyId)
+      .eq("account_id", account.id)
+      .order("requested_at", { ascending: false })
+      .limit(50);
+    if (paymentResult.error && !/does not exist|schema cache/i.test(paymentResult.error.message)) {
+      throw new Error(paymentResult.error.message);
+    }
+
+    const payrollResult = workerType
+      ? await db().from("hr_pay_advance_requests")
+        .select("id,request_number,requested_amount,approved_amount,reason,status,requested_at,decision_note,recovery_mode,requested_installments")
+        .eq("company_id", account.companyId)
+        .eq("worker_type", workerType)
+        .eq("worker_id", account.id)
+        .order("requested_at", { ascending: false })
+        .limit(50)
+      : { data: [], error: null };
+    if (payrollResult.error && !/does not exist|schema cache/i.test(payrollResult.error.message)) {
+      throw new Error(payrollResult.error.message);
+    }
+
+    const payrollRows = payrollResult.data ?? [];
+    const journeys = await loadApprovalJourneySteps(account.companyId, payrollRows.map((row) => row.id), {
+      table: "hr_pay_advance_steps",
+      parentColumn: "request_id",
+      orderColumn: "step_order",
+      labelColumn: "step_name",
+      actorColumns: ["approver_user_id"],
+      actedAtColumn: "decided_at",
+      noteColumn: "decision_note"
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "";
+      if (/does not exist|schema cache/i.test(message)) return new Map();
+      throw error;
+    });
+
+    const requests = [
+      ...(paymentResult.data ?? []).map((row) => ({
+        id: row.id,
+        source: "ops",
+        title: row.purpose || "Advance request",
+        amount: Number(row.amount),
+        approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
+        status: row.status,
+        requestedAt: row.requested_at,
+        note: row.decision_comment,
+        steps: [
+          { stepName: "Submitted", status: "approved", note: null },
+          { stepName: "Owner review", status: ownerReviewStatus(String(row.status)), note: row.decision_comment }
+        ]
+      })),
+      ...payrollRows.map((row) => ({
+        id: row.id,
+        source: "payroll",
+        title: row.request_number || row.reason || "Pay advance",
+        amount: Number(row.requested_amount),
+        approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
+        status: row.status,
+        requestedAt: row.requested_at,
+        note: row.decision_note,
+        recovery: row.recovery_mode,
+        installments: row.requested_installments,
+        steps: (journeys.get(row.id) ?? []).map((step) => ({
+          stepName: step.actorName ? `${step.actorName} · ${step.label}` : step.label,
+          status: step.status,
+          note: step.note
+        }))
+      }))
+    ];
+
+    return NextResponse.json({ requests }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) {
+    return NextResponse.json({ error: userFacingError(error, "Unable to load advances.") }, { status: 400 });
+  }
+}

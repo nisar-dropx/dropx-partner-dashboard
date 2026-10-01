@@ -743,15 +743,17 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
     setNotes((current) => ({ ...current, [id]: value }));
   }
 
-  async function decidePayAdvance(approval: PayAdvanceApproval, decision: "approved" | "rejected") {
+  async function decidePayAdvance(approval: PayAdvanceApproval, decision: "approved" | "rejected" | "returned") {
     setSaving(true); setPayAdvanceError("");
     try {
       const response = await fetch("/api/connect/approvals", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: account.id, profileType: account.profileType,
           payAdvanceRequestId: approval.requestId, decision, note: notes[approval.id] ?? "",
-          approvedAmount: payAdvanceTerms[approval.id]?.amount ?? approval.approvedAmount ?? approval.requestedAmount,
-          approvedInstallments: payAdvanceTerms[approval.id]?.installments ?? approval.installments })
+          ...(decision === "approved" ? {
+            approvedAmount: payAdvanceTerms[approval.id]?.amount ?? approval.approvedAmount ?? approval.requestedAmount,
+            approvedInstallments: payAdvanceTerms[approval.id]?.installments ?? approval.installments
+          } : {}) })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to record the pay advance decision.");
@@ -1732,8 +1734,9 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               </div> : null}
               <ApprovalNote id={approval.id} notes={notes} onChange={value => setNote(approval.id, value)} placeholder="Add a reason when rejecting" />
               {payAdvanceError ? <p className="dx-error" role="alert">{payAdvanceError}</p> : null}
-              <ApprovalToolbar saving={saving} showReturn={false}
+              <ApprovalToolbar saving={saving}
                 onApprove={() => void decidePayAdvance(approval, "approved")}
+                onReturn={() => void decidePayAdvance(approval, "returned")}
                 onReject={() => void decidePayAdvance(approval, "rejected")} />
             </ApprovalModal>;
           })()}

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isHrHeadDesignation, isHrHeadRoleCode } from "./approval-designation-labels";
 import type { ConnectAccount } from "./connect-auth";
 import { resolveConnectActorUserIds } from "./connect-approver-identity";
 import { todayInIndia } from "./india-date";
@@ -10,6 +11,29 @@ function db() {
   return supabaseAdmin;
 }
 
+function one<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+async function accountIsHrHead(account: ConnectAccount, actorUserIds: string[]) {
+  if (isHrHeadDesignation({ name: account.role ?? "", code: account.designationCode })) return true;
+  if (!actorUserIds.length) return false;
+  const today = todayInIndia();
+  const [legacy, grants, memberships] = await Promise.all([
+    db().from("hr_user_access").select("role_code").eq("company_id", account.companyId).in("user_id", actorUserIds).eq("is_active", true),
+    db().from("hr_access_grants").select("hr_roles(code)").eq("company_id", account.companyId).in("user_id", actorUserIds).eq("is_active", true)
+      .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`),
+    db().from("company_product_memberships").select("role_id").eq("company_id", account.companyId).in("user_id", actorUserIds).eq("is_active", true)
+  ]);
+  if (!legacy.error && (legacy.data ?? []).some((row) => isHrHeadRoleCode(row.role_code))) return true;
+  if (!grants.error && (grants.data ?? []).some((row) => isHrHeadRoleCode(one(row.hr_roles)?.code))) return true;
+  const roleIds = [...new Set((memberships.error ? [] : memberships.data ?? []).map((row) => row.role_id).filter(Boolean))];
+  if (!roleIds.length) return false;
+  const roles = await db().from("user_roles").select("code,name").eq("company_id", account.companyId).in("id", roleIds);
+  if (roles.error) return false;
+  return (roles.data ?? []).some((row) => isHrHeadRoleCode(row.code) || isHrHeadDesignation({ name: row.name ?? "", code: row.code }));
+}
+
 export type ConnectAttendanceApproveScope = {
   canFinalize: boolean;
   allLocations: boolean;
@@ -18,13 +42,13 @@ export type ConnectAttendanceApproveScope = {
 };
 
 /**
- * People-parity gate for attendance / WFH HR finalization in DropX One.
- * Uses attendance page can_approve + grant location/company scope (not a company-wide dump for every manager).
+ * People-parity gate for attendance / WFH / business-trip HR finalization in DropX One.
+ * Only the HR Head seat can finalize. Location scope still comes from that seat's attendance approve grant.
  */
 export async function loadConnectAttendanceApproveScope(account: ConnectAccount): Promise<ConnectAttendanceApproveScope> {
   const actorUserIds = await resolveConnectActorUserIds(account);
-  if (!actorUserIds.length) {
-    return { canFinalize: false, allLocations: false, locationIds: [], actorUserIds: [] };
+  if (!actorUserIds.length || !(await accountIsHrHead(account, actorUserIds))) {
+    return { canFinalize: false, allLocations: false, locationIds: [], actorUserIds };
   }
 
   const pageResult = await db().from("hr_permission_pages")

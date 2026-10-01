@@ -37,31 +37,36 @@ async function decideAdvanceRequest(formData: FormData, decision: "approved" | "
     .from("payment_advance_requests")
     .update({
       status: decision,
-      approved_amount: approvedAmount,
+      approved_amount: decision === "approved" ? approvedAmount : null,
       decision_comment: comment || null,
       updated_at: new Date().toISOString()
     })
     .eq("company_id", companyId)
     .eq("id", requestId)
     .in("status", ["submitted", "in_review"])
-    .select("id, account_id, profile_type, approved_amount")
+    .select("id, account_id, profile_type, amount, approved_amount")
     .maybeSingle();
 
   if (result.error) return finish({ error: result.error.message });
   if (!result.data) return finish({ error: "This request has already been decided or no longer exists." });
 
-  await createAppNotification({
-    accountId: String(result.data.account_id),
-    companyId,
-    eventCode: decision === "approved" ? "advance_request_approved" : "advance_request_rejected",
-    profileType: String(result.data.profile_type),
-    sourceKey: requestId,
-    variables: {
-      amount: Number(result.data.approved_amount ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 }),
-      remarks: comment
-    }
-  });
-  await sendPaymentAdvanceDecisionNotification(companyId, requestId, decision);
+  const notifiedAmount = Number(decision === "approved" ? result.data.approved_amount : result.data.amount) || 0;
+  try {
+    await createAppNotification({
+      accountId: String(result.data.account_id),
+      companyId,
+      eventCode: decision === "approved" ? "advance_request_approved" : "advance_request_rejected",
+      profileType: String(result.data.profile_type),
+      sourceKey: `${requestId}:${decision}`,
+      variables: {
+        amount: notifiedAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 }),
+        remarks: comment
+      }
+    });
+    await sendPaymentAdvanceDecisionNotification(companyId, requestId, decision);
+  } catch (error) {
+    console.error("Advance decision was saved, but the notification failed", error);
+  }
 
   revalidatePath("/payments/advance-request");
   finish({ notice: `Advance request ${decision}.` });

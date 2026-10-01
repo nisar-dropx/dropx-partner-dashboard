@@ -1,11 +1,11 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, LocateFixed, ReceiptText, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, Home, LocateFixed, Plane, ReceiptText, RotateCcw, Wallet, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
-type RequestKind = "attendance" | "location_flag" | "leave" | "reimbursement" | "roster_swap" | "exit";
+type RequestKind = "attendance" | "location_flag" | "leave" | "wfh" | "business_trip" | "advance" | "reimbursement" | "roster_swap" | "exit";
 
 type StepTrail = { name: string; status: string; note?: string | null };
 
@@ -78,7 +78,10 @@ const kindMeta: Record<RequestKind, { label: string; icon: ReactNode }> = {
   attendance: { label: "Attendance", icon: <CalendarClock /> },
   location_flag: { label: "Location check", icon: <LocateFixed /> },
   leave: { label: "Time off", icon: <CalendarDays /> },
-  reimbursement: { label: "Reimbursement", icon: <ReceiptText /> },
+  wfh: { label: "Work from home", icon: <Home /> },
+  business_trip: { label: "Business trip", icon: <Plane /> },
+  advance: { label: "Advances", icon: <Wallet /> },
+  reimbursement: { label: "Expenses", icon: <ReceiptText /> },
   roster_swap: { label: "Shift swap", icon: <ArrowLeftRight /> },
   exit: { label: "Exit", icon: <DoorOpen /> }
 };
@@ -99,12 +102,15 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
     if (!background) setLoading(true);
     setError("");
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-    const [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult] = await Promise.allSettled([
+    const [attendanceResult, flagResult, leaveResult, wfhResult, tripResult, advanceResult, reimbursementResult, rosterResult, exitResult] = await Promise.allSettled([
       // These two are answered locally (not proxied to the dashboard app) so they
       // don't depend on that separate deployment being up to date.
       fetch(`/api/connect/attendance/requests?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/attendance/flags?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/leave?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
+      fetch(`/api/connect/wfh?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
+      fetch(`/api/connect/business-trip?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
+      fetch(`/api/connect/advances?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/roster?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/exit?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null))
@@ -164,6 +170,72 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
         steps: (item.steps ?? []).map((step: { stepName: string; status: string }) => ({
           name: step.stepName,
           status: step.status
+        }))
+      });
+    }
+
+    const wfh = wfhResult.status === "fulfilled" ? wfhResult.value : null;
+    for (const item of wfh?.requests ?? []) {
+      unified.push({
+        id: `wfh:${item.id}`,
+        kind: "wfh",
+        title: `Work from home – ${item.days} day${item.days === 1 ? "" : "s"}`,
+        eyebrow: `${displayDate(item.fromDate)}${item.toDate !== item.fromDate ? ` – ${displayDate(item.toDate)}` : ""}`,
+        submittedAt: item.requestedAt,
+        status: item.status,
+        facts: [
+          { label: "Reason", value: item.reason || "—" },
+          ...(item.managerNote ? [{ label: "Manager note", value: item.managerNote }] : []),
+          ...(item.hrNote ? [{ label: "HR note", value: item.hrNote }] : [])
+        ],
+        steps: (item.steps ?? []).map((step: { stepName: string; status: string; note?: string | null }) => ({
+          name: step.stepName,
+          status: step.status,
+          note: step.note
+        }))
+      });
+    }
+
+    const trip = tripResult.status === "fulfilled" ? tripResult.value : null;
+    for (const item of trip?.requests ?? []) {
+      unified.push({
+        id: `business_trip:${item.id}`,
+        kind: "business_trip",
+        title: `Business trip – ${item.days} day${item.days === 1 ? "" : "s"}`,
+        eyebrow: `${displayDate(item.fromDate)}${item.toDate !== item.fromDate ? ` – ${displayDate(item.toDate)}` : ""}`,
+        submittedAt: item.requestedAt,
+        status: item.status,
+        facts: [
+          { label: "Reason", value: item.reason || "—" },
+          ...(item.managerNote ? [{ label: "Manager note", value: item.managerNote }] : []),
+          ...(item.hrNote ? [{ label: "HR note", value: item.hrNote }] : [])
+        ],
+        steps: (item.steps ?? []).map((step: { stepName: string; status: string; note?: string | null }) => ({
+          name: step.stepName,
+          status: step.status,
+          note: step.note
+        }))
+      });
+    }
+
+    const advances = advanceResult.status === "fulfilled" ? advanceResult.value : null;
+    for (const item of advances?.requests ?? []) {
+      unified.push({
+        id: `advance:${item.source}:${item.id}`,
+        kind: "advance",
+        title: `${item.title} – ${money(item.amount)}`,
+        eyebrow: item.source === "payroll" ? "Payroll advance" : "Advance request",
+        submittedAt: item.requestedAt,
+        status: item.status,
+        facts: [
+          ...(item.approvedAmount != null ? [{ label: "Approved amount", value: money(item.approvedAmount) }] : []),
+          ...(item.recovery ? [{ label: "Recovery", value: statusLabel(String(item.recovery)) }] : []),
+          ...(item.note ? [{ label: reviewNoteLabel(item.status), value: item.note }] : [])
+        ],
+        steps: (item.steps ?? []).map((step: { stepName: string; status: string; note?: string | null }) => ({
+          name: step.stepName,
+          status: step.status,
+          note: step.note
         }))
       });
     }
@@ -245,7 +317,7 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
 
     unified.sort((left, right) => new Date(right.submittedAt || 0).getTime() - new Date(left.submittedAt || 0).getTime());
     setRequests(unified);
-    const failedAll = [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult].every((result) => result.status === "rejected");
+    const failedAll = [attendanceResult, flagResult, leaveResult, wfhResult, tripResult, advanceResult, reimbursementResult, rosterResult, exitResult].every((result) => result.status === "rejected");
     if (failedAll) setError("Unable to load your requests.");
     if (!background) setLoading(false);
     markLoaded();
@@ -359,7 +431,7 @@ export function ConnectMyRequests({ account, active = true, workforce = false }:
               <strong>{requests.length ? `No requests in ${monthLabel(month)}` : "No requests yet"}</strong>
               <small>{requests.length
                 ? "Try another month, or the All tab, to see other requests."
-                : "Leave, attendance corrections, location checks, reimbursements, shift swaps and exit requests you submit will show up here."}</small>
+                : "Leave, work from home, business trips, attendance corrections, advances, expenses, shift swaps and exit requests you submit will show up here."}</small>
             </div>
           )}
         </div>

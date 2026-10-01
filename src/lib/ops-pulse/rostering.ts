@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isOpsRosterPlannerRole, isRosterDirectPublishDesignation, isStationFloorRosterDesignation } from "@/lib/approval-designation-labels";
+import { isHrHeadDesignation, isHrHeadRoleCode, isOpsRosterPlannerRole, isRosterDirectPublishDesignation, isStationFloorRosterDesignation } from "@/lib/approval-designation-labels";
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
@@ -59,6 +59,17 @@ export type OpsRosterPlan = {
   planningChannel: string | null;
   submittedAt: string | null;
   decisionNote: string | null;
+  entries: OpsRosterEntry[];
+};
+
+export type OpsRosterDecision = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  status: string;
+  decidedAt: string | null;
+  reason: string | null;
+  rounds: Array<{ round: number; status: string | null; reason: string | null }>;
   entries: OpsRosterEntry[];
 };
 
@@ -509,12 +520,12 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
 }
 
 export function canApproveOpsRosterHr(authorization: AuthorizationContext) {
-  return isCompanyOwner(authorization)
-    || [
-      "OWNER", "OWNER_BREAK_GLASS", "OPERATIONS_MANAGING_PARTNER", "PEOPLE_MANAGING_PARTNER",
-      "HR_HEAD", "HR_HAEAD", "HR_OPERATIONS", "HR_EXECUTIVE",
-      "OPERATIONS_HRM", "OPERATIONS_HRE", "PEOPLE_HRM", "PEOPLE_HRE"
-    ].includes(String(authorization.roleCode ?? ""));
+  const codes = [authorization.roleCode, ...(authorization.effectiveRoleCodes ?? [])];
+  if (codes.some((code) => isHrHeadRoleCode(code))) return true;
+  return isHrHeadDesignation({
+    name: authorization.designationName || authorization.roleName || "",
+    code: null
+  });
 }
 
 export async function resolveOpsRosterApprovalRoute(
@@ -550,6 +561,28 @@ function relation<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
+function textOrNull(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function decisionReason(row: Record<string, any>) {
+  const note = textOrNull(row.decision_note);
+  if (note) return note;
+  const steps = Array.isArray(row.hr_roster_approval_steps) ? row.hr_roster_approval_steps : [];
+  return [...steps].reverse().map((step) => textOrNull(step?.decision_note)).find(Boolean) ?? null;
+}
+
+function decisionRounds(row: Record<string, any>) {
+  const history = Array.isArray(row.approval_history) ? row.approval_history : [];
+  return history.flatMap((round: Record<string, any>, index: number) => {
+    const status = textOrNull(round?.planStatus);
+    const reason = textOrNull(round?.decisionNote);
+    if (!reason && !["approved", "returned", "rejected"].includes(status ?? "")) return [];
+    return [{ round: Number(round?.round ?? index + 1), status, reason }];
+  });
+}
+
 function normalizePlan(row: Record<string, any>): OpsRosterPlan {
   return {
     id: row.id,
@@ -582,12 +615,12 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
   const [manpower, planResult, shiftResult] = await Promise.all([
     loadOpsStationManpower(companyId, [location], today),
     db().from("hr_roster_plans")
-      .select("id,name,location_id,period_start,period_end,status,decision_note,roster_kind,planning_channel,effective_from,superseded_at,revision_no,submitted_at,created_at,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+      .select("id,name,location_id,period_start,period_end,status,decision_note,decided_at,approval_history,roster_kind,planning_channel,effective_from,superseded_at,revision_no,submitted_at,created_at,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes),hr_roster_approval_steps(stage_no,status,decision_note)")
       .eq("company_id", companyId)
       .eq("location_id", location.id)
       .in("roster_kind", ["dated", "recurring_weekly"])
       .order("created_at", { ascending: false })
-      .limit(40),
+      .limit(80),
     db().from("hr_shifts")
       .select("id,code,name,start_time,end_time,color")
       .eq("company_id", companyId)
@@ -647,6 +680,33 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
     if (!(key in defaultShifts)) defaultShifts[key] = row.shift_id;
   }
   const plans = (planResult.data ?? []).map((row) => normalizePlan(row as Record<string, any>));
+  const decisions: OpsRosterDecision[] = (planResult.data ?? [])
+    .filter((row) => ["approved", "returned", "rejected"].includes(String(row.status)))
+    .map((row) => {
+      const plan = normalizePlan(row as Record<string, any>);
+      return {
+        id: plan.id,
+        periodStart: plan.periodStart,
+        periodEnd: plan.periodEnd,
+        status: plan.status,
+        decidedAt: (row as { decided_at?: string | null }).decided_at ?? null,
+        reason: decisionReason(row as Record<string, any>),
+        rounds: decisionRounds(row as Record<string, any>),
+        entries: plan.entries
+      };
+    });
+  const knownPeople = new Set(people.map((person) => `${person.workerType}:${person.id}`));
+  const missingEmployeeIds = [...new Set(decisions.flatMap((decision) => decision.entries.filter((entry) => entry.workerType === "employee" && !knownPeople.has(`employee:${entry.workerId}`)).map((entry) => entry.workerId)))];
+  const missingContractorIds = [...new Set(decisions.flatMap((decision) => decision.entries.filter((entry) => entry.workerType === "contractor" && !knownPeople.has(`contractor:${entry.workerId}`)).map((entry) => entry.workerId)))];
+  const [historyEmployees, historyContractors] = await Promise.all([
+    missingEmployeeIds.length ? db().from("employees").select("id,employee_code,full_name").eq("company_id", companyId).in("id", missingEmployeeIds) : Promise.resolve({ data: [], error: null }),
+    missingContractorIds.length ? db().from("contractors").select("id,dropx_id,full_name").eq("company_id", companyId).in("id", missingContractorIds) : Promise.resolve({ data: [], error: null })
+  ]);
+  if (historyEmployees.error || historyContractors.error) throw new Error(historyEmployees.error?.message ?? historyContractors.error?.message ?? "Roster history names could not be loaded.");
+  const historyPeople: OpsRosterPerson[] = [
+    ...(historyEmployees.data ?? []).map((person): OpsRosterPerson => ({ id: person.id, workerType: "employee", code: person.employee_code ?? "", name: person.full_name, designation: "", locationId: location.id })),
+    ...(historyContractors.data ?? []).map((person): OpsRosterPerson => ({ id: person.id, workerType: "contractor", code: person.dropx_id ?? "", name: person.full_name, designation: "", locationId: location.id }))
+  ];
   const isOpsChannel = (plan: OpsRosterPlan) => plan.planningChannel === "ops" || plan.planningChannel == null;
   const openPlan = plans.find((plan) => ["draft", "returned", "pending_approval"].includes(plan.status) && isOpsChannel(plan)) ?? null;
   // A one-off approved "dated" plan for the current week (e.g. a specific override
@@ -686,6 +746,8 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
     openPlan,
     activePlan,
     selectedPlan,
+    decisions,
+    historyPeople,
     currentWeekStart: rosterMonday(today),
     blankPeriodStart: rosterMonday(today),
     blankPeriodEnd: addRosterDays(rosterMonday(today), 6)
@@ -701,7 +763,12 @@ export async function loadAssignedOpsRosterApprovals(authorization: Authorizatio
     .limit(200);
   if (result.error) throw new Error(result.error.message);
   const owner = isCompanyOwner(authorization);
-  const steps = (result.data ?? []).filter((step) => owner || step.approver_user_id === authorization.userId || (step.stage_type === "hr" && !step.approver_user_id && canApproveOpsRosterHr(authorization)));
+  const steps = (result.data ?? []).filter((step) => {
+    if (step.approver_user_id === authorization.userId) return true;
+    const openHrSlot = step.stage_type === "hr" && !step.approver_user_id;
+    if (openHrSlot) return canApproveOpsRosterHr(authorization);
+    return owner;
+  });
   if (!steps.length) return [];
   const planIds = [...new Set(steps.map((step) => step.plan_id))];
   const plans = await db().from("hr_roster_plans")

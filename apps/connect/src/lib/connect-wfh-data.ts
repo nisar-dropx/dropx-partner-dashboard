@@ -127,7 +127,14 @@ export async function listConnectWfhRequests(companyId: string, workerId: string
     .order("requested_at", { ascending: false })
     .limit(50);
   if (result.error) throw new Error(result.error.message);
-  const attachments=await loadTimeOffAttachments(companyId,"wfh",(result.data??[]).map(row=>row.id));
+  const requestIds = (result.data ?? []).map((row) => row.id);
+  const [attachments, journeys] = await Promise.all([
+    loadTimeOffAttachments(companyId, "wfh", requestIds),
+    loadApprovalJourneySteps(companyId, requestIds, {
+      table: "hr_wfh_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+      actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+    })
+  ]);
   return {
     policy: {
       enabled: access.policy.is_enabled,
@@ -150,7 +157,12 @@ export async function listConnectWfhRequests(companyId: string, workerId: string
       hrReviewerName: request.hr_reviewer_name,
       requestedAt: request.requested_at,
       appliedDates: request.applied_dates ?? [],
-      skippedDates: request.skipped_dates ?? []
+      skippedDates: request.skipped_dates ?? [],
+      steps: (journeys.get(request.id) ?? []).map((step) => ({
+        stepName: step.actorName ? `${step.actorName} · ${step.label}` : step.label,
+        status: step.status,
+        note: step.note
+      }))
     })),
     summary: {
       pending: (result.data ?? []).filter((item) => ["pending_manager", "pending_hr"].includes(String(item.status))).length

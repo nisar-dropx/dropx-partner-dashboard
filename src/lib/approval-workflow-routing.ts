@@ -9,7 +9,7 @@ import "server-only";
 // change here (routing rules, new designation flags, etc.) must be applied to all three
 // by hand until they're consolidated into one shared package.
 import { selectApprovalRoute } from "@/lib/approval-workflow-routing-core";
-import { isTeamLeadDesignation } from "@/lib/approval-designation-labels";
+import { isHrHeadDesignation, isTeamLeadDesignation } from "@/lib/approval-designation-labels";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -253,6 +253,21 @@ async function scopedDesignationCandidates(companyId: string, designationId: str
   return candidates.filter((item): item is Candidate => Boolean(item));
 }
 
+const HR_HEAD_FINAL_WORKFLOWS = new Set(["attendance_regularization", "work_from_home", "business_trip", "leave_request", "location_trace"]);
+
+async function companyHrHeadCandidates(companyId: string, asOf: string) {
+  const designations = await db().from("designations").select("id,code,name").eq("company_id", companyId);
+  if (designations.error) throw new Error(designations.error.message);
+  const ids = (designations.data ?? []).filter((row) => isHrHeadDesignation({ name: row.name, code: row.code })).map((row) => row.id);
+  const batches = await Promise.all(ids.map((id) => scopedDesignationCandidates(companyId, id, "reporting_chain", null, asOf)));
+  const seen = new Set<string>();
+  return batches.flat().filter((candidate) => {
+    if (seen.has(candidate.personId)) return false;
+    seen.add(candidate.personId);
+    return true;
+  });
+}
+
 async function stepForCandidate(companyId: string, routeId: string, level: number, candidate: Candidate, via: ConfiguredApprovalStep["resolved_via"], originalPersonId: string | null, fallbackReason: string | null, asOf: string) {
   const state = await candidateIsUnavailable(companyId, candidate, asOf);
   if (state.unavailable || !state.approverUserId || !state.person) return null;
@@ -305,6 +320,15 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     if (level > maxLevel) continue;
     if (level === 2 && !route.level_2_required) continue;
     if (level === 3 && (deferredFinalStep || !route.hr_final_required)) continue;
+    if (level === 3 && HR_HEAD_FINAL_WORKFLOWS.has(input.workflowCode)) {
+      const hrCandidates = await companyHrHeadCandidates(input.companyId, asOf);
+      const hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null, asOf);
+      if (!hrResolved) throw new Error("HR final approval is not available. Only the HR Head can take this step. Contact HR.");
+      hrResolved.step.step_name = "HR final approval";
+      excludedPeople.add(hrResolved.candidate.personId);
+      steps.push(hrResolved.step);
+      continue;
+    }
     const designationId = level === 1 ? route.level_1_designation_id : level === 2 ? route.level_2_designation_id : route.hr_final_designation_id;
     if (!designationId) throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approver designation is missing. Contact HR.`);
     const searchScope = level === 1 ? route.level_1_search_scope : level === 2 ? route.level_2_search_scope : route.hr_final_search_scope;
@@ -346,11 +370,14 @@ export async function resolveConfiguredApprovalWorkflow(input: {
       // config as the source of who counts as "HR" for this route), splice it in ahead
       // of the deferred final step, and hold this step back until after the loop.
       if (!route.hr_final_designation_id) throw new Error("HR final approver designation is missing. Contact HR.");
-      const hrCandidates = ["reporting_chain", "immediate_reporting_manager", "manager_above_team_lead"].includes(route.hr_final_search_scope)
+      const hrHeadFinal = HR_HEAD_FINAL_WORKFLOWS.has(input.workflowCode);
+      const hrCandidates = hrHeadFinal
+        ? await companyHrHeadCandidates(input.companyId, asOf)
+        : ["reporting_chain", "immediate_reporting_manager", "manager_above_team_lead"].includes(route.hr_final_search_scope)
         ? chainCandidates(chain, route.hr_final_search_scope, route.hr_final_designation_id, lastChainIndex, designationById)
         : await scopedDesignationCandidates(input.companyId, route.hr_final_designation_id, route.hr_final_search_scope, worker.assignment.location_id, asOf);
       let hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null, asOf);
-      if (!hrResolved && route.hr_final_fallback_mode !== "block") {
+      if (!hrResolved && !hrHeadFinal && route.hr_final_fallback_mode !== "block") {
         let hrFallbackCandidates: Candidate[] = [];
         if (route.hr_final_fallback_mode === "specific_person" && route.hr_final_fallback_person_id) {
           const candidate = await activePersonCandidate(input.companyId, route.hr_final_fallback_person_id, asOf);
