@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import * as XLSX from "xlsx";
-import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { currentAccessSurface } from "@/lib/access-surface";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { generateBiometricEnrolmentId } from "@/lib/biometric/ids";
@@ -24,6 +24,7 @@ import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityEx
 import { biometricBelongsToPeople, peopleIdentityForDualRole } from "@/lib/workforce-dual-role";
 import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
+import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
 import {
   nonEmployeeConfigForRoute,
@@ -39,6 +40,29 @@ function required(value: FormDataEntryValue | null, field: string) {
 function optional(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+const onboardingSources = new Set(["recruit_portal", "referral", "walk_in", "agency", "other"]);
+
+function onboardingSource(formData: FormData, fallback: string) {
+  const source = optional(formData.get("onboarding_source"));
+  if (!source) return { source: fallback, detail: null };
+  if (!onboardingSources.has(source)) throw new Error("Choose a valid onboarding source.");
+  const detail = optional(formData.get("onboarding_source_detail"));
+  if (detail && detail.length > 160) throw new Error("Onboarding source detail must be 160 characters or fewer.");
+  if (source === "other" && !detail) throw new Error("Add a short detail when the onboarding source is Other.");
+  return { source, detail };
+}
+
+async function scopedWorkforceLocationIds(companyId: string, authorization: AuthorizationContext) {
+  if (authorization.hasAllLocationAccess || !supabaseAdmin) return null;
+  const locations = await supabaseAdmin
+    .from("stations")
+    .select("id, hide_from_location_list, parent_station_id")
+    .eq("company_id", companyId)
+    .limit(500);
+  if (locations.error) throw new Error(locations.error.message);
+  return new Set(filterOnboardingLocations(locations.data ?? [], authorization).map((location) => location.id));
 }
 
 function normalizeFullName(value: FormDataEntryValue | null) {
@@ -101,7 +125,9 @@ function addFormParams(formData: FormData) {
     date_of_join: String(formData.get("date_of_join") ?? ""),
     reported_on: String(formData.get("reported_on") ?? ""),
     location_id: String(formData.get("location_id") ?? ""),
-    designation: String(formData.get("designation") ?? "")
+    designation: String(formData.get("designation") ?? ""),
+    onboarding_source: String(formData.get("onboarding_source") ?? ""),
+    onboarding_source_detail: String(formData.get("onboarding_source_detail") ?? "")
   };
 }
 
@@ -333,7 +359,8 @@ export async function createFieldExecutive(formData: FormData) {
 
     if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
     if (reportedOn && Number.isNaN(Date.parse(reportedOn))) throw new Error("Enter a valid training or reporting date.");
-    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
+    const allowedLocationIds = await scopedWorkforceLocationIds(companyId, authorization);
+    if (allowedLocationIds && !allowedLocationIds.has(locationId)) {
       throw new Error("You do not have access to the selected location.");
     }
     const { data: location, error: locationError } = await supabaseAdmin
@@ -401,9 +428,11 @@ export async function createFieldExecutive(formData: FormData) {
     const applicationSource = requestHost === "ops.dropxlogistics.com" || requestHost.startsWith("ops-")
       ? "ops"
       : "dashboard";
+    const selectedOnboardingSource = onboardingSource(formData, applicationSource);
     const lifecyclePayload = config.profileType === "field_executive" ? {
       approval_required: true,
-      onboarding_application_source: applicationSource,
+      onboarding_application_source: selectedOnboardingSource.source,
+      onboarding_source_detail: selectedOnboardingSource.detail,
       onboarding_submitted_at: null,
       provider_id_status: "pending",
       lifecycle_status: "onboarding"
@@ -494,7 +523,7 @@ export async function createFieldExecutive(formData: FormData) {
         to_status: "pending",
         actor_user_id: authorization.userId,
         source_portal: applicationSource,
-        metadata: { designation, location_id: locationId, ...identityExceptionEventMetadata(identityEvaluation), ...(peopleIdentity ? { dual_role_people_profile: { source_type: peopleIdentity.sourceType, source_id: peopleIdentity.sourceId, designation: peopleIdentity.designation, shared_dropx_id: peopleIdentity.dropxId, shared_biometric_id: peopleIdentity.biometricId } } : {}) }
+        metadata: { designation, location_id: locationId, onboarding_source: selectedOnboardingSource.source, onboarding_source_detail: selectedOnboardingSource.detail, ...identityExceptionEventMetadata(identityEvaluation), ...(peopleIdentity ? { dual_role_people_profile: { source_type: peopleIdentity.sourceType, source_id: peopleIdentity.sourceId, designation: peopleIdentity.designation, shared_dropx_id: peopleIdentity.dropxId, shared_biometric_id: peopleIdentity.biometricId } } : {}) }
       });
       if (reportedOn && table === "workforce") {
         const progressResult = await supabaseAdmin.rpc("workforce_record_partner_progress", {
@@ -1133,6 +1162,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
   try {
     if (authorization.readOnly || !supabaseAdmin) throw new Error("Amazon invitation queue is unavailable.");
     const companyId = requireCompanyId(authorization);
+    const allowedLocationIds = await scopedWorkforceLocationIds(companyId, authorization);
     const workforceId = required(formData.get("workforce_id"), "Associate");
     const workforce = await supabaseAdmin.from("workforce")
       .select("id,email,full_name,location_id,onboarding_status,stations(station_code)")
@@ -1142,7 +1172,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
       .maybeSingle();
     if (workforce.error) throw new Error(workforce.error.message);
     if (!workforce.data) throw new Error("Associate was not found.");
-    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(workforce.data.location_id)) {
+    if (allowedLocationIds && !allowedLocationIds.has(workforce.data.location_id)) {
       throw new Error("Associate is outside your station scope.");
     }
     if (!["under_review", "approved", "active"].includes(String(workforce.data.onboarding_status ?? ""))) {
@@ -1161,7 +1191,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
         p_company: companyId,
         p_actor: authorization.userId,
         p_request: latest.data.id,
-        p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
+        p_locations: allowedLocationIds ? [...allowedLocationIds] : null
       });
       if (retried.error) throw new Error(retried.error.message);
       revalidatePath("/work-force-register");
@@ -1177,7 +1207,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
       p_workforce: workforceId,
       p_email: workforce.data.email,
       p_source_portal: "ops_pulse",
-      p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
+      p_locations: allowedLocationIds ? [...allowedLocationIds] : null
     });
     if (queued.error) throw new Error(queued.error.message);
     revalidatePath("/work-force-register");

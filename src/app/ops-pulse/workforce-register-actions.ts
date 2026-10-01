@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type InterviewOutcome = "reported" | "not_interested" | "rescheduled";
@@ -43,21 +44,22 @@ async function scopedLead(leadId: string) {
     .maybeSingle();
   if (leadResult.error) throw new Error(leadResult.error.message);
   if (!leadResult.data) throw new Error("Recruit candidate was not found.");
+  const lead = leadResult.data;
 
   if (!authorization.hasAllLocationAccess) {
     const stationResult = await supabaseAdmin.from("stations")
-      .select("id")
+      .select("id, station_code, hide_from_location_list, parent_station_id")
       .eq("company_id", companyId)
-      .ilike("station_code", String(leadResult.data.station_code ?? ""))
-      .limit(1)
-      .maybeSingle();
+      .limit(500);
     if (stationResult.error) throw new Error(stationResult.error.message);
-    if (!stationResult.data || !authorization.locationScopeIds.includes(stationResult.data.id)) {
+    const allowedIds = new Set(filterOnboardingLocations(stationResult.data ?? [], authorization).map((station) => station.id));
+    const leadStation = (stationResult.data ?? []).find((station) => String(station.station_code ?? "").trim().toUpperCase() === String(lead.station_code ?? "").trim().toUpperCase());
+    if (!leadStation || !allowedIds.has(leadStation.id)) {
       throw new Error("This candidate is outside your station scope.");
     }
   }
 
-  return { authorization, companyId, lead: leadResult.data };
+  return { authorization, companyId, lead };
 }
 
 export async function updateRecruitInterviewOutcome(formData: FormData) {
