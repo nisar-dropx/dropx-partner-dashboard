@@ -14,8 +14,8 @@ export async function sendCurrentCodStatus(companyId:string){
  if(new Set(batch.messages.map(message=>message.email)).size!==batch.messages.length)throw new Error('Conflicting recipient scopes; no email queued.');
  const queued=await db.rpc('portal_enqueue_digest',{p_company_id:companyId,p_portal:'ops',p_event_key:'cod_pending_current',p_report_date:reportDate,p_snapshot_at:batch.checkedAt,p_messages:batch.messages});
  if(queued.error)throw new Error(queued.error.message);
- if(queued.data!==true)throw new Error('Today’s current-status reply has already been queued or sent.');
- const result=await deliverPortalDigestQueue(db,'ops',{queued:batch.messages.length,accepted:0,uncertain:0,skipped:0,errors:[]});
+ const result=await deliverPortalDigestQueue(db,'ops',{queued:queued.data?batch.messages.length:0,accepted:0,uncertain:0,skipped:0,errors:[]});
  if(result.errors.length||result.uncertain)throw new Error(`${result.accepted} accepted; ${result.uncertain} require delivery verification; ${result.skipped} skipped.`);
+ if(!queued.data&&!result.accepted&&!result.skipped)throw new Error('Today’s current-status reply has already been sent.');
  return {reportDate,...result};
 }
