@@ -75,6 +75,8 @@ const morning=digest.buildCodDigestMessages(rows,source,recipients,date,'morning
 assert.equal(evening.subject,morning.subject);assert.match(evening.html,/2026-09-01/);assert.match(morning.html,/9:00 AM follow-up/);assert.equal(evening.scope.sourceBatchId,morning.scope.sourceBatchId);assert.ok(!evening.html.includes('GNTI'));assert.ok(!evening.html.includes('999999'));
 assert.equal(digest.buildCodDigestMessages(rows,{...source,stations:[]},recipients,date,'morning',evening.subject).length,1,'Each recipient gets the daily uploaded/not-uploaded status report, including all-complete confirmation');
 assert.match(evening.html,/YES — uploaded/);
+const missingMail=digest.buildCodDigestMessages(policy.buildCodPendingRows([other],[],date,now),source,[{email:'user@example.com',name:'User',stationIds:['s2']}],date,'evening',evening.subject)[0];
+assert.match(missingMail.html,/Awaiting upload/);assert.ok(!missingMail.html.includes('Upload recorded; slip check queued'));
 const locationMail=digest.buildCodDigestMessages(rows,source,[{...recipients[0],canViewPendingReport:false}],date,'morning',evening.subject)[0];
 assert.ok(locationMail.html.includes('/cod/submission?deposit_date='+date));
 assert.ok(!locationMail.html.includes('/cod/pending'));
