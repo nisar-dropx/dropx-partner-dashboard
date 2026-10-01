@@ -9,6 +9,7 @@ import {
 import {
   biometricIdBelongsOnlyToProfile,
   helperBiometricIdVariants,
+  helperPayoutPopulationIds,
   normalizeHelperBiometricId
 } from "@/lib/helper-payout";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
@@ -39,14 +40,22 @@ export async function loadHelperPayoutRows(
 
   let locationsQuery = supabaseAdmin
     .from("stations")
-    .select("id, station_code, station_name")
+    .select("id, station_code, station_name, is_active")
     .eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) {
     locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   }
 
-  const [locationsResult, allocationsResult, deductionHeadsResult, paymentPolicyResult] = await Promise.all([
+  const [locationsResult, currentHelpersResult, allocationsResult, deductionHeadsResult, paymentPolicyResult] = await Promise.all([
     locationsQuery,
+    readAllRows(supabaseAdmin
+      .from("helpers")
+      .select("id,location_id,date_of_join")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .eq("onboarding_status", "active")
+      .or(`date_of_join.is.null,date_of_join.lte.${toDate}`)
+      .order("id")),
     readAllRows(supabaseAdmin
       .from("helper_payment_allocations")
       .select("id,helper_id,station_id,payment_method_id,payment_values,payment_components,effective_from,effective_to,status,payment_methods:payment_methods!helper_payment_allocations_method_company_fk(name)")
@@ -71,6 +80,7 @@ export async function loadHelperPayoutRows(
   ]);
 
   const initialError = locationsResult.error?.message
+    || currentHelpersResult.error?.message
     || allocationsResult.error?.message
     || deductionHeadsResult.error?.message
     || paymentPolicyResult.error?.message;
@@ -78,8 +88,13 @@ export async function loadHelperPayoutRows(
 
   const locations = locationsResult.data ?? [];
   const allowedLocationIds = new Set(locations.map((location) => String(location.id)));
+  const activeLocationIds = new Set(locations
+    .filter((location) => location.is_active === true)
+    .map((location) => String(location.id)));
+  const currentHelpers = (currentHelpersResult.data ?? []).filter((helper: any) => activeLocationIds.has(String(helper.location_id)));
   const allocations = (allocationsResult.data ?? []).filter((allocation: any) => allowedLocationIds.has(String(allocation.station_id)));
-  const helperIds = [...new Set(allocations.map((allocation: any) => String(allocation.helper_id)).filter(Boolean))];
+  const allocatedHelperIds = [...new Set(allocations.map((allocation: any) => String(allocation.helper_id)).filter(Boolean))];
+  const helperIds = helperPayoutPopulationIds(currentHelpers, allocations);
   const paymentMethodIds = [...new Set(allocations.map((allocation: any) => String(allocation.payment_method_id)).filter(Boolean))];
 
   const attendanceFromDate = workforcePaymentMonthStart(fromDate);
@@ -90,6 +105,7 @@ export async function loadHelperPayoutRows(
         .select("id,dropx_id,full_name,date_of_join,pan_number,biometric_id,location_id,designation")
         .eq("company_id", companyId)
         .in("id", helperIds)
+        .order("dropx_id")
         .order("id"))
       : Promise.resolve({ data: [], error: null }),
     helperIds.length
@@ -110,13 +126,13 @@ export async function loadHelperPayoutRows(
         .in("payment_method_id", paymentMethodIds)
         .order("id"))
       : Promise.resolve({ data: [], error: null }),
-    helperIds.length
+    allocatedHelperIds.length
       ? readAllRows(supabaseAdmin
         .from("biometric_enrolments")
         .select("id,enrolment_id,profile_type,account_id,effective_from,effective_to")
         .eq("company_id", companyId)
         .eq("profile_type", "worker")
-        .in("account_id", helperIds)
+        .in("account_id", allocatedHelperIds)
         .lte("effective_from", toDate)
         .or(`effective_to.is.null,effective_to.gte.${attendanceFromDate}`)
         .order("effective_from")
@@ -256,8 +272,11 @@ export async function loadHelperPayoutRows(
     ]);
   }
 
-  const rows: WorkforcePayoutRow[] = [...allocationsByHelper.entries()].map(([helperId, helperAllocations]) => {
-    const helper = helperById.get(helperId);
+  const rows: WorkforcePayoutRow[] = helpers.map((helper: any) => {
+    const helperId = String(helper.id);
+    const helperAllocations = allocationsByHelper.get(helperId) ?? [];
+    const helperPeriodFrom = [fromDate, String(helper?.date_of_join ?? fromDate)].sort().at(-1)!;
+    const helperPeriodTo = [toDate, todayKolkata()].sort()[0];
     const rawDailyBreakdown = helperAllocations.flatMap((allocation: any) => {
       const snapshotComponents = Array.isArray(allocation.payment_components)
         ? allocation.payment_components.filter((component: unknown): component is DirectPayComponent => Boolean(component && typeof component === "object"))
@@ -270,8 +289,8 @@ export async function loadHelperPayoutRows(
       const method: any = Array.isArray(allocation.payment_methods) ? allocation.payment_methods[0] : allocation.payment_methods;
       const methodId = String(allocation.payment_method_id);
       const methodName = String(method?.name ?? "-");
-      const activeFrom = [fromDate, String(allocation.effective_from), String(helper?.date_of_join ?? fromDate)].sort().at(-1)!;
-      const activeTo = [toDate, todayKolkata(), String(allocation.effective_to ?? toDate)].sort()[0];
+      const activeFrom = [helperPeriodFrom, String(allocation.effective_from)].sort().at(-1)!;
+      const activeTo = [helperPeriodTo, String(allocation.effective_to ?? helperPeriodTo)].sort()[0];
 
       return activeFrom <= activeTo
         ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
@@ -350,12 +369,16 @@ export async function loadHelperPayoutRows(
       ...configuredMethodAmounts,
       ...rawDailyBreakdown.flatMap((day) => day.methodAmounts.map((item) => ({ methodId: item.id, label: item.label, amount: item.amount })))
     ]);
-    const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, {
-      categoryCode: "workers",
-      panNumber: helper?.pan_number ?? null
-    });
+    const deductionBreakdown = helperAllocations.length
+      ? calculateAutomaticDeductionLines(baseAmount, automaticDeductions, {
+        categoryCode: "workers",
+        panNumber: helper?.pan_number ?? null
+      })
+      : [];
     const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
-    const locationIds = [...new Set(helperAllocations.map((allocation: any) => String(allocation.station_id ?? "")).filter(Boolean))];
+    const locationIds = [...new Set((helperAllocations.length
+      ? helperAllocations.map((allocation: any) => String(allocation.station_id ?? ""))
+      : [String(helper?.location_id ?? "")]).filter(Boolean))];
     const locationLabels = [...new Set(locationIds.map((id) => locationById.get(id)?.station_code ?? "-"))];
     const dailyBreakdown = dailyBreakdownWithState.map(({ date, baseAmount: dailyBaseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({
       date,
@@ -371,14 +394,18 @@ export async function loadHelperPayoutRows(
       dropxId: helper?.dropx_id ?? "-",
       name: helper?.full_name ?? "Unlinked Helper",
       providerMemberId: "No provider ID",
-      providerMemberName: "Helper direct allocation",
+      providerMemberName: "Helper direct pay",
       locationId: locationIds[0] ?? null,
       location: locationLabels.join(" / ") || "-",
       provider: "Direct",
-      model: "Attendance / fixed",
-      paymentMethod: paymentMethodBreakdown.map((item) => item.label).join(" / ") || "-",
+      model: helperAllocations.length ? "Attendance / fixed" : "No payment method",
+      paymentMethod: paymentMethodBreakdown.map((item) => item.label).join(" / ") || "Not allocated",
       workDays: workDaySummary.workDays,
-      workDaysSource: biometricConfigurationMissing ? "Biometric enrolment unavailable" : workDaySummary.source,
+      workDaysSource: !helperAllocations.length
+        ? "Unavailable until payment allocation"
+        : biometricConfigurationMissing
+          ? "Biometric enrolment unavailable"
+          : workDaySummary.source,
       paymentMethodBreakdown,
       production: productionBreakdown.reduce((sum, line) => sum + line.count, 0),
       productionBreakdown,
@@ -390,11 +417,13 @@ export async function loadHelperPayoutRows(
       deductionBreakdown,
       panAadhaarStatus: verificationByHelperId.get(helperId) === true ? "LINKED" : "NOT LINKED",
       netAmount: baseAmount - deductions,
-      status: biometricConfigurationMissing || dailyBreakdownWithState.some((day) => day.missing)
-        ? "Configuration incomplete"
-        : baseAmount > 0
-          ? "Ready for review"
-          : "No eligible accrual"
+      status: !helperAllocations.length
+        ? "Payment method not allocated"
+        : biometricConfigurationMissing || dailyBreakdownWithState.some((day) => day.missing)
+          ? "Configuration incomplete"
+          : baseAmount > 0
+            ? "Ready for review"
+            : "No eligible accrual"
     } satisfies WorkforcePayoutRow;
   });
 
