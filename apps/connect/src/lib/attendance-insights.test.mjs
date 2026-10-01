@@ -27,6 +27,21 @@ test("uses the canonical People day status", () => {
   assert.equal(attendanceDayInsight(row({ attendanceStatus: "Absent", status: "A" })).calendarClass, "absent");
 });
 
+test("makes an absent zero-punch workday regularizable", () => {
+  const insight = attendanceDayInsight(row({
+    status: "A",
+    attendanceStatus: "Absent",
+    inTime: "",
+    outTime: "",
+    workHours: "00:00",
+    punchCount: 0
+  }));
+  assert.equal(insight.calendarClass, "absent");
+  assert.equal(insight.needsRegularization, true);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["absent"]);
+  assert.match(insight.detail, /request regularization/i);
+});
+
 test("WFH approval is not a full day or missing-punch warning before finalization", () => {
   // Calendar tile color matters here too: "Upcoming" (shift hasn't started)
   // stays "off" (no data yet), but "Day in progress" and "Finalizing" are an

@@ -375,7 +375,7 @@ export function attendanceDayInsight(
       headline: "Absent recorded",
       issues,
       label: "Absent",
-      needsRegularization: false,
+      needsRegularization: true,
       payDayType: "absent",
       tone: "red"
     };

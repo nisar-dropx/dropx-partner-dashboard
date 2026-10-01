@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
 
     const range = monthRange(request.nextUrl.searchParams.get("month"));
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
+    const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
     const enrolmentId = cleanEnrolmentId(worker.enrolmentId) || cleanEnrolmentId(worker.biometricId);
     const rows = (await loadAttendanceReportRows({
       companyId: worker.companyId,
@@ -293,19 +294,27 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Neither attendance_daily nor the regularization backfill above covers a
-    // day with no punch and no request - most commonly a scheduled weekly
-    // off or holiday. Without this, the calendar can't tell "week off" apart
-    // from "no data for this day" (see fillAttendanceCalendarGaps).
+    // attendance_daily has no row at all for a zero-punch day. Backfill every
+    // completed active-service day so the calendar can distinguish absence,
+    // rest days and genuine out-of-service dates — and so a missed-both-punch
+    // day can enter the regularization workflow.
     if (worker.profileType === "employee" || worker.profileType === "contractor") {
-      const calendarGapRows = await fillAttendanceCalendarGaps({
-        companyId: worker.companyId,
-        existingDates: attendanceDates,
-        fromDate: range.fromDate,
-        profileId: worker.profileId,
-        profileType: worker.profileType,
-        toDate: range.toDate
-      });
+      const activeFromDate = worker.dateOfJoin && worker.dateOfJoin > range.fromDate ? worker.dateOfJoin : range.fromDate;
+      const yesterday = new Date(`${todayIst}T00:00:00Z`);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const lastCompletedDate = yesterday.toISOString().slice(0, 10);
+      const visibleToDate = lastCompletedDate < range.toDate ? lastCompletedDate : range.toDate;
+      const calendarGapRows = activeFromDate <= visibleToDate
+        ? await fillAttendanceCalendarGaps({
+          companyId: worker.companyId,
+          existingDates: attendanceDates,
+          fromDate: activeFromDate,
+          includeNoPunchDays: true,
+          profileId: worker.profileId,
+          profileType: worker.profileType,
+          toDate: visibleToDate
+        })
+        : [];
       for (const row of calendarGapRows) {
         responseRows.push({
           date: row.punchDate,
@@ -347,7 +356,6 @@ export async function GET(request: NextRequest) {
     // hr_regularization_window_open, which also guards the insert.
     const windowSettings = await supabaseAdmin.from("hr_company_settings")
       .select("regularization_max_backdate_days,regularization_close_day").eq("company_id", worker.companyId).maybeSingle();
-    const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
     const backdateDays = Number(windowSettings.data?.regularization_max_backdate_days ?? 30);
     const closeDay = windowSettings.data?.regularization_close_day == null ? null : Number(windowSettings.data.regularization_close_day);
     const earliest = new Date(`${todayIst}T00:00:00Z`);

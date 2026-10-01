@@ -223,8 +223,16 @@ function emptyAttendanceRow(date: string): Row {
     punchCount: 0,
     remark: "",
     workMode: "onsite",
-    regularization: null
+    regularization: null,
+    // A past active-service day is supplied by the API, including its policy
+    // window. A client-only placeholder is outside that verified scope.
+    regularizationOpen: false
   };
+}
+
+function canSubmitRegularization(row: Row) {
+  if (!row.regularization) return true;
+  return ["returned", "rejected", "cancelled"].includes(String(row.regularization.status).toLowerCase());
 }
 
 function localIsoDate(date = new Date()) {
@@ -537,7 +545,7 @@ export function ConnectAttendance({ account, active = true }: { account: Account
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
             {selected.regularization?.canCancel ? <button className="danger" disabled={withdrawing} onClick={() => void withdrawRegularization(selected.regularization!.id)} type="button">{withdrawing ? "Withdrawing…" : "Withdraw request"}</button> : null}
-            {selected.regularization?.status !== "pending"
+            {canSubmitRegularization(selected)
               && selected.statusKind !== "leave"
               && selected.statusKind !== "paid_leave"
               && selected.workMode !== "wfh"
@@ -547,7 +555,7 @@ export function ConnectAttendance({ account, active = true }: { account: Account
               && selected.regularizationOpen !== false
               ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button>
               : null}
-            {selected.regularizationOpen === false && selected.regularization?.status !== "pending" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
+            {selected.regularizationOpen === false && canSubmitRegularization(selected) && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
               ? <small className="dx-regularization-closed">Regularization closed{selected.regularizationClosesOn ? ` on ${new Date(`${selected.regularizationClosesOn}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}` : ""} for this day. Contact HR if it needs correcting.</small>
               : null}
           </footer>

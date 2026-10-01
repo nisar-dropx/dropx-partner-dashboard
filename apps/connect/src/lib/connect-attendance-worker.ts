@@ -21,6 +21,7 @@ export type ConnectAttendanceWorker = {
   biometricId: string;
   fullName: string;
   locationId: string | null;
+  dateOfJoin: string | null;
   workerType: "employee" | "individual_contract";
 };
 
@@ -66,7 +67,7 @@ export async function resolveConnectAttendanceWorker({
   const designationColumn = resolvedProfileType === "employee" ? "designation_id" : "designation";
   const result = await supabaseAdmin
     .from(table)
-    .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, ${idColumn}, ${designationColumn}`)
+    .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, date_of_join, ${idColumn}, ${designationColumn}`)
     .eq("id", accountId)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
@@ -107,6 +108,7 @@ export async function resolveConnectAttendanceWorker({
     biometricId,
     fullName: String(row.full_name ?? ""),
     locationId: (row.location_id as string | null) ?? null,
+    dateOfJoin: row.date_of_join ? String(row.date_of_join) : null,
     workerType: resolvedProfileType === "employee" ? "employee" : "individual_contract"
   };
 }

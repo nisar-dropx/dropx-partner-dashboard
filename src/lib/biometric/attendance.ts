@@ -1158,7 +1158,9 @@ function reportMatchesType(row: AttendanceReportRow, type: AttendanceReportType)
  * used to label existing rows (`loadAttendanceScheduleContext`), and returns
  * one synthetic row per date in range that has no existing row, so a
  * per-worker calendar (e.g. the DropX Connect attendance screen) can render
- * every day of the month correctly. It does not change what
+ * every day of the month correctly. Callers can opt into working/unassigned
+ * zero-punch rows so an absent day remains actionable even though
+ * `attendance_daily` has no source row. It does not change what
  * `loadAttendanceReportRows` returns for its other, list/export/notification
  * consumers - those keep seeing only real attendance events.
  */
@@ -1166,6 +1168,7 @@ export async function fillAttendanceCalendarGaps({
   companyId,
   existingDates,
   fromDate,
+  includeNoPunchDays = false,
   profileId,
   profileType,
   toDate
@@ -1173,6 +1176,7 @@ export async function fillAttendanceCalendarGaps({
   companyId: string;
   existingDates: Iterable<string>;
   fromDate: string;
+  includeNoPunchDays?: boolean;
   profileId: string;
   // Only the employee/contractor split matters here - loadAttendanceScheduleContext's
   // roster lookup (rosterWorkerType) treats every non-employee profile type the
@@ -1199,15 +1203,17 @@ export async function fillAttendanceCalendarGaps({
   const rows: AttendanceReportRow[] = [];
   for (const punchDate of missingDates) {
     const schedule = scheduleContext.scheduleFor(profileId, punchDate);
-    // Only backfill days with a known non-working roster day type (weekly
-    // off, holiday, etc). A day with no roster entry at all is genuinely
-    // "no record" - synthesizing a status for it would be a guess.
-    if (schedule.dayType === "working" || schedule.dayType === "unassigned") continue;
+    // The generic/default behavior only fills known rest days. DropX One opts
+    // into zero-punch rows because regularization must also be available when
+    // the attendance engine has no daily row at all.
+    if (!includeNoPunchDays && (schedule.dayType === "working" || schedule.dayType === "unassigned")) continue;
+    const shift = schedule.shift;
+    const scheduledMinutes = scheduledDuration(shift);
     const attendanceStatus = attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: 0,
       rules: scheduleContext.rulesFor(profileId),
-      scheduledMinutes: 0,
+      scheduledMinutes,
       status: "",
       workMinutes: 0
     });
@@ -1219,19 +1225,19 @@ export async function fillAttendanceCalendarGaps({
       locationId: null,
       location: "-",
       designation: "-",
-      shiftName: schedule.dayType.replaceAll("_", " "),
-      shiftCode: "",
+      shiftName: shift?.name || schedule.dayType.replaceAll("_", " "),
+      shiftCode: shift?.code || "",
       shiftSource: schedule.source,
-      scheduledStart: "",
-      scheduledEnd: "",
-      scheduledMinutes: 0,
+      scheduledStart: formatClock(shift?.start_time),
+      scheduledEnd: formatClock(shift?.end_time),
+      scheduledMinutes,
       punchDate,
       inTime: "",
       outTime: "",
       punchTimes: [],
       workHours: "",
       punchCount: 0,
-      status: schedule.dayType,
+      status: attendanceStatus === "Absent" ? "A" : schedule.dayType,
       attendanceStatus,
       lateMinutes: 0,
       earlyOutMinutes: 0,
