@@ -38,6 +38,15 @@ function statusTone(status: string) {
   return "payout-status-neutral";
 }
 
+function matchesFilters(row: WorkforcePayoutRow, search: string, location: string, provider: string, method: string, status: string) {
+  const term = search.trim().toLowerCase();
+  return (!term || `${row.dropxId} ${row.name} ${row.providerMemberId} ${row.providerMemberName}`.toLowerCase().includes(term))
+    && (location === "all" || row.location === location)
+    && (provider === "all" || row.provider === provider)
+    && (method === "all" || row.paymentMethodBreakdown.some((item) => item.label === method))
+    && (status === "all" || row.status === status);
+}
+
 export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   const [view, setView] = useState<PayoutTableView>("overview");
   const [search, setSearch] = useState("");
@@ -54,14 +63,7 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   const providerOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.provider || "-")).values()).sort(), [rows]);
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status || "-")).values()).sort(), [rows]);
   const methodOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [rows]);
-  const filtered = useMemo(() => rows.filter((row) => {
-    const term = deferredSearch.trim().toLowerCase();
-    return (!term || `${row.dropxId} ${row.name} ${row.providerMemberId} ${row.providerMemberName}`.toLowerCase().includes(term))
-      && (location === "all" || row.location === location)
-      && (provider === "all" || row.provider === provider)
-      && (method === "all" || row.paymentMethodBreakdown.some((item) => item.label === method))
-      && (status === "all" || row.status === status);
-  }), [rows, deferredSearch, location, provider, method, status]);
+  const filtered = useMemo(() => rows.filter((row) => matchesFilters(row, deferredSearch, location, provider, method, status)), [rows, deferredSearch, location, provider, method, status]);
   const pageSize = size === "all" ? Math.max(filtered.length, 1) : Number(size);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
@@ -109,11 +111,12 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   }
 
   function exportRows() {
+    const exportableRows = rows.filter((row) => matchesFilters(row, search, location, provider, method, status));
     const paymentMethodHeaders = paymentMethodColumns.map((item) => `${item.label} Amount`);
     const productionHeaders = productionColumns.flatMap((item) => [`${item.label} Count`, `${item.label} Rate`, `${item.label} Amount`]);
     const deductionHeaders = deductionColumns.map((item) => `${item.label} Deduction`);
     const columns = ["DropX ID","Registered Worker","Payment Source","Source ID","Location Code","Provider / Allocation","Model / Basis","Payment Method","Work Days","Attendance Source",...paymentMethodHeaders,...productionHeaders,"Base Amount","Additional Payments","Gross Payment",...deductionHeaders,"Gross Deductions","Net Pay","PAN-Aadhaar Status","Status"];
-    const csv = [columns, ...filtered.map((row) => [row.dropxId,row.name,row.providerMemberName,row.providerMemberId,row.location,row.provider,row.model,row.paymentMethod,workDaysValue(row.workDays, row.workDaysSource),row.workDaysSource,...paymentMethodColumns.map((column) => row.paymentMethodBreakdown.find((item) => item.id === column.id)?.amount ?? 0),...productionColumns.flatMap((column) => { const item = row.productionBreakdown.find((value) => value.code === column.code); return [item?.count ?? 0,item?.rate ?? 0,item?.amount ?? 0]; }),row.baseAmount,row.additions,row.grossPayment,...deductionColumns.map((column) => row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0),row.deductions,row.netAmount,row.panAadhaarStatus,row.status])]
+    const csv = [columns, ...exportableRows.map((row) => [row.dropxId,row.name,row.providerMemberName,row.providerMemberId,row.location,row.provider,row.model,row.paymentMethod,workDaysValue(row.workDays, row.workDaysSource),row.workDaysSource,...paymentMethodColumns.map((column) => row.paymentMethodBreakdown.find((item) => item.id === column.id)?.amount ?? 0),...productionColumns.flatMap((column) => { const item = row.productionBreakdown.find((value) => value.code === column.code); return [item?.count ?? 0,item?.rate ?? 0,item?.amount ?? 0]; }),row.baseAmount,row.additions,row.grossPayment,...deductionColumns.map((column) => row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0),row.deductions,row.netAmount,row.panAadhaarStatus,row.status])]
       .map((line) => line.map((value) => `"${String(value).replaceAll('"','""')}"`).join(",")).join("\r\n");
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = "workforce-payouts.csv"; link.click(); URL.revokeObjectURL(link.href);
   }
