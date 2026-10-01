@@ -22,6 +22,8 @@ function statusLabel(status: string) {
   if (status === "approved") return "Approved";
   if (status === "returned") return "Returned";
   if (status === "rejected") return "Rejected";
+  if (status === "draft") return "Draft";
+  if (status === "pending_approval") return "Pending approval";
   return status.replaceAll("_", " ");
 }
 
@@ -49,7 +51,7 @@ export function OpsRosterDecisionHistory({
   return <section className={styles.history} aria-label="Roster decision history">
     <button type="button" className={styles.historyToggle} aria-expanded={open} onClick={() => setOpen((current) => !current)}>
       <History size={15} />
-      <span><strong>Roster history</strong><small>{dateLabel(weekStart)} to {dateLabel(weekEnd)} · approved, returned and rejected</small></span>
+      <span><strong>Roster history</strong><small>{dateLabel(weekStart)} to {dateLabel(weekEnd)} · drafts, approvals and returns</small></span>
       <ChevronDown size={16} className={open ? styles.historyChevronOpen : undefined} />
     </button>
     {open ? <div className={styles.historyBody}>
@@ -71,8 +73,10 @@ export function OpsRosterDecisionHistory({
             <em className={styles.historyStatus} data-status={decision.status}>{statusLabel(decision.status)}</em>
             <strong>{dateLabel(decision.periodStart)} to {dateLabel(decision.periodEnd)}</strong>
           </header>
-          <p>{decision.reason ?? "No reason recorded."}</p>
-          {decision.rounds.length ? <ul>{decision.rounds.map((round) => <li key={`${decision.id}:${round.round}`}>Round {round.round}{round.status ? ` · ${statusLabel(round.status)}` : ""}{round.reason ? ` · ${round.reason}` : ""}</li>)}</ul> : null}
+          <p className={styles.historyMeta}>Drafted by {decision.draftedBy ?? "—"}. Last edit by {decision.editedBy ?? decision.draftedBy ?? "—"}.</p>
+          {decision.returnedBy ? <p>Returned by {decision.returnedBy}{decision.reason ? ` · ${decision.reason}` : ""}</p> : <p>{decision.reason ?? "No decision note recorded."}</p>}
+          {decision.line.length ? <ul>{decision.line.map((step, index) => <li key={`${decision.id}:line:${index}`}>{step.stage}{step.status ? ` · ${statusLabel(step.status)}` : ""}{step.actor ? ` · ${step.actor}` : ""}{step.reason ? ` · ${step.reason}` : ""}</li>)}</ul> : null}
+          {decision.rounds.length ? <ul>{decision.rounds.map((round) => <li key={`${decision.id}:${round.round}`}>Earlier round {round.round}{round.status ? ` · ${statusLabel(round.status)}` : ""}{round.actor ? ` · ${round.actor}` : ""}{round.reason ? ` · ${round.reason}` : ""}</li>)}</ul> : null}
           {peopleRows.length ? <div className={styles.historyGridWrap}>
             <table className={styles.historyGrid}>
               <thead><tr><th>Person</th>{dates.map((date) => <th key={date}>{dayLabel(date)}<small>{dateLabel(date)}</small></th>)}</tr></thead>
@@ -83,7 +87,7 @@ export function OpsRosterDecisionHistory({
             </table>
           </div> : <p className={styles.historyEmpty}>This decision has no saved days for this week.</p>}
         </article>;
-      }) : <p className={styles.historyEmpty}>No approved, returned or rejected roster for this week.</p>}
+      }) : <p className={styles.historyEmpty}>No draft, approved, returned or rejected roster for this week.</p>}
     </div> : null}
   </section>;
 }

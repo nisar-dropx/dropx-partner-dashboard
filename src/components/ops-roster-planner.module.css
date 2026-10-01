@@ -373,6 +373,9 @@
 .historyStatus[data-status="approved"] { background: #dcfce7; color: #166534; }
 .historyStatus[data-status="returned"] { background: #ffedd5; color: #9a3412; }
 .historyStatus[data-status="rejected"] { background: #fee2e2; color: #991b1b; }
+.historyStatus[data-status="draft"] { background: #e0e7ff; color: #3730a3; }
+.historyStatus[data-status="pending_approval"] { background: #fef3c7; color: #92400e; }
+.historyMeta { color: #475569; }
 .historyGridWrap { overflow-x: auto; }
 .historyGrid { width: 100%; border-collapse: collapse; background: #fff; font-size: 11px; }
 .historyGrid th, .historyGrid td { padding: 6px 8px; border: 1px solid #e5e9ef; text-align: left; white-space: nowrap; }

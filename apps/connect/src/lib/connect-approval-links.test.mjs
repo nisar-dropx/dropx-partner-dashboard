@@ -20,7 +20,9 @@ test('unknown categories cannot become an external return URL', () => {
 test('pay-advance decisions require a supported action and a rejection reason', () => {
   assert.deepEqual(payAdvanceDecision('approved',''),{decision:'approved',note:null});
   assert.deepEqual(payAdvanceDecision('rejected','  Please correct the amount  '),{decision:'rejected',note:'Please correct the amount'});
-  assert.throws(()=>payAdvanceDecision('disbursed',''),/Approve or Reject/);
+  assert.deepEqual(payAdvanceDecision('returned','  Sent back for the amount  '),{decision:'returned',note:'Sent back for the amount'});
+  assert.throws(()=>payAdvanceDecision('disbursed',''),/Approve, Return, or Reject/);
   assert.throws(()=>payAdvanceDecision('rejected',' '),/reason/);
+  assert.throws(()=>payAdvanceDecision('returned',' '),/returned/);
   assert.throws(()=>payAdvanceDecision('approved','x'.repeat(501)),/500/);
 });

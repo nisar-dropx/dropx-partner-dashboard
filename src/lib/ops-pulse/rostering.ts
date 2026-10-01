@@ -69,7 +69,11 @@ export type OpsRosterDecision = {
   status: string;
   decidedAt: string | null;
   reason: string | null;
-  rounds: Array<{ round: number; status: string | null; reason: string | null }>;
+  draftedBy: string | null;
+  editedBy: string | null;
+  returnedBy: string | null;
+  line: Array<{ stage: string; status: string | null; actor: string | null; reason: string | null }>;
+  rounds: Array<{ round: number; status: string | null; reason: string | null; actor: string | null }>;
   entries: OpsRosterEntry[];
 };
 
@@ -578,10 +582,21 @@ function decisionRounds(row: Record<string, any>) {
   return history.flatMap((round: Record<string, any>, index: number) => {
     const status = textOrNull(round?.planStatus);
     const reason = textOrNull(round?.decisionNote);
-    if (!reason && !["approved", "returned", "rejected"].includes(status ?? "")) return [];
-    return [{ round: Number(round?.round ?? index + 1), status, reason }];
+    const returnedStep = (Array.isArray(round?.steps) ? round.steps : []).find((step: Record<string, any>) => step?.status === "returned");
+    const actor = textOrNull(returnedStep?.decided_by ?? returnedStep?.approver_user_id);
+    if (!reason && !actor && !["approved", "returned", "rejected"].includes(status ?? "")) return [];
+    return [{ round: Number(round?.round ?? index + 1), status, reason, actor }];
   });
 }
+
+function stageLabel(stage: unknown) {
+  if (stage === "level_1") return "First approval";
+  if (stage === "level_2") return "Second approval";
+  if (stage === "hr") return "HR approval";
+  return "Approval";
+}
+
+const ROSTER_HISTORY_STATUSES = ["draft", "pending_approval", "approved", "returned", "rejected"];
 
 function normalizePlan(row: Record<string, any>): OpsRosterPlan {
   return {
@@ -615,12 +630,12 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
   const [manpower, planResult, shiftResult] = await Promise.all([
     loadOpsStationManpower(companyId, [location], today),
     db().from("hr_roster_plans")
-      .select("id,name,location_id,period_start,period_end,status,decision_note,decided_at,approval_history,roster_kind,planning_channel,effective_from,superseded_at,revision_no,submitted_at,created_at,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes),hr_roster_approval_steps(stage_no,status,decision_note)")
+      .select("id,name,location_id,period_start,period_end,status,decision_note,decided_at,approval_history,roster_kind,planning_channel,effective_from,superseded_at,revision_no,submitted_at,created_at,created_by,updated_by,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes),hr_roster_approval_steps(stage_no,stage_type,status,decision_note,decided_by,approver_user_id)")
       .eq("company_id", companyId)
       .eq("location_id", location.id)
       .in("roster_kind", ["dated", "recurring_weekly"])
       .order("created_at", { ascending: false })
-      .limit(80),
+      .limit(200),
     db().from("hr_shifts")
       .select("id,code,name,start_time,end_time,color")
       .eq("company_id", companyId)
@@ -680,29 +695,51 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
     if (!(key in defaultShifts)) defaultShifts[key] = row.shift_id;
   }
   const plans = (planResult.data ?? []).map((row) => normalizePlan(row as Record<string, any>));
-  const decisions: OpsRosterDecision[] = (planResult.data ?? [])
-    .filter((row) => ["approved", "returned", "rejected"].includes(String(row.status)))
-    .map((row) => {
-      const plan = normalizePlan(row as Record<string, any>);
-      return {
-        id: plan.id,
-        periodStart: plan.periodStart,
-        periodEnd: plan.periodEnd,
-        status: plan.status,
-        decidedAt: (row as { decided_at?: string | null }).decided_at ?? null,
-        reason: decisionReason(row as Record<string, any>),
-        rounds: decisionRounds(row as Record<string, any>),
-        entries: plan.entries
-      };
-    });
+  const historyRows = (planResult.data ?? []).filter((row) => ROSTER_HISTORY_STATUSES.includes(String(row.status)));
+  const decisions: OpsRosterDecision[] = historyRows.map((row) => {
+    const source = row as Record<string, any>;
+    const plan = normalizePlan(source);
+    const steps = Array.isArray(source.hr_roster_approval_steps) ? [...source.hr_roster_approval_steps].sort((left, right) => Number(left?.stage_no ?? 0) - Number(right?.stage_no ?? 0)) : [];
+    const returnedStep = [...steps].reverse().find((step) => step?.status === "returned");
+    return {
+      id: plan.id,
+      periodStart: plan.periodStart,
+      periodEnd: plan.periodEnd,
+      status: plan.status,
+      decidedAt: source.decided_at ?? null,
+      reason: decisionReason(source),
+      draftedBy: textOrNull(source.created_by),
+      editedBy: textOrNull(source.updated_by),
+      returnedBy: textOrNull(returnedStep?.decided_by ?? returnedStep?.approver_user_id),
+      line: steps.map((step) => ({
+        stage: stageLabel(step?.stage_type),
+        status: textOrNull(step?.status),
+        actor: textOrNull(step?.decided_by ?? step?.approver_user_id),
+        reason: textOrNull(step?.decision_note)
+      })),
+      rounds: decisionRounds(source),
+      entries: plan.entries
+    };
+  });
   const knownPeople = new Set(people.map((person) => `${person.workerType}:${person.id}`));
   const missingEmployeeIds = [...new Set(decisions.flatMap((decision) => decision.entries.filter((entry) => entry.workerType === "employee" && !knownPeople.has(`employee:${entry.workerId}`)).map((entry) => entry.workerId)))];
   const missingContractorIds = [...new Set(decisions.flatMap((decision) => decision.entries.filter((entry) => entry.workerType === "contractor" && !knownPeople.has(`contractor:${entry.workerId}`)).map((entry) => entry.workerId)))];
-  const [historyEmployees, historyContractors] = await Promise.all([
+  const actorIds = [...new Set(decisions.flatMap((decision) => [decision.draftedBy, decision.editedBy, decision.returnedBy, ...decision.line.map((step) => step.actor), ...decision.rounds.map((round) => round.actor)].filter((id): id is string => Boolean(id))))];
+  const [historyEmployees, historyContractors, actors] = await Promise.all([
     missingEmployeeIds.length ? db().from("employees").select("id,employee_code,full_name").eq("company_id", companyId).in("id", missingEmployeeIds) : Promise.resolve({ data: [], error: null }),
-    missingContractorIds.length ? db().from("contractors").select("id,dropx_id,full_name").eq("company_id", companyId).in("id", missingContractorIds) : Promise.resolve({ data: [], error: null })
+    missingContractorIds.length ? db().from("contractors").select("id,dropx_id,full_name").eq("company_id", companyId).in("id", missingContractorIds) : Promise.resolve({ data: [], error: null }),
+    actorIds.length ? db().from("profiles").select("id,full_name").eq("company_id", companyId).in("id", actorIds) : Promise.resolve({ data: [], error: null })
   ]);
-  if (historyEmployees.error || historyContractors.error) throw new Error(historyEmployees.error?.message ?? historyContractors.error?.message ?? "Roster history names could not be loaded.");
+  if (historyEmployees.error || historyContractors.error || actors.error) throw new Error(historyEmployees.error?.message ?? historyContractors.error?.message ?? actors.error?.message ?? "Roster history names could not be loaded.");
+  const actorNames = new Map((actors.data ?? []).map((profile) => [profile.id, profile.full_name]));
+  const named = (id: string | null) => id ? actorNames.get(id) ?? "Recorded user" : null;
+  for (const decision of decisions) {
+    decision.draftedBy = named(decision.draftedBy);
+    decision.editedBy = named(decision.editedBy);
+    decision.returnedBy = named(decision.returnedBy);
+    for (const step of decision.line) step.actor = named(step.actor);
+    for (const round of decision.rounds) round.actor = named(round.actor);
+  }
   const historyPeople: OpsRosterPerson[] = [
     ...(historyEmployees.data ?? []).map((person): OpsRosterPerson => ({ id: person.id, workerType: "employee", code: person.employee_code ?? "", name: person.full_name, designation: "", locationId: location.id })),
     ...(historyContractors.data ?? []).map((person): OpsRosterPerson => ({ id: person.id, workerType: "contractor", code: person.dropx_id ?? "", name: person.full_name, designation: "", locationId: location.id }))
