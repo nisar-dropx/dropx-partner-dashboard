@@ -403,6 +403,19 @@ export async function POST(request: Request) {
       });
       if (createResult.error) throw new Error(createResult.error.message);
       requestId = String(createResult.data ?? "");
+      // The creation RPC owns the transaction and the step order. Persist the
+      // resolver provenance immediately afterwards so temporary leave-cover
+      // owners can be restored automatically when the original manager returns.
+      for (const [index, step] of approval.steps.entries()) {
+        if (!step.route_id) continue;
+        const metadata = await db().from("hr_leave_approval_steps").update({
+          route_id: step.route_id,
+          resolved_via: step.resolved_via ?? null,
+          original_approver_person_id: step.original_approver_person_id ?? null,
+          fallback_reason: step.fallback_reason ?? null
+        }).eq("company_id", account.companyId).eq("request_id", requestId).eq("step_order", index + 1);
+        if (metadata.error) throw new Error(metadata.error.message);
+      }
     }
     let notification: Awaited<ReturnType<typeof notifyConnectLeaveSubmitted>> | null = null;
     if (!approval.direct) {

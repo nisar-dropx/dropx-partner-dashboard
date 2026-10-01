@@ -208,6 +208,10 @@ export async function createConnectWfhRequest(input: {
     approver_user_id: string;
     approver_person_id: string;
     approver_name: string;
+    route_id: string;
+    resolved_via: string;
+    original_approver_person_id: string | null;
+    fallback_reason: string | null;
   }> = [];
   let routeName = "Reporting manager";
   const skipManagerChain = Boolean(access.context.assignment.is_top_level)
@@ -235,7 +239,11 @@ export async function createConnectWfhRequest(input: {
         step_name: step.step_name,
         approver_user_id: step.approver_user_id,
         approver_person_id: step.approver_person_id,
-        approver_name: step.approver_name
+        approver_name: step.approver_name,
+        route_id: step.route_id,
+        resolved_via: step.resolved_via,
+        original_approver_person_id: step.original_approver_person_id,
+        fallback_reason: step.fallback_reason
       }));
     }
   } else {
@@ -284,6 +292,10 @@ export async function createConnectWfhRequest(input: {
       approver_user_id: step.approver_user_id,
       approver_person_id: step.approver_person_id,
       approver_name: step.approver_name,
+      route_id: step.route_id,
+      resolved_via: step.resolved_via,
+      original_approver_person_id: step.original_approver_person_id,
+      fallback_reason: step.fallback_reason,
       status: index === 0 ? "pending" : "queued"
     }));
     const stepsResult = await db().from("hr_wfh_approval_steps").insert(stepRows);

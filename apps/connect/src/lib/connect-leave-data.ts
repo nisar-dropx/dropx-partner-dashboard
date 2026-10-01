@@ -10,6 +10,10 @@ export type LeaveApprovalStep = {
   step_name: string;
   approver_user_id: string;
   approver_person_id: string;
+  route_id?: string;
+  resolved_via?: string;
+  original_approver_person_id?: string | null;
+  fallback_reason?: string | null;
 };
 
 export type WorkforceLeaveEntitlement = {
@@ -203,7 +207,11 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
       steps: configured.steps.map((step) => ({
         step_name: step.step_name,
         approver_user_id: step.approver_user_id,
-        approver_person_id: step.approver_person_id
+        approver_person_id: step.approver_person_id,
+        route_id: step.route_id,
+        resolved_via: step.resolved_via,
+        original_approver_person_id: step.original_approver_person_id,
+        fallback_reason: step.fallback_reason
       }))
     };
   }
