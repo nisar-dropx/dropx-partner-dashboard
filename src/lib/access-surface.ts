@@ -34,6 +34,8 @@ export const opsAccessPageCodes = [
   "cod_reports",
   "cod_portal_checks",
   "cod_cash_in_associate",
+  "station_audits",
+  "station_audit_master",
   "edd_dashboard",
   "station_edd",
   "cps",

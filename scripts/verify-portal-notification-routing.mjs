@@ -21,6 +21,11 @@ const settings=await mod.exports.middleware(request('/settings/notifications'));
 assert.equal(settings.headers.get('location'),null);
 assert.equal(settings.headers.get('x-middleware-next'),'1');
 assert.equal(settings.headers.get('x-middleware-rewrite'),null,'settings uses its own route, not /ops-pulse');
+for (const [path, target] of [['/audits', '/ops-pulse/audits'], ['/master/audits', '/ops-pulse/master/audits']]) {
+  const result = await mod.exports.middleware(request(path));
+  assert.equal(result.headers.get('location'), null, `${path} remains on the OpsPulse surface`);
+  assert.match(result.headers.get('x-middleware-rewrite') ?? '', new RegExp(`${target}$`), `${path} rewrites to its OpsPulse page`);
+}
 const other=await mod.exports.middleware(request('/settings/payments'));
 assert.match(other.headers.get('location'),/reason=surface/,'other portal settings stay blocked');
 authUnavailable=true;
