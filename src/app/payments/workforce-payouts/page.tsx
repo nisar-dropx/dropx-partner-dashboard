@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { WorkforceFinanceQueue } from "@/components/workforce-finance-queue";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -443,8 +442,6 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       from: period.from,
       to: period.to
     });
-    const payrollStatus = typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : "";
-    if (payrollStatus) params.set("payrollStatus", payrollStatus);
     return `/payments/workforce-payouts?${params.toString()}`;
   };
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
@@ -454,7 +451,6 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
       <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
     </nav>
-    <WorkforceFinanceQueue audience={audience} companyId={companyId} authorization={authorization} period={period} status={typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : undefined}/>
-    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section> : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} payrollStatus={typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : undefined} /></div><WorkforcePayoutTable key={audience} audience={audience} rows={rows} /></section>}
+    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section> : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={audience} audience={audience} rows={rows} /></section>}
   </AppShell>;
 }
