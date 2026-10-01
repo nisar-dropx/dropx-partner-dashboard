@@ -14,6 +14,7 @@ type AdvanceRequest = {
   decision_comment?: string | null;
   requested_at: string;
   updated_at: string;
+  canWithdraw?: boolean;
 };
 
 function money(value: number | null | undefined) {
@@ -35,7 +36,7 @@ function formatWhen(value: string) {
 export function ConnectAdvances({ account, active = true }: { account: Account; active?: boolean }) {
   const workforce = account.workspace === "workforce";
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
-  const [eligibleForAdvance, setEligibleForAdvance] = useState(false);
+  const [eligibleForAdvance, setEligibleForAdvance] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -54,9 +55,13 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
       const response = await fetch(`/api/connect/advances?${query}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load advance requests.");
+      if (typeof payload.account?.eligibleForAdvance !== "boolean") {
+        throw new Error("Unable to verify advance eligibility. Please retry shortly.");
+      }
       setRows(payload.requests ?? []);
       setEligibleForAdvance(payload.account?.eligibleForAdvance === true);
     } catch (reason) {
+      setEligibleForAdvance(null);
       setError(reason instanceof Error ? reason.message : "Unable to load advance requests.");
     } finally {
       if (!background) setLoading(false);
@@ -151,7 +156,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
 
       {error ? <div className="dx-alert error">{error}</div> : null}
       {notice ? <div className="dx-alert success">{notice}</div> : null}
-      {!loading && !eligibleForAdvance ? (
+      {!loading && !error && eligibleForAdvance === false ? (
         <div className="dx-alert info">Advance requests are available only when Profile status is Active.</div>
       ) : null}
 
@@ -188,7 +193,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
                   <dd>{formatWhen(row.updated_at)}</dd>
                 </div>
               </dl>
-              {["submitted", "in_review"].includes(row.status) ? (
+              {row.canWithdraw !== false && ["submitted", "in_review"].includes(row.status) ? (
                 <button
                   className="dx-advance-withdraw"
                   disabled={withdrawingId === row.id}

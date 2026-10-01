@@ -21,6 +21,42 @@ async function accountFromRequest(url: URL) {
   return account;
 }
 
+// Eligibility and writes must use the same canonical advance service. This
+// endpoint additionally provides the approval journey used by My Requests.
+const dashboardUrl = process.env.DASHBOARD_URL?.replace(/\/$/, "") || "https://dashboard.dropxlogistics.com";
+
+async function advanceService(request: Request, method: "GET" | "POST" | "PATCH") {
+  const target = new URL("/api/connect/advances", dashboardUrl);
+  new URL(request.url).searchParams.forEach((value, key) => target.searchParams.set(key, value));
+  return fetch(target, {
+    method,
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+    headers: { cookie: request.headers.get("cookie") ?? "", "content-type": "application/json" },
+    body: method === "GET" ? undefined : await request.text()
+  });
+}
+
+async function mutate(request: Request, method: "POST" | "PATCH") {
+  try {
+    const body = await request.clone().json();
+    const account = await requireConnectAccount(body.profileType, clean(body.accountId));
+    if (account.profileType === "user" || !account.pageAccess.includes("advances")) {
+      return NextResponse.json({ error: "Advance requests are not enabled for this account." }, { status: 403 });
+    }
+    const response = await advanceService(request, method);
+    return new NextResponse(await response.text(), {
+      status: response.status,
+      headers: { "Content-Type": "application/json", "Cache-Control": "private, no-store" }
+    });
+  } catch (error) {
+    return NextResponse.json({ error: userFacingError(error, "Unable to update advance request.") }, { status: 400 });
+  }
+}
+
+export function POST(request: Request) { return mutate(request, "POST"); }
+export function PATCH(request: Request) { return mutate(request, "PATCH"); }
+
 function ownerReviewStatus(status: string) {
   if (status === "approved") return "approved";
   if (status === "rejected") return "rejected";
@@ -36,13 +72,24 @@ export async function GET(request: Request) {
       : null;
 
     const paymentResult = await db().from("payment_advance_requests")
-      .select("id,amount,purpose,status,approved_amount,decision_comment,requested_at")
+      .select("id,amount,purpose,status,approved_amount,decision_comment,requested_at,updated_at")
       .eq("company_id", account.companyId)
       .eq("account_id", account.id)
       .order("requested_at", { ascending: false })
       .limit(50);
     if (paymentResult.error && !/does not exist|schema cache/i.test(paymentResult.error.message)) {
       throw new Error(paymentResult.error.message);
+    }
+
+    let eligibleForAdvance = false;
+    if (account.profileType !== "user" && account.pageAccess.includes("advances")) {
+      const response = await advanceService(request, "GET");
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to check advance eligibility.");
+      if (typeof payload.account?.eligibleForAdvance !== "boolean") {
+        throw new Error("Unable to verify advance eligibility. Please retry shortly.");
+      }
+      eligibleForAdvance = payload.account.eligibleForAdvance;
     }
 
     const payrollResult = workerType
@@ -77,6 +124,12 @@ export async function GET(request: Request) {
       ...(paymentResult.data ?? []).map((row) => ({
         id: row.id,
         source: "ops",
+        purpose: row.purpose,
+        approved_amount: row.approved_amount,
+        decision_comment: row.decision_comment,
+        requested_at: row.requested_at,
+        updated_at: row.updated_at,
+        canWithdraw: ["submitted", "in_review"].includes(row.status),
         title: row.purpose || "Advance request",
         amount: Number(row.amount),
         approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
@@ -91,6 +144,12 @@ export async function GET(request: Request) {
       ...payrollRows.map((row) => ({
         id: row.id,
         source: "payroll",
+        purpose: row.reason,
+        approved_amount: row.approved_amount,
+        decision_comment: row.decision_note,
+        requested_at: row.requested_at,
+        updated_at: row.requested_at,
+        canWithdraw: false,
         title: row.request_number || row.reason || "Pay advance",
         amount: Number(row.requested_amount),
         approvedAmount: row.approved_amount == null ? null : Number(row.approved_amount),
@@ -107,7 +166,7 @@ export async function GET(request: Request) {
       }))
     ];
 
-    return NextResponse.json({ requests }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ account: { eligibleForAdvance }, requests }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load advances.") }, { status: 400 });
   }
