@@ -49,6 +49,7 @@ import { FleetTrackingWorkspace } from "@/components/fleet-tracking-workspace";
 import { FleetServiceWorkspace } from "@/components/fleet-service-workspace";
 import { FleetReportsWorkspace } from "@/components/fleet-reports-workspace";
 import { FleetVehicleLifecycle } from "@/components/fleet-vehicle-lifecycle";
+import { FleetVehicleLiveStatus } from "@/components/fleet-vehicle-live-status";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { FleetChecklistItem, FleetControlData, FleetControlPayment, FleetControlVehicle, FleetVehicleStatusDefinition, FleetVehicleStatusReason } from "@/lib/fleet-control";
 
@@ -170,6 +171,7 @@ export function FleetControlDashboard({
   const [paymentStatuses, setPaymentStatuses] = useState<string[]>([]);
   const [paymentHeads, setPaymentHeads] = useState<string[]>([]);
   const [vehicleSort, setVehicleSort] = useState("vehicle");
+  const [vehicleView, setVehicleView] = useState<"live" | "registry">("live");
   const [paymentSort, setPaymentSort] = useState("date_desc");
   const [vehicles, setVehicles] = useState(data.vehicles);
   const [payments, setPayments] = useState(data.payments);
@@ -525,8 +527,10 @@ export function FleetControlDashboard({
           </> : null}
 
           {section === "vehicles" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle master</span><h1>Fleet registry</h1><p>Live allocation, availability and document readiness across every station.</p></div>{data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}</div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle control</span><h1>{vehicleView === "live" ? "Live fleet status" : "Fleet registry"}</h1><p>{vehicleView === "live" ? "Station-grouped movement, availability and start-location control." : "Allocation, availability and document readiness across every station."}</p></div>{data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}</div>
+            <nav className="fc-view-switch" aria-label="Vehicle views"><button className={vehicleView === "live" ? "active" : ""} onClick={() => setVehicleView("live")} type="button"><Activity size={16} /> Live status</button><button className={vehicleView === "registry" ? "active" : ""} onClick={() => setVehicleView("registry")} type="button"><Truck size={16} /> Fleet registry</button></nav>
             <FleetScopeFilters {...scopeProps} onStatuses={setVehicleStatuses} statusOptions={uniqueOptions(vehicles.map((item) => item.status))} statuses={vehicleStatuses} /><div className="fc-inline-filter"><FleetMultiSelect allLabel="All vehicle types" label="Vehicle type" onChange={setVehicleOwnerships} options={[{ value: "own", label: "Own" }, { value: "odcd", label: "ODCD" }, { value: "rented", label: "Rented" }]} values={vehicleOwnerships} /></div>
+            {vehicleView === "live" ? <FleetVehicleLiveStatus onManage={setSelectedVehicle} vehicles={filteredVehicles} /> : <>
             <div className="fc-segment-cards"><article><small>Total fleet</small><strong>{vehicles.length}</strong></article><article><small>Active</small><strong>{active}</strong></article><article><small>Under service</small><strong>{underService}</strong></article><article><small>Document attention</small><strong>{attentionVehicles.length}</strong></article></div>
             <div className="fc-table-panel">
               <div className="fc-table-toolbar"><span>{filteredVehicles.length} vehicles</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setVehicleSort(event.target.value)} value={vehicleSort}><option value="vehicle">Vehicle number</option><option value="placement">Placement</option><option value="status">Status</option><option value="document">Document urgency</option></select></label><FleetExportButtons compact report={{ title: "Fleet vehicle registry", subtitle: `As at ${data.today} · active filters applied`, fileName: `fleet-vehicles-${data.today}`, headers: ["Vehicle","Placement","Source","Model","Fuel","Status","Next document","Expiry"], rows: filteredVehicles.map((item) => [item.vehicleNo,item.stationCode,item.ownershipType,item.model,item.fuelType,item.statusLabel,item.nextDocument,item.nextDocumentDate]) }} /></div></div>
@@ -535,6 +539,7 @@ export function FleetControlDashboard({
               </tbody></table></div>
               {!filteredVehicles.length ? <div className="fc-empty"><Search size={32} /><strong>No matching vehicle</strong><p>Change the search or vehicle placement filter.</p></div> : null}
             </div>
+            </>}
           </section> : null}
 
           {section === "documents" ? <FleetDocumentsWorkspace data={data} vehicles={vehicles} /> : null}

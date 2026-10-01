@@ -4,6 +4,7 @@ import { getWheelseyeAccessToken } from "@/lib/wheelseye";
 import { loadWheelseyeMovement } from "@/lib/wheelseye-history";
 import { getAuthorization } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { saveDailyWheelseyeKm } from "@/lib/fleet/gps-storage";
 
 export async function GET(request: Request) {
   const authorization = await getAuthorization();
@@ -19,7 +20,9 @@ export async function GET(request: Request) {
   if (!token) return Response.json({ error: "Wheelseye is disabled or access token is not configured in Settings." }, { status: 400 });
 
   try {
-    return Response.json(await loadWheelseyeMovement(token, vehicle, date));
+    const movement = await loadWheelseyeMovement(token, vehicle, date);
+    await saveDailyWheelseyeKm(companyId, vehicle, date, movement.summary);
+    return Response.json(movement);
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load Wheelseye movement." }, { status: 400 });
   }

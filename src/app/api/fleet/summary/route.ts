@@ -11,24 +11,35 @@ export async function GET() {
   if (!authorization) return Response.json({ error: "Login required." }, { status: 401 });
   const companyId = requireCompanyId(authorization);
   const locationAccess = await resolveFleetLocationAccess(authorization, companyId);
-  const [vehicles, locations, documentTypes, gpsLive, fuelTransactions, dailyKmRows] = await Promise.all([
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const [vehicles, locations, documentTypes, gpsLive, fuelTransactions, dailyKmRows, todayKmRows] = await Promise.all([
     loadVehicles(companyId, locationAccess.stationCodes),
     loadLocations(companyId, locationAccess.stationCodes),
     loadDocumentTypes(companyId),
     loadWheelseyeCurrentLocations(companyId),
     loadFuelTransactions(companyId),
-    loadDailyKm(companyId)
+    loadDailyKm(companyId),
+    loadTodayKm(companyId, today)
   ]);
   const visibleVehicleNos = new Set(vehicles.map((vehicle) => vehicle.vehicle_no));
   const fuelByVehicle = sumFuelByVehicle(fuelTransactions.rows);
   const kmByVehicle = sumKmByVehicle(dailyKmRows.rows);
+  const todayByVehicle = new Map(todayKmRows.rows.map((row) => [row.vehicle_no, row]));
   const vehicleMetrics = vehicles.map((vehicle) => {
     const alerts = documentAlerts(vehicle);
     const fuel = fuelByVehicle.get(vehicle.vehicle_no) ?? { litres: 0, fuelAmount: 0, txns: 0 };
     const km = kmByVehicle.get(vehicle.vehicle_no) ?? 0;
+    const todayMovement = todayByVehicle.get(vehicle.vehicle_no);
     return {
       ...vehicle,
       km,
+      todayKm: Number(todayMovement?.km) || 0,
+      todayMaxSpeed: Number(todayMovement?.max_speed) || 0,
+      todayMovingMinutes: Number(todayMovement?.moving_minutes) || 0,
+      firstMovingAt: todayMovement?.first_moving_at ?? null,
+      lastMovingAt: todayMovement?.last_moving_at ?? null,
+      firstMovingLatitude: nullableNumber(todayMovement?.first_moving_latitude),
+      firstMovingLongitude: nullableNumber(todayMovement?.first_moving_longitude),
       litres: fuel.litres,
       fuelAmount: fuel.fuelAmount,
       maintenanceAmount: 0,
@@ -140,6 +151,9 @@ async function loadLocations(companyId: string, stationCodes: string[] | null) {
       station_code,
       station_name,
       is_active,
+      latitude,
+      longitude,
+      geofence_radius_m,
       providers (code, name),
       location_models (code, name)
     `)
@@ -155,6 +169,9 @@ async function loadLocations(companyId: string, stationCodes: string[] | null) {
   return (data ?? []).map((row) => ({
     code: row.station_code,
     name: row.station_name,
+    latitude: nullableNumber(row.latitude),
+    longitude: nullableNumber(row.longitude),
+    geofenceRadiusM: nullableNumber(row.geofence_radius_m),
     provider: firstRelation(row.providers)?.name ?? firstRelation(row.providers)?.code ?? "",
     model: firstRelation(row.location_models)?.name ?? firstRelation(row.location_models)?.code ?? ""
   }));
@@ -185,6 +202,26 @@ async function loadDailyKm(companyId: string) {
 
   if (error) return { rows: [], error: error.message };
   return { rows: data ?? [], error: null };
+}
+
+async function loadTodayKm(companyId: string, today: string) {
+  if (!supabaseAdmin) return { rows: [], error: "Supabase service role is not configured." };
+  const { data, error } = await supabaseAdmin
+    .from("fleet_daily_km")
+    .select("vehicle_no,movement_date,km,max_speed,moving_minutes,first_moving_at,last_moving_at,first_moving_latitude,first_moving_longitude,calculated_at")
+    .eq("company_id", companyId)
+    .eq("movement_date", today)
+    .neq("review_status", "needs_review")
+    .order("calculated_at", { ascending: false });
+  if (error) return { rows: [], error: error.message };
+  const latest = new Map<string, (typeof data)[number]>();
+  (data ?? []).forEach((row) => { if (!latest.has(row.vehicle_no)) latest.set(row.vehicle_no, row); });
+  return { rows: [...latest.values()], error: null };
+}
+
+function nullableNumber(value: unknown) {
+  const parsed = Number(value);
+  return value == null || value === "" || !Number.isFinite(parsed) ? null : parsed;
 }
 
 function sumFuelByVehicle(rows: Array<{ vehicle_no: string; fuel_quantity: number | string; fuel_amount: number | string }>) {

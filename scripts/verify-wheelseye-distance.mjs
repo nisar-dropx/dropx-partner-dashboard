@@ -10,6 +10,8 @@ const clean = Array.from({ length: 100 }, (_, index) => point(index * 10, 75 + i
 const expected = calc(clean);
 assert.equal(expected.summary.distanceReliable, true);
 assert.ok(expected.summary.km > 9 && expected.summary.km < 10);
+assert.equal(expected.summary.firstMovingLatitude, 11);
+assert.equal(expected.summary.firstMovingLongitude, 75);
 // Real failure pattern: the moving track is interleaved with old stopped coordinates.
 const cached = clean.flatMap(p => [p, { ...point(p.dttimeInEpoch - start + 2, 74.95, 0), ignition: 0 }]);
 const corrected = calc(cached);
