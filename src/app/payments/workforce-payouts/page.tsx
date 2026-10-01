@@ -29,20 +29,8 @@ type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: s
 
 function today() { return todayKolkata(); }
 function currentMonth() { return today().slice(0, 7); }
-function validDate(value?: string) {
-  const candidate = value ?? "";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return "";
-  const parsed = new Date(`${candidate}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === candidate ? candidate : "";
-}
-function validMonth(value?: string) {
-  const candidate = value ?? "";
-  if (!/^\d{4}-\d{2}$/.test(candidate)) return "";
-  const parsed = new Date(`${candidate}-01T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 7) === candidate ? candidate : "";
-}
-function monthLabel(value: string) { return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T00:00:00Z`)); }
-function dateLabel(value: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`)); }
+function validDate(value?: string) { return /^\d{4}-\d{2}-\d{2}$/.test(value ?? "") ? value! : ""; }
+function validMonth(value?: string) { return /^\d{4}-\d{2}$/.test(value ?? "") ? value! : ""; }
 
 function resolvePeriod(params: Record<string, string | string[] | undefined>): ReportPeriod & { fromDate: string; toDate: string; title: string } {
   const mode = params.period === "daily" || params.period === "range" ? params.period : "monthly";
@@ -50,10 +38,10 @@ function resolvePeriod(params: Record<string, string | string[] | undefined>): R
   const day = validDate(typeof params.day === "string" ? params.day : "") || today();
   const from = validDate(typeof params.from === "string" ? params.from : "") || `${month}-01`;
   const to = validDate(typeof params.to === "string" ? params.to : "") || today();
-  if (mode === "daily") return { mode, month, day, from, to, fromDate: day, toDate: day, title: `Daily payout worksheet · ${dateLabel(day)}` };
-  if (mode === "range") return { mode, month, day, from, to, fromDate: from <= to ? from : to, toDate: from <= to ? to : from, title: `Payout worksheet · ${dateLabel(from <= to ? from : to)} to ${dateLabel(from <= to ? to : from)}` };
+  if (mode === "daily") return { mode, month, day, from, to, fromDate: day, toDate: day, title: `Daily payout worksheet · ${day}` };
+  if (mode === "range") return { mode, month, day, from, to, fromDate: from <= to ? from : to, toDate: from <= to ? to : from, title: `Payout worksheet · ${from <= to ? from : to} to ${from <= to ? to : from}` };
   const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1); end.setUTCDate(0);
-  return { mode, month, day, from, to, fromDate: `${month}-01`, toDate: end.toISOString().slice(0, 10), title: `Monthly payout worksheet · ${monthLabel(month)}` };
+  return { mode, month, day, from, to, fromDate: `${month}-01`, toDate: end.toISOString().slice(0, 10), title: `Monthly payout worksheet · ${month}` };
 }
 const metricValue = (row: any, source: string) => source === "amazon_delivery" ? Number(row.amazon_delivery ?? 0)
   : source === "swa_delivery" ? Number(row.swa_delivery ?? 0)
@@ -439,12 +427,10 @@ export const dynamic = "force-dynamic";
 export default async function WorkforcePayoutsPage({ searchParams = {} }: { searchParams?: Record<string, string | string[] | undefined> }) {
   const period = resolvePeriod(searchParams);
   const authorization = await requirePagePermission("workforce_payouts", "access"); const companyId = requireCompanyId(authorization); const { rows, error } = await loadRows(companyId, authorization, period.fromDate, period.toDate);
-  const gross = rows.reduce((sum, row) => sum + row.grossPayment, 0);
-  const ready = rows.filter((row) => row.baseAmount > 0).length;
-  const pendingReview = rows.filter((row) => row.status === "Ready for review").length;
+  const gross = rows.reduce((sum, row) => sum + row.baseAmount, 0); const ready = rows.filter((row) => row.baseAmount > 0).length;
   return <AppShell active="Workforce Payouts" pageCode="workforce_payouts"><PageHead eyebrow="Payments" title="Workforce Payouts" subtitle="Calculate provider production and attendance-based workforce earnings, then review additions and deductions before payout." action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
     <WorkforceFinanceQueue companyId={companyId} authorization={authorization} status={typeof searchParams.payrollStatus === "string" ? searchParams.payrollStatus : undefined}/>
     <h2>Live estimate worksheet · not a payment instruction</h2>
-    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load payouts</strong><p className="subtle">{error}</p></div></section> : <><div className="stat-grid four"><div className="stat-card"><span>Payment allocations</span><strong>{rows.length}</strong></div><div className="stat-card"><span>Payment rows</span><strong>{ready}</strong></div><div className="stat-card"><span>Gross amount</span><strong>Rs {gross.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong></div><div className="stat-card"><span>Pending review</span><strong>{pendingReview}</strong></div></div><section className="panel"><div className="panel-head payout-period-head"><div><h2>{period.title}</h2><p className="subtle">Only workforce in your allocated locations is shown. Provider production and attendance-based amounts use effective dates and recorded attendance.</p></div><WorkforcePayoutPeriodFilter mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable rows={rows} /></section></>}
+    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load payouts</strong><p className="subtle">{error}</p></div></section> : <><div className="stat-grid four"><div className="stat-card"><span>Payment allocations</span><strong>{rows.length}</strong></div><div className="stat-card"><span>Payment rows</span><strong>{ready}</strong></div><div className="stat-card"><span>Gross amount</span><strong>Rs {gross.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong></div><div className="stat-card"><span>Pending review</span><strong>{ready}</strong></div></div><section className="panel"><div className="panel-head payout-period-head"><div><h2>{period.title}</h2><p className="subtle">Only workforce in your allocated locations is shown. Provider production and attendance-based amounts use effective dates and recorded attendance.</p></div><WorkforcePayoutPeriodFilter mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable rows={rows} /></section></>}
   </AppShell>;
 }

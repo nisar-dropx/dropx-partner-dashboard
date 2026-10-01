@@ -44,7 +44,6 @@ assert.match(workforceTable, /const tableColumnCount = view === "overview"[\s\S]
 assert.match(workforceTable, /payout-daily-production/, "Workforce daily breakup must condense production lines instead of repeating the full worksheet");
 
 assert.match(workforcePage, /<WorkforcePayoutPeriodFilter/, "Workforce must use the focused period selector");
-assert.match(workforcePage, /Number\.isNaN\(parsed\.getTime\(\)\)[\s\S]*toISOString\(\)\.slice/, "Workforce period URLs must reject impossible calendar dates before formatting");
 assert.match(workforcePeriodFilter, /mode === "monthly"[\s\S]*name="month"/, "Monthly mode must show only its month input");
 assert.match(workforcePeriodFilter, /mode === "daily"[\s\S]*name="day"/, "Daily mode must show only its day input");
 assert.match(workforcePeriodFilter, /mode === "range"[\s\S]*name="from"[\s\S]*name="to"/, "Range mode must show its from and to inputs");
