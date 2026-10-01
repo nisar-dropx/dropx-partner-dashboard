@@ -35,6 +35,13 @@ const memberships=[{user_id:'u',role_id:'r',has_all_location_access:false,locati
 assert.deepEqual(scope.resolveCodRecipients([station,other],memberships,roles,profiles,new Set(['r']),'example.com')[0].stationIds,['s1']);
 assert.equal(scope.resolveCodRecipients([station],memberships,roles,profiles,new Set(),'example.com').length,0);
 assert.equal(scope.resolveCodRecipients([station],memberships,roles,profiles,new Set(['r']),'other.com').length,0);
+for(const code of ['OPERATIONS_LOCATION','LOCATION']){const recipient=scope.resolveCodRecipients([station],memberships,[{...roles[0],code}],profiles,new Set(['r']),'example.com')[0];assert.deepEqual(recipient.stationIds,['s1'],'EDSP/XPT locations receive only their station');assert.equal(recipient.canViewPendingReport,false);}
+assert.equal(scope.resolveCodRecipients([station],memberships,[{...roles[0],code:'TECH'}],profiles,new Set(['r']),'example.com').length,0,'Non-Operations technical users must not receive COD emails');
+assert.equal(scope.resolveCodRecipients([station],memberships,[{...roles[0],code:'OPERATIONS_CM'}],profiles,new Set(['r']),'example.com').length,1);
+for(const model of ['EDSP','XPT','AMXL'])assert.equal(scope.isCodMailStation({...station,location_models:{code:model}}),true);
+for(const model of ['ODH','MDH'])assert.equal(scope.isCodMailStation({...station,providers:{code:'FLIPKART'},location_models:{code:model}}),true);
+assert.equal(scope.isCodMailStation({...station,location_models:{code:'NOW'}}),false);
+assert.equal(scope.isCodMailStation({...station,providers:{code:'FLIPKART'},location_models:{code:'XPT'}}),false);
 const nowStore={...station,id:'now',station_code:'TCC3',station_email:'store@example.com',location_models:{code:'NOW',name:'NOW'}};
 for(const location_models of [{code:'NOW'},[{code:'NOW'}],{name:'Amazon Now'},{code:'AMAZON_NOW'}])assert.equal(scope.isAmazonNowMailStation({...nowStore,location_models}),true);
 assert.equal(scope.isAmazonNowMailStation(station),false);

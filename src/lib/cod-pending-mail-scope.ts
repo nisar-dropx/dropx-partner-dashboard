@@ -7,21 +7,27 @@ type Membership={user_id:string;role_id:string;has_all_location_access:boolean;l
 type Role={id:string;code:string;location_access_mode:string|null};
 type Profile={id:string;email:string|null;full_name:string|null};
 export const isAmazonNowMailStation=isAmazonNowStation;
+export const isCodOperationsMailRole=(code:string)=>code.trim().toUpperCase()==='OWNER'||(code.trim().toUpperCase().startsWith('OPERATIONS_')&&!/(^|_)LOCATION$/.test(code.trim().toUpperCase()));
+export const isCodLocationMailRole=(code:string)=>['LOCATION','OPERATIONS_LOCATION'].includes(code.trim().toUpperCase());
+function relationValues(relation:unknown){const row=(Array.isArray(relation)?relation[0]:relation) as {code?:string;name?:string}|null;return [row?.code,row?.name].map(value=>String(value||'').trim().toUpperCase().replace(/[_-]+/g,' ').replace(/\s+/g,' '));}
+export function isCodMailStation(station:PendingStation){const providers=relationValues(station.providers),models=relationValues(station.location_models);return isCodReportStation(station)&&((providers.includes('AMAZON')&&models.some(model=>['EDSP','XPT','AMXL'].includes(model)))||(providers.includes('FLIPKART')&&models.some(model=>model==='ODH'||model==='MDH')));}
 export function resolveCodRecipients(stations:PendingStation[],memberships:Membership[],roles:Role[],profiles:Profile[],permittedRoles:Set<string>,domain:string,stationDirectory:PendingStation[]=stations){
  // Apply the same exclusion when preparing a report and immediately before SMTP.
  // Check the complete master: excluded store mailboxes must stay excluded even
  // when report rows were prefiltered or the account has a wider location scope.
- const excludedMailboxes=new Set(stationDirectory.filter(s=>isAmazonNowStation(s)||s.is_active!==true).map(s=>s.station_email?.trim().toLowerCase()).filter(Boolean));
- const mailStations=stations.filter(isCodReportStation);
+ const excludedMailboxes=new Set(stationDirectory.filter(s=>!isCodMailStation(s)).map(s=>s.station_email?.trim().toLowerCase()).filter(Boolean));
+ const mailStations=stations.filter(isCodMailStation);
  const byEmail=new Map<string,CodMailRecipient>();
  for(const profile of profiles){const email=String(profile.email||'').trim().toLowerCase();if(!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)||email.split('@')[1]!==domain.toLowerCase())continue;
   if(excludedMailboxes.has(email))continue;
   const userMemberships=memberships.filter(m=>m.user_id===profile.id),userRoles=roles.filter(r=>userMemberships.some(m=>m.role_id===r.id));
-  if(!userRoles.some(r=>r.code==='OWNER'||permittedRoles.has(r.id)))continue;
-  const all=userMemberships.some(m=>m.has_all_location_access)||userRoles.some(r=>r.location_access_mode==='all_locations'||r.code==='OWNER');
+  const operationsRoles=userRoles.filter(r=>isCodOperationsMailRole(r.code)&&(r.code==='OWNER'||permittedRoles.has(r.id)));
+  const locationRoles=userRoles.filter(r=>isCodLocationMailRole(r.code)&&permittedRoles.has(r.id));
+  if(!operationsRoles.length&&!locationRoles.length)continue;
+  const all=operationsRoles.length>0&&(userMemberships.some(m=>m.has_all_location_access)||operationsRoles.some(r=>r.location_access_mode==='all_locations'||r.code==='OWNER'));
   const ids=new Set(userMemberships.flatMap(m=>m.location_scope_ids||[]));
-  const allowed=mailStations.filter(s=>all||ids.has(s.id)||(userRoles.some(r=>r.code==='LOCATION')&&s.station_email?.trim().toLowerCase()===email));
-  if(!allowed.length)continue;const prior=byEmail.get(email);byEmail.set(email,{email,name:profile.full_name||email,canViewPendingReport:(prior?.canViewPendingReport!==false)&&!userRoles.some(r=>/(^|_)LOCATION$/.test(r.code.trim().toUpperCase())),stationIds:[...new Set([...(prior?.stationIds||[]),...allowed.map(s=>s.id)])].sort()});
+  const allowed=mailStations.filter(s=>all||ids.has(s.id)||(locationRoles.length>0&&s.station_email?.trim().toLowerCase()===email));
+  if(!allowed.length)continue;const prior=byEmail.get(email);byEmail.set(email,{email,name:profile.full_name||email,canViewPendingReport:operationsRoles.length>0,stationIds:[...new Set([...(prior?.stationIds||[]),...allowed.map(s=>s.id)])].sort()});
  }
  return [...byEmail.values()];
 }
