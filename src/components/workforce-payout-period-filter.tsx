@@ -11,10 +11,9 @@ type WorkforcePayoutPeriodFilterProps = {
   day: string;
   from: string;
   to: string;
-  payrollStatus?: string;
 };
 
-export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: initialMode, month, day, from, to, payrollStatus = "" }: WorkforcePayoutPeriodFilterProps) {
+export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: initialMode, month, day, from, to }: WorkforcePayoutPeriodFilterProps) {
   const [mode, setMode] = useState<PayoutPeriodMode>(initialMode);
   const [selectedMonth, setSelectedMonth] = useState(month);
   const [selectedDay, setSelectedDay] = useState(day);
@@ -23,7 +22,6 @@ export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: init
 
   return <form className="payout-period-filter" method="get">
     <input name="audience" type="hidden" value={audience} />
-    <input name="payrollStatus" type="hidden" value={payrollStatus} />
     <label>
       View by
       <select className="field" name="period" value={mode} onChange={(event) => setMode(event.target.value as PayoutPeriodMode)}>

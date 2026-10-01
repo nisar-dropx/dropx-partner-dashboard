@@ -9,7 +9,6 @@ const workforcePage = read("src/app/payments/workforce-payouts/page.tsx");
 const workforceTable = read("src/components/workforce-payout-table.tsx");
 const globalStyles = read("src/app/globals.css");
 const workforcePeriodFilter = read("src/components/workforce-payout-period-filter.tsx");
-const workforceFinanceQueue = read("src/components/workforce-finance-queue.tsx");
 const helperPayoutLoader = read("src/lib/helper-payout-loader.ts");
 const directAllocationPage = read("src/app/provider-mapping/direct-pay/page.tsx");
 const directAllocationAction = read("src/app/provider-mapping/direct-pay/actions.ts");
@@ -73,7 +72,7 @@ assert.match(workforcePeriodFilter, /mode === "daily"[\s\S]*name="day"/, "Daily 
 assert.match(workforcePeriodFilter, /mode === "range"[\s\S]*name="from"[\s\S]*name="to"/, "Range mode must show its from and to inputs");
 assert.match(workforceTable, /scrollTo\(\{ left: 0, behavior: "smooth" \}\)/, "Opening a breakup from a horizontally scrolled row must reveal its left-aligned details");
 assert.doesNotMatch(workforcePage, /Live estimate worksheet|Only workforce in your allocated locations|Calculate provider production/, "Workforce payout top copy must stay compact");
-assert.doesNotMatch(workforceFinanceQueue, /Frozen associate amounts from Workforce/, "Confirmed payroll must not repeat the workflow explainer");
+assert.doesNotMatch(workforcePage, /WorkforceFinanceQueue|Confirmed .* payroll|payrollStatus/, "Workforce and Helper payout tabs must not render the confirmed-payroll panel");
 
 assert.match(workforcePage, />Workforce<\/Link>[\s\S]*>Helpers<\/Link>/, "Payouts must expose Workforce and Helpers in the same window");
 assert.match(workforcePage, /loadHelperPayoutRows/, "The Helpers tab must use its isolated payout loader");
@@ -96,8 +95,7 @@ assert.match(directAllocationPage, /from\("helper_payment_allocations"\)/, "Help
 assert.match(directAllocationAction, /save_helper_payment_allocation/, "Helper allocations must save through the validated Helper RPC");
 assert.match(directAllocationWorksheet, /name="subject_type"[\s\S]*value=\{audience\}/, "The allocation worksheet must post the selected Workforce or Helpers population");
 assert.match(workforcePeriodFilter, /name="audience"/, "Changing a payout period must preserve the selected population tab");
-assert.match(workforcePeriodFilter, /name="payrollStatus"/, "Changing a payout period must preserve the confirmed-payroll status filter");
-assert.match(workforceFinanceQueue, /name="period"[\s\S]*name="month"[\s\S]*name="day"[\s\S]*name="from"[\s\S]*name="to"/, "Changing the confirmed-payroll status must preserve the selected payout period");
+assert.doesNotMatch(workforcePeriodFilter, /payrollStatus/, "The removed confirmed-payroll filter must not remain in the period selector");
 assert.match(workforcePage, /<WorkforcePayoutTable key=\{audience\}/, "Switching Workforce and Helpers must reset client-side row filters");
 
 console.log("Workforce payment breakup verification passed.");
