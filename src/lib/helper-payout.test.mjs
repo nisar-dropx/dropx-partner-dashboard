@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   biometricIdBelongsOnlyToProfile,
   helperBiometricIdVariants,
+  helperPayoutPopulationIds,
   normalizeHelperBiometricId,
   uniqueHelperByBiometricId
 } from "./helper-payout.ts";
@@ -12,6 +13,13 @@ test("normalizes helper biometric ids across device padding variants", () => {
   assert.equal(normalizeHelperBiometricId("000000"), "0");
   assert.deepEqual(helperBiometricIdVariants(["00230878"]), ["00230878", "230878"]);
   assert.deepEqual(helperBiometricIdVariants(["77"]), ["77", "000077", "00000077"]);
+});
+
+test("includes current helpers before payment allocation while preserving allocated history", () => {
+  assert.deepEqual(helperPayoutPopulationIds(
+    [{ id: "helper-current" }, { id: "helper-allocated" }],
+    [{ helper_id: "helper-allocated" }, { helper_id: "helper-history" }]
+  ), ["helper-current", "helper-allocated", "helper-history"]);
 });
 
 test("only resolves a biometric id when it belongs to one helper", () => {

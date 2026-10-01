@@ -12,6 +12,16 @@ export function helperBiometricIdVariants(values: unknown[]) {
   })));
 }
 
+export function helperPayoutPopulationIds(
+  currentHelpers: Array<{ id?: unknown }>,
+  allocations: Array<{ helper_id?: unknown }>
+) {
+  return Array.from(new Set([
+    ...currentHelpers.map((helper) => String(helper.id ?? "").trim()),
+    ...allocations.map((allocation) => String(allocation.helper_id ?? "").trim())
+  ].filter(Boolean)));
+}
+
 export function uniqueHelperByBiometricId<T extends { id: string; biometric_id?: string | null }>(helpers: T[]) {
   const candidates = new Map<string, T[]>();
   for (const helper of helpers) {
