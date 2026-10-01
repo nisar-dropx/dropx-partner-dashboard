@@ -38,7 +38,9 @@ function matchesFilters(row: WorkforcePayoutRow, search: string, location: strin
     && (status === "all" || row.status === status);
 }
 
-export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", rows }: { audience?: "workforce" | "helpers"; rows: WorkforcePayoutRow[] }) {
+  const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
+  const subjectLabelLower = subjectLabel.toLowerCase();
   const [search, setSearch] = useState("");
   const [location, setLocation] = useState("all");
   const [provider, setProvider] = useState("all");
@@ -152,17 +154,17 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
     const paymentMethodHeaders = paymentMethodColumns.map((item) => `${item.label} Amount`);
     const productionHeaders = productionColumns.flatMap((item) => [`${item.label} Count`, `${item.label} Rate`, `${item.label} Amount`]);
     const deductionHeaders = deductionColumns.map((item) => `${item.label} Deduction`);
-    const columns = ["DropX ID","Registered Worker","Payment Source","Source ID","Location Code","Provider / Allocation","Model / Basis","Payment Method","Work Days","Attendance Source",...paymentMethodHeaders,...productionHeaders,"Base Amount","Additional Payments","Gross Payment",...deductionHeaders,"Gross Deductions","Net Pay","PAN-Aadhaar Status","Status"];
+    const columns = ["DropX ID",`Registered ${subjectLabel}`,"Payment Source","Source ID","Location Code","Provider / Allocation","Model / Basis","Payment Method","Work Days","Attendance Source",...paymentMethodHeaders,...productionHeaders,"Base Amount","Additional Payments","Gross Payment",...deductionHeaders,"Gross Deductions","Net Pay","PAN-Aadhaar Status","Status"];
     const csv = [columns, ...exportableRows.map((row) => [row.dropxId,row.name,row.providerMemberName,row.providerMemberId,row.location,row.provider,row.model,row.paymentMethod,workDaysValue(row.workDays, row.workDaysSource),row.workDaysSource,...paymentMethodColumns.map((column) => row.paymentMethodBreakdown.find((item) => item.id === column.id)?.amount ?? 0),...productionColumns.flatMap((column) => { const item = row.productionBreakdown.find((value) => value.code === column.code); return [item?.count ?? 0,item?.rate ?? 0,item?.amount ?? 0]; }),row.baseAmount,row.additions,row.grossPayment,...deductionColumns.map((column) => row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0),row.deductions,row.netAmount,row.panAadhaarStatus,row.status])]
       .map((line) => line.map((value) => `"${String(value).replaceAll('"','""')}"`).join(",")).join("\r\n");
-    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = "workforce-payouts.csv"; link.click(); URL.revokeObjectURL(link.href);
+    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `${audience}-payouts.csv`; link.click(); URL.revokeObjectURL(link.href);
   }
 
   return <>
     <div className="payout-search-strip">
       <label>
-        <span className="payout-toolbar-label">Search workforce</span>
-        <input className="field" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="DropX ID, worker, provider ID or name" />
+        <span className="payout-toolbar-label">Search {subjectLabelLower}</span>
+        <input className="field" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={audience === "helpers" ? "DropX ID, helper, location or name" : "DropX ID, worker, provider ID or name"} />
       </label>
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
@@ -179,10 +181,10 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
     </div> : null}
     <div className="table-wrap payout-table-wrap" ref={tableWrapRef}>
       <table className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
-        <caption className="sr-only">Workforce payout totals</caption>
+        <caption className="sr-only">{subjectLabel} payout totals</caption>
         <thead><tr>
           <th className="payout-sticky-id" scope="col">DropX ID</th>
-          <th className="payout-sticky-worker" scope="col">Worker / payment source</th>
+          <th className="payout-sticky-worker" scope="col">{subjectLabel} / payment source</th>
           <th scope="col">Location</th>
           <th scope="col">Allocation</th>
           <th scope="col">Payment Method</th>
@@ -261,12 +263,12 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
                 </td>
               </tr> : null
             ].filter(Boolean) as ReactElement[];
-          }) : <tr><td className="empty-cell" colSpan={tableColumnCount}>No workforce payouts match the selected period and filters.</td></tr>}
+          }) : <tr><td className="empty-cell" colSpan={tableColumnCount}>No {subjectLabelLower} payouts match the selected period and filters.</td></tr>}
         </tbody>
       </table>
     </div>
     <div
-      aria-label="Workforce payout horizontal scrollbar"
+      aria-label={`${subjectLabel} payout horizontal scrollbar`}
       className={`payout-sticky-scroll ${stickyScrollFrame.visible ? "visible" : ""}`}
       ref={stickyScrollRef}
       role="region"

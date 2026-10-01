@@ -18,7 +18,7 @@ import {
 } from "@/lib/workforce-payment-allocation";
 
 type DesignationRow = { id: string; code: string; name: string };
-type WorkforceRow = {
+type PersonRow = {
   id: string;
   dropx_id: string | null;
   full_name: string;
@@ -29,7 +29,7 @@ type WorkforceRow = {
 };
 type AllocationRow = {
   id: string;
-  workforce_id: string;
+  person_id: string;
   payment_method_id: string;
   payment_values: Record<string, unknown> | null;
   effective_from: string;
@@ -83,8 +83,9 @@ export const dynamic = "force-dynamic";
 export default async function DirectPaymentAllocationsPage({
   searchParams = {}
 }: {
-  searchParams?: { q?: string };
+  searchParams?: { audience?: string; q?: string };
 }) {
+  const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
   const authorization = await requirePagePermission("provider_mapping", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.provider_mapping;
@@ -123,42 +124,60 @@ export default async function DirectPaymentAllocationsPage({
   const designationById = new Map(designations.map((designation) => [designation.id, designation]));
   const designationByName = new Map(designations.flatMap((designation) => [designation.code, designation.name]
     .map((value) => [String(value).trim().toLowerCase(), designation] as const)));
-  let workers: WorkforceRow[] = [];
-  if (!loadError && designations.length) {
-    const workerResult = await readAllRows(supabaseAdmin.from("workforce")
-      .select("id, dropx_id, full_name, location_id, designation_id, designation, date_of_join")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .is("deleted_at", null)
-      .order("dropx_id")
-      .order("id"));
-    loadError = workerResult.error;
-    workers = ((workerResult.data ?? []) as WorkforceRow[]).filter((worker) => Boolean(
-      designationById.get(String(worker.designation_id ?? ""))
-      ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase())
+  let people: PersonRow[] = [];
+  if (!loadError && (audience === "helpers" || designations.length)) {
+    const personResult = audience === "helpers"
+      ? await readAllRows(supabaseAdmin.from("helpers")
+        .select("id, dropx_id, full_name, location_id, designation, date_of_join")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .eq("onboarding_status", "active")
+        .order("dropx_id")
+        .order("id"))
+      : await readAllRows(supabaseAdmin.from("workforce")
+        .select("id, dropx_id, full_name, location_id, designation_id, designation, date_of_join")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .is("deleted_at", null)
+        .order("dropx_id")
+        .order("id"));
+    loadError = personResult.error;
+    people = ((personResult.data ?? []) as PersonRow[]).filter((person) => audience === "helpers" || Boolean(
+      designationById.get(String(person.designation_id ?? ""))
+      ?? designationByName.get(String(person.designation ?? "").trim().toLowerCase())
     ));
   }
 
   const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
   const allowedLocations = new Set(authorization.locationScopeIds);
   const activeStationIds = new Set((stationResult.data ?? []).map((station) => station.id));
-  workers = workers.filter((worker) => Boolean(worker.location_id
-    && activeStationIds.has(worker.location_id)
-    && (allLocations || allowedLocations.has(worker.location_id))));
+  people = people.filter((person) => Boolean(person.location_id
+    && activeStationIds.has(person.location_id)
+    && (allLocations || allowedLocations.has(person.location_id))));
 
   let allocations: AllocationRow[] = [];
-  if (!loadError && workers.length) {
-    const allocationResult = await readAllRows(supabaseAdmin.from("workforce_payment_allocations")
-      .select("id, workforce_id, payment_method_id, payment_values, effective_from, effective_to, status")
-      .eq("company_id", companyId)
-      .neq("status", "cancelled")
-      .order("effective_from", { ascending: false })
-      .order("created_at", { ascending: false })
-      .order("id"));
+  if (!loadError && people.length) {
+    const allocationResult = audience === "helpers"
+      ? await readAllRows(supabaseAdmin.from("helper_payment_allocations")
+        .select("id, helper_id, payment_method_id, payment_values, effective_from, effective_to, status")
+        .eq("company_id", companyId)
+        .neq("status", "cancelled")
+        .order("effective_from", { ascending: false })
+        .order("created_at", { ascending: false })
+        .order("id"))
+      : await readAllRows(supabaseAdmin.from("workforce_payment_allocations")
+        .select("id, workforce_id, payment_method_id, payment_values, effective_from, effective_to, status")
+        .eq("company_id", companyId)
+        .neq("status", "cancelled")
+        .order("effective_from", { ascending: false })
+        .order("created_at", { ascending: false })
+        .order("id"));
     loadError = allocationResult.error;
-    const workerIds = new Set(workers.map((worker) => worker.id));
-    allocations = ((allocationResult.data ?? []) as AllocationRow[])
-      .filter((allocation) => workerIds.has(allocation.workforce_id));
+    const personIds = new Set(people.map((person) => person.id));
+    allocations = (allocationResult.data ?? []).map((allocation: any) => ({
+      ...allocation,
+      person_id: String(allocation.helper_id ?? allocation.workforce_id)
+    })).filter((allocation: AllocationRow) => personIds.has(allocation.person_id));
   }
 
   const allMethods = paymentMethods((methodResult.data ?? []) as PaymentMethodRow[]);
@@ -171,28 +190,30 @@ export default async function DirectPaymentAllocationsPage({
       ? `${station.station_code} - ${station.station_name}`
       : station.station_code
   ]));
-  const historyByWorkforce = new Map<string, AllocationRow[]>();
-  allocations.forEach((allocation) => historyByWorkforce.set(allocation.workforce_id, [
-    ...(historyByWorkforce.get(allocation.workforce_id) ?? []),
+  const historyByPerson = new Map<string, AllocationRow[]>();
+  allocations.forEach((allocation) => historyByPerson.set(allocation.person_id, [
+    ...(historyByPerson.get(allocation.person_id) ?? []),
     allocation
   ]));
   const today = todayKolkata();
-  const rows: DirectPaymentAllocationRow[] = workers.map((worker) => {
-    const history = historyByWorkforce.get(worker.id) ?? [];
+  const rows: DirectPaymentAllocationRow[] = people.map((person) => {
+    const history = historyByPerson.get(person.id) ?? [];
     const current = history.find((allocation) => allocation.status !== "cancelled"
       && allocation.effective_from <= today
       && (!allocation.effective_to || allocation.effective_to >= today))
       ?? history.find((allocation) => allocation.status === "active" && !allocation.effective_to)
       ?? null;
-    const defaultEffectiveFrom = worker.date_of_join && worker.date_of_join > today ? worker.date_of_join : today;
+    const defaultEffectiveFrom = person.date_of_join && person.date_of_join > today ? person.date_of_join : today;
     return {
-      workforceId: worker.id,
-      dropxId: worker.dropx_id || "Not assigned",
-      fullName: worker.full_name,
-      stationLabel: stationById.get(worker.location_id ?? "") ?? "Location unavailable",
-      designationLabel: designationLabelById.get(worker.designation_id ?? "")
-        ?? (() => { const designation = designationByName.get(String(worker.designation ?? "").trim().toLowerCase()); return designation ? `${designation.code} - ${designation.name}` : "Designation unavailable"; })(),
-      dateOfJoin: worker.date_of_join ?? "",
+      personId: person.id,
+      dropxId: person.dropx_id || "Not assigned",
+      fullName: person.full_name,
+      stationLabel: stationById.get(person.location_id ?? "") ?? "Location unavailable",
+      designationLabel: audience === "helpers"
+        ? person.designation || "Designation unavailable"
+        : designationLabelById.get(person.designation_id ?? "")
+          ?? (() => { const designation = designationByName.get(String(person.designation ?? "").trim().toLowerCase()); return designation ? `${designation.code} - ${designation.name}` : "Designation unavailable"; })(),
+      dateOfJoin: person.date_of_join ?? "",
       allocationId: current?.id ?? "",
       paymentMethodId: current?.payment_method_id ?? "",
       currentMethodName: methodNameById.get(current?.payment_method_id ?? "") ?? "",
@@ -205,13 +226,15 @@ export default async function DirectPaymentAllocationsPage({
     };
   });
 
-  const migrationMissing = loadError?.message?.includes("workforce_payment_allocations")
+  const migrationMissing = loadError?.message?.includes(audience === "helpers" ? "helper_payment_allocations" : "workforce_payment_allocations")
     || loadError?.message?.includes("provider_mapping_required");
 
   return <AppShell active="ID Mapping" pageCode="provider_mapping">
     <PageHead
-      eyebrow="Provider-independent workforce pay"
-      subtitle="Assign attendance, workday or fixed-amount payment methods to Field Operations designations that do not require provider mapping."
+      eyebrow="Provider-independent pay"
+      subtitle={audience === "helpers"
+        ? "Assign attendance, workday or fixed-amount payment methods to Helpers. Provider mapping is never required."
+        : "Assign attendance, workday or fixed-amount payment methods to Field Operations designations that do not require provider mapping."}
       title="Direct pay allocations"
     />
     <nav aria-label="ID mapping views" className="performance-tabs">
@@ -219,9 +242,13 @@ export default async function DirectPaymentAllocationsPage({
       <Link href="/provider-mapping/provider-first">Provider member first</Link>
       <Link className="active" href="/provider-mapping/direct-pay">Direct pay allocations</Link>
     </nav>
+    <nav aria-label="Direct pay allocation categories" className="performance-tabs">
+      <Link className={audience === "workforce" ? "active" : undefined} href="/provider-mapping/direct-pay">Workforce</Link>
+      <Link className={audience === "helpers" ? "active" : undefined} href="/provider-mapping/direct-pay?audience=helpers">Helpers</Link>
+    </nav>
     {loadError ? <section className="panel message-panel error"><div className="panel-body">
       <strong>{migrationMissing ? "Database update required" : "Unable to load direct pay allocations"}</strong>
-      <p className="subtle">{migrationMissing ? "Apply the designation provider-mapping policy and workforce payment allocations migrations, then refresh this page." : loadError.message}</p>
+      <p className="subtle">{migrationMissing ? "Apply the direct payment allocation database migration, then refresh this page." : loadError.message}</p>
     </div></section> : null}
     {flash.error || flash.notice ? <section className={`panel message-panel ${flash.error ? "error" : "success"}`}><div className="panel-body">
       <strong>{flash.error ? "Action required" : "Completed"}</strong>
@@ -232,6 +259,6 @@ export default async function DirectPaymentAllocationsPage({
       <p className="subtle">No active payment method contains only attendance, workday or fixed-amount fields. Production fields cannot be used here.</p>
       <Link className="button secondary compact" href="/master/payment-methods">Open Payment Methods</Link>
     </div></section> : null}
-    {!loadError ? <DirectPaymentAllocationWorksheet canEdit={canEdit} initialQuery={searchParams.q} methods={eligibleMethods} productionMethodCount={productionMethodCount} rows={rows} /> : null}
+    {!loadError ? <DirectPaymentAllocationWorksheet audience={audience} canEdit={canEdit} initialQuery={searchParams.q} methods={eligibleMethods} productionMethodCount={productionMethodCount} rows={rows} /> : null}
   </AppShell>;
 }

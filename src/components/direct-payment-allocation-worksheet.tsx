@@ -5,7 +5,7 @@ import { saveDirectPaymentAllocation } from "@/app/provider-mapping/direct-pay/a
 import type { DirectPaymentMethod } from "@/lib/workforce-payment-allocation";
 
 export type DirectPaymentAllocationRow = {
-  workforceId: string;
+  personId: string;
   dropxId: string;
   fullName: string;
   stationLabel: string;
@@ -28,11 +28,13 @@ function scheduleLabel(value: "per_hour" | "per_day" | "per_month" | null | unde
 }
 
 function AllocationCells({
+  audience,
   canEdit,
   formId,
   methods,
   row
 }: {
+  audience: "workforce" | "helpers";
   canEdit: boolean;
   formId: string;
   methods: DirectPaymentMethod[];
@@ -51,7 +53,8 @@ function AllocationCells({
   return (
     <>
       <td style={{ minWidth: 210 }}>
-        <input form={formId} name="workforce_id" type="hidden" value={row.workforceId} />
+        <input form={formId} name="subject_type" type="hidden" value={audience} />
+        <input form={formId} name={audience === "helpers" ? "helper_id" : "workforce_id"} type="hidden" value={row.personId} />
         <input form={formId} name="payment_values_json" type="hidden" value={JSON.stringify(methodValues)} />
         <select
           className="select"
@@ -112,18 +115,21 @@ function AllocationCells({
 }
 
 export function DirectPaymentAllocationWorksheet({
+  audience = "workforce",
   canEdit,
   initialQuery = "",
   methods,
   productionMethodCount,
   rows
 }: {
+  audience?: "workforce" | "helpers";
   canEdit: boolean;
   initialQuery?: string;
   methods: DirectPaymentMethod[];
   productionMethodCount: number;
   rows: DirectPaymentAllocationRow[];
 }) {
+  const subjectLabel = audience === "helpers" ? "helpers" : "workforce";
   const [query, setQuery] = useState(initialQuery);
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -136,11 +142,11 @@ export function DirectPaymentAllocationWorksheet({
     <section className="panel">
       <div className="panel-body" style={{ display: "grid", gap: 14 }}>
         <div hidden>
-          {filtered.map((row) => <form action={saveDirectPaymentAllocation} id={`direct-allocation-${row.workforceId}`} key={row.workforceId} />)}
+          {filtered.map((row) => <form action={saveDirectPaymentAllocation} id={`direct-allocation-${audience}-${row.personId}`} key={row.personId} />)}
         </div>
         <div style={{ alignItems: "end", display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "space-between" }}>
           <label style={{ display: "grid", gap: 5, minWidth: 280 }}>
-            <span className="subtle">Search direct-pay workforce</span>
+            <span className="subtle">Search direct-pay {subjectLabel}</span>
             <input className="field" onChange={(event) => setQuery(event.target.value)} placeholder="DropX ID, name, location or designation" type="search" value={query} />
           </label>
           <div className="subtle">
@@ -169,13 +175,13 @@ export function DirectPaymentAllocationWorksheet({
             </tr>
           </thead>
           <tbody>
-            {filtered.length ? filtered.map((row) => <tr key={row.workforceId}>
+            {filtered.length ? filtered.map((row) => <tr key={row.personId}>
               <td><strong>{row.dropxId}</strong></td>
               <td>{row.fullName}</td>
               <td>{row.stationLabel}</td>
               <td>{row.designationLabel}</td>
-              <AllocationCells canEdit={canEdit} formId={`direct-allocation-${row.workforceId}`} methods={methods} row={row} />
-            </tr>) : <tr><td className="empty-cell" colSpan={10}>No direct-pay workforce records match this search.</td></tr>}
+              <AllocationCells audience={audience} canEdit={canEdit} formId={`direct-allocation-${audience}-${row.personId}`} methods={methods} row={row} />
+            </tr>) : <tr><td className="empty-cell" colSpan={10}>No direct-pay {subjectLabel} records match this search.</td></tr>}
           </tbody>
         </table>
       </div>

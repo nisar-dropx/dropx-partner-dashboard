@@ -5,14 +5,16 @@ import { useState } from "react";
 type PayoutPeriodMode = "monthly" | "daily" | "range";
 
 type WorkforcePayoutPeriodFilterProps = {
+  audience?: "workforce" | "helpers";
   mode: PayoutPeriodMode;
   month: string;
   day: string;
   from: string;
   to: string;
+  payrollStatus?: string;
 };
 
-export function WorkforcePayoutPeriodFilter({ mode: initialMode, month, day, from, to }: WorkforcePayoutPeriodFilterProps) {
+export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: initialMode, month, day, from, to, payrollStatus = "" }: WorkforcePayoutPeriodFilterProps) {
   const [mode, setMode] = useState<PayoutPeriodMode>(initialMode);
   const [selectedMonth, setSelectedMonth] = useState(month);
   const [selectedDay, setSelectedDay] = useState(day);
@@ -20,6 +22,8 @@ export function WorkforcePayoutPeriodFilter({ mode: initialMode, month, day, fro
   const [selectedTo, setSelectedTo] = useState(to);
 
   return <form className="payout-period-filter" method="get">
+    <input name="audience" type="hidden" value={audience} />
+    <input name="payrollStatus" type="hidden" value={payrollStatus} />
     <label>
       View by
       <select className="field" name="period" value={mode} onChange={(event) => setMode(event.target.value as PayoutPeriodMode)}>
