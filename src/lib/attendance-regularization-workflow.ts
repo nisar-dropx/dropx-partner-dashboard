@@ -73,23 +73,21 @@ async function managerLevels(companyId: string) {
   return Math.max(1, Math.min(Number(settings.data?.regularization_manager_levels ?? 2), 2));
 }
 
-/** Company setting can ask for two managers, but a route with level 2 off stops at the reporting manager. */
+/** Two organisation-line managers, unless the route is explicitly the immediate manager only. */
 async function routeManagerLevelCap(companyId: string, routeId: string) {
   const route = await db().from("hr_approval_workflow_routes")
-    .select("level_2_required")
+    .select("level_2_required,level_1_search_scope")
     .eq("company_id", companyId)
     .eq("id", routeId)
     .maybeSingle();
   if (route.error) throw new Error(route.error.message);
-  return route.data?.level_2_required ? 2 : 1;
+  if (route.data?.level_2_required) return 2;
+  if (route.data?.level_1_search_scope === "immediate_reporting_manager") return 1;
+  return 2;
 }
 
 function isAttendanceExecutiveStop(designation: { name: string; code: string | null } | null) {
-  if (!designation) return false;
-  if (isManagingPartnerDesignation(designation)) return true;
-  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
-  const name = designation.name.toLowerCase();
-  return code === "NH" || code === "NATIONAL_HEAD" || name.includes("national head");
+  return isManagingPartnerDesignation(designation);
 }
 
 async function resolveChainFallbackSteps(input: {
