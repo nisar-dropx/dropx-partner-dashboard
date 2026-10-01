@@ -24,6 +24,7 @@ import {
   summarizeWorkDays
 } from "@/lib/workforce-payout-summary";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
+import { currentAdminAccessSurface } from "@/lib/access-surface";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -458,7 +459,8 @@ export const dynamic = "force-dynamic";
 export default async function WorkforcePayoutsPage({ searchParams = {} }: { searchParams?: Record<string, string | string[] | undefined> }) {
   const period = resolvePeriod(searchParams);
   const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
-  const authorization = await requirePagePermission("workforce_payouts", "access");
+  const pageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const { rows, error } = audience === "helpers"
     ? await loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
@@ -476,7 +478,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   };
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
 
-  return <AppShell active="Workforce Payouts" pageCode="workforce_payouts"><PageHead title="Workforce Payments" action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
+  return <AppShell active="Workforce Payouts" pageCode={pageCode}><PageHead title="Workforce Payments" action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
     <nav aria-label="Payment population" className="performance-tabs">
       <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
       <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
