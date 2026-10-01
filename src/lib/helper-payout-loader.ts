@@ -312,7 +312,7 @@ export async function loadHelperPayoutRows(
             date,
             baseAmount: calculation.total,
             missing: calculation.missing || (needsAttendanceSource && !hasBiometricEnrolment),
-            lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount })),
+            lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, componentType: "amount" as const, count: line.count, rate: line.rate, amount: line.amount })),
             workDayUnits: calculation.attendanceUnit,
             attendanceSource: hasBiometricEnrolment ? "Biometric" : "Biometric enrolment unavailable",
             captureMethod: "biometric" as const,
@@ -341,7 +341,7 @@ export async function loadHelperPayoutRows(
     }
 
     const dailyBreakdownWithState = [...dailyByDate.values()].sort((left, right) => right.date.localeCompare(left.date));
-    const lineMap = new Map<string, { code: string; label: string; count: number; rate: number; amount: number }>();
+    const lineMap = new Map<string, WorkforcePayoutRow["productionBreakdown"][number]>();
     for (const day of dailyBreakdownWithState) for (const line of day.lines) {
       const current = lineMap.get(line.code) ?? { ...line, count: 0, amount: 0 };
       current.count += line.count;

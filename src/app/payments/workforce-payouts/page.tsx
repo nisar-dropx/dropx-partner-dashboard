@@ -256,7 +256,13 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const productionRules = allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).flatMap((item: any) => {
       const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
       if (!field?.code || field.field_type !== "production" || !metric?.source_key) return [];
-      return [{ code: String(field.code), label: productionLabel(String(field.code), String(field.label || field.code)), source: String(metric.source_key), rate: Number(mapping.payment_values?.[field.code] ?? 0) }];
+      return [{
+        code: String(field.code),
+        label: productionLabel(String(field.code), String(field.label || field.code)),
+        componentType: "production" as const,
+        source: String(metric.source_key),
+        rate: Number(mapping.payment_values?.[field.code] ?? 0)
+      }];
     });
     const attendanceComponents = attendanceComponentsFor(mapping);
     const attendanceDates = attendanceComponents.length && worker?.id && activeFrom <= activeTo
@@ -266,7 +272,17 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     let missingAttendanceConfiguration = false;
     const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = dates.sort().reverse().map((date) => {
       const rows = eligibleDaily.filter((daily) => String(daily.work_date) === date);
-      const productionLines = productionRules.map((rule) => { const count = rows.reduce((sum, daily) => sum + metricValue(daily, rule.source), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
+      const productionLines = productionRules.map((rule) => {
+        const count = rows.reduce((sum, daily) => sum + metricValue(daily, rule.source), 0);
+        return {
+          code: rule.code,
+          label: rule.label,
+          componentType: rule.componentType,
+          count,
+          rate: rule.rate,
+          amount: count * rule.rate
+        };
+      });
       const ownedAttendanceComponents = attendanceDates.includes(date) ? attendanceComponents : [];
       const workerDateKey = `${worker?.id}|${date}`;
       const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
@@ -283,7 +299,14 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         }
       );
       missingAttendanceConfiguration ||= ownedAttendanceComponents.length > 0 && attendancePay.missing;
-      const attendanceLines = attendancePay.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount }));
+      const attendanceLines = attendancePay.lines.map((line) => ({
+        code: line.code,
+        label: line.label,
+        componentType: "amount" as const,
+        count: line.count,
+        rate: line.rate,
+        amount: line.amount
+      }));
       const lines = [...productionLines, ...attendanceLines];
       const baseAmount = Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
       return {
@@ -295,7 +318,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         methodAmounts: summarizePaymentMethodAmounts([{ methodId: paymentMethodId, label: paymentMethodName, amount: baseAmount }])
       };
     });
-    const lineMap = new Map<string, { code: string; label: string; count: number; rate: number; amount: number }>();
+    const lineMap = new Map<string, WorkforcePayoutRow["productionBreakdown"][number]>();
     for (const day of dailyBreakdown) for (const line of day.lines) {
       const current = lineMap.get(line.code) ?? { ...line, count: 0, amount: 0 };
       current.count += line.count; current.amount += line.amount; lineMap.set(line.code, current);
@@ -367,7 +390,14 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
           date,
           baseAmount: calculation.total,
           missing: calculation.missing || (needsAttendanceSource && captureSetting.capture_method === "shipment_data"),
-          lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, count: line.count, rate: line.rate, amount: line.amount })),
+          lines: calculation.lines.map((line) => ({
+            code: line.code,
+            label: line.label,
+            componentType: "amount" as const,
+            count: line.count,
+            rate: line.rate,
+            amount: line.amount
+          })),
           workDayUnits: calculation.attendanceUnit,
           attendanceSource: captureSetting.capture_method === "shipment_data" ? "Shipment data unavailable" : attendanceCaptureLabel(captureSetting.capture_method),
           captureMethod: captureSetting.capture_method,
@@ -389,7 +419,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       });
     }
     const dailyBreakdown = [...dailyByDate.values()].sort((left, right) => right.date.localeCompare(left.date));
-    const lineMap = new Map<string, { code: string; label: string; count: number; rate: number; amount: number }>();
+    const lineMap = new Map<string, WorkforcePayoutRow["productionBreakdown"][number]>();
     for (const day of dailyBreakdown) for (const line of day.lines) {
       const current = lineMap.get(line.code) ?? { ...line, count: 0, amount: 0 };
       current.count += line.count;

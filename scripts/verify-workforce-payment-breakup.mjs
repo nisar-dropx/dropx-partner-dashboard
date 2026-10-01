@@ -7,6 +7,7 @@ const oneRoute = read("apps/connect/app/api/connect/workforce-payments/route.ts"
 const oneBreakup = read("apps/connect/src/components/connect-daily-payment-breakdown.tsx");
 const workforcePage = read("src/app/payments/workforce-payouts/page.tsx");
 const workforceTable = read("src/components/workforce-payout-table.tsx");
+const workforceExport = read("src/lib/workforce-payout-export.ts");
 const globalStyles = read("src/app/globals.css");
 const workforcePeriodFilter = read("src/components/workforce-payout-period-filter.tsx");
 const helperPayoutLoader = read("src/lib/helper-payout-loader.ts");
@@ -45,12 +46,16 @@ assert.match(workforceTable, /<th className="payout-money" scope="col">Net Pay<\
 assert.match(workforceTable, /<th scope="col">Payment Method<\/th>/, "The main Workforce payout view must label the Payment Method column");
 assert.match(workforceTable, /<td><strong>\{row\.paymentMethod\}<\/strong><\/td>/, "Each main Workforce payout row must show its payment method");
 assert.doesNotMatch(workforceTable, /overview-method-|daily-method-/, "The visible worksheet must not render global payment-method columns");
-assert.match(workforceTable, /"Attendance Source"/, "The Workforce payout export must identify the attendance source");
+assert.match(workforceExport, /"Attendance Source"/, "The Workforce payout export must identify the attendance source");
 assert.match(workforceTable, /DropX associate/, "Workforce must identify the registered associate");
 assert.match(workforceTable, /Partner ID/, "Workforce must show the mapped partner ID without coupling the shared UI to Amazon");
 assert.match(workforceTable, /Partner name/, "Workforce must show the source partner-account name");
 assert.doesNotMatch(workforceTable, /PayoutTableView|VIEW_OPTIONS|aria-pressed/, "Workforce must use one compact totals worksheet instead of multiple dense views");
 assert.match(workforceTable, /Export full CSV/, "Workforce must make the full-fidelity export clear");
+assert.match(workforceTable, /buildWorkforcePayoutCsv\(exportableRows, subjectLabel\)/, "Workforce and Helper exports must use the tested human-readable CSV builder");
+assert.doesNotMatch(workforceExport, /paymentMethodBreakdown/, "Export must not duplicate component amounts with payment-method aggregate columns");
+assert.match(workforceExport, /componentType === "production"[\s\S]*Count[\s\S]*Rate \(INR\)[\s\S]*Amount \(INR\)/, "Only production components must export Count, Rate, and Amount");
+assert.match(workforceExport, /:\s*\[`\$\{item\.label\} Rate \(INR\)`, `\$\{item\.label\} Amount \(INR\)`\]/, "Attendance and fixed components must omit misleading Count columns");
 assert.match(workforceTable, /const tableColumnCount = 11/, "Workforce detail and empty rows must span the compact totals worksheet");
 assert.match(workforceTable, /Payment totals[\s\S]*Deduction totals/, "Workforce breakup must show period payment and deduction totals");
 assert.match(workforceTable, /row\.productionBreakdown\.filter\(\(item\) => item\.amount !== 0\)/, "Workforce breakup must show only the worker's non-zero payment totals");
