@@ -67,6 +67,8 @@ export type OpsRosterDecision = {
   periodStart: string;
   periodEnd: string;
   status: string;
+  createdAt: string | null;
+  updatedAt: string | null;
   decidedAt: string | null;
   reason: string | null;
   draftedBy: string | null;
@@ -630,7 +632,7 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
   const [manpower, planResult, shiftResult] = await Promise.all([
     loadOpsStationManpower(companyId, [location], today),
     db().from("hr_roster_plans")
-      .select("id,name,location_id,period_start,period_end,status,decision_note,decided_at,approval_history,roster_kind,planning_channel,effective_from,superseded_at,revision_no,submitted_at,created_at,created_by,updated_by,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes),hr_roster_approval_steps(stage_no,stage_type,status,decision_note,decided_by,approver_user_id)")
+      .select("id,name,location_id,period_start,period_end,status,decision_note,decided_at,approval_history,roster_kind,planning_channel,effective_from,superseded_at,revision_no,submitted_at,created_at,updated_at,created_by,updated_by,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes),hr_roster_approval_steps(stage_no,stage_type,status,decision_note,decided_at,decided_by,approver_user_id)")
       .eq("company_id", companyId)
       .eq("location_id", location.id)
       .in("roster_kind", ["dated", "recurring_weekly"])
@@ -706,6 +708,8 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
       periodStart: plan.periodStart,
       periodEnd: plan.periodEnd,
       status: plan.status,
+      createdAt: source.created_at ?? null,
+      updatedAt: source.updated_at ?? null,
       decidedAt: source.decided_at ?? null,
       reason: decisionReason(source),
       draftedBy: textOrNull(source.created_by),

@@ -349,6 +349,7 @@
 .dirtyLegend { border: 2px solid #f2a93b; background: #fff; }
 .approvalLine { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-top: 1px solid #e5e9ef; color: #667085; background: #fffaf6; }
 .approvalLine > span { display: grid; gap: 2px; }
+.approvalLine > .approvalActions { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px; }
 .approvalLine strong { color: #8a3d22; font-size: 10px; }
 .approvalLine small { font-size: 9px; }
 .dragGhost { position: fixed; z-index: 90; transform: translate(12px, 12px); display: flex; align-items: center; gap: 4px; padding: 7px 9px; border: 1px solid #de7a51; border-radius: 8px; color: #7d361f; background: #fff; box-shadow: 0 10px 24px rgba(24,35,58,.2); font-size: 9px; font-weight: 800; pointer-events: none; }

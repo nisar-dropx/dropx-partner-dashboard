@@ -651,6 +651,37 @@ async function publishPlan(companyId: string, authorization: AuthorizationContex
   if (approved.error || !approved.data) throw new Error(approved.error?.message ?? "This roster is no longer available.");
 }
 
+export async function cancelOpsRosterDraft(planId: string): Promise<ActionResult> {
+  try {
+    const authorization = await requirePagePermission("ops_rostering", "edit");
+    const companyId = requireCompanyId(authorization);
+    await assertPlanner(authorization);
+    const plan = await loadPlan(companyId, authorization, planId);
+    if (!["draft", "returned"].includes(plan.status)) {
+      return { ok: false, message: "Only an open draft can be cancelled. The approved roster is unchanged." };
+    }
+    const channel = await db().from("hr_roster_plans").select("planning_channel").eq("company_id", companyId).eq("id", planId).maybeSingle();
+    if (channel.error) throw new Error(channel.error.message);
+    if (channel.data?.planning_channel !== "ops") {
+      return { ok: false, message: "This roster was not drafted in Ops, so it cannot be cancelled here." };
+    }
+    const removed = await db().from("hr_roster_plans")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("id", planId)
+      .eq("planning_channel", "ops")
+      .in("status", ["draft", "returned"])
+      .select("id")
+      .maybeSingle();
+    if (removed.error) throw new Error(removed.error.message);
+    if (!removed.data) return { ok: false, message: "This draft is no longer available to cancel." };
+    refreshRosterViews();
+    return { ok: true, message: "Draft cancelled. The approved roster is unchanged." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "The draft could not be cancelled." };
+  }
+}
+
 export async function submitOpsRoster(planId: string): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("ops_rostering", "edit");

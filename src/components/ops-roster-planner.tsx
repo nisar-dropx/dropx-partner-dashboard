@@ -14,7 +14,7 @@ import {
 } from "react";
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
+import { cancelOpsRosterDraft, importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import { OpsRosterDecisionHistory } from "@/components/ops-roster-decision-history";
 import type { OpsRosterDecision, OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
 import { formatShiftClock } from "@/lib/roster-plan-preference";
@@ -689,6 +689,32 @@ export function OpsRosterPlanner({
     });
   }
 
+  function cancelDraft() {
+    const planId = activePlanIdRef.current;
+    if (!planId) return;
+    if (!window.confirm("Cancel this draft? The approved roster will stay as it is.")) return;
+    const savedDraft = plan?.status === "draft" || plan?.status === "returned" || planId !== plan?.id;
+    if (!savedDraft) {
+      editingEnabledRef.current = false;
+      setEditingEnabled(false);
+      setDirtyKeys(new Set());
+      setMessage({ tone: "success", text: "Draft cancelled. The approved roster is unchanged." });
+      router.refresh();
+      return;
+    }
+    startSaving(async () => {
+      const result = await cancelOpsRosterDraft(planId);
+      setMessage({ tone: result.ok ? "success" : "error", text: result.message });
+      if (result.ok) {
+        expectedPlanShapeRef.current = null;
+        editingEnabledRef.current = false;
+        setEditingEnabled(false);
+        setDirtyKeys(new Set());
+        router.refresh();
+      }
+    });
+  }
+
   function submit() {
     const planId = activePlanIdRef.current;
     if (!planId) return;
@@ -940,7 +966,7 @@ export function OpsRosterPlanner({
     </div>
 
     <div className={styles.legend}><span><i className={styles.workingLegend} /> Working shift</span><span><i className={styles.offLegend} /> Week off</span><span><i className={styles.holidayLegend} /> Holiday</span><span><i className={styles.dirtyLegend} /> Unsaved change</span>{dirtyKeys.size ? <strong><Check size={13} /> Review and save {dirtyKeys.size} changes</strong> : editingEnabled ? <strong>No unsaved changes</strong> : <strong>Saved roster pattern</strong>}</div>
-    {editingEnabled && activePlanId ? <footer className={styles.approvalLine}><span><strong>{dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : approvalRequired ? "Ready to submit" : "Ready to apply"}</strong><small>{dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving)}>{approvalRequired ? <Send size={14} /> : <Check size={14} />} {approvalRequired ? "Send for approval" : "Apply roster"}</button></footer> : null}
+    {editingEnabled && activePlanId ? <footer className={styles.approvalLine}><span><strong>{dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : approvalRequired ? "Ready to submit" : "Ready to apply"}</strong><small>{dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><span className={styles.approvalActions}><button type="button" className="button secondary compact" onClick={cancelDraft} disabled={isSaving}>Cancel draft</button><button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving)}>{approvalRequired ? <Send size={14} /> : <Check size={14} />} {approvalRequired ? "Send for approval" : "Apply roster"}</button></span></footer> : null}
     {canUseExcel ? <section className={styles.excelPanel} aria-label="Station Excel upload">
       <div className={styles.excelHead}>
         <span className={styles.excelIcon} aria-hidden="true"><Upload size={16} /></span>

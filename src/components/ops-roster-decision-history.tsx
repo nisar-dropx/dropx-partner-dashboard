@@ -18,6 +18,21 @@ function dateLabel(date: string) {
   return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
 }
 
+function dateTimeLabel(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Asia/Kolkata"
+  }).format(parsed);
+}
+
 function statusLabel(status: string) {
   if (status === "approved") return "Approved";
   if (status === "returned") return "Returned";
@@ -68,13 +83,17 @@ export function OpsRosterDecisionHistory({
           rows.set(key, row);
         }
         const peopleRows = [...rows.values()].sort((left, right) => left.name.localeCompare(right.name));
+        const createdAt = dateTimeLabel(decision.createdAt);
+        const updatedAt = dateTimeLabel(decision.updatedAt);
+        const approvedAt = decision.status === "approved" ? dateTimeLabel(decision.decidedAt) : null;
         return <article key={decision.id} className={styles.historyCard}>
           <header>
             <em className={styles.historyStatus} data-status={decision.status}>{statusLabel(decision.status)}</em>
             <strong>{dateLabel(decision.periodStart)} to {dateLabel(decision.periodEnd)}</strong>
           </header>
-          <p className={styles.historyMeta}>Drafted by {decision.draftedBy ?? "—"}. Last edit by {decision.editedBy ?? decision.draftedBy ?? "—"}.</p>
+          <p className={styles.historyMeta}>Drafted by {decision.draftedBy ?? "—"}{createdAt ? ` on ${createdAt}` : ""}. Last edit by {decision.editedBy ?? decision.draftedBy ?? "—"}{updatedAt ? ` on ${updatedAt}` : ""}.</p>
           {decision.returnedBy ? <p>Returned by {decision.returnedBy}{decision.reason ? ` · ${decision.reason}` : ""}</p> : <p>{decision.reason ?? "No decision note recorded."}</p>}
+          {approvedAt ? <p>Approved on {approvedAt}.</p> : null}
           {decision.line.length ? <ul>{decision.line.map((step, index) => <li key={`${decision.id}:line:${index}`}>{step.stage}{step.status ? ` · ${statusLabel(step.status)}` : ""}{step.actor ? ` · ${step.actor}` : ""}{step.reason ? ` · ${step.reason}` : ""}</li>)}</ul> : null}
           {decision.rounds.length ? <ul>{decision.rounds.map((round) => <li key={`${decision.id}:${round.round}`}>Earlier round {round.round}{round.status ? ` · ${statusLabel(round.status)}` : ""}{round.actor ? ` · ${round.actor}` : ""}{round.reason ? ` · ${round.reason}` : ""}</li>)}</ul> : null}
           {peopleRows.length ? <div className={styles.historyGridWrap}>
