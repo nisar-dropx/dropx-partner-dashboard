@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
+import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendStationAuditCompletedEmail } from "@/lib/ops-pulse/station-audit-email";
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
-import { canManageStationAudits, canUseStationAuditLocation, createStationAudit, ensureAuditProgramme, isGoogleDriveUrl, loadAuditStations, loadStationAuditMaster, writeStationAuditEvent, type AuditChecklistItem, type AuditStation, type AuditType, type StationAudit } from "@/lib/ops-pulse/station-audits";
+import { canManageStationAudits, canRespondToStationAudits, canUseStationAuditLocation, createStationAudit, isGoogleDriveUrl, isStationAuditEligible, loadAuditStations, loadStationAuditMaster, writeStationAuditEvent, type AuditChecklistItem, type AuditStation, type AuditType, type StationAudit } from "@/lib/ops-pulse/station-audits";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type ActionResult = { ok: true; message: string } | { ok: false; message: string };
@@ -34,40 +34,37 @@ function parseShipments(value: string) {
 }
 
 async function readAudit(companyId: string, auditId: string, authorization: AuthorizationContext) {
-  const result = await db().from("ops_station_audits").select("*,ops_audit_types(*),stations(id,station_code,station_name,city,cluster,cluster_name,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email)")
-    .eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  const [result, master] = await Promise.all([
+    db().from("ops_station_audits").select("*,ops_audit_types(*),stations(id,station_code,station_name,city,cluster,cluster_name,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email,location_model_id,is_ho)")
+    .eq("company_id", companyId).eq("id", auditId).maybeSingle(),
+    loadStationAuditMaster(companyId)
+  ]);
   if (result.error) throw new Error(result.error.message);
-  if (!result.data || !canUseStationAuditLocation(authorization, result.data.location_id)) throw new Error("This audit is unavailable in your station scope.");
+  const station = Array.isArray(result.data?.stations) ? result.data.stations[0] : result.data?.stations;
+  if (!result.data || !station || !canUseStationAuditLocation(authorization, result.data.location_id) || !isStationAuditEligible(station, master.programmeSettings)) throw new Error("This audit is unavailable in your station scope.");
   return result.data as StationAudit & { ops_audit_types: AuditType; stations: AuditStation };
 }
 
 async function assertManager(action: "add" | "edit") {
   const authorization = await requirePagePermission("station_audits", action);
-  if (!canManageStationAudits(authorization)) throw new Error("Your Audit access is view only.");
-  return authorization;
+  const companyId = requireCompanyId(authorization);
+  const master = await loadStationAuditMaster(companyId);
+  if (!canManageStationAudits(authorization, master.programmeSettings)) throw new Error("Only roles selected in Audit Master can schedule and manage audits.");
+  return { authorization, companyId, master };
 }
 
 export async function scheduleStationAudit(formData: FormData): Promise<ActionResult> {
   try {
-    const authorization = await assertManager("add"); const companyId = requireCompanyId(authorization);
+    const { authorization, companyId } = await assertManager("add");
     const { date, time } = auditDateTime(clean(formData.get("scheduled_date")), clean(formData.get("scheduled_time")));
     const audit = await createStationAudit({ companyId, authorization, auditTypeId: clean(formData.get("audit_type_id")), locationId: clean(formData.get("location_id")), scheduledDate: date, scheduledTime: time, periodSlot: clean(formData.get("period_slot")) || undefined, assignedName: clean(formData.get("assigned_name")) || undefined, reason: clean(formData.get("reason")) || undefined });
     refreshAudits(); return { ok: true, message: `${audit.audit_number} scheduled.` };
   } catch (error) { return message(error); }
 }
 
-export async function generateStationAuditProgramme(): Promise<ActionResult> {
-  try {
-    const authorization = await assertManager("add"); const companyId = requireCompanyId(authorization);
-    const generated = await ensureAuditProgramme(companyId);
-    refreshAudits();
-    return { ok: true, message: generated.errors.length ? `${generated.created} audits generated. ${generated.errors.join(" ")}` : `${generated.created} audit slots generated from Audit Master.` };
-  } catch (error) { return message(error); }
-}
-
 export async function beginStationAudit(auditId: string): Promise<ActionResult> {
   try {
-    const authorization = await assertManager("edit"); const companyId = requireCompanyId(authorization); const audit = await readAudit(companyId, auditId, authorization);
+    const { authorization, companyId } = await assertManager("edit"); const audit = await readAudit(companyId, auditId, authorization);
     if (!['scheduled', 'in_progress'].includes(audit.status_code)) throw new Error("Only scheduled audits can be started.");
     const update = await db().from("ops_station_audits").update({ status_code: "in_progress", started_at: audit.started_at ?? new Date().toISOString(), assigned_to: authorization.userId, assigned_name: authorization.fullName, assigned_email: authorization.email }).eq("id", auditId).eq("company_id", companyId);
     if (update.error) throw new Error(update.error.message);
@@ -78,7 +75,7 @@ export async function beginStationAudit(auditId: string): Promise<ActionResult> 
 
 export async function submitStationAudit(formData: FormData): Promise<ActionResult> {
   try {
-    const authorization = await assertManager("edit"); const companyId = requireCompanyId(authorization); const auditId = clean(formData.get("audit_id"));
+    const { authorization, companyId } = await assertManager("edit"); const auditId = clean(formData.get("audit_id"));
     const audit = await readAudit(companyId, auditId, authorization);
     if (!['scheduled', 'in_progress', 'under_review', 'awaiting_station_response'].includes(audit.status_code)) throw new Error("This audit has already been closed.");
     const master = await loadStationAuditMaster(companyId);
@@ -173,8 +170,10 @@ export async function submitStationAudit(formData: FormData): Promise<ActionResu
 export async function respondToStationAudit(formData: FormData): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("station_audits", "access"); const companyId = requireCompanyId(authorization); const auditId = clean(formData.get("audit_id"));
+    const master = await loadStationAuditMaster(companyId);
+    if (!canRespondToStationAudits(authorization, master.programmeSettings)) throw new Error("Your role is not configured to respond to station audits.");
     const audit = await readAudit(companyId, auditId, authorization);
-    if (!hasPermission(authorization, "station_audits", "add") && !hasPermission(authorization, "station_audits", "edit")) throw new Error("Your Audit access is view only.");
+    if (audit.status_code !== "awaiting_station_response" || audit.station_response_status !== "requested") throw new Error("This audit is not currently awaiting a station response.");
     const body = clean(formData.get("response")); if (!body) throw new Error("Add a response or progress update.");
     const comment = await db().from("ops_station_audit_comments").insert({ company_id: companyId, audit_id: audit.id, body, audience: "managers", requests_station_response: false, created_by: authorization.userId, author_name: authorization.fullName, author_email: authorization.email });
     if (comment.error) throw new Error(comment.error.message);
@@ -200,7 +199,7 @@ export async function respondToStationAudit(formData: FormData): Promise<ActionR
 
 export async function addAuditManagerComment(formData: FormData): Promise<ActionResult> {
   try {
-    const authorization = await assertManager("edit"); const companyId = requireCompanyId(authorization); const audit = await readAudit(companyId, clean(formData.get("audit_id")), authorization);
+    const { authorization, companyId } = await assertManager("edit"); const audit = await readAudit(companyId, clean(formData.get("audit_id")), authorization);
     const body = clean(formData.get("comment")); if (!body) throw new Error("Write a follow-up before sending it.");
     const askResponse = clean(formData.get("request_station_response")) === "yes";
     const inserted = await db().from("ops_station_audit_comments").insert({ company_id: companyId, audit_id: audit.id, body, audience: "station", requests_station_response: askResponse, created_by: authorization.userId, author_name: authorization.fullName, author_email: authorization.email });
@@ -216,7 +215,7 @@ export async function addAuditManagerComment(formData: FormData): Promise<Action
 
 export async function closeStationAudit(auditId: string): Promise<ActionResult> {
   try {
-    const authorization = await assertManager("edit"); const companyId = requireCompanyId(authorization); const audit = await readAudit(companyId, auditId, authorization);
+    const { authorization, companyId } = await assertManager("edit"); const audit = await readAudit(companyId, auditId, authorization);
     const open = await db().from("ops_station_audit_actions").select("id").eq("company_id", companyId).eq("audit_id", audit.id).neq("status_code", "completed").limit(1);
     if (open.error) throw new Error(open.error.message); if (open.data?.length) throw new Error("Complete or return the outstanding corrective actions before closing this audit.");
     const update = await db().from("ops_station_audits").update({ status_code: "closed", station_response_status: "accepted" }).eq("company_id", companyId).eq("id", audit.id);

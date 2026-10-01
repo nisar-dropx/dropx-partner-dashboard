@@ -31,7 +31,10 @@ export type AuditChecklistItem = {
   evidence_rule: string; action_rule: string; default_severity_code: string | null; sort_order: number; is_active: boolean;
 };
 export type AuditOption = { id: string; option_group: string; code: string; label: string; description: string | null; metadata: Record<string, unknown>; sort_order: number; is_active: boolean };
-export type AuditStation = { id: string; station_code: string; station_name: string | null; city: string | null; cluster: string | null; cluster_name: string | null; station_email: string | null; station_manager_email: string | null; cluster_manager_email: string | null; ops_manager_email: string | null; finance_manager_email: string | null };
+export type AuditStation = { id: string; station_code: string; station_name: string | null; city: string | null; cluster: string | null; cluster_name: string | null; station_email: string | null; station_manager_email: string | null; cluster_manager_email: string | null; ops_manager_email: string | null; finance_manager_email: string | null; location_model_id: string | null; is_ho: boolean };
+export type AuditProgrammeSettings = { company_id: string; scheduler_role_ids: string[]; responder_role_ids: string[]; excluded_location_model_ids: string[]; excluded_location_ids: string[]; exclude_head_office: boolean };
+export type AuditRole = { id: string; code: string; name: string; product_code: string | null };
+export type AuditLocationModel = { id: string; code: string; name: string };
 export type StationAudit = {
   id: string; audit_number: string; audit_type_id: string; location_id: string; cycle_key: string; period_slot: string; scheduled_for: string;
   scheduled_reason: string | null; schedule_source: string; status_code: string; assigned_to: string | null; assigned_name: string | null;
@@ -64,6 +67,7 @@ export type StationAuditWorkspace = {
   responses: AuditResponse[];
   cashCounts: CashCount[];
   shipments: AuditShipment[];
+  programmeSettings: AuditProgrammeSettings;
 };
 
 function db() {
@@ -75,9 +79,19 @@ export function canUseStationAuditLocation(authorization: Pick<AuthorizationCont
   return authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(locationId);
 }
 
-export function canManageStationAudits(authorization: AuthorizationContext) {
+export function canManageStationAudits(authorization: AuthorizationContext, settings: AuditProgrammeSettings) {
+  return authorization.isMasterOwner || authorization.effectiveRoleIds.some((roleId) => settings.scheduler_role_ids.includes(roleId));
+}
+
+export function canRespondToStationAudits(authorization: AuthorizationContext, settings: AuditProgrammeSettings) {
   const permission = authorization.permissions.station_audits;
-  return Boolean(authorization.isMasterOwner || authorization.isMasterCompany || permission?.canAdd || permission?.canEdit);
+  return Boolean((permission?.canAdd || permission?.canEdit) && authorization.effectiveRoleIds.some((roleId) => settings.responder_role_ids.includes(roleId)));
+}
+
+export function isStationAuditEligible(station: Pick<AuditStation, "id" | "location_model_id" | "is_ho">, settings: AuditProgrammeSettings) {
+  return !settings.excluded_location_ids.includes(station.id) &&
+    !settings.excluded_location_model_ids.includes(station.location_model_id ?? "") &&
+    !(settings.exclude_head_office && station.is_ho);
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -110,24 +124,50 @@ function mapItem(row: any): AuditChecklistItem { return { ...row, response_optio
 function mapOption(row: any): AuditOption { return { ...row, metadata: record(row.metadata) } as AuditOption; }
 
 export async function loadStationAuditMaster(companyId: string) {
-  const [types, sections, items, options] = await Promise.all([
+  const [types, sections, items, options, programmeSettings] = await Promise.all([
     db().from("ops_audit_types").select("*").eq("company_id", companyId).order("sort_order").order("name"),
     db().from("ops_audit_checklist_sections").select("*").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("name"),
     db().from("ops_audit_checklist_items").select("*").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("label"),
-    db().from("ops_audit_reference_options").select("*").eq("company_id", companyId).eq("is_active", true).order("option_group").order("sort_order").order("label")
+    db().from("ops_audit_reference_options").select("*").eq("company_id", companyId).eq("is_active", true).order("option_group").order("sort_order").order("label"),
+    db().from("ops_audit_programme_settings").select("company_id,scheduler_role_ids,responder_role_ids,excluded_location_model_ids,excluded_location_ids,exclude_head_office").eq("company_id", companyId).maybeSingle()
   ]);
-  const error = types.error || sections.error || items.error || options.error;
+  const error = types.error || sections.error || items.error || options.error || programmeSettings.error;
   if (error) throw new Error(error.message);
   return {
     auditTypes: (types.data ?? []).map(mapType),
     sections: (sections.data ?? []) as AuditSection[],
     checklistItems: (items.data ?? []).map(mapItem),
-    options: (options.data ?? []).map(mapOption)
+    options: (options.data ?? []).map(mapOption),
+    programmeSettings: {
+      company_id: companyId,
+      scheduler_role_ids: stringList(programmeSettings.data?.scheduler_role_ids),
+      responder_role_ids: stringList(programmeSettings.data?.responder_role_ids),
+      excluded_location_model_ids: stringList(programmeSettings.data?.excluded_location_model_ids),
+      excluded_location_ids: stringList(programmeSettings.data?.excluded_location_ids),
+      exclude_head_office: programmeSettings.data?.exclude_head_office === true
+    } satisfies AuditProgrammeSettings
   };
 }
 
-export async function loadAuditStations(companyId: string, authorization: Pick<AuthorizationContext, "hasAllLocationAccess" | "locationScopeIds">) {
-  let query = db().from("stations").select("id,station_code,station_name,city,cluster,cluster_name,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email")
+export async function loadAuditMasterConfiguration(companyId: string) {
+  const [master, roles, locationModels, stations] = await Promise.all([
+    loadStationAuditMaster(companyId),
+    db().from("user_roles").select("id,code,name,product_code").eq("company_id", companyId).eq("is_active", true).or("product_code.eq.operations,code.eq.LOCATION").order("product_code").order("name"),
+    db().from("location_models").select("id,code,name").eq("company_id", companyId).eq("is_active", true).order("name"),
+    db().from("stations").select("id,station_code,station_name,city,location_model_id,is_ho").eq("company_id", companyId).eq("is_active", true).eq("hide_from_location_list", false).order("station_code")
+  ]);
+  const error = roles.error || locationModels.error || stations.error;
+  if (error) throw new Error(error.message);
+  return {
+    ...master,
+    roles: (roles.data ?? []) as AuditRole[],
+    locationModels: (locationModels.data ?? []) as AuditLocationModel[],
+    allStations: (stations.data ?? []) as Array<Pick<AuditStation, "id" | "station_code" | "station_name" | "city" | "location_model_id" | "is_ho">>
+  };
+}
+
+export async function loadAuditStations(companyId: string, authorization: Pick<AuthorizationContext, "hasAllLocationAccess" | "locationScopeIds">, settings: AuditProgrammeSettings) {
+  let query = db().from("stations").select("id,station_code,station_name,city,cluster,cluster_name,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email,location_model_id,is_ho")
     .eq("company_id", companyId).eq("is_active", true).eq("hide_from_location_list", false).order("station_code");
   if (!authorization.hasAllLocationAccess) {
     if (!authorization.locationScopeIds.length) return [] as AuditStation[];
@@ -135,18 +175,23 @@ export async function loadAuditStations(companyId: string, authorization: Pick<A
   }
   const result = await query;
   if (result.error) throw new Error(result.error.message);
-  return (result.data ?? []) as AuditStation[];
+  return ((result.data ?? []) as AuditStation[]).filter((station) => isStationAuditEligible(station, settings));
 }
 
-export async function loadStationAuditWorkspace(companyId: string, authorization: AuthorizationContext, from: string, to: string): Promise<StationAuditWorkspace> {
-  const [master, stations] = await Promise.all([loadStationAuditMaster(companyId), loadAuditStations(companyId, authorization)]);
+export async function loadStationAuditWorkspace(companyId: string, authorization: AuthorizationContext, from: string, to: string, stationOnly = false): Promise<StationAuditWorkspace> {
+  const master = await loadStationAuditMaster(companyId);
+  const stations = await loadAuditStations(companyId, authorization, master.programmeSettings);
   const stationIds = stations.map((station) => station.id);
   if (!stationIds.length) return { ...master, stations, audits: [], actions: [], comments: [], evidence: [], responses: [], cashCounts: [], shipments: [] };
-  const auditsResult = await db().from("ops_station_audits")
+  let auditsQuery = db().from("ops_station_audits")
     .select("*,ops_audit_types(code,name,requires_video_link,default_response_hours,video_link_help),stations(station_code,station_name,city,cluster,cluster_name)")
-    .eq("company_id", companyId).in("location_id", stationIds).gte("scheduled_for", `${from}T00:00:00.000Z`).lte("scheduled_for", `${to}T23:59:59.999Z`).order("scheduled_for", { ascending: true }).limit(1500);
+    .eq("company_id", companyId).in("location_id", stationIds);
+  auditsQuery = stationOnly
+    ? auditsQuery.eq("status_code", "awaiting_station_response")
+    : auditsQuery.gte("scheduled_for", `${from}T00:00:00.000Z`).lte("scheduled_for", `${to}T23:59:59.999Z`);
+  const auditsResult = await auditsQuery.order("scheduled_for", { ascending: true }).limit(1500);
   if (auditsResult.error) throw new Error(auditsResult.error.message);
-  const audits = (auditsResult.data ?? []) as StationAudit[];
+  const audits = ((auditsResult.data ?? []) as StationAudit[]).filter((audit) => !stationOnly || (audit.status_code === "awaiting_station_response" && audit.station_response_status === "requested"));
   const auditIds = audits.map((audit) => audit.id);
   if (!auditIds.length) return { ...master, stations, audits, actions: [], comments: [], evidence: [], responses: [], cashCounts: [], shipments: [] };
   const [actions, comments, evidence, responses, cashCounts, shipments] = await Promise.all([
@@ -211,13 +256,14 @@ function snapshotStation(station: AuditStation) {
 
 export async function createStationAudit(input: { companyId: string; authorization: AuthorizationContext; auditTypeId: string; locationId: string; scheduledDate: string; scheduledTime: string; periodSlot?: string; assignedName?: string; reason?: string; source?: string }) {
   if (!canUseStationAuditLocation(input.authorization, input.locationId)) throw new Error("This station is outside your Ops Pulse access.");
-  const [typeResult, stations] = await Promise.all([
+  const [typeResult, master] = await Promise.all([
     db().from("ops_audit_types").select("*").eq("company_id", input.companyId).eq("id", input.auditTypeId).eq("is_active", true).maybeSingle(),
-    loadAuditStations(input.companyId, input.authorization)
+    loadStationAuditMaster(input.companyId)
   ]);
   if (typeResult.error) throw new Error(typeResult.error.message);
   if (!typeResult.data) throw new Error("Choose an active audit type from Audit Master.");
   const type = mapType(typeResult.data);
+  const stations = await loadAuditStations(input.companyId, input.authorization, master.programmeSettings);
   const station = stations.find((row) => row.id === input.locationId);
   if (!station) throw new Error("This station is unavailable or outside your scope.");
   const cycle = auditCycleFor(type, input.scheduledDate, input.periodSlot);
@@ -241,61 +287,6 @@ export async function createStationAudit(input: { companyId: string; authorizati
 export async function writeStationAuditEvent(input: { companyId: string; auditId: string; eventType: string; authorization?: Pick<AuthorizationContext, "userId" | "fullName" | "email" | "roleName" | "roleCode">; before?: Record<string, unknown>; after?: Record<string, unknown> }) {
   const event = await db().from("ops_station_audit_events").insert({ company_id: input.companyId, audit_id: input.auditId, event_type: input.eventType, before_data: input.before ?? {}, after_data: input.after ?? {}, actor_user_id: input.authorization?.userId ?? null, actor_name: input.authorization?.fullName ?? null, actor_email: input.authorization?.email ?? null, actor_role: input.authorization?.roleName ?? input.authorization?.roleCode ?? null });
   if (event.error) throw new Error(event.error.message);
-}
-
-function configTime(type: AuditType) {
-  const value = String(record(type.scheduling_config).schedule_time ?? "").trim();
-  if (!/^\d{2}:\d{2}$/.test(value)) throw new Error(`${type.name}: configure schedule time in Audit Master.`);
-  return value;
-}
-
-export async function ensureAuditProgramme(companyId: string, date = ymdInKolkata()) {
-  const adminScope = { hasAllLocationAccess: true, locationScopeIds: [] };
-  const [{ auditTypes }, stations] = await Promise.all([loadStationAuditMaster(companyId), loadAuditStations(companyId, adminScope)]);
-  const activeTypes = auditTypes.filter((type) => type.is_active);
-  let created = 0;
-  const errors: string[] = [];
-  for (const type of activeTypes) {
-    try {
-      const time = configTime(type);
-      const slots = periodSlots(type);
-      if (!slots.length) throw new Error(`${type.name}: add one or more programme slots in Audit Master.`);
-      for (const [index, station] of stations.entries()) {
-        const slotRows = type.cadence_unit === "weekly" ? slots.slice(0, 1) : slots;
-        for (const slot of slotRows) {
-          const slotCode = String(slot.code);
-          let scheduledOn: string;
-          if (type.cadence_unit === "weekly") {
-            const monday = mondayOf(date);
-            const start = Number(slot.start_day ?? 1); const end = Number(slot.end_day ?? 7);
-            const width = Math.max(1, end - start + 1);
-            scheduledOn = dateAdd(monday, Math.max(0, start - 1) + (index % width));
-            // A first-time programme run must never create an audit in the past.
-            // The configured weekday remains the source of truth; overdue slots
-            // roll into the next configured weekly cycle.
-            if (scheduledOn < date) scheduledOn = dateAdd(scheduledOn, 7);
-          } else {
-            const start = Number(slot.start_day ?? 1); const end = Number(slot.end_day ?? start);
-            const width = Math.max(1, end - start + 1);
-            scheduledOn = dayInMonth(date, start + (index % width));
-            // Preserve the configured period window instead of manufacturing a
-            // back-dated audit when an administrator activates a programme late.
-            if (scheduledOn < date) scheduledOn = dayInMonth(nextMonthStart(date), start + (index % width));
-          }
-          const cycle = auditCycleFor(type, scheduledOn, slotCode);
-          const exists = await db().from("ops_station_audits").select("id").eq("company_id", companyId).eq("audit_type_id", type.id).eq("location_id", station.id).eq("cycle_key", cycle.cycleKey).eq("period_slot", cycle.periodSlot).maybeSingle();
-          if (exists.error) throw new Error(exists.error.message);
-          if (exists.data) continue;
-          const scheduledFor = scheduledDate(scheduledOn, time);
-          const responseDue = new Date(Date.parse(scheduledFor) + type.default_response_hours * 60 * 60 * 1000).toISOString();
-          const inserted = await db().from("ops_station_audits").insert({ company_id: companyId, audit_number: auditNumber(station.station_code, scheduledOn), audit_type_id: type.id, location_id: station.id, station_snapshot: snapshotStation(station), cycle_key: cycle.cycleKey, period_slot: cycle.periodSlot, scheduled_for: scheduledFor, scheduled_reason: "Programme generated from Audit Master", schedule_source: "programme", status_code: "scheduled", response_due_at: responseDue });
-          if (inserted.error) throw new Error(inserted.error.message);
-          created += 1;
-        }
-      }
-    } catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
-  }
-  return { created, errors };
 }
 
 export function isGoogleDriveUrl(value: string) {

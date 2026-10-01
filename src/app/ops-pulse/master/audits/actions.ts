@@ -20,8 +20,29 @@ function jsonArray(value: string, label: string) {
   try { const parsed = JSON.parse(value); if (!Array.isArray(parsed)) throw new Error(); return parsed; }
   catch { throw new Error(`${label} must be a JSON array.`); }
 }
+function selectedValues(formData: FormData, key: string) { return Array.from(new Set(formData.getAll(key).map((value) => clean(value)).filter(Boolean))); }
 
 async function access() { const authorization = await requirePagePermission("station_audit_master", "edit"); return { authorization, companyId: requireCompanyId(authorization) }; }
+
+export async function saveAuditProgrammeSettings(formData: FormData): Promise<Result> {
+  try {
+    const { authorization, companyId } = await access();
+    const payload = {
+      company_id: companyId,
+      scheduler_role_ids: selectedValues(formData, "scheduler_role_ids"),
+      responder_role_ids: selectedValues(formData, "responder_role_ids"),
+      excluded_location_model_ids: selectedValues(formData, "excluded_location_model_ids"),
+      excluded_location_ids: selectedValues(formData, "excluded_location_ids"),
+      exclude_head_office: clean(formData.get("exclude_head_office")) === "yes",
+      updated_by: authorization.userId
+    };
+    if (!payload.scheduler_role_ids.length) throw new Error("Select at least one manager role that can schedule and run audits.");
+    if (!payload.responder_role_ids.length) throw new Error("Select at least one station role that can respond to open audit actions.");
+    const saved = await db().from("ops_audit_programme_settings").upsert(payload, { onConflict: "company_id" });
+    if (saved.error) throw new Error(saved.error.message);
+    refresh(); return { ok: true, message: "Audit access and station scope updated." };
+  } catch (error) { return result(error); }
+}
 
 export async function saveAuditType(formData: FormData): Promise<Result> {
   try {

@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { loadAuditStations } from "@/lib/ops-pulse/station-audits";
+import { canManageStationAudits, loadAuditStations, loadStationAuditMaster } from "@/lib/ops-pulse/station-audits";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,9 @@ export async function GET(request: Request) {
   const authorization = await getAuthorization(); if (!authorization || !hasPermission(authorization, "station_audits", "access")) return Response.json({ error: "Audit access denied." }, { status: 403 });
   if (!supabaseAdmin) return Response.json({ error: "Database unavailable." }, { status: 500 }); const url = new URL(request.url); const from = url.searchParams.get("from") ?? ""; const to = url.searchParams.get("to") ?? "";
   if (!validDate(from) || !validDate(to) || from > to) return Response.json({ error: "Choose a valid audit date range." }, { status: 400 });
-  const companyId = requireCompanyId(authorization); const stations = await loadAuditStations(companyId, authorization); const stationIds = stations.map((station) => station.id); if (!stationIds.length) return Response.json({ error: "No stations are available in your Audit scope." }, { status: 403 }); const stationById = new Map(stations.map((station) => [station.id, station]));
+  const companyId = requireCompanyId(authorization); const master = await loadStationAuditMaster(companyId);
+  if (!canManageStationAudits(authorization, master.programmeSettings)) return Response.json({ error: "Only configured audit managers can export audit records." }, { status: 403 });
+  const stations = await loadAuditStations(companyId, authorization, master.programmeSettings); const stationIds = stations.map((station) => station.id); if (!stationIds.length) return Response.json({ error: "No stations are available in your Audit scope." }, { status: 403 }); const stationById = new Map(stations.map((station) => [station.id, station]));
   const auditsResult = await supabaseAdmin.from("ops_station_audits").select("id,audit_number,audit_type_id,location_id,scheduled_for,status_code,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)").eq("company_id", companyId).in("location_id", stationIds).gte("scheduled_for", `${from}T00:00:00.000Z`).lte("scheduled_for", `${to}T23:59:59.999Z`).order("scheduled_for").limit(5000);
   if (auditsResult.error) return Response.json({ error: auditsResult.error.message }, { status: 500 }); const audits = auditsResult.data ?? []; const ids = audits.map((audit) => audit.id); const typeName = new Map(audits.map((audit: any) => [audit.id, audit.ops_audit_types?.name ?? audit.ops_audit_types?.code ?? "Audit"]));
   const [cash, responses, shipments, actions, comments] = ids.length ? await Promise.all([
