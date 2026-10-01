@@ -3,10 +3,10 @@
 import type { PartnerOnboardingState } from "@/lib/partner-onboarding";
 import { recordPartnerProgress } from "@/app/field-executive/actions";
 
-export function PartnerProgressNote({ state, workforceId, canEdit }: {
-  state: PartnerOnboardingState; workforceId: string; canEdit: boolean;
+export function PartnerProgressNote({ state, workforceId, returnStatus = "registration", canEdit }: {
+  state: PartnerOnboardingState; workforceId: string; returnStatus?: string; canEdit: boolean;
 }) {
-  return <div style={{ fontSize: 12, minWidth: 220, maxWidth: 300, whiteSpace: "normal", textAlign: "left", overflowWrap: "anywhere" }}>
+  return <div className="partner-progress-note">
     {state.due_kind ? <span style={{ color: "#b45309", fontWeight: 600 }} title={`${state.due_kind === "invitation_due" ? "Invitation" : "ID setup follow-up"} overdue since ${state.due_since}`}>Due · {state.due_since}</span> : null}
     <details>
       <summary style={{ cursor: "pointer", padding: "4px 0", fontWeight: 500 }}>View details</summary>
@@ -21,6 +21,7 @@ export function PartnerProgressNote({ state, workforceId, canEdit }: {
           <summary style={{ cursor: "pointer" }}>Update dates</summary>
           <form action={recordPartnerProgress} style={{ display: "grid", gap: 8, marginTop: 8 }}>
             <input name="workforce_id" type="hidden" value={workforceId} />
+            <input name="return_status" type="hidden" value={returnStatus} />
             <label>Actual reporting date<input type="date" name="reported_on" required defaultValue={state.reported_on || ""} /></label>
             {state.adapter === "manual" && state.registration_ready ? <label>Partner invitation sent<input type="date" name="manual_invited_on" defaultValue={state.invited_on || ""} /></label> : null}
             <button className="button secondary compact">Save dates</button>

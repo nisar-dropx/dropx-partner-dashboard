@@ -99,6 +99,7 @@ function addFormParams(formData: FormData) {
     mobile: String(formData.get("mobile") ?? "").replace(/\D/g, ""),
     email: String(formData.get("email") ?? "").trim().toLowerCase(),
     date_of_join: String(formData.get("date_of_join") ?? ""),
+    reported_on: String(formData.get("reported_on") ?? ""),
     location_id: String(formData.get("location_id") ?? ""),
     designation: String(formData.get("designation") ?? "")
   };
@@ -264,6 +265,7 @@ export async function createFieldExecutive(formData: FormData) {
   const authorization = await requirePagePermission(pageCodeForReturnPath(returnPath), "add");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
+  let reportingNotice = "";
 
   try {
     const fullName = normalizeFullName(formData.get("full_name"));
@@ -271,6 +273,7 @@ export async function createFieldExecutive(formData: FormData) {
     const mobile = normalizeMobileNumber(formData.get("mobile"));
     const email = normalizeEmail(formData.get("email"));
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
+    const reportedOn = optional(formData.get("reported_on"));
     const locationId = required(formData.get("location_id"), "Location");
     const designation = required(formData.get("designation"), "Designation");
     const configuredDirectActivate = await loadWorkforceCategoryDirectActivate(companyId, config.designationCategory);
@@ -327,6 +330,7 @@ export async function createFieldExecutive(formData: FormData) {
     }
 
     if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
+    if (reportedOn && Number.isNaN(Date.parse(reportedOn))) throw new Error("Enter a valid training or reporting date.");
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
       throw new Error("You do not have access to the selected location.");
     }
@@ -473,6 +477,22 @@ export async function createFieldExecutive(formData: FormData) {
         source_portal: applicationSource,
         metadata: { designation, location_id: locationId, ...identityExceptionEventMetadata(identityEvaluation), ...(peopleIdentity ? { dual_role_people_profile: { source_type: peopleIdentity.sourceType, source_id: peopleIdentity.sourceId, designation: peopleIdentity.designation, shared_dropx_id: peopleIdentity.dropxId, shared_biometric_id: peopleIdentity.biometricId } } : {}) }
       });
+      if (reportedOn && table === "workforce") {
+        const progressResult = await supabaseAdmin.rpc("workforce_record_partner_progress", {
+          p_company: companyId,
+          p_actor: authorization.userId,
+          p_workforce: executive.id,
+          p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds,
+          p_reported: reportedOn,
+          p_invited: null,
+          p_portal: applicationSource === "ops" ? "ops_pulse" : "workforce"
+        });
+        if (progressResult.error) {
+          // The associate was created successfully. Keep the invitation usable
+          // even when the selected station has no partner workflow yet.
+          reportingNotice = " The first reporting date could not be recorded because this station's partner workflow is not configured.";
+        }
+      }
     }
 
     const stationRelation = executive.stations as unknown as { station_code?: string; station_name?: string | null; providers?: { name?: string } | Array<{ name?: string }> | null } | null;
@@ -506,7 +526,7 @@ export async function createFieldExecutive(formData: FormData) {
 
   fieldExecutiveRedirect({
     notice: config.profileType === "field_executive"
-      ? `${entityLabel} onboarding request created. The applicant must submit the profile and agreement before HO activation.`
+      ? `${entityLabel} onboarding request created. The applicant must submit the profile and agreement before HO activation.${reportingNotice}`
       : `${entityLabel} added successfully.`
   }, returnPath);
 }
@@ -1067,7 +1087,8 @@ export async function bulkImportFieldExecutives(formData: FormData) {
 
 export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
   const authorization = await requirePagePermission("delivery_associates", "edit");
-  const destination = "/work-force-register?status=pending";
+  const requestedStatus = String(formData.get("return_status") ?? "").trim().toLowerCase();
+  const destination = `/work-force-register?status=${["training", "registration", "amazon", "active", "attention"].includes(requestedStatus) ? requestedStatus : "registration"}`;
   try {
     if (authorization.readOnly || !supabaseAdmin) throw new Error("Amazon invitation queue is unavailable.");
     const companyId = requireCompanyId(authorization);
@@ -1128,10 +1149,12 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
 
 export async function recordPartnerProgress(form:FormData){
  const auth=await requirePagePermission("delivery_associates","edit");
+ const requestedStatus=String(form.get("return_status")??"").trim().toLowerCase();
+ const destination="/work-force-register?status="+(["training","registration","amazon","active","attention"].includes(requestedStatus)?requestedStatus:"training");
  try{
   if(!supabaseAdmin||auth.readOnly)throw new Error("Editing is unavailable.");
   const value=(key:string)=>String(form.get(key)||"").trim();
   const result=await supabaseAdmin.rpc("workforce_record_partner_progress",{p_company:requireCompanyId(auth),p_actor:auth.userId,p_workforce:value("workforce_id"),p_locations:auth.hasAllLocationAccess?null:auth.locationScopeIds,p_reported:value("reported_on"),p_invited:value("manual_invited_on")||null,p_portal:"ops_pulse"});
-  if(result.error)throw new Error(result.error.message);revalidatePath("/work-force-register");redirect("/work-force-register?notice="+encodeURIComponent("Reporting date and partner progress saved."));
- }catch(error){if(error&&typeof error==="object"&&"digest"in error)throw error;redirect("/work-force-register?error="+encodeURIComponent(error instanceof Error?error.message:"Unable to record progress."));}
+  if(result.error)throw new Error(result.error.message);revalidatePath("/work-force-register");redirect(destination+"&notice="+encodeURIComponent("Reporting date and partner progress saved."));
+ }catch(error){if(error&&typeof error==="object"&&"digest"in error)throw error;redirect(destination+"&error="+encodeURIComponent(error instanceof Error?error.message:"Unable to record progress."));}
 }

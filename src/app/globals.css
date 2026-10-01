@@ -20833,16 +20833,82 @@ td strong,
   font-size: 26px;
 }
 
+.workforce-register-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 16px 0 12px;
+  padding: 14px 16px;
+  border: 1px solid #dbe5f1;
+  border-radius: 14px;
+  background: linear-gradient(115deg, #f8fbff, #fff);
+}
+
+.workforce-register-intro strong { color: #19233a; font-size: 14px; }
+.workforce-register-intro p { max-width: 760px; margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.workforce-onboarding-tabs { margin-bottom: 12px; overflow-x: auto; }
+.workforce-onboarding-tabs a { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.workforce-onboarding-tabs a strong { min-width: 20px; padding: 1px 6px; border-radius: 999px; background: #edf1f7; color: #4a586d; text-align: center; font-size: 11px; }
+.workforce-onboarding-tabs a.active strong { background: rgba(255,255,255,.2); color: inherit; }
+.workforce-onboarding-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.workforce-onboarding-summary article { display: grid; grid-template-columns: 1fr auto; align-content: center; min-height: 94px; }
+.workforce-onboarding-summary article small { grid-column: 1 / -1; margin-top: 4px; color: #7b8799; font-size: 10px; line-height: 1.3; }
+.workforce-onboarding-summary article.attention { border-color: #f5c8c4; background: #fffafa; }
+.workforce-onboarding-summary article.attention strong { color: #b42318; }
+.workforce-add-associate { margin: 12px 0; overflow: hidden; }
+.workforce-add-associate > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 16px; cursor: pointer; list-style: none; }
+.workforce-add-associate > summary::-webkit-details-marker { display: none; }
+.workforce-add-associate > summary span:first-child { display: grid; gap: 4px; }
+.workforce-add-associate > summary small { color: var(--muted); font-size: 12px; }
+.workforce-add-associate-body { padding: 0 16px 16px; border-top: 1px solid #e6ebf2; }
+.workforce-add-associate-body > .subtle { margin: 13px 0; font-size: 12px; }
+.workforce-onboarding-desk { margin-top: 12px; overflow: visible; }
+.workforce-onboarding-desk-head { align-items: flex-start; gap: 16px; }
+.workforce-desk-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.workforce-desk-filters select, .workforce-desk-search { min-height: 38px; border: 1px solid #dce3ed; border-radius: 8px; background: #fff; color: #344054; }
+.workforce-desk-filters select { min-width: 132px; padding: 0 10px; }
+.workforce-desk-search { display: flex; align-items: center; width: min(280px, 100%); padding: 0 10px; color: #7a879a; }
+.workforce-desk-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; padding: 0 7px; color: #27354a; }
+.workforce-onboarding-table { min-width: 1100px; }
+.workforce-onboarding-table th { white-space: nowrap; }
+.workforce-onboarding-table td { vertical-align: top; padding-top: 14px; padding-bottom: 14px; }
+.workforce-onboarding-table td > small, .workforce-onboarding-table td > strong + small { display: block; margin-top: 4px; color: #748198; font-size: 11px; line-height: 1.35; }
+.workforce-onboarding-table td:first-child { min-width: 190px; }
+.workforce-onboarding-table td:nth-child(2) { min-width: 115px; }
+.workforce-onboarding-table td:nth-child(3) { min-width: 220px; }
+.workforce-onboarding-table td:nth-child(4) { min-width: 260px; max-width: 340px; white-space: normal; }
+.workforce-journey { display: flex; align-items: center; gap: 0; margin-bottom: 8px; }
+.workforce-journey span { position: relative; padding-right: 14px; color: #a5afbf; font-size: 10px; font-weight: 750; white-space: nowrap; }
+.workforce-journey span + span { padding-left: 14px; }
+.workforce-journey span + span::before { position: absolute; top: 50%; left: 0; width: 9px; height: 1px; background: #d4dbe5; content: ""; }
+.workforce-journey span.current { color: #a8550d; }
+.workforce-journey span.done { color: #087a54; }
+.workforce-journey span.done + span::before { background: #73c6a5; }
+.workforce-next-action strong { display: block; color: #36445a; font-size: 12px; font-weight: 600; line-height: 1.45; }
+.workforce-attention-note { color: #b42318 !important; font-weight: 700; }
+.workforce-onboarding-actions { display: grid; justify-items: start; gap: 7px; min-width: 160px; }
+.workforce-onboarding-actions form { margin: 0; }
+.workforce-onboarding-actions .button { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.partner-progress-note { min-width: 180px; max-width: 270px; color: #55637a; font-size: 12px; text-align: left; overflow-wrap: anywhere; white-space: normal; }
+.partner-progress-note details > summary { cursor: pointer; padding: 3px 0; font-weight: 600; }
+.partner-progress-note form label { display: grid; gap: 4px; color: #55637a; font-size: 11px; }
+.partner-progress-note form input { min-height: 34px; border: 1px solid #dbe3ed; border-radius: 6px; padding: 6px; }
 @media (max-width: 900px) {
   .workforce-register-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .workforce-onboarding-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workforce-register-intro { align-items: flex-start; flex-direction: column; }
+  .workforce-onboarding-desk-head { flex-direction: column; }
 }
 
 @media (max-width: 560px) {
   .workforce-register-summary {
     grid-template-columns: 1fr;
   }
+  .workforce-onboarding-summary { grid-template-columns: 1fr; }
+  .workforce-desk-filters, .workforce-desk-search { width: 100%; }
 }
 
 

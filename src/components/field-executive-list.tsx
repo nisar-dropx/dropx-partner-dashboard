@@ -21,6 +21,9 @@ export type FieldExecutiveListRow = {
   profilePhotoUrl?: string | null;
   isActive: boolean;
   status: string;
+  dateOfJoin?: string | null;
+  onboardingStatus?: string | null;
+  registrationDraftAt?: string | null;
   canEdit?: boolean;
   canQueueAmazonId?: boolean;
   partnerOnboarding?:import("@/lib/partner-onboarding").PartnerOnboardingState;
