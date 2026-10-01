@@ -9,18 +9,20 @@ const policy=compile('src/lib/ops-pulse/cod-proof-policy.ts');
 const expected={amount:100,date:'2026-09-26',reference:'AC123',station:'NLRC'};
 const extracted={document_type:'deposit_slip',readable:true,amount:100,deposit_date:expected.date,remittance_reference:'AC-123',receipt_reference:'A4842738',station_code:'NLRC',deposit_confirmed:true,seal_status:'visible',seal_clarity:'high',seal_issuer:'Radiant Cash Management',seal_evidence:'Blue rectangular ink stamp at bottom right with Radiant text'};
 assert.equal(policy.proofVerdict(extracted,expected).status,'Valid');
-for(const patch of [{readable:false},{amount:99},{amount:null},{deposit_date:'2026-09-25'},{remittance_reference:'OTHER'},{station_code:'OTHER'},{deposit_confirmed:false},{document_type:'other'}])assert.equal(policy.proofVerdict({...extracted,...patch},expected).status,'Not valid');
+for(const patch of [{amount:99},{document_type:'other'}])assert.equal(policy.proofVerdict({...extracted,...patch},expected).status,'Not valid');
+for(const patch of [{readable:false},{deposit_date:'2026-09-25'},{remittance_reference:'OTHER'},{station_code:'OTHER'},{deposit_confirmed:false}])assert.equal(policy.proofVerdict({...extracted,...patch},expected).status,'Valid','Context fields do not reject an otherwise valid slip');
+assert.equal(policy.proofVerdict({...extracted,amount:null},expected).status,'Details unclear');
 assert.equal(policy.proofVerdict({...extracted,remittance_reference:null,receipt_reference:'A4934620'},expected).status,'Valid','A CMS serial is not the Amazon remittance code');
-for(const patch of [{seal_status:'missing',seal_clarity:'not_applicable',seal_issuer:null,seal_evidence:null},{seal_status:'unclear',seal_clarity:'low'},{seal_status:'visible',seal_clarity:'low'},{seal_evidence:''}]){
- const result=policy.proofVerdict({...extracted,...patch},expected);assert.equal(result.status,'Not valid');assert.match(result.reason,/seal/);
-}
+const missingSeal=policy.proofVerdict({...extracted,seal_status:'missing',seal_clarity:'not_applicable',seal_issuer:null,seal_evidence:null},expected);assert.equal(missingSeal.status,'Not valid');assert.match(missingSeal.reason,/seal/i);
+for(const patch of [{seal_status:'unclear',seal_clarity:'low'},{seal_status:'visible',seal_clarity:'low'}]){const result=policy.proofVerdict({...extracted,...patch},expected);assert.equal(result.status,'Details unclear');assert.match(result.reason,/seal/i);}
+assert.equal(policy.proofVerdict({...extracted,seal_evidence:''},expected).status,'Valid','A recognisable medium-or-better seal does not require every seal word to be transcribed');
 assert.equal(policy.proofVerdict({...extracted,seal_clarity:'medium',seal_issuer:null},expected).status,'Valid','Recognisable medium-clarity seal passes even when issuer text is incomplete');
 assert.throws(()=>policy.proofVerdict({...extracted,seal_status:'maybe'},expected));
 assert.throws(()=>policy.proofVerdict({readable:true},expected));
 assert.throws(()=>policy.emailList('someone@example.com\nmalformed'));
 const {CodSlipCheckDetails}=compile('src/components/cod-slip-check-details.tsx',{'@/lib/date-format':compile('src/lib/date-format.ts')});
 const view=require('react-dom/server').renderToStaticMarkup(require('react').createElement(CodSlipCheckDetails,{result:{policy_version:4,proof_version:1,extracted:{...extracted,seal_clarity:'medium',seal_issuer:null}},checkedAt:'2026-09-26T12:00:00Z',amount:100,date:expected.date,station:'NLRC',reference:'AC123'}));
-assert.match(view,/Seal visible/);assert.match(view,/medium/);assert.match(view,/Sufficient/);assert.match(view,/Issuer not fully readable/);
+assert.match(view,/Slip checks/);assert.match(view,/Seal visible/);assert.match(view,/medium/i);assert.match(view,/Radiant text/);
 
 const {matchesCodEmail}=compile('src/lib/ops-pulse/cod-mail-evidence.ts',{'./cod-proof-policy':policy});
 const record={email_subject:'Banker not reported — NLRC',sender_email:'nlrc@dropxlogistics.com',email_sent_at:'2026-09-26T13:30:00Z',stakeholder_emails:['ops@dropxlogistics.com'],client_poc_emails:['client@example.com']};
@@ -51,7 +53,7 @@ for(const email of ['jamsheer@dropxlogistics.com','ct@dropxlogistics.com','tech@
  assert.equal(returns.canReturnCodSlip(auth),true);
  for(const patch of [{isPreview:true},{readOnly:true},{roleCode:'LOCATION'},{email:'other@dropxlogistics.com'}])assert.equal(returns.canReturnCodSlip({...auth,...patch}),false);
 }
-assert.equal(policy.proofVerdict({...extracted,station_code:'NLCC',uncertain_fields:['station_code']},expected).status,'Details unclear');
+assert.equal(policy.proofVerdict({...extracted,station_code:'NLCC',uncertain_fields:['station_code']},expected).status,'Valid','Ambiguous station handwriting is context only');
 assert.equal(policy.proofVerdict({...extracted,amount:100,uncertain_fields:['amount']},expected).status,'Details unclear','Even an expected value cannot pass if its writing is uncertain');
 assert.equal(policy.proofVerdict(policy.reconcileProofReadings({...extracted,amount:700}, {...extracted,amount:100}),expected).status,'Details unclear');
 assert.equal(policy.proofVerdict(policy.reconcileProofReadings({...extracted,amount:700}, {...extracted,amount:700}),expected).status,'Not valid','Consistent clear mismatches stay invalid');

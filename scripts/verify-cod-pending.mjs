@@ -13,6 +13,8 @@ let rows=policy.buildCodPendingRows([station,other],[slip],date,now);
 assert.equal(rows.find(r=>r.station.id==='s2').status,'Missing slip');
 assert.equal(rows.find(r=>r.station.id==='s2').overdue,true);
 assert.equal(rows.find(r=>r.station.id==='s1').status,'Complete');
+const queued=policy.buildCodPendingRows([station],[{...slip,ai_status:'Validation pending',ai_summary:null}],date,now)[0];
+assert.equal(queued.status,'Validation pending');assert.equal(queued.slipUploaded,true);assert.equal(queued.updateRecorded,true);assert.equal(queued.pending,false);assert.equal(queued.overdue,false,'A recorded upload waiting for its check is not an overdue station miss');
 assert.equal(policy.buildCodPendingRows([station],[slip],date,new Date('2026-09-02T14:59:59Z'))[0].overdue,false);
 assert.equal(policy.buildCodPendingRows([station],[{...slip,deposit_date:'2026-09-01'}],date,now)[0].status,'Missing slip','Do not match by covered COD period');
 assert.equal(policy.buildCodPendingRows([station],[{...slip,deposited_amount:80}],date,now)[0].short,20);

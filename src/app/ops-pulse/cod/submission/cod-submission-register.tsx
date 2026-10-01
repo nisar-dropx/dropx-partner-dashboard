@@ -2,7 +2,7 @@
 
 import {CodSlipCheckDetails} from '@/components/cod-slip-check-details';
 import {compactCodReason} from '@/lib/ops-pulse/cod-return-policy';
-import {proofTone} from '@/lib/ops-pulse/cod-proof-policy';
+import {proofStatusLabel,proofTone} from '@/lib/ops-pulse/cod-proof-policy';
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -246,7 +246,7 @@ export function CodSubmissionRegister({
                     <span className="subtle">Missing</span>
                   )}
                 </td>
-                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{row.proofStatus}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{compactCodReason(row.proofReason)}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode}/></div></td>
+                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{proofStatusLabel(row.proofStatus)}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofStatus==='Validation pending'?'Upload recorded; slip check queued':compactCodReason(row.proofReason)}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode} status={row.proofStatus}/></div></td>
                 <td>{row.remarks || "-"}</td>
                 <td>
                   {canEdit ? (

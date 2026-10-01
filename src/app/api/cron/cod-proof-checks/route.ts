@@ -10,5 +10,6 @@ export async function GET(request:Request){
  const [proof,email,returns]=await Promise.allSettled([processCodProofChecks(),checkCodExceptionEmails(),deliverCodReturns()]);
  const failed=proof.status==='rejected'||email.status==='rejected'||returns.status==='rejected';
  if(failed)console.error('COD checks failed',proof.status==='rejected'?String(proof.reason):'',email.status==='rejected'?String(email.reason):'');
+ else console.info('COD checks completed',JSON.stringify({proof:proof.value,email:email.value,returns:returns.value}));
  return Response.json({returns:returns.status==='fulfilled'?returns.value:{error:'Return notifications unavailable'},proof:proof.status==='fulfilled'?proof.value:{error:'Checks unavailable'},email:email.status==='fulfilled'?email.value:{error:'Mailbox check unavailable'}},{status:failed?500:200});
 }

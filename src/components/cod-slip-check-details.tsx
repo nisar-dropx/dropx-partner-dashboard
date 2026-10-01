@@ -1,31 +1,25 @@
 import type {ProofExtraction} from '@/lib/ops-pulse/cod-proof-policy';
-import {formatDashboardDate as formatDate,formatDashboardDateTime as formatDateTime} from '@/lib/date-format';
+import {formatDashboardDateTime as formatDateTime} from '@/lib/date-format';
 const cellStyle={whiteSpace:'normal' as const,overflowWrap:'anywhere' as const};
 const money=new Intl.NumberFormat('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const formatAmount=(value:number|string|null)=>money.format(Number(value)||0);
 
-type Props={result?:Record<string,unknown>|null;checkedAt?:string|null;amount:number|string|null;date:string|null;station:string;reference:string};
-export function CodSlipCheckDetails({result,checkedAt,amount,date,station,reference}:Props){
+type Props={result?:Record<string,unknown>|null;checkedAt?:string|null;amount:number|string|null;date:string|null;station:string;reference:string;status?:string|null};
+export function CodSlipCheckDetails({result,checkedAt,amount,status}:Props){
  const extracted=result?.extracted;
  const v=extracted&&typeof extracted==='object'&&!Array.isArray(extracted)?extracted as ProofExtraction:null;
- if(!v||Number(result?.policy_version)<4)return <p className="subtle">Seal check pending. An earlier receipt check does not confirm the seal.</p>;
- const normalize=(value:string)=>value.toUpperCase().replace(/[^A-Z0-9]/g,'');
- const seal=v.seal_status==='visible'&&['high','medium'].includes(v.seal_clarity)&&v.seal_evidence?'Seal visible':v.seal_status==='missing'?'Seal missing':'Seal unclear';
+ if(status==='Validation pending'||status==='Checking'||!v)return <p className="subtle">Slip check queued. The upload is already recorded.</p>;
+ const seal=v.seal_status==='visible'&&['high','medium'].includes(v.seal_clarity)?'Seal visible':v.seal_status==='missing'?'Seal missing':'Seal unclear';
  const uncertain=v.uncertain_fields||[];
  const rows=[
+  ['Document','CMS / bank deposit slip',v.document_type==='deposit_slip'?'Deposit slip':v.document_type==='other'?'Other document':'Unclear',v.document_type==='deposit_slip'?'Confirmed':v.document_type==='other'?'Not a deposit slip':'Needs clearer view'],
   ['Deposited amount',amount==null?'Not available':`₹${formatAmount(amount)}`,v.amount==null?'Not readable':`₹${formatAmount(v.amount)}`,amount!=null&&v.amount!=null&&Math.abs(Number(amount)-v.amount)<=0.01?'Match':'Mismatch / unreadable'],
-  ['Deposit date',formatDate(date),v.deposit_date?formatDate(v.deposit_date):'Not readable',v.deposit_date===date?.slice(0,10)?'Match':'Mismatch / unreadable'],
-  ['Station',station||'—',v.station_code||'Not visible',!v.station_code?'Not checked — not visible':normalize(v.station_code)===normalize(station)?'Match':'Mismatch'],
-  ['Marketplace remittance',reference||'—',v.remittance_reference||'Not printed',!v.remittance_reference?'Not checked — not printed':normalize(v.remittance_reference)===normalize(reference)?'Match':'Mismatch'],
-  ['Receipt / transaction number','Required',v.receipt_reference||v.remittance_reference||'Not readable',v.receipt_reference||v.remittance_reference?'Present':'Missing'],
-  ['Bank / CMS seal','Required · medium clarity or better',v.seal_issuer||'Issuer not fully readable',seal],
-  ['Seal clarity','Medium or high',v.seal_clarity||'Not assessed',['high','medium'].includes(v.seal_clarity)?'Sufficient':'Insufficient'],
-  ['Deposit acknowledgement','Required',v.deposit_confirmed?'Visible':'Not visible',v.deposit_confirmed?'Present':'Missing']
- ].map(row=>{const key:Record<string,string>={'Deposited amount':'amount','Deposit date':'deposit_date',Station:'station_code','Marketplace remittance':'remittance_reference','Receipt / transaction number':'receipt_reference'};return uncertain.includes(key[row[0]])?[...row.slice(0,3),'Handwriting unclear']:row;});
- return <details style={{margin:'12px 0',whiteSpace:'normal'}}><summary style={{cursor:'pointer',fontWeight:600,color:seal==='Seal visible'?'#15803d':'#b91c1c'}}>Validation checks · {seal}</summary>
-  {uncertain.length?<p style={{color:'#b91c1c'}}>Handwriting needs a clearer photo. Ambiguous readings are not confirmed mismatches.</p>:null}<p><strong>Checked:</strong> {formatDateTime(checkedAt)} · Slip version {String(result?.proof_version??'—')}</p>
+  ['Bank / CMS seal','Medium clarity or better',v.seal_issuer||v.seal_evidence||'Issuer text not required',seal]
+ ].map(row=>row[0]==='Deposited amount'&&uncertain.includes('amount')?[...row.slice(0,3),'Amount unclear']:row);
+ return <details style={{margin:'12px 0',whiteSpace:'normal'}}><summary style={{cursor:'pointer',fontWeight:600,color:seal==='Seal visible'?'#15803d':'#b91c1c'}}>Slip checks · 3 controls</summary>
+  <p><strong>Checked:</strong> {formatDateTime(checkedAt)} · Slip version {String(result?.proof_version??'—')}</p>
   <div className="table-wrap"><table style={{width:'100%',minWidth:0,tableLayout:'fixed'}}><thead><tr><th style={cellStyle}>Check</th><th style={cellStyle}>Submitted / required</th><th style={cellStyle}>Read from slip</th><th style={cellStyle}>Result</th></tr></thead><tbody>{rows.map(([label,expected,read,outcome])=><tr key={label}><td style={cellStyle}>{label}</td><td style={cellStyle}>{expected}</td><td style={cellStyle}>{read}</td><td style={{...cellStyle,color:/Mismatch|Missing|Seal missing|Seal unclear|Insufficient/.test(outcome)?'#b91c1c':undefined}}>{outcome}</td></tr>)}</tbody></table></div>
   <p><strong>Seal evidence:</strong> {v.seal_evidence||'No identifiable bank / CMS seal could be read.'}</p>
-  <p className="subtle">A printed logo or signature alone does not count as a seal. These checks verify visible document details, not seal authenticity or bank settlement.</p>
+  <p className="subtle">Only document type, deposited amount and a medium-or-better bank/CMS seal decide the result. Date, station handwriting and reference fields are context only.</p>
  </details>;
 }
