@@ -187,9 +187,9 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
           <th scope="col">Allocation</th>
           <th scope="col">Payment Method</th>
           <th className="work-days-group" scope="col">Work Days</th>
-          <th scope="col">Gross Payment</th>
-          <th scope="col">Gross Deductions</th>
-          <th scope="col">Net Pay</th>
+          <th className="payout-money" scope="col">Gross Payment</th>
+          <th className="payout-money" scope="col">Gross Deductions</th>
+          <th className="payout-money" scope="col">Net Pay</th>
           <th scope="col">Status</th>
           <th scope="col">Details</th>
         </tr></thead>
@@ -232,7 +232,7 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
                         <div className="table-wrap payout-total-table-wrap">
                           <table>
                             <caption className="sr-only">Payment-head totals for {row.name}</caption>
-                            <thead><tr><th scope="col">Payment</th><th scope="col">Units</th><th scope="col">Rate</th><th scope="col">Total</th></tr></thead>
+                            <thead><tr><th scope="col">Payment</th><th className="payout-money" scope="col">Units</th><th className="payout-money" scope="col">Rate</th><th className="payout-money" scope="col">Total</th></tr></thead>
                             <tbody>
                               {paymentTotals.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="payout-money">{units(item.count)}</td><td className="payout-money">{rateMoney(item.rate)}</td><td className="payout-money"><strong>{money(item.amount)}</strong></td></tr>)}
                               {row.additions ? <tr><td><strong>Additional payments</strong></td><td className="payout-money">—</td><td className="payout-money">—</td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
@@ -247,7 +247,7 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
                         <div className="table-wrap payout-total-table-wrap">
                           <table>
                             <caption className="sr-only">Deduction-head totals for {row.name}</caption>
-                            <thead><tr><th scope="col">Deduction</th><th scope="col">Total</th></tr></thead>
+                            <thead><tr><th scope="col">Deduction</th><th className="payout-money" scope="col">Total</th></tr></thead>
                             <tbody>
                               {deductionTotals.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="negative payout-money"><strong>- {money(item.amount)}</strong></td></tr>)}
                               {!deductionTotals.length ? <tr><td className="empty-cell" colSpan={2}>No deductions for this period.</td></tr> : null}
