@@ -22074,6 +22074,8 @@ td strong,
 .payout-search-strip label { display: grid; width: min(520px, 100%); gap: 6px; }
 .payout-search-strip .field { min-height: 42px; }
 .payout-result-count { padding-bottom: 10px; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.payout-search-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.payout-search-controls .button { min-height: 40px; }
 
 .payout-filter-panel {
   display: grid;
@@ -22152,7 +22154,7 @@ td strong,
 .workforce-payout-table .payment-method-group { min-width: 126px; white-space: normal; }
 .workforce-payout-table tbody .payment-method-amount { background: #fff; }
 .workforce-payout-table tbody .work-days-cell { background: #f8fbff; }
-.workforce-payout-table.payout-view-overview { min-width: max(1380px, 100%); }
+.workforce-payout-table.payout-view-overview { min-width: max(1180px, 100%); }
 .workforce-payout-table.payout-view-production { min-width: max(1260px, 100%); }
 .workforce-payout-table.payout-view-deductions { min-width: max(1120px, 100%); }
 
@@ -22199,6 +22201,42 @@ td strong,
 .payout-daily-production span { display: block; margin: 2px 0; color: #526078; font-size: 11px; }
 .payout-daily-production span strong { color: var(--text); }
 
+.workforce-payout-detail-table tr.payout-total-detail-row > td { padding: 0; background: #f8fafc; }
+.payout-total-detail { display: grid; gap: 14px; padding: 18px; }
+.payout-total-detail > header { display: flex; flex-wrap: wrap; gap: 24px; }
+.payout-total-detail > header span { display: grid; gap: 2px; }
+.payout-total-detail > header small { margin: 0; color: #8a94a6; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.payout-total-detail > header strong { color: #26324a; font-size: 12px; }
+.payout-total-detail .payout-breakup-summary { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+.payout-total-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.payout-total-group { min-width: 0; overflow: hidden; border: 1px solid #dfe5ed; border-radius: 10px; background: #fff; }
+.payout-total-group > h3 { margin: 0; padding: 12px 14px; border-bottom: 1px solid #e4e9f0; font-size: 13px; }
+.payout-total-table-wrap { max-height: 320px; border: 0; border-radius: 0; }
+.payout-total-table-wrap table { width: 100%; min-width: 0; }
+.payout-total-table-wrap th:last-child,
+.payout-total-table-wrap td:last-child { text-align: right; }
+.payout-total-table-wrap tfoot th,
+.payout-total-table-wrap tfoot td { border-top: 1px solid #d9e1eb; background: #f8fafc; }
+
+.payout-sticky-scroll {
+  position: fixed;
+  bottom: 0;
+  z-index: 60;
+  height: 20px;
+  border: 1px solid #cbd5e1;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: #f8fafc;
+  box-shadow: 0 -3px 12px rgba(15, 23, 42, .13);
+  opacity: 0;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+.payout-sticky-scroll.visible { opacity: 1; pointer-events: auto; }
+.payout-sticky-scroll > div { height: 1px; }
+
 .payout-pagination { flex-wrap: wrap; }
 .payout-page-size { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .payout-page-size .field { width: 82px; min-height: 34px; padding: 5px 26px 5px 8px; }
@@ -22212,6 +22250,8 @@ td strong,
 
 @media (max-width: 760px) {
   .payout-table-toolbar, .payout-search-strip { align-items: stretch; flex-direction: column; }
+  .payout-search-controls { align-items: stretch; justify-content: flex-start; }
+  .payout-search-controls .payout-result-count { width: 100%; }
   .payout-toolbar-actions { justify-content: flex-start; padding-top: 0; }
   .payout-view-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .payout-view-switch button { justify-content: center; }
@@ -22220,7 +22260,9 @@ td strong,
   .payout-period-filter { display: grid; grid-template-columns: 1fr; }
   .payout-period-filter label { min-width: 0; }
   .payout-period-filter .button { width: 100%; justify-content: center; }
-  .payout-breakup-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .payout-breakup-summary, .payout-total-detail .payout-breakup-summary { grid-template-columns: 1fr; }
+  .payout-total-groups { grid-template-columns: 1fr; }
+  .payout-total-detail { padding: 10px; }
   .payout-daily-detail { padding: 10px; }
   .workforce-payout-table tbody .payout-sticky-id,
   .workforce-payout-table tbody .payout-sticky-worker { position: static; }
