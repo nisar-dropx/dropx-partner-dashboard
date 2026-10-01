@@ -61,7 +61,11 @@ export async function processCodProofChecks(){
  const started=Date.now(),jobs:Job[]=[];
  while(jobs.length<6&&Date.now()-started<15000){
   const claimed=await db.rpc('claim_cod_proof_check_v5');if(claimed.error)throw new Error(claimed.error.message);
-  const job=claimed.data?.[0] as Job|undefined;if(!job)break;
+  const job=claimed.data?.[0] as Job|undefined;
+  if(!job){
+   if(!jobs.length)console.info('COD proof queue empty',JSON.stringify({database:new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).hostname,rows:Array.isArray(claimed.data)?claimed.data.length:null}));
+   break;
+  }
   jobs.push(job);
  }
  let failed=0,stale=0;
