@@ -1209,14 +1209,17 @@ export async function fillAttendanceCalendarGaps({
     if (!includeNoPunchDays && (schedule.dayType === "working" || schedule.dayType === "unassigned")) continue;
     const shift = schedule.shift;
     const scheduledMinutes = scheduledDuration(shift);
-    const attendanceStatus = attendanceDayStatus({
-      dayType: schedule.dayType,
-      punchCount: 0,
-      rules: scheduleContext.rulesFor(profileId),
-      scheduledMinutes,
-      status: "",
-      workMinutes: 0
-    });
+    const rules = scheduleContext.rulesFor(profileId);
+    const attendanceStatus = schedule.dayType === "unassigned"
+      ? treatmentLabel(rules.unassigned_shift_treatment, "Needs Review")
+      : attendanceDayStatus({
+        dayType: schedule.dayType,
+        punchCount: 0,
+        rules,
+        scheduledMinutes,
+        status: "",
+        workMinutes: 0
+      });
     rows.push({
       enrolmentId: "",
       workerCode: "",
