@@ -6,6 +6,31 @@ import {depositAttachmentsFor,type CodSubmissionRow} from './cod';
 import {proofVerdict,reconcileProofReadings,type ProofExtraction} from './cod-proof-policy';
 const MODEL='gpt-5-mini';
 type Job=CodSubmissionRow&{company_id:string;proof_version:number;proof_check_token:string};
+async function claimCodProofJob(){
+ if(!supabaseAdmin)throw new Error('Database unavailable.');
+ const claimed=await supabaseAdmin.rpc('claim_cod_proof_check_v5');
+ if(claimed.error)throw new Error(claimed.error.message);
+ const rpcJob=claimed.data?.[0] as Job|undefined;
+ if(rpcJob)return rpcJob;
+
+ // Keep the queue moving if an older database function is still running with
+ // row-level visibility. The service client performs the same compare-and-set
+ // claim, so two workers cannot process the same pending upload.
+ const pending=await supabaseAdmin.from('cod_submissions').select('*')
+  .is('returned_at',null).eq('ai_status','Validation pending')
+  .order('deposit_date',{ascending:false}).order('created_at',{ascending:false}).limit(8);
+ if(pending.error)throw new Error(pending.error.message);
+ for(const candidate of pending.data||[]){
+  const token=crypto.randomUUID();
+  const updated=await supabaseAdmin.from('cod_submissions').update({
+   ai_status:'Checking',proof_check_token:token,proof_check_started_at:new Date().toISOString(),
+   proof_check_attempts:Number(candidate.proof_check_attempts||0)+1
+  }).eq('id',candidate.id).eq('ai_status','Validation pending').is('returned_at',null).select('*').maybeSingle();
+  if(updated.error)throw new Error(updated.error.message);
+  if(updated.data)return updated.data as Job;
+ }
+ return undefined;
+}
 export async function checkCodProof(job:Job){
  if(!supabaseAdmin)throw new Error('Database unavailable.');
  const attachments=depositAttachmentsFor(job);
@@ -60,10 +85,9 @@ export async function processCodProofChecks(){
  const db=supabaseAdmin;
  const started=Date.now(),jobs:Job[]=[];
  while(jobs.length<6&&Date.now()-started<15000){
-  const claimed=await db.rpc('claim_cod_proof_check_v5');if(claimed.error)throw new Error(claimed.error.message);
-  const job=claimed.data?.[0] as Job|undefined;
+  const job=await claimCodProofJob();
   if(!job){
-   if(!jobs.length)console.info('COD proof queue empty',JSON.stringify({database:new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).hostname,rows:Array.isArray(claimed.data)?claimed.data.length:null}));
+   if(!jobs.length)console.info('COD proof queue empty',JSON.stringify({database:new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).hostname}));
    break;
   }
   jobs.push(job);
