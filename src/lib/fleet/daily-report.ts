@@ -6,6 +6,7 @@ export type DailyFleetRow = ReportVehicle & {
   mileage: number | null; costPerKm: number | null; fuelTransactions: number;
   distanceSource: string | null; pointCount: number | null; refreshedAt: string | null;
   fuelSources: string[]; rawKm: number | null; gpsQuality: string | null; acceptedPoints: number | null; rejectedPoints: number | null; stationaryPoints: number | null; dataStatus: 'gps_review' | 'ready' | 'gps_missing' | 'fuel_missing' | 'not_applicable'; provisional: boolean;
+  fuelBreakdown: Array<{ provider: string; litres: number; amount: number; transactions: number }>;
 };
 export type DailyFleetReport = {
   from: string; to: string; generatedAt: string; rows: DailyFleetRow[]; vehicles: ReportVehicle[];
@@ -17,7 +18,7 @@ export function shiftDay(date: string, offset: number) { return new Date(Date.pa
 export function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
-export function validateReportRange(from: string, to: string, today = istDate(), maxDays = 93) {
+export function validateReportRange(from: string, to: string, today = istDate(), maxDays = 366) {
   if (!validDate(from) || !validDate(to)) return 'Choose valid From and To dates.';
   if (from > to) return 'From date must be on or before To date.';
   if (to > today) return 'Future dates are not available.';
@@ -47,12 +48,12 @@ export function buildDailyFleetRows(vehicles: ReportVehicle[], kmRows: KmRecord[
     const rank = (item: KmRecord) => (recordedKm(item) !== null ? 2 : 0) + (item.source.toLowerCase() === 'manual' ? 1 : 0);
     if (!previous || rank(row) > rank(previous) || (rank(row) === rank(previous) && row.calculated_at > previous.calculated_at)) kmByDay.set(key, row);
   }
-  const fuelByDay = new Map<string, { litres: number; amount: number; count: number; providers: Set<string> }>();
+  const fuelByDay = new Map<string, { litres: number; amount: number; count: number; providers: Set<string>; breakdown: Map<string, { litres: number; amount: number; transactions: number }> }>();
   for (const row of fuelRows) {
     const key = `${vehicleKey(row.vehicle_no)}|${row.transaction_date}`;
-    const fuel = fuelByDay.get(key) ?? { litres: 0, amount: 0, count: 0, providers: new Set<string>() };
+    const fuel = fuelByDay.get(key) ?? { litres: 0, amount: 0, count: 0, providers: new Set<string>(), breakdown: new Map<string, { litres: number; amount: number; transactions: number }>() };
     fuel.litres += Math.max(0, Number(row.fuel_quantity) || 0);
-    fuel.amount += Math.max(0, Number(row.fuel_amount) || 0);
+    fuel.amount += Math.max(0, Number(row.fuel_amount) || 0); const provider = row.provider || 'Unmapped'; const source = fuel.breakdown.get(provider) ?? { litres: 0, amount: 0, transactions: 0 }; source.litres += Math.max(0, Number(row.fuel_quantity) || 0); source.amount += Math.max(0, Number(row.fuel_amount) || 0); source.transactions += 1; fuel.breakdown.set(provider, source);
     fuel.count++; fuel.providers.add(row.provider); fuelByDay.set(key, fuel);
   }
   return dateDays(from, to).flatMap(date => vehicles.flatMap(vehicle => {
@@ -67,6 +68,7 @@ export function buildDailyFleetRows(vehicles: ReportVehicle[], kmRows: KmRecord[
       costPerKm: km !== null && km > 0 && fuel ? fuel.amount / km : null,
       fuelTransactions: fuel?.count ?? 0, distanceSource: distance?.source ?? null,
       pointCount: distance?.point_count ?? null, refreshedAt: distance?.calculated_at ?? null,
+      fuelBreakdown: [...(fuel?.breakdown ?? new Map())].map(([provider, values]) => ({ provider, ...values })),
       fuelSources: [...(fuel?.providers ?? [])].sort(), rawKm: distance?.raw_km == null ? null : Number(distance.raw_km),
       gpsQuality: distance?.review_status ?? null, acceptedPoints: distance?.accepted_point_count ?? null, rejectedPoints: distance?.rejected_point_count ?? null, stationaryPoints: distance?.stationary_point_count ?? null,
       dataStatus: distance?.review_status === 'needs_review' ? 'gps_review' as const : km === null ? 'gps_missing' as const : !liquidFuel ? 'not_applicable' as const : !fuel || fuel.litres <= 0 ? 'fuel_missing' as const : 'ready' as const,

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowDownUp, Fuel, Gauge, MapPin, RefreshCw, Route, Search } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDownUp, Clock3, Fuel, Gauge, MapPin, RefreshCw, Route, Search, ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DailyFleetReportView } from "@/components/fleet-daily-report";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
@@ -40,6 +40,8 @@ type RouteHistory = {
     movingMinutes: number;
     pointCount: number;
     lateNight: boolean;
+    firstMovingAt?: string | null;
+    lastMovingAt?: string | null;
     distanceReliable?: boolean;
     quality?: string;
     qualityReason?: string;
@@ -51,8 +53,9 @@ const isoToday = () => new Date(Date.now() + 330 * 60_000).toISOString().slice(0
 const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 
-export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: FleetControlData["stationOptions"] }) {
-  const [view, setView] = useState<"live" | "mileage" | "fuel">("live");
+export function FleetTrackingWorkspace({ data }: { data: FleetControlData }) {
+  const stationOptions = data.stationOptions;
+  const [view, setView] = useState<"live" | "mileage" | "fuel" | "exceptions">("live");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -139,9 +142,10 @@ export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: Fle
       <button className={view === "live" ? "active" : ""} onClick={() => setView("live")} type="button"><MapPin size={16} /> Live tracking</button>
       <button className={view === "mileage" ? "active" : ""} onClick={() => setView("mileage")} type="button"><Gauge size={16} /> Mileage</button>
       <button className={view === "fuel" ? "active" : ""} onClick={() => setView("fuel")} type="button"><Fuel size={16} /> Fuel log</button>
+      <button className={view === "exceptions" ? "active" : ""} onClick={() => setView("exceptions")} type="button"><ShieldAlert size={16} /> Exceptions</button>
     </nav>
 
-    {view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
+    {view === "exceptions" ? <FleetGpsExceptions data={data} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
       <div className="fc-section-head fc-tracking-heading"><div><span className="fc-eyebrow">WheelsEye live feed</span><h1>Vehicle tracking</h1><p>Current GPS position and historical movement for vehicles that have tracking configured.</p></div><button className="fc-button secondary" disabled={refreshing} onClick={() => loadLive(true)} type="button"><RefreshCw className={refreshing ? "spin" : ""} size={16} /> Refresh live</button></div>
       {summary?.error ? <div className="fc-flash error"><span>{summary.error}</span></div> : null}
       <section className="fc-tracking-kpis">
@@ -166,10 +170,18 @@ export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: Fle
           <div className="fc-gps-detail-head"><div><small>Selected vehicle</small><h2>{selected?.vehicle_no ?? "No tracked vehicle"}</h2><p>{selected ? `${stationByVehicle.get(selected.vehicle_no) ?? "Unmapped"} · ${modelByVehicle.get(selected.vehicle_no) ?? "Vehicle"}` : "Connect WheelsEye to see live positions."}</p></div>{selected ? <div><span className={`fc-live-pill ${selected.ignition ? "on" : "off"}`}><i /> Ignition {selected.ignition ? "on" : "off"}</span><strong>{number(selected.speed)} km/h</strong></div> : null}</div>
           <div className="fc-map-wrap"><RouteMap currentPoint={selected ? { lat: selected.latitude, lng: selected.longitude } : null} points={route?.points ?? []} /></div>
           <div className="fc-movement-controls"><label><span>Journey date</span><input max={isoToday()} onChange={(event) => setMovementDate(event.target.value)} type="date" value={movementDate} /></label><button onClick={() => setMovementDate(shiftDate(isoToday(), -1))} type="button">Previous day</button><button onClick={() => setMovementDate(isoToday())} type="button">Today</button><button className="fc-button primary" disabled={!selected || routeLoading} onClick={loadMovement} type="button"><Route size={15} /> {routeLoading ? "Loading journey…" : "Load route & km"}</button>{selected ? <a href={`https://maps.google.com/?q=${selected.latitude},${selected.longitude}`} rel="noreferrer" target="_blank">Open current point</a> : null}</div>
-          {route?.summary ? <div className="fc-route-summary"><div><small>Route distance</small><strong>{route.summary.distanceReliable === false ? "Needs review" : `${number(route.summary.km)} km`}</strong></div><div><small>Max speed</small><strong>{number(route.summary.maxSpeed)} km/h</strong></div><div><small>Moving time</small><strong>{number(route.summary.movingMinutes, 0)} min</strong></div><div><small>GPS points</small><strong>{number(route.summary.pointCount, 0)}</strong></div></div> : null}
+          {route?.summary ? <><div className="fc-route-summary"><div><small>Route distance</small><strong>{route.summary.distanceReliable === false ? "Needs review" : `${number(route.summary.km)} km`}</strong></div><div><small>Max speed</small><strong>{number(route.summary.maxSpeed)} km/h</strong></div><div><small>Moving time</small><strong>{number(route.summary.movingMinutes, 0)} min</strong></div><div><small>GPS points</small><strong>{number(route.summary.pointCount, 0)}</strong></div></div><div className="fc-route-export"><span className={route.summary.lateNight ? "alert" : "clear"}>{route.summary.lateNight ? <><AlertTriangle size={14} /> Movement recorded after 10 p.m.</> : <><Clock3 size={14} /> No after-hours movement</>}</span><FleetExportButtons compact report={{ title: `GPS journey · ${selected?.vehicle_no}`, subtitle: `${movementDate} · ${stationByVehicle.get(selected?.vehicle_no ?? "") ?? "Unmapped"}`, fileName: `gps-journey-${selected?.vehicle_no}-${movementDate}`, headers: ["Date", "Vehicle", "Station", "Distance km", "Moving minutes", "Max speed km/h", "First movement", "Last movement", "After 10 p.m.", "GPS points", "Quality"], rows: [[movementDate, selected?.vehicle_no, stationByVehicle.get(selected?.vehicle_no ?? ""), route.summary.km, route.summary.movingMinutes, route.summary.maxSpeed, route.summary.firstMovingAt, route.summary.lastMovingAt, route.summary.lateNight ? "Alert" : "No", route.summary.pointCount, route.summary.quality]] }} /></div></> : null}
           {route?.summary?.qualityReason ? <p className="fc-route-note">{route.summary.qualityReason}</p> : route?.error ? <p className="fc-route-note error">{route.error}</p> : null}
         </article>
       </section>
     </>}
   </div>;
+}
+
+function FleetGpsExceptions({ data }: { data: FleetControlData }) {
+  const [from, setFrom] = useState(shiftDate(isoToday(), -30)); const [to, setTo] = useState(isoToday());
+  const rows = data.dailyKm.filter((row) => row.date >= from && row.date <= to && row.lateNight).sort((a, b) => b.date.localeCompare(a.date));
+  const vehicleByNo = new Map(data.vehicles.map((vehicle) => [vehicle.vehicleNo, vehicle]));
+  const report = { title: "Fleet GPS exception report", subtitle: `${from} to ${to} · movement from 10 p.m. to 5 a.m. IST`, fileName: `fleet-gps-exceptions-${from}-${to}`, headers: ["Date", "Vehicle", "Assigned station", "Kilometres", "Moving minutes", "Max speed", "First movement", "Last movement", "Exception"], rows: rows.map((row) => [row.date, row.vehicleNo, vehicleByNo.get(row.vehicleNo)?.stationCode, row.km, row.movingMinutes, row.maxSpeed, row.firstMovingAt, row.lastMovingAt, "After-hours movement"]) };
+  return <section className="fc-gps-exceptions"><div className="fc-section-head"><div><span className="fc-eyebrow">GPS control tower</span><h1>Movement exceptions</h1><p>Review vehicles that operated between 10 p.m. and 5 a.m. The assigned station shown here is KOZA or the vehicle’s current Fleet placement.</p></div><FleetExportButtons report={report} /></div><div className="fc-exception-toolbar"><label><span>From</span><input max={to} onChange={(event) => setFrom(event.target.value)} type="date" value={from} /></label><label><span>To</span><input max={isoToday()} min={from} onChange={(event) => setTo(event.target.value)} type="date" value={to} /></label><article><ShieldAlert size={17} /><span><small>After-hours alerts</small><strong>{rows.length}</strong></span></article></div><div className="fc-panel fc-exception-list">{rows.map((row) => { const vehicle = vehicleByNo.get(row.vehicleNo); return <article key={`${row.vehicleNo}-${row.date}`}><span><AlertTriangle size={16} /></span><div><strong>{row.vehicleNo} · {vehicle?.stationCode ?? "Unmapped"}</strong><small>{row.date} · {row.movingMinutes ?? 0} operating minutes · {row.km.toFixed(1)} km</small><p>{row.firstMovingAt ? `First ${new Date(row.firstMovingAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}` : "Start time unavailable"} · {row.lastMovingAt ? `Last ${new Date(row.lastMovingAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}` : "End time unavailable"}</p></div><b>{row.maxSpeed ?? 0} km/h max</b></article>; })}{!rows.length ? <div className="fc-empty"><ShieldAlert size={31} /><strong>No after-hours movement in this period</strong><p>Refresh GPS history to populate operating-time exceptions.</p></div> : null}</div><p className="fc-exception-note">Off-station start alerts will activate after station coordinates and geofence radii are complete. This prevents false personal-use alerts. WhatsApp delivery remains disabled until a verified Fleet Manager channel is connected in Settings.</p></section>;
 }

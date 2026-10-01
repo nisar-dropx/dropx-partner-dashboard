@@ -13,6 +13,7 @@ import {
   Eye,
   FileCheck2,
   FileText,
+  Fuel,
   Gauge,
   GitBranch,
   History,
@@ -41,21 +42,24 @@ import { FleetBrand } from "@/components/fleet-brand";
 import { FleetAppInstall } from "@/components/fleet-app-install";
 import { FleetAdHocCapacity } from "@/components/fleet-adhoc-capacity";
 import { FleetDocumentsWorkspace } from "@/components/fleet-documents-workspace";
+import { DailyFleetReportView } from "@/components/fleet-daily-report";
 import { FleetMultiSelect, type FleetFilterOption } from "@/components/fleet-multi-select";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { FleetTrackingWorkspace } from "@/components/fleet-tracking-workspace";
 import { FleetServiceWorkspace } from "@/components/fleet-service-workspace";
 import { FleetReportsWorkspace } from "@/components/fleet-reports-workspace";
+import { FleetVehicleLifecycle } from "@/components/fleet-vehicle-lifecycle";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { FleetChecklistItem, FleetControlData, FleetControlPayment, FleetControlVehicle, FleetVehicleStatusDefinition, FleetVehicleStatusReason } from "@/lib/fleet-control";
 
-type Section = "overview" | "vehicles" | "documents" | "tracking" | "service" | "audits" | "approvals" | "adhoc" | "reports" | "settings" | "masters";
+type Section = "overview" | "vehicles" | "documents" | "tracking" | "fuel" | "service" | "audits" | "approvals" | "adhoc" | "reports" | "settings" | "masters";
 
 const workspaceSections: Array<{ key: Section; label: string; icon: typeof LayoutDashboard }> = [
   { key: "overview", label: "Command Center", icon: LayoutDashboard },
   { key: "vehicles", label: "Vehicles", icon: Truck },
   { key: "documents", label: "Vehicle Documents", icon: FileCheck2 },
   { key: "tracking", label: "Tracking & Efficiency", icon: Gauge },
+  { key: "fuel", label: "Fuel", icon: Fuel },
   { key: "service", label: "Service", icon: Wrench },
   { key: "audits", label: "Vehicle Audits", icon: ClipboardCheck },
   { key: "approvals", label: "Vehicle Payments", icon: CircleDollarSign },
@@ -171,6 +175,7 @@ export function FleetControlDashboard({
   const [payments, setPayments] = useState(data.payments);
   const [movements, setMovements] = useState(data.movements);
   const [selectedVehicle, setSelectedVehicle] = useState<FleetControlVehicle | null>(null);
+  const [lifecycleVehicle, setLifecycleVehicle] = useState<FleetControlVehicle | null>(null);
   const [placementStation, setPlacementStation] = useState("");
   const [placementReason, setPlacementReason] = useState("");
   const [statusDraft, setStatusDraft] = useState("");
@@ -483,6 +488,8 @@ export function FleetControlDashboard({
               <article><span className="purple"><Activity size={19} /></span><div><small>Ad Hoc usage today</small><strong>{todayAdHoc.length}</strong><p>{todayAdHoc.filter((row) => row.requestType === "Van").length} vans · {todayAdHoc.filter((row) => row.requestType === "Driver").length} drivers</p></div><b>View only</b></article>
             </section>
 
+            <button className={`fc-command-exception ${data.dailyKm.some((row) => row.date >= data.today.slice(0, 7) + "-01" && row.lateNight) ? "alert" : "clear"}`} onClick={() => changeSection("tracking")} type="button"><span><ShieldCheck size={18} /></span><div><small>GPS exceptions · month to date</small><strong>{data.dailyKm.filter((row) => row.date >= data.today.slice(0, 7) + "-01" && row.lateNight).length} after-hours movements</strong><p>Movement between 10 p.m. and 5 a.m. · open the Exceptions tab to review operating time, distance and assigned station.</p></div><ArrowRight size={17} /></button>
+
             <section className="fc-overview-grid">
               <article className="fc-panel fc-priority-panel">
                 <div className="fc-panel-head"><div><span className="fc-eyebrow">Decision queue</span><h2>Payments needing attention</h2></div><button onClick={() => changeSection("approvals")} type="button">View all <ArrowRight size={15} /></button></div>
@@ -574,7 +581,8 @@ export function FleetControlDashboard({
             </div>
           </section> : null}
 
-          {section === "tracking" ? <section className="fc-section"><FleetTrackingWorkspace stationOptions={data.stationOptions} /></section> : null}
+          {section === "tracking" ? <section className="fc-section"><FleetTrackingWorkspace data={{ ...data, vehicles }} /></section> : null}
+          {section === "fuel" ? <section className="fc-section"><DailyFleetReportView focus="fuel" stationOptions={data.stationOptions} /></section> : null}
 
           {section === "adhoc" ? <section className="fc-section"><FleetAdHocCapacity rows={data.adHocRows} stationOptions={data.stationOptions} today={data.today} /></section> : null}
 
@@ -602,7 +610,7 @@ export function FleetControlDashboard({
       </section>
 
       {selectedVehicle ? <div className="fc-modal-backdrop" role="presentation"><section aria-label={`Manage ${selectedVehicle.vehicleNo}`} className="fc-modal wide fc-vehicle-manage"><button aria-label="Close" className="fc-modal-close" onClick={() => setSelectedVehicle(null)} type="button"><X size={19} /></button>
-        <div className="fc-modal-title"><span className="fc-vehicle-big"><Truck size={25} /></span><div><small>{selectedVehicle.stationCode} · {selectedVehicle.fuelType}</small><h2>{selectedVehicle.vehicleNo}</h2><p>{selectedVehicle.model}</p></div></div>
+        <div className="fc-modal-title fc-manage-title"><span className="fc-vehicle-big"><Truck size={25} /></span><div><small>{selectedVehicle.stationCode} · {selectedVehicle.fuelType}</small><h2>{selectedVehicle.vehicleNo}</h2><p>{selectedVehicle.model}</p></div><button className="fc-lifecycle-open" onClick={() => { setLifecycleVehicle(selectedVehicle); setSelectedVehicle(null); }} type="button"><BarChart3 size={15} /> Open vehicle lifecycle</button></div>
         <div className="fc-status-control scalable crisp"><div className="fc-status-control-head"><div><small>Availability update</small><strong>{selectedStatusDefinition?.helper || selectedVehicle.statusLabel}</strong></div><span className={`fc-status ${selectedStatusDefinition?.tone ?? statusTone(selectedVehicle.status)}`}><i />{selectedStatusDefinition?.label ?? selectedVehicle.statusLabel}</span></div><div className="fc-availability-statuses" role="radiogroup" aria-label="Vehicle status">{vehicleStatusOptions.map((option) => <button aria-checked={statusDraft === option.key} className={`${option.tone} ${statusDraft === option.key ? "active" : ""}`} disabled={!data.capabilities.canEditVehicles} key={option.key} onClick={() => { setStatusDraft(option.key); setStatusReasonId(option.key === selectedVehicle.status ? selectedVehicle.statusReasonId ?? "" : ""); if (option.isOperational) { setExpectedOperationalDate(""); setStatusComment(""); } }} role="radio" type="button"><i />{option.label}</button>)}</div><div className="fc-status-update compact"><label><span>Vehicle source</span><select disabled={!data.capabilities.canEditVehicles} onChange={(event) => setOwnershipDraft(event.target.value as FleetControlVehicle["ownershipType"])} value={ownershipDraft}><option value="own">Own</option><option value="odcd">ODCD</option><option value="rented">Rented</option></select></label>{!selectedStatusDefinition?.isOperational ? <><label><span>Reason{selectedStatusDefinition?.requiresReason ? " *" : ""}</span><select disabled={!data.capabilities.canEditVehicles} onChange={(event) => setStatusReasonId(event.target.value)} required={selectedStatusDefinition?.requiresReason} value={statusReasonId}><option value="">Select reason</option>{selectedStatusDefinition?.reasons.filter((reason) => reason.isActive).map((reason) => <option key={reason.id} value={reason.id}>{reason.label}</option>)}</select></label><label><span>Out of service from</span><input disabled={!data.capabilities.canEditVehicles} max={data.today} onChange={(event) => setStatusSince(event.target.value)} type="date" value={statusSince} /></label><label><span>Expected return{selectedStatusDefinition?.requiresExpectedDate ? " *" : ""}</span><input disabled={!data.capabilities.canEditVehicles} min={statusSince || data.today} onChange={(event) => setExpectedOperationalDate(event.target.value)} required={selectedStatusDefinition?.requiresExpectedDate} type="date" value={expectedOperationalDate} /></label><label className="comment"><span>Latest comment</span><input disabled={!data.capabilities.canEditVehicles} onChange={(event) => setStatusComment(event.target.value)} placeholder="Optional short update" value={statusComment} /></label></> : null}{data.capabilities.canEditVehicles ? <button className="fc-button primary" disabled={!statusDraft || Boolean(selectedStatusDefinition?.requiresReason && !statusReasonId) || Boolean(selectedStatusDefinition?.requiresExpectedDate && !expectedOperationalDate) || (statusDraft === selectedVehicle.status && ownershipDraft === selectedVehicle.ownershipType && statusReasonId === (selectedVehicle.statusReasonId ?? "") && statusComment === selectedVehicle.statusComment && expectedOperationalDate === (selectedVehicle.expectedOperationalDate ?? "")) || savingVehicle === selectedVehicle.vehicleNo} onClick={() => updateVehicleStatus(selectedVehicle)} type="button">{savingVehicle === selectedVehicle.vehicleNo ? "Saving…" : selectedStatusDefinition?.isOperational ? "Mark operational" : "Update"}</button> : null}</div></div>
         <div className="fc-manage-grid">
           <section className="fc-manage-card"><div className="fc-manage-card-head"><span><Truck size={17} /></span><div><strong>Vehicle placement</strong><small>Move this vehicle to another active station</small></div></div><form className="fc-placement-form" onSubmit={updateVehiclePlacement}><label><span>Station code</span><SearchableSelect disabled={!data.capabilities.canEditVehicles} name="station_code" onValueChange={setPlacementStation} options={data.stationOptions.map((station) => ({ value: station.code, label: station.code, helper: `${station.name} · ${station.cluster} · ${station.region}` }))} placeholder="Search station code or name" required value={placementStation} /></label><label><span>Transfer reason</span><input disabled={!data.capabilities.canEditVehicles} onChange={(event) => setPlacementReason(event.target.value)} placeholder="Route reallocation, replacement, service return…" value={placementReason} /></label>{data.capabilities.canEditVehicles ? <button className="fc-button primary" disabled={!placementStation || placementStation === selectedVehicle.stationCode || savingVehicle === selectedVehicle.vehicleNo} type="submit">{savingVehicle === selectedVehicle.vehicleNo ? "Saving…" : "Change location"}</button> : null}</form></section>
@@ -611,6 +619,8 @@ export function FleetControlDashboard({
         <section className="fc-placement-history"><button aria-expanded={placementHistoryOpen} onClick={() => setPlacementHistoryOpen((value) => !value)} type="button"><span><History size={17} /><div><strong>Placement history</strong><small>Where this vehicle was allocated and when it moved</small></div></span><b>{movements.filter((item) => item.vehicleId === selectedVehicle.id || item.vehicleNo === selectedVehicle.vehicleNo).length} moves</b></button>{placementHistoryOpen ? <div className="fc-placement-timeline">{movements.filter((item) => item.vehicleId === selectedVehicle.id || item.vehicleNo === selectedVehicle.vehicleNo).map((item) => <article key={item.id}><i /><div><header><strong>{item.fromStation} <ArrowRight size={12} /> {item.toStation}</strong><time>{dateTime(item.movedAt)}</time></header><p>{item.reason}</p><small>Moved by {item.movedBy}</small></div></article>)}{!movements.some((item) => item.vehicleId === selectedVehicle.id || item.vehicleNo === selectedVehicle.vehicleNo) ? <article><i /><div><header><strong>Current placement · {selectedVehicle.stationCode}</strong><time>{dateTime(selectedVehicle.createdAt)}</time></header><p>Initial location from the vehicle master</p><small>No earlier movement has been recorded in Fleet.</small></div></article> : null}</div> : null}</section>
         {!data.capabilities.canEditVehicles ? <div className="fc-readonly-note"><ShieldCheck size={18} /><span><strong>View-only vehicle access</strong><small>Your role can review status, documents and movement history.</small></span></div> : null}
       </section></div> : null}
+
+      {lifecycleVehicle ? <FleetVehicleLifecycle data={{ ...data, vehicles }} onClose={() => setLifecycleVehicle(null)} vehicle={vehicles.find((item) => item.id === lifecycleVehicle.id) ?? lifecycleVehicle} /> : null}
 
       {addVehicle ? <div className="fc-modal-backdrop" role="presentation"><section aria-label="Add vehicle" className="fc-modal wide"><button aria-label="Close" className="fc-modal-close" onClick={() => setAddVehicle(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Plus size={25} /></span><div><small>Vehicle master</small><h2>Add a fleet vehicle</h2><p>Start with allocation and compliance details.</p></div></div><form className="fc-add-form" onSubmit={createVehicle}><label><span>Vehicle number</span><input autoFocus name="vehicle_no" placeholder="KL 00 XX 0000" required /></label><label><span>Station</span><select name="station_code" required><option value="">Select station</option>{data.stationOptions.map((option) => <option key={option.code} value={option.code}>{option.code} · {option.name}</option>)}</select></label><label><span>Model</span><input name="model" placeholder="Vehicle make and model" required /></label><label><span>Fuel type</span><select name="fuel_type" required><option value="">Select fuel</option><option>Diesel</option><option>Petrol</option><option>CNG</option><option>EV</option></select></label><label><span>Vehicle source</span><select defaultValue="own" name="ownership_type"><option value="own">Own</option><option value="odcd">ODCD</option><option value="rented">Rented</option></select></label><label><span>Status</span><select defaultValue="active" name="status">{vehicleStatusOptions.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select></label><label><span>RC location</span><input name="rc_location" placeholder="RTO / station" /></label><label><span>Insurance expiry</span><input name="insurance_expiry" type="date" /></label><label><span>PUC expiry</span><input name="puc_expiry" type="date" /></label><label><span>Fitness expiry</span><input name="fitness_expiry" type="date" /></label><label><span>Tax validity</span><input name="tax_expiry" type="date" /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setAddVehicle(false)} type="button">Cancel</button><button className="fc-button primary" disabled={savingVehicle === "NEW"} type="submit">{savingVehicle === "NEW" ? "Adding…" : "Add vehicle"}</button></div></form></section></div> : null}
 

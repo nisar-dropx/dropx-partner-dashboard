@@ -17,6 +17,8 @@ export type WheelseyeMovementSummary = {
   rejectedPointCount: number;
   stationaryPointCount: number;
   lateNight: boolean;
+  firstMovingAt: string | null;
+  lastMovingAt: string | null;
   distanceReliable: boolean;
   rejectedSegments: number;
   quality: 'clean' | 'filtered' | 'needs_review';
@@ -128,6 +130,8 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
       movingMinutes: Math.round(movingSeconds / 60), pointCount: unique.length,
       acceptedPointCount: parked ? unique.length : moving.length, rejectedPointCount, stationaryPointCount,
       lateNight: moving.some(point => { const hour = Math.floor((point.epoch + 19800) / 3600) % 24; return hour >= 22 || hour < 5; }),
+      firstMovingAt: moving.length ? new Date(moving[0].epoch * 1000).toISOString() : null,
+      lastMovingAt: moving.length ? new Date(moving.at(-1)!.epoch * 1000).toISOString() : null,
       distanceReliable, rejectedSegments, quality, qualityReason, algorithmVersion: ALGORITHM
     } satisfies WheelseyeMovementSummary
   };

@@ -1,15 +1,16 @@
 "use client";
 
-import { Activity, CalendarDays, CircleDollarSign, ClipboardCheck, FileCheck2, Gauge, Search, Truck, Wrench } from "lucide-react";
+import { Activity, CalendarDays, CircleDollarSign, ClipboardCheck, FileCheck2, Gauge, History, Search, Truck, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { FleetMultiSelect } from "@/components/fleet-multi-select";
 import type { FleetControlData } from "@/lib/fleet-control";
 import type { FleetReportTable } from "@/lib/fleet/report-export";
 
-type ReportKey = "vehicles" | "documents" | "service" | "audits" | "payments" | "adhoc";
+type ReportKey = "vehicles" | "lifecycle" | "documents" | "service" | "audits" | "payments" | "adhoc";
 const definitions: Array<{ key: ReportKey; label: string; description: string; icon: typeof Truck }> = [
   { key: "vehicles", label: "Fleet availability", description: "Vehicle source, placement and current operational status", icon: Truck },
+  { key: "lifecycle", label: "Vehicle lifecycle", description: "Daily availability, GPS kilometres and maintenance cost by vehicle", icon: History },
   { key: "documents", label: "Document compliance", description: "Stored files, validity dates and renewal attention", icon: FileCheck2 },
   { key: "service", label: "Service & maintenance", description: "Service dates, vendors, bills, downtime and next due", icon: Wrench },
   { key: "audits", label: "Vehicle audits", description: "Video and physical inspection programme and outcomes", icon: ClipboardCheck },
@@ -36,6 +37,13 @@ export function FleetReportsWorkspace({ data }: { data: FleetControlData }) {
   const report = useMemo<FleetReportTable>(() => {
     const subtitle = `${from} to ${to} · ${stations.length ? stations.join(", ") : clusters.length ? clusters.join(", ") : regions.length ? regions.join(", ") : "All vehicle placements"}`;
     if (reportKey === "vehicles") return { title: "Fleet availability report", subtitle, fileName: `fleet-availability-${data.today}`, headers: ["Vehicle", "Station", "Source", "Model", "Fuel", "Status", "Reason", "Non-operational since", "Expected operational", "Latest comment"], rows: data.vehicles.filter((row) => inScope(row.stationCode) && includes(`${row.vehicleNo} ${row.model} ${row.stationCode} ${row.statusLabel} ${row.statusReasonLabel}`)).map((row) => [row.vehicleNo, row.stationCode, label(row.ownershipType), row.model, row.fuelType, row.statusLabel, row.statusReasonLabel, row.nonOperationalSince, row.expectedOperationalDate, row.statusComment]) };
+    if (reportKey === "lifecycle") {
+      const range: string[] = []; for (let value = from; value <= to; value = new Date(Date.parse(`${value}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) range.push(value);
+      const km = new Map(data.dailyKm.map((row) => [`${row.vehicleNo}|${row.date}`, row.km]));
+      const services = new Map<string, { labels: string[]; amount: number }>(); data.serviceHistory.filter((row) => row.serviceDate >= from && row.serviceDate <= to).forEach((row) => { const key = `${row.vehicleNo}|${row.serviceDate}`; const current = services.get(key) ?? { labels: [], amount: 0 }; current.labels.push(label(row.serviceType)); current.amount += row.amount; services.set(key, current); });
+      const rows = data.vehicles.filter((vehicle) => inScope(vehicle.stationCode) && includes(`${vehicle.vehicleNo} ${vehicle.stationCode} ${vehicle.model}`)).flatMap((vehicle) => range.map((day) => { const noon = Date.parse(`${day}T12:00:00Z`); const period = [...data.statusHistory].reverse().find((item) => item.vehicleNo === vehicle.vehicleNo && Date.parse(item.startedAt) <= noon && (!item.endedAt || Date.parse(item.endedAt) > noon)); const service = services.get(`${vehicle.vehicleNo}|${day}`); return [day, vehicle.vehicleNo, vehicle.stationCode, period?.statusLabel ?? vehicle.statusLabel, period?.statusReasonLabel ?? vehicle.statusReasonLabel, period?.comment ?? vehicle.statusComment, km.get(`${vehicle.vehicleNo}|${day}`) ?? 0, service?.labels.join(", ") ?? "", service?.amount ?? 0]; }));
+      return { title: "Vehicle lifecycle report", subtitle, fileName: `fleet-vehicle-lifecycle-${from}-${to}`, headers: ["Date", "Vehicle", "Station", "Status", "Reason", "Comment", "Kilometres", "Service / maintenance", "Service amount"], rows };
+    }
     if (reportKey === "documents") return { title: "Vehicle document compliance report", subtitle, fileName: `fleet-documents-${data.today}`, headers: ["Vehicle", "Station", "Document", "File", "Expiry", "Uploaded"], rows: data.documents.filter((row) => { const vehicle = data.vehicles.find((item) => item.vehicleNo === row.vehicleNo); return inScope(vehicle?.stationCode ?? "") && includes(`${row.vehicleNo} ${row.documentType} ${row.fileName}`); }).map((row) => { const vehicle = data.vehicles.find((item) => item.vehicleNo === row.vehicleNo); return [row.vehicleNo, vehicle?.stationCode, data.documentTypes.find((item) => item.value === row.documentType)?.label ?? row.documentType, row.fileName, row.expiryDate, row.uploadedAt]; }) };
     if (reportKey === "service") return { title: "Vehicle service and maintenance report", subtitle, fileName: `fleet-service-${from}-${to}`, headers: ["Date", "Vehicle", "Station", "Type", "Vendor", "Amount", "Status", "Downtime hours", "Next service", "Invoice"], rows: data.serviceHistory.filter((row) => row.serviceDate >= from && row.serviceDate <= to && inScope(row.stationCode) && includes(`${row.vehicleNo} ${row.serviceType} ${row.vendorName} ${row.description}`)).map((row) => [row.serviceDate, row.vehicleNo, row.stationCode, label(row.serviceType), row.vendorName, row.amount, label(row.status), row.downtimeHours, row.nextServiceDate, row.invoiceUrl]) };
     if (reportKey === "audits") return { title: "Vehicle audit report", subtitle, fileName: `fleet-audits-${from}-${to}`, headers: ["Scheduled", "Vehicle", "Station", "Mode", "Status", "Risk", "Score", "Evidence", "Completed", "Summary"], rows: data.audits.filter((row) => row.scheduledFor >= from && row.scheduledFor <= to && inScope(row.stationCode) && includes(`${row.vehicleNo} ${row.auditMode} ${row.status} ${row.summary}`)).map((row) => [row.scheduledFor, row.vehicleNo, row.stationCode, label(row.auditMode), label(row.status), row.riskScore, row.score, row.evidenceCount, row.completedAt, row.summary]) };
