@@ -266,6 +266,7 @@ export async function createFieldExecutive(formData: FormData) {
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
   let reportingNotice = "";
+  const redirectTab = optional(formData.get("redirect_tab"));
 
   try {
     const fullName = normalizeFullName(formData.get("full_name"));
@@ -274,6 +275,7 @@ export async function createFieldExecutive(formData: FormData) {
     const email = normalizeEmail(formData.get("email"));
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
     const reportedOn = optional(formData.get("reported_on"));
+    const recruitmentLeadId = optional(formData.get("recruitment_lead_id"));
     const locationId = required(formData.get("location_id"), "Location");
     const designation = required(formData.get("designation"), "Designation");
     const configuredDirectActivate = await loadWorkforceCategoryDirectActivate(companyId, config.designationCategory);
@@ -336,12 +338,29 @@ export async function createFieldExecutive(formData: FormData) {
     }
     const { data: location, error: locationError } = await supabaseAdmin
       .from("stations")
-      .select("id")
+      .select("id, station_code")
       .eq("id", locationId)
       .eq("company_id", companyId)
       .maybeSingle();
     if (locationError) throw new Error(locationError.message);
     if (!location) throw new Error("Selected location is not available for this company.");
+    if (recruitmentLeadId) {
+      if (table !== "workforce") throw new Error("Recruit candidates can only be invited to the Workforce Register.");
+      const leadResult = await supabaseAdmin.from("leads")
+        .select("id, station_code, status")
+        .eq("company_id", companyId)
+        .eq("id", recruitmentLeadId)
+        .is("archived_at", null)
+        .maybeSingle();
+      if (leadResult.error) throw new Error(leadResult.error.message);
+      if (!leadResult.data) throw new Error("Recruit candidate was not found.");
+      if (String(leadResult.data.status ?? "").toLowerCase() !== "interview_reported") {
+        throw new Error("Mark the candidate as reported before sending the DropX ID invitation.");
+      }
+      if (String(leadResult.data.station_code ?? "").trim().toUpperCase() !== String(location.station_code ?? "").trim().toUpperCase()) {
+        throw new Error("The selected location must match the candidate's Recruit station.");
+      }
+    }
     await assertWorkforceContactsAvailable({
       companyId,
       mobile,
@@ -399,7 +418,7 @@ export async function createFieldExecutive(formData: FormData) {
       date_of_join: dateOfJoin,
       location_id: locationId,
       designation,
-      ...(table === "workforce" ? { designation_id: designationRuleResult.data.id, ...workforceIdentityFields() } : {}),
+      ...(table === "workforce" ? { designation_id: designationRuleResult.data.id, recruitment_lead_id: recruitmentLeadId, ...workforceIdentityFields() } : {}),
       biometric_id: biometricId,
       dropx_id: dropxId,
       created_by: authorization.userId,
@@ -493,6 +512,27 @@ export async function createFieldExecutive(formData: FormData) {
           reportingNotice = " The first reporting date could not be recorded because this station's partner workflow is not configured.";
         }
       }
+      if (recruitmentLeadId && table === "workforce") {
+        const acceptedAt = new Date().toISOString();
+        const leadUpdate = await supabaseAdmin.from("leads").update({
+          status: "registration_invited",
+          final_status: "DropX ID pending",
+          last_status_at: acceptedAt,
+          last_updated_by: authorization.userId,
+          updated_at: acceptedAt
+        }).eq("company_id", companyId).eq("id", recruitmentLeadId);
+        if (leadUpdate.error) throw new Error(leadUpdate.error.message);
+        const handoffEvent = await supabaseAdmin.from("workforce_recruitment_events").insert({
+          company_id: companyId,
+          lead_id: recruitmentLeadId,
+          workforce_id: executive.id,
+          event_code: "dropx_id_invited",
+          event_at: acceptedAt,
+          actor_user_id: authorization.userId,
+          metadata: { location_id: locationId, designation }
+        });
+        if (handoffEvent.error) throw new Error(handoffEvent.error.message);
+      }
     }
 
     const stationRelation = executive.stations as unknown as { station_code?: string; station_name?: string | null; providers?: { name?: string } | Array<{ name?: string }> | null } | null;
@@ -525,6 +565,7 @@ export async function createFieldExecutive(formData: FormData) {
   }
 
   fieldExecutiveRedirect({
+    ...(redirectTab ? { tab: redirectTab } : {}),
     notice: config.profileType === "field_executive"
       ? `${entityLabel} onboarding request created. The applicant must submit the profile and agreement before HO activation.${reportingNotice}`
       : `${entityLabel} added successfully.`
@@ -1088,7 +1129,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
 export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
   const authorization = await requirePagePermission("delivery_associates", "edit");
   const requestedStatus = String(formData.get("return_status") ?? "").trim().toLowerCase();
-  const destination = `/work-force-register?status=${["training", "registration", "amazon", "active", "attention"].includes(requestedStatus) ? requestedStatus : "registration"}`;
+  const destination = `/work-force-register?tab=${["interviews", "dropx-id", "amazon-id", "da-onboarding", "attention"].includes(requestedStatus) ? requestedStatus : "amazon-id"}`;
   try {
     if (authorization.readOnly || !supabaseAdmin) throw new Error("Amazon invitation queue is unavailable.");
     const companyId = requireCompanyId(authorization);
@@ -1150,7 +1191,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
 export async function recordPartnerProgress(form:FormData){
  const auth=await requirePagePermission("delivery_associates","edit");
  const requestedStatus=String(form.get("return_status")??"").trim().toLowerCase();
- const destination="/work-force-register?status="+(["training","registration","amazon","active","attention"].includes(requestedStatus)?requestedStatus:"training");
+ const destination="/work-force-register?tab="+(["interviews","dropx-id","amazon-id","da-onboarding","attention"].includes(requestedStatus)?requestedStatus:"dropx-id");
  try{
   if(!supabaseAdmin||auth.readOnly)throw new Error("Editing is unavailable.");
   const value=(key:string)=>String(form.get(key)||"").trim();
