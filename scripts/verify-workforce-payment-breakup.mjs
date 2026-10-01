@@ -55,7 +55,7 @@ assert.match(workforceTable, /Export full CSV/, "Workforce must make the full-fi
 assert.match(workforceTable, /buildWorkforcePayoutCsv\(exportableRows, subjectLabel\)/, "Workforce and Helper exports must use the tested human-readable CSV builder");
 assert.doesNotMatch(workforceExport, /paymentMethodBreakdown/, "Export must not duplicate component amounts with payment-method aggregate columns");
 assert.match(workforceExport, /componentType === "production"[\s\S]*Count[\s\S]*Rate \(INR\)[\s\S]*Amount \(INR\)/, "Only production components must export Count, Rate, and Amount");
-assert.match(workforceExport, /:\s*\[`\$\{item\.label\} Rate \(INR\)`, `\$\{item\.label\} Amount \(INR\)`\]/, "Attendance and fixed components must omit misleading Count columns");
+assert.match(workforceExport, /:\s*\[`\$\{item\.exportLabel\} Rate \(INR\)`, `\$\{item\.exportLabel\} Amount \(INR\)`\]/, "Attendance and fixed components must omit misleading Count columns");
 assert.match(workforceTable, /const tableColumnCount = 11/, "Workforce detail and empty rows must span the compact totals worksheet");
 assert.match(workforceTable, /Payment totals[\s\S]*Deduction totals/, "Workforce breakup must show period payment and deduction totals");
 assert.match(workforceTable, /row\.productionBreakdown\.filter\(\(item\) => item\.amount !== 0\)/, "Workforce breakup must show only the worker's non-zero payment totals");
