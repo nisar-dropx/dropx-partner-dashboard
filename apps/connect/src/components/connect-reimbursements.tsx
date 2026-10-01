@@ -51,6 +51,7 @@ type ApprovalGuide = {
   claimSteps: Array<{ order: number; kind: "manager" | "conditional" | "finance"; label: string; approverName: string; detail: string }>;
   payment: { label: string; approverName: string; detail: string };
 };
+type PreparedReceiptUpload = { contentType: string; fileName: string; path: string; signedUrl: string; size: number };
 
 function uid() { return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
 function newItem(): ExpenseItem { return { id: uid(), categoryId: "", expenseDate: todayInIndia(), merchant: "", description: "", amount: "", quantity: "" }; }
@@ -59,6 +60,58 @@ function dateTime(value: string) { return new Date(value).toLocaleString("en-IN"
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function statusLabel(status: string) { return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function amountInput(value: number) { return value > 0 ? String(value) : ""; }
+
+async function responsePayload(response: Response) {
+  const text = await response.text();
+  if (!text) return {} as Record<string, unknown>;
+  try { return JSON.parse(text) as Record<string, unknown>; }
+  catch { return { error: response.ok ? "The server returned an invalid response." : `Upload failed (${response.status}).` }; }
+}
+
+function discardPreparedReceipts(account: AppAccount, paths: string[]) {
+  if (!paths.length) return;
+  const discard = new FormData();
+  discard.set("kind", "discard_staged_receipts");
+  discard.set("accountId", account.id);
+  discard.set("profileType", account.profileType);
+  discard.set("paths", JSON.stringify(paths));
+  void fetch("/api/connect/reimbursements", { method: "POST", body: discard });
+}
+
+async function prepareAndUploadReceipts(account: AppAccount, receipts: File[]) {
+  const prepare = new FormData();
+  prepare.set("kind", "prepare_receipt_uploads");
+  prepare.set("accountId", account.id);
+  prepare.set("profileType", account.profileType);
+  prepare.set("receipts", JSON.stringify(receipts.map((file) => ({
+    contentType: file.type,
+    fileName: file.name,
+    size: file.size
+  }))));
+  const preparedResponse = await fetch("/api/connect/reimbursements", { method: "POST", body: prepare });
+  const preparedPayload = await responsePayload(preparedResponse);
+  if (!preparedResponse.ok) throw new Error(String(preparedPayload.error || "Unable to prepare receipt uploads."));
+  const uploads = Array.isArray(preparedPayload.uploads) ? preparedPayload.uploads as PreparedReceiptUpload[] : [];
+  if (uploads.length !== receipts.length) throw new Error("Unable to prepare every receipt upload.");
+
+  try {
+    for (let index = 0; index < uploads.length; index += 1) {
+      const body = new FormData();
+      body.append("cacheControl", "3600");
+      body.append("", receipts[index]);
+      const response = await fetch(uploads[index].signedUrl, {
+        method: "PUT",
+        headers: { "x-upsert": "false" },
+        body
+      });
+      if (!response.ok) throw new Error(`Unable to upload ${receipts[index].name}. Please retry.`);
+    }
+    return uploads.map(({ contentType, fileName, path, size }) => ({ contentType, fileName, path, size }));
+  } catch (error) {
+    discardPreparedReceipts(account, uploads.map((upload) => upload.path));
+    throw error;
+  }
+}
 
 export function ConnectReimbursements({ account, active = true }: { account: AppAccount; active?: boolean }) {
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
@@ -311,6 +364,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
     try {
       if (!editingClaimId && !selectedRequestId) throw new Error("Select an approved request before submitting a claim.");
       if (!receipts.length) throw new Error("Attach at least one receipt image or PDF.");
+      const uploadedReceipts = await prepareAndUploadReceipts(account, receipts);
       const form = new FormData();
       form.set("kind", "claim");
       form.set("accountId", account.id);
@@ -321,14 +375,20 @@ export function ConnectReimbursements({ account, active = true }: { account: App
       form.set("claimRequestId", selectedRequestId);
       if (editingClaimId) form.set("claimId", editingClaimId);
       form.set("items", JSON.stringify(items.map((item) => ({ ...item, amount: Number(item.amount) }))));
-      for (const file of receipts) form.append("receipts", file);
+      form.set("uploadedReceipts", JSON.stringify(uploadedReceipts));
       const response = await fetch("/api/connect/reimbursements", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to submit claim.");
-      setNotice(payload.notice);
+      const payload = await responsePayload(response);
+      if (!response.ok) {
+        discardPreparedReceipts(account, uploadedReceipts.map((receipt) => receipt.path));
+        throw new Error(String(payload.error || "Unable to submit claim."));
+      }
+      setNotice(String(payload.notice || "Claim submitted."));
       setPurpose(""); setTripFrom(""); setTripTo(""); setItems([newItem()]); setReceipts([]); setSelectedRequestId(""); setEditingClaimId(null);
       await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to submit claim."); }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to submit claim.");
+      window.setTimeout(() => document.getElementById("dx-expense-claim-feedback")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+    }
     finally { setSaving(false); }
   }
 
@@ -367,8 +427,8 @@ export function ConnectReimbursements({ account, active = true }: { account: App
         <a className="dx-small-action" href={`/api/connect/reimbursements?kind=policy_document&download=1&accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`}><Download /> Download PDF</a>
       </div>
     </section> : null}
-    {error ? <div className="dx-alert error">{error}</div> : null}
-    {notice ? <div className="dx-alert success">{notice}</div> : null}
+    {error && (loading || tab !== "claims") ? <div className="dx-alert error">{error}</div> : null}
+    {notice && (loading || tab !== "claims") ? <div className="dx-alert success">{notice}</div> : null}
     {data && !data.payout.ready ? <div className="dx-alert warning">{data.payout.message} You can still raise a request; bank details are required before claim submission.</div> : null}
 
     <nav className="dx-expense-tabs">
@@ -635,8 +695,12 @@ export function ConnectReimbursements({ account, active = true }: { account: App
           </label>
           {receipts.length ? <ul className="dx-expense-file-list">{receipts.map((file) => <li key={`${file.name}-${file.size}`}><FileText /><span>{file.name}</span><small>{Math.ceil(file.size / 1024)} KB</small></li>)}</ul> : null}
         </section>
+        <div id="dx-expense-claim-feedback" aria-live="polite">
+          {error ? <div className="dx-alert error">{error}</div> : null}
+          {notice ? <div className="dx-alert success">{notice}</div> : null}
+        </div>
         <button className="dx-save" disabled={saving || total <= 0 || !data?.payout.ready || (!editingClaimId && !selectedRequestId)} type="submit">
-          {saving ? "Submitting…" : `${editingClaimId ? "Resubmit" : "Submit"} ${money(total)} claim`}
+          {saving ? "Uploading receipts…" : `${editingClaimId ? "Resubmit" : "Submit"} ${money(total)} claim`}
         </button>
       </form> : <div className="dx-alert warning">Approve an expense request first, then return here to submit the claim with receipts.</div>}
 

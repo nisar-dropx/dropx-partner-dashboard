@@ -29,10 +29,61 @@ import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
 import type { ExpensePolicyQuote } from "../../../../src/lib/reimbursement-policy";
 
+export const maxDuration = 60;
+
+const allowedReceiptTypes = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+const maxReceiptBytes = 10 * 1024 * 1024;
+
+type StagedReceipt = {
+  contentType: string;
+  fileName: string;
+  path: string;
+  size: number;
+};
+
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
 function safeFileName(value: string) { return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 120) || "receipt"; }
 function relation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
+
+function stagedReceiptPrefix(account: ConnectAccount) {
+  return `${account.companyId}/staging/${account.profileType}/${account.id}/`;
+}
+
+function receiptMetadata(value: unknown): Array<{ contentType: string; fileName: string; size: number }> {
+  if (!Array.isArray(value) || !value.length || value.length > 20) throw new Error("Attach between 1 and 20 receipt files.");
+  return value.map((entry) => {
+    const row = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+    const fileName = safeFileName(clean(row.fileName));
+    const contentType = clean(row.contentType).toLowerCase();
+    const size = Number(row.size);
+    if (!fileName || !allowedReceiptTypes.has(contentType)) throw new Error("Receipts must be PDF, JPG, PNG or WebP.");
+    if (!Number.isFinite(size) || size <= 0 || size > maxReceiptBytes) throw new Error("Each receipt must be 10 MB or smaller.");
+    return { contentType, fileName, size };
+  });
+}
+
+async function prepareReceiptUploads(form: FormData, account: ConnectAccount) {
+  const files = receiptMetadata(JSON.parse(clean(form.get("receipts")) || "[]"));
+  const prefix = stagedReceiptPrefix(account);
+  const uploads = await Promise.all(files.map(async (file) => {
+    const path = `${prefix}${randomUUID()}-${file.fileName}`;
+    const signed = await db().storage.from("hr-expense-receipts").createSignedUploadUrl(path);
+    if (signed.error || !signed.data) throw new Error(signed.error?.message ?? "Unable to prepare receipt upload.");
+    return { ...file, path, signedUrl: signed.data.signedUrl, token: signed.data.token };
+  }));
+  return NextResponse.json({ uploads }, { headers: { "Cache-Control": "private, no-store" } });
+}
+
+async function discardStagedReceipts(form: FormData, account: ConnectAccount) {
+  const paths = JSON.parse(clean(form.get("paths")) || "[]") as unknown;
+  const prefix = stagedReceiptPrefix(account);
+  const safePaths = Array.isArray(paths)
+    ? paths.map(clean).filter((path) => path.startsWith(prefix)).slice(0, 20)
+    : [];
+  if (safePaths.length) await db().storage.from("hr-expense-receipts").remove(safePaths);
+  return NextResponse.json({ ok: true });
+}
 
 async function signedAttachments(value: Array<{ id: string; item_id: string | null; file_name: string; content_type: string | null; storage_path: string }> | null | undefined) {
   return Promise.all((value ?? []).map(async (attachment) => {
@@ -677,6 +728,7 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
 
 async function submitClaim(form: FormData, account: ConnectAccount) {
   const uploadedPaths: string[] = [];
+  const stagedPaths: string[] = [];
   let priorPaths: string[] = [];
   let claimId = "";
   let isResubmit = false;
@@ -712,12 +764,30 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       const legacy = form.get(`receipt:${item.id}`);
       if (legacy instanceof File && legacy.size > 0) receiptFiles.push(legacy);
     }
-    if (!receiptFiles.length) throw new Error("Attach at least one receipt image or PDF.");
     for (const receipt of receiptFiles) {
-      if (receipt.size > 10 * 1024 * 1024) throw new Error("Each receipt must be 10 MB or smaller.");
-      if (!["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(receipt.type)) {
+      if (receipt.size > maxReceiptBytes) throw new Error("Each receipt must be 10 MB or smaller.");
+      if (!allowedReceiptTypes.has(receipt.type)) {
         throw new Error("Receipts must be PDF, JPG, PNG or WebP.");
       }
+    }
+
+    const stagedInput = JSON.parse(clean(form.get("uploadedReceipts")) || "[]") as unknown;
+    const stagedReceipts: StagedReceipt[] = Array.isArray(stagedInput) ? stagedInput.map((entry) => {
+      const row = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+      return {
+        contentType: clean(row.contentType).toLowerCase(),
+        fileName: safeFileName(clean(row.fileName)),
+        path: clean(row.path),
+        size: Number(row.size)
+      };
+    }) : [];
+    if (!receiptFiles.length && !stagedReceipts.length) throw new Error("Attach at least one receipt image or PDF.");
+    if (receiptFiles.length + stagedReceipts.length > 20) throw new Error("Attach no more than 20 receipt files.");
+    const requiredPrefix = stagedReceiptPrefix(account);
+    for (const receipt of stagedReceipts) {
+      if (!receipt.path.startsWith(requiredPrefix)) throw new Error("A staged receipt does not belong to this account.");
+      if (!receipt.fileName || !allowedReceiptTypes.has(receipt.contentType)) throw new Error("Receipts must be PDF, JPG, PNG or WebP.");
+      if (!Number.isFinite(receipt.size) || receipt.size <= 0 || receipt.size > maxReceiptBytes) throw new Error("Each receipt must be 10 MB or smaller.");
     }
 
     for (const item of items) {
@@ -794,6 +864,17 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       fileName: file.name,
       contentType: file.type || "application/octet-stream"
     })));
+    for (const receipt of stagedReceipts) {
+      const download = await db().storage.from("hr-expense-receipts").download(receipt.path);
+      if (download.error || !download.data) throw new Error(download.error?.message ?? `Unable to read ${receipt.fileName}.`);
+      if (download.data.size > maxReceiptBytes) throw new Error("Each receipt must be 10 MB or smaller.");
+      stagedPaths.push(receipt.path);
+      mergeInputs.push({
+        bytes: new Uint8Array(await download.data.arrayBuffer()),
+        fileName: receipt.fileName,
+        contentType: receipt.contentType
+      });
+    }
     const mergedPdf = await mergeExpenseReceiptsToPdf(mergeInputs);
     const mergedPath = `${account.companyId}/${claimId}/merged/${Date.now()}-receipts.pdf`;
     const upload = await db().storage.from("hr-expense-receipts").upload(mergedPath, mergedPdf, {
@@ -874,6 +955,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     });
     if (attachmentResult.error) throw new Error(attachmentResult.error.message);
     if (isResubmit && priorPaths.length) await db().storage.from("hr-expense-receipts").remove(priorPaths);
+    if (stagedPaths.length) await db().storage.from("hr-expense-receipts").remove(stagedPaths);
 
     // The submitted route already includes any configured policy-exception approver and always ends in Finance.
     const pendingSteps = await db().from("hr_expense_approval_steps").select("approver_user_id,step_order")
@@ -900,6 +982,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
   } catch (error) {
     if (account && claimId && !isResubmit) await db().from("hr_expense_claims").delete().eq("company_id", account.companyId).eq("id", claimId);
     if (uploadedPaths.length) await db().storage.from("hr-expense-receipts").remove(uploadedPaths);
+    if (stagedPaths.length) await db().storage.from("hr-expense-receipts").remove(stagedPaths);
     throw error;
   }
 }
@@ -1008,6 +1091,8 @@ export async function POST(request: Request) {
       kind === "carry_forward_request_approval"
     );
     if (kind === "carry_forward_request_approval") return await carryForwardExistingClaim(form, account);
+    if (kind === "prepare_receipt_uploads") return await prepareReceiptUploads(form, account);
+    if (kind === "discard_staged_receipts") return await discardStagedReceipts(form, account);
     if (kind === "policy_quote") {
       const items = JSON.parse(clean(form.get("items")) || "[]");
       if (!Array.isArray(items) || items.length > 50) throw new Error("Invalid expense lines.");

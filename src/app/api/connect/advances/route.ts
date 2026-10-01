@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { isManagingPartnerDesignation } from "@/lib/approval-designation-labels";
+import { isAdvanceEligible } from "@/lib/advance-eligibility";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { createAppNotification } from "@/lib/app-notifications";
 import { sendPaymentAdvanceRequestNotification, sendPaymentAdvanceWithdrawalNotification } from "@/lib/payment-advance-email-notifications";
@@ -35,6 +36,21 @@ async function isDirectAdvanceRequester(companyId: string, profileType: Workforc
     code: designation.data.code as string | null,
     name: String(designation.data.name ?? "")
   });
+}
+
+async function hasCurrentPeopleAssignment(companyId: string, profileType: WorkforceProfileType, accountId: string) {
+  if (!supabaseAdmin || (profileType !== "employee" && profileType !== "contractor")) return false;
+  const workerColumn = profileType === "employee" ? "employee_id" : "contractor_id";
+  const engagement = await supabaseAdmin.from("hr_engagements").select("id")
+    .eq("company_id", companyId).eq("worker_type", profileType).eq(workerColumn, accountId).eq("status", "active")
+    .limit(1).maybeSingle();
+  if (engagement.error || !engagement.data) return false;
+  const today = indiaToday();
+  const assignment = await supabaseAdmin.from("hr_work_assignments").select("id")
+    .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  return !assignment.error && Boolean(assignment.data);
 }
 
 async function resolveAccount(accountId: string, profileType: string) {
@@ -74,7 +90,12 @@ async function resolveAccount(accountId: string, profileType: string) {
   }
   const profileStatusColumn = resolvedType === "employee" ? "profile_completion_status" : "onboarding_status";
   const profileStatus = String(row[profileStatusColumn] ?? "").trim().toLowerCase();
-  const eligibleForAdvance = row.is_active === true && profileStatus === "active";
+  const currentPeopleAssignment = await hasCurrentPeopleAssignment(String(row.company_id), resolvedType, String(row.id));
+  const eligibleForAdvance = isAdvanceEligible({
+    currentPeopleAssignment,
+    profileActive: row.is_active === true,
+    profileStatus
+  });
 
   let station = "";
   if (row.location_id) {
@@ -90,7 +111,8 @@ async function resolveAccount(accountId: string, profileType: string) {
     name: String(row.full_name ?? ""),
     station,
     designation: String("designation" in row ? row.designation ?? "" : "Employee"),
-    eligibleForAdvance
+    eligibleForAdvance,
+    eligibilitySource: currentPeopleAssignment ? "people" : profileStatus === "active" ? "legacy_profile" : "inactive"
   };
 }
 
