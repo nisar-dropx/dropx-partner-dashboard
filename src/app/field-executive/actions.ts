@@ -25,6 +25,7 @@ import { biometricBelongsToPeople, peopleIdentityForDualRole } from "@/lib/workf
 import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
 import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadClientIdMappings, needsClientId, providerMappingFor, type ClientIdWorker } from "@/lib/workforce-client-id-queue";
+import { loadClientIdPartnerStates } from "@/lib/workforce-client-id-partner";
 import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
@@ -1161,7 +1162,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
 export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
   const authorization = await requirePagePermission("delivery_associates", "edit");
   const requestedStatus = String(formData.get("return_status") ?? "").trim().toLowerCase();
-  const destination = `/work-force-register?tab=${["interviews", "dropx-id", "amazon-id", "da-onboarding", "attention"].includes(requestedStatus) ? requestedStatus : "amazon-id"}`;
+  const destination = `/work-force-register?tab=${["interviews", "dropx-id", "amazon-id", "da-onboarding", "mapping", "attention"].includes(requestedStatus) ? requestedStatus : "amazon-id"}`;
   try {
     if (authorization.readOnly || !supabaseAdmin) throw new Error("Amazon invitation queue is unavailable.");
     const companyId = requireCompanyId(authorization);
@@ -1192,6 +1193,12 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     }
     if (mapping.known) {
       throw new Error("This associate already has a provider ID. Review its station and effective dates in Dashboard mapping before requesting another invitation.");
+    }
+    const existingPartner = (await loadClientIdPartnerStates(supabaseAdmin, companyId, [workforceId])).get(workforceId);
+    if (existingPartner) {
+      revalidatePath("/work-force-register");
+      const tab = existingPartner.queue === "mapping" ? "mapping" : existingPartner.queue === "progress" ? "da-onboarding" : "attention";
+      redirect(`/work-force-register?tab=${tab}&notice=${encodeURIComponent(existingPartner.instruction)}`);
     }
     const latest = await supabaseAdmin.from("workforce_amazon_invitation_requests")
       .select("id,status")

@@ -62,7 +62,8 @@ export function providerMappingFor(worker: ClientIdWorker, mappings: ClientIdMap
   return { current, known: current ?? known[0] };
 }
 
-export function clientIdQueues<T extends ClientIdWorker>(workers: T[], mappings: ClientIdMapping[], invitations: ClientIdInvitation[], date: string) {
+export function clientIdQueues<T extends ClientIdWorker>(workers: T[], mappings: ClientIdMapping[], invitations: ClientIdInvitation[], date: string,
+  partnerStates: ReadonlyMap<string, { queue: "mapping" | "progress" | "attention" }> = new Map()) {
   const latestInvitations = new Map<string, ClientIdInvitation>();
   for (const invitation of invitations) {
     const previous = latestInvitations.get(invitation.workforce_id);
@@ -74,17 +75,22 @@ export function clientIdQueues<T extends ClientIdWorker>(workers: T[], mappings:
   const ready: T[] = [];
   const progress: T[] = [];
   const failed: T[] = [];
+  const mappingPending: T[] = [];
   const providerMappings = new Map<string, ReturnType<typeof providerMappingFor>>();
   for (const worker of workers) {
     const mapping = providerMappingFor(worker, mappings, date);
     providerMappings.set(worker.id, mapping);
     if (!needsClientId(worker) || mapping.current) continue;
+    const partner = partnerStates.get(worker.id);
     const invitation = latestInvitations.get(worker.id);
-    if (invitation?.status === "failed") failed.push(worker);
+    if (mapping.known || partner?.queue === "mapping") mappingPending.push(worker);
+    else if (partner?.queue === "progress") progress.push(worker);
+    else if (partner?.queue === "attention") failed.push(worker);
+    else if (invitation?.status === "failed") failed.push(worker);
     else if (invitation && ["queued", "processing", "sent"].includes(invitation.status)) progress.push(worker);
     else ready.push(worker);
   }
-  return { ready, progress, failed, latestInvitations, providerMappings };
+  return { ready, progress, failed, mappingPending, latestInvitations, providerMappings };
 }
 
 // Page through the source before classifying or counting; PostgREST limits and
