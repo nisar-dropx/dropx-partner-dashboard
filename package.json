@@ -6,7 +6,7 @@
     "verify:adhoc-da": "node --experimental-strip-types --test src/lib/ops-pulse/adhoc-da-report.test.mjs && node scripts/verify-adhoc-da-payments.mjs",
     "test:people-sheet": "node --experimental-strip-types --test src/lib/all-people-sheet.test.mjs src/lib/all-people-verification-view.test.mjs src/components/all-people-register.test.mjs src/app/people/all/actions.test.mjs src/app/people/all/page.test.mjs src/app/api/people/all-profile-file/route.test.mjs src/app/api/profile-verification/route.test.mjs",
     "test:attendance-capture": "node --experimental-strip-types --test src/lib/workforce-attendance-capture.test.mjs && node scripts/verify-workforce-payment-settings.mjs",
-    "test:workforce-payout-summary": "node --experimental-strip-types --test src/lib/workforce-payout-summary.test.mjs src/lib/helper-payout.test.mjs src/lib/workforce-payout-export.test.mjs src/lib/workforce-payout-filters.test.mjs",
+    "test:workforce-payout-summary": "node --experimental-strip-types --test src/lib/workforce-payout-summary.test.mjs src/lib/helper-payout.test.mjs src/lib/workforce-payout-export.test.mjs src/lib/workforce-payout-filters.test.mjs src/lib/workforce-payout-population.test.mjs",
     "test:provider-mapping-period": "node --experimental-strip-types --test src/lib/provider-mapping-period.test.mjs",
     "dev": "next dev",
     "dev:connect": "next dev apps/connect",

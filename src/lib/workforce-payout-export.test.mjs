@@ -5,6 +5,7 @@ import { buildWorkforcePayoutExportTable } from "./workforce-payout-export.ts";
 
 const combinedMethodRow = {
   dropxId: "N1013",
+  dropxStatus: "Active",
   name: "ELDHOSE THOMAS",
   providerMemberId: "2000078396420",
   providerMemberName: "ELDHOSE THOMAS / DROP / 207254383",
@@ -12,6 +13,8 @@ const combinedMethodRow = {
   provider: "Amazon",
   model: "EDSP - EDSP",
   paymentMethod: "Per Packet & Van Rent Per Day",
+  mappingStatus: "Mapped",
+  paymentDetailsAvailable: true,
   workDays: 28,
   workDaysSource: "Biometric",
   productionBreakdown: [
@@ -61,12 +64,35 @@ test("attendance and rent heads export rate and amount without misleading counts
 test("payout export uses human labels, exact partner IDs, and one deduction suffix", () => {
   const table = buildWorkforcePayoutExportTable([combinedMethodRow], "Workforce");
 
-  assert.deepEqual(table.headers.slice(0, 5), ["DropX ID", "Workforce Name", "Partner Name", "Partner ID", "Location"]);
+  assert.deepEqual(table.headers.slice(0, 6), ["DropX ID", "DropX Status", "Workforce Name", "Partner Name", "Partner ID", "Location"]);
   assert.equal(table.rows[0][table.headers.indexOf("Partner ID")], '="2000078396420"');
   assert.ok(table.headers.includes("TDS Deduction (INR)"));
   assert.equal(table.headers.some((header) => /Deduction Deduction/.test(header)), false);
   assert.equal(table.rows[0][table.headers.indexOf("Gross Payment (INR)")], 52287);
   assert.equal(table.rows[0][table.headers.indexOf("Net Pay (INR)")], 51764);
+});
+
+test("unmapped provider report rows export blank DropX and payment details", () => {
+  const unmapped = {
+    ...combinedMethodRow,
+    dropxId: "",
+    dropxStatus: "",
+    name: "UNMAPPED PARTNER PERSON",
+    mappingStatus: "ID not mapped",
+    paymentDetailsAvailable: false,
+    paymentMethod: "",
+    productionBreakdown: [],
+    deductionBreakdown: [],
+    status: "ID not mapped"
+  };
+  const table = buildWorkforcePayoutExportTable([combinedMethodRow, unmapped], "Workforce");
+  const row = table.rows[1];
+
+  assert.equal(row[table.headers.indexOf("DropX ID")], "");
+  assert.equal(row[table.headers.indexOf("Payment Method")], "");
+  assert.equal(row[table.headers.indexOf("Gross Payment (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Net Pay (INR)")], "");
+  assert.equal(row[table.headers.indexOf("Mapping Status")], "ID not mapped");
 });
 
 test("separately configured heads with the same display name remain identifiable", () => {

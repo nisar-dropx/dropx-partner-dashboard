@@ -32,8 +32,8 @@ assert.doesNotMatch(actions, /Reassign those mappings before adding an Attendanc
 assert.doesNotMatch(providerFirstPage, /\.filter\(\(method\)[\s\S]*attendance_eligibility/);
 assert.match(dashboardCalculator, /attendanceBased[\s\S]*attendanceUnit/);
 assert.match(dashboardPayout, /attendanceComponents[\s\S]*directPayForDay/);
-assert.match(dashboardPayout, /const allMappings = mappingsResult\.data \?\? \[\][\s\S]*const mappings = allMappings\.filter/,
-  "the payout worksheet must retain tenant-wide mappings while rendering only allowed locations");
+assert.match(dashboardPayout, /const allMappings = mappingsResult\.data \?\? \[\][\s\S]*const authorizedMappings = allMappings\.filter[\s\S]*const mappings = authorizedMappings\.filter/,
+  "the payout worksheet must resolve report identities only through mappings in the viewer's allowed locations");
 assert.match(dashboardPayout, /const attendanceOwnerOn[\s\S]*const candidates = allMappings\.filter/,
   "provider attendance ownership must not change with the viewer's location scope");
 assert.match(connectCalculator, /attendanceBased[\s\S]*units/);

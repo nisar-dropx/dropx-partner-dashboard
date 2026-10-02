@@ -19,6 +19,7 @@ import { calculateAutomaticDeductionLines, type AutomaticDeductionHead } from "@
 import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
 import { summarizePaymentMethodAmounts, summarizeWorkDays } from "@/lib/workforce-payout-summary";
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
+import { workforcePayoutDropxStatus } from "@/lib/workforce-payout-population";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 
@@ -102,7 +103,7 @@ export async function loadHelperPayoutRows(
     helperIds.length
       ? readAllRows(supabaseAdmin
         .from("helpers")
-        .select("id,dropx_id,full_name,date_of_join,pan_number,biometric_id,location_id,designation")
+        .select("id,dropx_id,full_name,date_of_join,pan_number,biometric_id,location_id,designation,onboarding_status,is_active")
         .eq("company_id", companyId)
         .in("id", helperIds)
         .order("dropx_id")
@@ -392,6 +393,7 @@ export async function loadHelperPayoutRows(
     return {
       id: `helper-${helperId}`,
       dropxId: helper?.dropx_id ?? "-",
+      dropxStatus: workforcePayoutDropxStatus(helper),
       name: helper?.full_name ?? "Unlinked Helper",
       providerMemberId: "No provider ID",
       providerMemberName: "Helper direct pay",
@@ -400,6 +402,8 @@ export async function loadHelperPayoutRows(
       provider: "Direct",
       model: helperAllocations.length ? "Attendance / fixed" : "No payment method",
       paymentMethod: paymentMethodBreakdown.map((item) => item.label).join(" / ") || "Not allocated",
+      mappingStatus: "Not required",
+      paymentDetailsAvailable: true,
       workDays: workDaySummary.workDays,
       workDaysSource: !helperAllocations.length
         ? "Unavailable until payment allocation"

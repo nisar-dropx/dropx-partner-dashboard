@@ -6,8 +6,8 @@ import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import { matchesWorkforcePayoutFilters } from "@/lib/workforce-payout-filters";
 
 export type WorkforcePayoutRow = {
-  id: string; dropxId: string; name: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
-  location: string; provider: string; model: string; paymentMethod: string; workDays: number; workDaysSource: string; production: number;
+  id: string; dropxId: string; dropxStatus: string; name: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
+  location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
   productionBreakdown: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number }>;
   dailyBreakdown: Array<{
@@ -18,7 +18,7 @@ export type WorkforcePayoutRow = {
     baseAmount: number;
     lines: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number }>;
   }>;
-  baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED"; netAmount: number; status: string;
+  baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED" | ""; netAmount: number; status: string;
 };
 
 function money(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`; }
@@ -28,7 +28,8 @@ function workDaysValue(value: number, source: string) { return source.toLowerCas
 function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
 function statusTone(status: string) {
   if (status === "Ready for review") return "good";
-  if (status === "Configuration incomplete") return "warn";
+  if (status === "ID not mapped" || status === "Mapping conflict") return "bad";
+  if (status === "Configuration incomplete" || status === "Payment method not allocated") return "warn";
   return "payout-status-neutral";
 }
 
@@ -83,7 +84,7 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
     <div className="multi-select">
       <button
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-label={`${label}: ${summary}`}
         className={`multi-select-trigger ${open ? "open" : ""}`}
         onClick={() => setOpen((current) => !current)}
@@ -92,7 +93,7 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
         <span className="multi-select-summary">{summary}</span>
         <ChevronDown aria-hidden="true" className="multi-select-chevron" size={15} />
       </button>
-      {open ? <div className="multi-select-menu payout-filter-menu">
+      {open ? <div aria-label={`${label} options`} className="multi-select-menu payout-filter-menu" role="dialog">
         <div className="multi-select-search payout-filter-search">
           <Search aria-hidden="true" size={14} />
           <input
@@ -128,6 +129,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const [locations, setLocations] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>([]);
   const [methods, setMethods] = useState<string[]>([]);
+  const [mappingStatuses, setMappingStatuses] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState("20");
@@ -139,14 +141,15 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const deferredSearch = useDeferredValue(search);
   const locationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.location || "-")).values()).sort(), [rows]);
   const providerOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.provider || "-")).values()).sort(), [rows]);
+  const mappingStatusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.mappingStatus).filter(Boolean))).sort(), [rows]);
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status || "-")).values()).sort(), [rows]);
   const methodOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [rows]);
-  const filtered = useMemo(() => rows.filter((row) => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, providers, methods, statuses })), [rows, deferredSearch, locations, providers, methods, statuses]);
+  const filtered = useMemo(() => rows.filter((row) => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, providers, methods, mappingStatuses, statuses })), [rows, deferredSearch, locations, providers, methods, mappingStatuses, statuses]);
   const pageSize = size === "all" ? Math.max(filtered.length, 1) : Number(size);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const activeFilterCount = locations.length + providers.length + methods.length + statuses.length;
+  const activeFilterCount = locations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
   const tableColumnCount = 11;
 
   useEffect(() => {
@@ -200,7 +203,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   }, [expandedId, filtered.length, safePage, visible.length]);
 
   function clearFilters() {
-    setLocations([]); setProviders([]); setMethods([]); setStatuses([]); setPage(1);
+    setLocations([]); setProviders([]); setMethods([]); setMappingStatuses([]); setStatuses([]); setPage(1);
   }
 
   function toggleBreakup(rowId: string, button: HTMLButtonElement) {
@@ -211,7 +214,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   }
 
   function exportRows() {
-    const exportableRows = rows.filter((row) => matchesWorkforcePayoutFilters(row, search, { locations, providers, methods, statuses }));
+    const exportableRows = rows.filter((row) => matchesWorkforcePayoutFilters(row, search, { locations, providers, methods, mappingStatuses, statuses }));
     const csv = buildWorkforcePayoutCsv(exportableRows, subjectLabel);
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `${audience}-payouts.csv`; link.click(); URL.revokeObjectURL(link.href);
   }
@@ -231,6 +234,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
       <PayoutMultiFilter allLabel="All providers" label="Provider" onChange={(values) => { setProviders(values); setPage(1); }} options={providerOptions} selected={providers} />
       <PayoutMultiFilter allLabel="All methods" label="Payment method" onChange={(values) => { setMethods(values); setPage(1); }} options={methodOptions} selected={methods} />
+      <PayoutMultiFilter allLabel="All mapping statuses" label="Mapping status" onChange={(values) => { setMappingStatuses(values); setPage(1); }} options={mappingStatusOptions} selected={mappingStatuses} />
       <PayoutMultiFilter allLabel="All statuses" label="Status" onChange={(values) => { setStatuses(values); setPage(1); }} options={statusOptions} selected={statuses} />
       <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
     </div>
@@ -257,18 +261,18 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
             const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0);
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
             return [
-              <tr key={row.id} className={row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
-                <td className="payout-sticky-id"><strong>{row.dropxId}</strong></td>
+              <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
+                <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={`DropX ID status: ${row.dropxStatus}`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
                 <td><strong>{row.location}</strong></td>
                 <td><strong>{row.provider}</strong><small>{row.model}</small></td>
-                <td><strong>{row.paymentMethod}</strong></td>
-                <td className="work-days-cell"><strong>{workDaysDisplay(row.workDays, row.workDaysSource)}</strong><small>{row.workDaysSource}</small></td>
-                <td className="payout-money"><strong>{money(row.grossPayment)}</strong></td>
-                <td className="negative payout-money">{row.deductions ? `- ${money(row.deductions)}` : "—"}</td>
-                <td className="payout-money payout-net-pay"><strong>{money(row.netAmount)}</strong></td>
-                <td><div className="payout-status-stack"><span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span><span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span></div></td>
-                <td><button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button></td>
+                <td>{row.paymentDetailsAvailable ? <strong>{row.paymentMethod}</strong> : <span className="sr-only">Payment method unavailable</span>}</td>
+                <td className="work-days-cell">{row.paymentDetailsAvailable ? <><strong>{workDaysDisplay(row.workDays, row.workDaysSource)}</strong><small>{row.workDaysSource}</small></> : null}</td>
+                <td className="payout-money">{row.paymentDetailsAvailable ? <strong>{money(row.grossPayment)}</strong> : null}</td>
+                <td className="negative payout-money">{row.paymentDetailsAvailable ? row.deductions ? `- ${money(row.deductions)}` : "—" : null}</td>
+                <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <strong>{money(row.netAmount)}</strong> : null}</td>
+                <td><div className="payout-status-stack"><span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span>{row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
+                <td>{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}</td>
               </tr>,
               expanded ? <tr className="payout-total-detail-row" key={`${row.id}-totals`}>
                 <td colSpan={tableColumnCount}>
