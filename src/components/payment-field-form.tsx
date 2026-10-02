@@ -20,6 +20,7 @@ type PaymentField = {
   calculation_type: PaymentCalculationType;
   calculation_source: PaymentCalculationSource | null;
   provider_calculation_sources?: ProviderCalculationSources | null;
+  is_custom_production?: boolean;
   usage_count?: number;
 };
 
@@ -29,6 +30,7 @@ type ProviderAllocation = { provider_id: string; provider_model_id: string | nul
 
 export function PaymentFieldForm({ action, initialField, submitLabel, providerMetrics = [], providerModels = [], selectedAllocations = [] }: { action: (formData: FormData) => Promise<void>; initialField?: PaymentField; submitLabel: string; providerMetrics?: ProviderMetric[]; providerModels?: ProviderModel[]; selectedAllocations?: ProviderAllocation[] }) {
   const [type, setType] = useState<"amount" | "production">(initialField?.field_type ?? "production");
+  const [customProduction, setCustomProduction] = useState(Boolean(initialField?.is_custom_production));
   const [schedule, setSchedule] = useState<"per_hour" | "per_day" | "per_month">(initialField?.pay_schedule ?? "per_month");
   const [basis, setBasis] = useState<PaymentCalculationBasis>(() => initialField
     ? paymentCalculationBasis({ fieldType: initialField.field_type, calculationType: initialField.calculation_type, calculationSource: initialField.calculation_source })
@@ -48,7 +50,11 @@ export function PaymentFieldForm({ action, initialField, submitLabel, providerMe
         <span className="payment-field-section-title">Field details</span>
         <label>Field ID<input className="field mono" defaultValue={initialField?.code} name="field_code" readOnly={Boolean(initialField?.usage_count)} required title={initialField?.usage_count ? "Field ID is locked because this field is already used." : undefined} /></label>
         <label>Display name<input className="field" defaultValue={initialField?.label} name="field_label" required /></label>
-        <label>Value type<select className="select" name="field_type" onChange={(event) => { const next = event.target.value as "amount" | "production"; setType(next); setBasis(next === "production" ? "production" : amountBasis); }} value={type}><option value="production">Production count x rate</option><option value="amount">Amount</option></select></label>
+        <label>Value type<select className="select" name="field_type" onChange={(event) => { const next = event.target.value as "amount" | "production"; setType(next); setBasis(next === "production" ? "production" : amountBasis); if (next !== "production") setCustomProduction(false); }} value={type}><option value="production">Production count x rate</option><option value="amount">Amount</option></select></label>
+        {type === "production" ? <label className="payment-field-custom-toggle">
+          <input checked={customProduction} name="is_custom_production" onChange={(event) => setCustomProduction(event.target.checked)} type="checkbox" value="true" />
+          <span><strong>Custom production</strong><small>Use an uploaded unit instead of provider/model counts.</small></span>
+        </label> : null}
         {type === "amount" ? <label>Payment frequency<select className="select" name="pay_schedule" onChange={(event) => setSchedule(event.target.value as typeof schedule)} required value={schedule}><option value="per_hour">Per hour</option><option value="per_day">Per day</option><option value="per_month">Per month</option></select></label> : null}
       </div>
 
@@ -57,30 +63,33 @@ export function PaymentFieldForm({ action, initialField, submitLabel, providerMe
         <input name="calculation_type" type="hidden" value={calculationType} />
         {type === "production" ? <>
           <input name="calculation_basis" type="hidden" value="production" />
-          <div className="payment-field-allocation-head"><span>Provider</span><span>Operating model</span><span>Production count</span></div>
-          {providerModels.map((model) => {
-            const options = providerMetrics.filter((metric) => metric.provider_id === model.provider_id && (metric.provider_model_id === model.id || metric.provider_model_id === null));
-            const selected = selectedAllocations.find((allocation) => allocation.provider_id === model.provider_id && allocation.provider_model_id === model.id);
-            return <div className="payment-field-allocation-row" key={`${model.provider_id}:${model.id}`}>
-              <strong>{model.provider_name}</strong><span>{model.name}</span>
-              <select className="select" defaultValue={selected?.provider_metric_id ? `${model.provider_id}|${model.id}|${selected.provider_metric_id}` : ""} name={`provider_metric_${model.provider_id}_${model.id}`}>
-                <option value="">Not used</option>
-                {options.map((metric) => <option key={metric.id} value={`${model.provider_id}|${model.id}|${metric.id}`}>{metric.name}{metric.provider_model_id === null ? " (provider default)" : ""}</option>)}
-              </select>
-            </div>;
-          })}
-          {Array.from(new Map(providerMetrics.filter((metric) => metric.provider_model_id === null).map((metric) => [metric.provider_id, metric]))).map(([providerId, group]) => {
-            const options = providerMetrics.filter((metric) => metric.provider_id === providerId && metric.provider_model_id === null);
-            const selected = selectedAllocations.find((allocation) => allocation.provider_id === providerId && allocation.provider_model_id === null);
-            return <div className="payment-field-allocation-row fallback" key={`${providerId}:default`}>
-              <strong>{group.provider_name}</strong><span>Default for unmapped models</span>
-              <select className="select" defaultValue={selected?.provider_metric_id ? `${providerId}||${selected.provider_metric_id}` : ""} name={`provider_metric_${providerId}_default`}>
-                <option value="">Not used</option>{options.map((metric) => <option key={metric.id} value={`${providerId}||${metric.id}`}>{metric.name}</option>)}
-              </select>
-            </div>;
-          })}
-          {!providerMetrics.length ? <p className="payment-field-calculation-help">No provider production counts are configured. Add them in Provider Master first.</p> : null}
-          <div className="payment-field-calculation-help">Allocate a production count separately for each provider and operating model. The individual rate is entered for each DropX ID in ID &amp; pay mapping.</div>
+          {customProduction ? <div className="payment-field-custom-note" role="note"><strong>Provider/model production counts are not required.</strong><span>Production units will be uploaded later.</span></div> : null}
+          <fieldset aria-label="Provider and operating model production count mapping" className={`payment-field-provider-controls${customProduction ? " is-disabled" : ""}`} disabled={customProduction}>
+            <div className="payment-field-allocation-head"><span>Provider</span><span>Operating model</span><span>Production count</span></div>
+            {providerModels.map((model) => {
+              const options = providerMetrics.filter((metric) => metric.provider_id === model.provider_id && (metric.provider_model_id === model.id || metric.provider_model_id === null));
+              const selected = selectedAllocations.find((allocation) => allocation.provider_id === model.provider_id && allocation.provider_model_id === model.id);
+              return <div className="payment-field-allocation-row" key={`${model.provider_id}:${model.id}`}>
+                <strong>{model.provider_name}</strong><span>{model.name}</span>
+                <select className="select" defaultValue={selected?.provider_metric_id ? `${model.provider_id}|${model.id}|${selected.provider_metric_id}` : ""} name={`provider_metric_${model.provider_id}_${model.id}`}>
+                  <option value="">Not used</option>
+                  {options.map((metric) => <option key={metric.id} value={`${model.provider_id}|${model.id}|${metric.id}`}>{metric.name}{metric.provider_model_id === null ? " (provider default)" : ""}</option>)}
+                </select>
+              </div>;
+            })}
+            {Array.from(new Map(providerMetrics.filter((metric) => metric.provider_model_id === null).map((metric) => [metric.provider_id, metric]))).map(([providerId, group]) => {
+              const options = providerMetrics.filter((metric) => metric.provider_id === providerId && metric.provider_model_id === null);
+              const selected = selectedAllocations.find((allocation) => allocation.provider_id === providerId && allocation.provider_model_id === null);
+              return <div className="payment-field-allocation-row fallback" key={`${providerId}:default`}>
+                <strong>{group.provider_name}</strong><span>Default for unmapped models</span>
+                <select className="select" defaultValue={selected?.provider_metric_id ? `${providerId}||${selected.provider_metric_id}` : ""} name={`provider_metric_${providerId}_default`}>
+                  <option value="">Not used</option>{options.map((metric) => <option key={metric.id} value={`${providerId}||${metric.id}`}>{metric.name}</option>)}
+                </select>
+              </div>;
+            })}
+            {!providerMetrics.length ? <p className="payment-field-calculation-help">No provider production counts are configured. Add them in Provider Master first.</p> : null}
+            <div className="payment-field-calculation-help">Allocate a production count separately for each provider and operating model. The individual rate is entered for each DropX ID in ID &amp; pay mapping.</div>
+          </fieldset>
         </> : <>
           <label>Calculation basis<select className="select" name="calculation_basis" onChange={(event) => setBasis(event.target.value as PaymentCalculationBasis)} value={amountBasis}><option value="attendance">Attendance / worked time</option><option value="legacy">Schedule default (existing behavior)</option></select></label>
           <input name="calculation_source" type="hidden" value={amountBasis === "attendance" ? "attendance_eligibility" : ""} />

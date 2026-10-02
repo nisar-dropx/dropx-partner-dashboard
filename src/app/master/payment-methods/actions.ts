@@ -21,6 +21,10 @@ function required(value: FormDataEntryValue | null, field: string) {
   return text;
 }
 
+function checked(formData: FormData, field: string) {
+  return formData.getAll(field).some((value) => ["1", "on", "true"].includes(String(value).trim().toLowerCase()));
+}
+
 function paymentMethodRedirect(params: { error?: string; notice?: string }) {
   cookies().set("dropx_payment_method_flash", JSON.stringify(params), {
     httpOnly: true,
@@ -158,6 +162,7 @@ function parsePaymentField(formData: FormData) {
   const fieldType = required(formData.get("field_type"), "Field type");
   const paySchedule = clean(formData.get("pay_schedule"));
   const calculationBasis = required(formData.get("calculation_basis"), "Calculation basis");
+  const isCustomProduction = checked(formData, "is_custom_production");
   if (!["amount", "production"].includes(fieldType)) throw new Error("Field type must be Amount or Production.");
   if (fieldType === "amount" && !["per_hour", "per_day", "per_month"].includes(paySchedule ?? "")) {
     throw new Error("Amount fields need a pay schedule.");
@@ -173,6 +178,9 @@ function parsePaymentField(formData: FormData) {
     : calculationBasis === "attendance"
       ? attendanceCalculationType(paySchedule)
       : "manual_input";
+  if (isCustomProduction && (fieldType !== "production" || calculationType !== "count_x_rate")) {
+    throw new Error("Custom production can only be enabled for a production count x rate field.");
+  }
   return {
     code,
     label,
@@ -180,12 +188,14 @@ function parsePaymentField(formData: FormData) {
     pay_schedule: fieldType === "amount" ? paySchedule : null,
     calculation_type: calculationType,
     calculation_source: fieldType === "amount" && calculationBasis === "attendance" ? "attendance_eligibility" : null,
-    provider_calculation_sources: {}
+    provider_calculation_sources: {},
+    is_custom_production: isCustomProduction
   };
 }
 
-async function saveProviderMetricSelections(formData: FormData, companyId: string, paymentFieldId: string) {
+async function saveProviderMetricSelections(formData: FormData, companyId: string, paymentFieldId: string, isCustomProduction: boolean) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  if (isCustomProduction) return;
   const selected: Array<{ metricId: string; providerId: string; providerModelId: string | null }> = [...formData.entries()]
     .filter(([key, value]) => key.startsWith("provider_metric_") && String(value).trim())
     .map(([, value]) => {
@@ -228,7 +238,7 @@ export async function createPaymentField(formData: FormData) {
     const payload = parsePaymentField(formData);
     const result = await supabaseAdmin.from("payment_fields").insert(withCompany({ ...payload, is_active: true }, companyId)).select("id").single();
     if (result.error) throw new Error(result.error.message);
-    await saveProviderMetricSelections(formData, companyId, result.data.id);
+    await saveProviderMetricSelections(formData, companyId, result.data.id, payload.is_custom_production);
     revalidatePath("/master/payment-methods");
   } catch (error) {
     paymentFieldRedirect({ error: error instanceof Error ? error.message : "Unable to create the payment field." });
@@ -246,7 +256,7 @@ export async function updatePaymentField(formData: FormData) {
     const update = await supabaseAdmin.from("payment_fields").update({ ...payload, updated_at: new Date().toISOString() })
       .eq("id", id).eq("company_id", companyId);
     if (update.error) throw new Error(update.error.message);
-    await saveProviderMetricSelections(formData, companyId, id);
+    await saveProviderMetricSelections(formData, companyId, id, payload.is_custom_production);
     const sync = await supabaseAdmin.from("payment_method_components").update({
       component_code: payload.code,
       component_type: payload.field_type,
