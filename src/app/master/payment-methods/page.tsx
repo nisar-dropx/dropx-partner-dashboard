@@ -35,6 +35,7 @@ type PaymentFieldRow = {
   calculation_type: PaymentCalculationType;
   calculation_source: PaymentCalculationSource | null;
   provider_calculation_sources: ProviderCalculationSources | null;
+  is_custom_production: boolean;
   is_active: boolean;
   usage_count: number;
   selected_allocations: Array<{ provider_id: string; provider_model_id: string | null; provider_metric_id: string }>;
@@ -110,7 +111,7 @@ async function loadPaymentMethods(companyId: string) {
 async function loadPaymentFields(companyId: string) {
   if (!supabaseAdmin) return { fields: [] as PaymentFieldRow[], error: "Supabase service role key is not configured." };
   const fieldsResult = await supabaseAdmin.from("payment_fields")
-    .select("id, code, field_type, label, pay_schedule, calculation_type, calculation_source, provider_calculation_sources, is_active")
+    .select("id, code, field_type, label, pay_schedule, calculation_type, calculation_source, provider_calculation_sources, is_custom_production, is_active")
     .eq("company_id", companyId).order("code");
   if (fieldsResult.error) return { fields: [] as PaymentFieldRow[], error: fieldsResult.error.message };
   const usageResult = await supabaseAdmin.from("payment_method_components")
@@ -122,7 +123,15 @@ async function loadPaymentFields(companyId: string) {
   if (selections.error) return { fields: [] as PaymentFieldRow[], error: selections.error.message };
   const selectedByField = new Map<string, Array<{ provider_id: string; provider_model_id: string | null; provider_metric_id: string }>>();
   (selections.data ?? []).forEach((row) => selectedByField.set(String(row.payment_field_id), [...(selectedByField.get(String(row.payment_field_id)) ?? []), { provider_id: String(row.provider_id), provider_model_id: row.provider_model_id ? String(row.provider_model_id) : null, provider_metric_id: String(row.provider_metric_id) }]));
-  return { fields: ((fieldsResult.data ?? []) as any[]).map((field) => ({ ...field, usage_count: usage.get(field.id) ?? 0, selected_allocations: selectedByField.get(field.id) ?? [] })), error: null };
+  return {
+    fields: ((fieldsResult.data ?? []) as any[]).map((field) => ({
+      ...field,
+      is_custom_production: field.is_custom_production === true,
+      usage_count: usage.get(field.id) ?? 0,
+      selected_allocations: selectedByField.get(field.id) ?? []
+    })),
+    error: null
+  };
 }
 
 async function loadProviderMetrics(companyId: string) {
