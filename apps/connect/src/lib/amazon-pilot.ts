@@ -18,9 +18,9 @@ export function pilotStatus(pilot:Pick<Pilot,'evidence'|'trial_completed_at'|'cl
  const text=`${category} ${action}`.toLowerCase();
  const stale=Boolean(e.reportDate && now-new Date(`${e.reportDate}T00:00:00+05:30`).getTime()>48*3600000);
  let stage:keyof typeof pilotStages='registration_pending';
- let instruction='Open the invitation sent to your Amazon email and complete the pending steps in the Flex Pro app once your station team confirms you are ready.';
+ let instruction='Open the invitation sent to your Amazon email and complete the pending steps in the Flex Pro app.';
  let owner='Associate';
- if(pilot.closed_at){stage='closed';instruction='Your trial has been closed. Contact your station team if you wish to rejoin.';owner='Station team';}
+ if(pilot.closed_at){stage='closed';instruction='Your onboarding has been closed. Contact your station team if you wish to rejoin.';owner='Station team';}
  else if(e.conflict){stage='exception';instruction='Your Amazon identifiers need a team review. Your records have been retained.';owner='Station team';}
  else if(/failed|rejected|blocked|insufficien|mismatch/.test(text)){stage='exception';instruction=action||'Your verification needs attention. Contact your station team.';}
  else if(e.firstDelivery && e.employeeId){stage='delivery_started';instruction=`Delivery activity is recorded from ${e.firstDelivery}.`;owner='No action';}
@@ -33,5 +33,5 @@ export function pilotStatus(pilot:Pick<Pilot,'evidence'|'trial_completed_at'|'cl
  else if(/verification|bgc clearance|provisioning|verify dl/.test(text)){stage='verification_pending';instruction=action||'Amazon or its verification partner is reviewing your details.';owner='Amazon / verification partner';}
  else if(/no further action required/i.test(action)||['ACTIVE','PROVISIONED'].includes(String(e.lscStatus??'').toUpperCase())){stage='scc_pending';instruction='Amazon setup is complete. Waiting for a current SCC record to connect your delivery ID.';owner='Station team';}
  else if(action) instruction=action;
- return {stage,label:pilotStages[stage],instruction,owner,category,action,stale,ready:Boolean(pilot.trial_completed_at),trainingLabel:pilot.trial_completed_at?'Ready to complete registration':'Trial training in progress'};
+ return {stage,label:pilotStages[stage],instruction,owner,category,action,stale};
 }

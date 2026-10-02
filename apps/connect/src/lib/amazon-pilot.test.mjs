@@ -5,9 +5,9 @@ const now=Date.parse('2026-10-02T12:00:00Z');
 const status=(evidence={},extra={})=>pilotStatus({evidence,trial_completed_at:null,closed_at:null,...extra},now);
 test('invitation does not imply registration or BGC completion',()=>{
  assert.equal(status({invitationStatus:'queued'}).stage,'invitation_pending');
- const p=status({invitationStatus:'sent',providerId:'provider'});assert.equal(p.stage,'registration_pending');assert.equal(p.ready,false);
+ const p=status({invitationStatus:'sent',providerId:'provider'});assert.equal(p.stage,'registration_pending');
 });
-test('same-day readiness is independent of Amazon state',()=>{const p=status({providerId:'p'},{trial_completed_at:'2026-10-02T10:00:00Z'});assert.equal(p.ready,true);assert.equal(p.stage,'registration_pending');});
+test('registration has no internal training or readiness gate',()=>{const p=status({providerId:'p'});assert.equal(p.stage,'registration_pending');assert.doesNotMatch(p.instruction,/trial|ready|training/i);assert.deepEqual(p,status({providerId:'p'},{trial_completed_at:'2026-10-02T10:00:00Z'}));});
 test('actual DA registration pendency comes from report; vendor waits are distinct',()=>{
  assert.equal(status({providerId:'p',report:{categories:'9 - DA Pending Filling BGC details',action_item:'DA needs to complete filling BGC details'}}).stage,'registration_pending');
  assert.equal(status({providerId:'p',report:{categories:'10-DA Pending BGC clearance by BGC Vendor'}}).stage,'verification_pending');
