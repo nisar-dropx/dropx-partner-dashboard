@@ -5,6 +5,9 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
+import dynamic from "next/dynamic";
+import { isPeopleTrainingAccount } from "../lib/connect-training-policy";
+const ConnectTraining=dynamic(()=>import('./connect-training').then(m=>m.ConnectTraining),{loading:()=> <p>Loading training…</p>});
 
 type Cycle = { id: string; name: string; period_start: string; period_end: string; self_review_due: string | null; manager_review_due: string | null; status: string; rating_scale: number };
 type Review = { id: string; cycle_id: string; worker_name?: string | null; worker_code?: string | null; status: string; designation_name: string | null; department_name: string | null; self_rating: number | null; manager_rating: number | null; final_rating: number | null; self_comments: string | null; manager_comments: string | null; calibration_comments: string | null; self_submitted_at: string | null; manager_submitted_at: string | null; acknowledged_at: string | null };
@@ -45,7 +48,13 @@ function Status({ value }: { value: string }) {
   return <span className={`dx-performance-status ${tone}`}>{label(value)}</span>;
 }
 
-export function ConnectPerformance({ account, active = true }: { account: AppAccount; active?: boolean }) {
+export function ConnectPerformance({account,active=true}:{account:AppAccount;active?:boolean}) {
+  const [pane,setPane]=useState<'performance'|'training'>('performance');
+  const eligible=isPeopleTrainingAccount(account);
+  return <>{eligible?<nav className="dx-performance-sections" aria-label="Development sections"><button className={pane==='performance'?'active':''} onClick={()=>setPane('performance')}>Performance</button><button className={pane==='training'?'active':''} onClick={()=>setPane('training')}>Training</button></nav>:null}{eligible&&pane==='training'?<ConnectTraining key={`${account.profileType}:${account.id}`} account={account}/>:<ConnectPerformanceCore key={`${account.profileType}:${account.id}`} account={account} active={active}/>}</>;
+}
+
+function ConnectPerformanceCore({ account, active = true }: { account: AppAccount; active?: boolean }) {
   const [data, setData] = useState<Payload | null>(null);
   const [section, setSection] = useState<"scorecards" | "cps" | "reviews">("scorecards");
   const [weekKey, setWeekKey] = useState<number | null>(null);
