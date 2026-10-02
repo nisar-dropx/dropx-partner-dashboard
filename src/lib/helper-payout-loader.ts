@@ -395,6 +395,7 @@ export async function loadHelperPayoutRows(
       dropxId: helper?.dropx_id ?? "-",
       dropxStatus: workforcePayoutDropxStatus(helper),
       name: helper?.full_name ?? "Unlinked Helper",
+      designation: String(helper?.designation ?? "").trim(),
       providerMemberId: "No provider ID",
       providerMemberName: "Helper direct pay",
       locationId: locationIds[0] ?? null,

@@ -11,6 +11,7 @@ export type WorkforcePayoutExportRow = {
   dropxId: string;
   dropxStatus: string;
   name: string;
+  designation: string;
   providerMemberId: string;
   providerMemberName: string;
   location: string;
@@ -108,6 +109,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     "DropX ID",
     "DropX Status",
     `${subjectLabel} Name`,
+    "Designation",
     "Partner Name",
     "Partner ID",
     "Location",
@@ -143,6 +145,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
       row.dropxId,
       row.dropxStatus,
       row.name,
+      row.designation,
       row.providerMemberName,
       spreadsheetIdentifier(row.providerMemberId),
       row.location,

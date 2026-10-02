@@ -8,6 +8,7 @@ const row = {
   name: "Midhun T",
   providerMemberId: "No provider ID",
   providerMemberName: "Direct allocation",
+  designation: "DR - Driver",
   location: "KOZA",
   provider: "Direct",
   mappingStatus: "Not required",
@@ -18,7 +19,7 @@ const row = {
   ]
 };
 
-const all = { locations: [], providers: [], methods: [], mappingStatuses: [], statuses: [] };
+const all = { designations: [], locations: [], providers: [], methods: [], mappingStatuses: [], statuses: [] };
 
 test("empty selections keep every facet unfiltered", () => {
   assert.equal(matchesWorkforcePayoutFilters(row, "", all), true);
@@ -38,6 +39,18 @@ test("different facets combine with AND matching", () => {
     locations: ["KOZA"],
     providers: ["Amazon"]
   }), false);
+});
+
+test("designation is a searchable multi-select facet", () => {
+  assert.equal(matchesWorkforcePayoutFilters(row, "", {
+    ...all,
+    designations: ["DR - Driver", "DA - Delivery Associate"]
+  }), true);
+  assert.equal(matchesWorkforcePayoutFilters(row, "", {
+    ...all,
+    designations: ["DA - Delivery Associate"]
+  }), false);
+  assert.equal(matchesWorkforcePayoutFilters(row, "driver", all), true);
 });
 
 test("mapping status is a searchable multi-select facet", () => {

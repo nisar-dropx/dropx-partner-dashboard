@@ -6,7 +6,7 @@ import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import { matchesWorkforcePayoutFilters } from "@/lib/workforce-payout-filters";
 
 export type WorkforcePayoutRow = {
-  id: string; dropxId: string; dropxStatus: string; name: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
+  id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
   productionBreakdown: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number }>;
@@ -127,12 +127,13 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const subjectLabelLower = subjectLabel.toLowerCase();
   const [search, setSearch] = useState("");
   const [locations, setLocations] = useState<string[]>([]);
+  const [designations, setDesignations] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>([]);
   const [methods, setMethods] = useState<string[]>([]);
   const [mappingStatuses, setMappingStatuses] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const [size, setSize] = useState("20");
+  const [size, setSize] = useState("50");
   const [expandedId, setExpandedId] = useState("");
   const [stickyScrollWidth, setStickyScrollWidth] = useState(0);
   const [stickyScrollFrame, setStickyScrollFrame] = useState({ left: 0, width: 0, visible: false });
@@ -140,17 +141,18 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const deferredSearch = useDeferredValue(search);
   const locationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.location || "-")).values()).sort(), [rows]);
+  const designationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.designation).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [rows]);
   const providerOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.provider || "-")).values()).sort(), [rows]);
   const mappingStatusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.mappingStatus).filter(Boolean))).sort(), [rows]);
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status || "-")).values()).sort(), [rows]);
   const methodOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [rows]);
-  const filtered = useMemo(() => rows.filter((row) => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, providers, methods, mappingStatuses, statuses })), [rows, deferredSearch, locations, providers, methods, mappingStatuses, statuses]);
+  const filtered = useMemo(() => rows.filter((row) => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, designations, providers, methods, mappingStatuses, statuses })), [rows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses]);
   const pageSize = size === "all" ? Math.max(filtered.length, 1) : Number(size);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const activeFilterCount = locations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
-  const tableColumnCount = 11;
+  const activeFilterCount = locations.length + designations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
+  const tableColumnCount = 12;
 
   useEffect(() => {
     const tableWrap = tableWrapRef.current;
@@ -203,7 +205,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   }, [expandedId, filtered.length, safePage, visible.length]);
 
   function clearFilters() {
-    setLocations([]); setProviders([]); setMethods([]); setMappingStatuses([]); setStatuses([]); setPage(1);
+    setLocations([]); setDesignations([]); setProviders([]); setMethods([]); setMappingStatuses([]); setStatuses([]); setPage(1);
   }
 
   function toggleBreakup(rowId: string, button: HTMLButtonElement) {
@@ -214,7 +216,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   }
 
   function exportRows() {
-    const exportableRows = rows.filter((row) => matchesWorkforcePayoutFilters(row, search, { locations, providers, methods, mappingStatuses, statuses }));
+    const exportableRows = rows.filter((row) => matchesWorkforcePayoutFilters(row, search, { locations, designations, providers, methods, mappingStatuses, statuses }));
     const csv = buildWorkforcePayoutCsv(exportableRows, subjectLabel);
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `${audience}-payouts.csv`; link.click(); URL.revokeObjectURL(link.href);
   }
@@ -223,7 +225,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
     <div className="payout-search-strip">
       <label>
         <span className="payout-toolbar-label">Search {subjectLabelLower}</span>
-        <input className="field" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={audience === "helpers" ? "DropX ID, helper, location or name" : "DropX ID, worker, provider ID or name"} />
+        <input className="field" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={audience === "helpers" ? "DropX ID, helper, designation or location" : "DropX ID, worker, designation or provider ID"} />
       </label>
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
@@ -232,6 +234,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
     </div>
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
+      <PayoutMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />
       <PayoutMultiFilter allLabel="All providers" label="Provider" onChange={(values) => { setProviders(values); setPage(1); }} options={providerOptions} selected={providers} />
       <PayoutMultiFilter allLabel="All methods" label="Payment method" onChange={(values) => { setMethods(values); setPage(1); }} options={methodOptions} selected={methods} />
       <PayoutMultiFilter allLabel="All mapping statuses" label="Mapping status" onChange={(values) => { setMappingStatuses(values); setPage(1); }} options={mappingStatusOptions} selected={mappingStatuses} />
@@ -244,6 +247,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
         <thead><tr>
           <th className="payout-sticky-id" scope="col">DropX ID</th>
           <th className="payout-sticky-worker" scope="col">{subjectLabel} / payment source</th>
+          <th scope="col">Designation</th>
           <th scope="col">Location</th>
           <th scope="col">Allocation</th>
           <th scope="col">Payment Method</th>
@@ -264,6 +268,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
                 <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={`DropX ID status: ${row.dropxStatus}`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
+                <td>{row.designation ? <strong>{row.designation}</strong> : <span aria-hidden="true">—</span>}</td>
                 <td><strong>{row.location}</strong></td>
                 <td><strong>{row.provider}</strong><small>{row.model}</small></td>
                 <td>{row.paymentDetailsAvailable ? <strong>{row.paymentMethod}</strong> : <span className="sr-only">Payment method unavailable</span>}</td>
@@ -337,7 +342,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
       <div style={{ width: stickyScrollWidth }} />
     </div>
     <div className="pagination payout-pagination">
-      <label className="payout-page-size">Rows per page<select className="field" value={size} onChange={(event) => { setSize(event.target.value); setPage(1); }}>{["20","50","100","500","1000","all"].map((value) => <option value={value} key={value}>{value === "all" ? "All" : value}</option>)}</select></label>
+      <label className="payout-page-size">Rows per page<select className="field" value={size} onChange={(event) => { setSize(event.target.value); setPage(1); }}>{["50","100","500","1000","all"].map((value) => <option value={value} key={value}>{value === "all" ? "All" : value}</option>)}</select></label>
       <span>Showing {filtered.length ? (safePage - 1) * pageSize + 1 : 0}–{Math.min(safePage * pageSize, filtered.length)} of {filtered.length}</span>
       <div><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)} type="button">Previous</button><span>Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage(safePage + 1)} type="button">Next</button></div>
     </div>

@@ -22199,7 +22199,7 @@ td strong,
 
 .payout-filter-panel {
   display: grid;
-  grid-template-columns: repeat(5, minmax(140px, 1fr)) auto;
+  grid-template-columns: repeat(6, minmax(125px, 1fr)) auto;
   align-items: end;
   gap: 12px;
   margin: 0 18px 16px;
@@ -22431,7 +22431,7 @@ td strong,
 .workforce-payout-page .workforce-payout-table .payout-sticky-id { width: 94px; min-width: 94px; max-width: 94px; }
 .workforce-payout-page .workforce-payout-table .payout-sticky-worker { left: 94px; width: 190px; min-width: 190px; max-width: 190px; }
 .workforce-payout-page .workforce-payout-table .payout-sticky-worker small { max-width: 165px; }
-.workforce-payout-page .workforce-payout-table.payout-view-overview { min-width: max(1100px, 100%); }
+.workforce-payout-page .workforce-payout-table.payout-view-overview { min-width: max(1200px, 100%); }
 .workforce-payout-page .payout-pagination { min-height: 42px; padding-block: 6px; font-size: 10px; }
 .workforce-payout-page .payout-page-size { font-size: 10px; }
 .workforce-payout-page .payout-page-size .field { min-height: 30px; height: 30px; font-size: 10px; }
