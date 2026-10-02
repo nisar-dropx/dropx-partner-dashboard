@@ -23,6 +23,7 @@ import { createAppNotification } from "@/lib/app-notifications";
 import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityExceptionEventMetadata } from "@/lib/onboarding-identity";
 import { biometricBelongsToPeople, peopleIdentityForDualRole } from "@/lib/workforce-dual-role";
 import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
+import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
@@ -1186,6 +1187,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
       .limit(1)
       .maybeSingle();
     if (latest.error) throw new Error(latest.error.message);
+    let requestId = latest.data?.id ?? null;
     if (latest.data?.status === "failed") {
       const retried = await supabaseAdmin.rpc("workforce_retry_amazon_invitation", {
         p_company: companyId,
@@ -1194,30 +1196,51 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
         p_locations: allowedLocationIds ? [...allowedLocationIds] : null
       });
       if (retried.error) throw new Error(retried.error.message);
-      revalidatePath("/work-force-register");
-      redirect(`${destination}&notice=${encodeURIComponent("Amazon ID invitation retry queued from OpsPulse.")}`);
     }
-    if (latest.data && ["queued", "processing", "sent"].includes(latest.data.status)) {
+    if (latest.data?.status === "sent") {
       redirect(`${destination}&notice=${encodeURIComponent(`Amazon ID invitation is already ${latest.data.status}.`)}`);
     }
-    const queued = await supabaseAdmin.rpc("workforce_queue_amazon_invitation", {
-      p_company: companyId,
-      p_actor: authorization.userId,
-      p_actor_name: authorization.fullName || authorization.email || "OpsPulse",
-      p_workforce: workforceId,
-      p_email: workforce.data.email,
-      p_source_portal: "ops_pulse",
-      p_locations: allowedLocationIds ? [...allowedLocationIds] : null
-    });
-    if (queued.error) throw new Error(queued.error.message);
+    if (latest.data?.status === "processing") {
+      redirect(`${destination}&notice=${encodeURIComponent("Amazon LSC invitation is already being processed.")}`);
+    }
+    if (!requestId) {
+      const queued = await supabaseAdmin.rpc("workforce_queue_amazon_invitation", {
+        p_company: companyId,
+        p_actor: authorization.userId,
+        p_actor_name: authorization.fullName || authorization.email || "OpsPulse",
+        p_workforce: workforceId,
+        p_email: workforce.data.email,
+        p_source_portal: "ops_pulse",
+        p_locations: allowedLocationIds ? [...allowedLocationIds] : null
+      });
+      if (queued.error) throw new Error(queued.error.message);
+      requestId = String(queued.data);
+    }
     console.info("[workforce-amazon-invite] queued", {
       companyId,
-      requestId: queued.data,
+      requestId,
       stationId: workforce.data.location_id,
       workforceId
     });
+
+    await callWorkforceAmazonWorker<{ processed: number }>("/api/admin/amazon/invitation/tick", {
+      method: "POST",
+      body: "{}"
+    });
+    const completed = await supabaseAdmin.from("workforce_amazon_invitation_requests")
+      .select("status,external_reference,error_message")
+      .eq("company_id", companyId)
+      .eq("id", requestId)
+      .maybeSingle();
+    if (completed.error) throw new Error(completed.error.message);
+    if (completed.data?.status === "failed") {
+      throw new Error(completed.data.error_message || "Amazon LSC rejected the invitation.");
+    }
     revalidatePath("/work-force-register");
-    redirect(`${destination}&notice=${encodeURIComponent("Amazon ID invitation queued from OpsPulse.")}`);
+    const notice = completed.data?.status === "sent"
+      ? `Amazon LSC invitation sent${completed.data.external_reference ? ` · ${completed.data.external_reference}` : ""}.`
+      : "Amazon LSC invitation submitted to the shared worker and is processing.";
+    redirect(`${destination}&notice=${encodeURIComponent(notice)}`);
   } catch (error) {
     if (error && typeof error === "object" && "digest" in error) throw error;
     console.error("[workforce-amazon-invite] rejected", {

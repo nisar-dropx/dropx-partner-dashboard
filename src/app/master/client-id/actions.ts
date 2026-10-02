@@ -2,10 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
+import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
 
 type Provider = { name?: string | null };
 type Station = {
@@ -185,29 +186,26 @@ export async function enableMissingAmazonStations(formData: FormData) {
   }
 }
 
-export async function saveAmazonOnboardingConnection(formData: FormData) {
+export async function refreshClientIdWorker() {
   const authorization = await requirePagePermission("delivery_associates", "edit");
   try {
-    if (!isCompanyOwner(authorization) || authorization.readOnly || !supabaseAdmin) throw new Error("Only the company owner can change the secure Amazon worker connection.");
-    const username = String(formData.get("username") ?? "").trim();
-    const password = String(formData.get("password") ?? "");
-    const version = Number(formData.get("version"));
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username) || username.length > 254) throw new Error("Enter a valid Amazon LSC login email.");
-    if (password.length > 1024 || !Number.isInteger(version) || version < 0) throw new Error("Refresh the connection and enter valid credentials.");
-    const result = await supabaseAdmin.rpc("workforce_save_amazon_connection", {
-      p_company: requireCompanyId(authorization),
-      p_actor: authorization.userId,
-      p_username: username,
-      p_password: password || null,
-      p_enabled: formData.get("enabled") === "on",
-      p_version: version,
-      p_request_login: formData.get("intent") === "test"
+    if (authorization.readOnly) throw new Error("The worker check is unavailable in read-only mode.");
+    const credentials = await callWorkforceAmazonWorker<{ workforce: boolean; idfy: boolean }>("/api/admin/credentials/status");
+    if (!credentials.workforce || !credentials.idfy) {
+      throw new Error(`Cloudflare credentials are incomplete: Amazon LSC ${credentials.workforce ? "ready" : "missing"}, IDfy ${credentials.idfy ? "ready" : "missing"}.`);
+    }
+    const session = await callWorkforceAmazonWorker<{ source?: string; associateCount?: number }>("/api/admin/workforce/session/ensure", {
+      method: "POST",
+      body: "{}"
     });
-    if (result.error) throw new Error(result.error.message);
+    const [areas, idfy] = await Promise.all([
+      callWorkforceAmazonWorker<{ count?: number }>("/api/admin/amazon/service-areas/sync", { method: "POST", body: "{}" }),
+      callWorkforceAmazonWorker<{ count?: number; insufficiencies?: number }>("/api/admin/idfy/sync", { method: "POST", body: "{}" })
+    ]);
     revalidateClientIdMaster();
-    redirect(destination({ notice: formData.get("enabled") === "on" ? "Amazon LSC worker connection saved and enabled." : "Amazon LSC worker connection saved and paused." }));
+    redirect(destination({ notice: `Worker verified · ${session.associateCount ?? 0} Amazon associates · ${areas.count ?? 0} service areas · ${idfy.count ?? 0} IDfy profiles (${idfy.insufficiencies ?? 0} need attention).` }));
   } catch (error) {
     if (isRedirectError(error)) throw error;
-    redirect(destination({ error: error instanceof Error ? error.message : "Unable to save the Amazon worker connection." }));
+    redirect(destination({ error: error instanceof Error ? error.message : "Unable to verify the shared Workforce worker." }));
   }
 }

@@ -2,11 +2,12 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { SubmitButton } from "@/components/submit-button";
-import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { enableMissingAmazonStations, saveAmazonOnboardingConnection, saveClientIdStation } from "./actions";
+import { callWorkforceAmazonWorker, workforceAmazonWorkerConfig } from "@/lib/workforce-amazon-worker";
+import { enableMissingAmazonStations, refreshClientIdWorker, saveClientIdStation } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,7 @@ type Setting = {
   updated_at: string;
 };
 type ServiceArea = { service_area_id: string; service_area_name: string; station_code: string; station_state: string | null };
+type WorkerCredentialStatus = { workforce: boolean; idfy: boolean };
 
 function relation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
@@ -47,19 +49,25 @@ export default async function ClientIdMasterPage({ searchParams }: { searchParam
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.delivery_associates ?? { canView: false, canAdd: false, canEdit: false };
   const canEdit = Boolean(permission.canEdit && !authorization.readOnly);
-  const owner = isCompanyOwner(authorization);
   if (!supabaseAdmin) throw new Error("Client ID master is unavailable.");
 
-  const [stationResult, settingResult, areaResult, defaultResult, supervisorResult, connectionResult, syncResult] = await Promise.all([
+  const workerConfig = workforceAmazonWorkerConfig();
+  const workerProbe = workerConfig.configured
+    ? callWorkforceAmazonWorker<WorkerCredentialStatus>("/api/admin/credentials/status", { signal: AbortSignal.timeout(10_000) })
+        .then((data) => ({ data, error: null as Error | null }))
+        .catch((error) => ({ data: null, error: error instanceof Error ? error : new Error("Worker status is unavailable.") }))
+    : Promise.resolve({ data: null, error: new Error("OpsPulse deployment variables are not configured.") });
+
+  const [stationResult, settingResult, areaResult, defaultResult, supervisorResult, syncResult, workerResult] = await Promise.all([
     supabaseAdmin.from("stations").select("id,station_code,station_name,hide_from_location_list,parent_station_id,providers(name)").eq("company_id", companyId).eq("is_active", true).order("station_code").limit(500),
     supabaseAdmin.from("workforce_amazon_station_settings").select("station_id,service_area_code,amazon_service_area_id,service_type,supervisor_alias,contract_type,associate_email_pattern,invitation_enabled,version,updated_at").eq("company_id", companyId),
     supabaseAdmin.from("workforce_amazon_service_areas").select("service_area_id,service_area_name,station_code,station_state").eq("company_id", companyId).order("station_code"),
     supabaseAdmin.from("workforce_amazon_supervisor_defaults").select("supervisor_alias").eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("workforce_amazon_supervisors").select("supervisor_alias,display_name,is_active").eq("company_id", companyId).eq("is_active", true).order("supervisor_alias"),
-    supabaseAdmin.from("workforce_amazon_connections").select("username,enabled,version,updated_at,login_requested_at,login_attempted_at").eq("company_id", companyId).maybeSingle(),
-    supabaseAdmin.from("workforce_amazon_sync_state").select("status,last_attempt_at,last_success_at,matched_count,missing_count").eq("company_id", companyId).maybeSingle()
+    supabaseAdmin.from("workforce_amazon_sync_state").select("status,last_attempt_at,last_success_at,matched_count,missing_count").eq("company_id", companyId).maybeSingle(),
+    workerProbe
   ]);
-  const firstError = stationResult.error || settingResult.error || areaResult.error || defaultResult.error || supervisorResult.error || connectionResult.error || syncResult.error;
+  const firstError = stationResult.error || settingResult.error || areaResult.error || defaultResult.error || supervisorResult.error || syncResult.error;
   const allStations = filterOnboardingLocations((stationResult.data ?? []) as Station[], authorization);
   const stations = allStations.filter((station) => String(relation(station.providers)?.name ?? "").toLowerCase().includes("amazon") && !/^TEST(?:\s|$)/i.test(station.station_code));
   const settings = (settingResult.data ?? []) as Setting[];
@@ -74,8 +82,8 @@ export default async function ClientIdMasterPage({ searchParams }: { searchParam
   const held = stations.filter((station) => { const setting = settingByStation.get(station.id); return Boolean(setting && !setting.invitation_enabled); }).length;
   const reviewed = stations.filter((station) => settingByStation.has(station.id)).length;
   const unsynced = stations.filter((station) => !areaByCode.has(station.station_code.toUpperCase())).length;
-  const connection = connectionResult.data;
   const sync = syncResult.data;
+  const workerConnected = Boolean(workerResult.data);
 
   return <AppShell active="Client ID Master" pageCode="delivery_associates"><div className="ops-command-center client-id-master">
     <PageHead
@@ -91,7 +99,8 @@ export default async function ClientIdMasterPage({ searchParams }: { searchParam
       <article><span>Amazon stations</span><strong>{stations.length}</strong><small>Active stations in your scope</small></article>
       <article><span>Invitation enabled</span><strong>{enabled}</strong><small>{held} on hold · {Math.max(0, stations.length - reviewed)} require setup</small></article>
       <article><span>Service area sync</span><strong>{Math.max(0, stations.length - unsynced)}</strong><small>{unsynced} station{unsynced === 1 ? "" : "s"} not yet synced</small></article>
-      <article><span>LSC worker</span><strong>{connection?.enabled ? "Enabled" : "Setup required"}</strong><small>{sync?.status ? String(sync.status).replaceAll("_", " ") : "No worker check yet"}</small></article>
+      <article><span>Amazon LSC worker</span><strong>{workerConnected && workerResult.data?.workforce ? "Connected" : "Attention needed"}</strong><small>{workerConnected ? "Cloudflare connection verified" : "OpsPulse cannot reach the worker"}</small></article>
+      <article><span>IDfy worker</span><strong>{workerConnected && workerResult.data?.idfy ? "Connected" : "Attention needed"}</strong><small>{workerResult.data?.idfy ? "IDfy credentials available" : "Credential check failed"}</small></article>
     </section>
 
     {authorization.hasAllLocationAccess && canEdit ? <section className="panel client-id-bulk-panel"><div className="panel-head"><div><h2>Shared station rollout</h2><p className="subtle">Configure only stations without a saved setup. Existing enabled and on-hold stations are preserved.</p></div><form action={enableMissingAmazonStations}><SubmitButton className="button" pendingText="Configuring stations" confirmMessage={`Configure missing Amazon stations with supervisor ${defaultSupervisor || "the configured default"}?`} confirmTitle="Configure missing Amazon stations" confirmDescription="Each station is mapped only to its own synced service area. Existing enabled or on-hold setups will not be changed." disabled={!defaultSupervisor || reviewed === stations.length}>{reviewed === stations.length ? "All stations reviewed" : "Configure missing stations"}</SubmitButton></form></div></section> : null}
@@ -120,16 +129,12 @@ export default async function ClientIdMasterPage({ searchParams }: { searchParam
     </div>
 
     <section className="panel client-id-worker-panel" id="worker-connection">
-      <div className="panel-head"><div><p className="eyebrow">Secure worker configuration</p><h2>Amazon LSC onboarding connection</h2><p className="subtle">The station master makes a request eligible. This encrypted connection lets the backend onboarding worker process the queued invitation.</p></div><span className={`status-pill ${connection?.enabled ? "good" : "warn"}`}>{connection?.enabled ? "Enabled" : "Not configured"}</span></div>
-      {owner ? <form action={saveAmazonOnboardingConnection} className="form-grid two">
-        <input name="version" type="hidden" value={connection?.version ?? 0}/>
-        <label>Amazon LSC portal<input className="field" value="https://logistics.amazon.in" readOnly/></label>
-        <label>Login email<input className="field" name="username" type="email" autoComplete="username" required defaultValue={connection?.username || ""}/></label>
-        <label>Password<input className="field" name="password" type="password" autoComplete="new-password" required={!connection} placeholder={connection ? "Saved · leave blank to keep" : "Enter the Amazon login password"}/><small>Encrypted in Vault and never returned to this page.</small></label>
-        <label className="checkbox-row"><input name="enabled" type="checkbox" defaultChecked={connection?.enabled ?? false}/> Enable onboarding worker connection</label>
-        <div className="client-id-worker-health span-2"><span>Last worker check <b>{when(sync?.last_attempt_at)}</b></span><span>Last successful scan <b>{when(sync?.last_success_at)}</b></span><span>Last login attempt <b>{when(connection?.login_attempted_at)}</b></span><span>Latest scan <b>{sync?.matched_count ?? 0} matched · {sync?.missing_count ?? 0} missing</b></span></div>
-        <div className="form-actions span-2"><SubmitButton disabled={!canEdit} pendingText="Saving securely">Save connection</SubmitButton><SubmitButton className="button secondary" disabled={!canEdit} pendingText="Requesting worker check" name="intent" value="test">Save & test connection</SubmitButton></div>
-      </form> : <div className="panel-body"><p><strong>{connection?.enabled ? "Worker connection enabled" : "Owner setup required"}</strong></p><p className="subtle">Only the company owner can change the encrypted Amazon login. Station editors can still manage badge and service-area settings above.</p></div>}
+      <div className="panel-head"><div><p className="eyebrow">Shared Cloudflare worker</p><h2>Amazon LSC and IDfy connection</h2><p className="subtle">OpsPulse uses the existing secure Workforce worker. Portal passwords stay in Cloudflare and are never entered or displayed here.</p></div><span className={`status-pill ${workerConnected && workerResult.data?.workforce && workerResult.data?.idfy ? "good" : "warn"}`}>{workerConnected ? "Worker reachable" : "Connection failed"}</span></div>
+      <div className="panel-body">
+        <div className="client-id-worker-health"><span>Amazon LSC credentials <b>{workerResult.data?.workforce ? "Available" : "Unavailable"}</b></span><span>IDfy credentials <b>{workerResult.data?.idfy ? "Available" : "Unavailable"}</b></span><span>Last successful Amazon scan <b>{when(sync?.last_success_at)}</b></span><span>Latest scan <b>{sync?.matched_count ?? 0} matched · {sync?.missing_count ?? 0} missing</b></span></div>
+        {workerResult.error ? <p className="ops-workforce-error"><strong>Worker check failed.</strong> {workerResult.error.message}</p> : null}
+        {canEdit ? <form action={refreshClientIdWorker}><SubmitButton className="button secondary" pendingText="Checking Amazon LSC and IDfy">Run live worker check</SubmitButton></form> : null}
+      </div>
     </section>
   </div></AppShell>;
 }
