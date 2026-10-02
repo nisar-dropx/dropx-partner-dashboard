@@ -7,6 +7,7 @@ const combinedMethodRow = {
   dropxId: "N1013",
   dropxStatus: "Active",
   name: "ELDHOSE THOMAS",
+  designation: "DR - Driver",
   providerMemberId: "2000078396420",
   providerMemberName: "ELDHOSE THOMAS / DROP / 207254383",
   location: "KTUO",
@@ -64,7 +65,7 @@ test("attendance and rent heads export rate and amount without misleading counts
 test("payout export uses human labels, exact partner IDs, and one deduction suffix", () => {
   const table = buildWorkforcePayoutExportTable([combinedMethodRow], "Workforce");
 
-  assert.deepEqual(table.headers.slice(0, 6), ["DropX ID", "DropX Status", "Workforce Name", "Partner Name", "Partner ID", "Location"]);
+  assert.deepEqual(table.headers.slice(0, 7), ["DropX ID", "DropX Status", "Workforce Name", "Designation", "Partner Name", "Partner ID", "Location"]);
   assert.equal(table.rows[0][table.headers.indexOf("Partner ID")], '="2000078396420"');
   assert.ok(table.headers.includes("TDS Deduction (INR)"));
   assert.equal(table.headers.some((header) => /Deduction Deduction/.test(header)), false);
@@ -78,6 +79,7 @@ test("unmapped provider report rows export blank DropX and payment details", () 
     dropxId: "",
     dropxStatus: "",
     name: "UNMAPPED PARTNER PERSON",
+    designation: "",
     mappingStatus: "ID not mapped",
     paymentDetailsAvailable: false,
     paymentMethod: "",
@@ -89,6 +91,7 @@ test("unmapped provider report rows export blank DropX and payment details", () 
   const row = table.rows[1];
 
   assert.equal(row[table.headers.indexOf("DropX ID")], "");
+  assert.equal(row[table.headers.indexOf("Designation")], "");
   assert.equal(row[table.headers.indexOf("Payment Method")], "");
   assert.equal(row[table.headers.indexOf("Gross Payment (INR)")], "");
   assert.equal(row[table.headers.indexOf("Net Pay (INR)")], "");

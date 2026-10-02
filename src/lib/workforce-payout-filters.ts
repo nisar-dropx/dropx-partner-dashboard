@@ -4,6 +4,7 @@ export type WorkforcePayoutFilterableRow = {
   name: string;
   providerMemberId: string;
   providerMemberName: string;
+  designation: string;
   location: string;
   provider: string;
   mappingStatus: string;
@@ -12,6 +13,7 @@ export type WorkforcePayoutFilterableRow = {
 };
 
 export type WorkforcePayoutFilterSelection = {
+  designations: readonly string[];
   locations: readonly string[];
   providers: readonly string[];
   methods: readonly string[];
@@ -30,11 +32,12 @@ export function matchesWorkforcePayoutFilters(
 ) {
   const term = search.trim().toLowerCase();
   const matchesSearch = !term
-    || `${row.dropxId} ${row.dropxStatus} ${row.name} ${row.providerMemberId} ${row.providerMemberName} ${row.mappingStatus}`.toLowerCase().includes(term);
+    || `${row.dropxId} ${row.dropxStatus} ${row.name} ${row.providerMemberId} ${row.providerMemberName} ${row.designation} ${row.mappingStatus}`.toLowerCase().includes(term);
   const matchesMethod = filters.methods.length === 0
     || row.paymentMethodBreakdown.some((item) => filters.methods.includes(item.label));
 
   return matchesSearch
+    && includesSelected(filters.designations, row.designation)
     && includesSelected(filters.locations, row.location)
     && includesSelected(filters.providers, row.provider)
     && matchesMethod
