@@ -171,7 +171,7 @@ type ProviderMemberLookupResult = {
   workDate: string | null;
 };
 
-export type MappingFilterOption = { value: string; label: string };
+export type MappingFilterOption = { value: string; label: string; searchText?: string };
 
 export function MappingMultiFilter({
   allLabel,
@@ -190,7 +190,7 @@ export function MappingMultiFilter({
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const visibleOptions = query.trim()
-    ? options.filter((option) => option.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    ? options.filter((option) => `${option.label} ${option.searchText ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
     : options;
   const optionByValue = new Map(options.map((option) => [option.value, option.label]));
   const summary = selected.length === 0
@@ -202,10 +202,16 @@ export function MappingMultiFilter({
   useEffect(() => {
     if (!open) return;
     function close(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
     }
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        setQuery("");
+      }
     }
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", closeOnEscape);
@@ -223,7 +229,7 @@ export function MappingMultiFilter({
     <div className="mapping-filter-field mapping-bulk-filter" ref={rootRef}>
       <span className="mapping-field-label">{label}</span>
       <div className="bulk-multi-filter">
-        <button aria-expanded={open} className={`bulk-multi-filter-trigger ${open ? "open" : ""}`} onClick={() => setOpen((current) => !current)} type="button">
+        <button aria-expanded={open} className={`bulk-multi-filter-trigger ${open ? "open" : ""}`} onClick={() => { if (open) setQuery(""); setOpen(!open); }} type="button">
           <strong>{summary}</strong><span aria-hidden="true">v</span>
         </button>
         {open ? <div className="bulk-multi-filter-menu mapping-filter-menu">

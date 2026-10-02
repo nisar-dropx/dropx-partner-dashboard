@@ -828,7 +828,7 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
         .neq("status", "cancelled")
         .maybeSingle();
       if (currentMappingError) throw new Error(currentMappingError.message);
-      if (currentMapping && String(currentMapping.provider_member_id) !== providerMemberId) {
+      if (currentMapping && String(currentMapping.provider_member_id).trim().toUpperCase() !== providerMemberId.trim().toUpperCase()) {
         throw new Error(`Row ${index + 1}: This DropX ID is already mapped to Provider Member ID ${currentMapping.provider_member_id}.`);
       }
       await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
@@ -843,6 +843,105 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
     providerFirstMappingRedirect({ error: error instanceof Error ? error.message : "Unable to save provider-first mappings." });
   }
   providerFirstMappingRedirect({ notice: `${savedRows} row${savedRows === 1 ? "" : "s"} saved.` });
+}
+
+export type ProviderFirstInlineSavedRow = {
+  clientKey: string;
+  mappingId: string;
+  workforceId: string;
+  paymentMethodId: string;
+  paymentValues: Record<string, string>;
+  effectiveFrom: string;
+  effectiveTo: string;
+};
+
+export type ProviderFirstInlineSaveResult = {
+  ok: boolean;
+  message: string;
+  savedRows: ProviderFirstInlineSavedRow[];
+  failedClientKey?: string;
+};
+
+/** Saves provider-first rows without redirecting or reloading the worksheet.
+ * The authoritative validation and history-safe write remain in
+ * saveExecutiveMappingRow; this wrapper only changes response delivery. */
+export async function saveProviderFirstMappingsInline(formData: FormData): Promise<ProviderFirstInlineSaveResult> {
+  const savedRows: ProviderFirstInlineSavedRow[] = [];
+  let currentClientKey: string | undefined;
+  try {
+    const authorization = await getAuthorization();
+    if (!authorization) return { ok: false, message: "Your sign-in session has expired. Reload the page and sign in again.", savedRows };
+    const companyId = requireCompanyId(authorization);
+    if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
+      return { ok: false, message: "You do not have permission to edit provider mappings.", savedRows };
+    }
+    if (!supabaseAdmin) return { ok: false, message: "Supabase service role key is not configured.", savedRows };
+
+    const rowCount = Number(formData.get("row_count") ?? 0);
+    if (!Number.isInteger(rowCount) || rowCount < 1 || rowCount > 5000) {
+      return { ok: false, message: "The selected mapping rows are invalid. Reload the page and try again.", savedRows };
+    }
+    const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
+      ? null
+      : new Set(authorization.locationScopeIds);
+
+    for (let index = 0; index < rowCount; index += 1) {
+      currentClientKey = rowValue(formData, index, "client_key") ?? String(index);
+      const workforceId = rowRequired(formData, index, "id", "DropX workforce ID");
+      const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
+      const stationId = rowRequired(formData, index, "station_id", "Location");
+      const { data: currentMapping, error: currentMappingError } = await supabaseAdmin
+        .from("field_executive_provider_mappings")
+        .select("id, provider_member_id")
+        .eq("company_id", companyId)
+        .eq("workforce_id", workforceId)
+        .is("effective_to", null)
+        .neq("status", "cancelled")
+        .maybeSingle();
+      if (currentMappingError) throw new Error(currentMappingError.message);
+      if (currentMapping && String(currentMapping.provider_member_id).trim().toUpperCase() !== providerMemberId.trim().toUpperCase()) {
+        throw new Error(`Row ${index + 1}: This DropX ID is already mapped to Provider Member ID ${currentMapping.provider_member_id}.`);
+      }
+
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
+
+      const { data: savedMapping, error: savedMappingError } = await supabaseAdmin
+        .from("field_executive_provider_mappings")
+        .select("id, workforce_id, payment_method_id, payment_values, effective_from, effective_to")
+        .eq("company_id", companyId)
+        .eq("workforce_id", workforceId)
+        .eq("provider_member_id", providerMemberId)
+        .eq("station_id", stationId)
+        .neq("status", "cancelled")
+        .order("effective_from", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (savedMappingError) throw new Error(savedMappingError.message);
+      if (!savedMapping) throw new Error(`Row ${index + 1}: The saved mapping could not be reloaded.`);
+
+      savedRows.push({
+        clientKey: currentClientKey,
+        mappingId: String(savedMapping.id),
+        workforceId: String(savedMapping.workforce_id ?? workforceId),
+        paymentMethodId: String(savedMapping.payment_method_id ?? ""),
+        paymentValues: Object.fromEntries(Object.entries((savedMapping.payment_values ?? {}) as Record<string, string | number>).map(([key, value]) => [key, String(value)])),
+        effectiveFrom: String(savedMapping.effective_from ?? ""),
+        effectiveTo: String(savedMapping.effective_to ?? "")
+      });
+    }
+
+    revalidateTag("ops-cps");
+    return { ok: true, message: `${savedRows.length} row${savedRows.length === 1 ? "" : "s"} saved.`, savedRows };
+  } catch (error) {
+    if (savedRows.length) revalidateTag("ops-cps");
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Unable to save provider-first mappings.",
+      savedRows,
+      failedClientKey: currentClientKey
+    };
+  }
 }
 
 /** Links an imported provider member to an existing canonical workforce record.

@@ -21660,9 +21660,15 @@ td strong,
   margin: 0;
 }
 
+.provider-first-panel-head .mapping-upload-error,
+.provider-first-panel-head .mapping-upload-success {
+  margin: 5px 0 0;
+  font-size: 12px;
+}
+
 .provider-first-filters {
   display: grid;
-  grid-template-columns: minmax(260px, 1.5fr) repeat(4, minmax(150px, 1fr)) auto;
+  grid-template-columns: minmax(240px, 1.4fr) repeat(4, minmax(140px, 1fr)) minmax(82px, .45fr) auto;
   gap: 10px;
   align-items: end;
   padding: 14px;

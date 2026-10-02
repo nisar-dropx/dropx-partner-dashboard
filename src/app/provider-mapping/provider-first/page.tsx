@@ -6,6 +6,7 @@ import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type Provi
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { providerMemberKey } from "@/lib/provider-first-mapping-view";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type PaymentMethodRow = { id: string; code: string; name: string; payment_method_components: Array<{ component_code: string; component_type: "amount" | "production"; label: string; sort_order: number; payment_fields: { calculation_source: string | null; calculation_type: string | null } | Array<{ calculation_source: string | null; calculation_type: string | null }> | null }> | null };
@@ -32,16 +33,21 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
-    supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }),
+    supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status").eq("company_id", companyId).neq("status", "cancelled").is("effective_to", null).order("effective_from", { ascending: false }).order("created_at", { ascending: false }),
     supabaseAdmin.from("payment_methods").select("id, code, name, payment_method_components(component_code, component_type, label, sort_order, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true).order("code"),
     supabaseAdmin.from("designations").select("id, code, name, is_field_operations, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
   const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error;
   const stations = (stationsResult.data ?? []).filter((station) => allowed(station.id));
-  const stationByCode = new Map(stations.map((station) => [station.station_code, station]));
-  const activeMappings = ((mappingsResult.data ?? []) as Mapping[]).filter((mapping) => allowed(mapping.station_id) && !mapping.effective_to);
-  const mappingByWorkforce = new Map(activeMappings.filter((mapping) => mapping.workforce_id).map((mapping) => [mapping.workforce_id!, mapping]));
-  const mappingByMember = new Map(activeMappings.map((mapping) => [String(mapping.provider_member_id), mapping]));
+  const stationByCode = new Map(stations.map((station) => [String(station.station_code ?? "").trim().toUpperCase(), station]));
+  const activeMappings = ((mappingsResult.data ?? []) as Mapping[]).filter((mapping) => allowed(mapping.station_id));
+  const mappingByWorkforce = new Map<string, Mapping>();
+  const mappingByMember = new Map<string, Mapping>();
+  for (const mapping of activeMappings) {
+    if (mapping.workforce_id && !mappingByWorkforce.has(mapping.workforce_id)) mappingByWorkforce.set(mapping.workforce_id, mapping);
+    const memberKey = providerMemberKey(String(mapping.station_id ?? ""), String(mapping.provider_member_id ?? ""));
+    if (!mappingByMember.has(memberKey)) mappingByMember.set(memberKey, mapping);
+  }
   const workforceById = new Map((workersResult.data ?? []).map((worker) => [worker.id, worker]));
   const designationById = new Map((designationsResult.data ?? []).map((designation) => [String(designation.id), designation]));
   const designationByName = new Map((designationsResult.data ?? []).flatMap((designation) => [designation.name, designation.code].map((value) => [String(value ?? "").trim().toLowerCase(), designation] as const)));
@@ -56,17 +62,20 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
   const latestMembers = new Map<string, { id: string; name: string; stationId: string; stationLabel: string; providerId: string }>();
   for (const provider of providerResult.data ?? []) {
     const id = String(provider.provider_employee_id ?? "").trim();
-    const station = stationByCode.get(String(provider.station_code ?? "").trim());
-    if (!id || !station || latestMembers.has(`${station.id}|${id}`)) continue;
-    latestMembers.set(`${station.id}|${id}`, { id, name: String(provider.provider_employee_name ?? "").trim() || "Unnamed provider member", stationId: station.id, stationLabel: station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code, providerId: station.provider_id ?? "" });
+    const station = stationByCode.get(String(provider.station_code ?? "").trim().toUpperCase());
+    const memberKey = station ? providerMemberKey(station.id, id) : "";
+    if (!id || !station || latestMembers.has(memberKey)) continue;
+    latestMembers.set(memberKey, { id, name: String(provider.provider_employee_name ?? "").trim() || "Unnamed provider member", stationId: station.id, stationLabel: station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code, providerId: station.provider_id ?? "" });
   }
   const mappings: ProviderFirstMappingRow[] = Array.from(latestMembers.values()).map((member) => {
-    const link = mappingByMember.get(member.id);
+    const link = mappingByMember.get(providerMemberKey(member.stationId, member.id));
     const worker = link?.workforce_id ? workforceById.get(link.workforce_id) : null;
     return { providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "" };
   });
   const paymentMethods: PaymentMethodOption[] = ((methodsResult.data ?? []) as PaymentMethodRow[])
     .map((method) => ({ id: method.id, code: method.code, name: method.name, components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
+  const requestedStation = String(searchParams?.station ?? "").trim();
+  const initialStationId = stations.find((station) => station.id === requestedStation || String(station.station_code ?? "").trim().toUpperCase() === requestedStation.toUpperCase())?.id ?? "";
 
   return <AppShell active="ID Mapping" pageCode="provider_mapping">
     <PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
@@ -74,6 +83,6 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
     
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet initialQuery={searchParams?.q} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }
