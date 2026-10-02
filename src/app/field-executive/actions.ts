@@ -1210,10 +1210,20 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
       p_locations: allowedLocationIds ? [...allowedLocationIds] : null
     });
     if (queued.error) throw new Error(queued.error.message);
+    console.info("[workforce-amazon-invite] queued", {
+      companyId,
+      requestId: queued.data,
+      stationId: workforce.data.location_id,
+      workforceId
+    });
     revalidatePath("/work-force-register");
     redirect(`${destination}&notice=${encodeURIComponent("Amazon ID invitation queued from OpsPulse.")}`);
   } catch (error) {
     if (error && typeof error === "object" && "digest" in error) throw error;
+    console.error("[workforce-amazon-invite] rejected", {
+      error: error instanceof Error ? error.message : "Unknown queue error",
+      requestedStatus
+    });
     redirect(`${destination}&error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to queue the Amazon invitation.")}`);
   }
 }

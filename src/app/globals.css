@@ -22618,9 +22618,30 @@ td strong,
 .ops-workforce-next strong { color: #33435c; }
 .ops-workforce-next p { margin: 0; }
 
+.client-id-master { display: grid; gap: 14px; }
+.client-id-master .performance-summary-grid { margin: 0; }
+.client-id-bulk-panel .panel-head { align-items: center; }
+.client-id-master-layout { display: grid; grid-template-columns: minmax(260px,.72fr) minmax(0,1.8fr); gap: 14px; align-items: start; }
+.client-id-station-list, .client-id-station-editor, .client-id-worker-panel { overflow: hidden; border-radius: 14px; }
+.client-id-station-links { display: grid; max-height: 650px; overflow: auto; padding: 8px; }
+.client-id-station-links > a { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 11px 12px; border: 1px solid transparent; border-radius: 9px; color: #26354d; text-decoration: none; }
+.client-id-station-links > a:hover { border-color: #d9e4f0; background: #f8fafc; }
+.client-id-station-links > a.active { border-color: #ef835f; background: #fff7f2; box-shadow: inset 3px 0 #ed5b31; }
+.client-id-station-links > a > span:first-child { display: grid; min-width: 0; gap: 2px; }
+.client-id-station-links strong { font-size: 13px; }
+.client-id-station-links small { overflow: hidden; color: #7b899c; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.client-id-station-links .client-id-sync-warning { position: absolute; right: 12px; bottom: 2px; color: #b46b15; font-size: 9px; font-weight: 700; }
+.client-id-station-form small { color: #8793a4; font-size: 10px; font-weight: 500; text-transform: none; }
+.client-id-worker-health { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.client-id-worker-health span { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #e3e9f1; border-radius: 9px; background: #f9fbfd; color: #7b899c; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.client-id-worker-health b { color: #30415a; font-size: 11px; text-transform: none; }
+
 @media (max-width: 1100px) {
   .ops-workforce-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ops-workforce-hero { align-items: stretch; flex-direction: column; }
+  .client-id-master-layout { grid-template-columns: 1fr; }
+  .client-id-station-links { grid-template-columns: repeat(2,minmax(0,1fr)); max-height: 320px; }
+  .client-id-worker-health { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 700px) {
   .ops-workforce-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -22633,4 +22654,5 @@ td strong,
   .ops-workforce-inline-form { align-items: stretch; flex-direction: column; }
   .ops-workforce-inline-form input { width: 100%; }
   .ops-workforce-tracker-grid { grid-template-columns: 1fr; }
+  .client-id-station-links, .client-id-worker-health { grid-template-columns: 1fr; }
 }

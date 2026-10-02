@@ -92,6 +92,7 @@ const administration: NavItem[] = [
       { code: "master_locations", label: "Station Master", href: "/master/location" },
       { code: "master_providers", label: "Client / Provider Master", href: "/master/providers" },
       { code: "master_models", label: "Operation Models", href: "/master/models" }
+      ,{ code: "delivery_associates", label: "Client ID Master", href: "/master/client-id" }
       ,{ code: "performance_master", label: "Performance Master", href: "/master/performance-targets" }
       ,{ code: "capacity_master", label: "Capacity Master", href: "/master/capacity" }
       ,{ code: "service_network_master", label: "Network Planning Master", href: "/master/service-network" }

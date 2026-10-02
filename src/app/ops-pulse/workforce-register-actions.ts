@@ -7,7 +7,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-type InterviewOutcome = "reported" | "not_interested" | "rescheduled";
+type InterviewOutcome = "reported" | "did_not_report" | "not_responding" | "not_interested" | "rescheduled";
 
 function value(formData: FormData, name: string) {
   return String(formData.get(name) ?? "").trim();
@@ -36,25 +36,23 @@ async function scopedLead(leadId: string) {
   const companyId = requireCompanyId(authorization);
   if (authorization.readOnly || !supabaseAdmin) throw new Error("Editing is unavailable in this view.");
 
-  const leadResult = await supabaseAdmin.from("leads")
-    .select("id, station_code, status, interview_at")
+  const leadResult = await supabaseAdmin.from("recruitment_leads")
+    .select("id, location_id, status, follow_up_at, recruitment_locations(station_id)")
     .eq("company_id", companyId)
     .eq("id", leadId)
-    .is("archived_at", null)
+    .eq("stream", "workforce")
+    .eq("archived", false)
     .maybeSingle();
   if (leadResult.error) throw new Error(leadResult.error.message);
   if (!leadResult.data) throw new Error("Recruit candidate was not found.");
   const lead = leadResult.data;
 
   if (!authorization.hasAllLocationAccess) {
-    const stationResult = await supabaseAdmin.from("stations")
-      .select("id, station_code, hide_from_location_list, parent_station_id")
-      .eq("company_id", companyId)
-      .limit(500);
+    const stationResult = await supabaseAdmin.from("stations").select("id, station_code, hide_from_location_list, parent_station_id").eq("company_id", companyId).limit(500);
     if (stationResult.error) throw new Error(stationResult.error.message);
     const allowedIds = new Set(filterOnboardingLocations(stationResult.data ?? [], authorization).map((station) => station.id));
-    const leadStation = (stationResult.data ?? []).find((station) => String(station.station_code ?? "").trim().toUpperCase() === String(lead.station_code ?? "").trim().toUpperCase());
-    if (!leadStation || !allowedIds.has(leadStation.id)) {
+    const locationRelation = Array.isArray(lead.recruitment_locations) ? lead.recruitment_locations[0] : lead.recruitment_locations;
+    if (!locationRelation?.station_id || !allowedIds.has(locationRelation.station_id)) {
       throw new Error("This candidate is outside your station scope.");
     }
   }
@@ -71,7 +69,7 @@ export async function updateRecruitInterviewOutcome(formData: FormData) {
 
   try {
     if (!leadId) throw new Error("Choose a candidate.");
-    if (!["reported", "not_interested", "rescheduled"].includes(outcome)) throw new Error("Choose a valid interview update.");
+    if (!["reported", "did_not_report", "not_responding", "not_interested", "rescheduled"].includes(outcome)) throw new Error("Choose a valid interview update.");
 
     const { authorization, companyId, lead } = await scopedLead(leadId);
     const database = supabaseAdmin;
@@ -84,10 +82,20 @@ export async function updateRecruitInterviewOutcome(formData: FormData) {
     let eventCode = "";
 
     if (outcome === "reported") {
-      status = "interview_reported";
+      status = "joined";
       finalStatus = "Reported";
-      eventCode = "interview_reported";
+      eventCode = "joined";
       redirectTo = destination({ tab: "dropx-id", candidate: leadId, notice: "Candidate reported. Send the DropX ID invitation to start registration." });
+    } else if (outcome === "did_not_report") {
+      status = "interview_no_show";
+      finalStatus = "Did not report";
+      eventCode = "interview_no_show";
+      redirectTo = destination({ tab: "interviews", date: value(formData, "queue_date") || null, notice: "Candidate marked as did not report. Recruit has been updated." });
+    } else if (outcome === "not_responding") {
+      status = "no_response";
+      finalStatus = "Not responding";
+      eventCode = "interview_not_responding";
+      redirectTo = destination({ tab: "interviews", date: value(formData, "queue_date") || null, notice: "Candidate marked as not responding. Recruit has been updated." });
     } else if (outcome === "not_interested") {
       status = "not_interested";
       finalStatus = "Not interested";
@@ -109,23 +117,28 @@ export async function updateRecruitInterviewOutcome(formData: FormData) {
       status,
       final_status: finalStatus,
       final_remarks: note || null,
-      ...(interviewAt ? { interview_at: interviewAt } : {}),
-      last_status_at: updateAt,
+      ...(interviewAt ? { follow_up_at: interviewAt } : {}),
       last_updated_by: authorization.userId,
       updated_at: updateAt
     }).eq("company_id", companyId).eq("id", lead.id);
     if (update.error) throw new Error(update.error.message);
 
-    const event = await database.from("workforce_recruitment_events").insert({
+    const event = await database.from("recruitment_lead_history").insert({
       company_id: companyId,
       lead_id: lead.id,
-      event_code: eventCode,
-      event_at: updateAt,
-      actor_user_id: authorization.userId,
+      event_type: "interview_outcome",
+      field_name: "status",
+      old_value: lead.status,
+      new_value: status,
+      remarks: note || null,
+      actor_profile_id: authorization.userId,
       metadata: {
+        outcome: eventCode,
         note: note || null,
-        previous_interview_at: lead.interview_at,
-        rescheduled_for: interviewAt
+        previous_interview_at: lead.follow_up_at,
+        rescheduled_for: interviewAt,
+        source_portal: "ops_pulse",
+        station_updated: true
       }
     });
     if (event.error) throw new Error(event.error.message);
