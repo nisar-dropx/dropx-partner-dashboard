@@ -51,5 +51,7 @@ test("current Dashboard mapping removes all onboarding queues, including stale p
 
 test("only a record with no existing partner evidence remains invitation eligible", () => {
   assert.equal(clientIdPartnerState(undefined, undefined, undefined, { ...oldLearning, stage: "id_creation_pending", can_trigger: true }), undefined);
+  // A station being disabled/held is not evidence that an ID already exists.
+  assert.equal(clientIdPartnerState(undefined, undefined, undefined, { ...oldLearning, stage: "id_creation_pending", can_trigger: false }), undefined);
   assert.equal(clientIdQueues([worker], [], [], "2026-10-02").ready.length, 1);
 });

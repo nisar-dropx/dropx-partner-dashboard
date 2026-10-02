@@ -53,7 +53,7 @@ export function clientIdPartnerState(
       instruction: `${observation.progress} · ${observation.provider_status}`, source: "LSC onboarding",
       observedAt: observation.observed_at, transporterId });
   }
-  if (flow && !flow.can_trigger && !["active", "registration_pending", "partner_setup_pending"].includes(flow.stage)) {
+  if (flow && !flow.can_trigger && !["active", "registration_pending", "partner_setup_pending", "id_creation_pending"].includes(flow.stage)) {
     evidence.push({ queue: flow.stage === "mapping_pending" ? "mapping" : ["exception", "invitation_failed"].includes(flow.stage) ? "attention" : "progress",
       label: flow.label, instruction: flow.instruction, source: "Partner onboarding report",
       observedAt: flow.report_updated_at, transporterId });
