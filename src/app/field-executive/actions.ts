@@ -23,6 +23,8 @@ import { createAppNotification } from "@/lib/app-notifications";
 import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityExceptionEventMetadata } from "@/lib/onboarding-identity";
 import { biometricBelongsToPeople, peopleIdentityForDualRole } from "@/lib/workforce-dual-role";
 import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
+import { dashboardDateInputValue } from "@/lib/date-format";
+import { loadClientIdMappings, needsClientId, providerMappingFor, type ClientIdWorker } from "@/lib/workforce-client-id-queue";
 import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
@@ -1166,7 +1168,7 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     const allowedLocationIds = await scopedWorkforceLocationIds(companyId, authorization);
     const workforceId = required(formData.get("workforce_id"), "Associate");
     const workforce = await supabaseAdmin.from("workforce")
-      .select("id,email,full_name,location_id,onboarding_status,stations(station_code)")
+      .select("id,email,full_name,source_profile_type,source_profile_id,lifecycle_status,migration_state,location_id,onboarding_status,stations(station_code,provider_id),designations(provider_mapping_required)")
       .eq("company_id", companyId)
       .eq("id", workforceId)
       .is("deleted_at", null)
@@ -1178,6 +1180,18 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
     }
     if (!["under_review", "approved", "active"].includes(String(workforce.data.onboarding_status ?? ""))) {
       throw new Error("Complete registration before creating the partner ID.");
+    }
+    const clientWorker = workforce.data as unknown as ClientIdWorker;
+    if (!needsClientId(clientWorker)) {
+      throw new Error("This associate does not require a client ID invitation under the current master or lifecycle status.");
+    }
+    const mapping = providerMappingFor(clientWorker, await loadClientIdMappings(supabaseAdmin, companyId), dashboardDateInputValue());
+    if (mapping.current) {
+      revalidatePath("/work-force-register");
+      redirect(`/work-force-register?tab=amazon-id&notice=${encodeURIComponent("This associate already has a valid provider ID mapping in Dashboard. No invitation is needed.")}`);
+    }
+    if (mapping.known) {
+      throw new Error("This associate already has a provider ID. Review its station and effective dates in Dashboard mapping before requesting another invitation.");
     }
     const latest = await supabaseAdmin.from("workforce_amazon_invitation_requests")
       .select("id,status")
