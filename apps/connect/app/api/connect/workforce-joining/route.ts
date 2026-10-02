@@ -1,3 +1,4 @@
+import {pilotStatus,type Pilot} from '@/lib/amazon-pilot';
 import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
 import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
@@ -31,6 +32,13 @@ export async function GET(request: NextRequest) {
     if (personResult.error) throw new Error("Your Workforce record could not be verified.");
     if (!personResult.data) return NextResponse.json({available:false},{headers});
     const person = personResult.data as JoiningPerson;
+    const pilot=await db.from("workforce_amazon_pilots").select("*").eq("company_id",company).eq("workforce_id",person.id).maybeSingle();
+    if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status unavailable.");
+    if(pilot.data){
+      const p=pilot.data as Pilot,s=pilotStatus(p);
+      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),ready:s.ready,trainingLabel:s.trainingLabel,trialDays:p.trial_days,biometricId:account.biometricId,actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.last_checked_at,tasks:[],training:null},{headers});
+    }
+
     const partnerState=(await loadPartnerOnboardingStates(db,company,[person.id])).get(person.id);
     if(account.activationOnly && partnerState) return NextResponse.json({available:true,stage:partnerState.stage,stageLabel:partnerState.label,instruction:partnerState.instruction,reportUpdatedAt:partnerState.report_updated_at,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:partnerState.label,nextFollowUp:null,updatedAt:partnerState.report_updated_at,tasks:[],training:null},{headers});
     const ids = [{column:"workforce_id",id:person.id}];
