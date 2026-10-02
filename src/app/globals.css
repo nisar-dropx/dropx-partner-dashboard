@@ -22209,8 +22209,28 @@ td strong,
   background: #f8fafc;
 }
 
-.payout-filter-panel label { display: grid; gap: 6px; color: #526078; font-size: 11px; font-weight: 800; text-transform: uppercase; }
-.payout-filter-panel .field, .payout-filter-panel .button { min-height: 40px; }
+.payout-multi-filter {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.payout-multi-filter > span { color: #526078; font-size: 10px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+.payout-multi-filter .multi-select-trigger { min-height: 34px; padding-inline: 9px; font-size: 11px; font-weight: 650; }
+.payout-filter-panel .button { min-height: 34px; }
+.payout-filter-menu {
+  z-index: 40;
+  right: auto;
+  width: max(100%, 250px);
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 8px;
+  text-transform: none;
+}
+.payout-filter-menu label { display: flex; color: var(--ink); font-size: 12px; font-weight: 550; text-transform: none; }
+.payout-filter-menu .multi-select-all,
+.payout-filter-menu .multi-select-option { min-height: 32px; padding: 5px 7px; }
+.payout-filter-search { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; margin-bottom: 6px; color: #667085; }
+.payout-filter-search .field { width: 100%; height: 32px; min-height: 32px; font-size: 12px; }
+.payout-filter-empty { margin: 0; padding: 10px 7px; color: var(--muted); font-size: 11px; font-weight: 500; text-align: center; }
 
 .payout-table-wrap {
   max-height: min(70vh, 760px);
@@ -22361,6 +22381,58 @@ td strong,
 .payout-page-size { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .payout-page-size .field { width: 82px; min-height: 34px; padding: 5px 26px 5px 8px; }
 
+/* Shared Dashboard/Ops payout page density: keep the worksheet above the fold. */
+.workforce-payout-page {
+  display: grid;
+  gap: 8px;
+  margin-top: -8px;
+}
+.payout-page-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.payout-page-titlebar .page-head { min-height: 38px; margin: 0; padding: 0; }
+.payout-page-titlebar .page-head h1 { font-size: 20px; line-height: 1.15; }
+.payout-page-titlebar .performance-tabs { flex: 0 0 auto; padding: 3px; }
+.payout-page-titlebar .performance-tabs a { min-height: 30px; padding: 6px 12px; font-size: 10px; }
+.workforce-payout-page > .panel { margin: 0; }
+.workforce-payout-page .payout-period-head { min-height: 42px; gap: 12px; padding: 7px 12px; }
+.workforce-payout-page .payout-period-head h2 { font-size: 14px; }
+.workforce-payout-page .payout-period-filter { gap: 7px; }
+.workforce-payout-page .payout-period-filter label { min-width: 132px; gap: 3px; font-size: 9px; }
+.workforce-payout-page .payout-period-filter .field,
+.workforce-payout-page .payout-period-filter .button { height: 34px; min-height: 34px; font-size: 11px; }
+.workforce-payout-page .payout-search-strip { gap: 10px; padding: 7px 12px 6px; }
+.workforce-payout-page .payout-search-strip label { gap: 3px; }
+.workforce-payout-page .payout-search-strip .field { min-height: 34px; height: 34px; font-size: 12px; }
+.workforce-payout-page .payout-search-controls { gap: 6px; }
+.workforce-payout-page .payout-search-controls .button { min-height: 34px; height: 34px; font-size: 11px; }
+.workforce-payout-page .payout-result-count { padding-bottom: 8px; font-size: 10px; }
+.workforce-payout-page .payout-filter-panel {
+  gap: 8px;
+  margin: 0 12px 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.workforce-payout-page .workforce-payout-table { font-size: 11px; }
+.workforce-payout-page .workforce-payout-table th { padding: 7px 9px; font-size: 9px; line-height: 1.2; }
+.workforce-payout-page .workforce-payout-table td { padding: 7px 9px; line-height: 1.25; }
+.workforce-payout-page .workforce-payout-table td strong { font-size: 11px; }
+.workforce-payout-page .workforce-payout-table td small { margin-top: 2px; font-size: 9px; }
+.workforce-payout-page .workforce-payout-table .payout-net-pay strong { font-size: 11px; }
+.workforce-payout-page .workforce-payout-table .payout-status-stack { gap: 3px; }
+.workforce-payout-page .workforce-payout-table .status-pill { height: 20px; min-height: 20px; padding: 3px 7px; font-size: 9px; line-height: 1.1; }
+.workforce-payout-page .workforce-payout-table .button.compact { height: 28px; min-height: 28px; padding-inline: 9px; font-size: 10px; }
+.workforce-payout-page .workforce-payout-table .payout-sticky-id { width: 94px; min-width: 94px; max-width: 94px; }
+.workforce-payout-page .workforce-payout-table .payout-sticky-worker { left: 94px; width: 190px; min-width: 190px; max-width: 190px; }
+.workforce-payout-page .workforce-payout-table .payout-sticky-worker small { max-width: 165px; }
+.workforce-payout-page .workforce-payout-table.payout-view-overview { min-width: max(1100px, 100%); }
+.workforce-payout-page .payout-pagination { min-height: 42px; padding-block: 6px; font-size: 10px; }
+.workforce-payout-page .payout-page-size { font-size: 10px; }
+.workforce-payout-page .payout-page-size .field { min-height: 30px; height: 30px; font-size: 10px; }
+
 @media (max-width: 1200px) {
   .payout-period-head { display: block; }
   .payout-period-filter { justify-content: flex-start; margin-top: 14px; }
@@ -22369,6 +22441,9 @@ td strong,
 }
 
 @media (max-width: 760px) {
+  .workforce-payout-page { margin-top: 0; }
+  .payout-page-titlebar { align-items: stretch; flex-direction: column; }
+  .payout-page-titlebar .performance-tabs { width: fit-content; }
   .payout-table-toolbar, .payout-search-strip { align-items: stretch; flex-direction: column; }
   .payout-search-controls { align-items: stretch; justify-content: flex-start; }
   .payout-search-controls .payout-result-count { width: 100%; }

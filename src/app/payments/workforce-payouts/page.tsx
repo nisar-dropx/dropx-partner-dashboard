@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
-import { PendingLink } from "@/components/pending-link";
 import { WorkforcePayoutTable, type WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import { WorkforcePayoutPeriodFilter } from "@/components/workforce-payout-period-filter";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
@@ -478,11 +477,18 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   };
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
 
-  return <AppShell active="Workforce Payouts" pageCode={pageCode}><PageHead title="Workforce Payments" action={<PendingLink className="button secondary" href="/master/payment-methods?deductions=1">Deduction Heads</PendingLink>} />
-    <nav aria-label="Payment population" className="performance-tabs">
-      <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
-      <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
-    </nav>
-    {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section> : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={audience} audience={audience} rows={rows} /></section>}
+  return <AppShell active="Workforce Payouts" pageCode={pageCode}>
+    <div className="workforce-payout-page">
+      <div className="payout-page-titlebar">
+        <PageHead title="Workforce Payments" />
+        <nav aria-label="Payment population" className="performance-tabs">
+          <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
+          <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
+        </nav>
+      </div>
+      {error
+        ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
+        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={audience} audience={audience} rows={rows} /></section>}
+    </div>
   </AppShell>;
 }
