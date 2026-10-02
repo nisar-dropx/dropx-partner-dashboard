@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status unavailable.");
     if(pilot.data){
       const p=pilot.data as Pilot,s=pilotStatus(p);
-      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),ready:s.ready,trainingLabel:s.trainingLabel,trialDays:p.trial_days,biometricId:account.biometricId,actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.last_checked_at,tasks:[],training:null},{headers});
+      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),driverId:account.reference,biometricId:account.biometricId,actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.last_checked_at,tasks:[],training:null},{headers});
     }
 
     const partnerState=(await loadPartnerOnboardingStates(db,company,[person.id])).get(person.id);
