@@ -70,6 +70,15 @@ assert.match(workforceTable, /aria-label=\{`\$\{subjectLabel\} payout horizontal
 assert.match(workforceTable, /stickyScrollElement\.scrollLeft = tableWrapElement\.scrollLeft[\s\S]*tableWrapElement\.scrollLeft = stickyScrollElement\.scrollLeft/, "Workforce horizontal scrollbars must stay synchronized");
 assert.match(workforceTable, /new ResizeObserver\(updateStickyScroll\)/, "Workforce horizontal scrollbar must react to table size changes");
 assert.match(globalStyles, /\.workforce-payout-table \.payout-money\s*\{\s*text-align:\s*right;\s*\}/, "The shared payout numeric alignment rule must remain right-aligned");
+assert.doesNotMatch(workforcePage, /Deduction Heads|PendingLink/, "The payout page must not show the Deduction Heads shortcut");
+assert.doesNotMatch(workforceTable, /showFilters|aria-controls="payout-filter-panel"/, "Payout filters must remain visible without a Filters toggle");
+assert.match(workforceTable, /<div aria-label="Payout filters" className="payout-filter-panel"/, "The payout filter panel must always be rendered");
+assert.equal((workforceTable.match(/<PayoutMultiFilter /g) ?? []).length, 4, "Location, provider, payment method, and status must each use a searchable multi-select");
+assert.match(workforceTable, /placeholder=\{`Search \$\{label\.toLowerCase\(\)\}`\}/, "Every payout multi-select must expose option search");
+assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, deferredSearch, \{ locations, providers, methods, statuses \}\)/, "Visible rows must use the shared multi-select predicate");
+assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, search, \{ locations, providers, methods, statuses \}\)/, "CSV export must use the same multi-select predicate over all filtered rows");
+assert.match(globalStyles, /\.workforce-payout-page\s*\{[\s\S]*?margin-top:\s*-8px/, "Payout density changes must be scoped to the shared Dashboard and Ops page");
+assert.match(globalStyles, /\.workforce-payout-page \.workforce-payout-table td\s*\{\s*padding:\s*7px 9px/, "Payout rows must use compact, readable spacing");
 
 assert.match(workforcePage, /<WorkforcePayoutPeriodFilter/, "Workforce must use the focused period selector");
 assert.match(workforcePeriodFilter, /mode === "monthly"[\s\S]*name="month"/, "Monthly mode must show only its month input");

@@ -1,7 +1,9 @@
 "use client";
 
+import { ChevronDown, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
+import { matchesWorkforcePayoutFilters } from "@/lib/workforce-payout-filters";
 
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; name: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
@@ -30,24 +32,103 @@ function statusTone(status: string) {
   return "payout-status-neutral";
 }
 
-function matchesFilters(row: WorkforcePayoutRow, search: string, location: string, provider: string, method: string, status: string) {
-  const term = search.trim().toLowerCase();
-  return (!term || `${row.dropxId} ${row.name} ${row.providerMemberId} ${row.providerMemberName}`.toLowerCase().includes(term))
-    && (location === "all" || row.location === location)
-    && (provider === "all" || row.provider === provider)
-    && (method === "all" || row.paymentMethodBreakdown.some((item) => item.label === method))
-    && (status === "all" || row.status === status);
+function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
+  allLabel: string;
+  label: string;
+  onChange: (values: string[]) => void;
+  options: string[];
+  selected: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const visibleOptions = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return options.filter((option) => !term || option.toLowerCase().includes(term));
+  }, [options, query]);
+  const summary = selected.length === 0
+    ? allLabel
+    : selected.length <= 2
+      ? selected.join(", ")
+      : `${selected.length} selected`;
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function toggle(value: string) {
+    onChange(selectedSet.has(value)
+      ? selected.filter((item) => item !== value)
+      : [...selected, value]);
+  }
+
+  return <div className="payout-multi-filter" ref={rootRef}>
+    <span>{label}</span>
+    <div className="multi-select">
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={`${label}: ${summary}`}
+        className={`multi-select-trigger ${open ? "open" : ""}`}
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <span className="multi-select-summary">{summary}</span>
+        <ChevronDown aria-hidden="true" className="multi-select-chevron" size={15} />
+      </button>
+      {open ? <div className="multi-select-menu payout-filter-menu">
+        <div className="multi-select-search payout-filter-search">
+          <Search aria-hidden="true" size={14} />
+          <input
+            aria-label={`Search ${label.toLowerCase()}`}
+            autoFocus
+            className="field multi-select-search-field"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={`Search ${label.toLowerCase()}`}
+            type="search"
+            value={query}
+          />
+        </div>
+        <label className="multi-select-all">
+          <input checked={selected.length === 0} onChange={() => onChange([])} type="checkbox" />
+          <span>{allLabel}</span>
+        </label>
+        <div aria-label={label} className="multi-select-options" role="group">
+          {visibleOptions.map((option) => <label className={`multi-select-option ${selectedSet.has(option) ? "selected" : ""}`} key={option}>
+            <input checked={selectedSet.has(option)} onChange={() => toggle(option)} type="checkbox" />
+            <span>{option}</span>
+          </label>)}
+          {!visibleOptions.length ? <p className="payout-filter-empty">No matching options</p> : null}
+        </div>
+      </div> : null}
+    </div>
+  </div>;
 }
 
 export function WorkforcePayoutTable({ audience = "workforce", rows }: { audience?: "workforce" | "helpers"; rows: WorkforcePayoutRow[] }) {
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
   const [search, setSearch] = useState("");
-  const [location, setLocation] = useState("all");
-  const [provider, setProvider] = useState("all");
-  const [method, setMethod] = useState("all");
-  const [status, setStatus] = useState("all");
-  const [showFilters, setShowFilters] = useState(false);
+  const [locations, setLocations] = useState<string[]>([]);
+  const [providers, setProviders] = useState<string[]>([]);
+  const [methods, setMethods] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState("20");
   const [expandedId, setExpandedId] = useState("");
@@ -60,12 +141,12 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const providerOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.provider || "-")).values()).sort(), [rows]);
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status || "-")).values()).sort(), [rows]);
   const methodOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [rows]);
-  const filtered = useMemo(() => rows.filter((row) => matchesFilters(row, deferredSearch, location, provider, method, status)), [rows, deferredSearch, location, provider, method, status]);
+  const filtered = useMemo(() => rows.filter((row) => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, providers, methods, statuses })), [rows, deferredSearch, locations, providers, methods, statuses]);
   const pageSize = size === "all" ? Math.max(filtered.length, 1) : Number(size);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const activeFilterCount = [location, provider, method, status].filter((value) => value !== "all").length;
+  const activeFilterCount = locations.length + providers.length + methods.length + statuses.length;
   const tableColumnCount = 11;
 
   useEffect(() => {
@@ -119,7 +200,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   }, [expandedId, filtered.length, safePage, visible.length]);
 
   function clearFilters() {
-    setLocation("all"); setProvider("all"); setMethod("all"); setStatus("all"); setPage(1);
+    setLocations([]); setProviders([]); setMethods([]); setStatuses([]); setPage(1);
   }
 
   function toggleBreakup(rowId: string, button: HTMLButtonElement) {
@@ -130,7 +211,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   }
 
   function exportRows() {
-    const exportableRows = rows.filter((row) => matchesFilters(row, search, location, provider, method, status));
+    const exportableRows = rows.filter((row) => matchesWorkforcePayoutFilters(row, search, { locations, providers, methods, statuses }));
     const csv = buildWorkforcePayoutCsv(exportableRows, subjectLabel);
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `${audience}-payouts.csv`; link.click(); URL.revokeObjectURL(link.href);
   }
@@ -143,17 +224,16 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
       </label>
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
-        <button aria-controls="payout-filter-panel" aria-expanded={showFilters} className="button secondary" onClick={() => setShowFilters((current) => !current)} type="button">Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</button>
         <button className="button secondary" type="button" onClick={exportRows}>Export full CSV</button>
       </div>
     </div>
-    {showFilters ? <div className="payout-filter-panel" id="payout-filter-panel">
-      <label>Location<select className="field" value={location} onChange={(event) => { setLocation(event.target.value); setPage(1); }}><option value="all">All allocated locations</option>{locationOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
-      <label>Provider<select className="field" value={provider} onChange={(event) => { setProvider(event.target.value); setPage(1); }}><option value="all">All providers</option>{providerOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
-      <label>Payment method<select className="field" value={method} onChange={(event) => { setMethod(event.target.value); setPage(1); }}><option value="all">All methods</option>{methodOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
-      <label>Status<select className="field" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="all">All statuses</option>{statusOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
+    <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
+      <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
+      <PayoutMultiFilter allLabel="All providers" label="Provider" onChange={(values) => { setProviders(values); setPage(1); }} options={providerOptions} selected={providers} />
+      <PayoutMultiFilter allLabel="All methods" label="Payment method" onChange={(values) => { setMethods(values); setPage(1); }} options={methodOptions} selected={methods} />
+      <PayoutMultiFilter allLabel="All statuses" label="Status" onChange={(values) => { setStatuses(values); setPage(1); }} options={statusOptions} selected={statuses} />
       <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
-    </div> : null}
+    </div>
     <div className="table-wrap payout-table-wrap" ref={tableWrapRef}>
       <table className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
         <caption className="sr-only">{subjectLabel} payout totals</caption>
