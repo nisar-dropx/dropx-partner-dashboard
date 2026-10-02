@@ -84,17 +84,27 @@ export async function saveClientIdStation(formData: FormData) {
   try {
     if (authorization.readOnly || !supabaseAdmin) throw new Error("Station setup is unavailable in read-only mode.");
     const stations = await scopedAmazonStations(companyId, authorization);
-    if (!stations.some((station) => station.id === stationId)) throw new Error("Choose an Amazon station in your location scope.");
-    const serviceAreaCode = text("service_area_code").toUpperCase();
+    const station = stations.find((candidate) => candidate.id === stationId);
+    if (!station) throw new Error("Choose an Amazon station in your location scope.");
+    const serviceAreaCode = station.station_code.toUpperCase();
     const supervisorAlias = text("supervisor_alias");
     const contractType = text("contract_type");
     const emailPattern = text("associate_email_pattern").toLowerCase();
     const version = Number(text("version"));
+    const invitationEnabled = formData.get("invitation_enabled") === "on";
     if (!/^[A-Z0-9_-]{2,24}$/.test(serviceAreaCode)) throw new Error("Enter the exact Amazon service-area code.");
     if (!/^[a-zA-Z0-9._-]{2,80}$/.test(supervisorAlias)) throw new Error("Enter the Amazon supervisor badge login without @amazon.com.");
     if (!Number.isInteger(version) || version < 0) throw new Error("Refresh the station master before saving again.");
     if (!["Independent Contractor", "Subcontractor", "DSP Employed"].includes(contractType)) throw new Error("Choose the approved Amazon DA contract type.");
     if (emailPattern && !validEmailPattern(emailPattern)) throw new Error("The optional email pattern must include {station_code} and {first_name} or {full_name}, followed by a valid domain.");
+    const areaResult = await supabaseAdmin
+      .from("workforce_amazon_service_areas")
+      .select("service_area_id")
+      .eq("company_id", companyId)
+      .eq("station_code", serviceAreaCode)
+      .maybeSingle();
+    if (areaResult.error) throw new Error(areaResult.error.message);
+    if (invitationEnabled && !areaResult.data?.service_area_id) throw new Error(`${serviceAreaCode} is not yet available in the Amazon service-area sync. Keep the station on hold until it is synced.`);
     const result = await supabaseAdmin.rpc("workforce_save_amazon_station", {
       p_company: companyId,
       p_actor: authorization.userId,
@@ -104,12 +114,12 @@ export async function saveClientIdStation(formData: FormData) {
       p_locations: authorization.hasAllLocationAccess ? null : stations.map((station) => station.id),
       p_settings: {
         service_area_code: serviceAreaCode,
-        amazon_service_area_id: text("amazon_service_area_id") || null,
+        amazon_service_area_id: areaResult.data?.service_area_id || null,
         service_type: "Amazon Logistics",
         supervisor_alias: supervisorAlias,
         contract_type: contractType,
         associate_email_pattern: emailPattern || null,
-        invitation_enabled: formData.get("invitation_enabled") === "on"
+        invitation_enabled: invitationEnabled
       }
     });
     if (result.error) throw new Error(result.error.message);
@@ -138,23 +148,29 @@ export async function enableMissingAmazonStations(formData: FormData) {
     const settingByStation = new Map(((settingResult.data ?? []) as StationSetting[]).map((setting) => [setting.station_id, setting]));
     const areaByCode = new Map((areaResult.data ?? []).map((area) => [String(area.station_code).toUpperCase(), String(area.service_area_id)]));
     let updated = 0;
+    let waitingForSync = 0;
     for (const station of stations) {
       const current = settingByStation.get(station.id);
-      if (current?.invitation_enabled) continue;
+      if (current) continue;
+      const serviceAreaId = areaByCode.get(station.station_code.toUpperCase()) || null;
+      if (!serviceAreaId) {
+        waitingForSync += 1;
+        continue;
+      }
       const result = await supabaseAdmin.rpc("workforce_save_amazon_station", {
         p_company: companyId,
         p_actor: authorization.userId,
         p_actor_name: authorization.fullName || authorization.email || "OpsPulse",
         p_station: station.id,
-        p_version: current?.version ?? 0,
+        p_version: 0,
         p_locations: null,
         p_settings: {
-          service_area_code: current?.service_area_code || station.station_code.toUpperCase(),
-          amazon_service_area_id: current?.amazon_service_area_id || areaByCode.get(station.station_code.toUpperCase()) || null,
-          service_type: current?.service_type || "Amazon Logistics",
+          service_area_code: station.station_code.toUpperCase(),
+          amazon_service_area_id: serviceAreaId,
+          service_type: "Amazon Logistics",
           supervisor_alias: supervisorAlias,
-          contract_type: current?.contract_type || "Independent Contractor",
-          associate_email_pattern: current?.associate_email_pattern || null,
+          contract_type: "Independent Contractor",
+          associate_email_pattern: null,
           invitation_enabled: true
         }
       });
@@ -162,7 +178,7 @@ export async function enableMissingAmazonStations(formData: FormData) {
       updated += 1;
     }
     revalidateClientIdMaster();
-    redirect(destination({ notice: `${updated} Amazon station${updated === 1 ? "" : "s"} enabled with supervisor ${supervisorAlias}.` }));
+    redirect(destination({ notice: `${updated} Amazon station${updated === 1 ? "" : "s"} configured with individual service areas.${waitingForSync ? ` ${waitingForSync} waiting for service-area sync.` : ""}` }));
   } catch (error) {
     if (isRedirectError(error)) throw error;
     redirect(destination({ error: error instanceof Error ? error.message : "Unable to enable all Amazon stations." }));
