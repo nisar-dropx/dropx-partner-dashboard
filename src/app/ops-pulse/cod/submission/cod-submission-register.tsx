@@ -246,7 +246,7 @@ export function CodSubmissionRegister({
                     <span className="subtle">Missing</span>
                   )}
                 </td>
-                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{proofStatusLabel(row.proofStatus)}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofStatus==='Validation pending'?'Upload recorded; slip check queued':compactCodReason(row.proofReason)}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode} status={row.proofStatus}/></div></td>
+                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{proofStatusLabel(row.proofStatus)}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofStatus==='Review pending'||row.proofStatus==='Validation pending'?'Upload recorded; manual review pending':compactCodReason(row.proofReason)}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode} status={row.proofStatus}/></div></td>
                 <td>{row.remarks || "-"}</td>
                 <td>
                   {canEdit ? (

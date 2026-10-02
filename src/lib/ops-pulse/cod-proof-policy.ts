@@ -23,9 +23,9 @@ export function emailList(raw:string) {
  if(!values.length||values.length>20||values.some(s=>!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s)))throw new Error('Enter valid email addresses, separated by commas (maximum 20).');
  return values;
 }
-export function proofStatus(value?:string|null){return value==='Valid'||value==='Not valid'||value==='Details unclear'||value==='Returned'||value==='Validation unavailable'?value:'Validation pending';}
-export function proofStatusLabel(value?:string|null){const status=proofStatus(value);return status==='Validation pending'?'Check queued':status;}
-export function proofTone(value:string){return value==='Valid'||value==='Not required'?'good':['Returned','Not valid','Validation unavailable','Details unclear'].includes(value)?'bad':'warn';}
+export function proofStatus(value?:string|null){return value==='Valid'||value==='Not valid'||value==='Returned'?value:'Review pending';}
+export function proofStatusLabel(value?:string|null){return proofStatus(value);}
+export function proofTone(value:string){return value==='Valid'||value==='Not required'?'good':['Returned','Not valid'].includes(value)?'bad':'warn';}
 
 // Independent readings that disagree are not evidence of a confirmed mismatch.
 export function reconcileProofReadings(first:ProofExtraction,second:ProofExtraction){

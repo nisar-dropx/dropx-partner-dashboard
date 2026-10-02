@@ -1,15 +1,13 @@
 import {deliverCodReturns} from '@/lib/ops-pulse/cod-return-mail';
 import {cronAuthorized} from '@/lib/portal-digest-delivery';
 import {isEddCronHost} from '@/lib/ops-pulse/edd-cron-scope';
-import {processCodProofChecks} from '@/lib/ops-pulse/cod-proof-worker';
 import {checkCodExceptionEmails} from '@/lib/ops-pulse/cod-exception-mail';
 export const dynamic='force-dynamic';export const maxDuration=300;
 export async function GET(request:Request){
  if(!cronAuthorized(request))return Response.json({error:'Unauthorized'},{status:401});
  if(!isEddCronHost(new URL(request.url).hostname))return Response.json({skipped:'OpsPulse only'});
- const [proof,email,returns]=await Promise.allSettled([processCodProofChecks(),checkCodExceptionEmails(),deliverCodReturns()]);
- const failed=proof.status==='rejected'||email.status==='rejected'||returns.status==='rejected';
- if(failed)console.error('COD checks failed',proof.status==='rejected'?String(proof.reason):'',email.status==='rejected'?String(email.reason):'');
- else console.info('COD checks completed',JSON.stringify({proof:proof.value,email:email.value,returns:returns.value}));
- return Response.json({returns:returns.status==='fulfilled'?returns.value:{error:'Return notifications unavailable'},proof:proof.status==='fulfilled'?proof.value:{error:'Checks unavailable'},email:email.status==='fulfilled'?email.value:{error:'Mailbox check unavailable'}},{status:failed?500:200});
+ const [email,returns]=await Promise.allSettled([checkCodExceptionEmails(),deliverCodReturns()]);
+ const failed=email.status==='rejected'||returns.status==='rejected';
+ if(failed)console.error('COD follow-ups failed',email.status==='rejected'?String(email.reason):'',returns.status==='rejected'?String(returns.reason):'');
+ return Response.json({returns:returns.status==='fulfilled'?returns.value:{error:'Return notifications unavailable'},proof:{mode:'manual',processed:0},email:email.status==='fulfilled'?email.value:{error:'Mailbox check unavailable'}},{status:failed?500:200});
 }

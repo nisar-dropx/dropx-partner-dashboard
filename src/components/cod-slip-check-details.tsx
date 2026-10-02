@@ -8,7 +8,7 @@ type Props={result?:Record<string,unknown>|null;checkedAt?:string|null;amount:nu
 export function CodSlipCheckDetails({result,checkedAt,amount,status}:Props){
  const extracted=result?.extracted;
  const v=extracted&&typeof extracted==='object'&&!Array.isArray(extracted)?extracted as ProofExtraction:null;
- if(status==='Validation pending'||status==='Checking'||!v)return <p className="subtle">Slip check queued. The upload is already recorded.</p>;
+ if(status==='Review pending'||status==='Validation pending'||status==='Checking'||!v)return <p className="subtle">Manual review pending. The upload is already recorded.</p>;
  const seal=v.seal_status==='visible'&&['high','medium'].includes(v.seal_clarity)?'Seal visible':v.seal_status==='missing'?'Seal missing':'Seal unclear';
  const uncertain=v.uncertain_fields||[];
  const rows=[
