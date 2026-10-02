@@ -985,6 +985,11 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         const state=(await loadPartnerOnboardingStates(supabaseAdmin!,account.company_id,[account.id])).get(account.id);
         activationOnly=Boolean(state?.registration_ready && state.restrict_dropx_one && !state.mapping_confirmed);
         activationStage=state?.stage??null;
+        const pilot=await supabaseAdmin!.from("workforce_amazon_pilots").select("workforce_id,closed_at").eq("company_id",account.company_id).eq("workforce_id",account.id).maybeSingle();
+        // Additive pilot schema may be deployed independently of DropX One.
+        if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status is temporarily unavailable.");
+        if(pilot.data){activationOnly=true;activationStage=pilot.data.closed_at?"closed":"amazon_pilot";}
+
       }
 
       return {
