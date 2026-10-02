@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
 import { approvedLeaveDays } from "@/lib/leave-calendar-days";
 import { userFacingError } from "@/lib/user-facing-error";
+import { regularizationTimeInput } from "@/lib/regularization-input";
 import { canCancelRegularization, cancellableRegularizationStatuses, regularizationIdsWithApproval } from "@/lib/connect-regularization-cancel";
 import { fillAttendanceCalendarGaps, loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
 import { resolveAttendanceRegularizationApprovers } from "../../../../../../src/lib/attendance-regularization-workflow";
@@ -38,10 +39,6 @@ function isMissingRegularizationTable(message: unknown) {
   const text = String(message ?? "").toLowerCase();
   return text.includes("attendance_regularization_requests") &&
     (text.includes("does not exist") || text.includes("schema cache"));
-}
-
-function validTime(value: string) {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function mapConfigError(message: string) {
@@ -99,7 +96,7 @@ export async function GET(request: NextRequest) {
 
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
-      .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at, request_kind")
+      .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, attachment_path_out, status, review_remarks, created_at, request_kind")
       .eq("company_id", worker.companyId)
       .eq("profile_type", worker.profileType)
       .eq("profile_id", worker.profileId)
@@ -124,6 +121,7 @@ export async function GET(request: NextRequest) {
           reasonCode: item.reason_code,
           remarks: item.remarks,
           hasAttachment: Boolean(item.attachment_path),
+          hasAttachmentOut: Boolean(item.attachment_path_out),
           status: item.status,
           reviewRemarks: item.review_remarks,
           createdAt: item.created_at,
@@ -394,6 +392,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const uploadedPaths: string[] = [];
+  let requestSaved = false;
+  let stage = "validate";
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const formData = await request.formData();
@@ -421,29 +422,22 @@ export async function POST(request: NextRequest) {
     ].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }
-    const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "late_in_permission"].includes(reasonCode);
-    const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "early_out_permission"].includes(reasonCode);
-    const remarksOnly = reasonCode === "other";
-    const normalizedRequestedInTime = requestsInTime ? requestedInTime : currentInTime;
-    const normalizedRequestedOutTime = requestsOutTime ? requestedOutTime : currentOutTime;
-    if (requestsInTime && !validTime(requestedInTime)) throw new Error("Requested IN time is required for this reason.");
-    if (requestsOutTime && !validTime(requestedOutTime)) throw new Error("Requested OUT time is required for this reason.");
-    if (!remarksOnly && !requestsInTime && !validTime(currentInTime)) throw new Error("The existing IN punch is missing. Select Missed both punches.");
-    if (!remarksOnly && !requestsOutTime && !validTime(currentOutTime)) throw new Error("The existing OUT punch is missing. Select Missed both punches.");
-    if (!remarksOnly && normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
-    if (remarksOnly && validTime(normalizedRequestedInTime) && validTime(normalizedRequestedOutTime) && normalizedRequestedOutTime <= normalizedRequestedInTime) {
-      throw new Error("Existing OUT time must be after IN time.");
-    }
+    const { inTime: normalizedRequestedInTime, outTime: normalizedRequestedOutTime } = regularizationTimeInput({
+      reason: reasonCode, currentIn: currentInTime, currentOut: currentOutTime,
+      requestedIn: requestedInTime, requestedOut: requestedOutTime
+    });
     if (remarks.length < 5) throw new Error("Enter a short explanation.");
 
+    stage = "account";
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
     if (worker.profileType !== "employee" && worker.profileType !== "contractor") {
       throw new Error("Attendance regularization is available only for employees and independent contractors.");
     }
 
+    stage = "existing_request";
     const existingResult = await supabaseAdmin
       .from("attendance_regularization_requests")
-      .select("id, status, attachment_path")
+      .select("id, status, attachment_path, attachment_path_out")
       .eq("company_id", worker.companyId)
       .eq("profile_type", worker.profileType)
       .eq("profile_id", worker.profileId)
@@ -464,17 +458,15 @@ export async function POST(request: NextRequest) {
     }
 
     let attachmentPath = existingResult.data?.attachment_path ?? null;
-    let attachmentPathOut: string | null = null;
-    let uploadedPath: string | null = null;
-    let uploadedPathOut: string | null = null;
+    let attachmentPathOut: string | null = existingResult.data?.attachment_path_out ?? null;
     const attachment = formData.get("attachment");
     const attachmentOut = formData.get("attachmentOut");
+    stage = "upload";
     if (attachment instanceof File && attachment.size > 0) {
       const extension = regularizationProofTypes.get(attachment.type);
       if (!extension) throw new Error("CCTV proof must be a JPG, PNG or WebP image.");
       if (attachment.size > 5 * 1024 * 1024) throw new Error("CCTV proof must be 5 MB or smaller.");
       attachmentPath = `${worker.companyId}/${worker.profileId}/attendance-regularization-${attendanceDate}-${Date.now()}${extension}`;
-      uploadedPath = attachmentPath;
       const uploadResult = await supabaseAdmin.storage
         .from("employee-profile-documents")
         .upload(attachmentPath, Buffer.from(await attachment.arrayBuffer()), {
@@ -482,13 +474,13 @@ export async function POST(request: NextRequest) {
           upsert: false
         });
       if (uploadResult.error) throw new Error(uploadResult.error.message);
+      uploadedPaths.push(attachmentPath);
     }
     if (attachmentOut instanceof File && attachmentOut.size > 0) {
       const extension = regularizationProofTypes.get(attachmentOut.type);
       if (!extension) throw new Error("OUT-time CCTV proof must be a JPG, PNG or WebP image.");
       if (attachmentOut.size > 5 * 1024 * 1024) throw new Error("OUT-time CCTV proof must be 5 MB or smaller.");
       attachmentPathOut = `${worker.companyId}/${worker.profileId}/attendance-regularization-out-${attendanceDate}-${Date.now()}${extension}`;
-      uploadedPathOut = attachmentPathOut;
       const uploadResult = await supabaseAdmin.storage
         .from("employee-profile-documents")
         .upload(attachmentPathOut, Buffer.from(await attachmentOut.arrayBuffer()), {
@@ -496,20 +488,23 @@ export async function POST(request: NextRequest) {
           upsert: false
         });
       if (uploadResult.error) throw new Error(uploadResult.error.message);
+      uploadedPaths.push(attachmentPathOut);
     }
     if (!attachmentPath) {
       throw new Error("Upload workplace CCTV proof with a visible timestamp matching the requested IN or OUT time.");
     }
-    if (reasonCode === "missed_both" && !attachmentPathOut && !existingResult.data?.attachment_path) {
+    if (reasonCode === "missed_both" && !attachmentPathOut) {
       throw new Error("Upload separate CCTV proof for both IN and OUT times.");
     }
 
     const workerType = worker.profileType as "employee" | "contractor";
+    stage = "approval_route";
     const approval = await resolveAttendanceRegularizationApprovers(
       worker.companyId,
       workerType,
       worker.profileId
     );
+    stage = "create_request";
     const createResult = await supabaseAdmin.rpc("hr_create_attendance_regularization_with_steps", {
       p_company_id: worker.companyId,
       p_profile_type: worker.profileType,
@@ -520,8 +515,8 @@ export async function POST(request: NextRequest) {
       p_attendance_date: attendanceDate,
       p_current_in_time: currentInTime || null,
       p_current_out_time: currentOutTime || null,
-      p_requested_in_time: validTime(normalizedRequestedInTime) ? normalizedRequestedInTime : null,
-      p_requested_out_time: validTime(normalizedRequestedOutTime) ? normalizedRequestedOutTime : null,
+      p_requested_in_time: normalizedRequestedInTime,
+      p_requested_out_time: normalizedRequestedOutTime,
       p_reason_code: reasonCode,
       p_remarks: remarks,
       p_attachment_path: attachmentPath,
@@ -537,12 +532,11 @@ export async function POST(request: NextRequest) {
       p_attachment_path_out: attachmentPathOut
     });
     if (createResult.error) {
-      if (uploadedPath) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPath]);
-      if (uploadedPathOut) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPathOut]);
-      throw new Error(createResult.error.message);
+      throw new Error(createResult.error.message, { cause: { code: createResult.error.code } });
     }
     const requestId = String(createResult.data ?? "");
     if (!requestId) throw new Error("Unable to create attendance regularization request.");
+    requestSaved = true;
     const initialStatus = approval.steps.length ? "pending_manager" : "pending_hr";
     const firstApprover = approval.steps[0];
     if (firstApprover) {
@@ -556,6 +550,13 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ok: true, request: { id: requestId, status: initialStatus } });
   } catch (error) {
+    if (!requestSaved && uploadedPaths.length && supabaseAdmin) {
+      await supabaseAdmin.storage.from("employee-profile-documents").remove(uploadedPaths).catch(() => undefined);
+    }
+    // Keep diagnostics searchable without logging names, remarks, proof paths or credentials.
+    const code = error instanceof Error && error.cause && typeof error.cause === "object" && "code" in error.cause
+      ? String(error.cause.code) : undefined;
+    console.error("Attendance regularization submission failed", { stage, code });
     return errorResponse(error, "Unable to submit regularization request.");
   }
 }

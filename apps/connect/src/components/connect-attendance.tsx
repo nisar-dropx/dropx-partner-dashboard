@@ -29,6 +29,7 @@ import {
   type AttendanceInsightRow
 } from "@/lib/attendance-insights";
 import { readJsonResponse, userFacingError } from "@/lib/user-facing-error";
+import { missingPunchReason, regularizationTimeInput } from "@/lib/regularization-input";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
@@ -39,6 +40,7 @@ type Regularization = {
   reasonCode: string;
   remarks: string;
   hasAttachment: boolean;
+  hasAttachmentOut?: boolean;
   status: string;
   reviewRemarks: string;
   createdAt: string;
@@ -885,7 +887,11 @@ function RegularizationSheet({
 }) {
   const [inTime, setInTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedInTime || row.inTime || ""));
   const [outTime, setOutTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedOutTime || row.outTime || ""));
-  const [reason, setReason] = useState(row.regularization?.reasonCode || "");
+  const missingReason = missingPunchReason(row.inTime, row.outTime);
+  const [reason, setReason] = useState(() => {
+    const previous = row.regularization?.reasonCode;
+    return previous && !(previous === "other" && missingReason) ? previous : missingReason;
+  });
   const [remarks, setRemarks] = useState(row.regularization?.remarks || "");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentOut, setAttachmentOut] = useState<File | null>(null);
@@ -917,11 +923,17 @@ function RegularizationSheet({
       setError("Enter the requested OUT time in 24-hour format (HH:MM).");
       return;
     }
+    try {
+      regularizationTimeInput({ reason, currentIn: row.inTime, currentOut: row.outTime, requestedIn: inTime, requestedOut: outTime });
+    } catch (validationError) {
+      setError(userFacingError(validationError));
+      return;
+    }
     if (!attachment && !row.regularization?.hasAttachment) {
       setError(`Upload workplace CCTV proof with a visible timestamp matching the ${proofTimeLabel}.`);
       return;
     }
-    if (needsDualProof && !attachmentOut && !row.regularization?.hasAttachment) {
+    if (needsDualProof && !attachmentOut && !row.regularization?.hasAttachmentOut) {
       setError("Upload separate CCTV proof for both IN and OUT times.");
       return;
     }
@@ -941,6 +953,7 @@ function RegularizationSheet({
       if (attachment) form.set("attachment", attachment);
       if (attachmentOut) form.set("attachmentOut", attachmentOut);
       const response = await fetch("/api/connect/attendance", { method: "POST", body: form });
+      if (response.status === 413) throw new Error("The proof files are too large to send together. Use smaller screenshots and try again.");
       await readJsonResponse(response, "Unable to submit regularization request. Please try again.");
       onSubmitted();
     } catch (reasonValue) {
@@ -971,8 +984,9 @@ function RegularizationSheet({
           <option value="incorrect_out">Incorrect OUT time</option>
           <option value="late_in_permission">Permission – late IN</option>
           <option value="early_out_permission">Permission – early OUT</option>
-          <option value="other">Other (remarks only)</option>
+          <option value="other" disabled={Boolean(missingReason)}>Other (remarks only{missingReason ? " · needs both punches" : ""})</option>
         </select></label>
+        {missingReason ? <p className="dx-time-prompt">{missingReason === "missed_both" ? "No punches recorded. Enter your actual IN and OUT times." : "Enter the actual time of the missing punch."} Other cannot correct missing punches.</p> : null}
         {reason && (requestsInTime || requestsOutTime) ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
           {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
           {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}
@@ -980,7 +994,7 @@ function RegularizationSheet({
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">
           <Info aria-hidden="true" />
-          <span><strong>Workplace CCTV proof is mandatory</strong>Upload a clear screenshot showing you were present at the workplace at the {proofTimeLabel}. The CCTV date and time must be visible; you do not need to be standing near the biometric device.</span>
+          <span><strong>Workplace CCTV proof is mandatory</strong>Upload a clear screenshot showing you were present at the workplace at the {proofTimeLabel}. The CCTV date and time must be visible; you do not need to be standing near the biometric device. No CCTV available? Contact HR for an exception review; do not upload a dummy image.</span>
         </div>
         <label className="dx-attachment required"><Paperclip /><span>{attachment?.name || (row.regularization?.hasAttachment ? "Existing proof attached · choose to replace" : needsDualProof ? "Upload IN-time CCTV proof" : "Upload workplace CCTV proof")}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment && !needsDualProof} type="file" onChange={(event) => {
           const file = event.target.files?.[0] ?? null;
@@ -999,7 +1013,7 @@ function RegularizationSheet({
           setError("");
           setAttachment(file);
         }} /></label>
-        {needsDualProof ? <label className="dx-attachment required"><Paperclip /><span>{attachmentOut?.name || "Upload OUT-time CCTV proof"}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment} type="file" onChange={(event) => {
+        {needsDualProof ? <label className="dx-attachment required"><Paperclip /><span>{attachmentOut?.name || (row.regularization?.hasAttachmentOut ? "Existing OUT proof attached · choose to replace" : "Upload OUT-time CCTV proof")}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachmentOut} type="file" onChange={(event) => {
           const file = event.target.files?.[0] ?? null;
           if (file && !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
             setAttachmentOut(null);
@@ -1018,7 +1032,7 @@ function RegularizationSheet({
         }} /></label> : null}
         <p className="dx-evidence-format">JPG, PNG or WebP · maximum 5 MB · timestamp must match the requested attendance time{needsDualProof ? " · upload one file per corrected punch" : ""}</p>
         {error ? <p className="dx-form-error">{error}</p> : null}
-        <div className="dx-sheet-actions"><button className="secondary" onClick={onClose} type="button">Cancel</button><button disabled={saving || (!attachment && !row.regularization?.hasAttachment) || (needsDualProof && !attachmentOut && !row.regularization?.hasAttachment)} type="submit">{saving ? "Submitting..." : "Submit request"}</button></div>
+        <div className="dx-sheet-actions"><button className="secondary" onClick={onClose} type="button">Cancel</button><button disabled={saving || (!attachment && !row.regularization?.hasAttachment) || (needsDualProof && !attachmentOut && !row.regularization?.hasAttachmentOut)} type="submit">{saving ? "Submitting..." : "Submit request"}</button></div>
       </form>
     </aside>
   </>;
