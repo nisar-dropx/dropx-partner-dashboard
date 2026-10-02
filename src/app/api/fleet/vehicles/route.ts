@@ -22,6 +22,10 @@ const editableFields = [
   "status_comment",
   "status_reason_id",
   "status_reason_key",
+  "deployment_status",
+  "current_location_type",
+  "current_location_code",
+  "current_location_label",
   "transfer_date",
   "sale_date",
   "dispose_date"
@@ -39,13 +43,17 @@ export async function POST(request: Request) {
   if (!payload.station_code) return NextResponse.json({ error: "Location is required." }, { status: 400 });
   if (!payload.model) return NextResponse.json({ error: "Model is required." }, { status: 400 });
   if (!payload.fuel_type) return NextResponse.json({ error: "Fuel type is required." }, { status: 400 });
+  if (!payload.deployment_status) payload.deployment_status = "deployed";
+  if (!payload.current_location_type) payload.current_location_type = "station";
+  if (!payload.current_location_code) payload.current_location_code = payload.station_code;
+  if (!payload.current_location_label) payload.current_location_label = payload.station_code;
   if (!canAccessStation(access.stationCodes, payload.station_code)) {
     return NextResponse.json({ error: "This location is not allocated to your user." }, { status: 403 });
   }
 
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .insert(payload)
+    .insert({ ...payload, current_location_updated_at: new Date().toISOString(), current_location_updated_by: access.authorization.userId })
     .select()
     .single();
 
@@ -67,6 +75,15 @@ export async function PATCH(request: Request) {
   if ("error" in guard) return guard.error;
   if (payload.station_code && !canAccessStation(access.stationCodes, payload.station_code)) {
     return NextResponse.json({ error: "This location is not allocated to your user." }, { status: 403 });
+  }
+  if (payload.deployment_status && !["deployed", "not_deployed"].includes(payload.deployment_status)) {
+    return NextResponse.json({ error: "Choose Deployed or Not deployed." }, { status: 400 });
+  }
+  if (payload.current_location_type && !["station", "ho", "workshop", "in_transit", "other"].includes(payload.current_location_type)) {
+    return NextResponse.json({ error: "Choose a valid current location type." }, { status: 400 });
+  }
+  if (("deployment_status" in payload || "current_location_type" in payload || "current_location_label" in payload) && !payload.current_location_label) {
+    return NextResponse.json({ error: "Enter where the vehicle is currently located." }, { status: 400 });
   }
   if (payload.status) {
     const definition = await supabaseAdmin.from("fleet_vehicle_status_master").select("id,status_key,label,is_operational,requires_reason,requires_expected_date").eq("company_id", access.companyId).eq("status_key", payload.status).eq("is_active", true).maybeSingle();
@@ -92,7 +109,7 @@ export async function PATCH(request: Request) {
 
   let { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .update({ ...payload, ...(payload.status ? { status_updated_at: new Date().toISOString(), status_updated_by: access.authorization.userId } : {}), updated_at: new Date().toISOString() })
+    .update({ ...payload, ...(payload.status ? { status_updated_at: new Date().toISOString(), status_updated_by: access.authorization.userId } : {}), ...(("deployment_status" in payload || "current_location_type" in payload || "current_location_label" in payload) ? { current_location_updated_at: new Date().toISOString(), current_location_updated_by: access.authorization.userId } : {}), updated_at: new Date().toISOString() })
     .eq("company_id", access.companyId)
     .eq("vehicle_no", vehicleNo)
     .select()
@@ -136,6 +153,34 @@ export async function PATCH(request: Request) {
       route: "/api/fleet/vehicles",
       method: "PATCH",
       metadata: { from_station: fromStation, to_station: toStation, reason: normalizeText(body.transfer_reason) || "Placement changed in Fleet" },
+      request
+    });
+  }
+  const fromDeployment = normalizeText(guard.vehicle.deployment_status) || "deployed";
+  const toDeployment = normalizeText(data?.deployment_status) || fromDeployment;
+  const fromLocation = normalizeText(guard.vehicle.current_location_label || guard.vehicle.current_location_code || guard.vehicle.station_code);
+  const toLocation = normalizeText(data?.current_location_label || data?.current_location_code || data?.station_code) || fromLocation;
+  const fromLocationType = normalizeText(guard.vehicle.current_location_type) || "station";
+  const toLocationType = normalizeText(data?.current_location_type) || fromLocationType;
+  if (fromDeployment !== toDeployment || fromLocation !== toLocation || fromLocationType !== toLocationType) {
+    await writeEventLog({
+      companyId: access.companyId,
+      platform: "dashboard",
+      eventCode: "fleet_vehicle_location_updated",
+      module: "fleet",
+      action: "update",
+      outcome: "success",
+      actorType: "fleet_user",
+      actorUserId: access.authorization.userId,
+      actorLabel: access.authorization.fullName || access.authorization.email,
+      actorIdentifier: access.authorization.email,
+      subjectType: "fleet_vehicle",
+      subjectId: guard.vehicle.id,
+      subjectCode: vehicleNo,
+      subjectLabel: vehicleNo,
+      route: "/api/fleet/vehicles",
+      method: "PATCH",
+      metadata: { from_deployment: fromDeployment, to_deployment: toDeployment, from_location: fromLocation, to_location: toLocation, from_location_type: fromLocationType, to_location_type: toLocationType, reason: normalizeText(body.transfer_reason) || "Deployment or physical location updated in Fleet" },
       request
     });
   }
@@ -224,7 +269,7 @@ async function requireVehicleScope(companyId: string, vehicleNo: string, station
   if (!supabaseAdmin) return { error: setupError("Supabase service role key is not configured.") };
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("id,station_code,status,non_operational_since,expected_operational_date,status_comment,status_reason_id,status_reason_key")
+    .select("id,station_code,status,deployment_status,current_location_type,current_location_code,current_location_label,non_operational_since,expected_operational_date,status_comment,status_reason_id,status_reason_key")
     .eq("company_id", companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();
@@ -246,6 +291,7 @@ function sanitizePayload(input: Record<string, unknown>) {
   });
   if (payload.vehicle_no) payload.vehicle_no = payload.vehicle_no.toUpperCase();
   if (payload.station_code) payload.station_code = payload.station_code.toUpperCase();
+  if (payload.current_location_code) payload.current_location_code = payload.current_location_code.toUpperCase();
   return payload;
 }
 
