@@ -9,6 +9,7 @@ export type WorkforcePayoutExportComponent = {
 
 export type WorkforcePayoutExportRow = {
   dropxId: string;
+  dropxStatus: string;
   name: string;
   providerMemberId: string;
   providerMemberName: string;
@@ -16,6 +17,8 @@ export type WorkforcePayoutExportRow = {
   provider: string;
   model: string;
   paymentMethod: string;
+  mappingStatus: string;
+  paymentDetailsAvailable: boolean;
   workDays: number;
   workDaysSource: string;
   productionBreakdown: WorkforcePayoutExportComponent[];
@@ -103,6 +106,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     : [`${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]);
   const headers = [
     "DropX ID",
+    "DropX Status",
     `${subjectLabel} Name`,
     "Partner Name",
     "Partner ID",
@@ -120,34 +124,45 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     "Gross Deductions (INR)",
     "Net Pay (INR)",
     "PAN-Aadhaar Status",
+    "Mapping Status",
     "Payment Status"
   ];
-  const exportRows = rows.map((row) => [
-    row.dropxId,
-    row.name,
-    row.providerMemberName,
-    spreadsheetIdentifier(row.providerMemberId),
-    row.location,
-    row.provider,
-    row.model,
-    row.paymentMethod,
-    row.workDaysSource.toLowerCase().includes("unavailable") ? "" : row.workDays,
-    row.workDaysSource,
-    ...details.flatMap((column) => {
+  const exportRows = rows.map((row) => {
+    const blankPayments = !row.paymentDetailsAvailable;
+    const detailValues: ExportValue[] = details.flatMap((column): ExportValue[] => {
+      if (blankPayments) return column.componentType === "production" ? ["", "", ""] : ["", ""];
       const item = row.productionBreakdown.find((value) => value.code === column.code);
       return column.componentType === "production"
         ? [item?.count ?? 0, item?.rate ?? 0, item?.amount ?? 0]
         : [item?.rate ?? 0, item?.amount ?? 0];
-    }),
-    row.baseAmount,
-    row.additions,
-    row.grossPayment,
-    ...deductions.map((column) => row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0),
-    row.deductions,
-    row.netAmount,
-    row.panAadhaarStatus,
-    row.status
-  ] satisfies ExportValue[]);
+    });
+    const deductionValues: ExportValue[] = deductions.map((column) => blankPayments
+      ? ""
+      : row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0);
+    return [
+      row.dropxId,
+      row.dropxStatus,
+      row.name,
+      row.providerMemberName,
+      spreadsheetIdentifier(row.providerMemberId),
+      row.location,
+      row.provider,
+      blankPayments ? "" : row.model,
+      blankPayments ? "" : row.paymentMethod,
+      blankPayments || row.workDaysSource.toLowerCase().includes("unavailable") ? "" : row.workDays,
+      blankPayments ? "" : row.workDaysSource,
+      ...detailValues,
+      blankPayments ? "" : row.baseAmount,
+      blankPayments ? "" : row.additions,
+      blankPayments ? "" : row.grossPayment,
+      ...deductionValues,
+      blankPayments ? "" : row.deductions,
+      blankPayments ? "" : row.netAmount,
+      blankPayments ? "" : row.panAadhaarStatus,
+      row.mappingStatus,
+      row.status
+    ] satisfies ExportValue[];
+  });
   return { headers, rows: exportRows };
 }
 

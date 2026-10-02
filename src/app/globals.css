@@ -22199,7 +22199,7 @@ td strong,
 
 .payout-filter-panel {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr)) auto;
+  grid-template-columns: repeat(5, minmax(140px, 1fr)) auto;
   align-items: end;
   gap: 12px;
   margin: 0 18px 16px;
@@ -22285,6 +22285,7 @@ td strong,
 .workforce-payout-table td.payout-sticky-id,
 .workforce-payout-table td.payout-sticky-worker { background: #fff; }
 .workforce-payout-table .payout-sticky-worker small { max-width: 185px; overflow: hidden; text-overflow: ellipsis; }
+.workforce-payout-table .payout-dropx-status { max-width: 100%; overflow: hidden; color: #68758a; text-overflow: ellipsis; }
 .workforce-payout-table .payout-money { text-align: right; }
 .workforce-payout-table .payout-net-pay strong { color: #0f6f51; font-size: 13px; }
 .workforce-payout-table .payout-production-summary { min-width: 155px; text-align: right; }
@@ -22317,6 +22318,8 @@ td strong,
 .workforce-payout-detail-table tr.payout-pan-aadhaar-unlinked td small { color: #68758a; }
 .workforce-payout-detail-table tr.payout-pan-aadhaar-unlinked td:first-child { box-shadow: inset 3px 0 #f59e0b; }
 .workforce-payout-detail-table tr.payout-pan-aadhaar-unlinked td.payout-sticky-worker { box-shadow: 7px 0 12px -10px rgba(15, 23, 42, .55); }
+.workforce-payout-detail-table tr.payout-id-unmapped td:first-child { box-shadow: inset 3px 0 var(--red); }
+.workforce-payout-detail-table tr.payout-id-unmapped td.payout-sticky-worker { box-shadow: 7px 0 12px -10px rgba(15, 23, 42, .55); }
 
 .payout-daily-detail { padding: 18px; }
 .payout-breakup-summary {

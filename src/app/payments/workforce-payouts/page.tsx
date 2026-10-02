@@ -24,6 +24,14 @@ import {
 } from "@/lib/workforce-payout-summary";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
+import {
+  normalizePayoutIdentity,
+  payoutMappingMatchesShipment,
+  resolveShipmentPayoutMapping,
+  shipmentIdentityKey,
+  workforcePayoutDropxStatus,
+  type WorkforcePayoutMappingIdentity
+} from "@/lib/workforce-payout-population";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -74,21 +82,22 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (error) return { rows: [] as WorkforcePayoutRow[], error };
   const locations = locationsResult.data ?? [];
   const allowed = new Set(locations.map((row) => row.id));
+  const authorizedStationCodes = [...new Set(locations.map((row) => String(row.station_code ?? "").trim()).filter(Boolean))];
   const allMappings = mappingsResult.data ?? [];
-  const mappings = allMappings.filter((row: any) => allowed.has(row.station_id) && row.payment_method_id && String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
+  const authorizedMappings = allMappings.filter((row: any) => allowed.has(row.station_id));
+  const mappings = authorizedMappings.filter((row: any) => row.payment_method_id && String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
   const directAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
   const directWorkforceIds = Array.from(new Set(directAllocations.map((row: any) => row.workforce_id).filter(Boolean)));
-  const sourceIds = Array.from(new Set([...allMappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]), ...directWorkforceIds].filter(Boolean)));
+  const sourceIds = Array.from(new Set([...authorizedMappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]), ...directWorkforceIds].filter(Boolean)));
   const contractorIds = Array.from(new Set(mappings.map((row: any) => row.contractor_id).filter(Boolean)));
   const employeeIds = Array.from(new Set(mappings.map((row: any) => row.employee_id).filter(Boolean)));
   const fieldExecutiveIds = Array.from(new Set(mappings.map((row: any) => row.field_executive_id).filter(Boolean)));
-  const providerMemberIds = Array.from(new Set(allMappings.map((row: any) => row.provider_member_id).filter(Boolean)));
   const workforceIds = Array.from(new Set([...mappings.map((row: any) => row.workforce_id), ...directWorkforceIds].filter(Boolean)));
-  const paymentMethodIds = Array.from(new Set([...allMappings, ...directAllocations].map((row: any) => row.payment_method_id).filter(Boolean)));
+  const paymentMethodIds = Array.from(new Set([...authorizedMappings, ...directAllocations].map((row: any) => row.payment_method_id).filter(Boolean)));
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
-    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    providerMemberIds.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, station_code, client, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
+    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
+    sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
+    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, station_code, client, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
@@ -155,30 +164,29 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   }
   const attendanceCaptureHistory = (attendanceCaptureResult.data ?? []) as WorkforceAttendanceCaptureSetting[];
   const stationCodeById = new Map(locations.map((location: any) => [String(location.id), String(location.station_code ?? "").trim().toUpperCase()]));
-  const compactIdentity = (value: unknown) => String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const mappingsByProviderMember = new Map<string, any[]>();
-  for (const mapping of allMappings) {
-    const key = String(mapping.provider_member_id ?? "").trim().toUpperCase();
-    if (key) mappingsByProviderMember.set(key, [...(mappingsByProviderMember.get(key) ?? []), mapping]);
-  }
+  const payoutMappingIdentities: WorkforcePayoutMappingIdentity[] = authorizedMappings.map((mapping: any) => {
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
+    const worker = workerBySource.get(sourceId);
+    const provider: any = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
+    return {
+      id: String(mapping.id),
+      providerMemberId: String(mapping.provider_member_id ?? ""),
+      stationCode: stationCodeById.get(String(mapping.station_id)) ?? "",
+      providerIdentity: `${provider?.code ?? ""} ${provider?.name ?? ""}`,
+      effectiveFrom: String(mapping.effective_from ?? ""),
+      effectiveTo: mapping.effective_to ? String(mapping.effective_to) : null,
+      workforceId: String(worker?.id ?? ""),
+      paymentMethodId: String(mapping.payment_method_id ?? "")
+    };
+  });
+  const payoutMappingIdentityById = new Map(payoutMappingIdentities.map((mapping) => [mapping.id, mapping]));
+  const shipmentResolutionByRow = new Map<any, ReturnType<typeof resolveShipmentPayoutMapping>>();
+  for (const row of metricsResult.data ?? []) shipmentResolutionByRow.set(row, resolveShipmentPayoutMapping(row, payoutMappingIdentities));
   const shipmentDeliveriesByWorkerDate = aggregateShipmentDeliveriesByWorkforceDay((metricsResult.data ?? []).flatMap((row: any) => {
     const date = String(row.work_date ?? "");
-    const rowStation = String(row.station_code ?? "").trim().toUpperCase();
-    const rowClient = compactIdentity(row.client);
-    const candidates = (mappingsByProviderMember.get(String(row.provider_employee_id ?? "").trim().toUpperCase()) ?? []).filter((mapping: any) => {
-      const provider = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
-      const providerIdentity = compactIdentity(`${provider?.code ?? ""} ${provider?.name ?? ""}`);
-      return String(mapping.effective_from) <= date
-        && (!mapping.effective_to || String(mapping.effective_to) >= date)
-        && (!mapping.station_id || stationCodeById.get(String(mapping.station_id)) === rowStation)
-        && (!rowClient || providerIdentity.includes(rowClient));
-    });
-    const workforceForShipment = [...new Set(candidates.map((mapping: any) => {
-      const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
-      return workerBySource.get(sourceId)?.id;
-    }).filter(Boolean))];
-    return workforceForShipment.length === 1
-      ? [{ workforce_id: String(workforceForShipment[0]), work_date: date, total_delivery: Number(row.total_delivery ?? 0) }]
+    const resolution = shipmentResolutionByRow.get(row);
+    return resolution?.kind === "mapped"
+      ? [{ workforce_id: resolution.workforceId, work_date: date, total_delivery: Number(row.total_delivery ?? 0) }]
       : [];
   }));
   for (const worker of canonicalWorkers) {
@@ -217,7 +225,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   };
   const panBySource = new Map([...contractorsResult.data ?? [], ...employeesResult.data ?? [], ...fieldExecutivesResult.data ?? []].map((row: any) => [row.id, row.pan_number]));
   const locationById = new Map(locations.map((row: any) => [row.id, row])); const modelById = new Map((modelsResult.data ?? []).map((row: any) => [row.id, row]));
-  const metricsByProviderMember = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByProviderMember.set(row.provider_employee_id, [...(metricsByProviderMember.get(row.provider_employee_id) ?? []), row]));
+  const locationByCode = new Map(locations.map((row: any) => [normalizePayoutIdentity(row.station_code), row]));
   const allocations = allocationResult.data ?? [];
   const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
   const panAadhaarLinkedByWorkforceId = new Map((panAadhaarResult.data ?? []).map((row: any) => [row.account_id, row.verified === true]));
@@ -244,8 +252,16 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     if (new Set(latest.map(attendanceSetupSignature)).size > 1) providerAttendanceConflict = true;
     return String(latest[0].id);
   };
-  const providerRows = mappings.map((mapping: any) => {
-    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const providerDailyRows = metricsByProviderMember.get(mapping.provider_member_id) ?? []; const providerMemberName = providerDailyRows.find((daily) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
+  const providerRows = mappings.flatMap((mapping: any): WorkforcePayoutRow[] => {
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const mappingIdentity = payoutMappingIdentityById.get(String(mapping.id));
+    if (!worker || !mappingIdentity) return [];
+    const matchingShipmentRows = (metricsResult.data ?? []).filter((daily: any) => payoutMappingMatchesShipment(mappingIdentity, daily));
+    if (matchingShipmentRows.some((daily: any) => String(daily.work_date) >= fromDate && String(daily.work_date) <= toDate && shipmentResolutionByRow.get(daily)?.kind === "conflict")) return [];
+    const providerDailyRows = matchingShipmentRows.filter((daily: any) => {
+      const resolution = shipmentResolutionByRow.get(daily);
+      return resolution?.kind === "mapped" && resolution.workforceId === String(worker.id);
+    });
+    const providerMemberName = providerDailyRows.find((daily: any) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
     const paymentMethod: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
     const paymentMethodId = String(mapping.payment_method_id);
     const paymentMethodName = String(paymentMethod?.name ?? "-");
@@ -339,7 +355,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) }); const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0); const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
     const additions = 0; const grossPayment = baseAmount + additions;
     const status = missingAttendanceConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
-    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, workDays, workDaysSource, paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status } satisfies WorkforcePayoutRow;
+    return [{ id: mapping.id, dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays, workDaysSource, paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status } satisfies WorkforcePayoutRow];
   });
   if (providerAttendanceConflict) return { rows: [] as WorkforcePayoutRow[], error: "Conflicting provider attendance payment setups exist for the same workforce date. Resolve the duplicate rate cards before calculating payroll." };
   const overlappingPaymentSetup = mappings.some((mapping: any) => {
@@ -351,6 +367,66 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       && String(allocation.effective_from) <= String(mapping.effective_to ?? toDate));
   });
   if (overlappingPaymentSetup) return { rows: [] as WorkforcePayoutRow[], error: "Provider-linked and direct payment allocations overlap. Close one setup before relying on this payout estimate." };
+  type ReportOnlyGroup = { kind: "unmapped" | "conflict" | "payment_missing"; workforceId: string; rows: any[] };
+  const reportOnlyGroups = new Map<string, ReportOnlyGroup>();
+  for (const shipment of metricsResult.data ?? []) {
+    const shipmentDate = String(shipment.work_date ?? "");
+    if (shipmentDate < fromDate || shipmentDate > toDate || !normalizePayoutIdentity(shipment.provider_employee_id)) continue;
+    const resolution = shipmentResolutionByRow.get(shipment) ?? resolveShipmentPayoutMapping(shipment, payoutMappingIdentities);
+    const kind = resolution.kind === "unmapped"
+      ? "unmapped"
+      : resolution.kind === "conflict"
+        ? "conflict"
+        : resolution.matches.some((mapping) => mapping.paymentMethodId)
+          ? null
+          : "payment_missing";
+    if (!kind) continue;
+    const groupKey = `${kind}|${shipmentIdentityKey(shipment)}|${resolution.workforceId}`;
+    const group = reportOnlyGroups.get(groupKey) ?? { kind, workforceId: resolution.workforceId, rows: [] };
+    group.rows.push(shipment);
+    reportOnlyGroups.set(groupKey, group);
+  }
+  const reportOnlyRows: WorkforcePayoutRow[] = [...reportOnlyGroups.entries()].map(([groupKey, group]) => {
+    const recentRows = [...group.rows].sort((left, right) => String(right.work_date ?? "").localeCompare(String(left.work_date ?? "")));
+    const source = recentRows[0] ?? {};
+    const namedSource = recentRows.find((row) => String(row.provider_employee_name ?? "").trim()) ?? source;
+    const worker = group.kind === "payment_missing" ? workerBySource.get(group.workforceId) : null;
+    const stationCode = String(source.station_code ?? "").trim();
+    const location: any = locationByCode.get(normalizePayoutIdentity(stationCode));
+    const providerMemberId = String(source.provider_employee_id ?? "").trim();
+    const providerMemberName = String(namedSource.provider_employee_name ?? "").trim() || providerMemberId;
+    const mappingStatus = group.kind === "payment_missing" ? "Mapped" : group.kind === "conflict" ? "Mapping conflict" : "ID not mapped";
+    const status = group.kind === "payment_missing" ? "Payment method not allocated" : mappingStatus;
+    return {
+      id: `provider-report-${encodeURIComponent(groupKey)}`,
+      dropxId: String(worker?.dropx_id ?? ""),
+      dropxStatus: workforcePayoutDropxStatus(worker),
+      name: String(worker?.full_name ?? providerMemberName),
+      providerMemberId,
+      providerMemberName,
+      locationId: location?.id ?? null,
+      location: stationCode || "-",
+      provider: String(source.client ?? "").trim() || "Provider report",
+      model: "",
+      paymentMethod: "",
+      mappingStatus,
+      paymentDetailsAvailable: false,
+      workDays: 0,
+      workDaysSource: "",
+      paymentMethodBreakdown: [],
+      production: 0,
+      productionBreakdown: [],
+      dailyBreakdown: [],
+      baseAmount: 0,
+      additions: 0,
+      grossPayment: 0,
+      deductions: 0,
+      deductionBreakdown: [],
+      panAadhaarStatus: "",
+      netAmount: 0,
+      status
+    };
+  });
   const allocationsByWorkforce = new Map<string, any[]>();
   for (const allocation of directAllocations) allocationsByWorkforce.set(String(allocation.workforce_id), [
     ...(allocationsByWorkforce.get(String(allocation.workforce_id)) ?? []),
@@ -448,9 +524,9 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const locationIds = [...new Set(workerAllocations.map((allocation: any) => String(allocation.station_id ?? "")).filter(Boolean))];
     const locationLabels = [...new Set(locationIds.map((id) => locationById.get(id)?.station_code ?? "-"))];
     const methodNames = paymentMethodBreakdown.map((item) => item.label);
-    return { id: `direct-${workforceId}`, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationIds[0] ?? null, location: locationLabels.join(" / ") || "-", provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", workDays, workDaysSource, paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: shipmentWorkDaysUnavailable || dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" };
+    return { id: `direct-${workforceId}`, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationIds[0] ?? null, location: locationLabels.join(" / ") || "-", provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: shipmentWorkDaysUnavailable || dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" };
   });
-  const rows = [...providerRows, ...directRows];
+  const rows = [...providerRows, ...reportOnlyRows, ...directRows];
   return { rows, error: null };
 }
 
