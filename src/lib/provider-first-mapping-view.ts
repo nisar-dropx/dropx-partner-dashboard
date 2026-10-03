@@ -48,6 +48,32 @@ export type ProviderFirstFilters = {
 
 export type ProviderFirstPageSize = 50 | 100 | 500 | 1000 | "all";
 
+const SCIENTIFIC_ID_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/;
+const MAX_DISPLAY_ID_LENGTH = 64;
+
+/**
+ * Expands a scientific-notation source ID without converting it through a
+ * JavaScript number. This is display-only: the raw imported ID remains the
+ * value used for matching and saving because the source may already be
+ * rounded (for example, `2.00001E+12`).
+ */
+export function providerMemberIdDisplay(value: string) {
+  const source = String(value ?? "").trim();
+  const match = source.match(SCIENTIFIC_ID_PATTERN);
+  if (!match) return source;
+
+  const [, sign, whole, fraction = "", exponentText] = match;
+  const exponent = Number(exponentText);
+  const digits = `${whole}${fraction}`;
+  if (!Number.isSafeInteger(exponent) || digits.length + Math.abs(exponent) > MAX_DISPLAY_ID_LENGTH) return source;
+  const decimalIndex = whole.length + exponent;
+  const prefix = sign === "-" ? "-" : "";
+
+  if (decimalIndex <= 0) return `${prefix}0.${"0".repeat(-decimalIndex)}${digits}`;
+  if (decimalIndex >= digits.length) return `${prefix}${digits}${"0".repeat(decimalIndex - digits.length)}`;
+  return `${prefix}${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
 export function providerMemberKey(stationId: string, providerMemberId: string) {
   return `${String(stationId ?? "").trim()}|${String(providerMemberId ?? "").trim().toUpperCase()}`;
 }
