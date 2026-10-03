@@ -162,6 +162,13 @@ test('providerless workforce without a direct allocation has an actionable gap',
  const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;
  const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.ok(r.gaps.some(g=>g.kind==='Direct payment allocation missing'&&g.href.includes('/provider-mapping/direct-pay')));
 });
+test('provider-required workforce gaps use the canonical ID mapping URL with encoded filters',()=>{
+ const f=facts();f.shipments=[];f.mappings=[];f.allocations=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=true;f.workforce[0].dropx_id='D1 / north';f.stations[0].station_code='A & B';f.volumes[0].station_code='A & B';
+ const r=rebuildCps(base([day('A & B','2026-09-01',0)]),f);
+ const gap=r.gaps.find(g=>g.kind==='Provider ID not linked'&&g.dropx_id==='D1 / north');
+ assert.ok(gap);
+ assert.equal(gap.href,'https://dashboard.dropxlogistics.com/provider-id-mapping?q=D1%20%2F%20north&station=A%20%26%20B');
+});
 test('historical direct cost stays on the allocation station after a workforce transfer',()=>{
  const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;f.workforce[0].location_id='station-b';
  f.allocations=[{id:'a1',workforce_id:'w1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'direct',payment_values:{MONTHLY:3000}}];

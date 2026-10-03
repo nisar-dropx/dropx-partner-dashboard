@@ -331,8 +331,7 @@ export async function ProviderMappingPageContent({
       />
 
       <nav className="performance-tabs" aria-label="ID mapping views">
-        <Link className="active" href="/provider-mapping">Existing worksheet</Link>
-        <Link href="/provider-mapping/provider-first">Provider member first</Link>
+        <Link href="/provider-id-mapping">Provider member first</Link>
         <Link href="/provider-mapping/direct-pay">Direct pay allocations</Link>
       </nav>
 

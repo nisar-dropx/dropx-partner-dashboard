@@ -21,10 +21,10 @@ function mappingRedirect(params: { error?: string; notice?: string }) {
   cookies().set("dropx_provider_mapping_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 15,
-    path: "/provider-mapping",
+    path: "/provider-id-mapping",
     sameSite: "lax"
   });
-  redirect("/provider-mapping");
+  redirect("/provider-id-mapping");
 }
 
 function rowValue(formData: FormData, index: number, field: string) {
@@ -426,7 +426,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
 
     revalidateTag("ops-cps");
     revalidatePath("/cps");
-    revalidatePath("/provider-mapping");
+    revalidatePath("/provider-id-mapping");
     const skippedCount = reportRows.length - saved;
     return { ok: true, message: `${saved} mapped; ${skippedCount} skipped.`, rows: reportRows };
   } catch (error) {
@@ -840,7 +840,7 @@ export async function saveProviderMappingWorksheet(formData: FormData) {
 
     revalidateTag("ops-cps");
     revalidatePath("/cps");
-    revalidatePath("/provider-mapping");
+    revalidatePath("/provider-id-mapping");
     revalidatePath("/workforce");
   } catch (error) {
     mappingRedirect({ error: error instanceof Error ? error.message : "Unable to save mappings." });
@@ -853,10 +853,10 @@ function providerFirstMappingRedirect(params: { error?: string; notice?: string 
   cookies().set("dropx_provider_mapping_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 15,
-    path: "/provider-mapping",
+    path: "/provider-id-mapping",
     sameSite: "lax"
   });
-  redirect("/provider-mapping/provider-first");
+  redirect("/provider-id-mapping");
 }
 
 async function assertProviderFirstRowScope(
@@ -889,7 +889,7 @@ async function assertProviderFirstRowScope(
 }
 
 /** Saves the full provider-member-first worksheet.  It deliberately reuses the
- * same row validator and history-safe save path as the existing worksheet. */
+ * same row validator and history-safe save path as the ID Mapping page. */
 export async function saveProviderFirstMappingWorksheet(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
@@ -946,8 +946,7 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
     }
     revalidateTag("ops-cps");
     revalidatePath("/cps");
-    revalidatePath("/provider-mapping");
-    revalidatePath("/provider-mapping/provider-first");
+    revalidatePath("/provider-id-mapping");
     revalidatePath("/payments/workforce-payouts");
   } catch (error) {
     providerFirstMappingRedirect({ error: error instanceof Error ? error.message : "Unable to save provider-first mappings." });
@@ -1064,7 +1063,7 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
 }
 
 /** Links an imported provider member to an existing canonical workforce record.
- * Payment-method and rate configuration remains on the existing worksheet. */
+ * Payment-method and rate configuration remains on the ID Mapping page. */
 export async function saveProviderFirstMapping(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
@@ -1149,11 +1148,10 @@ export async function saveProviderFirstMapping(formData: FormData) {
     }
     revalidateTag("ops-cps");
     revalidatePath("/cps");
-    revalidatePath("/provider-mapping");
-    revalidatePath("/provider-mapping/provider-first");
+    revalidatePath("/provider-id-mapping");
     revalidatePath("/payments/workforce-payouts");
   } catch (error) {
     providerFirstMappingRedirect({ error: error instanceof Error ? error.message : "Unable to save provider-first mapping." });
   }
-  providerFirstMappingRedirect({ notice: "Provider Member ID linked to workforce. Configure payment and rates in the Existing mapping worksheet if needed." });
+  providerFirstMappingRedirect({ notice: "Provider Member ID linked to workforce. Configure the payment method and rates on this ID Mapping page if needed." });
 }

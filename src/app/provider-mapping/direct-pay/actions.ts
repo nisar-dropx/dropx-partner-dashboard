@@ -179,7 +179,7 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
 
     revalidateTag("ops-cps");
     revalidatePath("/provider-mapping/direct-pay");
-    revalidatePath("/provider-mapping/provider-first");
+    revalidatePath("/provider-id-mapping");
     revalidatePath("/payments/workforce-payouts");
   } catch (error) {
     directAllocationRedirect({

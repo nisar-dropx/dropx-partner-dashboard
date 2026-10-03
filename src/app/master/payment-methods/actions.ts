@@ -152,7 +152,7 @@ export async function updatePaymentMethod(formData: FormData) {
   }
 
   revalidatePath("/master/payment-methods");
-  revalidatePath("/provider-mapping");
+  revalidatePath("/provider-id-mapping");
   redirect("/master/payment-methods");
 }
 
@@ -266,7 +266,7 @@ export async function updatePaymentField(formData: FormData) {
     }).eq("payment_field_id", id).eq("company_id", companyId);
     if (sync.error) throw new Error(sync.error.message);
     revalidatePath("/master/payment-methods");
-    revalidatePath("/provider-mapping");
+    revalidatePath("/provider-id-mapping");
   } catch (error) {
     paymentFieldRedirect({ error: error instanceof Error ? error.message : "Unable to save the payment field." });
   }
