@@ -7,6 +7,7 @@ import type { PaymentMethodOption } from "@/components/provider-mapping-workshee
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canonicalizeProviderFirstMembers, providerMemberKey, providerSourceMemberKey } from "@/lib/provider-first-mapping-view";
+import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 
@@ -20,16 +21,17 @@ function flash() {
 }
 
 export default async function ProviderFirstMappingPage({searchParams}: {searchParams?: {q?:string;station?:string}}) {
-  const authorization = await requirePagePermission("provider_mapping", "access");
+  const pageCode = currentProviderMappingPageCode();
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const permission = authorization.permissions.provider_mapping;
+  const permission = authorization.permissions[pageCode];
   const canEdit = Boolean(permission?.canAdd || permission?.canEdit);
   const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
   const scope = new Set(authorization.locationScopeIds);
   const allowed = (id: string | null) => allLocations || Boolean(id && scope.has(id));
   const notice = flash();
 
-  if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode="provider_mapping"><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
+  if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode={pageCode}><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
   const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult, designationsResult] = await Promise.all([
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
@@ -93,7 +95,7 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
   const requestedStation = String(searchParams?.station ?? "").trim();
   const initialStationId = stations.find((station) => station.id === requestedStation || String(station.station_code ?? "").trim().toUpperCase() === requestedStation.toUpperCase())?.id ?? "";
 
-  return <AppShell active="ID Mapping" pageCode="provider_mapping">
+  return <AppShell active="ID Mapping" pageCode={pageCode}>
     <PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
     <nav className="performance-tabs" aria-label="ID mapping views"><Link href="/provider-mapping">Existing worksheet</Link><Link className="active" href="/provider-mapping/provider-first">Provider member first</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link></nav>
     

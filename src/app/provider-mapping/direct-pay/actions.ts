@@ -3,8 +3,9 @@
 import { cookies } from "next/headers";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeDirectPaymentValues,
@@ -47,8 +48,8 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
-  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
-    redirect("/unauthorized?page=provider_mapping&action=edit");
+  if (!canEditProviderMappings(authorization)) {
+    redirect(`/unauthorized?page=${currentProviderMappingPageCode()}&action=edit`);
   }
 
   const audience = text(formData.get("subject_type")) === "helpers" ? "helpers" : "workforce";

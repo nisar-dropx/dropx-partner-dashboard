@@ -29,6 +29,7 @@ const commonStart: NavItem[] = [
   },
   { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
   { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register", icon: "+" },
+  { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-mapping/provider-first", icon: "<>" },
   { code: "ops_workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts", icon: "₹" },
   { code: "ops_rostering", label: "Rostering", href: "/rostering", icon: "S" }
 ];
