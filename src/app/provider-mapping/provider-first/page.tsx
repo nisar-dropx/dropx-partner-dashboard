@@ -97,7 +97,7 @@ export default async function ProviderFirstMappingPage({searchParams}: {searchPa
 
   return <AppShell active="ID Mapping" pageCode={pageCode}>
     <PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" subtitle="Map provider members to available DropX workforce IDs and payment rates." />
-    <nav className="performance-tabs" aria-label="ID mapping views"><Link href="/provider-mapping">Existing worksheet</Link><Link className="active" href="/provider-mapping/provider-first">Provider member first</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link></nav>
+    <nav className="performance-tabs" aria-label="ID mapping views"><Link className="active" href="/provider-id-mapping">Provider member first</Link><Link href="/provider-mapping/direct-pay">Direct pay allocations</Link></nav>
     
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}

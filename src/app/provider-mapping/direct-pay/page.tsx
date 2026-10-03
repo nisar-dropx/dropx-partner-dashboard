@@ -240,8 +240,7 @@ export default async function DirectPaymentAllocationsPage({
       title="Direct pay allocations"
     />
     <nav aria-label="ID mapping views" className="performance-tabs">
-      <Link href="/provider-mapping">Existing worksheet</Link>
-      <Link href="/provider-mapping/provider-first">Provider member first</Link>
+      <Link href="/provider-id-mapping">Provider member first</Link>
       <Link className="active" href="/provider-mapping/direct-pay">Direct pay allocations</Link>
     </nav>
     <nav aria-label="Direct pay allocation categories" className="performance-tabs">

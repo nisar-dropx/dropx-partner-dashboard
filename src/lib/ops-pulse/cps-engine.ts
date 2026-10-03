@@ -236,7 +236,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const seen=gapDates.get(k)??new Set<string>();seen.add(date);gapDates.set(k,seen);
     if(existing) {existing.days=seen.size;existing.first_date=existing.first_date<date?existing.first_date:date;existing.last_date=existing.last_date>date?existing.last_date:date;existing.deliveries+=deliveries;existing.known_cost+=cost;return;}
     gaps.set(k,{key:k,kind,station_code:station,provider_id:id,dropx_id:dropx,name,first_date:date,last_date:date,days:1,deliveries,known_cost:cost,owner,
-      href:owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `https://dashboard.dropxlogistics.com/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : `https://dashboard.dropxlogistics.com/provider-mapping/${dropx?'':'provider-first'}?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
+      href:owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `https://dashboard.dropxlogistics.com/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : `https://dashboard.dropxlogistics.com/provider-id-mapping?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
   }
   const add=(station:string,date:string,head:CpsHead,sub:string,amount:number,source:string) => {
     if(selected.has(station) && amount!==0) lines.push({station_code:station,work_date:date,head,sub_head:sub,amount,source});

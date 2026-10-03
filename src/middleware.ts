@@ -170,13 +170,20 @@ export async function middleware(request: NextRequest) {
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
-  const isProviderMappingPath = path === "/provider-mapping" || path.startsWith("/provider-mapping/");
+  const isLegacyProviderMappingIndex = path === "/provider-mapping" || path === "/provider-mapping/provider-first";
+  const isProviderMappingPath = path === "/provider-id-mapping" || path === "/provider-mapping" || path.startsWith("/provider-mapping/");
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/") ||
     isProviderMappingPath;
 
   if (isProviderMappingPath && !providerMappingPageCodeForHost(host)) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "provider_mapping_portal", path));
+  }
+
+  if (isLegacyProviderMappingIndex) {
+    const canonicalUrl = request.nextUrl.clone();
+    canonicalUrl.pathname = "/provider-id-mapping";
+    return NextResponse.redirect(canonicalUrl, 308);
   }
 
   if (isDashboardHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
