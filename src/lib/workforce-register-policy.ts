@@ -20,12 +20,12 @@ export function workforceStationPolicy(station: WorkforceStation) {
 }
 export function workforceStationEmailError(email: string, stationCode: string, required: boolean) {
   const value = email.trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return "Enter a valid email address.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return "enter a valid email address.";
   if (!required) return null;
   const local = value.split("@")[0].toLowerCase();
   const suffix = `.${stationCode.trim().toLowerCase()}`;
   if (local.length > suffix.length && local.endsWith(suffix)) return null;
-  return `Use an email ending in .${stationCode.toUpperCase()} before @, for example Akshay.${stationCode.toUpperCase()}@outlook.com. Any email domain is allowed.`;
+  return `use an email ending in .${stationCode.toLowerCase()} before @, for example akshay.${stationCode.toLowerCase()}@outlook.com. any email domain is allowed.`;
 }
 export function workforceRegisterLocations<T extends WorkforceStation>(stations: T[], auth: { hasAllLocationAccess: boolean; locationScopeIds: string[] }) {
   const ids = new Set(auth.hasAllLocationAccess ? stations.map(s => s.id) : auth.locationScopeIds);

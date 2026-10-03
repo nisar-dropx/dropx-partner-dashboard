@@ -96,7 +96,7 @@ export function ScopedDesignationFields({
           value={selectedDesignation}
         />
       </label>
-      {email ? <div className="span-3 workforce-email-guidance" role="note">{location?.requiresStationEmail ? <>For Amazon EDSP, XPT and AMXL, use a mailbox ending in <strong>.{location.label}</strong> before @. Example: <strong>Akshay.{location.label}@outlook.com</strong>. Any email domain is allowed.</> : location ? <>Any valid email address can be used for this location.</> : <>Amazon EDSP, XPT and AMXL require .STATIONCODE before @ (for example Akshay.KOZA@outlook.com). Flipkart locations accept any valid email. Select a location to see its requirement.</>}</div> : null}
+      {email ? <div className="span-3 workforce-email-guidance" role="note">{location?.requiresStationEmail ? <>for amazon edsp, xpt and amxl, use a mailbox ending in <strong>.{location.label.toLowerCase()}</strong> before @. example: <strong>akshay.{location.label.toLowerCase()}@outlook.com</strong>. any email domain is allowed.</> : location ? <>any valid email address can be used for this location.</> : <>amazon edsp, xpt and amxl require .stationcode before @ (for example akshay.koza@outlook.com). flipkart locations accept any valid email. select a location to see its requirement.</>}</div> : null}
     </>
   );
 }
