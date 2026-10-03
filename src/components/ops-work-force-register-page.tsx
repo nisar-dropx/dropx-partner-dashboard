@@ -10,7 +10,7 @@ export function OpsWorkforceRegisterPage({ searchParams = {} }: { searchParams?:
   if (searchParams.section === "register" && !searchParams.edit && !searchParams.view) return <OpsWorkforcePeople />;
   return <FieldExecutivePageContent
     activeLabel="Workforce Register" pageCode="delivery_associates" pageTitle="Workforce Register"
-    pageSubtitle="Invite associates and track registration, client ID setup and activation."
+    pageSubtitle="Invite associates and follow their registration progress."
     addTitle="Request workforce onboarding" listTitle="Workforce onboarding requests"
     entityLabel="Workforce applicant" emptyListLabel="No workforce onboarding requests yet."
     detailSubtitle="Workforce application and profile" editTitle="Edit workforce request"

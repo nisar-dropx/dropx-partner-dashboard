@@ -24,6 +24,8 @@ export type FieldExecutiveListRow = {
   dateOfJoin?: string | null;
   onboardingStatus?: string | null;
   registrationDraftAt?: string | null;
+  registrationFields?: Record<string, boolean>;
+  registrationPending?: boolean;
   canEdit?: boolean;
   canQueueAmazonId?: boolean;
   partnerOnboarding?:import("@/lib/partner-onboarding").PartnerOnboardingState;

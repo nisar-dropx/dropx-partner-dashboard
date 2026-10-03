@@ -1,3 +1,4 @@
+import { activeWorkforceRegistration } from "@/lib/workforce-registration-progress";
 import type { AccessSurface } from "@/lib/access-surface";
 import type { AllPeopleRow } from "@/components/all-people-register";
 import { allPeopleExportColumns, type AllPeopleExportValues } from "@/lib/all-people-export";
@@ -78,13 +79,13 @@ export async function loadCanonicalWorkforcePeople(
   companyId: string,
   locationScopeIds: string[],
   hasAllLocationAccess: boolean,
-  actions: { canEdit: boolean; canView: boolean; isOwner?: boolean; surface?: AccessSurface; basePath?: string } = { canEdit: false, canView: false }
+  actions: { canEdit: boolean; canView: boolean; isOwner?: boolean; surface?: AccessSurface; basePath?: string; activeOnly?: boolean } = { canEdit: false, canView: false }
 ): Promise<{ rows: AllPeopleRow[]; error: string | null }> {
   if (!supabaseAdmin) return { rows: [], error: "Supabase service role key is not configured." };
 
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile_country_code, mobile, email, onboarding_status, is_active, deleted_at, statutory_applicability, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, postal_pin, landmark, bank_account_no, ifsc_code, pf_uan, pf_account_no, esi_no, emergency_contact_number, emergency_contact_name, emergency_contact_relation, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, profile_return_remarks, created_at, updated_at, stations (station_code, providers (name), location_models (code, name)), designations (id, code, name, portal_permissions)")
+    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile_country_code, mobile, email, onboarding_status, is_active, deleted_at, people_lifecycle_status, statutory_applicability, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, postal_pin, landmark, bank_account_no, ifsc_code, pf_uan, pf_account_no, esi_no, emergency_contact_number, emergency_contact_name, emergency_contact_relation, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, profile_return_remarks, created_at, updated_at, stations (station_code, providers (name), location_models (code, name)), designations (id, code, name, portal_permissions)")
     .eq("company_id", companyId)
     .order("full_name");
   if (result.error) return { rows: [], error: result.error.message };
@@ -92,6 +93,7 @@ export async function loadCanonicalWorkforcePeople(
   const seen = new Set<string>();
   const rows = ((result.data ?? []) as unknown as Record<string, unknown>[])
     .filter((row) => hasAllLocationAccess || locationScopeIds.includes(String(row.location_id ?? "")))
+    .filter((row) => !actions.activeOnly || activeWorkforceRegistration(row))
     .filter((row) => {
       const key = String(row.id ?? "");
       if (!key || seen.has(key)) return false;

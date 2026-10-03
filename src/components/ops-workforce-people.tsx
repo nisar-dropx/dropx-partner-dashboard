@@ -1,7 +1,6 @@
 import { AllPeopleRegister } from "@/components/all-people-register";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
-import { PendingLink } from "@/components/pending-link";
 import { OpsWorkforceNavigation } from "@/components/ops-workforce-navigation";
 import { requirePagePermission, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
@@ -14,11 +13,10 @@ export async function OpsWorkforcePeople() {
   const locations = await loadOpsWorkforceLocations(companyId, authorization);
   const data = await loadCanonicalWorkforcePeople(companyId, locations.map(location => location.id), false, {
     canView: true, canEdit: !authorization.readOnly && hasPermission(authorization, "delivery_associates", "edit"),
-    isOwner: isCompanyOwner(authorization), surface: "ops", basePath: "/work-force-register"
+    isOwner: isCompanyOwner(authorization), surface: "ops", basePath: "/work-force-register", activeOnly: true
   });
   return <AppShell active="Workforce Register" pageCode="delivery_associates">
-    <PageHead eyebrow="Workforce master" title="Workforce Register" subtitle="Associate records for your locations."
-      action={!authorization.readOnly && hasPermission(authorization, "delivery_associates", "add") ? <PendingLink className="button" href="/work-force-register#invite-associate">+ Invite associate</PendingLink> : null} />
+    <PageHead eyebrow="Workforce master" title="Workforce Register" subtitle="Active associate IDs for your locations." />
     <OpsWorkforceNavigation register />
     {data.error ? <section className="panel message-panel error"><div className="panel-body">{data.error}</div></section> : null}
     <AllPeopleRegister rows={data.rows} today={peopleDateKey()} registerPath="/work-force-register?section=register" />

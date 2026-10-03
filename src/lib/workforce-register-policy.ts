@@ -14,7 +14,7 @@ export function workforceStationPolicy(station: WorkforceStation) {
   const provider = normalized(first(station.providers)?.name);
   const model = normalized(first(station.location_models)?.code || first(station.location_models)?.name);
   return {
-    excluded: provider === "AMAZON" && ["NOW", "AMAZONNOW"].includes(model),
+    excluded: (provider === "AMAZON" && ["NOW", "AMAZONNOW"].includes(model)) || ["HO", "DROPXHO", "HEADOFFICE"].includes(model),
     requiresStationEmail: provider === "AMAZON" && ["EDSP", "XPT", "AMXL"].includes(model),
   };
 }
