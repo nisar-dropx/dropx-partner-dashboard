@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import * as XLSX from "xlsx";
 import {
+  canonicalizeProviderFirstMembers,
   filterProviderFirstRowIndexes,
-  providerMemberIdDisplay,
+  isScientificProviderMemberId,
   providerFirstPageWindow,
   providerFirstValidationStatus,
-  providerMemberKey
+  providerMemberIdFromSpreadsheetCells,
+  providerMemberKey,
+  providerSourceMemberKey,
+  scientificProviderIdCouldRepresent
 } from "./provider-first-mapping-view.ts";
 
 const method = { id: "method-1", components: [{ code: "DELIVERY", label: "Delivery rate" }] };
@@ -47,12 +52,114 @@ test("keys provider members by station and normalized member ID", () => {
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
 });
 
-test("expands scientific provider IDs for display without numeric coercion", () => {
-  assert.equal(providerMemberIdDisplay("2.00001E+12"), "2000010000000");
-  assert.equal(providerMemberIdDisplay("1.2345e+3"), "1234.5");
-  assert.equal(providerMemberIdDisplay("9.8e-3"), "0.0098");
-  assert.equal(providerMemberIdDisplay(" 2000014627340 "), "2000014627340");
-  assert.equal(providerMemberIdDisplay("1E+100000000"), "1E+100000000");
+test("recognizes scientific provider IDs without fabricating missing digits", () => {
+  assert.equal(isScientificProviderMemberId("2.00001E+12"), true);
+  assert.equal(isScientificProviderMemberId(" 2000014627340 "), false);
+  assert.equal(scientificProviderIdCouldRepresent("2.00003E+12", "2000033019000"), true);
+  assert.equal(scientificProviderIdCouldRepresent("2.00003E+12", "2000039999999"), false);
+  assert.equal(scientificProviderIdCouldRepresent("2.00003E+12", "2000029999999"), true);
+  assert.equal(scientificProviderIdCouldRepresent("2E+12", "2000033019000"), false);
+  assert.equal(scientificProviderIdCouldRepresent(`${"9".repeat(129)}E+12`, "2000033019000"), false);
+  assert.equal(scientificProviderIdCouldRepresent("2.00003E+12", "9".repeat(129)), false);
+});
+
+test("raw spreadsheet reads preserve provider ID evidence", () => {
+  for (const [source, expected] of [
+    ["2.00003E+12", "2.00003E+12"],
+    ["\"2.00003E+12\"", "2.00003E+12"],
+    ["0012345", "0012345"]
+  ]) {
+    const workbook = XLSX.read(`PROVIDER_MEMBER_ID\n${source}`, { type: "string", raw: true });
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
+    assert.equal(rows[0].PROVIDER_MEMBER_ID, expected);
+  }
+
+  const sheet = XLSX.utils.aoa_to_sheet([["PROVIDER_MEMBER_ID"], [2000033019000], [Number.MAX_SAFE_INTEGER + 1]]);
+  sheet.A2.z = "0.00000E+00";
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
+  const bytes = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  const parsed = XLSX.read(bytes, { type: "buffer", raw: true });
+  const rows = XLSX.utils.sheet_to_json(parsed.Sheets.Sheet1, { defval: "", raw: true });
+  assert.equal(rows[0].PROVIDER_MEMBER_ID, 2000033019000);
+  assert.equal(Number.isSafeInteger(rows[0].PROVIDER_MEMBER_ID), true);
+  assert.equal(Number.isSafeInteger(rows[1].PROVIDER_MEMBER_ID), false);
+
+  assert.deepEqual(providerMemberIdFromSpreadsheetCells("2.00003E+12", 2000033019000), {
+    providerMemberId: "2000033019000",
+    providerMemberIdUnsafeNumber: false
+  });
+  assert.deepEqual(providerMemberIdFromSpreadsheetCells("0012345", 12345), {
+    providerMemberId: "0012345",
+    providerMemberIdUnsafeNumber: false
+  });
+  assert.deepEqual(providerMemberIdFromSpreadsheetCells("9.00720E+15", Number.MAX_SAFE_INTEGER + 1), {
+    providerMemberId: String(Number.MAX_SAFE_INTEGER + 1),
+    providerMemberIdUnsafeNumber: true
+  });
+  assert.equal(providerMemberIdFromSpreadsheetCells("1.23457E+15", 1234567890123450).providerMemberIdUnsafeNumber, true);
+});
+
+test("replaces rounded duplicate IDs only when one full provider ID is unambiguous", () => {
+  const pokala = {
+    stationCode: "GDRD",
+    providerMemberName: "POKALA BHARATH / SPVAN _DROP / 111839719"
+  };
+  assert.deepEqual(canonicalizeProviderFirstMembers([
+    { ...pokala, providerMemberId: "2.00003E+12", workDate: "2026-07-26" },
+    { ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" }
+  ]), [{ ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" }]);
+
+  const unresolved = { stationCode: "KOZA", providerMemberName: "UNKNOWN / DROP", providerMemberId: "2.00001E+12", workDate: "2026-07-26" };
+  assert.deepEqual(canonicalizeProviderFirstMembers([unresolved]), [unresolved]);
+
+  const incompatible = { ...pokala, providerMemberId: "2000099999999", workDate: "2026-10-01" };
+  assert.deepEqual(canonicalizeProviderFirstMembers([
+    { ...pokala, providerMemberId: "2.00003E+12", workDate: "2026-07-26" },
+    incompatible
+  ]), [incompatible, { ...pokala, providerMemberId: "2.00003E+12", workDate: "2026-07-26" }]);
+
+  const protectedScientific = { ...pokala, providerMemberId: "2.00003E+12", workDate: "2026-07-26" };
+  assert.deepEqual(canonicalizeProviderFirstMembers([
+    protectedScientific,
+    { ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" }
+  ], new Set([providerSourceMemberKey("GDRD", "2.00003E+12")])), [
+    { ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" },
+    protectedScientific
+  ]);
+  assert.deepEqual(canonicalizeProviderFirstMembers([
+    protectedScientific,
+    { ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" }
+  ], new Set([providerSourceMemberKey("*", "2.00003E+12")])), [
+    { ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" },
+    protectedScientific
+  ]);
+
+  const compatiblePlusUnrelated = [
+    { ...pokala, providerMemberId: "2.00003E+12", workDate: "2026-07-26" },
+    { ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" },
+    { ...pokala, providerMemberId: "2000099999999", workDate: "2026-10-02" }
+  ];
+  assert.deepEqual(canonicalizeProviderFirstMembers(compatiblePlusUnrelated), compatiblePlusUnrelated.slice(1));
+
+  const ambiguous = [
+    { ...pokala, providerMemberId: "2.00003E+12", workDate: "2026-07-26" },
+    { ...pokala, providerMemberId: "2000033019000", workDate: "2026-10-01" },
+    { ...pokala, providerMemberId: "2000032000000", workDate: "2026-10-02" }
+  ];
+  assert.deepEqual(canonicalizeProviderFirstMembers(ambiguous), [ambiguous[1], ambiguous[2], ambiguous[0]]);
+
+  const punctuationDistinct = [
+    { stationCode: "GDRD", providerMemberName: "AB / C", providerMemberId: "2.00003E+12", workDate: "2026-07-26" },
+    { stationCode: "GDRD", providerMemberName: "A / BC", providerMemberId: "2000033019000", workDate: "2026-10-01" }
+  ];
+  assert.deepEqual(canonicalizeProviderFirstMembers(punctuationDistinct), punctuationDistinct);
+
+  const unnamed = [
+    { stationCode: "GDRD", providerMemberName: "", providerMemberId: "2.00003E+12", workDate: "2026-07-26" },
+    { stationCode: "GDRD", providerMemberName: "", providerMemberId: "2000033019000", workDate: "2026-10-01" }
+  ];
+  assert.deepEqual(canonicalizeProviderFirstMembers(unnamed), unnamed);
 });
 
 test("classifies every required mapped-row field consistently", () => {
@@ -109,7 +216,7 @@ test("provider-first renders only the selected page and saves without navigation
     readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8")
   ]);
   assert.match(component, /paginatedIndexes\.map/);
-  assert.match(component, /providerMemberIdDisplay\(row\.providerMemberId\)/);
+  assert.match(component, /isScientificProviderMemberId\(row\.providerMemberId\)/);
   assert.match(component, /formData\.set\(`\$\{prefix\}\[provider_member_id\]`, row\.providerMemberId\)/);
   assert.doesNotMatch(component, /<form action=\{saveProviderFirstMappingWorksheet\}/);
   const start = actions.indexOf("export async function saveProviderFirstMappingsInline");
@@ -119,4 +226,12 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(inlineAction, /hasPermission\(authorization, "provider_mapping", "edit"\)/);
   assert.match(inlineAction, /saveExecutiveMappingRow/);
   assert.doesNotMatch(inlineAction, /redirect\(|revalidatePath\(/);
+  assert.match(actions, /isScientificProviderMemberId\(providerMemberId\)/);
+  assert.match(actions, /XLSX\.read\(await file\.arrayBuffer\(\), \{ type: "array", raw: true \}\)/);
+  assert.match(actions, /identifierRows = XLSX\.utils\.sheet_to_json[\s\S]*raw: true/);
+  assert.match(actions, /providerMemberIdUnsafeNumber/);
+  assert.match(actions, /memberNameByStationAndId\.get\(`\$\{station\.stationCode\}\|\$\{uploadRow\.providerMemberId\}`\)/);
+  assert.match(actions, /providerHolderMatches\(holderName, worker\.fullName\)/);
+  assert.match(actions, /const providerId = String\(station\.provider_id/);
+  assert.match(actions, /worker's current location is not allocated to your account/);
 });

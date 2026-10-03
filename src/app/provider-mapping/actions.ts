@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { matchNames } from "@/lib/name-match";
+import { isScientificProviderMemberId, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -116,11 +117,15 @@ function normalizedHeader(value: unknown) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-function bulkCell(row: Record<string, unknown>, aliases: string[]) {
+function bulkValue(row: Record<string, unknown>, aliases: string[]) {
   for (const [key, value] of Object.entries(row)) {
-    if (aliases.includes(normalizedHeader(key))) return String(value ?? "").trim();
+    if (aliases.includes(normalizedHeader(key))) return value;
   }
   return "";
+}
+
+function bulkCell(row: Record<string, unknown>, aliases: string[]) {
+  return String(bulkValue(row, aliases) ?? "").trim();
 }
 
 function bulkDate(value: string) {
@@ -173,19 +178,28 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     if (!(file instanceof File) || !file.size) throw new Error("Select an Excel or CSV file to upload.");
     if (file.size > 10 * 1024 * 1024) throw new Error("The upload file must be 10 MB or smaller.");
 
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: false });
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: true });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     if (!sheet) throw new Error("The uploaded file does not contain a worksheet.");
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
-    const uploadRows = rawRows.map((row, index) => ({
-      rowNumber: index + 2,
-      dropxId: bulkCell(row, ["DROPX_ID", "DROPXID", "DROPX_ID_CODE"]).toUpperCase(),
-      providerMemberId: bulkCell(row, ["PROVIDER_MEMBER_ID", "PROVIDER_ID", "MEMBER_ID", "PROVIDER_EMPLOYEE_ID"]),
-      paymentMethodCode: bulkCell(row, ["PAYMENT_METHOD_CODE", "PAYMENT_METHOD", "METHOD_CODE"]).toUpperCase(),
-      effectiveFromRaw: bulkCell(row, ["EFFECTIVE_FROM", "FROM_DATE"]),
-      effectiveToRaw: bulkCell(row, ["EFFECTIVE_TO", "TO_DATE"]),
-      cells: Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizedHeader(key), String(value ?? "").trim()]))
-    })).filter((row) => row.dropxId || row.providerMemberId || row.paymentMethodCode);
+    const formattedRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
+    const identifierRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: true });
+    const uploadRows = formattedRows.map((row, index) => {
+      const identifierRow = identifierRows[index] ?? row;
+      const providerMemberValue = bulkValue(identifierRow, ["PROVIDER_MEMBER_ID", "PROVIDER_ID", "MEMBER_ID", "PROVIDER_EMPLOYEE_ID"]);
+      const providerMember = providerMemberIdFromSpreadsheetCells(
+        bulkValue(row, ["PROVIDER_MEMBER_ID", "PROVIDER_ID", "MEMBER_ID", "PROVIDER_EMPLOYEE_ID"]),
+        providerMemberValue
+      );
+      return {
+        rowNumber: index + 2,
+        dropxId: bulkCell(row, ["DROPX_ID", "DROPXID", "DROPX_ID_CODE"]).toUpperCase(),
+        ...providerMember,
+        paymentMethodCode: bulkCell(row, ["PAYMENT_METHOD_CODE", "PAYMENT_METHOD", "METHOD_CODE"]).toUpperCase(),
+        effectiveFromRaw: bulkCell(row, ["EFFECTIVE_FROM", "FROM_DATE"]),
+        effectiveToRaw: bulkCell(row, ["EFFECTIVE_TO", "TO_DATE"]),
+        cells: Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizedHeader(key), String(value ?? "").trim()]))
+      };
+    }).filter((row) => row.dropxId || row.providerMemberId || row.paymentMethodCode);
     if (!uploadRows.length) throw new Error("No DropX ID or Provider Member ID rows were found.");
 
     const dropxIds = Array.from(new Set(uploadRows.map((row) => row.dropxId).filter(Boolean)));
@@ -229,14 +243,17 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       : new Set(authorization.locationScopeIds);
     const eligibleWorkers = new Map(Array.from(workers.entries()).filter(([, worker]) => !allowedLocationIds || allowedLocationIds.has(worker.stationId)));
     const stationIds = Array.from(new Set(Array.from(eligibleWorkers.values()).map((worker) => worker.stationId).filter(Boolean))) as string[];
-    const { data: stations, error: stationsError } = await supabaseAdmin.from("stations").select("id, provider_id").eq("company_id", companyId).in("id", stationIds);
+    const { data: stations, error: stationsError } = await supabaseAdmin.from("stations").select("id, provider_id, station_code").eq("company_id", companyId).in("id", stationIds);
     if (stationsError) throw new Error(stationsError.message);
-    const providerByStation = new Map((stations ?? []).map((station) => [station.id, String(station.provider_id ?? "")]));
+    const stationById = new Map((stations ?? []).map((station) => [station.id, {
+      providerId: String(station.provider_id ?? ""),
+      stationCode: String(station.station_code ?? "").trim().toUpperCase()
+    }]));
     const memberIds = Array.from(new Set(uploadRows.map((row) => row.providerMemberId).filter(Boolean)));
-    const memberNameById = new Map<string, string>();
+    const memberNameByStationAndId = new Map<string, string>();
     for (let offset = 0; offset < memberIds.length; offset += 200) {
       const { data, error } = await supabaseAdmin.from("cps_shipment_daily")
-        .select("provider_employee_id, provider_employee_name, work_date, created_at")
+        .select("provider_employee_id, provider_employee_name, station_code, work_date, created_at")
         .eq("company_id", companyId)
         .in("provider_employee_id", memberIds.slice(offset, offset + 200))
         .order("work_date", { ascending: false })
@@ -244,7 +261,11 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (error) throw new Error(error.message);
       (data ?? []).forEach((row) => {
         const memberId = String(row.provider_employee_id ?? "").trim();
-        if (memberId && !memberNameById.has(memberId)) memberNameById.set(memberId, String(row.provider_employee_name ?? "").trim());
+        const stationCode = String(row.station_code ?? "").trim().toUpperCase();
+        const memberKey = `${stationCode}|${memberId}`;
+        if (memberId && stationCode && !memberNameByStationAndId.has(memberKey)) {
+          memberNameByStationAndId.set(memberKey, String(row.provider_employee_name ?? "").trim());
+        }
       });
     }
     let saved = 0;
@@ -254,14 +275,18 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       const reportRow = { rowNumber: uploadRow.rowNumber, dropxId: uploadRow.dropxId, providerMemberId: uploadRow.providerMemberId, paymentMethodCode: uploadRow.paymentMethodCode };
       const skipped = (reason: string) => reportRows.push({ ...reportRow, result: "Skipped", reason });
       if (!uploadRow.dropxId || !uploadRow.providerMemberId) { skipped("DropX ID or Provider Member ID is blank."); continue; }
+      if (uploadRow.providerMemberIdUnsafeNumber) { skipped("Provider Member ID is too large to read safely as a number. Format that cell as text and upload it again."); continue; }
+      if (isScientificProviderMemberId(uploadRow.providerMemberId)) { skipped("Provider Member ID is rounded scientific notation. Upload the full provider ID as text or an unformatted number."); continue; }
       if (seenDropxIds.has(uploadRow.dropxId)) { skipped("Duplicate DropX ID in this upload."); continue; }
       seenDropxIds.add(uploadRow.dropxId);
       const worker = eligibleWorkers.get(uploadRow.dropxId);
       if (!worker) { skipped("DropX ID is not available in the current mapping list."); continue; }
-      const providerId = providerByStation.get(worker.stationId);
-      if (!providerId) { skipped("The worker's location has no provider configured."); continue; }
-      const holderName = memberNameById.get(uploadRow.providerMemberId);
-      if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data."); continue; }
+      const station = stationById.get(worker.stationId);
+      const providerId = station?.providerId;
+      if (!providerId || !station?.stationCode) { skipped("The worker's location has no provider configured."); continue; }
+      const holderName = memberNameByStationAndId.get(`${station.stationCode}|${uploadRow.providerMemberId}`);
+      if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data for the worker's location."); continue; }
+      if (!providerHolderMatches(holderName, worker.fullName)) { skipped("Provider Member ID holder name does not match the DropX worker."); continue; }
       const suppliedPaymentValues = Array.from(allPaymentFieldCodes).some((code) => String(uploadRow.cells[code] ?? "").trim() !== "");
       const hasAllocationData = Boolean(uploadRow.paymentMethodCode || uploadRow.effectiveFromRaw || uploadRow.effectiveToRaw || suppliedPaymentValues);
       const paymentMethod = uploadRow.paymentMethodCode ? paymentMethodByCode.get(uploadRow.paymentMethodCode) : null;
@@ -421,8 +446,11 @@ async function saveExecutiveMappingRow(
   }
   const mappingId = rowValue(formData, index, "mapping_id");
   const dropxId = rowRequired(formData, index, "dropx_id", "DropX ID").toUpperCase();
-  const providerId = rowRequired(formData, index, "provider_id", "Provider");
+  const submittedProviderId = rowValue(formData, index, "provider_id");
   const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
+  if (isScientificProviderMemberId(providerMemberId)) {
+    throw new Error(`Row ${index + 1}: The imported Provider Member ID is rounded. Reimport a report containing the full ID.`);
+  }
   const stationId = rowRequired(formData, index, "station_id", "Location");
   if (allowedLocationIds && !allowedLocationIds.has(stationId)) {
     throw new Error(`Row ${index + 1}: This location is not allocated to your account.`);
@@ -446,7 +474,7 @@ async function saveExecutiveMappingRow(
     sourceType === "employee"
       ? supabaseAdmin
         .from("employees")
-        .select("id, full_name, designations!inner(is_field_operations,provider_mapping_required)")
+        .select("id, full_name, location_id, designations!inner(is_field_operations,provider_mapping_required)")
         .eq("id", id)
         .eq("company_id", companyId)
         .eq("is_active", true)
@@ -456,7 +484,7 @@ async function saveExecutiveMappingRow(
       : sourceType === "contractor"
         ? supabaseAdmin
           .from("contractors")
-          .select("id, full_name, designation")
+          .select("id, full_name, location_id, designation")
           .eq("id", id)
           .eq("company_id", companyId)
           .eq("is_active", true)
@@ -471,7 +499,7 @@ async function saveExecutiveMappingRow(
         .maybeSingle(),
     supabaseAdmin
       .from("stations")
-      .select("id")
+      .select("id, station_code, provider_id")
       .eq("id", stationId)
       .eq("company_id", companyId)
       .maybeSingle()
@@ -491,8 +519,18 @@ async function saveExecutiveMappingRow(
   if (canonicalWorkerResult.error) throw new Error(canonicalWorkerResult.error.message);
   const worker = legacyWorker ?? canonicalWorkerResult.data;
   if (!worker) throw new Error(`Row ${index + 1}: Field Operations worker was not found for this company.`);
+  const workerLocationId = String((worker as { location_id?: string | null }).location_id ?? "");
+  if (allowedLocationIds && (!workerLocationId || !allowedLocationIds.has(workerLocationId))) {
+    throw new Error(`Row ${index + 1}: The worker's current location is not allocated to your account.`);
+  }
   if (sourceType === "workforce" && String((worker as { location_id?: string | null }).location_id ?? "") !== stationId) {
     throw new Error(`Row ${index + 1}: Location mismatch.`);
+  }
+  if (!station) throw new Error(`Row ${index + 1}: Location was not found for this company.`);
+  const providerId = String(station.provider_id ?? "");
+  if (!providerId) throw new Error(`Row ${index + 1}: The selected location does not have a provider configured.`);
+  if (submittedProviderId && submittedProviderId !== providerId) {
+    throw new Error(`Row ${index + 1}: Provider does not match the selected location. Refresh the page and try again.`);
   }
   const dropxName = String((worker as { full_name?: string | null }).full_name ?? "").trim();
   const { data: uploadedMember, error: uploadedMemberError } = await supabaseAdmin
@@ -500,6 +538,7 @@ async function saveExecutiveMappingRow(
     .select("provider_employee_name")
     .eq("company_id", companyId)
     .eq("provider_employee_id", providerMemberId)
+    .eq("station_code", station.station_code)
     .order("work_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -534,8 +573,6 @@ async function saveExecutiveMappingRow(
   if (!providerMappingRequired && !mappingId) {
     throw new Error(`Row ${index + 1}: This designation uses Direct pay allocations and does not require a new provider ID mapping.`);
   }
-  if (!station) throw new Error(`Row ${index + 1}: Location was not found for this company.`);
-
   let paymentValues: Record<string, number> = {};
   try {
     const parsed = JSON.parse(rawPaymentValues) as Record<string, unknown>;
@@ -960,6 +997,9 @@ export async function saveProviderFirstMapping(formData: FormData) {
     const workforceId = clean(formData.get("workforce_id"));
     const stationId = clean(formData.get("station_id"));
     if (!providerMemberId || !workforceId || !stationId) throw new Error("Provider Member ID, workforce DropX ID, and location are required.");
+    if (isScientificProviderMemberId(providerMemberId)) {
+      throw new Error("This Provider Member ID is rounded. Reimport a report containing the full ID before mapping it.");
+    }
 
     const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
       ? null
@@ -968,7 +1008,7 @@ export async function saveProviderFirstMapping(formData: FormData) {
 
     const [{ data: worker, error: workerError }, { data: station, error: stationError }, { data: memberMapping, error: memberMappingError }, { data: workerMapping, error: workerMappingError }] = await Promise.all([
       supabaseAdmin.from("workforce").select("id, full_name, location_id, designation_id, designation, is_active").eq("id", workforceId).eq("company_id", companyId).is("deleted_at", null).maybeSingle(),
-      supabaseAdmin.from("stations").select("id, provider_id").eq("id", stationId).eq("company_id", companyId).eq("is_active", true).maybeSingle(),
+      supabaseAdmin.from("stations").select("id, provider_id, station_code").eq("id", stationId).eq("company_id", companyId).eq("is_active", true).maybeSingle(),
       supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id").eq("company_id", companyId).eq("provider_member_id", providerMemberId).is("effective_to", null).neq("status", "cancelled").maybeSingle(),
       supabaseAdmin.from("field_executive_provider_mappings").select("id, payment_method_id, payment_values, pay_type, effective_from").eq("company_id", companyId).eq("workforce_id", workforceId).is("effective_to", null).neq("status", "cancelled").order("created_at", { ascending: false }).limit(1).maybeSingle()
     ]);
@@ -976,6 +1016,20 @@ export async function saveProviderFirstMapping(formData: FormData) {
     if (!worker?.is_active) throw new Error("The selected workforce record is no longer active.");
     if (worker.location_id !== stationId) throw new Error("The selected workforce member belongs to a different location.");
     if (!station?.provider_id) throw new Error("The selected location does not have a provider configured.");
+    const { data: uploadedMember, error: uploadedMemberError } = await supabaseAdmin
+      .from("cps_shipment_daily")
+      .select("provider_employee_name")
+      .eq("company_id", companyId)
+      .eq("provider_employee_id", providerMemberId)
+      .eq("station_code", station.station_code)
+      .order("work_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (uploadedMemberError) throw new Error(uploadedMemberError.message);
+    const uploadedHolderName = String(uploadedMember?.provider_employee_name ?? "").trim();
+    if (!uploadedHolderName) throw new Error("No uploaded holder was found for this Provider Member ID at the selected location.");
+    if (!providerHolderMatches(uploadedHolderName, String(worker.full_name ?? ""))) throw new Error("Provider Member ID holder name does not match the selected workforce member.");
     if (memberMapping && memberMapping.workforce_id !== workforceId) throw new Error("This Provider Member ID is already actively linked to another workforce record.");
     const designation = await resolveFieldOperationsDesignationPolicy(companyId, worker);
     if (!designation) throw new Error("The selected workforce designation is not enabled for Field Operations.");

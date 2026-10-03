@@ -21872,6 +21872,17 @@ td strong,
   overflow-wrap: anywhere;
 }
 
+.provider-first-row .mapping-source-warning {
+  width: fit-content;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #fff1f0;
+  color: #b42318;
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .provider-first-row .mapping-provider-name {
   color: #17243b;
   font-size: 12.5px;
