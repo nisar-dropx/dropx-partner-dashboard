@@ -275,7 +275,7 @@ type ShiftDefinition = {
 
 type ShiftSchedule = {
   shift: ShiftDefinition | null;
-  source: "Roster" | "Unassigned";
+  source: "Roster" | "Unassigned" | "Holiday";
   dayType: string;
 };
 
@@ -644,7 +644,7 @@ async function loadAttendanceScheduleContext({
   const workerIds = Array.from(new Set(workers.map((worker) => worker.profileId).filter(Boolean)));
   const shiftColumns = "id, code, name, start_time, end_time, break_minutes, grace_in_minutes, grace_out_minutes";
 
-  const [settingsResult, rosterResult, recurringPlanResult] = await Promise.all([
+  const [settingsResult, rosterResult, recurringPlanResult, calendarResult] = await Promise.all([
     supabaseAdmin
       .from("hr_company_settings")
       .select("attendance_grace_minutes, below_half_day_treatment, full_day_minutes, full_day_percent, half_day_minutes, half_day_percent, no_punch_treatment, odd_punch_treatment, partial_day_treatment, single_punch_treatment, unassigned_shift_treatment, work_duration_basis")
@@ -668,11 +668,19 @@ async function loadAttendanceScheduleContext({
       .eq("status", "approved")
       .eq("roster_kind", "recurring_weekly")
       .lte("effective_from", toDate)
-      .order("effective_from", { ascending: false })
+      .order("effective_from", { ascending: false }),
+    supabaseAdmin
+      .from("hr_payroll_calendar_days")
+      .select("calendar_date,day_type,name,location_id")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .gte("calendar_date", fromDate)
+      .lte("calendar_date", toDate)
   ]);
   if (settingsResult.error) throw new Error(settingsResult.error.message);
   if (rosterResult.error) throw new Error(rosterResult.error.message);
   if (recurringPlanResult.error) throw new Error(recurringPlanResult.error.message);
+  if (calendarResult.error) throw new Error(calendarResult.error.message);
 
   type RosterRow = {
     worker_id: string;
@@ -729,17 +737,28 @@ async function loadAttendanceScheduleContext({
 
   // Part-time workers among these profiles (one lookup per report, not per row).
   const [partTimeEmployees, partTimeContractors] = workerIds.length ? await Promise.all([
-    supabaseAdmin.from("employees").select("id,employment_type,designations(code,name)").eq("company_id", companyId).in("id", workerIds),
-    supabaseAdmin.from("contractors").select("id,employment_type,designation").eq("company_id", companyId).in("id", workerIds)
+    supabaseAdmin.from("employees").select("id,employment_type,location_id,designations(code,name)").eq("company_id", companyId).in("id", workerIds),
+    supabaseAdmin.from("contractors").select("id,employment_type,location_id,designation").eq("company_id", companyId).in("id", workerIds)
   ]) : [{ data: [], error: null }, { data: [], error: null }];
   const partTimeIds = new Set<string>();
-  for (const row of (partTimeEmployees.data ?? []) as Array<{ id: string; employment_type: string | null; designations: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null }>) {
+  const locationByWorker = new Map<string, string | null>();
+  for (const row of (partTimeEmployees.data ?? []) as Array<{ id: string; employment_type: string | null; location_id: string | null; designations: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null }>) {
+    locationByWorker.set(row.id, row.location_id);
     const designation = relationFirst(row.designations);
     if (isPartTimeWorker({ employmentType: row.employment_type, designationCode: designation?.code, designationName: designation?.name })) partTimeIds.add(row.id);
   }
-  for (const row of (partTimeContractors.data ?? []) as Array<{ id: string; employment_type: string | null; designation: string | null }>) {
+  for (const row of (partTimeContractors.data ?? []) as Array<{ id: string; employment_type: string | null; location_id: string | null; designation: string | null }>) {
+    locationByWorker.set(row.id, row.location_id);
     if (isPartTimeWorker({ employmentType: row.employment_type, designationName: row.designation })) partTimeIds.add(row.id);
   }
+  type CalendarDayRow = { calendar_date: string; day_type: string; name: string | null; location_id: string | null };
+  const calendarDays = (calendarResult.data ?? []) as CalendarDayRow[];
+  const calendarDayFor = (profileId: string, punchDate: string) => {
+    const locationId = locationByWorker.get(profileId) ?? null;
+    const matches = calendarDays.filter((day) => String(day.calendar_date).slice(0, 10) === punchDate && (!day.location_id || day.location_id === locationId));
+    matches.sort((left, right) => Number(Boolean(right.location_id)) - Number(Boolean(left.location_id)));
+    return matches[0] ?? null;
+  };
   const baseRules = (settingsResult.data ?? {}) as AttendanceRules;
   const halvedRules = partTimeRules(baseRules);
   const withPartTime = (profileId: string, schedule: ShiftSchedule): ShiftSchedule =>
@@ -754,16 +773,27 @@ async function loadAttendanceScheduleContext({
     scheduleFor(profileId: string | null, punchDate: string): ShiftSchedule {
       if (!profileId) return { dayType: "unassigned", shift: null, source: "Unassigned" };
       const roster = rosterByWorkerDate.get(`${profileId}:${punchDate}`);
-      if (roster) return withPartTime(profileId, roster);
-      const weekly = weeklyRosterValueForDate(
+      const weekly = roster ? null : weeklyRosterValueForDate(
         weeklyIndex,
         rosterWorkerType(profileTypeById.get(profileId)),
         profileId,
         punchDate
       );
-      return weekly
-        ? withPartTime(profileId, { dayType: weekly.day_type ?? "working", shift: relationFirst(weekly.hr_shifts), source: "Roster" })
-        : { dayType: "unassigned", shift: null, source: "Unassigned" };
+      const scheduled: ShiftSchedule = roster
+        ? roster
+        : weekly
+          ? { dayType: weekly.day_type ?? "working", shift: relationFirst(weekly.hr_shifts), source: "Roster" }
+          : { dayType: "unassigned", shift: null, source: "Unassigned" };
+      const calendar = calendarDayFor(profileId, punchDate);
+      // Station holiday from Holiday Master wins over a working or week-off roster,
+      // matching payroll. An exceptional working day turns a rostered week-off into a working day.
+      if (calendar?.day_type === "paid_holiday") {
+        return withPartTime(profileId, { dayType: "holiday", shift: scheduled.shift, source: "Holiday" });
+      }
+      if (calendar?.day_type === "working_day" && scheduled.dayType === "weekly_off") {
+        return withPartTime(profileId, { ...scheduled, dayType: "working" });
+      }
+      return scheduled.dayType === "unassigned" ? scheduled : withPartTime(profileId, scheduled);
     }
   };
 }

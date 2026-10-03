@@ -1,13 +1,13 @@
 import "server-only";
 import type { ConnectAccount } from "./connect-auth";
-import { resolveConnectActorUserIds } from "./connect-approver-identity";
+import { adoptPendingStepForHigherManager, resolveConnectActorUserIds, resolveConnectVisibleApproverUserIds } from "./connect-approver-identity";
 import { payAdvanceDecision, payAdvanceFinanceTerms, type PayAdvanceApproval } from "./connect-pay-advance-approval";
 import { supabaseAdmin } from "./supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 
 export async function listConnectPayAdvanceApprovals(account: ConnectAccount): Promise<PayAdvanceApproval[]> {
-  const actorIds = await resolveConnectActorUserIds(account);
+  const actorIds = await resolveConnectVisibleApproverUserIds(account);
   if (!actorIds.length) return [];
   const steps = await db().from("hr_pay_advance_steps").select("id,request_id,step_name,step_type")
     .eq("company_id", account.companyId).in("approver_user_id", actorIds).eq("status", "pending").order("created_at");
@@ -30,6 +30,13 @@ export async function decideConnectPayAdvanceApproval(account: ConnectAccount, r
   const decision = payAdvanceDecision(action, note);
   const actorIds = await resolveConnectActorUserIds(account);
   if (!actorIds.length) throw new Error("This pay advance is not assigned to your account.");
+  await adoptPendingStepForHigherManager({
+    companyId: account.companyId,
+    actorUserId: actorIds[0],
+    table: "hr_pay_advance_steps",
+    parentColumn: "request_id",
+    parentId: requestId
+  });
   // Resolve the actor from the authenticated account and its exact pending step.
   // Never trust a caller-supplied approver ID or a company-wide role alone.
   const step = await db().from("hr_pay_advance_steps").select("id,approver_user_id,step_type")

@@ -135,17 +135,26 @@ function chainCandidates(
   lastChainIndex: number,
   designationById: Map<string, { name: string; code: string | null }>
 ) {
-  return chain.filter((item) => {
-    if (item.chainIndex <= lastChainIndex) return false;
-    const label = item.designationId ? designationById.get(item.designationId) : null;
-    if (searchScope === "immediate_reporting_manager") return item.chainIndex === 0;
-    if (searchScope === "manager_above_team_lead") {
-      if (isTeamLeadDesignation(label)) return false;
-      return item.designationId === designationId;
-    }
-    if (searchScope === "reporting_chain") return item.designationId === designationId;
-    return false;
-  });
+  const after = chain.filter((item) => item.chainIndex > lastChainIndex);
+  if (searchScope === "immediate_reporting_manager") {
+    return after.filter((item) => item.chainIndex === 0);
+  }
+  if (searchScope === "manager_above_team_lead") {
+    const nonTeamLeads = after.filter((item) => {
+      const label = item.designationId ? designationById.get(item.designationId) : null;
+      return !isTeamLeadDesignation(label);
+    });
+    const preferred = nonTeamLeads.filter((item) => item.designationId === designationId);
+    if (!preferred.length) return [];
+    const targetIndex = preferred[0].chainIndex;
+    return nonTeamLeads.filter((item) => item.chainIndex <= targetIndex);
+  }
+  if (searchScope === "reporting_chain") {
+    const matchAt = after.findIndex((item) => item.designationId === designationId);
+    if (matchAt >= 0) return after.slice(0, matchAt + 1);
+    return [];
+  }
+  return [];
 }
 
 async function reportingChain(companyId: string, subjectAssignmentId: string, asOf: string): Promise<Candidate[]> {
@@ -180,13 +189,11 @@ async function candidateIsUnavailable(companyId: string, candidate: Candidate, a
   if (!approverUserId) {
     return { unavailable: true, reason: "no DropX One manager login", person: person.data, approverUserId: null as string | null };
   }
-  let leaveQuery = db().from("hr_leave_requests").select("id").eq("company_id", companyId).eq("status", "approved").lte("start_date", asOf).gte("end_date", asOf).limit(1);
-  leaveQuery = candidate.workerType === "employee" ? leaveQuery.eq("employee_id", candidate.employeeId) : leaveQuery.eq("contractor_id", candidate.contractorId);
-  const leave = await leaveQuery.maybeSingle();
-  if (leave.error) throw new Error(leave.error.message);
+  // Leave and out-of-station travel stay with this manager. A higher manager
+  // on the same reporting line may approve and skip the steps below them.
   return {
-    unavailable: Boolean(leave.data),
-    reason: leave.data ? "approved leave" : null,
+    unavailable: false,
+    reason: null,
     person: person.data,
     approverUserId
   };
@@ -355,6 +362,30 @@ export async function resolveConfiguredApprovalWorkflow(input: {
       : ["reporting_chain", "immediate_reporting_manager", "manager_above_team_lead"].includes(searchScope)
         ? chainCandidates(chain, searchScope, designationId, lastChainIndex, designationById)
         : await scopedDesignationCandidates(input.companyId, designationId, searchScope, worker.assignment.location_id, asOf);
+    if (!forceChain && (searchScope === "reporting_chain" || searchScope === "manager_above_team_lead") && primaryCandidates.length > 1) {
+      let added = false;
+      for (const candidate of primaryCandidates) {
+        if (excludedPeople.has(candidate.personId)) continue;
+        let chosen = candidate;
+        let via: ConfiguredApprovalStep["resolved_via"] = "configured_designation";
+        let originalPersonId: string | null = null;
+        let fallbackReason: string | null = null;
+        const delegated = await delegatedCandidate(input.companyId, input.workflowCode, candidate, asOf);
+        if (delegated && !excludedPeople.has(delegated.personId)) {
+          chosen = delegated;
+          via = "delegation";
+          originalPersonId = candidate.personId;
+          fallbackReason = "Temporary approval cover";
+        }
+        const step = await stepForCandidate(input.companyId, route.id, level, chosen, via, originalPersonId, fallbackReason, asOf);
+        if (!step) continue;
+        excludedPeople.add(chosen.personId);
+        if (chosen.chainIndex >= 0) lastChainIndex = Math.max(lastChainIndex, chosen.chainIndex);
+        steps.push(step);
+        added = true;
+      }
+      if (added) continue;
+    }
     let resolved = await findAvailable(primaryCandidates, input.companyId, route.id, level, excludedPeople, "configured_designation", null, null, asOf);
     const original = primaryCandidates.find((item) => !excludedPeople.has(item.personId)) ?? null;
     if (original) {

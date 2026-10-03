@@ -313,7 +313,25 @@ export async function GET(request: NextRequest) {
           toDate: visibleToDate
         })
         : [];
-      for (const row of calendarGapRows) {
+      const nextIsoDate = (date: string) => {
+        const value = new Date(`${date}T00:00:00Z`);
+        value.setUTCDate(value.getUTCDate() + 1);
+        return value.toISOString().slice(0, 10);
+      };
+      const restFromDate = nextIsoDate(visibleToDate);
+      const upcomingFromDate = activeFromDate > restFromDate ? activeFromDate : restFromDate;
+      const upcomingRestRows = upcomingFromDate <= range.toDate
+        ? await fillAttendanceCalendarGaps({
+          companyId: worker.companyId,
+          existingDates: new Set([...attendanceDates, ...calendarGapRows.map((row) => row.punchDate)]),
+          fromDate: upcomingFromDate,
+          includeNoPunchDays: false,
+          profileId: worker.profileId,
+          profileType: worker.profileType,
+          toDate: range.toDate
+        })
+        : [];
+      for (const row of [...calendarGapRows, ...upcomingRestRows]) {
         responseRows.push({
           date: row.punchDate,
           status: row.status,
@@ -347,6 +365,38 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const holidayCalendar = await supabaseAdmin
+      .from("hr_payroll_calendar_days")
+      .select("calendar_date,day_type,name,location_id")
+      .eq("company_id", worker.companyId)
+      .eq("is_active", true)
+      .gte("calendar_date", range.fromDate)
+      .lte("calendar_date", range.toDate);
+    if (holidayCalendar.error) throw new Error(holidayCalendar.error.message);
+    const holidayNameByDate = new Map<string, string>();
+    for (const day of holidayCalendar.data ?? []) {
+      if (day.day_type !== "paid_holiday") continue;
+      if (day.location_id && day.location_id !== worker.locationId) continue;
+      const date = String(day.calendar_date).slice(0, 10);
+      if (!holidayNameByDate.has(date) || day.location_id) holidayNameByDate.set(date, day.name || "Holiday");
+    }
+    let holidaysMarkedAbsent = 0;
+    for (const row of responseRows) {
+      if (row.statusKind !== "attendance") continue;
+      const name = holidayNameByDate.get(row.date);
+      if (!name) continue;
+      if ((row.punchCount ?? 0) > 0) {
+        row.payDayType = "paid_holiday";
+        continue;
+      }
+      if (row.attendanceStatus === "Absent" || row.payDayType === "absent") holidaysMarkedAbsent += 1;
+      row.status = "holiday";
+      row.attendanceStatus = name;
+      row.payDayType = "paid_holiday";
+      row.shiftName = name;
+      row.shiftSource = "Holiday";
+    }
+
     responseRows.sort((left, right) => left.date.localeCompare(right.date));
 
     // Regularization window (HRMS > Attendance policy): the rolling backdate
@@ -378,7 +428,7 @@ export async function GET(request: NextRequest) {
         present,
         fullDay,
         halfDay,
-        absent,
+        absent: Math.max(0, absent - holidaysMarkedAbsent),
         needsReview,
         lateIn,
         earlyOut,
