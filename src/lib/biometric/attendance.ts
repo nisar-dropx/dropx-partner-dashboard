@@ -187,6 +187,9 @@ function biometricIdVariants(values: string[]) {
 
 /** Prefer the enrolment spelling that already holds the richest day summary. */
 function preferEnrolmentDailyRow(left: DailyRow, right: DailyRow) {
+  const leftRegularized = isManualRegularizationDay(left) ? 1 : 0;
+  const rightRegularized = isManualRegularizationDay(right) ? 1 : 0;
+  if (leftRegularized !== rightRegularized) return rightRegularized > leftRegularized ? right : left;
   const leftScore =
     Number(left.punch_count ?? 0) * 100 +
     Number(Boolean(left.out_time)) * 10 +
@@ -1594,7 +1597,11 @@ export async function loadAttendanceReportRows({
     // An approved business trip is attendance credit, like WFH: no punch times are recorded,
     // but the day is a full present day.
     const businessTripCredit = row.work_mode === "business_trip" && !effectiveInTime && !effectiveOutTime && effectivePunchCount === 0;
-    const attendanceStatus = creditState ? wfhCreditLabel(creditState) : businessTripCredit ? "Full Day" : attendanceDayStatus({
+    // An approved regularization is Present. Re-scoring the corrected clock span
+    // was turning short approved days into Half Day or Absent in DropX One.
+    const attendanceStatus = regularized
+      ? "Full Day"
+      : creditState ? wfhCreditLabel(creditState) : businessTripCredit ? "Full Day" : attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: effectivePunchCount,
       rules: scheduleContext.rulesFor(profileId),
@@ -1622,7 +1629,7 @@ export async function loadAttendanceReportRows({
       punchTimes: punches.map((punch) => formatTime(punch.punch_time)),
       workHours: formatDuration(effectiveWorkMinutes),
       punchCount: effectivePunchCount,
-      status: creditState ? (creditState === "credited" ? "P" : "PENDING") : row.status ?? "P",
+      status: creditState ? (creditState === "credited" ? "P" : "PENDING") : regularized ? "P" : row.status ?? "P",
       wfhCreditState: creditState,
       attendanceStatus,
       lateMinutes: variance.lateMinutes,
