@@ -4,11 +4,12 @@ import { cookies } from "next/headers";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { matchNames } from "@/lib/name-match";
 import { isScientificProviderMemberId, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
+import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -168,8 +169,8 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
-  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
-    redirect("/unauthorized?page=provider_mapping&action=edit");
+  if (!canEditProviderMappings(authorization)) {
+    redirect(`/unauthorized?page=${currentProviderMappingPageCode()}&action=edit`);
   }
 
   try {
@@ -312,7 +313,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (invalidPaymentValue) { skipped(invalidPaymentValue); continue; }
       const workerColumn = worker.sourceType === "workforce" ? "workforce_id" : worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
-        .select("id, effective_from, effective_to")
+        .select("id, effective_from, effective_to, station_id")
         .eq("company_id", companyId)
         .eq(workerColumn, worker.id)
         .is("effective_to", null)
@@ -320,6 +321,10 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
         .limit(1)
         .maybeSingle();
       if (existingError) throw new Error(existingError.message);
+      if (existing && allowedLocationIds && (!existing.station_id || !allowedLocationIds.has(existing.station_id))) {
+        skipped("The existing active mapping is outside your allocated locations.");
+        continue;
+      }
 
       const fallbackEffectiveFrom = /^\d{4}-\d{2}-\d{2}$/.test(worker.effectiveFrom) ? worker.effectiveFrom : new Date().toISOString().slice(0, 10);
       const allocationPayload = paymentMethod ? {
@@ -532,6 +537,29 @@ async function saveExecutiveMappingRow(
   if (submittedProviderId && submittedProviderId !== providerId) {
     throw new Error(`Row ${index + 1}: Provider does not match the selected location. Refresh the page and try again.`);
   }
+  if (!mappingId) {
+    const workerColumn = sourceType === "workforce" ? "workforce_id"
+      : sourceType === "employee" ? "employee_id"
+        : sourceType === "contractor" ? "contractor_id"
+          : "field_executive_id";
+    const { data: existingCurrentMapping, error: existingCurrentMappingError } = await supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("id, station_id")
+      .eq("company_id", companyId)
+      .eq(workerColumn, id)
+      .is("effective_to", null)
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingCurrentMappingError) throw new Error(existingCurrentMappingError.message);
+    if (existingCurrentMapping) {
+      if (allowedLocationIds && (!existingCurrentMapping.station_id || !allowedLocationIds.has(existingCurrentMapping.station_id))) {
+        throw new Error(`Row ${index + 1}: The existing active mapping is outside your allocated locations.`);
+      }
+      throw new Error(`Row ${index + 1}: An active mapping already exists. Reload the page and try again.`);
+    }
+  }
   const dropxName = String((worker as { full_name?: string | null }).full_name ?? "").trim();
   const { data: uploadedMember, error: uploadedMemberError } = await supabaseAdmin
     .from("cps_shipment_daily")
@@ -657,13 +685,16 @@ async function saveExecutiveMappingRow(
     if (mappingId) {
       const { data, error } = await supabaseAdmin
         .from("field_executive_provider_mappings")
-        .select("effective_from, effective_to")
+        .select("effective_from, effective_to, station_id")
         .eq("id", mappingId)
         .eq("company_id", companyId)
         .eq("workforce_id", id)
         .maybeSingle();
       if (error) throw new Error(error.message);
       if (!data) throw new Error(`Row ${index + 1}: Mapping history row was not found.`);
+      if (allowedLocationIds && (!data.station_id || !allowedLocationIds.has(data.station_id))) {
+        throw new Error(`Row ${index + 1}: The existing mapping is outside your allocated locations.`);
+      }
       existingMapping = data;
     }
 
@@ -703,13 +734,16 @@ async function saveExecutiveMappingRow(
 
   const { data: existingMapping, error: existingError } = await supabaseAdmin
     .from("field_executive_provider_mappings")
-    .select("id, effective_from, effective_to, workforce_id, employee_id, contractor_id, field_executive_id")
+    .select("id, effective_from, effective_to, station_id, workforce_id, employee_id, contractor_id, field_executive_id")
     .eq("id", mappingId)
     .eq("company_id", companyId)
     .maybeSingle();
 
   if (existingError) throw new Error(existingError.message);
   if (!existingMapping) throw new Error(`Row ${index + 1}: Mapping history row was not found.`);
+  if (allowedLocationIds && (!existingMapping.station_id || !allowedLocationIds.has(existingMapping.station_id))) {
+    throw new Error(`Row ${index + 1}: The existing mapping is outside your allocated locations.`);
+  }
   const existingWorkerId = sourceType === "employee" ? existingMapping.employee_id
       : sourceType === "contractor" ? existingMapping.contractor_id
         : existingMapping.field_executive_id;
@@ -765,8 +799,8 @@ export async function saveProviderMappingWorksheet(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
-  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
-    redirect("/unauthorized?page=provider_mapping&action=edit");
+  if (!canEditProviderMappings(authorization)) {
+    redirect(`/unauthorized?page=${currentProviderMappingPageCode()}&action=edit`);
   }
 
   let savedRows = 0;
@@ -825,14 +859,43 @@ function providerFirstMappingRedirect(params: { error?: string; notice?: string 
   redirect("/provider-mapping/provider-first");
 }
 
+async function assertProviderFirstRowScope(
+  companyId: string,
+  workforceId: string,
+  stationId: string,
+  sourceType: string,
+  allowedLocationIds: Set<string> | null,
+  rowNumber: number
+) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  if (sourceType !== "workforce") {
+    throw new Error(`Row ${rowNumber}: Provider-first mappings must use the canonical workforce record.`);
+  }
+  if (allowedLocationIds && !allowedLocationIds.has(stationId)) {
+    throw new Error(`Row ${rowNumber}: This location is not allocated to your account.`);
+  }
+  const { data: scopedWorker, error: scopedWorkerError } = await supabaseAdmin
+    .from("workforce")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("id", workforceId)
+    .eq("location_id", stationId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (scopedWorkerError) throw new Error(scopedWorkerError.message);
+  if (!scopedWorker) {
+    throw new Error(`Row ${rowNumber}: The selected DropX workforce ID is not available at this location.`);
+  }
+}
+
 /** Saves the full provider-member-first worksheet.  It deliberately reuses the
  * same row validator and history-safe save path as the existing worksheet. */
 export async function saveProviderFirstMappingWorksheet(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
-  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
-    redirect("/unauthorized?page=provider_mapping&action=edit");
+  if (!canEditProviderMappings(authorization)) {
+    redirect(`/unauthorized?page=${currentProviderMappingPageCode()}&action=edit`);
   }
 
   let savedRows = 0;
@@ -856,17 +919,27 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
       if (index < 0 || index >= rowCount) throw new Error("Invalid row selected.");
       const workforceId = rowRequired(formData, index, "id", "DropX workforce ID");
       const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
+      const stationId = rowRequired(formData, index, "station_id", "Location");
+      const sourceType = rowRequired(formData, index, "source_type", "Worker source");
+      const submittedMappingId = rowValue(formData, index, "mapping_id");
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1);
       const { data: currentMapping, error: currentMappingError } = await supabaseAdmin!
         .from("field_executive_provider_mappings")
-        .select("id, provider_member_id")
+        .select("id, provider_member_id, station_id")
         .eq("company_id", companyId)
         .eq("workforce_id", workforceId)
         .is("effective_to", null)
         .neq("status", "cancelled")
         .maybeSingle();
       if (currentMappingError) throw new Error(currentMappingError.message);
+      if (currentMapping && allowedLocationIds && (!currentMapping.station_id || !allowedLocationIds.has(currentMapping.station_id))) {
+        throw new Error(`Row ${index + 1}: The existing active mapping is outside your allocated locations.`);
+      }
+      if ((currentMapping?.id ?? null) !== submittedMappingId) {
+        throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
+      }
       if (currentMapping && String(currentMapping.provider_member_id).trim().toUpperCase() !== providerMemberId.trim().toUpperCase()) {
-        throw new Error(`Row ${index + 1}: This DropX ID is already mapped to Provider Member ID ${currentMapping.provider_member_id}.`);
+        throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
       }
       await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
       savedRows += 1;
@@ -909,7 +982,7 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
     const authorization = await getAuthorization();
     if (!authorization) return { ok: false, message: "Your sign-in session has expired. Reload the page and sign in again.", savedRows };
     const companyId = requireCompanyId(authorization);
-    if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
+    if (!canEditProviderMappings(authorization)) {
       return { ok: false, message: "You do not have permission to edit provider mappings.", savedRows };
     }
     if (!supabaseAdmin) return { ok: false, message: "Supabase service role key is not configured.", savedRows };
@@ -927,17 +1000,26 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
       const workforceId = rowRequired(formData, index, "id", "DropX workforce ID");
       const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
       const stationId = rowRequired(formData, index, "station_id", "Location");
+      const sourceType = rowRequired(formData, index, "source_type", "Worker source");
+      const submittedMappingId = rowValue(formData, index, "mapping_id");
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1);
       const { data: currentMapping, error: currentMappingError } = await supabaseAdmin
         .from("field_executive_provider_mappings")
-        .select("id, provider_member_id")
+        .select("id, provider_member_id, station_id")
         .eq("company_id", companyId)
         .eq("workforce_id", workforceId)
         .is("effective_to", null)
         .neq("status", "cancelled")
         .maybeSingle();
       if (currentMappingError) throw new Error(currentMappingError.message);
+      if (currentMapping && allowedLocationIds && (!currentMapping.station_id || !allowedLocationIds.has(currentMapping.station_id))) {
+        throw new Error(`Row ${index + 1}: The existing active mapping is outside your allocated locations.`);
+      }
+      if ((currentMapping?.id ?? null) !== submittedMappingId) {
+        throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
+      }
       if (currentMapping && String(currentMapping.provider_member_id).trim().toUpperCase() !== providerMemberId.trim().toUpperCase()) {
-        throw new Error(`Row ${index + 1}: This DropX ID is already mapped to Provider Member ID ${currentMapping.provider_member_id}.`);
+        throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
       }
 
       await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
@@ -987,8 +1069,8 @@ export async function saveProviderFirstMapping(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
-  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
-    redirect("/unauthorized?page=provider_mapping&action=edit");
+  if (!canEditProviderMappings(authorization)) {
+    redirect(`/unauthorized?page=${currentProviderMappingPageCode()}&action=edit`);
   }
 
   try {
@@ -1010,9 +1092,12 @@ export async function saveProviderFirstMapping(formData: FormData) {
       supabaseAdmin.from("workforce").select("id, full_name, location_id, designation_id, designation, is_active").eq("id", workforceId).eq("company_id", companyId).is("deleted_at", null).maybeSingle(),
       supabaseAdmin.from("stations").select("id, provider_id, station_code").eq("id", stationId).eq("company_id", companyId).eq("is_active", true).maybeSingle(),
       supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id").eq("company_id", companyId).eq("provider_member_id", providerMemberId).is("effective_to", null).neq("status", "cancelled").maybeSingle(),
-      supabaseAdmin.from("field_executive_provider_mappings").select("id, payment_method_id, payment_values, pay_type, effective_from").eq("company_id", companyId).eq("workforce_id", workforceId).is("effective_to", null).neq("status", "cancelled").order("created_at", { ascending: false }).limit(1).maybeSingle()
+      supabaseAdmin.from("field_executive_provider_mappings").select("id, payment_method_id, payment_values, pay_type, effective_from, station_id").eq("company_id", companyId).eq("workforce_id", workforceId).is("effective_to", null).neq("status", "cancelled").order("created_at", { ascending: false }).limit(1).maybeSingle()
     ]);
     if (workerError || stationError || memberMappingError || workerMappingError) throw new Error(workerError?.message || stationError?.message || memberMappingError?.message || workerMappingError?.message || "Unable to load mapping data.");
+    if (workerMapping && allowedLocationIds && (!workerMapping.station_id || !allowedLocationIds.has(workerMapping.station_id))) {
+      throw new Error("The existing active mapping is outside your allocated locations.");
+    }
     if (!worker?.is_active) throw new Error("The selected workforce record is no longer active.");
     if (worker.location_id !== stationId) throw new Error("The selected workforce member belongs to a different location.");
     if (!station?.provider_id) throw new Error("The selected location does not have a provider configured.");

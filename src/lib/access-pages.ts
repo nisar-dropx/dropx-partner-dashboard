@@ -47,6 +47,7 @@ export const accessPages = [
   { code: "ops_workforce_losses", name: "Team Ops · Workforce Loss Claims", sort_order: 87 },
   { code: "ops_workforce_mileage", name: "Team Ops · Workforce Mileage Claims", sort_order: 88 },
   { code: "ops_losses", name: "Team Ops · Losses (NL / SLP)", sort_order: 89 },
+  { code: "ops_provider_mapping", name: "ID Mapping", sort_order: 89 },
   { code: "ops_workforce_payouts", name: "Workforce & Helper Payments", sort_order: 90 },
   { code: "ops_rostering", name: "Rostering", sort_order: 85 },
   { code: "service_network", name: "Network Planning", sort_order: 92 },

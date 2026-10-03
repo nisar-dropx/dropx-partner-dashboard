@@ -25,6 +25,7 @@ export const opsAccessPageCodes = [
   "ops_workforce_losses",
   "ops_workforce_mileage",
   "ops_losses",
+  "ops_provider_mapping",
   "ops_rostering",
   "daily_submission",
   "cod",
@@ -174,8 +175,8 @@ const financePageCodes = new Set([
 
 export function currentAccessSurface(): AccessSurface {
   const host = (
-    headers().get("x-forwarded-host") ??
     headers().get("host") ??
+    headers().get("x-forwarded-host") ??
     ""
   ).split(":")[0].toLowerCase();
   return host === "ops.dropxlogistics.com" || host.startsWith("ops-") ? "ops" : "dashboard";
@@ -183,8 +184,8 @@ export function currentAccessSurface(): AccessSurface {
 
 export function currentAdminAccessSurface(): AdminAccessSurface {
   const host = (
-    headers().get("x-forwarded-host") ??
     headers().get("host") ??
+    headers().get("x-forwarded-host") ??
     ""
   ).split(":")[0].toLowerCase();
   if (isPeopleHostName(host)) return "people";

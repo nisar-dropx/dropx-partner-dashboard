@@ -8,6 +8,7 @@ import {
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
@@ -86,14 +87,15 @@ export default async function DirectPaymentAllocationsPage({
   searchParams?: { audience?: string; q?: string };
 }) {
   const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
-  const authorization = await requirePagePermission("provider_mapping", "access");
+  const pageCode = currentProviderMappingPageCode();
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const permission = authorization.permissions.provider_mapping;
+  const permission = authorization.permissions[pageCode];
   const canEdit = Boolean(permission?.canAdd || permission?.canEdit);
   const flash = loadFlash();
 
   if (!supabaseAdmin) {
-    return <AppShell active="ID Mapping" pageCode="provider_mapping">
+    return <AppShell active="ID Mapping" pageCode={pageCode}>
       <PageHead eyebrow="Direct workforce pay" title="Direct pay allocations" />
       <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section>
     </AppShell>;
@@ -229,7 +231,7 @@ export default async function DirectPaymentAllocationsPage({
   const migrationMissing = loadError?.message?.includes(audience === "helpers" ? "helper_payment_allocations" : "workforce_payment_allocations")
     || loadError?.message?.includes("provider_mapping_required");
 
-  return <AppShell active="ID Mapping" pageCode="provider_mapping">
+  return <AppShell active="ID Mapping" pageCode={pageCode}>
     <PageHead
       eyebrow="Provider-independent pay"
       subtitle={audience === "helpers"

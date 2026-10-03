@@ -4,6 +4,7 @@ import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
 import { timeoutFetch } from "@/lib/timeout-fetch";
 import { TimeoutError, withTimeout } from "@/lib/with-timeout";
 import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
+import { providerMappingPageCodeForHost } from "@/lib/provider-mapping-host";
 
 const AUTH_TIMEOUT_MS = 5000;
 const AUTH_CLAIMS_TIMEOUT_MS = 3000;
@@ -169,8 +170,14 @@ export async function middleware(request: NextRequest) {
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
+  const isProviderMappingPath = path === "/provider-mapping" || path.startsWith("/provider-mapping/");
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
-    path === "/business-documents" || path.startsWith("/business-documents/");
+    path === "/business-documents" || path.startsWith("/business-documents/") ||
+    isProviderMappingPath;
+
+  if (isProviderMappingPath && !providerMappingPageCodeForHost(host)) {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "provider_mapping_portal", path));
+  }
 
   if (isDashboardHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));

@@ -223,7 +223,7 @@ test("provider-first renders only the selected page and saves without navigation
   const end = actions.indexOf("/** Links an imported provider member", start);
   const inlineAction = actions.slice(start, end);
   assert.match(inlineAction, /getAuthorization\(\)/);
-  assert.match(inlineAction, /hasPermission\(authorization, "provider_mapping", "edit"\)/);
+  assert.match(inlineAction, /canEditProviderMappings\(authorization\)/);
   assert.match(inlineAction, /saveExecutiveMappingRow/);
   assert.doesNotMatch(inlineAction, /redirect\(|revalidatePath\(/);
   assert.match(actions, /isScientificProviderMemberId\(providerMemberId\)/);
