@@ -49,29 +49,109 @@ export type ProviderFirstFilters = {
 export type ProviderFirstPageSize = 50 | 100 | 500 | 1000 | "all";
 
 const SCIENTIFIC_ID_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/;
-const MAX_DISPLAY_ID_LENGTH = 64;
+
+export type ProviderFirstSourceMember = {
+  providerMemberId: string;
+  providerMemberName: string;
+  stationCode: string;
+  workDate?: string;
+};
+
+export function isScientificProviderMemberId(value: string) {
+  return SCIENTIFIC_ID_PATTERN.test(String(value ?? "").trim());
+}
+
+export function providerMemberIdFromSpreadsheetCells(formattedValue: unknown, rawValue: unknown) {
+  const formattedId = String(formattedValue ?? "").trim();
+  const rawId = String(rawValue ?? "").trim();
+  return {
+    providerMemberId: typeof rawValue === "number" && isScientificProviderMemberId(formattedId)
+      ? rawId
+      : formattedId || rawId,
+    providerMemberIdUnsafeNumber: typeof rawValue === "number"
+      && (!Number.isSafeInteger(rawValue) || Math.abs(rawValue) >= 1_000_000_000_000_000)
+  };
+}
+
+export function providerSourceMemberKey(stationCode: string, providerMemberId: string) {
+  return `${String(stationCode ?? "").trim().toUpperCase()}|${String(providerMemberId ?? "").trim().toUpperCase()}`;
+}
+
+export function scientificProviderIdCouldRepresent(scientificId: string, exactId: string) {
+  const source = String(scientificId ?? "").trim();
+  const exact = String(exactId ?? "").trim();
+  if (source.length > 128 || exact.length > 128) return false;
+  const match = source.match(SCIENTIFIC_ID_PATTERN);
+  if (!match || !/^\d+$/.test(exact) || match[1] === "-") return false;
+  const [, , whole, fraction = "", exponentText] = match;
+  const exponent = Number(exponentText);
+  const scale = exponent - fraction.length;
+  if (!Number.isSafeInteger(exponent) || scale < 0 || scale > 64) return false;
+  const mantissaDigits = `${whole}${fraction}`;
+  if (!/^\d+$/.test(mantissaDigits) || mantissaDigits.replace(/^0+/, "").length < 6) return false;
+
+  try {
+    const quantum = BigInt(`1${"0".repeat(scale)}`);
+    const center = BigInt(mantissaDigits) * quantum;
+    const candidate = BigInt(exact);
+    const distance = candidate >= center ? candidate - center : center - candidate;
+    return distance * BigInt(2) < quantum;
+  } catch {
+    return false;
+  }
+}
+
+function providerSourceIdentity(member: ProviderFirstSourceMember) {
+  const station = String(member.stationCode ?? "").trim().toUpperCase();
+  const name = String(member.providerMemberName ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+  return name ? `${station}|${name}` : `${station}|ID:${String(member.providerMemberId ?? "").trim().toUpperCase()}`;
+}
 
 /**
- * Expands a scientific-notation source ID without converting it through a
- * JavaScript number. This is display-only: the raw imported ID remains the
- * value used for matching and saving because the source may already be
- * rounded (for example, `2.00001E+12`).
+ * Old shipment files sometimes stored a rounded scientific value instead of
+ * the provider's real member ID. When the same station and holder name also
+ * has one compatible, unambiguous full ID, keep that full-ID record and suppress the
+ * rounded duplicate. If no exact record exists (or more than one exists), keep
+ * the source rows unchanged instead of inventing an ID from rounded digits.
  */
-export function providerMemberIdDisplay(value: string) {
-  const source = String(value ?? "").trim();
-  const match = source.match(SCIENTIFIC_ID_PATTERN);
-  if (!match) return source;
+export function canonicalizeProviderFirstMembers<T extends ProviderFirstSourceMember>(
+  members: T[],
+  protectedSourceKeys: ReadonlySet<string> = new Set()
+) {
+  const groups = new Map<string, T[]>();
+  for (const member of members) {
+    const key = providerSourceIdentity(member);
+    const group = groups.get(key);
+    if (group) group.push(member);
+    else groups.set(key, [member]);
+  }
 
-  const [, sign, whole, fraction = "", exponentText] = match;
-  const exponent = Number(exponentText);
-  const digits = `${whole}${fraction}`;
-  if (!Number.isSafeInteger(exponent) || digits.length + Math.abs(exponent) > MAX_DISPLAY_ID_LENGTH) return source;
-  const decimalIndex = whole.length + exponent;
-  const prefix = sign === "-" ? "-" : "";
+  const canonical: T[] = [];
+  for (const group of groups.values()) {
+    const exactMembers = group.filter((member) => !isScientificProviderMemberId(member.providerMemberId));
+    const scientificMembers = group.filter((member) => isScientificProviderMemberId(member.providerMemberId));
+    if (!exactMembers.length || !scientificMembers.length) {
+      canonical.push(...group);
+      continue;
+    }
 
-  if (decimalIndex <= 0) return `${prefix}0.${"0".repeat(-decimalIndex)}${digits}`;
-  if (decimalIndex >= digits.length) return `${prefix}${digits}${"0".repeat(decimalIndex - digits.length)}`;
-  return `${prefix}${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+    const newestExactById = new Map<string, T>();
+    for (const member of exactMembers) {
+      const id = String(member.providerMemberId ?? "").trim().toUpperCase();
+      const current = newestExactById.get(id);
+      if (!current || String(member.workDate ?? "").localeCompare(String(current.workDate ?? "")) > 0) {
+        newestExactById.set(id, member);
+      }
+    }
+    const canonicalExactMembers = Array.from(newestExactById.values());
+    const unresolvedScientific = scientificMembers.filter((member) =>
+      protectedSourceKeys.has(providerSourceMemberKey(member.stationCode, member.providerMemberId))
+      || protectedSourceKeys.has(providerSourceMemberKey("*", member.providerMemberId))
+      || canonicalExactMembers.filter((candidate) => scientificProviderIdCouldRepresent(member.providerMemberId, candidate.providerMemberId)).length !== 1
+    );
+    canonical.push(...canonicalExactMembers, ...unresolvedScientific);
+  }
+  return canonical;
 }
 
 export function providerMemberKey(stationId: string, providerMemberId: string) {
@@ -91,6 +171,7 @@ export function providerFirstRowIssue(
   worker: ProviderFirstWorkerView | undefined,
   method: ProviderFirstPaymentMethodView | undefined
 ) {
+  if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
   if (!row.workforceId) return "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
   if (worker.stationId !== row.stationId) return "Location mismatch.";
