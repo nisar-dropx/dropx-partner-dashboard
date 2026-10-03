@@ -1,3 +1,5 @@
+import { currentAccessSurface } from "@/lib/access-surface";
+import { loadOpsWorkforceLocations } from "@/lib/ops-workforce-locations";
 import { NextResponse, type NextRequest } from "next/server";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -60,13 +62,18 @@ export async function GET(request: NextRequest) {
   try {
     const authorization = await getAuthorization();
     if (!authorization) return NextResponse.json({ error: "Login is required." }, { status: 401 });
-    if (!hasPermission(authorization, "people_all", "access")) {
+    const surface = currentAccessSurface();
+    const canView = surface === "ops"
+      ? hasPermission(authorization, "delivery_associates", "access")
+      : hasPermission(authorization, "people_all", "access");
+    if (!canView) {
       return NextResponse.json({ error: "You do not have access to All People." }, { status: 403 });
     }
     if (!supabaseAdmin) return NextResponse.json({ error: "Profile storage is not configured." }, { status: 500 });
 
     const companyId = requireCompanyId(authorization);
     const category = normalizeWorkforceCategoryCode(request.nextUrl.searchParams.get("category"));
+    if (surface === "ops" && category !== "workforce") return NextResponse.json({ error: "Attachment access denied." }, { status: 403 });
     const id = String(request.nextUrl.searchParams.get("id") ?? "").trim();
     const column = attachmentFields[String(request.nextUrl.searchParams.get("field") ?? "")];
     const source = sourceFor(category);
@@ -93,8 +100,9 @@ export async function GET(request: NextRequest) {
     if (!row) return NextResponse.json({ error: "Profile was not found." }, { status: 404 });
 
     const ownerAccess = isCompanyOwner(authorization);
+    if (surface === "ops" && !(await loadOpsWorkforceLocations(companyId, authorization)).some(station => station.id === row.location_id)) return NextResponse.json({ error: "Attachment access denied." }, { status: 403 });
     const locationId = String(row.location_id ?? "").trim();
-    if (!ownerAccess && !authorization.hasAllLocationAccess &&
+    if (surface !== "ops" && !ownerAccess && !authorization.hasAllLocationAccess &&
         (!locationId || !authorization.locationScopeIds.includes(locationId))) {
       return NextResponse.json({ error: "Attachment access denied." }, { status: 403 });
     }
@@ -108,7 +116,7 @@ export async function GET(request: NextRequest) {
     const designation = (designationResult.data ?? []).find((item) => source.designationField === "designation_id"
       ? String(item.id ?? "") === designationValue
       : String(item.name ?? "").trim().toLowerCase() === designationValue.toLowerCase());
-    if (!canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess })) {
+    if (!canAccessDesignationPortal(designation, surface, "view", { isOwner: ownerAccess })) {
       return NextResponse.json({ error: "Attachment access denied." }, { status: 403 });
     }
 

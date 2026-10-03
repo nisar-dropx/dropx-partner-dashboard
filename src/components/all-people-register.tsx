@@ -515,7 +515,7 @@ function AllPeopleActionMenu({ row }: { row: AllPeopleRow }) {
   );
 }
 
-export function AllPeopleRegister({ rows, editOptions = {}, today }: { rows: AllPeopleRow[]; editOptions?: SheetEditOptions; today: string }) {
+export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath = "/people/all" }: { rows: AllPeopleRow[]; editOptions?: SheetEditOptions; today: string; registerPath?: string }) {
   const searchParams = useSearchParams();
   const editableSheet = searchParams.get("layout") === "edit-sheet";
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
@@ -894,7 +894,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today }: { rows: All
           }} type="button">
             <Download aria-hidden="true" size={16} /> Export
           </button>
-          <PendingLink className="button secondary" href={editableSheet ? "/people/all" : "/people/all?layout=edit-sheet"}>{editableSheet ? "Register view" : "Editable sheet"}</PendingLink>
+          <PendingLink className="button secondary" href={editableSheet ? registerPath : `${registerPath}${registerPath.includes("?") ? "&" : "?"}layout=edit-sheet`}>{editableSheet ? "Register view" : "Editable sheet"}</PendingLink>
         </div>
       </div>
       <div className="table-wrap field-executive-table-wrap employee-table-wrap all-people-table-wrap" ref={tableWrapRef}>

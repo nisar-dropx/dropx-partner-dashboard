@@ -279,3 +279,95 @@ export async function resolveConnectActorUserIds(account: ConnectActorAccount): 
   return [...ids];
 }
 
+function indiaToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+/** Assigned approver ids plus everyone who reports up to this account, so a higher manager can see and take those steps. */
+export async function resolveConnectVisibleApproverUserIds(account: ConnectActorAccount): Promise<string[]> {
+  const ids = new Set(await resolveConnectActorUserIds(account));
+  const personId = await personIdForAccount(account);
+  if (!personId) return [...ids];
+  const asOf = indiaToday();
+  const engagement = await db().from("hr_engagements").select("id")
+    .eq("company_id", account.companyId).eq("person_id", personId).eq("status", "active").limit(1).maybeSingle();
+  if (engagement.error || !engagement.data) return [...ids];
+  const assignment = await db().from("hr_work_assignments").select("id")
+    .eq("company_id", account.companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .lte("effective_from", asOf).or(`effective_to.is.null,effective_to.gte.${asOf}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data) return [...ids];
+  const rels = await db().from("hr_reporting_relationships").select("subject_assignment_id,manager_assignment_id")
+    .eq("company_id", account.companyId).eq("relationship_type", "solid_line").eq("is_primary", true)
+    .lte("effective_from", asOf).or(`effective_to.is.null,effective_to.gte.${asOf}`);
+  if (rels.error) return [...ids];
+  const children = new Map<string, string[]>();
+  for (const row of rels.data ?? []) {
+    const list = children.get(row.manager_assignment_id) ?? [];
+    list.push(row.subject_assignment_id);
+    children.set(row.manager_assignment_id, list);
+  }
+  const below: string[] = [];
+  const queue = [assignment.data.id as string];
+  const seen = new Set(queue);
+  while (queue.length) {
+    const current = queue.shift()!;
+    for (const child of children.get(current) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      below.push(child);
+      queue.push(child);
+    }
+  }
+  if (!below.length) return [...ids];
+  const assignments = await db().from("hr_work_assignments").select("engagement_id").eq("company_id", account.companyId).in("id", below);
+  const engagementIds = [...new Set((assignments.data ?? []).map((row) => row.engagement_id).filter(Boolean))];
+  if (!engagementIds.length) return [...ids];
+  const engagements = await db().from("hr_engagements").select("person_id").eq("company_id", account.companyId).in("id", engagementIds);
+  const personIds = [...new Set((engagements.data ?? []).map((row) => row.person_id).filter(Boolean))];
+  if (!personIds.length) return [...ids];
+  const links = await db().from("hr_user_person_links").select("user_id")
+    .eq("company_id", account.companyId).eq("status", "active").in("person_id", personIds);
+  for (const row of links.data ?? []) if (row.user_id) ids.add(row.user_id);
+  return [...ids];
+}
+
+export async function adoptPendingStepForHigherManager(input: {
+  companyId: string;
+  actorUserId: string;
+  table: string;
+  parentColumn: string;
+  parentId: string;
+}) {
+  const selfIds = new Set(await resolveConnectActorUserIds({ companyId: input.companyId, id: input.actorUserId, profileType: "user" } as ConnectActorAccount));
+  selfIds.add(input.actorUserId);
+  const visible = await resolveConnectVisibleApproverUserIds({ companyId: input.companyId, id: input.actorUserId, profileType: "user" } as ConnectActorAccount);
+  const below = new Set(visible.filter((id) => !selfIds.has(id)));
+  const pending = await db().from(input.table).select("id,approver_user_id")
+    .eq("company_id", input.companyId).eq(input.parentColumn, input.parentId).eq("status", "pending")
+    .order("step_order").limit(1).maybeSingle();
+  if (pending.error || !pending.data?.approver_user_id) return;
+  if (selfIds.has(pending.data.approver_user_id)) return;
+  if (!below.has(pending.data.approver_user_id)) return;
+  const now = new Date().toISOString();
+  let claimed = await db().from(input.table).update({
+    approver_user_id: input.actorUserId,
+    fallback_reason: "Higher manager on the reporting line",
+    updated_at: now
+  }).eq("id", pending.data.id);
+  if (claimed.error && /fallback_reason/i.test(claimed.error.message)) {
+    claimed = await db().from(input.table).update({ approver_user_id: input.actorUserId, updated_at: now }).eq("id", pending.data.id);
+  }
+  if (claimed.error) throw new Error(claimed.error.message);
+  const queued = await db().from(input.table).select("id,approver_user_id")
+    .eq("company_id", input.companyId).eq(input.parentColumn, input.parentId).eq("status", "queued");
+  if (queued.error) return;
+  const skipIds = (queued.data ?? []).filter((row) => selfIds.has(row.approver_user_id) || below.has(row.approver_user_id)).map((row) => row.id);
+  if (!skipIds.length) return;
+  await db().from(input.table).update({
+    status: "skipped",
+    decision_note: "Skipped because a higher manager approved",
+    updated_at: now
+  }).in("id", skipIds);
+}
+

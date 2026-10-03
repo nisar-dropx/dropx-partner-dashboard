@@ -5,6 +5,7 @@ import { isManagingPartnerDesignation } from "@/lib/approval-designation-labels"
 import { isAdvanceEligible } from "@/lib/advance-eligibility";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { createAppNotification } from "@/lib/app-notifications";
+import { openPayAdvanceOnExpenseChain } from "@/lib/payment-advance-approval";
 import { sendPaymentAdvanceRequestNotification, sendPaymentAdvanceWithdrawalNotification } from "@/lib/payment-advance-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
@@ -180,6 +181,25 @@ export async function POST(request: NextRequest) {
       .select("id, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
       .single();
     if (result.error) throw new Error(result.error.message);
+    if (!directApprove) {
+      if (account.profileType !== "employee" && account.profileType !== "contractor") {
+        await supabaseAdmin.from("payment_advance_requests").delete().eq("id", result.data.id);
+        throw new Error("Advance requests are available for employees and contractors.");
+      }
+      try {
+        await openPayAdvanceOnExpenseChain({
+          companyId: account.companyId,
+          profileType: account.profileType,
+          accountId: account.accountId,
+          amount,
+          purpose,
+          paymentRequestId: String(result.data.id)
+        });
+      } catch (chainError) {
+        await supabaseAdmin.from("payment_advance_requests").delete().eq("id", result.data.id);
+        throw chainError;
+      }
+    }
     await createAppNotification({
       accountId: account.accountId,
       companyId: account.companyId,

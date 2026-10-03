@@ -1,3 +1,5 @@
+import { activeWorkforceRegistration } from "@/lib/workforce-registration-progress";
+import type { AccessSurface } from "@/lib/access-surface";
 import type { AllPeopleRow } from "@/components/all-people-register";
 import { allPeopleExportColumns, type AllPeopleExportValues } from "@/lib/all-people-export";
 import { ALL_PEOPLE_SHEET_EDITABLE_KEYS } from "@/lib/all-people-sheet";
@@ -77,7 +79,7 @@ export async function loadCanonicalWorkforcePeople(
   companyId: string,
   locationScopeIds: string[],
   hasAllLocationAccess: boolean,
-  actions: { canEdit: boolean; canView: boolean; isOwner?: boolean } = { canEdit: false, canView: false }
+  actions: { canEdit: boolean; canView: boolean; isOwner?: boolean; surface?: AccessSurface; basePath?: string; activeOnly?: boolean } = { canEdit: false, canView: false }
 ): Promise<{ rows: AllPeopleRow[]; error: string | null }> {
   if (!supabaseAdmin) return { rows: [], error: "Supabase service role key is not configured." };
 
@@ -91,6 +93,7 @@ export async function loadCanonicalWorkforcePeople(
   const seen = new Set<string>();
   const rows = ((result.data ?? []) as unknown as Record<string, unknown>[])
     .filter((row) => hasAllLocationAccess || locationScopeIds.includes(String(row.location_id ?? "")))
+    .filter((row) => !actions.activeOnly || activeWorkforceRegistration(row))
     .filter((row) => {
       const key = String(row.id ?? "");
       if (!key || seen.has(key)) return false;
@@ -99,7 +102,7 @@ export async function loadCanonicalWorkforcePeople(
     })
     .filter((row) => {
       const designationRecord = first(row.designations as { portal_permissions?: unknown } | Array<{ portal_permissions?: unknown }> | null);
-      return canAccessDesignationPortal(designationRecord, "dashboard", "view", { isOwner: actions.isOwner });
+      return canAccessDesignationPortal(designationRecord, actions.surface ?? "dashboard", "view", { isOwner: actions.isOwner });
     })
     .map((row) => {
       const station = first(row.stations as { station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null } | Array<{ station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null }> | null);
@@ -113,7 +116,7 @@ export async function loadCanonicalWorkforcePeople(
           ? onboardingStatus.replace(/\b\w/g, (letter) => letter.toUpperCase())
           : "Active"
         : "Inactive";
-      const canEdit = actions.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: actions.isOwner });
+      const canEdit = actions.canEdit && canAccessDesignationPortal(designationRecord, actions.surface ?? "dashboard", "edit", { isOwner: actions.isOwner });
       return {
         id: String(row.id),
         category: "Workforce",
@@ -125,8 +128,8 @@ export async function loadCanonicalWorkforcePeople(
         email: String(row.email ?? "-") || "-",
         location, model, provider, designation,
         status,
-        viewHref: actions.canView ? `/workforce?view=${encodeURIComponent(String(row.id))}` : undefined,
-        editHref: actions.canEdit ? `/workforce?edit=${encodeURIComponent(String(row.id))}` : undefined,
+        viewHref: actions.canView ? `${actions.basePath ?? "/workforce"}?view=${encodeURIComponent(String(row.id))}` : undefined,
+        editHref: actions.canEdit ? `${actions.basePath ?? "/workforce"}?edit=${encodeURIComponent(String(row.id))}` : undefined,
         canEdit,
         version: String(row.updated_at ?? ""),
         locationId: String(row.location_id ?? ""),

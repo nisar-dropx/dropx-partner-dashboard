@@ -18,7 +18,7 @@ function fixture() {
   }, async rpc(name,args){state.rpcCalls.push({name,args});return {data:'pending',error:state.error}} };
   const mod={exports:{}};
   const source=ts.transpileModule(fs.readFileSync(new URL('./connect-pay-advance-approval-data.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const mocks={'server-only':{},'./connect-approver-identity':{resolveConnectActorUserIds:async()=>state.actors},'./connect-pay-advance-approval':{payAdvanceDecision,payAdvanceFinanceTerms},'./supabase-admin':{supabaseAdmin:db}};
+  const mocks={'server-only':{},'./connect-approver-identity':{resolveConnectActorUserIds:async()=>state.actors,resolveConnectVisibleApproverUserIds:async()=>state.actors,adoptPendingStepForHigherManager:async()=>{}},'./connect-pay-advance-approval':{payAdvanceDecision,payAdvanceFinanceTerms},'./supabase-admin':{supabaseAdmin:db}};
   new Function('require','module','exports',source)(id=>{assert.ok(id in mocks,id);return mocks[id]},mod,mod.exports);
   return {state,...mod.exports};
 }

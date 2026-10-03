@@ -492,12 +492,13 @@ export function ConnectAttendance({ account, active = true }: { account: Account
               {Array.from({ length: leading }).map((_, index) => <span key={`blank-${index}`} />)}
               {Array.from({ length: days }, (_, index) => index + 1).map((day) => {
                 const row = rowsByDay.get(day);
-                const future = new Date(year, monthNumber - 1, day) > now;
                 const date = `${year}-${String(monthNumber).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                 const insight = attendanceDayInsight(row, {
                   today: date === todayDate,
                   shiftOpen: date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
                 });
+                const scheduledRest = insight.payDayType === "week_off" || insight.payDayType === "paid_holiday";
+                const future = date > todayDate && !scheduledRest;
                 return <button aria-label={`${date}: ${future ? "Future" : insight.label}`} className={`${future ? "off" : insight.calendarClass} ${insight.issues.length ? "has-issue" : ""} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}><span>{day}</span></button>;
               })}
             </div>

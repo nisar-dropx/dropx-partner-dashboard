@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { WorkforceEmailInput } from "@/components/workforce-contact-inputs";
 import { SearchableSelect } from "@/components/searchable-select";
 
 export type ScopedLocationOption = {
@@ -8,6 +9,7 @@ export type ScopedLocationOption = {
   label: string;
   helper?: string;
   modelId?: string | null;
+  requiresStationEmail?: boolean;
 };
 
 export type ScopedDesignationOption = {
@@ -40,7 +42,8 @@ export function ScopedDesignationFields({
   locationName,
   locationOptions,
   onDesignationChange,
-  required = true
+  required = true,
+  email
 }: {
   designationName: string;
   designationOptions: ScopedDesignationOption[];
@@ -50,6 +53,7 @@ export function ScopedDesignationFields({
   locationOptions: ScopedLocationOption[];
   onDesignationChange?: (value: string) => void;
   required?: boolean;
+  email?: { defaultValue?: string; required?: boolean; preserveExisting?: boolean };
 }) {
   const [selectedLocationId, setSelectedLocationId] = useState(initialLocationId ?? "");
   const [selectedDesignation, setSelectedDesignation] = useState(initialDesignation ?? "");
@@ -59,8 +63,10 @@ export function ScopedDesignationFields({
     : filteredDesignationOptions;
   const designationDisabled = !selectedLocationId || !effectiveDesignationOptions.length;
 
+  const location = locationOptions.find(option => option.value === selectedLocationId);
   return (
     <>
+      {email ? <label>Email<WorkforceEmailInput defaultValue={email.defaultValue} required={email.required} stationCode={location?.label} requiresStationEmail={location?.requiresStationEmail} preserveExisting={email.preserveExisting && selectedLocationId === initialLocationId} /></label> : null}
       <label>Location
         <SearchableSelect
           name={locationName}
@@ -75,6 +81,7 @@ export function ScopedDesignationFields({
           value={selectedLocationId}
         />
       </label>
+
       <label>Designation
         <SearchableSelect
           disabled={designationDisabled}
@@ -89,6 +96,7 @@ export function ScopedDesignationFields({
           value={selectedDesignation}
         />
       </label>
+      {email ? <div className="span-3 workforce-email-guidance" role="note">{location?.requiresStationEmail ? <>for amazon edsp, xpt and amxl, use a mailbox ending in <strong>.{location.label.toLowerCase()}</strong> before @. example: <strong>akshay.{location.label.toLowerCase()}@outlook.com</strong>. any email domain is allowed.</> : location ? <>any valid email address can be used for this location.</> : <>amazon edsp, xpt and amxl require .stationcode before @ (for example akshay.koza@outlook.com). flipkart locations accept any valid email. select a location to see its requirement.</>}</div> : null}
     </>
   );
 }

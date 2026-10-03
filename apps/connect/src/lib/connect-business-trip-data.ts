@@ -2,6 +2,7 @@ import "server-only";
 import { loadTimeOffAttachments, type TimeOffAttachmentFields } from "./connect-time-off-attachments";
 
 import { isManagingPartnerDesignation, isWfhHardBlockedDesignation } from "./approval-designation-labels";
+import { adoptPendingStepForHigherManager } from "./connect-approver-identity";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import type { ConnectAccount } from "./connect-auth";
 import {
@@ -462,6 +463,13 @@ export async function decideConnectBusinessTripApproval(input: {
   if (input.decision === "returned" && (input.note ?? "").trim().length < 3) {
     throw new Error("Add a short note explaining why the request is being returned.");
   }
+  await adoptPendingStepForHigherManager({
+    companyId: input.companyId,
+    actorUserId: input.approverUserId,
+    table: "hr_business_trip_approval_steps",
+    parentColumn: "request_id",
+    parentId: input.requestId
+  });
   const result = await db().rpc("hr_decide_business_trip_manager", {
     p_company_id: input.companyId,
     p_request_id: input.requestId,

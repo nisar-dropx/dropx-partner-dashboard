@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
+import { resolveConnectActorUserId, resolveConnectActorUserIds, resolveConnectVisibleApproverUserIds } from "../../../../src/lib/connect-approver-identity";
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
@@ -90,7 +90,7 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
-    const approverUserIds = await resolveConnectActorUserIds(account);
+    const approverUserIds = await resolveConnectVisibleApproverUserIds(account);
     const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals, payAdvanceApprovals, paymentApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length

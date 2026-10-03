@@ -1,3 +1,5 @@
+import { currentAccessSurface } from "@/lib/access-surface";
+import { loadOpsWorkforceLocations } from "@/lib/ops-workforce-locations";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -132,6 +134,8 @@ async function dashboardAccount(accountId: string, profileType: string, pageCode
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const authorization = await getAuthorization();
   if (!authorization) throw new Error("Login required.");
+  const surface = currentAccessSurface();
+  if (authorization.readOnly || (surface === "ops" && !["workforce", "field_executive"].includes(profileType))) throw new Error("Profile verification is not available for this account.");
   if (!isWorkforceProfileType(profileType)) throw new Error("Invalid profile type.");
   const config = nonEmployeeConfigForProfileType(profileType);
   const permissionCode = profileType === "employee"
@@ -157,7 +161,8 @@ async function dashboardAccount(accountId: string, profileType: string, pageCode
   const row = result.data;
   if (!row) throw new Error("Account not found.");
   const locationId = text(row.location_id);
-  if (!isCompanyOwner(authorization) && !authorization.hasAllLocationAccess &&
+  if (surface === "ops" && !(await loadOpsWorkforceLocations(companyId, authorization)).some(station => station.id === locationId)) throw new Error("This profile is outside your location access.");
+  if (surface !== "ops" && !isCompanyOwner(authorization) && !authorization.hasAllLocationAccess &&
       (!locationId || !authorization.locationScopeIds.includes(locationId))) {
     throw new Error("This profile is outside your location access.");
   }
@@ -170,8 +175,8 @@ async function dashboardAccount(accountId: string, profileType: string, pageCode
   const designation = (designationResult.data ?? []).find((item) => designationField === "designation_id"
     ? text(item.id) === designationValue
     : text(item.name).toLowerCase() === designationValue.toLowerCase());
-  if (!canAccessDesignationPortal(designation, "dashboard", "edit", { isOwner: isCompanyOwner(authorization) })) {
-    throw new Error("This designation does not allow profile verification from Dashboard.");
+  if (!canAccessDesignationPortal(designation, surface, "edit", { isOwner: isCompanyOwner(authorization) })) {
+    throw new Error("This designation does not allow profile verification from this portal.");
   }
   const accountCode = profileType === "employee"
     ? compact((row as { employee_code?: unknown }).employee_code)

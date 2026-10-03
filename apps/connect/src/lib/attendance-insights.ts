@@ -298,12 +298,13 @@ export function attendanceDayInsight(
   }
 
   if (isHolidayDay) {
+    const holidayTitle = /present/.test(state) ? label : (state && state !== "holiday" ? label : "Holiday");
     return {
       calendarClass: "week-off",
       detail: "Paid holiday is recorded for this day.",
-      headline: /present/.test(state) ? label : "Holiday",
+      headline: holidayTitle,
       issues: [],
-      label: /present/.test(state) ? label : "Holiday",
+      label: holidayTitle,
       needsRegularization: false,
       payDayType: "paid_holiday",
       tone: "amber"

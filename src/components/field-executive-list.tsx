@@ -24,6 +24,8 @@ export type FieldExecutiveListRow = {
   dateOfJoin?: string | null;
   onboardingStatus?: string | null;
   registrationDraftAt?: string | null;
+  registrationFields?: Record<string, boolean>;
+  registrationPending?: boolean;
   canEdit?: boolean;
   canQueueAmazonId?: boolean;
   partnerOnboarding?:import("@/lib/partner-onboarding").PartnerOnboardingState;
@@ -296,7 +298,7 @@ export function FieldExecutiveList({
                 <td>{row.location}</td>
                 <td>{row.designation}</td>
                 <td><StatusPill status={row.status} /></td>
-                {showActions ? <td className="action-cell">{row.partnerOnboarding?<><PartnerProgressNote state={row.partnerOnboarding} workforceId={row.id} canEdit={Boolean(row.canEdit)}/></>:null}{row.canQueueAmazonId ? <form action={queueAmazonInvitationFromOpsPulse}><input name="workforce_id" type="hidden" value={row.id} /><button className="row-action-item" type="submit">Create Amazon ID</button></form> : null}
+                {showActions ? <td className="action-cell">{row.partnerOnboarding?<><PartnerProgressNote state={row.partnerOnboarding} workforceId={row.id} canEdit={canEdit && Boolean(row.canEdit)} returnPath={basePath}/></>:null}{canEdit && row.canQueueAmazonId ? <form action={queueAmazonInvitationFromOpsPulse}><input name="workforce_id" type="hidden" value={row.id} /><input name="return_path" type="hidden" value={basePath} /><button className="row-action-item" type="submit">Create Amazon ID</button></form> : null}
                   <div className="row-action-menu" ref={openMenuId === row.id ? menuRef : undefined}>
                     <button
                       aria-expanded={openMenuId === row.id}

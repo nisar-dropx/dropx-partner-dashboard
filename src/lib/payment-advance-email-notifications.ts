@@ -2,7 +2,7 @@ import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { approvalEmailCard } from "@/lib/approval-email-card";
 
-const PAYMENT_APPROVALS_URL = "https://ops.dropxlogistics.com/payments/approvals";
+const PAYMENT_APPROVALS_URL = "https://people.dropxlogistics.com/pay-advances";
 
 export type PaymentAdvanceEmailResult =
   | { sent: true; cc: string[]; to: string[] }
@@ -18,25 +18,6 @@ function clean(value: unknown) {
 
 function uniqueEmails(values: (string | null | undefined)[]) {
   return Array.from(new Set(values.map((email) => String(email ?? "").trim().toLowerCase()).filter((email) => email.includes("@"))));
-}
-
-/** Advance requests have no per-request approver on the row - decideAdvanceRequest
- * (advance-request/actions.ts) restricts the decision to company owners, so "the
- * approver" is dynamically resolved here as every active company-owner profile. */
-async function ownerEmails(companyId: string) {
-  if (!supabaseAdmin) return [];
-  const ownerRole = await supabaseAdmin.from("user_roles").select("id").eq("company_id", companyId).eq("code", "OWNER").eq("is_active", true);
-  const roleIds = (ownerRole.data ?? []).map((role) => role.id);
-  const [roleOwners, masterOwners] = await Promise.all([
-    roleIds.length
-      ? supabaseAdmin.from("company_product_memberships").select("user_id").eq("company_id", companyId).eq("is_active", true).in("role_id", roleIds)
-      : Promise.resolve({ data: [], error: null }),
-    supabaseAdmin.from("profiles").select("id").eq("company_id", companyId).eq("is_active", true).eq("is_master_owner", true)
-  ]);
-  const userIds = [...new Set([...(roleOwners.data ?? []).map((row) => row.user_id), ...(masterOwners.data ?? []).map((row) => row.id)])];
-  if (!userIds.length) return [];
-  const profiles = await supabaseAdmin.from("profiles").select("email").eq("company_id", companyId).eq("is_active", true).in("id", userIds);
-  return uniqueEmails((profiles.data ?? []).map((row) => row.email));
 }
 
 type AdvanceRequestRow = {
@@ -58,6 +39,18 @@ type AdvanceRequestRow = {
 };
 
 const sourceAppLabels: Record<string, string> = { ops: "Ops", one_app: "One App", hrms: "HRMS" };
+
+async function currentApproverEmails(companyId: string, paymentRequestId: string) {
+  if (!supabaseAdmin) return [];
+  const hr = await supabaseAdmin.from("hr_pay_advance_requests").select("id")
+    .eq("company_id", companyId).eq("external_source", "payment_advance_requests").eq("external_reference", paymentRequestId).maybeSingle();
+  if (hr.error || !hr.data) return [];
+  const step = await supabaseAdmin.from("hr_pay_advance_steps").select("approver_user_id")
+    .eq("company_id", companyId).eq("request_id", hr.data.id).eq("status", "pending").order("step_order").limit(1).maybeSingle();
+  if (step.error || !step.data?.approver_user_id) return [];
+  const profile = await supabaseAdmin.from("profiles").select("email").eq("company_id", companyId).eq("id", step.data.approver_user_id).maybeSingle();
+  return uniqueEmails([profile.data?.email]);
+}
 
 async function requesterEmail(companyId: string, request: AdvanceRequestRow) {
   if (!supabaseAdmin) return null;
@@ -109,12 +102,12 @@ function buildSubjectBody(request: AdvanceRequestRow, companyName: string, kind:
     introduction,
     infoLabel: purpose,
     infoValue: `${amount} · ${location}`,
-    ctaLabel: "Open in Ops",
+    ctaLabel: "Open Pay Advances",
     ctaUrl: PAYMENT_APPROVALS_URL,
     steps: kind === "submitted" || kind === "reminder" ? [
-      `Open Ops: ${PAYMENT_APPROVALS_URL}`,
-      "Find the advance request in the approvals list.",
-      "Review the amount and purpose, then Approve or Reject."
+      `Open Pay Advances: ${PAYMENT_APPROVALS_URL}`,
+      "Find the advance request assigned to you.",
+      "Review the amount and purpose, then Approve, Return or Reject."
     ] : [],
     footer: kind === "reminder" ? "Reminders are sent every 90 minutes until this request is approved or rejected." : undefined
   });
@@ -169,7 +162,7 @@ export async function sendPaymentAdvanceRequestNotification(companyId: string, r
   try {
     const request = await loadRequest(companyId, requestId);
     if (!request) return skipped("Advance request not found.");
-    const to = await ownerEmails(companyId);
+    const to = await currentApproverEmails(companyId, requestId);
     const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "submitted");
     return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: request.status === "submitted" });
   } catch (error) {
@@ -182,7 +175,7 @@ export async function sendPaymentAdvanceDecisionNotification(companyId: string, 
   try {
     const request = await loadRequest(companyId, requestId);
     if (!request) return skipped("Advance request not found.");
-    const to = uniqueEmails([await requesterEmail(companyId, request), ...(await ownerEmails(companyId))]);
+    const to = uniqueEmails([await requesterEmail(companyId, request), ...(await currentApproverEmails(companyId, requestId))]);
     const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), decision);
     return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: false });
   } catch (error) {
@@ -195,7 +188,7 @@ export async function sendPaymentAdvanceWithdrawalNotification(companyId: string
   try {
     const request = await loadRequest(companyId, requestId);
     if (!request) return skipped("Advance request not found.");
-    const to = await ownerEmails(companyId);
+    const to = await currentApproverEmails(companyId, requestId);
     const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "withdrawn");
     return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: false });
   } catch (error) {
@@ -212,7 +205,7 @@ export async function sendPaymentAdvanceReminder(companyId: string, requestId: s
       await supabaseAdmin!.from("payment_advance_requests").update({ email_next_reminder_at: null }).eq("company_id", companyId).eq("id", request.id);
       return skipped("This advance request is no longer awaiting approval.");
     }
-    const to = await ownerEmails(companyId);
+    const to = await currentApproverEmails(companyId, requestId);
     const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "reminder");
     return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: true });
   } catch (error) {
