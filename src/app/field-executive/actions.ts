@@ -28,6 +28,8 @@ import { loadClientIdMappings, needsClientId, providerMappingFor, type ClientIdW
 import { loadClientIdPartnerStates } from "@/lib/workforce-client-id-partner";
 import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
+import { loadOpsWorkforceLocations } from "@/lib/ops-workforce-locations";
+import { workforceStationPolicy, workforceStationEmailError } from "@/lib/workforce-register-policy";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
 import {
@@ -59,6 +61,7 @@ function onboardingSource(formData: FormData, fallback: string) {
 }
 
 async function scopedWorkforceLocationIds(companyId: string, authorization: AuthorizationContext) {
+  if (currentAccessSurface() === "ops") return new Set((await loadOpsWorkforceLocations(companyId, authorization)).map(location => location.id));
   if (authorization.hasAllLocationAccess || !supabaseAdmin) return null;
   const locations = await supabaseAdmin
     .from("stations")
@@ -369,12 +372,17 @@ export async function createFieldExecutive(formData: FormData) {
     }
     const { data: location, error: locationError } = await supabaseAdmin
       .from("stations")
-      .select("id, station_code")
+      .select("id, station_code, is_active, hide_from_location_list, providers(name), location_models(code,name)")
       .eq("id", locationId)
       .eq("company_id", companyId)
       .maybeSingle();
     if (locationError) throw new Error(locationError.message);
     if (!location) throw new Error("Selected location is not available for this company.");
+    if (accessSurface === "ops") {
+      if (!location.is_active || location.hide_from_location_list || workforceStationPolicy(location).excluded) throw new Error("This location is not available for workforce onboarding.");
+      const emailError = workforceStationEmailError(email, location.station_code, workforceStationPolicy(location).requiresStationEmail);
+      if (emailError) throw new Error(emailError);
+    }
     if (recruitmentLeadId) {
       if (table !== "workforce") throw new Error("Recruit candidates can only be invited to the Workforce Register.");
       const leadResult = await supabaseAdmin.from("leads")
@@ -620,25 +628,32 @@ export async function updateFieldExecutive(formData: FormData) {
     const executiveId = id;
     const existingResult = await supabaseAdmin
       .from(table)
-      .select("biometric_id, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path")
+      .select("location_id, email, biometric_id, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path")
       .eq("id", executiveId)
       .eq("company_id", companyId)
       .maybeSingle();
     if (existingResult.error) throw new Error(existingResult.error.message);
+    if (!existingResult.data) throw new Error("Associate was not found.");
+    const allowedLocationIds = await scopedWorkforceLocationIds(companyId, authorization);
+    if (allowedLocationIds && (!allowedLocationIds.has(existingResult.data.location_id) || !allowedLocationIds.has(payload.location_id))) throw new Error("Associate or selected location is outside your station scope.");
     payload.biometric_id = String((existingResult.data as { biometric_id?: string | null } | null)?.biometric_id ?? "").replace(/\D/g, "") || null;
 
-    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(payload.location_id)) {
+    if (allowedLocationIds && !allowedLocationIds.has(payload.location_id)) {
       throw new Error("You do not have access to the selected location.");
     }
     const { data: location, error: locationError } = await supabaseAdmin
       .from("stations")
-      .select("id")
+      .select("id, station_code, providers(name), location_models(code,name)")
       .eq("id", payload.location_id)
       .eq("company_id", companyId)
       .maybeSingle();
     if (locationError) throw new Error(locationError.message);
     if (!location) throw new Error("Selected location is not available for this company.");
 
+    if (currentAccessSurface() === "ops" && (payload.email !== existingResult.data.email || payload.location_id !== existingResult.data.location_id)) {
+      const emailError = workforceStationEmailError(payload.email, location.station_code, workforceStationPolicy(location).requiresStationEmail);
+      if (emailError) throw new Error(emailError);
+    }
     const designationResult = await supabaseAdmin
       .from("designations")
       .select("id, code, profile_field_rules, portal_permissions")
@@ -1162,7 +1177,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
 export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
   const authorization = await requirePagePermission("delivery_associates", "edit");
   const requestedStatus = String(formData.get("return_status") ?? "").trim().toLowerCase();
-  const destination = `/work-force-register?tab=${["interviews", "dropx-id", "amazon-id", "da-onboarding", "mapping", "attention"].includes(requestedStatus) ? requestedStatus : "amazon-id"}`;
+  const destination = formData.get("return_path") ? `${safeReturnPath(formData)}?` : `/work-force-register?tab=${["interviews", "dropx-id", "amazon-id", "da-onboarding", "mapping", "attention"].includes(requestedStatus) ? requestedStatus : "amazon-id"}`;
   try {
     if (authorization.readOnly || !supabaseAdmin) throw new Error("Amazon invitation queue is unavailable.");
     const companyId = requireCompanyId(authorization);
@@ -1275,11 +1290,12 @@ export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
 export async function recordPartnerProgress(form:FormData){
  const auth=await requirePagePermission("delivery_associates","edit");
  const requestedStatus=String(form.get("return_status")??"").trim().toLowerCase();
- const destination="/work-force-register?tab="+(["interviews","dropx-id","amazon-id","da-onboarding","attention"].includes(requestedStatus)?requestedStatus:"dropx-id");
+ const destination=form.get("return_path") ? `${safeReturnPath(form)}?` : "/work-force-register?tab="+(["interviews","dropx-id","amazon-id","da-onboarding","attention"].includes(requestedStatus)?requestedStatus:"dropx-id");
  try{
   if(!supabaseAdmin||auth.readOnly)throw new Error("Editing is unavailable.");
   const value=(key:string)=>String(form.get(key)||"").trim();
-  const result=await supabaseAdmin.rpc("workforce_record_partner_progress",{p_company:requireCompanyId(auth),p_actor:auth.userId,p_workforce:value("workforce_id"),p_locations:auth.hasAllLocationAccess?null:auth.locationScopeIds,p_reported:value("reported_on"),p_invited:value("manual_invited_on")||null,p_portal:"ops_pulse"});
+  const allowedLocations = await scopedWorkforceLocationIds(requireCompanyId(auth), auth);
+  const result=await supabaseAdmin.rpc("workforce_record_partner_progress",{p_company:requireCompanyId(auth),p_actor:auth.userId,p_workforce:value("workforce_id"),p_locations:allowedLocations?[...allowedLocations]:null,p_reported:value("reported_on"),p_invited:value("manual_invited_on")||null,p_portal:"ops_pulse"});
   if(result.error)throw new Error(result.error.message);revalidatePath("/work-force-register");redirect(destination+"&notice="+encodeURIComponent("Reporting date and partner progress saved."));
  }catch(error){if(error&&typeof error==="object"&&"digest"in error)throw error;redirect(destination+"&error="+encodeURIComponent(error instanceof Error?error.message:"Unable to record progress."));}
 }

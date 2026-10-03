@@ -1,7 +1,9 @@
 "use client";
 
 import type { ChangeEvent, InputHTMLAttributes } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { workforceStationEmailError } from "@/lib/workforce-register-policy";
 
 const EMAIL_PATTERN = "[^\\s@]+@[^\\s@]+\\.[^\\s@]+";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -57,17 +59,26 @@ export function WorkforceEmailInput({
   name = "email",
   placeholder = "Enter email",
   required,
+  stationCode = "",
+  requiresStationEmail = false,
+  preserveExisting = false,
   ...props
-}: SharedInputProps) {
+}: SharedInputProps & { stationCode?: string; requiresStationEmail?: boolean; preserveExisting?: boolean }) {
   const [value, setValue] = useState(() => String(defaultValue ?? "").trim().toLowerCase());
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  const unchanged = preserveExisting && value === defaultValue.trim().toLowerCase();
+  const error = value && !unchanged ? workforceStationEmailError(value, stationCode, requiresStationEmail) : null;
+  useEffect(() => { inputRef.current?.setCustomValidity(error ?? ""); }, [error, value]);
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     setValue(event.target.value.replace(/\s+/g, "").toLowerCase());
   }
 
   return (
+    <>
     <input
       {...props}
+      ref={inputRef}
       autoComplete="email"
       className={className}
       inputMode="email"
@@ -79,15 +90,18 @@ export function WorkforceEmailInput({
           input.setCustomValidity(required ? "Email is required." : "");
           return;
         }
-        input.setCustomValidity(EMAIL_REGEX.test(input.value) ? "" : "Enter a valid email address.");
+        input.setCustomValidity(error ?? (EMAIL_REGEX.test(input.value) ? "" : "Enter a valid email address."));
       }}
-      onInput={(event) => event.currentTarget.setCustomValidity("")}
+      onInput={(event) => event.currentTarget.setCustomValidity(unchanged ? "" : workforceStationEmailError(event.currentTarget.value, stationCode, requiresStationEmail) ?? "")}
       pattern={EMAIL_PATTERN}
       placeholder={placeholder}
       required={required}
-      title="Enter a valid email address"
+      aria-invalid={Boolean(error)}
+      title={error || "Enter a valid email address"}
       type="email"
       value={value}
     />
+    {error ? <small role="alert" style={{ color: "#b42318" }}>{error}</small> : null}
+    </>
   );
 }

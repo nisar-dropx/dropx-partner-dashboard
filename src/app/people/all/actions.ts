@@ -1,5 +1,8 @@
 "use server";
 
+import { currentAccessSurface } from "@/lib/access-surface";
+import { loadOpsWorkforceLocations } from "@/lib/ops-workforce-locations";
+import { workforceStationEmailError, workforceStationPolicy } from "@/lib/workforce-register-policy";
 import { revalidatePath } from "next/cache";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -102,7 +105,12 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id ?? ""))) return failure("Profile identifier is invalid.");
   if (!expectedUpdatedAt || !Number.isFinite(Date.parse(expectedUpdatedAt))) return failure("This row is missing its update version. Refresh the page and try again.", "CONFLICT");
 
+  const surface = currentAccessSurface();
+  if (authorization.readOnly || (surface === "ops" && categoryCode !== "workforce")) return failure("This profile is read-only.", "FORBIDDEN");
   const companyId = requireCompanyId(authorization);
+  const opsLocations = surface === "ops" ? await loadOpsWorkforceLocations(companyId, authorization) : null;
+  const allowedLocationIds = opsLocations ? opsLocations.map(location => location.id) : authorization.locationScopeIds;
+  const allLocations = surface !== "ops" && authorization.hasAllLocationAccess;
   const source = await resolveSource(companyId, categoryCode);
   if (!source || !hasPermission(authorization, source.pageCode, "edit")) return failure("You do not have permission to edit this profile.", "FORBIDDEN");
 
@@ -117,7 +125,7 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
   const current = await supabaseAdmin.from(source.table).select("*").eq("company_id", companyId).eq("id", id).maybeSingle();
   if (current.error || !current.data) return failure(current.error?.message ?? "Profile was not found.", "NOT_FOUND");
   const existing = current.data as Record<string, unknown>;
-  if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(String(existing.location_id ?? ""))) return failure("You do not have access to this profile location.", "FORBIDDEN");
+  if (!allLocations && !allowedLocationIds.includes(String(existing.location_id ?? ""))) return failure("You do not have access to this profile location.", "FORBIDDEN");
   if (!sameTimestamp(existing.updated_at, expectedUpdatedAt)) return failure("This row was updated by someone else. Refresh it before saving your changes.", "CONFLICT");
 
   const master = await supabaseAdmin.from("designations").select("id, code, name, onboarding_categories, portal_permissions")
@@ -129,7 +137,7 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
     return failure("Profile was not found in the requested category.", "NOT_FOUND");
   }
   const owner = isCompanyOwner(authorization);
-  if (!canAccessDesignationPortal(currentDesignation, "dashboard", "edit", { isOwner: owner })) return failure("You do not have permission to edit this profile designation.", "FORBIDDEN");
+  if (!canAccessDesignationPortal(currentDesignation, surface, "edit", { isOwner: owner })) return failure("You do not have permission to edit this profile designation.", "FORBIDDEN");
 
   const payload = { ...patch.payload };
   if (patch.deferred.location !== undefined) {
@@ -138,17 +146,23 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
     if (location.error) return failure(location.error.message);
     if (!location.data) return failure("Selected location is not available for this company.");
     const locationId = String(location.data.id);
-    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) return failure("You do not have access to the selected location.", "FORBIDDEN");
+    if (!allLocations && !allowedLocationIds.includes(locationId)) return failure("You do not have access to the selected location.", "FORBIDDEN");
     payload.location_id = locationId;
   }
   if (patch.deferred.designation !== undefined) {
     const next = findDesignation(designations, patch.deferred.designation);
     if (!next || !matchesCategory(next, source.categoryCode)) return failure("Selected designation is not available for this category.");
-    if (!canAccessDesignationPortal(next, "dashboard", "edit", { isOwner: owner })) return failure("You do not have permission to assign the selected designation.", "FORBIDDEN");
+    if (!canAccessDesignationPortal(next, surface, "edit", { isOwner: owner })) return failure("You do not have permission to assign the selected designation.", "FORBIDDEN");
     payload[source.designationStorage === "id" ? "designation_id" : "designation"] = source.designationStorage === "id" ? next.id : next.name;
     if (source.categoryCode === "workforce") payload.designation = next.name;
   }
 
+  if (opsLocations && (("email" in payload && payload.email !== existing.email) || ("location_id" in payload && payload.location_id !== existing.location_id))) {
+    const station = opsLocations.find(location => location.id === String(payload.location_id ?? existing.location_id));
+    if (!station) return failure("Selected location is not available for workforce onboarding.", "FORBIDDEN");
+    const error = workforceStationEmailError(String(payload.email ?? existing.email ?? ""), station.station_code ?? "", workforceStationPolicy(station).requiresStationEmail);
+    if (error) return failure(error);
+  }
   if (source.categoryCode === "employees" && existing.org_position_id) {
     const position = await supabaseAdmin.from("org_positions")
       .select("id, designation_id, location_access_mode, location_scope_ids, is_active")
@@ -274,7 +288,7 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
   }
 
   revalidatePath("/people/all");
-  if (source.categoryCode === "workforce") revalidatePath("/people/workforce");
+  if (source.categoryCode === "workforce") { revalidatePath("/people/workforce"); revalidatePath("/work-force-register"); }
   return {
     ok: true as const,
     updatedAt: String(update.data.updated_at ?? nextUpdatedAt),

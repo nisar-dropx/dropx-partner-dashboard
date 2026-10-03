@@ -26,9 +26,12 @@ test("attachment preview enforces session, All People permission, company, UUID,
   assert.match(route, /\.eq\("company_id", companyId\)[\s\S]*?\.eq\("id", id\)/);
   assert.match(route, /from\("workforce_categories"\)[\s\S]*?\.eq\("code", category\)[\s\S]*?\.eq\("is_active", true\)/);
   assert.match(route, /authorization\.locationScopeIds\.includes\(locationId\)/);
+  assert.match(route, /surface === "ops" && category !== "workforce"/);
+  assert.match(route, /loadOpsWorkforceLocations\(companyId, authorization\)/);
+  assert.match(route, /hasPermission\(authorization, "delivery_associates", "access"\)/);
   assert.match(route, /isCompanyOwner\(authorization\)/);
   assert.match(route, /from\("designations"\)[\s\S]*?\.select\("id, name, portal_permissions"\)[\s\S]*?\.eq\("company_id", companyId\)[\s\S]*?\.eq\("is_active", true\)/);
-  assert.match(route, /canAccessDesignationPortal\(designation, "dashboard", "view", \{ isOwner: ownerAccess \}\)/);
+  assert.match(route, /canAccessDesignationPortal\(designation, surface, "view", \{ isOwner: ownerAccess \}\)/);
   assert.match(route, /if \(!canAccessDesignationPortal[\s\S]*?"Attachment access denied\."[\s\S]*?status: 403/);
 });
 

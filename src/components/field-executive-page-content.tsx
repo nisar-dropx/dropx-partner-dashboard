@@ -1,6 +1,8 @@
+import { workforceRegisterLocations, workforceStationPolicy } from "@/lib/workforce-register-policy";
 import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
+import { workforceQueueCounts } from "@/lib/workforce-onboarding-queues";
+import { loadClientIdPartnerStates } from "@/lib/workforce-client-id-partner";
 import { WorkforceCostReadiness } from "@/components/workforce-cost-readiness";
-import { WorkforceOnboardingDesk } from "@/components/workforce-onboarding-desk";
 import type { ReactNode } from "react";
 import { bulkImportFieldExecutives, createFieldExecutive, reviewFieldExecutiveProfile, updateFieldExecutive } from "@/app/field-executive/actions";
 import { AppShell } from "@/components/app-shell";
@@ -33,15 +35,10 @@ import {
   nonEmployeeConfigForRoute,
   type NonEmployeeRoute
 } from "@/lib/workforce-profiles";
-import {
-  workforceOnboardingView,
-  workforceQueueCounts,
-  workforceQueueFor,
-  type WorkforceRegisterView
-} from "@/lib/workforce-onboarding-queues";
-
 type LocationRow = {
   id: string;
+  parent_station_id?: string | null;
+  is_active?: boolean;
   station_code: string;
   station_name: string | null;
   location_model_id?: string | null;
@@ -422,7 +419,7 @@ function FieldExecutiveForm({
       {executive ? <input type="hidden" name="id" value={executive.id} /> : null}
 
       <label>Full name<WorkforceFullNameInput required={!optionalEditFields} defaultValue={textValue(executive?.full_name)} /></label>
-      <label>Email<WorkforceEmailInput required={!optionalEditFields} defaultValue={textValue(executive?.email)} /></label>
+      {returnPath !== "/work-force-register" ? <label>Email<WorkforceEmailInput required={!optionalEditFields} defaultValue={textValue(executive?.email)} /></label> : null}
 
       <label>Country code
         <select className="select" name="mobile_country_code" defaultValue={executive?.mobile_country_code ?? "91"}>
@@ -436,6 +433,7 @@ function FieldExecutiveForm({
       <ScopedDesignationFields
         designationName="designation"
         designationOptions={designationOptions}
+        email={returnPath === "/work-force-register" ? { defaultValue: executive?.email, required: !optionalEditFields, preserveExisting: mode === "edit" } : undefined}
         initialDesignation={executive?.designation}
         initialLocationId={executive?.location_id}
         locationName="location_id"
@@ -559,12 +557,13 @@ function AddFieldExecutiveForm({
           <WorkforceMobileInput required defaultValue={values?.mobile ?? ""} />
         </div>
       </label>
-      <label>Email<WorkforceEmailInput required defaultValue={values?.email ?? ""} /><small>Use the created mailbox. Where the partner workflow requires it, end the name with .stationcode before @. Any valid domain is allowed.</small></label>
+      {returnPath !== "/work-force-register" ? <label>Email<WorkforceEmailInput required defaultValue={values?.email ?? ""} /><small>Use the created mailbox. Where the partner workflow requires it, end the name with .stationcode before @. Any valid domain is allowed.</small></label> : null}
       <label>Date of join<input className="field" name="date_of_join" required type="date" defaultValue={values?.dateOfJoin ?? ""} /></label>
       <label>Training / reported on<input className="field" name="reported_on" type="date" defaultValue={values?.reportedOn ?? ""} /><small>Optional. Record this only once the associate actually reports at the station.</small></label>
       <ScopedDesignationFields
         designationName="designation"
         designationOptions={designationOptions}
+        email={returnPath === "/work-force-register" ? { defaultValue: values?.email, required: true } : undefined}
         initialDesignation={values?.designation}
         initialLocationId={values?.locationId}
         locationName="location_id"
@@ -674,14 +673,13 @@ async function loadFieldExecutiveData(
   const mappedDesignationIds = await loadMappedDesignationIds(companyId, targetRegister);
   let locationsResult: { data: unknown[] | null; error: { message?: string } | null } = await supabaseAdmin
     .from("stations")
-    .select("id, station_code, station_name, location_model_id, hide_from_location_list, providers (name), location_models (code, name)")
+    .select("id, station_code, station_name, parent_station_id, is_active, location_model_id, hide_from_location_list, providers (name), location_models (code, name)")
     .eq("company_id", companyId)
-    .eq("is_active", true)
     .order("station_code");
   if (isMissingColumnError(locationsResult.error)) {
     locationsResult = await supabaseAdmin
       .from("stations")
-      .select("id, station_code, station_name, location_model_id, providers (name), location_models (code, name)")
+      .select("id, station_code, station_name, parent_station_id, is_active, location_model_id, providers (name), location_models (code, name)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("station_code");
@@ -775,7 +773,8 @@ async function loadFieldExecutiveData(
   const rawLocations = (locationsResult.data ?? []) as unknown as LocationRow[];
   // Hidden locations must not be offered for new onboarding, but existing people at
   // those locations must remain visible and editable in their category register.
-  const locations = filterOnboardingLocations(rawLocations, authorization).map((location) => ({
+  const scopedLocations = accessSurface === "ops" ? workforceRegisterLocations(rawLocations, authorization) : rawLocations;
+  const locations = filterOnboardingLocations(scopedLocations.filter(location => location.is_active !== false), authorization).map((location) => ({
     ...location,
     providers: firstRelation(location.providers),
     location_models: firstRelation(location.location_models)
@@ -785,12 +784,12 @@ async function loadFieldExecutiveData(
     .filter((designation) => mappedDesignationIds.has(designation.id));
   // Existing records retain visibility by the user's actual assigned location scope,
   // even when their station is now inactive or hidden from new onboarding.
-  const allowedLocationIds = new Set(authorization.locationScopeIds);
+  const allowedLocationIds = new Set(accessSurface === "ops" ? scopedLocations.map(location => location.id) : authorization.locationScopeIds);
   const allowedDesignationNames = new Set((ownerAccess ? allDesignations : designations)
     .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "view", { isOwner: ownerAccess }))
     .map((designation) => designation.name));
   const visibleExecutiveRows = ((executivesResult.data ?? []) as unknown as ExecutiveRow[])
-    .filter((executive) => authorization.hasAllLocationAccess || allowedLocationIds.has(executive.location_id))
+    .filter((executive) => (accessSurface !== "ops" && authorization.hasAllLocationAccess) || allowedLocationIds.has(executive.location_id))
     .filter((executive) => ownerAccess || allowedDesignationNames.has(String(executive.designation ?? "")));
   // Dual role (e.g. SSA in People + DA in Workforce, same DropX ID): show both designations.
   if (targetRegister === "workforce" && supabaseAdmin) {
@@ -813,6 +812,16 @@ async function loadFieldExecutiveData(
     }
   }
   const partnerStates = targetRegister === "workforce" && supabaseAdmin ? await loadPartnerOnboardingStates(supabaseAdmin, companyId, visibleExecutiveRows.map(row=>row.id)) : new Map();
+  // Preserve verified existing-ID handling when restoring the Dashboard UI.
+  const existingPartners = accessSurface === "ops" && targetRegister === "workforce"
+    ? await loadClientIdPartnerStates(supabaseAdmin, companyId, visibleExecutiveRows.filter(row => {
+      const state = partnerStates.get(row.id);
+      return state?.adapter === "amazon" && state.registration_ready && !state.mapping_confirmed;
+    }).map(row => row.id)) : new Map();
+  for (const [id, existing] of existingPartners) {
+    const state = partnerStates.get(id);
+    if (state) partnerStates.set(id, { ...state, label: existing.label, instruction: existing.instruction, can_trigger: false });
+  }
   const workforceIds = visibleExecutiveRows.map((row) => row.id);
   const registrationDrafts = targetRegister === "workforce" && workforceIds.length
     ? await supabaseAdmin.from("mob_app_registration_drafts")
@@ -840,7 +849,7 @@ async function loadFieldExecutiveData(
       provider: firstRelation(location?.providers)?.name || "-",
       model: model?.code || model?.name || "-",
       designation: executive.people_designation ? `${executive.designation || "-"} + ${executive.people_designation} (People)` : executive.designation || "-",
-      canEdit: canAccessDesignationPortal(
+      canEdit: !authorization.readOnly && canAccessDesignationPortal(
         designations.find((designation) => designation.name === executive.designation),
         accessSurface,
           "edit",
@@ -852,10 +861,10 @@ async function loadFieldExecutiveData(
       registrationDraftAt: draftsByWorkforce.get(executive.id) ?? null,
       status: partnerStates.get(executive.id)?.label || fieldExecutiveStatus(executive, targetRegister === "workforce"),
       partnerOnboarding: partnerStates.get(executive.id),
-      canQueueAmazonId: Boolean(partnerStates.get(executive.id)?.can_trigger)
+      canQueueAmazonId: !authorization.readOnly && Boolean(authorization.permissions.delivery_associates?.canEdit && partnerStates.get(executive.id)?.can_trigger)
     };
   });
-  const uploadUrlRows = await Promise.all(visibleExecutiveRows.map(async (executive) => ({
+  const uploadUrlRows = await Promise.all(visibleExecutiveRows.filter(row => row.id === editId || row.id === viewId).map(async (executive) => ({
     ...executive,
     upload_urls: {
       aadhaarFront: await signedDocumentUrl(executive.aadhaar_front_path),
@@ -976,7 +985,8 @@ export async function FieldExecutivePageContent({
     helper: [firstRelation(location.providers)?.name, firstRelation(location.location_models)?.name || firstRelation(location.location_models)?.code]
       .filter(Boolean)
       .join(" - ") || location.station_name || undefined,
-    modelId: location.location_model_id ?? null
+    modelId: location.location_model_id ?? null,
+    requiresStationEmail: accessSurface === "ops" && workforceStationPolicy(location).requiresStationEmail
   }));
   const designationOptions = await Promise.all(designations.map(async (designation) => ({
     value: designation.name,
@@ -985,7 +995,7 @@ export async function FieldExecutivePageContent({
     code: designation.code,
     modelIds: designation.model_ids ?? [],
       canAdd: canAccessDesignationPortal(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && ownerAccess }),
-      canEdit: canAccessDesignationPortal(designation, accessSurface, "edit", { isOwner: accessSurface === "dashboard" && ownerAccess }),
+      canEdit: !authorization.readOnly && canAccessDesignationPortal(designation, accessSurface, "edit", { isOwner: accessSurface === "dashboard" && ownerAccess }),
     dashboardRules: (await loadWorkforceCategoryRules(
       requireCompanyId(authorization),
       workforceConfig.designationCategory,
@@ -1002,19 +1012,7 @@ export async function FieldExecutivePageContent({
     ?? categoryRules.dashboard;
   const editRules = designationOptions.find((option) => option.value === editExecutive?.designation)?.dashboardRules
     ?? categoryRules.dashboard;
-  const workforceView: WorkforceRegisterView = workforceOnboardingView(registerView);
-  const workforceCounts = workforceQueueCounts(executives);
-  const isOpsWorkforceRegister = returnPath === "/work-force-register";
-  const workforceViewMeta: Record<WorkforceRegisterView, { label: string; title: string; empty: string }> = {
-    training: { label: "Training", title: "Training & first reporting", empty: "No associates are waiting for their first reporting day." },
-    registration: { label: "Registration", title: "DropX One registration", empty: "No associates are waiting to complete registration." },
-    amazon: { label: "Amazon ID", title: "Amazon ID setup", empty: "No registered associates are waiting for Amazon ID setup." },
-    active: { label: "Active", title: "Active associates", empty: "No active associates are available in this scope." },
-    attention: { label: "Attention", title: "Attention needed", empty: "No overdue or blocked onboarding steps are available in this scope." }
-  };
-  const registerRows = returnPath === "/work-force-register"
-    ? executives.filter((row) => workforceQueueFor(row, workforceView))
-    : executives;
+  const registerRows = executives;
 
   return (
     <AppShell active={activeLabel} pageCode={pageCode}>
@@ -1022,18 +1020,11 @@ export async function FieldExecutivePageContent({
         eyebrow="Workforce master"
         title={pageTitle}
         subtitle={pageSubtitle}
+        action={returnPath === "/work-force-register" && permission.canAdd && !authorization.readOnly ? <a className="button" href="#invite-associate">+ Invite associate</a> : undefined}
       />
 
       {registerNavigation}
-      {isOpsWorkforceRegister ? <>
-        <section className="workforce-register-intro">
-          <div><strong>Associate onboarding desk</strong><p>Keep training, DropX One registration, Amazon ID, and activation in separate queues. Counts and follow-up timing come from the configured partner workflow.</p></div>
-          {permission.canAdd ? <PendingLink className="button" href={`/work-force-register?new=1&status=${workforceView}`}>Add associate</PendingLink> : null}
-        </section>
-        <nav className="workforce-lifecycle-tabs workforce-onboarding-tabs" aria-label="Workforce onboarding queue">
-          {(Object.entries(workforceViewMeta) as Array<[WorkforceRegisterView, { label: string }]>).map(([view, meta]) => <PendingLink key={view} className={workforceView === view ? "active" : ""} href={`/work-force-register?status=${view}`}>{meta.label} <strong>{workforceCounts[view]}</strong></PendingLink>)}
-        </nav>
-      </> : null}
+
 
       {error || errorMessage || notice ? (
         <section className={`panel message-panel ${error || errorMessage ? "error" : "success"}`}>
@@ -1052,13 +1043,10 @@ export async function FieldExecutivePageContent({
         </section>
       ) : null}
 
-      {showWorkforceSummary || isOpsWorkforceRegister ? <><WorkforceRegisterSummary rows={executives} />{!isOpsWorkforceRegister ? <WorkforceCostReadiness auth={authorization}/> : null}</> : null}
+      {showWorkforceSummary ? <><WorkforceRegisterSummary rows={executives} /><WorkforceCostReadiness auth={authorization}/></> : null}
 
-      {permission.canAdd ? (
-        isOpsWorkforceRegister ? <details className="panel workforce-add-associate" open={addOpen}>
-          <summary><span><strong>Add associate</strong><small>Create the Day 1 registration invite and capture the reporting date when training begins.</small></span><span className="button secondary compact">{addOpen ? "Close" : "Open"}</span></summary>
-          <div className="workforce-add-associate-body"><p className="subtle">Use the station-code email required by the configured partner workflow. After the associate completes DropX One registration, Amazon ID can be queued from the Amazon ID tab.</p><AddFieldExecutiveForm designationOptions={onboardingDesignationOptions} entityLabel={entityLabel} locationOptions={locationOptions} returnPath={returnPath} statutoryEnabled={statutoryEnabled} values={addFormValues} /></div>
-        </details> : <section className="panel">
+      {permission.canAdd && !authorization.readOnly ? (
+        <section className="panel" id="invite-associate">
           <div className="panel-head"><h2>{addTitle}</h2></div>
           {directActivate ? (
             <FieldExecutiveForm
@@ -1080,10 +1068,7 @@ export async function FieldExecutivePageContent({
       {permission.canAdd && accessSurface !== "ops" ? <FieldExecutiveBulkImportPanel description={bulkImportDescription} entityLabel={entityLabel} returnPath={returnPath} title={bulkImportTitle} /> : null}
       {ownerAccess && accessSurface !== "ops" && returnPath === "/contractors" ? <CompensationBulkUpload kind="contractor_remuneration" /> : null}
 
-      {permission.canView || permission.canEdit ? (isOpsWorkforceRegister
-        ? <WorkforceOnboardingDesk basePath={returnPath} canEdit={permission.canEdit && !authorization.readOnly} emptyLabel={workforceViewMeta[workforceView].empty} rows={registerRows} title={workforceViewMeta[workforceView].title} view={workforceView} />
-        : <FieldExecutiveList basePath={returnPath} canEdit={permission.canEdit} emptyLabel={emptyListLabel} rows={registerRows} title={listTitle} />
-      ) : null}
+      {permission.canView || permission.canEdit ? <FieldExecutiveList basePath={returnPath} canEdit={permission.canEdit && !authorization.readOnly} emptyLabel={emptyListLabel} rows={registerRows} title={listTitle} /> : null}
 
       {(permission.canView || permission.canEdit) && viewExecutive ? (
         <div className="modal-backdrop">
@@ -1104,7 +1089,7 @@ export async function FieldExecutivePageContent({
         </div>
       ) : null}
 
-      {permission.canEdit && editExecutive ? (
+      {permission.canEdit && !authorization.readOnly && editExecutive ? (
         <div className="modal-backdrop">
           <section className="modal-panel wide" aria-label="Edit field executive">
             <div className="panel-head">

@@ -11,7 +11,7 @@ test("dashboard verification is scoped to the operator location and designation"
   assert.match(route, /authorization\.locationScopeIds\.includes\(locationId\)/);
   assert.match(route, /const designationField = \["employee", "workforce", "field_executive"\]\.includes\(profileType\)/);
   assert.match(route, /from\("designations"\)[\s\S]*?\.select\("id, name, portal_permissions"\)/);
-  assert.match(route, /canAccessDesignationPortal\(designation, "dashboard", "edit", \{ isOwner: isCompanyOwner\(authorization\) \}\)/);
+  assert.match(route, /canAccessDesignationPortal\(designation, surface, "edit", \{ isOwner: isCompanyOwner\(authorization\) \}\)/);
 });
 
 test("provider results are persisted by the server before they are returned", () => {
