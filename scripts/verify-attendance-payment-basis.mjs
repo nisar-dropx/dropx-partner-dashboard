@@ -8,7 +8,7 @@ const [form, actions, providerMappingActions, providerFirstPage, directAllocatio
   read("src/components/payment-field-form.tsx"),
   read("src/app/master/payment-methods/actions.ts"),
   read("src/app/provider-mapping/actions.ts"),
-  read("src/app/provider-mapping/provider-first/page.tsx"),
+  read("src/app/provider-id-mapping/page.tsx"),
   read("src/app/provider-mapping/direct-pay/actions.ts"),
   read("src/lib/direct-workforce-pay.ts"),
   read("src/app/payments/workforce-payouts/page.tsx"),
