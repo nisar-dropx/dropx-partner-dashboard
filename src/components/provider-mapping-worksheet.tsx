@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { bulkUploadProviderIds, saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
@@ -46,6 +46,7 @@ export type PaymentMethodOption = {
   id: string;
   code: string;
   name: string;
+  isActive?: boolean;
   components: PaymentMethodComponentOption[];
 };
 
@@ -186,6 +187,10 @@ export function MappingMultiFilter({
   selected: string[];
   setSelected: (values: string[]) => void;
 }) {
+  const filterId = useId();
+  const filterLabelId = `${filterId}-label`;
+  const filterMenuId = `${filterId}-menu`;
+  const filterSummaryId = `${filterId}-summary`;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
@@ -227,14 +232,14 @@ export function MappingMultiFilter({
 
   return (
     <div className="mapping-filter-field mapping-bulk-filter" ref={rootRef}>
-      <span className="mapping-field-label">{label}</span>
+      <span className="mapping-field-label" id={filterLabelId}>{label}</span>
       <div className="bulk-multi-filter">
-        <button aria-expanded={open} className={`bulk-multi-filter-trigger ${open ? "open" : ""}`} onClick={() => { if (open) setQuery(""); setOpen(!open); }} type="button">
-          <strong>{summary}</strong><span aria-hidden="true">v</span>
+        <button aria-controls={filterMenuId} aria-expanded={open} aria-labelledby={`${filterLabelId} ${filterSummaryId}`} className={`bulk-multi-filter-trigger ${open ? "open" : ""}`} onClick={() => { if (open) setQuery(""); setOpen(!open); }} type="button">
+          <span className="mapping-filter-summary-text" id={filterSummaryId}>{summary}</span><span aria-hidden="true">v</span>
         </button>
-        {open ? <div className="bulk-multi-filter-menu mapping-filter-menu">
+        {open ? <div aria-labelledby={filterLabelId} className="bulk-multi-filter-menu mapping-filter-menu" id={filterMenuId} role="group">
           <div className="bulk-multi-filter-search">
-            <input autoFocus className="field" onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${label.toLocaleLowerCase()}`} type="search" value={query} />
+            <input aria-label={`Search ${label}`} autoFocus className="field" onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${label.toLocaleLowerCase()}`} type="search" value={query} />
           </div>
           <div className="bulk-multi-filter-options">
           <label className="bulk-multi-filter-option all">

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   filterProviderFirstRowIndexes,
+  providerMemberIdDisplay,
   providerFirstPageWindow,
   providerFirstValidationStatus,
   providerMemberKey
@@ -44,6 +45,14 @@ const row = {
 test("keys provider members by station and normalized member ID", () => {
   assert.equal(providerMemberKey("station-1", " abc "), "station-1|ABC");
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
+});
+
+test("expands scientific provider IDs for display without numeric coercion", () => {
+  assert.equal(providerMemberIdDisplay("2.00001E+12"), "2000010000000");
+  assert.equal(providerMemberIdDisplay("1.2345e+3"), "1234.5");
+  assert.equal(providerMemberIdDisplay("9.8e-3"), "0.0098");
+  assert.equal(providerMemberIdDisplay(" 2000014627340 "), "2000014627340");
+  assert.equal(providerMemberIdDisplay("1E+100000000"), "1E+100000000");
 });
 
 test("classifies every required mapped-row field consistently", () => {
@@ -100,6 +109,8 @@ test("provider-first renders only the selected page and saves without navigation
     readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8")
   ]);
   assert.match(component, /paginatedIndexes\.map/);
+  assert.match(component, /providerMemberIdDisplay\(row\.providerMemberId\)/);
+  assert.match(component, /formData\.set\(`\$\{prefix\}\[provider_member_id\]`, row\.providerMemberId\)/);
   assert.doesNotMatch(component, /<form action=\{saveProviderFirstMappingWorksheet\}/);
   const start = actions.indexOf("export async function saveProviderFirstMappingsInline");
   const end = actions.indexOf("/** Links an imported provider member", start);
