@@ -180,7 +180,7 @@ async function reportingChain(companyId: string, subjectAssignmentId: string, as
   return chain;
 }
 
-async function candidateIsUnavailable(companyId: string, candidate: Candidate, asOf: string) {
+async function candidateIsUnavailable(companyId: string, candidate: Candidate) {
   const person = await db().from("hr_people").select("display_name,status").eq("company_id", companyId).eq("id", candidate.personId).maybeSingle();
   if (person.error) throw new Error(person.error.message);
   if (!person.data || person.data.status !== "active") {
@@ -275,8 +275,8 @@ async function companyHrHeadCandidates(companyId: string, asOf: string) {
   });
 }
 
-async function stepForCandidate(companyId: string, routeId: string, level: number, candidate: Candidate, via: ConfiguredApprovalStep["resolved_via"], originalPersonId: string | null, fallbackReason: string | null, asOf: string) {
-  const state = await candidateIsUnavailable(companyId, candidate, asOf);
+async function stepForCandidate(companyId: string, routeId: string, level: number, candidate: Candidate, via: ConfiguredApprovalStep["resolved_via"], originalPersonId: string | null, fallbackReason: string | null) {
+  const state = await candidateIsUnavailable(companyId, candidate);
   if (state.unavailable || !state.approverUserId || !state.person) return null;
   return {
     step_name: `${candidate.positionTitle || `Level ${level}`} approval`, approver_user_id: state.approverUserId,
@@ -285,10 +285,10 @@ async function stepForCandidate(companyId: string, routeId: string, level: numbe
   } satisfies ConfiguredApprovalStep;
 }
 
-async function findAvailable(candidates: Candidate[], companyId: string, routeId: string, level: number, excludedPeople: Set<string>, via: ConfiguredApprovalStep["resolved_via"], originalPersonId: string | null, fallbackReason: string | null, asOf: string) {
+async function findAvailable(candidates: Candidate[], companyId: string, routeId: string, level: number, excludedPeople: Set<string>, via: ConfiguredApprovalStep["resolved_via"], originalPersonId: string | null, fallbackReason: string | null) {
   for (const candidate of candidates) {
     if (excludedPeople.has(candidate.personId)) continue;
-    const step = await stepForCandidate(companyId, routeId, level, candidate, via, originalPersonId, fallbackReason, asOf);
+    const step = await stepForCandidate(companyId, routeId, level, candidate, via, originalPersonId, fallbackReason);
     if (step) return { candidate, step };
   }
   return null;
@@ -334,7 +334,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     if (level === 3 && (deferredFinalStep || !route.hr_final_required)) continue;
     if (level === 3 && HR_HEAD_FINAL_WORKFLOWS.has(input.workflowCode)) {
       const hrCandidates = await companyHrHeadCandidates(input.companyId, asOf);
-      const hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null, asOf);
+      const hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null);
       if (!hrResolved) throw new Error("HR final approval is not available. Only the HR Head can take this step. Contact HR.");
       hrResolved.step.step_name = "HR final approval";
       excludedPeople.add(hrResolved.candidate.personId);
@@ -375,7 +375,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
           originalPersonId = candidate.personId;
           fallbackReason = "Temporary approval cover";
         }
-        const step = await stepForCandidate(input.companyId, route.id, level, chosen, via, originalPersonId, fallbackReason, asOf);
+        const step = await stepForCandidate(input.companyId, route.id, level, chosen, via, originalPersonId, fallbackReason);
         if (!step) continue;
         excludedPeople.add(chosen.personId);
         if (chosen.chainIndex >= 0) lastChainIndex = Math.max(lastChainIndex, chosen.chainIndex);
@@ -384,12 +384,12 @@ export async function resolveConfiguredApprovalWorkflow(input: {
       }
       if (added) continue;
     }
-    let resolved = await findAvailable(primaryCandidates, input.companyId, route.id, level, excludedPeople, "configured_designation", null, null, asOf);
+    let resolved = await findAvailable(primaryCandidates, input.companyId, route.id, level, excludedPeople, "configured_designation", null, null);
     const original = primaryCandidates.find((item) => !excludedPeople.has(item.personId)) ?? null;
     if (original) {
       const delegated = await delegatedCandidate(input.companyId, input.workflowCode, original, asOf);
       if (delegated && !excludedPeople.has(delegated.personId)) {
-        const delegationStep = await stepForCandidate(input.companyId, route.id, level, delegated, "delegation", original.personId, "Temporary approval cover", asOf);
+        const delegationStep = await stepForCandidate(input.companyId, route.id, level, delegated, "delegation", original.personId, "Temporary approval cover");
         if (delegationStep) resolved = { candidate: delegated, step: delegationStep };
       }
     }
@@ -405,7 +405,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
         const fallbackScope = fallbackMode.replace("same_designation_", "same_") as SearchScope;
         fallbackCandidates = await scopedDesignationCandidates(input.companyId, designationId, fallbackScope, worker.assignment.location_id, asOf);
       }
-      resolved = await findAvailable(fallbackCandidates, input.companyId, route.id, level, excludedPeople, "fallback", original?.personId ?? null, original ? "Configured approver unavailable" : "Configured designation not found", asOf);
+      resolved = await findAvailable(fallbackCandidates, input.companyId, route.id, level, excludedPeople, "fallback", original?.personId ?? null, original ? "Configured approver unavailable" : "Configured designation not found");
     }
     if (!resolved) throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approval is not available for this request. Contact HR.`);
     if (level === 3) resolved.step.step_name = input.level3StepName ?? "HR final approval";
@@ -425,7 +425,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
         : ["reporting_chain", "immediate_reporting_manager", "manager_above_team_lead"].includes(route.hr_final_search_scope)
         ? chainCandidates(chain, route.hr_final_search_scope, route.hr_final_designation_id, lastChainIndex, designationById)
         : await scopedDesignationCandidates(input.companyId, route.hr_final_designation_id, route.hr_final_search_scope, worker.assignment.location_id, asOf);
-      let hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null, asOf);
+      let hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null);
       if (!hrResolved && !hrHeadFinal && route.hr_final_fallback_mode !== "block") {
         let hrFallbackCandidates: Candidate[] = [];
         if (route.hr_final_fallback_mode === "specific_person" && route.hr_final_fallback_person_id) {
@@ -437,7 +437,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
           const fallbackScope = route.hr_final_fallback_mode.replace("same_designation_", "same_") as SearchScope;
           hrFallbackCandidates = await scopedDesignationCandidates(input.companyId, route.hr_final_designation_id, fallbackScope, worker.assignment.location_id, asOf);
         }
-        hrResolved = await findAvailable(hrFallbackCandidates, input.companyId, route.id, 3, excludedPeople, "fallback", null, "Configured designation not found", asOf);
+        hrResolved = await findAvailable(hrFallbackCandidates, input.companyId, route.id, 3, excludedPeople, "fallback", null, "Configured designation not found");
       }
       if (!hrResolved) throw new Error("HR review approval is not available for this request. Contact HR.");
       hrResolved.step.step_name = "HR review";
