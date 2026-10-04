@@ -52,5 +52,23 @@ test('guided beta is limited to an explicitly enrolled pilot account',()=>{
  const activation=readFileSync(new URL('../components/connect-activation-status.tsx',import.meta.url),'utf8');
  assert.match(auth,/let onboardingBeta = false/);
  assert.match(auth,/if\(pilot\.data\)\{activationOnly=true;onboardingBeta=true;/);
- assert.match(activation,/if \(account\.onboardingBeta\) return <ConnectBetaOnboarding/);
+  assert.match(activation,/if \(account\.onboardingBeta\) return <ConnectBetaOnboarding/);
+});
+test('isolated email pilot is visible without converting an active Workforce account',()=>{
+ const auth=readFileSync(new URL('./connect-auth.ts',import.meta.url),'utf8');
+ const flow=readFileSync(new URL('../components/connect-login-flow.tsx',import.meta.url),'utf8');
+ const route=readFileSync(new URL('../../app/api/connect/workforce-joining/route.ts',import.meta.url),'utf8');
+ const beta=readFileSync(new URL('../components/connect-beta-onboarding.tsx',import.meta.url),'utf8');
+ assert.match(auth,/workforce_amazon_email_pilot_candidates/);
+ assert.match(auth,/onboardingBeta = true/);
+ assert.doesNotMatch(auth,/emailPilot\.data\)\{activationOnly=true/);
+ assert.match(flow,/account\.activationOnly \|\| account\.onboardingBeta/);
+ assert.match(flow,/Amazon setup/);
+ assert.match(route,/workforce_amazon_email_pilot_messages/);
+ assert.match(route,/invitationUrl/);
+ assert.match(route,/isolatedBeta:true/);
+ assert.match(beta,/Open invitation/);
+ assert.match(beta,/Copy link/);
+ assert.match(beta,/private\/incognito window/);
+ assert.match(beta,/com\.amazon\.flex\.rabbit/);
 });
