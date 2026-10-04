@@ -482,7 +482,7 @@ async function updateMailSettings(companyId: string, userId: string, allowed: bo
   if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
   const enabled = Boolean(body.dailyStatusEmailEnabled);
   const emailConfig = normalizeFleetDailyStatusEmailConfig(body.dailyStatusEmailConfig);
-  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, daily_status_email_enabled: enabled, daily_status_send_time: clean(body.dailyStatusSendTime) || "20:30", daily_status_only_affected: body.dailyStatusOnlyAffected !== false, daily_status_email_config: emailConfig, updated_by: userId, updated_at: new Date().toISOString() });
+  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, daily_status_email_enabled: enabled, daily_status_send_time: clean(body.dailyStatusSendTime) || "20:00", daily_status_only_affected: body.dailyStatusOnlyAffected !== false, daily_status_email_config: emailConfig, updated_by: userId, updated_at: new Date().toISOString() });
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, message: enabled ? "Daily Fleet mail configuration saved and scheduled." : "Daily Fleet mail configuration saved on hold." });
 }
