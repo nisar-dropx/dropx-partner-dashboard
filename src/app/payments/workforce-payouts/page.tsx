@@ -7,7 +7,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { calculateAutomaticDeductionLines, type AutomaticDeductionHead } from "@/lib/workforce-deductions";
-import { allocationActiveOn, directPayAttendanceUnit, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
+import { allocationActiveOn, cumulativeDirectPayAttendanceUnitsBefore, directPayAttendanceUnit, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
@@ -20,11 +20,14 @@ import {
 import {
   attendanceCaptureLabel,
   summarizePaymentMethodAmounts,
+  summarizePayoutBreakdownLines,
   summarizeWorkDays
 } from "@/lib/workforce-payout-summary";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { normalizePaymentFieldCode, paymentComponentOrderMap, sortByPaymentFieldOrder } from "@/lib/payment-field-order";
+import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
+import { consolidateProviderPayoutSegments, type ProviderPayoutSegment } from "@/lib/provider-payout-consolidation";
 import {
   normalizePayoutIdentity,
   payoutMappingMatchesShipment,
@@ -84,8 +87,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   const [locationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult, attendanceCaptureResult] = await Promise.all([
     locationsQuery,
-    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name,code), payment_methods(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${workforcePaymentMonthStart(fromDate)}`).order("id")),
-    readAllRows(supabaseAdmin.from("workforce_payment_allocations").select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, payment_methods:payment_methods!workforce_payment_allocations_method_company_fk(name)").eq("company_id", companyId).in("status", ["active", "closed"]).lte("effective_from", toDate).or(`effective_to.is.null,effective_to.gte.${fromDate}`).order("effective_from").order("id")),
+    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, reason, providers(name,code), payment_methods(name)").eq("company_id", companyId).in("status", ["active", "closed"]).order("effective_from").order("id")),
+    readAllRows(supabaseAdmin.from("workforce_payment_allocations").select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, change_reason, payment_methods:payment_methods!workforce_payment_allocations_method_company_fk(name)").eq("company_id", companyId).in("status", ["active", "closed"]).order("effective_from").order("id")),
     supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
     supabaseAdmin.from("workforce_deduction_heads").select("code, name, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true),
     supabaseAdmin.from("workforce_payment_settings").select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from").eq("company_id", companyId).lte("effective_from", toDate).order("effective_from"),
@@ -99,14 +102,15 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const allMappings = mappingsResult.data ?? [];
   const authorizedMappings = allMappings.filter((row: any) => allowed.has(row.station_id));
   const mappings = authorizedMappings.filter((row: any) => row.payment_method_id && String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
-  const directAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
+  const allDirectAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
+  const directAllocations = allDirectAllocations.filter((row: any) => String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
   const directWorkforceIds = Array.from(new Set(directAllocations.map((row: any) => row.workforce_id).filter(Boolean)));
   const sourceIds = Array.from(new Set([...authorizedMappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]), ...directWorkforceIds].filter(Boolean)));
   const contractorIds = Array.from(new Set(mappings.map((row: any) => row.contractor_id).filter(Boolean)));
   const employeeIds = Array.from(new Set(mappings.map((row: any) => row.employee_id).filter(Boolean)));
   const fieldExecutiveIds = Array.from(new Set(mappings.map((row: any) => row.field_executive_id).filter(Boolean)));
   const workforceIds = Array.from(new Set([...mappings.map((row: any) => row.workforce_id), ...directWorkforceIds].filter(Boolean)));
-  const paymentMethodIds = Array.from(new Set([...authorizedMappings, ...directAllocations].map((row: any) => row.payment_method_id).filter(Boolean)));
+  const paymentMethodIds = Array.from(new Set([...authorizedMappings, ...allDirectAllocations].map((row: any) => row.payment_method_id).filter(Boolean)));
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
@@ -214,23 +218,6 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       attendanceByWorkerDate.set(key, shipmentAttendanceRecord(date, shipmentDeliveriesByWorkerDate.get(key) ?? 0, capture));
     }
   }
-  const cumulativeAttendanceUnitsBefore = new Map<string, number>();
-  for (const worker of canonicalWorkers) {
-    const entries = [...attendanceByWorkerDate.entries()]
-      .filter(([key]) => key.startsWith(`${worker.id}|`))
-      .sort(([left], [right]) => left.localeCompare(right));
-    let month = "";
-    let running = 0;
-    for (const [key, attendance] of entries) {
-      const date = key.slice(String(worker.id).length + 1);
-      if (date.slice(0, 7) !== month) {
-        month = date.slice(0, 7);
-        running = 0;
-      }
-      cumulativeAttendanceUnitsBefore.set(key, running);
-      running += directPayAttendanceUnit(attendance);
-    }
-  }
   const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
   const dateRange = (from: string, to: string) => {
     const dates: string[] = [];
@@ -243,6 +230,60 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const allocations = allocationResult.data ?? [];
   const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
   const panAadhaarLinkedByWorkforceId = new Map((panAadhaarResult.data ?? []).map((row: any) => [row.account_id, row.verified === true]));
+  const historyByWorkforceId = new Map<string, PaymentAllocationHistoryEntry[]>();
+  const historyByProviderMember = new Map<string, PaymentAllocationHistoryEntry[]>();
+  const providerHistoryKey = (stationId: unknown, providerMemberId: unknown) => `${String(stationId ?? "")}|${normalizePayoutIdentity(providerMemberId)}`;
+  const appendHistory = (workforceId: string, entry: PaymentAllocationHistoryEntry) => {
+    if (!workforceId) return;
+    historyByWorkforceId.set(workforceId, [...(historyByWorkforceId.get(workforceId) ?? []), entry]);
+  };
+  for (const mapping of authorizedMappings) {
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
+    const worker = workerBySource.get(sourceId);
+    const method: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
+    const provider: any = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
+    const components = componentsByMethod.get(String(mapping.payment_method_id)) ?? [];
+    const entry: PaymentAllocationHistoryEntry = {
+      id: `provider-${mapping.id}`,
+      paymentMethodId: String(mapping.payment_method_id ?? ""),
+      paymentMethodName: String(method?.name ?? "Payment method unavailable"),
+      effectiveFrom: String(mapping.effective_from ?? ""),
+      effectiveTo: String(mapping.effective_to ?? ""),
+      storedStatus: String(mapping.status ?? ""),
+      sourceLabel: `Provider ID ${String(mapping.provider_member_id ?? "-")} · ${String(provider?.name ?? provider?.code ?? "Provider")}`,
+      subjectLabel: worker ? `${String(worker.dropx_id ?? "")} · ${String(worker.full_name ?? "")}`.replace(/^ · | · $/g, "") : "",
+      locationLabel: String(locationById.get(mapping.station_id)?.station_code ?? ""),
+      reason: String(mapping.reason ?? ""),
+      rates: paymentAllocationHistoryRates(mapping.payment_values, components.map((component) => ({ code: component.component_code, label: String(component.label ?? component.component_code), sortOrder: Number(component.sort_order ?? 0) })))
+    };
+    if (worker?.id) appendHistory(String(worker.id), entry);
+    const memberKey = providerHistoryKey(mapping.station_id, mapping.provider_member_id);
+    historyByProviderMember.set(memberKey, [...(historyByProviderMember.get(memberKey) ?? []), entry]);
+  }
+  for (const allocation of allDirectAllocations) {
+    const worker = workerBySource.get(allocation.workforce_id);
+    if (!worker?.id) continue;
+    const method: any = Array.isArray(allocation.payment_methods) ? allocation.payment_methods[0] : allocation.payment_methods;
+    const snapshotComponents = Array.isArray(allocation.payment_components)
+      ? allocation.payment_components
+      : [];
+    const components = snapshotComponents.length ? snapshotComponents : componentsByMethod.get(String(allocation.payment_method_id)) ?? [];
+    appendHistory(String(worker.id), {
+      id: `direct-${allocation.id}`,
+      paymentMethodId: String(allocation.payment_method_id ?? ""),
+      paymentMethodName: String(method?.name ?? "Payment method unavailable"),
+      effectiveFrom: String(allocation.effective_from ?? ""),
+      effectiveTo: String(allocation.effective_to ?? ""),
+      storedStatus: String(allocation.status ?? ""),
+      sourceLabel: "Direct workforce allocation",
+      subjectLabel: `${String(worker.dropx_id ?? "")} · ${String(worker.full_name ?? "")}`.replace(/^ · | · $/g, ""),
+      locationLabel: String(locationById.get(allocation.station_id)?.station_code ?? ""),
+      reason: String(allocation.change_reason ?? ""),
+      rates: paymentAllocationHistoryRates(allocation.payment_values, components.map((component: any) => ({ code: String(component.component_code ?? component.code ?? ""), label: String(component.label ?? component.component_code ?? component.code ?? ""), sortOrder: Number(component.sort_order ?? component.sortOrder ?? 0) })))
+    });
+  }
+  for (const [workforceId, history] of historyByWorkforceId) historyByWorkforceId.set(workforceId, sortPaymentAllocationHistory(history));
+  for (const [memberKey, history] of historyByProviderMember) historyByProviderMember.set(memberKey, sortPaymentAllocationHistory(history));
   const attendanceComponentsFor = (mapping: any) => (componentsByMethod.get(String(mapping.payment_method_id)) ?? [])
     .filter((component) => component.component_type !== "production" && component.calculation_source === "attendance_eligibility");
   const attendanceSetupSignature = (mapping: any) => JSON.stringify(attendanceComponentsFor(mapping)
@@ -253,7 +294,10 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     })
     .sort((left, right) => String(left[0]).localeCompare(String(right[0]))));
   let providerAttendanceConflict = false;
+  const attendanceOwnerByWorkerDate = new Map<string, string>();
   const attendanceOwnerOn = (workforceId: string, date: string) => {
+    const cacheKey = `${workforceId}|${date}`;
+    if (attendanceOwnerByWorkerDate.has(cacheKey)) return attendanceOwnerByWorkerDate.get(cacheKey) ?? "";
     const candidates = allMappings.filter((candidate: any) => {
       const sourceId = candidate.workforce_id || candidate.contractor_id || candidate.employee_id || candidate.field_executive_id;
       return workerBySource.get(sourceId)?.id === workforceId
@@ -261,12 +305,17 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         && (!candidate.effective_to || String(candidate.effective_to) >= date)
         && attendanceComponentsFor(candidate).length > 0;
     }).sort((left: any, right: any) => String(right.effective_from).localeCompare(String(left.effective_from)) || String(right.id).localeCompare(String(left.id)));
-    if (!candidates.length) return "";
+    if (!candidates.length) {
+      attendanceOwnerByWorkerDate.set(cacheKey, "");
+      return "";
+    }
     const latest = candidates.filter((candidate: any) => String(candidate.effective_from) === String(candidates[0].effective_from));
     if (new Set(latest.map(attendanceSetupSignature)).size > 1) providerAttendanceConflict = true;
-    return String(latest[0].id);
+    const ownerId = String(latest[0].id);
+    attendanceOwnerByWorkerDate.set(cacheKey, ownerId);
+    return ownerId;
   };
-  const providerRows = mappings.flatMap((mapping: any): WorkforcePayoutRow[] => {
+  const providerSegments = mappings.flatMap((mapping: any): ProviderPayoutSegment[] => {
     const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const mappingIdentity = payoutMappingIdentityById.get(String(mapping.id));
     if (!worker || !mappingIdentity) return [];
     const matchingShipmentRows = (metricsResult.data ?? []).filter((daily: any) => payoutMappingMatchesShipment(mappingIdentity, daily));
@@ -327,7 +376,13 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         attendanceByWorkerDate.get(workerDateKey),
         {
           policyHistory: paymentPolicyHistory,
-          cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0,
+          cumulativeAttendanceUnitsBefore: cumulativeDirectPayAttendanceUnitsBefore(
+            date,
+            [String(mapping.effective_from), String(worker?.date_of_join ?? mapping.effective_from)].sort().at(-1)!,
+            (candidateDate) => attendanceOwnerOn(String(worker.id), candidateDate) === String(mapping.id)
+              ? attendanceByWorkerDate.get(`${worker.id}|${candidateDate}`)
+              : null
+          ),
           attendanceSource: captureSetting.capture_method
         }
       );
@@ -371,12 +426,30 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     }));
     const paymentMethodBreakdown = summarizePaymentMethodAmounts([{ methodId: paymentMethodId, label: paymentMethodName, amount: baseAmount }]);
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
-    const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) }); const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0); const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
+    const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
     const additions = 0; const grossPayment = baseAmount + additions;
     const status = missingAttendanceConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
-    return [{ id: mapping.id, dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays, workDaysSource, paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status } satisfies WorkforcePayoutRow];
+    return [{
+      workforceId: String(worker.id),
+      categoryCode,
+      panNumber: worker?.pan_number ?? panBySource.get(sourceId) ?? null,
+      row: { id: mapping.id, dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays, workDaysSource, history: [], paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions: 0, deductionBreakdown: [], panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment, status } satisfies WorkforcePayoutRow
+    }];
   });
   if (providerAttendanceConflict) return { rows: [] as WorkforcePayoutRow[], error: "Conflicting provider attendance payment setups exist for the same workforce date. Resolve the duplicate rate cards before calculating payroll." };
+  const consolidatedProvider = consolidateProviderPayoutSegments(providerSegments);
+  if (consolidatedProvider.conflicts.length) return { rows: [] as WorkforcePayoutRow[], error: "Overlapping provider payment methods exist for the same workforce date. Correct the effective dates before calculating payroll." };
+  const providerRows: WorkforcePayoutRow[] = consolidatedProvider.rows.map(({ workforceId, categoryCode, panNumber, row }) => {
+    const deductionBreakdown = calculateAutomaticDeductionLines(row.grossPayment, automaticDeductions, { categoryCode, panNumber });
+    const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
+    return {
+      ...row,
+      history: historyByWorkforceId.get(workforceId) ?? [],
+      deductions,
+      deductionBreakdown,
+      netAmount: row.grossPayment - deductions
+    };
+  });
   const overlappingPaymentSetup = mappings.some((mapping: any) => {
     const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
     const canonicalWorkforceId = workerBySource.get(sourceId)?.id;
@@ -433,6 +506,9 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       paymentDetailsAvailable: false,
       workDays: 0,
       workDaysSource: "",
+      history: worker?.id
+        ? historyByWorkforceId.get(String(worker.id)) ?? []
+        : historyByProviderMember.get(providerHistoryKey(location?.id, providerMemberId)) ?? [],
       paymentMethodBreakdown: [],
       production: 0,
       productionBreakdown: [],
@@ -479,7 +555,13 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
           attendanceByWorkerDate.get(workerDateKey),
           {
             policyHistory: paymentPolicyHistory,
-            cumulativeAttendanceUnitsBefore: cumulativeAttendanceUnitsBefore.get(workerDateKey) ?? 0,
+            cumulativeAttendanceUnitsBefore: cumulativeDirectPayAttendanceUnitsBefore(
+              date,
+              [String(allocation.effective_from), String(worker?.date_of_join ?? allocation.effective_from)].sort().at(-1)!,
+              (candidateDate) => allocationActiveOn(allocation, candidateDate)
+                ? attendanceByWorkerDate.get(`${workforceId}|${candidateDate}`)
+                : null
+            ),
             attendanceSource: captureSetting.capture_method
           }
         );
@@ -517,19 +599,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       });
     }
     const dailyBreakdown = [...dailyByDate.values()].sort((left, right) => right.date.localeCompare(left.date));
-    const lineMap = new Map<string, WorkforcePayoutRow["productionBreakdown"][number]>();
-    for (const day of dailyBreakdown) for (const line of day.lines) {
-      const current = lineMap.get(line.code) ?? { ...line, count: 0, amount: 0 };
-      current.count += line.count;
-      current.amount += line.amount;
-      lineMap.set(line.code, current);
-    }
-    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [...lineMap.values()].map((line) => ({
-      ...line,
-      count: Math.round(line.count * 100) / 100,
-      rate: line.count ? Math.round(line.amount / line.count * 100) / 100 : line.rate,
-      amount: Math.round(line.amount * 100) / 100
-    }));
+    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = summarizePayoutBreakdownLines(dailyBreakdown.flatMap((day) => day.lines));
     const baseAmount = Math.round(dailyBreakdown.reduce((sum, day) => sum + day.baseAmount, 0) * 100) / 100;
     const workDaySummary = summarizeWorkDays(rawDailyBreakdown.map((day) => ({ date: day.date, attendanceUnit: day.workDayUnits, source: day.captureMethod })));
     const shipmentWorkDaysUnavailable = rawDailyBreakdown.some((day) => day.captureMethod === "shipment_data");
@@ -546,7 +616,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const locationIds = [...new Set(workerAllocations.map((allocation: any) => String(allocation.station_id ?? "")).filter(Boolean))];
     const locationLabels = [...new Set(locationIds.map((id) => locationById.get(id)?.station_code ?? "-"))];
     const methodNames = paymentMethodBreakdown.map((item) => item.label);
-    return { id: `direct-${workforceId}`, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationIds[0] ?? null, location: locationLabels.join(" / ") || "-", provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: shipmentWorkDaysUnavailable || dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" };
+    return { id: `direct-${workforceId}`, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationIds[0] ?? null, location: locationLabels.join(" / ") || "-", provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, history: historyByWorkforceId.get(workforceId) ?? [], paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: shipmentWorkDaysUnavailable || dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" };
   });
   const rows = [...providerRows, ...reportOnlyRows, ...directRows];
   return { rows, error: null };

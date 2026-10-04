@@ -12,6 +12,7 @@ import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
+import { paymentAllocationHistoryRates, sortPaymentAllocationHistory } from "@/lib/payment-allocation-history";
 import {
   directPaymentMethodEligible,
   type DirectPaymentComponent,
@@ -31,16 +32,26 @@ type PersonRow = {
 type AllocationRow = {
   id: string;
   person_id: string;
+  station_id: string | null;
   payment_method_id: string;
   payment_values: Record<string, unknown> | null;
+  payment_components: Array<{
+    component_code?: string;
+    code?: string;
+    label?: string;
+    sort_order?: number;
+    sortOrder?: number;
+  }> | null;
   effective_from: string;
   effective_to: string | null;
   status: string;
+  change_reason: string | null;
 };
 type PaymentMethodRow = {
   id: string;
   code: string;
   name: string;
+  is_active: boolean;
   payment_method_components: Array<{
     component_code: string;
     component_type: "amount" | "production";
@@ -74,7 +85,8 @@ function paymentMethods(rows: PaymentMethodRow[]) {
         label: component.label,
         type: component.component_type,
         schedule: component.pay_schedule,
-        active: component.is_active
+        active: component.is_active,
+        sortOrder: component.sort_order
       }))
   }));
 }
@@ -115,9 +127,8 @@ export default async function DirectPaymentAllocationsPage({
       .eq("is_active", true)
       .order("station_code"),
     supabaseAdmin.from("payment_methods")
-      .select("id, code, name, payment_method_components(component_code, component_type, label, pay_schedule, sort_order, is_active)")
+      .select("id, code, name, is_active, payment_method_components(component_code, component_type, label, pay_schedule, sort_order, is_active)")
       .eq("company_id", companyId)
-      .eq("is_active", true)
       .order("code")
   ]);
 
@@ -161,14 +172,14 @@ export default async function DirectPaymentAllocationsPage({
   if (!loadError && people.length) {
     const allocationResult = audience === "helpers"
       ? await readAllRows(supabaseAdmin.from("helper_payment_allocations")
-        .select("id, helper_id, payment_method_id, payment_values, effective_from, effective_to, status")
+        .select("id, helper_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, change_reason")
         .eq("company_id", companyId)
         .neq("status", "cancelled")
         .order("effective_from", { ascending: false })
         .order("created_at", { ascending: false })
         .order("id"))
       : await readAllRows(supabaseAdmin.from("workforce_payment_allocations")
-        .select("id, workforce_id, payment_method_id, payment_values, effective_from, effective_to, status")
+        .select("id, workforce_id, station_id, payment_method_id, payment_values, payment_components, effective_from, effective_to, status, change_reason")
         .eq("company_id", companyId)
         .neq("status", "cancelled")
         .order("effective_from", { ascending: false })
@@ -179,12 +190,14 @@ export default async function DirectPaymentAllocationsPage({
     allocations = (allocationResult.data ?? []).map((allocation: any) => ({
       ...allocation,
       person_id: String(allocation.helper_id ?? allocation.workforce_id)
-    })).filter((allocation: AllocationRow) => personIds.has(allocation.person_id));
+    })).filter((allocation: AllocationRow) => personIds.has(allocation.person_id)
+      && (allLocations || Boolean(allocation.station_id && allowedLocations.has(String(allocation.station_id)))));
   }
 
   const allMethods = paymentMethods((methodResult.data ?? []) as PaymentMethodRow[]);
-  const eligibleMethods = allMethods.filter((method) => directPaymentMethodEligible(method.components));
-  const productionMethodCount = allMethods.filter((method) => method.components.some((component) => component.type === "production")).length;
+  const activeMethodIds = new Set(((methodResult.data ?? []) as PaymentMethodRow[]).filter((method) => method.is_active).map((method) => method.id));
+  const eligibleMethods = allMethods.filter((method) => activeMethodIds.has(method.id) && directPaymentMethodEligible(method.components));
+  const productionMethodCount = allMethods.filter((method) => activeMethodIds.has(method.id) && method.components.some((component) => component.type === "production")).length;
   const methodNameById = new Map(allMethods.map((method) => [method.id, `${method.code} - ${method.name}`]));
   const designationLabelById = new Map(designations.map((designation) => [designation.id, `${designation.code} - ${designation.name}`]));
   const stationById = new Map((stationResult.data ?? []).map((station) => [station.id,
@@ -224,7 +237,30 @@ export default async function DirectPaymentAllocationsPage({
         .filter(([, value]) => Number.isFinite(value))),
       effectiveFrom: current?.effective_from ?? defaultEffectiveFrom,
       effectiveTo: current?.effective_to ?? "",
-      historyCount: history.length
+      history: sortPaymentAllocationHistory(history.map((allocation) => {
+        const method = allMethods.find((candidate) => candidate.id === allocation.payment_method_id);
+        const snapshotComponents = Array.isArray(allocation.payment_components) ? allocation.payment_components : [];
+        const historyComponents = snapshotComponents.length
+          ? snapshotComponents.map((component, index) => ({
+            code: String(component.component_code ?? component.code ?? ""),
+            label: String(component.label ?? component.component_code ?? component.code ?? ""),
+            sortOrder: Number(component.sort_order ?? component.sortOrder ?? index)
+          }))
+          : (method?.components ?? []).map((component) => ({ code: component.code, label: component.label, sortOrder: component.sortOrder }));
+        return {
+          id: allocation.id,
+          paymentMethodId: allocation.payment_method_id,
+          paymentMethodName: method ? `${method.code} - ${method.name}` : "Payment method unavailable",
+          effectiveFrom: allocation.effective_from,
+          effectiveTo: allocation.effective_to ?? "",
+          storedStatus: allocation.status,
+          sourceLabel: audience === "helpers" ? "Helper direct pay" : "Workforce direct pay",
+          subjectLabel: `${person.dropx_id || "Not assigned"} · ${person.full_name}`,
+          locationLabel: stationById.get(allocation.station_id ?? "") ?? "Location unavailable",
+          reason: allocation.change_reason ?? "",
+          rates: paymentAllocationHistoryRates(allocation.payment_values, historyComponents)
+        };
+      }))
     };
   });
 

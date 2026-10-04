@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { directPayForDay, monthlyDailyAccrual, preferredDirectPayAttendance } from "./direct-workforce-pay.ts";
+import { cumulativeDirectPayAttendanceUnitsBefore, directPayForDay, monthlyDailyAccrual, preferredDirectPayAttendance } from "./direct-workforce-pay.ts";
 import {
   monthlyAttendanceAmountForDay,
   workforcePaymentExample,
@@ -57,6 +57,27 @@ test("earned paid off is credited on the configured attendance threshold", () =>
   assert.equal(fifth.amount, 600);
   assert.equal(sixth.amount, 1200);
   assert.equal(sixth.creditedPaidOffUnits, 1);
+});
+
+test("earned paid off attendance restarts when a new dated payment allocation begins", () => {
+  const attendance = new Map(Array.from({ length: 6 }, (_, index) => {
+    const date = `2026-09-${String(index + 1).padStart(2, "0")}`;
+    return [date, { punch_date: date, status: "P" }];
+  }));
+  const cumulative = cumulativeDirectPayAttendanceUnitsBefore("2026-09-06", "2026-09-06", (date) => attendance.get(date));
+  const result = directPayForDay({ MONTHLY: 18000 }, [{
+    component_code: "MONTHLY",
+    component_type: "amount",
+    pay_schedule: "per_month",
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility"
+  }], "2026-09-06", attendance.get("2026-09-06"), {
+    cumulativeAttendanceUnitsBefore: cumulative,
+    policyHistory: [{ calculation_method: "earned_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6, cap_at_monthly_amount: true, effective_from: "2026-09-01" }]
+  });
+
+  assert.equal(cumulative, 0);
+  assert.equal(result.total, 600);
 });
 
 test("payment policies are selected by effective month and default to existing calendar attendance", () => {

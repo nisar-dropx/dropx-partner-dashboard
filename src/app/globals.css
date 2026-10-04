@@ -23030,3 +23030,32 @@ td strong,
  .ops-registration-filters { width:100%; }
  .ops-registration-filters .field { flex:1; min-width:120px; }
 }
+
+.payment-history-button { white-space: nowrap; }
+.payment-history-backdrop { z-index: 1200; }
+.payment-history-modal { width: min(920px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); overflow: hidden; }
+.payment-history-head { align-items: flex-start; }
+.payment-history-head h2 { margin: 0; }
+.payment-history-head p { margin: 3px 0 0; }
+.payment-history-body { max-height: calc(100vh - 150px); overflow: auto; padding: 14px 18px 18px; }
+.payment-history-list { display: grid; gap: 10px; }
+.payment-history-entry { display: grid; gap: 10px; padding: 13px 14px; border: 1px solid #dce4ef; border-radius: 10px; background: #fff; }
+.payment-history-entry-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.payment-history-entry-head > div { display: grid; gap: 3px; }
+.payment-history-entry-head strong { color: #18243a; font-size: 13px; }
+.payment-history-entry-head span:not(.status-pill) { color: #66758c; font-size: 11px; }
+.payment-history-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: #586a82; font-size: 11px; }
+.payment-history-meta b, .payment-history-reason b { color: #34445c; }
+.payment-history-rates { display: flex; flex-wrap: wrap; gap: 7px; }
+.payment-history-rates > span { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid #dfe7f1; border-radius: 999px; background: #f7f9fc; color: #293a52; font-size: 11px; }
+.payment-history-rates > span b { color: #65748a; font-size: 9px; letter-spacing: .03em; text-transform: uppercase; }
+.payment-history-reason { margin: 0; color: #596a81; font-size: 11px; }
+.payment-history-empty { padding: 30px 16px; }
+.payout-detail-actions { display: flex; align-items: center; gap: 6px; }
+.mapping-period-help { grid-column: 1 / -1; margin: -2px 0 0; color: #6a7890; font-size: 10px; line-height: 1.35; }
+
+@media (max-width: 700px) {
+  .payment-history-modal { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
+  .payment-history-body { max-height: calc(100vh - 130px); padding: 10px; }
+  .payment-history-entry-head { align-items: stretch; flex-direction: column; }
+}

@@ -3,7 +3,9 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import { saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
 import { SearchableSelect } from "@/components/searchable-select";
+import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
+import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
 import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
@@ -128,6 +130,30 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   }
 
+  function reconciledHistory(previous: ProviderFirstMappingRow, next: ProviderFirstMappingRow) {
+    const method = paymentMethodById.get(next.paymentMethodId);
+    const nextEntry = {
+      id: next.mappingId,
+      paymentMethodId: next.paymentMethodId,
+      paymentMethodName: method?.name ?? "Payment method unavailable",
+      effectiveFrom: next.effectiveFrom,
+      effectiveTo: next.effectiveTo,
+      storedStatus: next.effectiveTo ? "closed" : "active",
+      sourceLabel: `Provider ID ${next.providerMemberId}`,
+      subjectLabel: `${next.dropxId} · ${next.dropxName}`.replace(/^ · | · $/g, ""),
+      locationLabel: next.stationLabel,
+      rates: paymentAllocationHistoryRates(next.paymentValues, (method?.components ?? []).map((component, index) => ({ code: component.code, label: component.label, sortOrder: index })))
+    };
+    let history = previous.history;
+    if (previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
+      const closingDate = new Date(`${next.effectiveFrom}T00:00:00.000Z`);
+      closingDate.setUTCDate(closingDate.getUTCDate() - 1);
+      const effectiveTo = closingDate.toISOString().slice(0, 10);
+      history = history.map((entry) => entry.id === previous.mappingId ? { ...entry, effectiveTo, storedStatus: "closed" } : entry);
+    }
+    return uniquePaymentAllocationHistory([...history.filter((entry) => entry.id !== next.mappingId), nextEntry]);
+  }
+
   function chooseWorker(index: number, workerId: string) {
     const worker = workerById.get(workerId);
     if (!worker) {
@@ -183,7 +209,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       for (const saved of result.savedRows) {
         const snapshot = snapshotByKey.get(saved.clientKey);
         if (!snapshot) continue;
-        canonicalByIndex.set(snapshot.index, {
+        const canonical = {
           ...snapshot.row,
           mappingId: saved.mappingId,
           workforceId: saved.workforceId,
@@ -191,7 +217,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           paymentValues: saved.paymentValues,
           effectiveFrom: saved.effectiveFrom,
           effectiveTo: saved.effectiveTo
-        });
+        };
+        canonicalByIndex.set(snapshot.index, { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical) });
       }
 
       if (canonicalByIndex.size) {
@@ -282,13 +309,13 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Select DropX workforce" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {} })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
-            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveFrom: event.target.value })} type="date" value={row.effectiveFrom} /></label><label>Effective to<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label></div>
+            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
-          <div className="mapping-row-actions"><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
+          <div className="mapping-row-actions"><PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
         </div>;
       })}{!paginatedIndexes.length ? <div className="empty-state"><strong>No matching provider members.</strong><p className="subtle">Change or clear the filters to see more records.</p></div> : null}</div>
       <div className="mapping-pagination">

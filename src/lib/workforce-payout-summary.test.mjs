@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  summarizePayoutBreakdownLines,
   summarizePaymentMethodAmounts,
   summarizeWorkDays
 } from "./workforce-payout-summary.ts";
@@ -12,6 +13,17 @@ test("summarizeWorkDays counts full, half and absent biometric days", () => {
     { date: "2026-09-02", attendanceUnit: 0.5, source: "biometric" },
     { date: "2026-09-03", attendanceUnit: 0, source: "biometric" }
   ]), { workDays: 1.5, source: "Biometric" });
+});
+
+test("payout breakup preserves separate dated rates for the same head", () => {
+  assert.deepEqual(summarizePayoutBreakdownLines([
+    { code: "DELIVERY", label: "Delivery", componentType: "production", count: 100, rate: 13, amount: 1300, sortOrder: 1 },
+    { code: "DELIVERY", label: "Delivery", componentType: "production", count: 50, rate: 15, amount: 750, sortOrder: 1 },
+    { code: "DELIVERY", label: "Delivery", componentType: "production", count: 25, rate: 13, amount: 325, sortOrder: 1 }
+  ]), [
+    { code: "DELIVERY", label: "Delivery", componentType: "production", count: 125, rate: 13, amount: 1625, sortOrder: 1 },
+    { code: "DELIVERY", label: "Delivery", componentType: "production", count: 50, rate: 15, amount: 750, sortOrder: 1 }
+  ]);
 });
 
 test("summarizeWorkDays keeps shipment threshold results as zero or one", () => {

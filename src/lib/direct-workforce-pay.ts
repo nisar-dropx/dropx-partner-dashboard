@@ -55,6 +55,21 @@ export function directPayAttendanceUnit(attendance?: DirectPayAttendance | null)
   return ["HD", "HLF", "HALF_DAY", "HALF DAY"].includes(status) ? 0.5 : 1;
 }
 
+export function cumulativeDirectPayAttendanceUnitsBefore(
+  date: string,
+  effectiveFrom: string,
+  attendanceForDate: (candidateDate: string) => DirectPayAttendance | null | undefined
+) {
+  const monthStart = `${date.slice(0, 7)}-01`;
+  const periodStart = effectiveFrom > monthStart ? effectiveFrom : monthStart;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || periodStart >= date) return 0;
+  let total = 0;
+  for (let cursor = new Date(`${periodStart}T00:00:00.000Z`); cursor < new Date(`${date}T00:00:00.000Z`); cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    total += directPayAttendanceUnit(attendanceForDate(cursor.toISOString().slice(0, 10)));
+  }
+  return total;
+}
+
 export function preferredDirectPayAttendance(
   current: DirectPayAttendance | null | undefined,
   candidate: DirectPayAttendance

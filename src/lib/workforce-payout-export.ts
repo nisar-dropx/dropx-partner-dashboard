@@ -50,20 +50,48 @@ function withUniqueLabels<T extends { code: string; label: string }>(items: T[])
   }));
 }
 
+function componentIdentity(item: Pick<WorkforcePayoutExportComponent, "code" | "componentType" | "rate">) {
+  return `${item.code.trim().toUpperCase()}|${item.componentType}|${Number(item.rate)}`;
+}
+
 function componentColumns(rows: WorkforcePayoutExportRow[]) {
-  const values = new Map<string, Pick<WorkforcePayoutExportComponent, "code" | "label" | "componentType">>();
+  const values = new Map<string, Pick<WorkforcePayoutExportComponent, "code" | "label" | "componentType" | "rate">>();
   for (const row of rows) for (const item of row.productionBreakdown) {
-    const current = values.get(item.code);
-    values.set(item.code, {
+    const identity = componentIdentity(item);
+    if (values.has(identity)) continue;
+    values.set(identity, {
       code: item.code,
       label: item.label,
-      componentType: current?.componentType === "production" || item.componentType === "production" ? "production" : "amount"
+      componentType: item.componentType,
+      rate: item.rate
     });
   }
   // Each payout row is already arranged by its payment method's configured
   // field order. A CSV can contain methods with conflicting orders, so retain
   // the first visible occurrence instead of imposing a new alphabetic order.
-  return withUniqueLabels(Array.from(values.values()));
+  const items = Array.from(values.values());
+  const labelCounts = new Map<string, number>();
+  const codeCounts = new Map<string, number>();
+  const codeRateCounts = new Map<string, number>();
+  for (const item of items) {
+    const labelKey = item.label.trim().toLowerCase();
+    const codeKey = item.code.trim().toUpperCase();
+    const codeRateKey = `${codeKey}|${Number(item.rate)}`;
+    labelCounts.set(labelKey, (labelCounts.get(labelKey) ?? 0) + 1);
+    codeCounts.set(codeKey, (codeCounts.get(codeKey) ?? 0) + 1);
+    codeRateCounts.set(codeRateKey, (codeRateCounts.get(codeRateKey) ?? 0) + 1);
+  }
+  return items.map((item) => {
+    const labelKey = item.label.trim().toLowerCase();
+    const codeKey = item.code.trim().toUpperCase();
+    const codeRateKey = `${codeKey}|${Number(item.rate)}`;
+    const exportLabel = (codeCounts.get(codeKey) ?? 0) > 1
+      ? `${item.label} @ INR ${item.rate}${(codeRateCounts.get(codeRateKey) ?? 0) > 1 ? ` [${item.componentType}]` : ""}`
+      : (labelCounts.get(labelKey) ?? 0) > 1
+        ? `${item.label} [${item.code}]`
+        : item.label;
+    return { ...item, exportLabel };
+  });
 }
 
 function deductionColumns(rows: WorkforcePayoutExportRow[]) {
@@ -123,7 +151,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     const blankPayments = !row.paymentDetailsAvailable;
     const detailValues: ExportValue[] = details.flatMap((column): ExportValue[] => {
       if (blankPayments) return column.componentType === "production" ? ["", "", ""] : ["", ""];
-      const item = row.productionBreakdown.find((value) => value.code === column.code);
+      const item = row.productionBreakdown.find((value) => componentIdentity(value) === componentIdentity(column));
       return column.componentType === "production"
         ? [item?.count ?? 0, item?.rate ?? 0, item?.amount ?? 0]
         : [item?.rate ?? 0, item?.amount ?? 0];

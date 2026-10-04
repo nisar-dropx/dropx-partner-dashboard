@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { saveDirectPaymentAllocation } from "@/app/provider-mapping/direct-pay/actions";
+import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
+import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import type { DirectPaymentMethod } from "@/lib/workforce-payment-allocation";
 
 export type DirectPaymentAllocationRow = {
@@ -17,7 +19,7 @@ export type DirectPaymentAllocationRow = {
   paymentValues: Record<string, number>;
   effectiveFrom: string;
   effectiveTo: string;
-  historyCount: number;
+  history: PaymentAllocationHistoryEntry[];
 };
 
 function scheduleLabel(value: "per_hour" | "per_day" | "per_month" | null | undefined) {
@@ -105,10 +107,7 @@ function AllocationCells({
         <input className="field" disabled={!canEdit} form={formId} maxLength={500} name="change_reason" placeholder="Reason for change" />
       </td>
       <td style={{ minWidth: 105 }}>
-        <button className="button compact" disabled={!methodId || !canEdit} form={formId} type="submit">Save</button>
-        <small className="subtle" style={{ display: "block", marginTop: 6 }}>
-          {row.allocationId ? `${row.historyCount} histor${row.historyCount === 1 ? "y" : "ies"}` : "Not allocated"}
-        </small>
+        <div className="payout-detail-actions"><PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId} · ${row.fullName}`} /><button className="button compact" disabled={!methodId || !canEdit} form={formId} type="submit">Save</button></div>
       </td>
     </>
   );

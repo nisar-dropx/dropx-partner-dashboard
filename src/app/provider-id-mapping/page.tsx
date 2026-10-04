@@ -7,12 +7,13 @@ import type { PaymentMethodOption } from "@/components/provider-mapping-workshee
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canonicalizeProviderFirstMembers, providerMemberKey, providerSourceMemberKey } from "@/lib/provider-first-mapping-view";
+import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 
 type PaymentMethodRow = { id: string; code: string; name: string; is_active: boolean; payment_method_components: Array<{ component_code: string; component_type: "amount" | "production"; label: string; sort_order: number; payment_fields: { calculation_source: string | null; calculation_type: string | null } | Array<{ calculation_source: string | null; calculation_type: string | null }> | null }> | null };
-type Mapping = { id: string; workforce_id: string | null; provider_member_id: string; station_id: string | null; provider_id: string | null; payment_method_id: string | null; payment_values: Record<string, string | number> | null; effective_from: string; effective_to: string | null; status: string };
+type Mapping = { id: string; workforce_id: string | null; provider_member_id: string; station_id: string | null; provider_id: string | null; payment_method_id: string | null; payment_values: Record<string, string | number> | null; effective_from: string; effective_to: string | null; status: string; reason: string | null };
 type ProviderMemberSource = { provider_employee_id: unknown; provider_employee_name: unknown; station_code: unknown; work_date: unknown };
 
 function flash() {
@@ -37,7 +38,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
-    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status, reason").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
     supabaseAdmin.from("payment_methods").select("id, code, name, is_active, payment_method_components(component_code, component_type, label, sort_order, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("designations").select("id, code, name, is_field_operations, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
@@ -64,6 +65,34 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const designationById = new Map((designationsResult.data ?? []).map((designation) => [String(designation.id), designation]));
   const designationByName = new Map((designationsResult.data ?? []).flatMap((designation) => [designation.name, designation.code].map((value) => [String(value ?? "").trim().toLowerCase(), designation] as const)));
   const stationLabelById = new Map(stations.map((station) => [station.id, station.station_code]));
+  const paymentMethods: PaymentMethodOption[] = ((methodsResult.data ?? []) as PaymentMethodRow[])
+    .map((method) => ({ id: method.id, code: method.code, name: method.name, isActive: method.is_active, components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
+  const rawMethodById = new Map(((methodsResult.data ?? []) as PaymentMethodRow[]).map((method) => [method.id, method]));
+  const historyByMember = new Map<string, PaymentAllocationHistoryEntry[]>();
+  const historyByWorkforce = new Map<string, PaymentAllocationHistoryEntry[]>();
+  for (const mapping of mappingHistory) {
+    const key = providerMemberKey(String(mapping.station_id ?? ""), mapping.provider_member_id);
+    const method = rawMethodById.get(String(mapping.payment_method_id ?? ""));
+    const worker = mapping.workforce_id ? workforceById.get(mapping.workforce_id) : null;
+    const entry: PaymentAllocationHistoryEntry = {
+      id: mapping.id,
+      paymentMethodId: String(mapping.payment_method_id ?? ""),
+      paymentMethodName: method?.name ?? "Payment method unavailable",
+      effectiveFrom: mapping.effective_from,
+      effectiveTo: mapping.effective_to ?? "",
+      storedStatus: mapping.status,
+      sourceLabel: `Provider ID ${mapping.provider_member_id}`,
+      subjectLabel: worker ? `${worker.dropx_id ?? ""} · ${worker.full_name ?? ""}`.replace(/^ · | · $/g, "") : "",
+      locationLabel: stationLabelById.get(String(mapping.station_id ?? "")) ?? "",
+      reason: mapping.reason ?? "",
+      rates: paymentAllocationHistoryRates(mapping.payment_values, (method?.payment_method_components ?? []).map((component) => ({ code: component.component_code, label: component.label, sortOrder: component.sort_order })))
+    };
+    historyByMember.set(key, [...(historyByMember.get(key) ?? []), entry]);
+    if (mapping.workforce_id) historyByWorkforce.set(mapping.workforce_id, [
+      ...(historyByWorkforce.get(mapping.workforce_id) ?? []),
+      entry
+    ]);
+  }
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => {
     const designation = designationById.get(String(worker.designation_id ?? "")) ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
     return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
@@ -88,10 +117,11 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const mappings: ProviderFirstMappingRow[] = Array.from(latestMembers.values()).map((member) => {
     const link = mappingByMember.get(providerMemberKey(member.stationId, member.id));
     const worker = link?.workforce_id ? workforceById.get(link.workforce_id) : null;
-    return { providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "" };
+    const history = link?.workforce_id
+      ? historyByWorkforce.get(link.workforce_id) ?? []
+      : historyByMember.get(providerMemberKey(member.stationId, member.id)) ?? [];
+    return { providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
   });
-  const paymentMethods: PaymentMethodOption[] = ((methodsResult.data ?? []) as PaymentMethodRow[])
-    .map((method) => ({ id: method.id, code: method.code, name: method.name, isActive: method.is_active, components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
   const requestedStation = String(searchParams?.station ?? "").trim();
   const initialStationId = stations.find((station) => station.id === requestedStation || String(station.station_code ?? "").trim().toUpperCase() === requestedStation.toUpperCase())?.id ?? "";
 

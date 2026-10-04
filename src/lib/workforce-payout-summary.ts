@@ -12,6 +12,16 @@ export type PaymentMethodAmountInput = {
   amount: number;
 };
 
+export type PayoutBreakdownLine = {
+  code: string;
+  label: string;
+  componentType: "production" | "amount";
+  count: number;
+  rate: number;
+  amount: number;
+  sortOrder?: number;
+};
+
 const rounded = (value: number) => Math.round(value * 100) / 100;
 
 export function attendanceCaptureLabel(source: WorkforceAttendanceCaptureMethod) {
@@ -61,4 +71,20 @@ export function summarizePaymentMethodAmounts(inputs: PaymentMethodAmountInput[]
   return [...values.values()]
     .map((value) => ({ ...value, amount: rounded(value.amount) }))
     .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+}
+
+export function summarizePayoutBreakdownLines(lines: PayoutBreakdownLine[]) {
+  const values = new Map<string, PayoutBreakdownLine>();
+  for (const line of lines) {
+    const key = `${line.code.trim().toUpperCase()}|${line.componentType}|${Number(line.rate)}`;
+    const current = values.get(key) ?? { ...line, count: 0, amount: 0 };
+    current.count += Number.isFinite(line.count) ? line.count : 0;
+    current.amount += Number.isFinite(line.amount) ? line.amount : 0;
+    values.set(key, current);
+  }
+  return [...values.values()].map((line) => ({
+    ...line,
+    count: rounded(line.count),
+    amount: rounded(line.amount)
+  }));
 }
