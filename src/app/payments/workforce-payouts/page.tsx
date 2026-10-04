@@ -24,6 +24,7 @@ import {
 } from "@/lib/workforce-payout-summary";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
+import { normalizePaymentFieldCode, paymentComponentOrderMap, sortByPaymentFieldOrder } from "@/lib/payment-field-order";
 import {
   normalizePayoutIdentity,
   payoutMappingMatchesShipment,
@@ -64,6 +65,10 @@ const productionLabel = (code: string, fallback: string) => code === "DELIVERY" 
   : code === "SELLER_PICKUP" ? "MFN"
   : code === "SLLLER_RETURN" ? "MFN return"
   : fallback;
+
+function orderPayoutLines<T extends { code: string; sortOrder?: number }>(lines: T[], order: Map<string, number>) {
+  return sortByPaymentFieldOrder(lines, order, (line) => normalizePaymentFieldCode(line.code));
+}
 
 function workforceDesignation(worker: any) {
   const related = Array.isArray(worker?.designations) ? worker.designations[0] : worker?.designations;
@@ -111,7 +116,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
     fieldExecutiveIds.length ? supabaseAdmin.from("workforce").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIds) : Promise.resolve({ data: [], error: null }),
     workforceIds.length ? supabaseAdmin.from("connect_profile_verifications").select("account_id, verified").eq("company_id", companyId).eq("profile_type", "workforce").eq("kind", "pan_aadhaar").in("account_id", workforceIds) : Promise.resolve({ data: [], error: null }),
-    paymentMethodIds.length ? readAllRows(supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", paymentMethodIds).order("id")) : Promise.resolve({ data: [], error: null })
+    paymentMethodIds.length ? readAllRows(supabaseAdmin.from("payment_method_components").select("payment_method_id,component_code,component_type,label,pay_schedule,sort_order,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", paymentMethodIds).order("payment_method_id").order("sort_order").order("id")) : Promise.resolve({ data: [], error: null })
   ]);
   if (workforceBySourceResult.error || workforceByIdResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error || panAadhaarResult.error || methodComponentsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceBySourceResult.error?.message || workforceByIdResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || panAadhaarResult.error?.message || methodComponentsResult.error?.message || "Unable to load payout data." };
   const workerBySource = new Map<string, any>();
@@ -157,7 +162,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       label: String(field?.label ?? row.label ?? row.component_code ?? ""),
       pay_schedule: String(field?.pay_schedule ?? row.pay_schedule ?? "") || null,
       calculation_type: String(field?.calculation_type ?? "") || null,
-      calculation_source: String(field?.calculation_source ?? "") || null
+      calculation_source: String(field?.calculation_source ?? "") || null,
+      sort_order: Number(row.sort_order)
     };
     componentsByMethod.set(String(row.payment_method_id), [...(componentsByMethod.get(String(row.payment_method_id)) ?? []), component]);
   }
@@ -273,6 +279,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     const paymentMethod: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
     const paymentMethodId = String(mapping.payment_method_id);
     const paymentMethodName = String(paymentMethod?.name ?? "-");
+    const configuredComponentOrder = paymentComponentOrderMap(componentsByMethod.get(paymentMethodId) ?? []);
     const activeFrom = [fromDate, String(mapping.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
     const activeTo = [toDate, today(), String(mapping.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
     const activeDates = activeFrom <= activeTo ? dateRange(activeFrom, activeTo) : [];
@@ -285,7 +292,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         label: productionLabel(String(field.code), String(field.label || field.code)),
         componentType: "production" as const,
         source: String(metric.source_key),
-        rate: Number(mapping.payment_values?.[field.code] ?? 0)
+        rate: Number(mapping.payment_values?.[field.code] ?? 0),
+        sortOrder: configuredComponentOrder.get(normalizePaymentFieldCode(field.code))
       }];
     });
     const attendanceComponents = attendanceComponentsFor(mapping);
@@ -304,7 +312,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
           componentType: rule.componentType,
           count,
           rate: rule.rate,
-          amount: count * rule.rate
+          amount: count * rule.rate,
+          sortOrder: rule.sortOrder
         };
       });
       const ownedAttendanceComponents = attendanceDates.includes(date) ? attendanceComponents : [];
@@ -329,9 +338,10 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
         componentType: "amount" as const,
         count: line.count,
         rate: line.rate,
-        amount: line.amount
+        amount: line.amount,
+        sortOrder: line.sortOrder
       }));
-      const lines = [...productionLines, ...attendanceLines];
+      const lines = orderPayoutLines([...productionLines, ...attendanceLines], configuredComponentOrder);
       const baseAmount = Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
       return {
         date,
@@ -347,7 +357,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       const current = lineMap.get(line.code) ?? { ...line, count: 0, amount: 0 };
       current.count += line.count; current.amount += line.amount; lineMap.set(line.code, current);
     }
-    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [...lineMap.values()].map((line) => ({ ...line, count: Math.round(line.count * 100) / 100, amount: Math.round(line.amount * 100) / 100 }));
+    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = orderPayoutLines([...lineMap.values()], configuredComponentOrder)
+      .map((line) => ({ ...line, count: Math.round(line.count * 100) / 100, amount: Math.round(line.amount * 100) / 100 }));
     const production = productionBreakdown.reduce((sum, line) => sum + line.count, 0);
     const baseAmount = Math.round(dailyBreakdown.reduce((sum, day) => sum + day.baseAmount, 0) * 100) / 100;
     const { workDays, source: workDaysSource } = summarizeWorkDays(activeDates.map((date) => {
@@ -455,6 +466,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       const method: any = Array.isArray(allocation.payment_methods) ? allocation.payment_methods[0] : allocation.payment_methods;
       const methodId = String(allocation.payment_method_id);
       const methodName = String(method?.name ?? "-");
+      const currentComponentOrder = paymentComponentOrderMap(componentsByMethod.get(methodId) ?? []);
       const activeFrom = [fromDate, String(allocation.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
       const activeTo = [toDate, today(), String(allocation.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
@@ -475,14 +487,15 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
           date,
           baseAmount: calculation.total,
           missing: calculation.missing || (needsAttendanceSource && captureSetting.capture_method === "shipment_data"),
-          lines: calculation.lines.map((line) => ({
+          lines: orderPayoutLines(calculation.lines.map((line) => ({
             code: line.code,
             label: line.label,
             componentType: "amount" as const,
             count: line.count,
             rate: line.rate,
-            amount: line.amount
-          })),
+            amount: line.amount,
+            sortOrder: line.sortOrder
+          })), currentComponentOrder),
           workDayUnits: calculation.attendanceUnit,
           attendanceSource: captureSetting.capture_method === "shipment_data" ? "Shipment data unavailable" : attendanceCaptureLabel(captureSetting.capture_method),
           captureMethod: captureSetting.capture_method,

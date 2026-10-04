@@ -306,6 +306,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
                 name: editMethod.name,
                 components: editMethod.payment_method_components ?? []
               }}
+              key={editMethod.id}
               submitLabel="Save changes"
             />
             <form action={deletePaymentMethod} className="danger-form">

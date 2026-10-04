@@ -9,14 +9,14 @@ export type WorkforcePayoutRow = {
   id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
-  productionBreakdown: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number }>;
+  productionBreakdown: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number; sortOrder?: number }>;
   dailyBreakdown: Array<{
     date: string;
     workDayUnits: number;
     attendanceSource: string;
     methodAmounts: Array<{ id: string; label: string; amount: number }>;
     baseAmount: number;
-    lines: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number }>;
+    lines: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number; sortOrder?: number }>;
   }>;
   baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED" | ""; netAmount: number; status: string;
 };

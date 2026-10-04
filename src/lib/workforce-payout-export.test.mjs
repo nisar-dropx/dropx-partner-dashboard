@@ -62,6 +62,35 @@ test("attendance and rent heads export rate and amount without misleading counts
   assert.equal(table.rows[0][table.headers.indexOf("Van Rent Per Day Amount (INR)")], 22400);
 });
 
+test("payout export preserves the payment method's custom mixed field order", () => {
+  const customOrder = {
+    ...combinedMethodRow,
+    productionBreakdown: [
+      { code: "VAN_RENT_PER_DAY", label: "Van Rent Per Day", componentType: "amount", count: 28, rate: 800, amount: 22400 },
+      { code: "CRETURN", label: "C-return", componentType: "production", count: 133, rate: 16, amount: 2128 },
+      { code: "MG_PER_MONTH", label: "MG Per Month", componentType: "amount", count: 0.93, rate: 18000, amount: 16800 },
+      { code: "DELIVERY", label: "Delivery", componentType: "production", count: 843, rate: 13, amount: 10959 }
+    ]
+  };
+  const table = buildWorkforcePayoutExportTable([customOrder], "Workforce");
+
+  assert.deepEqual(
+    table.headers.filter((header) => /^(Van Rent Per Day|C-return|MG Per Month|Delivery) /.test(header)),
+    [
+      "Van Rent Per Day Rate (INR)",
+      "Van Rent Per Day Amount (INR)",
+      "C-return Count",
+      "C-return Rate (INR)",
+      "C-return Amount (INR)",
+      "MG Per Month Rate (INR)",
+      "MG Per Month Amount (INR)",
+      "Delivery Count",
+      "Delivery Rate (INR)",
+      "Delivery Amount (INR)"
+    ]
+  );
+});
+
 test("payout export uses human labels, exact partner IDs, and one deduction suffix", () => {
   const table = buildWorkforcePayoutExportTable([combinedMethodRow], "Workforce");
 

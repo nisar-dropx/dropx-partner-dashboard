@@ -20,6 +20,7 @@ import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/w
 import { summarizePaymentMethodAmounts, summarizeWorkDays } from "@/lib/workforce-payout-summary";
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import { workforcePayoutDropxStatus } from "@/lib/workforce-payout-population";
+import { normalizePaymentFieldCode, paymentComponentOrderMap, sortByPaymentFieldOrder } from "@/lib/payment-field-order";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 
@@ -121,10 +122,12 @@ export async function loadHelperPayoutRows(
     paymentMethodIds.length
       ? readAllRows(supabaseAdmin
         .from("payment_method_components")
-        .select("payment_method_id,component_code,component_type,label,pay_schedule,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)")
+        .select("payment_method_id,component_code,component_type,label,pay_schedule,sort_order,payment_fields(label,pay_schedule,field_type,calculation_type,calculation_source)")
         .eq("company_id", companyId)
         .eq("is_active", true)
         .in("payment_method_id", paymentMethodIds)
+        .order("payment_method_id")
+        .order("sort_order")
         .order("id"))
       : Promise.resolve({ data: [], error: null }),
     allocatedHelperIds.length
@@ -190,7 +193,8 @@ export async function loadHelperPayoutRows(
       label: String(field?.label ?? row.label ?? row.component_code ?? ""),
       pay_schedule: String(field?.pay_schedule ?? row.pay_schedule ?? "") || null,
       calculation_type: String(field?.calculation_type ?? "") || null,
-      calculation_source: String(field?.calculation_source ?? "") || null
+      calculation_source: String(field?.calculation_source ?? "") || null,
+      sort_order: Number(row.sort_order)
     };
     componentsByMethod.set(String(row.payment_method_id), [
       ...(componentsByMethod.get(String(row.payment_method_id)) ?? []),
@@ -290,6 +294,7 @@ export async function loadHelperPayoutRows(
       const method: any = Array.isArray(allocation.payment_methods) ? allocation.payment_methods[0] : allocation.payment_methods;
       const methodId = String(allocation.payment_method_id);
       const methodName = String(method?.name ?? "-");
+      const currentComponentOrder = paymentComponentOrderMap(componentsByMethod.get(methodId) ?? []);
       const activeFrom = [helperPeriodFrom, String(allocation.effective_from)].sort().at(-1)!;
       const activeTo = [helperPeriodTo, String(allocation.effective_to ?? helperPeriodTo)].sort()[0];
 
@@ -313,7 +318,11 @@ export async function loadHelperPayoutRows(
             date,
             baseAmount: calculation.total,
             missing: calculation.missing || (needsAttendanceSource && !hasBiometricEnrolment),
-            lines: calculation.lines.map((line) => ({ code: line.code, label: line.label, componentType: "amount" as const, count: line.count, rate: line.rate, amount: line.amount })),
+            lines: sortByPaymentFieldOrder(
+              calculation.lines.map((line) => ({ code: line.code, label: line.label, componentType: "amount" as const, count: line.count, rate: line.rate, amount: line.amount, sortOrder: line.sortOrder })),
+              currentComponentOrder,
+              (line) => normalizePaymentFieldCode(line.code)
+            ),
             workDayUnits: calculation.attendanceUnit,
             attendanceSource: hasBiometricEnrolment ? "Biometric" : "Biometric enrolment unavailable",
             captureMethod: "biometric" as const,

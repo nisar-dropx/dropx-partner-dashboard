@@ -20,6 +20,17 @@ test("direct pay handles monthly, present-day and hourly amounts", () => {
   assert.equal(result.missing, false);
 });
 
+test("direct pay lines follow the configured payment-field order", () => {
+  const result = directPayForDay({ FIELD_A: 100, FIELD_B: 200, FIELD_C: 300 }, [
+    { component_code: "FIELD_B", component_type: "amount", pay_schedule: "per_day", sort_order: 2 },
+    { component_code: "FIELD_C", component_type: "amount", pay_schedule: "per_day", sort_order: 3 },
+    { component_code: "FIELD_A", component_type: "amount", pay_schedule: "per_day", sort_order: 1 }
+  ], "2026-10-01", { punch_date: "2026-10-01", status: "P", work_minutes: 480 });
+
+  assert.deepEqual(result.lines.map((line) => line.code), ["FIELD_A", "FIELD_B", "FIELD_C"]);
+  assert.deepEqual(result.lines.map((line) => line.sortOrder), [1, 2, 3]);
+});
+
 test("monthly accrual conserves paise across a month", () => {
   const total = Array.from({ length: 30 }, (_, index) => monthlyDailyAccrual(1000, `2026-09-${String(index + 1).padStart(2, "0")}`))
     .reduce((sum, amount) => sum + amount, 0);
