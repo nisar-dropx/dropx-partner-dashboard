@@ -110,6 +110,7 @@ export type PnlTotal = {
   revenueDays: number;
   costDays: number;
   issueDays: number;
+  dataThrough: string | null;
 };
 const sumKnown = (values: (number | null)[]) =>
   values.every((v) => v === null)
@@ -155,6 +156,12 @@ export function pnlTotal(rows: PnlDay[], key = "Business total"): PnlTotal {
     revenueDays: rows.filter((r) => r.revenue !== null).length,
     costDays: rows.filter((r) => r.cost !== null).length,
     issueDays: rows.filter((r) => r.issues.length).length,
+    dataThrough:
+      rows
+        .filter((r) => r.deliveries !== null)
+        .map((r) => r.date)
+        .sort()
+        .at(-1) ?? null,
   };
 }
 export function pnlGroup(
@@ -188,14 +195,40 @@ export function buildPnl(
   const costs = new Map(
     cps.daily.map((d) => [`${d.station_code}/${d.work_date}`, d]),
   );
+  // Revenue and cost must stop together at each station's latest delivery report.
+  // Zero-delivery reports are valid evidence; absence of a report is not zero.
+  const cutoffs = new Map<string, string>();
+  for (const row of revenue)
+    for (const day of row.daily)
+      if (
+        day.shipmentReported &&
+        day.deliveries !== null &&
+        day.date >= from &&
+        day.date <= to
+      )
+        cutoffs.set(
+          row.station,
+          [cutoffs.get(row.station) || "", day.date].sort().at(-1)!,
+        );
+  for (const day of cps.daily)
+    if (day.shipment_present && day.work_date >= from && day.work_date <= to)
+      cutoffs.set(
+        day.station_code,
+        [cutoffs.get(day.station_code) || "", day.work_date].sort().at(-1)!,
+      );
+  const inCoverage = (station: string, date: string) =>
+    date >= from && date <= (cutoffs.get(station) || "");
   const review = cpsReviewItems(cps);
   const days: PnlDay[] = [];
   for (const location of locations)
     for (let d = Date.parse(from); d <= Date.parse(to); d += 86400000) {
       const date = new Date(d).toISOString().slice(0, 10),
         key = `${location.station_code}/${date}`;
-      const revenue = revenueDays.get(key) ?? [],
-        cost = costs.get(key);
+      const covered = inCoverage(location.station_code, date);
+      if (!covered && (cutoffs.has(location.station_code) || date !== from))
+        continue;
+      const revenue = covered ? (revenueDays.get(key) ?? []) : [],
+        cost = covered ? costs.get(key) : undefined;
       const issues = new Set(
         revenue
           .flatMap((r) => r.issues)
@@ -246,40 +279,74 @@ export function buildPnl(
   // Explicit public projection: never return People profiles, identities or individual CTC.
   return {
     days,
+    coverage: locations.map((l) => ({
+      station: l.station_code,
+      from,
+      requestedTo: to,
+      through: cutoffs.get(l.station_code) ?? null,
+      reportedDays: days.filter(
+        (d) => d.station === l.station_code && d.deliveries !== null,
+      ).length,
+      excludedDays:
+        Math.round(
+          (Date.parse(to) - Date.parse(cutoffs.get(l.station_code) || from)) /
+            86400000,
+        ) + (cutoffs.has(l.station_code) ? 0 : 1),
+    })),
+    staffGroups: (cps.staff ?? []).map((s) => ({
+      station: s.station_code,
+      group: s.group,
+      roles: s.roles ?? [],
+    })),
     total: pnlTotal(days),
     stations: pnlGroup(days, "station"),
     regions: pnlGroup(days, "region"),
     months: pnlGroup(days, "month"),
     daily: pnlGroup(days, "date"),
-    costs: cps.breakup.map(
-      ({ station_code, work_date, head, sub_head, source, amount }) => ({
+    costs: cps.breakup
+      .filter((c) => inCoverage(c.station_code, c.work_date))
+      .map(({ station_code, work_date, head, sub_head, source, amount }) => ({
         station_code,
         work_date,
         head,
         sub_head,
         source,
         amount,
-      }),
-    ),
+      })),
     reviews: [
-      ...review.gaps.map((g) => ({
-        station: g.station_code,
-        kind: g.kind,
-        reference: g.provider_id || g.dropx_id || "Setup",
-        from: g.first_date,
-        to: g.last_date,
-        deliveries: g.deliveries,
-        href: g.href,
-      })),
-      ...review.bills.map((b) => ({
-        station: b.station_code,
-        kind: "Confirm bill period",
-        reference: b.reference,
-        from: b.period_from,
-        to: b.period_to,
-        deliveries: 0,
-        href: "/cps?view=inputs",
-      })),
+      ...review.gaps
+        .filter(
+          (g) =>
+            cutoffs.has(g.station_code) &&
+            g.first_date <= cutoffs.get(g.station_code)!,
+        )
+        .map((g) => ({
+          station: g.station_code,
+          kind: g.kind,
+          reference: g.provider_id || g.dropx_id || "Setup",
+          from: g.first_date,
+          to:
+            g.last_date < cutoffs.get(g.station_code)!
+              ? g.last_date
+              : cutoffs.get(g.station_code)!,
+          deliveries: g.deliveries,
+          href: g.href,
+        })),
+      ...review.bills
+        .filter(
+          (b) =>
+            cutoffs.has(b.station_code) &&
+            b.period_from <= cutoffs.get(b.station_code)!,
+        )
+        .map((b) => ({
+          station: b.station_code,
+          kind: "Confirm bill period",
+          reference: b.reference,
+          from: b.period_from,
+          to: b.period_to,
+          deliveries: 0,
+          href: "/cps?view=inputs",
+        })),
     ],
   };
 }

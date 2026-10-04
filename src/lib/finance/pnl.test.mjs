@@ -153,9 +153,9 @@ test("partial data exposes coverage and produces a labelled known result", () =>
     "2026-09-02",
   );
   assert.equal(r.total.profit, 100);
-  assert.equal(r.total.stationDays, 2);
+  assert.equal(r.total.stationDays, 1);
   assert.equal(r.total.shipmentDays, 1);
-  assert.equal(r.total.issueDays, 1);
+  assert.equal(r.total.issueDays, 0);
 });
 test("custom ranges exclude earlier days while preserving source monthly calculations", () => {
   const r = p.buildPnl(
@@ -379,10 +379,26 @@ test("P&L CSV uses scoped live loader, exports reconciled totals and no staff id
   const text = await response.text(),
     rows = pricing.parseCsv(text),
     fields = Object.fromEntries(rows[0].map((h, i) => [h, rows[1][i]]));
-  assert.equal(fields["Known revenue INR"], "200");
-  assert.equal(fields["Known cost INR"], "100");
+  assert.equal(fields["Revenue INR"], "200");
+  assert.equal(fields["Expenses INR"], "100");
   assert.equal(fields["Provisional operating P&L INR"], "100");
   assert.equal(fields["CPS INR"], "10");
+  assert.equal(fields["Calculated through delivery data"], "2026-09-01");
   assert.ok(!text.includes("PRIVATE STAFF"));
   assert.match(text, /Missing inputs are not zero/);
+});
+
+test("delivery cutoff excludes later fixed revenue, all expense heads and future source details",()=>{
+ const days=[cday,{...cday,work_date:'2026-09-02',shipment_present:false,deliveries:0,total:999}];
+ const r=p.buildPnl([{station:'A',daily:[day,{...day,date:'2026-09-02',shipmentReported:false,deliveries:null,revenue:'999'}]}],{...snapshot,daily:days,breakup:[{station_code:'A',work_date:'2026-09-02',head:'Van',amount:999}]},[place],'2026-09-01','2026-09-05');
+ assert.equal(r.total.revenue,200);assert.equal(r.total.cost,100);assert.equal(r.total.profit,100);
+ assert.equal(r.days.length,1);assert.deepEqual(r.costs,[]);assert.equal(r.coverage[0].through,'2026-09-01');assert.equal(r.coverage[0].excludedDays,4);
+});
+test("each station uses its own cutoff, and a reported zero-delivery day still accrues",()=>{
+ const r=p.buildPnl([{station:'A',daily:[day]},{station:'B',daily:[{...day,deliveries:'0',date:'2026-09-02'}]}],{...snapshot,daily:[cday,{...cday,station_code:'B',deliveries:0,work_date:'2026-09-02'}]},[place,{...place,station_code:'B'}],'2026-09-01','2026-09-03');
+ assert.deepEqual(r.coverage.map(c=>c.through),['2026-09-01','2026-09-02']);assert.equal(r.total.cost,200);assert.equal(r.total.deliveries,10);
+});
+test("station without any delivery data never contributes unmatched fixed costs or fabricated profit",()=>{
+ const r=p.buildPnl([{station:'A',daily:[{...day,shipmentReported:false,deliveries:null}]}],{...snapshot,daily:[{...cday,shipment_present:false,deliveries:0}]},[place],'2026-09-01','2026-09-03');
+ assert.equal(r.total.revenue,null);assert.equal(r.total.cost,null);assert.equal(r.total.profit,null);assert.equal(r.coverage[0].through,null);
 });

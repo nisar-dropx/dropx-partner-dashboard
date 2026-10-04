@@ -599,3 +599,37 @@
     padding: 13px 16px;
   }
 }
+
+.pnl-cutoff {
+  background: #eef5fd;
+  border: 1px solid #cadcf1;
+  border-radius: 10px;
+  padding: 15px 18px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.pnl-simple-result {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 16px;
+}
+.pnl-simple-result > div {
+  padding: 16px 20px;
+  border: 1px solid var(--pnl-border);
+  border-radius: 10px;
+  background: white;
+}
+.pnl-simple-result strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 20px;
+}
+.pnl-expanded-period {
+  padding: 0 0 14px;
+}
+@media (max-width: 640px) {
+  .pnl-simple-result {
+    grid-template-columns: 1fr;
+  }
+}

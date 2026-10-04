@@ -25,11 +25,11 @@ export async function GET(request: Request) {
       const header = [
         "View",
         "Key",
-        "From",
-        "Through",
+        "Requested from",
+        "Requested through",
         "Delivered shipments",
-        "Known revenue INR",
-        "Known cost INR",
+        "Revenue INR",
+        "Expenses INR",
         "Provisional operating P&L INR",
         "Margin %",
         "CPS INR",
@@ -46,6 +46,7 @@ export async function GET(request: Request) {
         "Shipment station-days",
         "Total station-days",
         "Issue days",
+        "Calculated through delivery data",
       ];
       const body: (string | number | null)[][] = [header];
       for (const [view, rows] of totals)
@@ -74,6 +75,7 @@ export async function GET(request: Request) {
             t.shipmentDays,
             t.stationDays,
             t.issueDays,
+            t.dataThrough,
           ]);
       for (const d of r.days) {
         const t = pnlTotal([d]);
@@ -101,6 +103,7 @@ export async function GET(request: Request) {
           t.shipmentDays,
           1,
           t.issueDays,
+          t.dataThrough,
         ]);
       }
       body.push(

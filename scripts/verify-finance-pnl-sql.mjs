@@ -18,6 +18,7 @@ insert into finance_pricing_revisions(company_id,provider,station_code,effective
 insert into cps_shipment_daily values(gen_random_uuid(),'00000000-0000-0000-0000-000000000001',gen_random_uuid(),'PARENT','2026-09-01','ID1','Amazon',15,10,5,0,0,now());`);
 const sql=readFileSync('supabase/migrations/20261004195759_finance_live_pnl_sources.sql','utf8');
 await db.exec(sql);
+await db.exec(readFileSync('supabase/migrations/20261004205530_finance_pnl_scoped_query_plan.sql','utf8'));
 const q=(await db.query(`select finance_pnl_revenue_snapshot('00000000-0000-0000-0000-000000000001','2026-09-01','2026-09-02',array['PARENT']) as r`)).rows[0].r;
 assert.equal(q.daily_shipments[0].deliveries,'15');assert.equal(q.daily_shipments[0].swa,'5');assert.equal(q.availability.shipments.from,'2026-09-01');
 const empty=(await db.query(`select finance_pnl_revenue_snapshot('00000000-0000-0000-0000-000000000001','2026-09-01','2026-09-02',array[]::text[]) as r`)).rows[0].r;

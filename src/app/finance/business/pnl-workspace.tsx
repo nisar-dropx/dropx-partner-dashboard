@@ -11,7 +11,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { LivePnl } from "@/lib/finance/pnl-data";
-import { type PnlTotal, type PnlDay } from "@/lib/finance/pnl";
+import { pnlGroup, type PnlTotal, type PnlDay } from "@/lib/finance/pnl";
 import { todayIndia } from "@/lib/finance/pricing";
 import { LiveRefresh } from "./refresh";
 
@@ -36,6 +36,14 @@ const dateLabel = (d: string | null) =>
         timeZone: "UTC",
       })
     : "Not available";
+const resultLabel = (profit: number | null) =>
+  profit === null
+    ? "P&L unavailable"
+    : profit < 0
+      ? "Loss"
+      : profit > 0
+        ? "Profit"
+        : "Break-even";
 const opsLink = (href: string) =>
   /^https:\/\/(?:dashboard|ops)\.dropxlogistics\.com\//.test(href)
     ? href
@@ -43,11 +51,22 @@ const opsLink = (href: string) =>
       ? `https://ops.dropxlogistics.com${href}`
       : "https://ops.dropxlogistics.com/cps";
 
+const titleForRows = (rows: PnlDay[]) => {
+  const dates = rows
+    .filter((d) => d.deliveries !== null)
+    .map((d) => d.date)
+    .sort();
+  return dates.length
+    ? `Calculated ${dateLabel(dates[0])} – ${dateLabel(dates.at(-1)!)}; same dates for revenue and expenses`
+    : "No delivered-data report in the selected period";
+};
 function Statement({
   total,
   rows,
   report,
+  showSummary = false,
 }: {
+  showSummary?: boolean;
   total: PnlTotal;
   rows: PnlDay[];
   report: LivePnl;
@@ -75,147 +94,184 @@ function Statement({
     return [...map.values()];
   }, [report.costs, dayKeys]);
   return (
-    <div className="pnl-statement">
-      <section className="pnl-panel">
-        <div className="pnl-panel-head">
+    <>
+      {showSummary && (
+        <div
+          className="pnl-simple-result"
+          aria-label="Revenue, expenses and result"
+        >
           <div>
-            <span className="pnl-eyebrow">Income</span>
-            <h3>Revenue earned</h3>
+            <small>Revenue</small>
+            <strong>{money(total.revenue, 2)}</strong>
           </div>
-          <ArrowDownRight size={22} />
-        </div>
-        {[
-          ["MG / fixed payout + monthly fee", total.base],
-          ["Excess deliveries / delivery slabs", total.variable],
-          ["SWA delivery earnings", total.swa],
-          ["MFN earnings", total.mfn],
-        ].map(([label, value]) => (
-          <div className="pnl-line" key={String(label)}>
-            <span>{label}</span>
-            <strong>{money(value as number | null, 2)}</strong>
-          </div>
-        ))}
-        <div className="pnl-line pnl-total">
-          <strong>Known revenue</strong>
-          <strong>{money(total.revenue, 2)}</strong>
-        </div>
-        <details className="pnl-source">
-          <summary>
-            Pricing & calculation <ChevronDown size={14} />
-          </summary>
-          <p>
-            Fixed amounts accrue by actual calendar days. Excess delivery uses
-            the effective rate card. SWA is priced separately and excluded from
-            MG volume. Flipkart slabs use cumulative deliveries within each
-            month.
-          </p>
-          <div className="pnl-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Station / month</th>
-                  <th>Effective card</th>
-                  <th>Delivery rate</th>
-                  <th>Monthly MG</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.pricing
-                  .filter((p) =>
-                    rows.some(
-                      (r) =>
-                        r.station === p.station &&
-                        r.date.startsWith(p.month || "__"),
-                    ),
-                  )
-                  .map((p, i) => (
-                    <tr key={i}>
-                      <td>
-                        {p.station}
-                        <small>{p.month}</small>
-                      </td>
-                      <td>
-                        {p.effective || "Missing"} · v{p.revision ?? "—"}
-                      </td>
-                      <td>
-                        {money(
-                          p.variable === null ? null : Number(p.variable),
-                          2,
-                        )}
-                      </td>
-                      <td>{money(p.mg === null ? null : Number(p.mg), 2)}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-          <Link href="/master/pricing">Open Pricing Master →</Link>
-        </details>
-      </section>
-      <section className="pnl-panel">
-        <div className="pnl-panel-head">
           <div>
-            <span className="pnl-eyebrow">Expenses</span>
-            <h3>Operating costs</h3>
+            <small>Expenses</small>
+            <strong>{money(total.cost, 2)}</strong>
           </div>
-          <ArrowUpRight size={22} />
+          <div
+            className={
+              (total.profit ?? 0) < 0 ? "pnl-negative" : "pnl-positive"
+            }
+          >
+            <small>{resultLabel(total.profit)}</small>
+            <strong>
+              {money(total.profit === null ? null : Math.abs(total.profit), 2)}
+            </strong>
+          </div>
         </div>
-        {[
-          ["DA", "Delivery associates", total.da],
-          ["UTR", "Station team & shared managers", total.utr],
-          ["Van", "Vehicles, drivers & fuel", total.van],
-          ["Rent", "Station rent & maintenance", total.rent],
-          ["Other", "Other costs & overhead", total.other],
-        ].map(([head, label, value]) => {
-          const lines = heads.filter((c) =>
-            head === "Other"
-              ? ["Other", "Overhead"].includes(c.head)
-              : c.head === head,
-          );
-          return (
-            <details className="pnl-expense" key={String(head)}>
-              <summary>
-                <span>
-                  <ChevronDown size={14} /> {label}
-                </span>
-                <strong>
-                  {total.cost === null ? "—" : money(value as number, 2)}
-                </strong>
-              </summary>
-              <div className="pnl-expense-detail">
-                {lines.length ? (
-                  lines.map((l, i) => (
-                    <div className="pnl-line" key={i}>
-                      <span>
-                        {l.label}
-                        <small>{l.source}</small>
-                      </span>
-                      <strong>{money(l.amount, 2)}</strong>
-                    </div>
-                  ))
-                ) : (
-                  <p>
-                    No recorded cost in this head for these dates. Review source
-                    coverage before treating it as complete.
-                  </p>
-                )}
-                {head === "UTR" && (
-                  <p>
-                    Grouped People CTC only. Active station team and configured
-                    manager / telecaller shares accrue by calendar day;
-                    individual salaries and names remain private.
-                  </p>
-                )}
-              </div>
-            </details>
-          );
-        })}
-        <div className="pnl-line pnl-total">
-          <strong>Known operating cost</strong>
-          <strong>{money(total.cost, 2)}</strong>
-        </div>
-      </section>
-    </div>
+      )}
+      <div className="pnl-statement">
+        <section className="pnl-panel">
+          <div className="pnl-panel-head">
+            <div>
+              <span className="pnl-eyebrow">Income</span>
+              <h3>Revenue</h3>
+            </div>
+            <ArrowDownRight size={22} />
+          </div>
+          {[
+            ["MG / fixed payout + monthly fee", total.base],
+            ["Excess deliveries / delivery slabs", total.variable],
+            ["SWA delivery earnings", total.swa],
+            ["MFN earnings", total.mfn],
+          ].map(([label, value]) => (
+            <div className="pnl-line" key={String(label)}>
+              <span>{label}</span>
+              <strong>{money(value as number | null, 2)}</strong>
+            </div>
+          ))}
+          <div className="pnl-line pnl-total">
+            <strong>Revenue</strong>
+            <strong>{money(total.revenue, 2)}</strong>
+          </div>
+          <details className="pnl-source">
+            <summary>
+              Pricing & calculation <ChevronDown size={14} />
+            </summary>
+            <p>
+              Fixed amounts accrue by actual calendar days. Excess delivery uses
+              the effective rate card. SWA is priced separately and excluded
+              from MG volume. Flipkart slabs use cumulative deliveries within
+              each month.
+            </p>
+            <div className="pnl-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Station / month</th>
+                    <th>Effective card</th>
+                    <th>Delivery rate</th>
+                    <th>Monthly MG</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.pricing
+                    .filter((p) =>
+                      rows.some(
+                        (r) =>
+                          r.station === p.station &&
+                          r.date.startsWith(p.month || "__"),
+                      ),
+                    )
+                    .map((p, i) => (
+                      <tr key={i}>
+                        <td>
+                          {p.station}
+                          <small>{p.month}</small>
+                        </td>
+                        <td>
+                          {p.effective || "Missing"} · v{p.revision ?? "—"}
+                        </td>
+                        <td>
+                          {money(
+                            p.variable === null ? null : Number(p.variable),
+                            2,
+                          )}
+                        </td>
+                        <td>{money(p.mg === null ? null : Number(p.mg), 2)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            <Link href="/master/pricing">Open Pricing Master →</Link>
+          </details>
+        </section>
+        <section className="pnl-panel">
+          <div className="pnl-panel-head">
+            <div>
+              <span className="pnl-eyebrow">Expenses</span>
+              <h3>Expenses</h3>
+            </div>
+            <ArrowUpRight size={22} />
+          </div>
+          {[
+            ["DA", "Delivery associates", total.da],
+            ["UTR", "Station team & shared managers", total.utr],
+            ["Van", "Vehicles, drivers & fuel", total.van],
+            ["Rent", "Station rent & maintenance", total.rent],
+            ["Other", "Other costs & overhead", total.other],
+          ].map(([head, label, value]) => {
+            const lines = heads.filter((c) =>
+              head === "Other"
+                ? ["Other", "Overhead"].includes(c.head)
+                : c.head === head,
+            );
+            return (
+              <details className="pnl-expense" key={String(head)}>
+                <summary>
+                  <span>
+                    <ChevronDown size={14} /> {label}
+                  </span>
+                  <strong>
+                    {total.cost === null ? "—" : money(value as number, 2)}
+                  </strong>
+                </summary>
+                <div className="pnl-expense-detail">
+                  {lines.length ? (
+                    lines.map((l, i) => (
+                      <div className="pnl-line" key={i}>
+                        <span>
+                          {l.label}
+                          <small>{l.source}</small>
+                        </span>
+                        <strong>{money(l.amount, 2)}</strong>
+                      </div>
+                    ))
+                  ) : (
+                    <p>
+                      No recorded cost in this head for these dates. Review
+                      source coverage before treating it as complete.
+                    </p>
+                  )}
+                  {head === "UTR" && (
+                    <p>
+                      Grouped People CTC only. Active station team and
+                      configured manager / telecaller shares accrue by calendar
+                      day; individual salaries and names remain private.
+                      Attendance is not required.{" "}
+                      {[
+                        ...new Set(
+                          report.staffGroups
+                            .filter((g) =>
+                              rows.some((d) => d.station === g.station),
+                            )
+                            .flatMap((g) => g.roles),
+                        ),
+                      ].join(" · ")}
+                    </p>
+                  )}
+                </div>
+              </details>
+            );
+          })}
+          <div className="pnl-line pnl-total">
+            <strong>Expenses</strong>
+            <strong>{money(total.cost, 2)}</strong>
+          </div>
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -568,21 +624,36 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
         </div>
       ) : (
         <>
+          <div className="pnl-cutoff" role="status">
+            <strong>
+              Revenue and expenses use the same delivery-data cutoff.
+            </strong>
+            <p>
+              Requested: {dateLabel(report.filters.from)} –{" "}
+              {dateLabel(report.filters.to)}.{" "}
+              {report.coverage.length === 1
+                ? `Calculated through ${dateLabel(report.coverage[0].through)}.`
+                : "Each station stops on its latest reported delivery date; see Data through below."}{" "}
+              Dates after that cutoff are excluded from both sides. Monthly
+              fixed costs are divided by the actual calendar days in that month;
+              fuel uses dated transactions.
+            </p>
+          </div>
           <section className="pnl-kpis">
             <div>
-              <span>Known revenue</span>
+              <span>Revenue</span>
               <strong>{money(total.revenue)}</strong>
               <small>{count(total.deliveries)} delivered shipments</small>
             </div>
             <div>
-              <span>Known operating cost</span>
+              <span>Expenses</span>
               <strong>{money(total.cost)}</strong>
               <small>Same live calculation as OpsPulse CPS</small>
             </div>
             <div
               className={`pnl-result ${(total.profit ?? 0) < 0 ? "loss" : ""}`}
             >
-              <span>Provisional operating P&L</span>
+              <span>{resultLabel(total.profit)} · provisional</span>
               <strong>{money(total.profit)}</strong>
               <small>
                 {total.margin === null
@@ -670,15 +741,11 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                     </th>
                     <th>Delivered</th>
                     <th>Revenue</th>
-                    <th>DA cost</th>
-                    <th>UTR cost</th>
-                    <th>Van cost</th>
-                    <th>Rent + other</th>
-                    <th>Total cost</th>
+                    <th>Expenses</th>
+                    <th>Profit / Loss</th>
                     <th>CPS</th>
-                    <th>Operating P&L</th>
                     <th>Margin</th>
-                    <th>Coverage</th>
+                    <th>Data through</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -703,12 +770,76 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                               ? dateLabel(row.key)
                               : row.key
                         }
+                        through={
+                          rows
+                            .filter((d) => d.deliveries !== null)
+                            .map((d) => d.date)
+                            .sort()
+                            .at(-1) ?? null
+                        }
                         open={expanded === row.key}
                         onToggle={() =>
                           setExpanded(expanded === row.key ? null : row.key)
                         }
                       >
-                        <Statement total={row} rows={rows} report={report} />
+                        <p className="pnl-expanded-period">
+                          {titleForRows(rows)} · Revenue minus expenses ={" "}
+                          {resultLabel(row.profit).toLowerCase()}. Amounts
+                          remain provisional where inputs need review.
+                        </p>
+                        <Statement
+                          total={row}
+                          rows={rows}
+                          report={report}
+                          showSummary
+                        />
+                        {view !== "daily" && (
+                          <details className="pnl-source">
+                            <summary>
+                              Daily revenue, expenses & profit / loss
+                            </summary>
+                            <div className="pnl-scroll">
+                              <table>
+                                <thead>
+                                  <tr>
+                                    <th>Date</th>
+                                    <th>Revenue</th>
+                                    <th>Expenses</th>
+                                    <th>Profit / Loss</th>
+                                    <th>Deliveries</th>
+                                    <th>CPS</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {pnlGroup(rows, "date").map((d) => (
+                                    <tr key={d.key}>
+                                      <td>{dateLabel(d.key)}</td>
+                                      <td>{money(d.revenue, 2)}</td>
+                                      <td>{money(d.cost, 2)}</td>
+                                      <td
+                                        className={
+                                          (d.profit ?? 0) < 0
+                                            ? "pnl-negative"
+                                            : "pnl-positive"
+                                        }
+                                      >
+                                        {resultLabel(d.profit)}{" "}
+                                        {money(
+                                          d.profit === null
+                                            ? null
+                                            : Math.abs(d.profit),
+                                          2,
+                                        )}
+                                      </td>
+                                      <td>{count(d.deliveries)}</td>
+                                      <td>{money(d.cps, 2)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </details>
+                        )}
                         {view === "stations" && (
                           <a
                             className="pnl-btn"
@@ -728,17 +859,14 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                     <th>Total</th>
                     <td>{count(total.deliveries)}</td>
                     <td>{money(total.revenue)}</td>
-                    <td>{money(total.cost === null ? null : total.da)}</td>
-                    <td>{money(total.cost === null ? null : total.utr)}</td>
-                    <td>{money(total.cost === null ? null : total.van)}</td>
+                    <td>{money(total.cost)}</td>
                     <td>
+                      {resultLabel(total.profit)}{" "}
                       {money(
-                        total.cost === null ? null : total.rent + total.other,
+                        total.profit === null ? null : Math.abs(total.profit),
                       )}
                     </td>
-                    <td>{money(total.cost)}</td>
                     <td>{money(total.cps, 2)}</td>
-                    <td>{money(total.profit)}</td>
                     <td>{total.margin?.toFixed(1) ?? "—"}%</td>
                     <td>
                       {total.shipmentDays}/{total.stationDays}
@@ -915,12 +1043,14 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
 function PnlTableRow({
   row,
   title,
+  through,
   open,
   onToggle,
   children,
 }: {
   row: PnlTotal;
   title: string;
+  through: string | null;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
@@ -939,26 +1069,26 @@ function PnlTableRow({
         </th>
         <td>{count(row.deliveries)}</td>
         <td>{money(row.revenue)}</td>
-        <td>{money(row.cost === null ? null : row.da)}</td>
-        <td>{money(row.cost === null ? null : row.utr)}</td>
-        <td>{money(row.cost === null ? null : row.van)}</td>
-        <td>{money(row.cost === null ? null : row.rent + row.other)}</td>
         <td>{money(row.cost)}</td>
-        <td>{money(row.cps, 2)}</td>
         <td className={(row.profit ?? 0) < 0 ? "pnl-negative" : "pnl-positive"}>
-          {money(row.profit)}
+          {resultLabel(row.profit)}{" "}
+          {row.profit === null ? "" : money(Math.abs(row.profit))}
         </td>
+        <td>{money(row.cps, 2)}</td>
         <td>{row.margin === null ? "—" : `${row.margin.toFixed(1)}%`}</td>
         <td>
           <span className={row.issueDays ? "pnl-badge" : "pnl-badge good"}>
-            {row.shipmentDays}/{row.stationDays} days
+            {dateLabel(through)}
+            <small>
+              {row.shipmentDays}/{row.stationDays} reported days
+            </small>
             {row.issueDays ? " · provisional" : ""}
           </span>
         </td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={12} className="pnl-expanded">
+          <td colSpan={8} className="pnl-expanded">
             {children}
           </td>
         </tr>

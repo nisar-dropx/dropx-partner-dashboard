@@ -60,8 +60,16 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery) {
         };
       }),
   ]);
-  if (revenueResponse.error)
+  if (revenueResponse.error) {
+    console.error("Finance P&L revenue source failed", {
+      code: revenueResponse.error.code,
+      message: revenueResponse.error.message,
+      stationCount: codes.length,
+      from: filters.from,
+      through: filters.to,
+    });
     throw Error("Revenue data could not be loaded. Please retry.");
+  }
   const snapshot = revenueResponse.data as Snapshot & {
     availability: SourceAvailability;
   };
