@@ -25,7 +25,7 @@ create table cps_fuel_daily(company_id uuid,station_code text,transaction_date d
 create table cps_cashbook_daily(company_id uuid,station_code text,expense_date date,category text,cps_head text,cps_sub_head text,remarks text,raw_payload jsonb,amount numeric);
 create table cps_station_targets(company_id uuid,station_code text,is_active boolean,effective_from date,target_cps numeric);
 `);
-for(const file of ['20261004154730_cps_vehicle_rent_master.sql','20261004155012_cps_operating_cost_sources.sql']) await db.exec(readFileSync(new URL(`../supabase/migrations/${file}`,import.meta.url),'utf8'));
+for(const file of ['20261004160924_cps_vehicle_rent_master.sql','20261004160954_cps_operating_cost_sources.sql']) await db.exec(readFileSync(new URL(`../supabase/migrations/${file}`,import.meta.url),'utf8'));
 const query = async(sql,params=[]) => (await db.query(sql,params)).rows;
 const costs = async(fn,codes=['A','B'],from='2026-09-01',to='2026-09-30') => (await query(`select public.${fn}($1,$2,$3,$4) result`,[company,from,to,codes]))[0].result;
 let result=await costs('ops_cps_vehicle_costs');
