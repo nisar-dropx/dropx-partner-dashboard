@@ -113,7 +113,7 @@ export async function loadFleetControlData(companyId: string, authorization: Aut
   const locations = locationsResult.locations.filter(isAdHocActivityLocation); const stationCodes = locations.map((location) => normalized(location.station_code));
   const canManageFleet = authorization.isMasterOwner || hasPermission(authorization, "fleet_maintenance", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
   const canManageDocuments = authorization.isMasterOwner || hasPermission(authorization, "fleet_date_view", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
-  const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit") || hasPermission(authorization, "app_settings", "edit") || hasPermission(authorization, "users", "edit");
+  const canManageSettings = !authorization.readOnly && (authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit") || hasPermission(authorization, "app_settings", "edit") || hasPermission(authorization, "users", "edit"));
   const visibleSections = [
     ["overview", "fleet_action_center"],
     ["vehicles", "fleet_vehicle_view"],
