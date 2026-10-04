@@ -329,7 +329,7 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
       if(passed===false) findings.push({itemId:item.id,category:item.category,finding:`${item.label}: ${comments || value}`,severity:item.failure_severity,actionRequired:'Review and rectify',expectedCompletionDate:todayKolkata()});
     }
     if(value && new Set(evidence.filter((e:Payload)=>e.itemId===item.id && (type==='any' || e.type===type)).map((e:Payload)=>clean(e.url))).size < minimum) throw new Error(`${item.label}: attach ${minimum} ${type} evidence.`);
-    responses.push({itemId:item.id,passed,comments,snapshot:{value,label:item.label,config,days:r.days || null,action:clean(r.action)}});
+    responses.push({itemId:item.id,passed,comments,snapshot:{value,label:item.label,config,days:config?.options.find(option=>option.value===value)?.followUp==='planned' ? Number(r.days) : null,action:clean(r.action)}});
   }
   if(clean(body.finding)) findings.push({category:clean(body.findingCategory)||'General',finding:clean(body.finding),severity:['low','medium','high','critical'].includes(body.severity)?body.severity:'medium',actionRequired:clean(body.actionRequired),expectedCompletionDate:clean(body.expectedCompletionDate)||null});
   const failed=responses.some(r=>r.passed===false);

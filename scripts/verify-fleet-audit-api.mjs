@@ -19,6 +19,7 @@ r=await submit({responses:[]});assert.equal(r.status,400);
 r=await submit({responses:[{...response,value:'invented'}]});assert.equal(r.status,400);
 const evidence=[{itemId:'tyre',url:'https://example.com/tyre.jpg',type:'photo'}];
 r=await submit({responses:[response],evidence});assert.equal(r.status,200);assert.equal(rpcPayload.p_data.responses[0].passed,false,'client passed flag cannot override master');assert.equal(rpcPayload.p_data.findings[0].expectedCompletionDate,'2026-10-12');assert.equal(rpcPayload.p_data.status,'failed');
+r=await submit({responses:[{...response,value:'needs_immediate_replacement'}],evidence});assert.equal(r.status,200);assert.equal(rpcPayload.p_data.findings[0].expectedCompletionDate,'2026-10-05');assert.equal(rpcPayload.p_data.responses[0].snapshot.days,null);
 item.response_config={...item.response_config,options:item.response_config.options.map(o=>({...o,photos:o.issue?2:0}))};r=await submit({responses:[response],evidence:[...evidence,...evidence]});assert.equal(r.status,400,'same file cannot satisfy two photos');
 membership=false;r=await submit({});assert.equal(r.status,403);membership=true;edit=false;r=await submit({});assert.equal(r.status,403);edit=true;auth.hasAllLocationAccess=false;records.stations=[{station_code:'OTHER'}];r=await submit({});assert.equal(r.status,403);
 auth=null;r=await submit({});assert.equal(r.status,401);
