@@ -14,7 +14,6 @@ import {
   type CpsParams,
 } from "@/lib/ops-pulse/cps";
 import { compressedWorkbookResponse } from "@/lib/report-workbook";
-import { adHocClusterLabel } from "@/lib/ops-pulse/adhoc-activity";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 const headers = { "Cache-Control": "private, no-store" };
@@ -120,7 +119,6 @@ export async function GET(request: Request) {
           rows: groupCps(result.daily, (r) => r.station_code).map((s) => ({
             Location: s.key,
             Name: places.get(s.key)?.station_name || s.key,
-            Cluster: adHocClusterLabel(places.get(s.key)!),
             Region: places.get(s.key)?.region || "Unassigned",
             ...summaryRow(s),
           })),

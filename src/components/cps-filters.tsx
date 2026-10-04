@@ -11,7 +11,7 @@ export function CpsFilters({
   params: CpsParams;
   period: { mode: string; date: string; month: string };
   today: string;
-  places: { code: string; name: string; cluster: string; region: string }[];
+  places: { code: string; name: string; region: string }[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -71,17 +71,8 @@ export function CpsFilters({
           ))}
         </select>
       </label>
-      <label>
-        Cluster
-        <select name="cluster" defaultValue={params.cluster || ""}>
-          <option value="">All permitted clusters</option>
-          {[...new Set(places.map((p) => p.cluster))].sort().map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </select>
-      </label>
       <div className="cps-station-picker"><span>Stations</span><input type="hidden" name="station" value={stations.join(',')}/>
-        <details><summary>{stations.length?`${stations.length} stations selected`:'All permitted stations'}</summary><div className="cps-station-menu">
+        <details><summary>{stations.length?`${stations.length} station${stations.length===1?'':'s'} selected`:'All permitted stations'}</summary><div className="cps-station-menu">
           <input aria-label="Find stations" placeholder="Search code or name…" value={search} onChange={e=>setSearch(e.target.value)}/>
           <div className="cps-picker-actions"><button type="button" onClick={()=>setStations([])}>All stations</button><button type="button" onClick={()=>setStations([...new Set([...stations,...places.filter(p=>`${p.code} ${p.name}`.toLowerCase().includes(search.toLowerCase())).map(p=>p.code)])])}>Select search results</button></div>
           <div className="cps-station-options">{places.filter(p=>`${p.code} ${p.name}`.toLowerCase().includes(search.toLowerCase())).map(p=><label key={p.code}><input type="checkbox" checked={stations.includes(p.code)} onChange={e=>setStations(e.target.checked?[...stations,p.code]:stations.filter(c=>c!==p.code))}/><span><strong>{p.code}</strong> · {p.name}</span></label>)}</div>

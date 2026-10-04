@@ -10,7 +10,7 @@ import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
 import { listConnectPayAdvanceApprovals, decideConnectPayAdvanceApproval } from "../../../../src/lib/connect-pay-advance-approval-data";
-import { listConnectPaymentApprovals, decideConnectPaymentApproval } from "../../../../src/lib/connect-payment-approvals";
+import { listConnectPaymentApprovals } from "../../../../src/lib/connect-payment-approvals";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -155,13 +155,7 @@ export async function PATCH(request: Request) {
     }
     const paymentRequestId = clean(body.paymentRequestId);
     if (paymentRequestId) {
-      const decision = clean(body.decision);
-      if (decision !== "approved" && decision !== "returned" && decision !== "rejected") {
-        throw new Error("Select a valid decision.");
-      }
-      const actorUserIds = await resolveConnectActorUserIds(account);
-      await decideConnectPaymentApproval(account.companyId, actorUserIds, paymentRequestId, decision, clean(body.comments));
-      return NextResponse.json({ ok: true, notice: `Payment request ${decision}.` });
+      return NextResponse.json({ error: "Station payment requests, including ad hoc DA, Wishmaster, driver and van requests, must be reviewed in OpsPulse.", url: "https://ops.dropxlogistics.com/payments/approvals" }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
     }
     const reviewId = clean(body.reviewId);
     if (reviewId) {

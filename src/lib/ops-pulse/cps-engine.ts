@@ -27,6 +27,7 @@ export type CpsFacts = {
   stations: RecordRow[]; employees: RecordRow[]; salaries: RecordRow[];
   people_rules: CpsCostInput[];
   people_policies?: CpsPeoplePolicy[];
+  people_assignments?: {employee_id:string;station_code:string;effective_from:string;effective_to:string|null}[];
   allocations?: RecordRow[];
   attendance?: RecordRow[];
   attendance_shipments?: RecordRow[];
@@ -470,8 +471,13 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     if(!rule) {
       if(!overhead) codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):operating.some(s=>s.id===home?.id)?[home!.station_code]:[];
       else {
-        codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
-        if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
+        // The current People assignment history is authoritative when supplied;
+        // an expired assignment must not revive an old org-position/email scope.
+        if(facts.people_assignments) codes=[...new Set(facts.people_assignments.filter(a=>a.employee_id===e.id&&activeOn(a,date)&&operating.some(s=>s.station_code===a.station_code)).map(a=>a.station_code))];
+        else {
+          codes=operating.filter(s=>(e.location_scope_ids??[]).includes(s.id)).map(s=>s.station_code);
+          if(!codes.length && e.email) codes=operating.filter(s=>[s.cluster_manager_email,s.ops_manager_email].some(v=>key(v)===key(e.email))).map(s=>s.station_code);
+        }
       }
     }
     if(!codes.length) {

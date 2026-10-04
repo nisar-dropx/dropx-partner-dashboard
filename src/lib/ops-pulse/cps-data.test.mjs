@@ -94,6 +94,7 @@ test("RPC receives company, sorted station scope and exact period; empty scope d
     rpc: async (...args) => {
       if(args[0] === "ops_cps_source_facts") return { data: { shipments: [], stations: [] }, error: null };
       if(args[0] === "ops_cps_vehicle_costs") return { data: { breakup: [], gaps: [], vehicles: [] }, error: null };
+      if(args[0] === "ops_cps_people_assignments") return {data:{employees:[],salaries:[],stations:[],volumes:[],assignments:[]},error:null};
       if(args[0] === "ops_cps_period_expenses") return {data:[],error:null};
       calls.push(args);
       return { data: { daily: [], breakup: [] }, error: null };

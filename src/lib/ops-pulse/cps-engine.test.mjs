@@ -285,3 +285,13 @@ test('moving a manager cost head never makes their name or individual salary pub
  f.employees=[{id:'private',employee_code:'PRIVATE1',full_name:'PRIVATE_MANAGER_NAME',designation:'CLM',is_active:true,location_scope_ids:['station-a']}];f.salaries=[{employee_id:'private',effective_from:'2026-01-01',monthly_ctc:30000}];
  const r=rebuildCps(base(),f);assert.ok(!JSON.stringify(r).includes('PRIVATE_MANAGER_NAME'));assert.ok(!r.people.some(p=>p.dropx_id==='PRIVATE1'));
 });
+
+test('People assignments use dated mapped stations, deduplicate duties and preserve shares under filters',()=>{
+ const f=facts();f.employees=[{id:'manager',employee_code:'PRIVATE1',full_name:'Private manager',designation:'CLM',location_id:'ho',is_active:true,date_of_join:'2020-01-01',location_scope_ids:['station-a']}];
+ f.salaries=[{id:'ctc',employee_id:'manager',monthly_ctc:30000,effective_from:'2026-01-01'}];
+ f.people_assignments=[{employee_id:'manager',station_code:'A',effective_from:'2026-09-01',effective_to:'2026-09-15'},{employee_id:'manager',station_code:'B',effective_from:'2026-09-01',effective_to:null},{employee_id:'manager',station_code:'B',effective_from:'2026-09-01',effective_to:null}];
+ let r=rebuildCps(base([day(),day('B')]),f);near(r.daily[0].utr,500);near(r.daily[1].utr,500);
+ r=rebuildCps(base(),f);near(r.daily[0].utr,500);assert.ok(r.staff.every(s=>s.station_code==='A'));assert.ok(!JSON.stringify(r).includes('Private manager'));assert.ok(!JSON.stringify(r).includes('PRIVATE1'));
+ r=rebuildCps(base([day('A','2026-09-16'),day('B','2026-09-16')]),f);near(r.daily[0].utr,0);near(r.daily[1].utr,1000);
+ f.people_assignments=[];r=rebuildCps(base(),f);near(r.daily[0].utr,0);assert.ok(r.allocation_notices.some(n=>n.includes('mapped operating stations are missing')));
+});

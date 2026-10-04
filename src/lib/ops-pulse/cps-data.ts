@@ -50,7 +50,7 @@ const snapshot = cache(
     const codes: string[] = JSON.parse(codesKey);
     if (!supabaseAdmin) throw Error("CPS data is temporarily unavailable.");
     const attendanceFrom = workforcePaymentMonthStart(from);
-    const [result, facts, paymentPolicy, attendanceCapture, monthAttendance, monthSourceFacts, vehicleCosts, peoplePolicies, periodCosts, stationFlags] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
+    const [result, facts, paymentPolicy, attendanceCapture, monthAttendance, monthSourceFacts, vehicleCosts, peoplePolicies, periodCosts, stationFlags, peopleAssignments] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
       p_company: company,
       p_from: from,
       p_through: to,
@@ -83,7 +83,8 @@ const snapshot = cache(
       }), supabaseAdmin.rpc("ops_cps_vehicle_costs", {p_company:company,p_from:from,p_through:to,p_stations:codes}),
     supabaseAdmin.from("ops_cps_people_policies").select("designation_code,designation_name,mode,head,label,allocation,effective_from").eq("company_id",company).lte("effective_from",to).limit(1000),
     supabaseAdmin.rpc("ops_cps_period_expenses",{p_company:company,p_from:from,p_through:to,p_stations:codes}),
-    supabaseAdmin.from("stations").select("id,is_ho").eq("company_id",company).limit(1000)]);
+    supabaseAdmin.from("stations").select("id,is_ho").eq("company_id",company).limit(1000),
+    supabaseAdmin.rpc("ops_cps_people_assignments",{p_company:company,p_from:from,p_through:to})]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
       throw Error("CPS data could not be loaded. Please retry shortly.");
@@ -99,7 +100,16 @@ const snapshot = cache(
     if (vehicleCosts.error || !Array.isArray(vehicleCosts.data?.breakup) || !Array.isArray(vehicleCosts.data?.gaps))
       throw Error("Fleet vehicle costs could not be loaded. Please retry.");
     if(stationFlags.error || stationFlags.data?.length===1000 || peoplePolicies.error || peoplePolicies.data?.length===1000 || periodCosts.error) throw Error("CPS allocation settings could not be loaded.");
+    if (peopleAssignments.error || !Array.isArray(peopleAssignments.data?.assignments) || !Array.isArray(peopleAssignments.data?.employees) || !Array.isArray(peopleAssignments.data?.salaries) || !Array.isArray(peopleAssignments.data?.stations) || !Array.isArray(peopleAssignments.data?.volumes)) throw Error("People station assignments could not be loaded. Please retry.");
     const sourceFacts = facts.data as CpsFacts;
+    // Company-private facts stay on the server. Merge current People assignments
+    // before calculation, retaining the whole share denominator outside the filter.
+    const mergeFacts=(original:any[], extra:any[], identity:(row:any)=>string)=>[...new Map([...original,...extra].map(row=>[identity(row),row])).values()];
+    sourceFacts.employees=mergeFacts(sourceFacts.employees??[],peopleAssignments.data.employees,row=>row.id);
+    sourceFacts.salaries=mergeFacts(sourceFacts.salaries??[],peopleAssignments.data.salaries,row=>row.id);
+    sourceFacts.stations=mergeFacts(sourceFacts.stations??[],peopleAssignments.data.stations,row=>row.id);
+    sourceFacts.volumes=mergeFacts(sourceFacts.volumes??[],peopleAssignments.data.volumes,row=>`${row.station_code}|${row.work_date}`);
+    sourceFacts.people_assignments=peopleAssignments.data.assignments;
     sourceFacts.stations=sourceFacts.stations.map(s=>({...s,is_ho:stationFlags.data?.find(f=>f.id===s.id)?.is_ho??s.is_ho}));
     sourceFacts.people_policies=peoplePolicies.data as CpsFacts["people_policies"];
     const attendanceFacts = (monthSourceFacts.data ?? sourceFacts) as CpsFacts;
