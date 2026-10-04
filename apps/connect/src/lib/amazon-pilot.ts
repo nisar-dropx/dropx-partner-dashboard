@@ -5,7 +5,7 @@ export type PilotEvidence = {
  reportSyncedAt?: string | null; sccAt?: string | null; sccSource?: string | null;
  firstDelivery?: string | null; conflict?: boolean;
 };
-export type Pilot = {workforce_id:string;company_id:string;station_id:string;reported_on:string;trial_days:number;trial_completed_at:string|null;readiness_note?:string|null;closed_at:string|null;evidence:PilotEvidence;last_checked_at:string|null;sync_error:string|null;created_at:string};
+export type Pilot = {workforce_id:string;company_id:string;station_id:string;reported_on:string;trial_days:number;trial_completed_at:string|null;readiness_note?:string|null;closed_at:string|null;exit_reason_id?:string|null;exit_note?:string|null;exit_requested_at?:string|null;exit_requested_source?:'associate'|'workforce'|null;evidence:PilotEvidence;last_checked_at:string|null;sync_error:string|null;created_at:string};
 export type InvitationSnapshot = {status?:string|null;external_reference?:string|null;completed_at?:string|null;error_message?:string|null};
 export type PortalSnapshot = {amazon_provider_id?:string|null;transporter_id?:string|null};
 export function withLiveAmazonEvidence(evidence:PilotEvidence|undefined,invitation?:InvitationSnapshot|null,portal?:PortalSnapshot|null):PilotEvidence {

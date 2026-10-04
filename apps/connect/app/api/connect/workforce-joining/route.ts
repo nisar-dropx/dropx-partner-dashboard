@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     if (account.workspace !== "workforce" || (!account.activationOnly && !account.pageAccess.some(code => ["dashboard", "earnings", "profile"].includes(code)))) return NextResponse.json({error:"This view is not enabled for your account."},{status:403,headers});
     if (!supabaseAdmin) throw new Error("Joining details are temporarily unavailable.");
     const db = supabaseAdmin, company = account.companyId;
-    let personQuery = db.from("workforce").select("id,location_id,source_profile_type,source_profile_id,onboarding_status,lifecycle_status,is_active,onboarding_approved_at,last_working_date")
+    let personQuery = db.from("workforce").select("id,email,location_id,source_profile_type,source_profile_id,onboarding_status,lifecycle_status,is_active,onboarding_approved_at,last_working_date")
       .eq("company_id",company).is("deleted_at",null).neq("migration_state","reclassified");
     personQuery = account.profileType === "workforce" ? personQuery.eq("id",account.id) : personQuery.eq("source_profile_type",account.profileType).eq("source_profile_id",account.id);
     const personResult = await personQuery.maybeSingle();
@@ -35,11 +35,12 @@ export async function GET(request: NextRequest) {
     const pilot=await db.from("workforce_amazon_pilots").select("*").eq("company_id",company).eq("workforce_id",person.id).maybeSingle();
     if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status unavailable.");
     if(pilot.data){
-      const [invitation,portal,registrationDraft,liveSources]=await Promise.all([
+      const [invitation,portal,registrationDraft,liveSources,exitReasons]=await Promise.all([
         db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_message").eq("company_id",company).eq("workforce_id",person.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
         db.from("workforce_amazon_portal_links").select("amazon_provider_id,transporter_id").eq("company_id",company).eq("workforce_id",person.id).maybeSingle(),
         db.from("mob_app_registration_drafts").select("draft_data,updated_at").eq("company_id",company).eq("profile_type",account.profileType).eq("account_id",person.id).maybeSingle(),
-        db.rpc("workforce_amazon_pilot_sources",{p_company:company,p_workforce:person.id})
+        db.rpc("workforce_amazon_pilot_sources",{p_company:company,p_workforce:person.id}),
+        db.from("workforce_onboarding_exit_reasons").select("id,label,description,requires_note").eq("company_id",company).eq("client_code","AMAZON").eq("is_active",true).order("sort_order").order("label")
       ]);
       const base=pilot.data as Pilot;
       const sourceEvidence=liveSources.error||!liveSources.data?base.evidence:liveSources.data as Pilot["evidence"];
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
       const betaData=(registrationDraft.data?.draft_data??{}) as Record<string,unknown>;
       const betaSubmitted=betaData._beta_status==="submitted";
       const registrationRequired=["pending","returned"].includes(String(person.onboarding_status??"").toLowerCase())&&!betaSubmitted;
-      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),driverId:p.evidence.employeeId??null,biometricId:account.biometricId,amazonAccountId:p.evidence.providerId,registrationRequired,registrationStatus:betaSubmitted?"submitted":person.onboarding_status,actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.evidence.invitationAt||p.last_checked_at,tasks:[],training:null},{headers});
+      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),driverId:p.evidence.employeeId??null,biometricId:account.biometricId,amazonAccountId:p.evidence.providerId,invitationEmail:person.email??account.email,registrationRequired,registrationStatus:betaSubmitted?"submitted":person.onboarding_status,offboardingRequested:Boolean(p.closed_at&&p.exit_requested_source==='associate'),offboardingRequestedAt:p.exit_requested_at??null,exitReasons:exitReasons.data??[],actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.evidence.invitationAt||p.last_checked_at,tasks:[],training:null},{headers});
     }
 
     const partnerState=(await loadPartnerOnboardingStates(db,company,[person.id])).get(person.id);
@@ -94,4 +95,24 @@ export async function GET(request: NextRequest) {
   } catch {
     return NextResponse.json({error:"We could not load your joining details. Please retry, or sign in again if your session expired."},{status:400,headers});
   }
+}
+
+export async function POST(request:NextRequest){
+ try{
+  const body=await request.json() as {accountId?:string;profileType?:ConnectAccount["profileType"];action?:string;reasonId?:string;note?:string};
+  const account=await requireConnectAccount(body.profileType as ConnectAccount["profileType"],body.accountId??"",{allowActivationOnly:true});
+  if(account.workspace!=="workforce"||body.action!=="not_continuing")return NextResponse.json({error:"This action is unavailable."},{status:403,headers});
+  if(!supabaseAdmin)throw new Error("Onboarding is temporarily unavailable.");
+  const note=String(body.note??"").trim();
+  if(!body.reasonId||note.length>1000)return NextResponse.json({error:"Choose a reason and keep the note under 1,000 characters."},{status:400,headers});
+  let personQuery=supabaseAdmin.from("workforce").select("id").eq("company_id",account.companyId).is("deleted_at",null).neq("migration_state","reclassified");
+  personQuery=account.profileType==="workforce"?personQuery.eq("id",account.id):personQuery.eq("source_profile_type",account.profileType).eq("source_profile_id",account.id);
+  const person=await personQuery.maybeSingle();
+  if(person.error||!person.data)return NextResponse.json({error:"Your onboarding record could not be verified."},{status:404,headers});
+  const result=await supabaseAdmin.rpc("workforce_submit_amazon_pilot_exit",{p_company:account.companyId,p_workforce:person.data.id,p_reason:body.reasonId,p_note:note});
+  if(result.error)throw new Error(result.error.message);
+  return NextResponse.json({ok:true},{headers});
+ }catch(error){
+  return NextResponse.json({error:error instanceof Error?error.message:"We could not save your decision."},{status:400,headers});
+ }
 }

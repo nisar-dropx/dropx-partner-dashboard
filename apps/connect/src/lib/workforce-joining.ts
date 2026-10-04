@@ -50,7 +50,7 @@ export type JoiningPlan = {
   version: number; updated_at: string; updated_by: string;
 };
 export type JoiningPerson = {
-  id: string; location_id: string; source_profile_type?: string | null; source_profile_id?: string | null;
+  id: string; email?: string | null; location_id: string; source_profile_type?: string | null; source_profile_id?: string | null;
   onboarding_status: string | null; lifecycle_status: string | null; is_active: boolean;
   onboarding_approved_at?: string | null; last_working_date?: string | null;
 };
