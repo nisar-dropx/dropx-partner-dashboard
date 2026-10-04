@@ -81,7 +81,7 @@ insert into designations values('${company}','HRM','HR Head'),('${company}','CLM
 alter table payment_requests add column id uuid default gen_random_uuid();
 alter table cps_cashbook_daily add column id uuid default gen_random_uuid();`);
 await db.exec(readFileSync(new URL('../supabase/migrations/20261004171601_cps_allocation_privacy_and_period_costs.sql',import.meta.url),'utf8'));
-await db.exec(readFileSync(new URL('../supabase/migrations/20261004181144_cps_expense_lookup_performance.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261004182514_cps_expense_lookup_performance.sql',import.meta.url),'utf8'));
 assert.equal((await query("select mode from ops_cps_people_policies where designation_code='HRM'"))[0].mode,'excluded');
 assert.equal((await query("select allocation from ops_cps_people_policies where designation_code='CLM'"))[0].allocation,'equal');
 await db.exec(`insert into ops_cps_expense_policies(company_id,cost_label,mode,effective_from) values('${company}','electricity','monthly','2026-09-01');`);
