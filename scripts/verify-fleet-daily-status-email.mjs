@@ -7,6 +7,11 @@ new Function('exports', ts.transpileModule(readFileSync('src/lib/fleet/daily-sta
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
 }).outputText)(exports);
 
+const recipientExports = {};
+new Function('exports', 'require', ts.transpileModule(readFileSync('src/lib/fleet/daily-status-recipients.ts', 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+}).outputText)(recipientExports, (specifier) => specifier === '@/lib/adhoc-digest-scope' ? { adHocOpsRoles: new Set() } : {});
+
 const rows = [{ station: 'KOZA', ownTotal: 12, ownOperational: 6, ownNonOperational: 6, partnerTotal: 0, partnerOperational: 0, partnerNonOperational: 0, totalNonOperational: 6, adHocVans: 0 }];
 const report = exports.buildFleetDailyStatusEmail({
   date: '2026-10-04',
@@ -52,4 +57,32 @@ assert.doesNotMatch(report.html, /Review and update Fleet|Review Fleet:/);
 assert.match(report.text, /32 vehicles/);
 assert.match(report.text, /3 approved ad hoc usages/);
 assert.match(report.text, /3 pending approvals/);
-console.log('Fleet daily status email: station-level T/A/P counts plus compact Today and MTD count-and-amount detail, configurable styling, and no portal access link passed.');
+
+const deliveries = recipientExports.resolveFleetDailyStatusDeliveryRecipients(
+  [
+    { email: 'ops@example.com', name: 'Mapped Ops', stationCodes: ['KOZA', 'QLDA'], source: 'people' },
+    { email: 'quiet@example.com', name: 'Other Ops', stationCodes: ['TLPA'], source: 'people' }
+  ],
+  [
+    { email: 'ops@example.com', name: 'Mapped Ops', stationCodes: ['KTUO'] },
+    { email: 'leader@example.com', name: 'Business Head', stationCodes: [] }
+  ],
+  ['KOZA', 'QLDA', 'KTUO', 'TLPA'],
+  ['KOZA'],
+  true
+);
+assert.deepEqual(deliveries.map((row) => row.email), ['leader@example.com', 'ops@example.com']);
+assert.deepEqual(deliveries.find((row) => row.email === 'ops@example.com').stationCodes, ['KOZA', 'KTUO', 'QLDA']);
+assert.deepEqual(deliveries.find((row) => row.email === 'leader@example.com').stationCodes, ['KOZA', 'KTUO', 'QLDA', 'TLPA']);
+assert.ok(!deliveries.some((row) => row.email === 'quiet@example.com'));
+
+const route = readFileSync('src/app/api/cron/fleet-daily-status/route.ts', 'utf8');
+assert.match(route, /to: \[delivery\.email\]/);
+assert.match(route, /\.eq\("recipient_email", delivery\.email\)/);
+assert.match(route, /stationScope\.has/);
+const migration = readFileSync('supabase/migrations/20261004172422_fleet_daily_status_recipient_threads.sql', 'utf8');
+assert.match(migration, /unique \(company_id, report_date, recipient_email\)/i);
+assert.match(migration, /daily_status_send_time = '20:00:00'/);
+assert.match(migration, /'\{monthlyThread\}'/);
+
+console.log('Fleet daily status email: station-scoped recipient delivery, one recipient/month thread, 8:00 PM schedule, station-level T/A/P counts, and compact Van/Driver amount detail.');

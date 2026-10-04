@@ -10,11 +10,41 @@ type Role = { id: string; code: string; location_access_mode: string | null };
 type Profile = { id: string; full_name: string | null; email: string | null };
 
 export type FleetMailRecipient = { email: string; name: string; stationCodes: string[]; source: "people" | "station" };
+export type FleetManualMailRecipient = { email: string | null; name?: string | null; stationCodes: string[] };
+export type FleetMailDeliveryRecipient = { email: string; name: string; stationCodes: string[]; sources: Array<"people" | "station" | "manual"> };
 
 const address = (value: unknown) => {
   const result = String(value ?? "").trim().toLowerCase();
   return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(result) ? result : null;
 };
+
+/** Merge automatic and manual audiences into one station-scoped delivery per email address. */
+export function resolveFleetDailyStatusDeliveryRecipients(
+  automatic: FleetMailRecipient[],
+  manual: FleetManualMailRecipient[],
+  allStationCodes: string[],
+  triggerStationCodes: string[],
+  onlyAffected: boolean
+) {
+  const allowed = new Set(allStationCodes.map((value) => String(value).trim().toUpperCase()).filter(Boolean));
+  const triggers = new Set(triggerStationCodes.map((value) => String(value).trim().toUpperCase()).filter(Boolean));
+  const recipients = new Map<string, FleetMailDeliveryRecipient>();
+  const merge = (emailValue: unknown, name: unknown, stationCodes: string[], source: FleetMailDeliveryRecipient["sources"][number]) => {
+    const email = address(emailValue);
+    if (!email) return;
+    const scoped = [...new Set(stationCodes.map((value) => String(value).trim().toUpperCase()).filter((value) => allowed.has(value)))].sort();
+    if (!scoped.length) return;
+    const current = recipients.get(email) ?? { email, name: String(name ?? "").trim() || email, stationCodes: [], sources: [] };
+    current.stationCodes = [...new Set([...current.stationCodes, ...scoped])].sort();
+    current.sources = [...new Set([...current.sources, source])];
+    recipients.set(email, current);
+  };
+  automatic.forEach((recipient) => merge(recipient.email, recipient.name, recipient.stationCodes, recipient.source));
+  manual.forEach((recipient) => merge(recipient.email, recipient.name, recipient.stationCodes.length ? recipient.stationCodes : [...allowed], "manual"));
+  return [...recipients.values()]
+    .filter((recipient) => !onlyAffected || recipient.stationCodes.some((value) => triggers.has(value)))
+    .sort((left, right) => left.email.localeCompare(right.email));
+}
 
 async function allRows<T>(query: (offset: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>) {
   const rows: T[] = [];
