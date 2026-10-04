@@ -314,6 +314,8 @@ function mapNonEmployeeAccountRow(
     email?: string | null;
     dropx_id?: string | null;
     biometric_id?: string | null;
+    mobile?: string | null;
+    mobile_country_code?: string | null;
     designation_id?: string | null;
     designation?: string | null;
     onboarding_status?: string | null;
@@ -330,6 +332,8 @@ function mapNonEmployeeAccountRow(
     email: profile.email,
     dropx_id: profile.dropx_id,
     biometric_id: profile.biometric_id,
+    mobile: profile.mobile ?? null,
+    mobile_country_code: profile.mobile_country_code ?? null,
     designation_id: profile.designation_id ?? null,
     role: profile.designation || workforceLabel(profileType),
     status: profile.onboarding_status === "active"
