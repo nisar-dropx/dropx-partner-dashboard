@@ -38,6 +38,7 @@ const context = {
 };
 const emptyQuery = () => ({
   select() { return this; },
+  limit() { return this; },
   eq() { return this; },
   gte() { return this; },
   lte() { return this; },
@@ -91,8 +92,9 @@ test("RPC receives company, sorted station scope and exact period; empty scope d
   const calls = [];
   const db = {
     rpc: async (...args) => {
-      if(args[0] === "ops_cps_source_facts") return { data: { shipments: [] }, error: null };
+      if(args[0] === "ops_cps_source_facts") return { data: { shipments: [], stations: [] }, error: null };
       if(args[0] === "ops_cps_vehicle_costs") return { data: { breakup: [], gaps: [], vehicles: [] }, error: null };
+      if(args[0] === "ops_cps_period_expenses") return {data:[],error:null};
       calls.push(args);
       return { data: { daily: [], breakup: [] }, error: null };
     },
@@ -276,7 +278,7 @@ test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", 
     "Station CPS",
     "Daily CPS",
     "Cost breakup",
-    "People CTC",
+    "Staff cost allocation", "Bill periods",
     "Vehicle rent",
   ]);
   assert.equal(XLSX.utils.sheet_to_json(book.Sheets["Daily CPS"]).length, 31);
@@ -289,4 +291,10 @@ test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", 
   const cell = book.Sheets["Cost breakup"].D2;
   assert.equal(cell.t, "s");
   assert.equal(cell.f, undefined);
+});
+
+test('multiple station selection respects access and excludes HO masters',async()=>{
+ const d=dataModule(null,[...all,{id:'3',station_code:'OFFICE',is_ho:true}]);
+ assert.deepEqual((await d.cpsScope(context,{station:'a,B,FORGED'})).selected.map(s=>s.station_code),['A','B']);
+ assert.equal((await d.cpsScope(context,{station:'OFFICE'})).selected.length,0);
 });

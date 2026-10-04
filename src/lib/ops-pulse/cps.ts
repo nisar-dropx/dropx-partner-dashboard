@@ -128,13 +128,29 @@ export type CpsSnapshot = {
   gaps?: import("./cps-engine").CpsGap[];
   people?: import("./cps-engine").CpsPersonCost[];
   staff?: CpsStaffCost[];
+  allocation_notices?: string[];
+  expense_periods?: CpsExpensePeriod[];
   vehicles?: CpsVehicleCost[];
 };
+// Public CPS data contains grouped staff cost only; never employee identities or CTC.
 export type CpsStaffCost = {
-  employee_id: string; employee_code: string; name: string; designation: string;
-  station_code: string; head: CpsHead; monthly_ctc: number; days: number;
+  group: string; station_code: string; head: CpsHead;
   from_date: string; through_date: string; amount: number; allocation: string;
 };
+export type CpsPeoplePolicy = {
+  id?: string; designation_code: string; designation_name: string;
+  mode: 'excluded' | 'home' | 'managed'; head: CpsHead; label: string;
+  allocation: 'equal' | 'delivery_share'; effective_from: string;
+  updated_at?: string;
+};
+export type CpsExpensePeriod = {
+  source: 'payment' | 'cashbook'; source_id: string; station_code: string;
+  label: string; reference: string; amount: number; booked_on: string;
+  period_from: string; period_to: string; confirmed: boolean;
+};
+export function selectedCpsStations(value?: string) {
+  return [...new Set((value || '').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean))];
+}
 export type CpsVehicleCost = {
   vehicle_id: string; vehicle_no: string; model: string; station_code: string;
   monthly_rent: number | null; from_date: string; through_date: string; days: number; amount: number | null;

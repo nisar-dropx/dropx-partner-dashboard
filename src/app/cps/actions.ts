@@ -9,7 +9,7 @@ export async function saveCpsCost(form: FormData) {
   try {
     const auth = await getAuthorization();
     const id = String(form.get("id") || "");
-    if (!auth || !hasPermission(auth, "cps_inputs", id ? "edit" : "add"))
+    if (!auth || auth.readOnly || !hasPermission(auth, "cps_inputs", id ? "edit" : "add"))
       throw Error("CPS Inputs permission is required.");
     if (!supabaseAdmin) throw Error("Database unavailable. Please retry.");
     const scope = await cpsScope(auth, {});
@@ -75,7 +75,7 @@ export async function saveCpsCost(form: FormData) {
 export async function saveCpsTarget(form: FormData) {
   try {
     const auth = await getAuthorization();
-    if (!auth || !hasPermission(auth, "cps_inputs", "add"))
+    if (!auth || auth.readOnly || !hasPermission(auth, "cps_inputs", "add"))
       throw Error("CPS Inputs add permission is required.");
     if (!supabaseAdmin) throw Error("Database unavailable. Please retry.");
     const scope = await cpsScope(auth, {});

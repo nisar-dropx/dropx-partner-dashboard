@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import type { CpsParams } from "@/lib/ops-pulse/cps";
+import { selectedCpsStations, type CpsParams } from "@/lib/ops-pulse/cps";
 export function CpsFilters({
   params,
   period,
@@ -16,6 +16,8 @@ export function CpsFilters({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [mode,setMode]=useState(period.mode);
+  const [search,setSearch]=useState('');
+  const [stations,setStations]=useState(()=>selectedCpsStations(params.station));
   return (<>
     <div className="cps-quick-periods">{[{label:"MTD",period:"mtd",month:""},{label:"Last month",period:"monthly",month:new Date(Date.UTC(Number(today.slice(0,4)),Number(today.slice(5,7))-1,0)).toISOString().slice(0,7)}].map(p=><button key={p.label} type="button" disabled={pending} onClick={()=>{const q=new URLSearchParams(params as Record<string,string>);q.set("view","overview");q.set("period",p.period);q.delete("date");if(p.month)q.set("month",p.month);else q.delete("month");start(()=>router.push(`/cps?${q}`,{scroll:false}));}}>{p.label}</button>)}</div>
     <form
@@ -78,17 +80,14 @@ export function CpsFilters({
           ))}
         </select>
       </label>
-      <label>
-        Location
-        <select name="station" defaultValue={params.station || ""}>
-          <option value="">All permitted locations</option>
-          {places.map((p) => (
-            <option key={p.code} value={p.code}>
-              {p.code} · {p.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="cps-station-picker"><span>Stations</span><input type="hidden" name="station" value={stations.join(',')}/>
+        <details><summary>{stations.length?`${stations.length} stations selected`:'All permitted stations'}</summary><div className="cps-station-menu">
+          <input aria-label="Find stations" placeholder="Search code or name…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          <div className="cps-picker-actions"><button type="button" onClick={()=>setStations([])}>All stations</button><button type="button" onClick={()=>setStations([...new Set([...stations,...places.filter(p=>`${p.code} ${p.name}`.toLowerCase().includes(search.toLowerCase())).map(p=>p.code)])])}>Select search results</button></div>
+          <div className="cps-station-options">{places.filter(p=>`${p.code} ${p.name}`.toLowerCase().includes(search.toLowerCase())).map(p=><label key={p.code}><input type="checkbox" checked={stations.includes(p.code)} onChange={e=>setStations(e.target.checked?[...stations,p.code]:stations.filter(c=>c!==p.code))}/><span><strong>{p.code}</strong> · {p.name}</span></label>)}</div>
+          <small>Choose one or more, then apply filters.</small>
+        </div></details>
+      </div>
       <button type="submit" className="button primary" disabled={pending}>
         {pending ? "Loading…" : "Apply"}
       </button>

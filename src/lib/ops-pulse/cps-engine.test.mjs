@@ -13,7 +13,7 @@ new Function('exports','module','require',ts.transpileModule(readFileSync(new UR
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
-const facts=()=>({shipments:[{id:'s1',client:'Amazon',work_date:'2026-09-01',station_code:'A',provider_employee_id:'AM1',provider_employee_name:'Person',amazon_delivery:80,swa_delivery:20,total_delivery:100,total_activity:100,c_return:0,mfn:0,mfn_return:0}],volumes:[{station_code:'A',work_date:'2026-09-01',deliveries:100}],mappings:[{id:'m1',workforce_id:'w1',provider_id:'amazon',provider_member_id:'AM1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'per-packet',payment_values:{DELIVERY:10},pay_type:'PER_PACKET'}],workforce:[{id:'w1',full_name:'Person',dropx_id:'D1',location_id:'station-a',date_of_join:'2026-01-01',is_active:true}],components:[{payment_method_id:'per-packet',component_code:'DELIVERY',component_type:'production',calculation_type:'count_x_rate'}],providers:[{id:'amazon',code:'AMAZON',name:'Amazon'}],stations:[{id:'station-a',station_code:'A',is_active:true,state:'KL'},{id:'station-b',station_code:'B',is_active:true,state:'KL'}],employees:[],salaries:[],people_rules:[]});
+const facts=()=>({shipments:[{id:'s1',client:'Amazon',work_date:'2026-09-01',station_code:'A',provider_employee_id:'AM1',provider_employee_name:'Person',amazon_delivery:80,swa_delivery:20,total_delivery:100,total_activity:100,c_return:0,mfn:0,mfn_return:0}],volumes:[{station_code:'A',work_date:'2026-09-01',deliveries:100}],mappings:[{id:'m1',workforce_id:'w1',provider_id:'amazon',provider_member_id:'AM1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'per-packet',payment_values:{DELIVERY:10},pay_type:'PER_PACKET'}],workforce:[{id:'w1',full_name:'Person',dropx_id:'D1',location_id:'station-a',date_of_join:'2026-01-01',is_active:true}],components:[{payment_method_id:'per-packet',component_code:'DELIVERY',component_type:'production',calculation_type:'count_x_rate'}],providers:[{id:'amazon',code:'AMAZON',name:'Amazon'}],stations:[{id:'station-a',station_code:'A',is_active:true,state:'KL'},{id:'station-b',station_code:'B',is_active:true,state:'KL'}],employees:[],salaries:[],people_rules:[],people_policies:[{designation_code:"SSA",mode:"home",head:"UTR",label:"Station staff CTC",allocation:"equal",effective_from:"2026-01-01"},{designation_code:"CLM",mode:"managed",head:"UTR",label:"Manager share",allocation:"equal",effective_from:"2026-01-01"},{designation_code:"DA",mode:"home",head:"DA",label:"Salary / minimum guarantee",allocation:"equal",effective_from:"2026-01-01"}]});
 const near=(a,b)=>assert.ok(Math.abs(a-b)<.000001,`${a} != ${b}`);
 test('monthly calendar accrual exactly conserves full CTC for February and 31-day months',()=>{
  for(const [month,count] of [['2024-02',29],['2026-08',31],['2026-09',30]])near(Array.from({length:count},(_,i)=>monthlyAccrual(23456.78,`${month}-${String(i+1).padStart(2,'0')}`)).reduce((a,b)=>a+b,0),23456.78);
@@ -135,7 +135,7 @@ test('rate revisions use effective dates and reject simultaneous conflicting car
 test('People CTC includes full employer cost, dates, and shared UTR without filter leakage',()=>{
  const f=facts();f.employees=[{id:'e1',employee_code:'E1',full_name:'Staff',location_id:'station-a',is_active:true,date_of_join:'2026-01-01',designation:'SSA'},{id:'e2',employee_code:'E2',full_name:'Manager',location_id:'ho',is_active:true,date_of_join:'2026-01-01',designation:'CLM',location_scope_ids:['station-a','station-b']}];
  f.stations.push({id:'ho',station_code:'HO_KL',state:'KL',is_active:true});f.salaries=f.employees.map(e=>({employee_id:e.id,effective_from:'2026-01-01',monthly_ctc:30000}));f.volumes.push({station_code:'B',work_date:'2026-09-01',deliveries:300});
- const r=rebuildCps(base(),f);assert.equal(r.daily[0].utr,1250);assert.equal(r.daily[0].overhead,0);assert.equal(r.staff.reduce((s,p)=>s+p.amount,0),1250);assert.equal(r.daily[0].utr_configured,true);
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].utr,1500);assert.equal(r.daily[0].overhead,0);assert.equal(r.staff.reduce((s,p)=>s+p.amount,0),1500);assert.equal(r.daily[0].utr_configured,true);
 });
 test('People allocation override replaces automatic allocation and missing CTC is flagged',()=>{
  const f=facts();f.employees=[{id:'e1',employee_code:'E1',full_name:'Staff',location_id:'station-a',is_active:true,designation:'SSA'}];f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:30000}];f.people_rules=[{employee_id:'e1',station_codes:['A','B'],head:'Overhead',allocation:'equal',effective_from:'2026-01-01'}];
@@ -199,7 +199,7 @@ test('People CTC suppresses the salary bucket from an employee-backed direct all
  const f=facts();f.shipments=[];f.mappings=[];f.workforce[0].is_field_operations=true;f.workforce[0].provider_mapping_required=false;f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
  f.allocations=[{id:'a1',workforce_id:'w1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'direct',payment_values:{SALARY:30000}}];
  f.components=[{payment_method_id:'direct',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month',label:'Driver salary'}];
- f.employees=[{id:'e1',employee_code:'E1',full_name:'Driver',location_id:'station-a',is_active:true,date_of_join:'2026-01-01',designation:'DRIVER'}];f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:33000}];
+ f.employees=[{id:'e1',employee_code:'E1',full_name:'Driver',location_id:'station-a',is_active:true,date_of_join:'2026-01-01',designation:'DRIVER'}];f.people_policies.push({designation_code:'DRIVER',mode:'home',head:'UTR',label:'Station staff CTC',allocation:'equal',effective_from:'2026-01-01'});f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:33000}];
  const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da_salary,0);assert.equal(r.daily[0].utr,1100);assert.ok(!r.breakup.some(line=>line.source==='Direct workforce allocation'&&line.head==='DA'));
 });
 test('employee-backed CTC follows effective Workforce station after a transfer',()=>{
@@ -260,4 +260,28 @@ test('provider-required gap uses effective policy station rather than current lo
  const r=rebuildCps(base([day('B','2026-09-01',0)]),f);
  assert.ok(r.gaps.some(g=>g.dropx_id==='D1'&&g.kind==='Provider ID not linked'&&g.station_code==='B'));
  assert.ok(!r.gaps.some(g=>g.dropx_id==='D1'&&g.station_code==='A'));
+});
+
+test('HR, Finance, Fleet and unknown HO roles never allocate from access scope; People details stay private',()=>{
+ const f=facts();f.stations.push({id:'ho',station_code:'HO_MJR',region:'SAME_REGION',is_active:true,is_ho:true});
+ f.employees=['HRE','HRM','FINMGR','FLTM','UNCONFIGURED','CLM'].map((designation,i)=>({id:`e${i}`,full_name:`PRIVATE_NAME_${i}`,employee_code:`SECRET_${i}`,designation,location_id:'ho',location_scope_ids:['station-a','station-b'],is_active:true}));
+ f.salaries=f.employees.map(e=>({employee_id:e.id,effective_from:'2026-01-01',monthly_ctc:30000}));
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].utr,500);assert.equal(r.staff.length,1);assert.equal(r.staff[0].group,'Manager share');
+ const json=JSON.stringify(r);assert.ok(!json.includes('PRIVATE_NAME'));assert.ok(!json.includes('SECRET_'));assert.ok(!json.includes('monthly_ctc'));assert.ok(!json.includes('"employee_id":'));
+ f.stations[0].region='SAME_REGION';f.employees.at(-1).location_scope_ids=[];assert.equal(rebuildCps(base(),f).daily[0].utr,0,'HO region/all-company fallback must not exist');
+});
+test('telecaller role is configurable and shares are independent of report station filter',()=>{
+ const f=facts();f.people_policies.push({designation_code:'TC',mode:'managed',head:'UTR',label:'Telecaller share',allocation:'equal',effective_from:'2026-01-01'});
+ f.employees=[{id:'tc',full_name:'Hidden telecaller',designation:'TC',is_active:true,location_scope_ids:['station-a','station-b']}];f.salaries=[{employee_id:'tc',effective_from:'2026-01-01',monthly_ctc:12000}];
+ assert.equal(rebuildCps(base(),f).daily[0].utr,200);assert.equal(rebuildCps(base([day('A'),day('B')]),f).daily.reduce((n,d)=>n+d.utr,0),400);
+});
+test('unconfirmed bill periods make CPS provisional without losing the recorded amount',()=>{
+ const b=base();b.expense_periods=[{station_code:'A',source_id:'bill',label:'Electricity Bill',confirmed:false,period_from:'2026-09-01',period_to:'2026-09-30'}];
+ const r=rebuildCps(b,facts());assert.ok(r.gaps.some(g=>g.kind==='Billing period unconfirmed'));assert.ok(r.daily[0].cost_gaps>0);
+});
+
+test('moving a manager cost head never makes their name or individual salary public',()=>{
+ const f=facts();f.people_policies=f.people_policies.map(p=>p.designation_code==='CLM'?{...p,head:'DA'}:p);
+ f.employees=[{id:'private',employee_code:'PRIVATE1',full_name:'PRIVATE_MANAGER_NAME',designation:'CLM',is_active:true,location_scope_ids:['station-a']}];f.salaries=[{employee_id:'private',effective_from:'2026-01-01',monthly_ctc:30000}];
+ const r=rebuildCps(base(),f);assert.ok(!JSON.stringify(r).includes('PRIVATE_MANAGER_NAME'));assert.ok(!r.people.some(p=>p.dropx_id==='PRIVATE1'));
 });

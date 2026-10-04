@@ -7,6 +7,7 @@ import { loadCodLocations, todayKolkata, type CodLocationRow } from "./cod";
 import { adHocClusterLabel } from "./adhoc-activity";
 import {
   cpsPeriod,
+  selectedCpsStations,
   type CpsParams,
   type CpsSnapshot,
   type CpsCostInput,
@@ -27,10 +28,11 @@ export async function cpsScope(auth: AuthorizationContext, params: CpsParams) {
     throw Error("Location access could not be loaded. Please retry.");
   // The shared owner loader includes hidden masters; CPS's calculation excludes
   // them. Keep pickers, input validation, report counts and the RPC in parity.
-  const all = locations.locations.filter((l) => !l.hide_from_location_list);
+  const all = locations.locations.filter((l) => !l.hide_from_location_list && !l.is_ho && !/^HO(?:_|$)/i.test(l.station_code));
+  const requested=selectedCpsStations(params.station);
   const selected = all.filter(
     (l) =>
-      (!params.station || l.station_code === params.station) &&
+      (!requested.length || requested.includes(l.station_code)) &&
       (!params.cluster || adHocClusterLabel(l) === params.cluster) &&
       (!params.region || (l.region || "Unassigned") === params.region),
   );
@@ -48,7 +50,7 @@ const snapshot = cache(
     const codes: string[] = JSON.parse(codesKey);
     if (!supabaseAdmin) throw Error("CPS data is temporarily unavailable.");
     const attendanceFrom = workforcePaymentMonthStart(from);
-    const [result, facts, paymentPolicy, attendanceCapture, monthAttendance, monthSourceFacts, vehicleCosts] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
+    const [result, facts, paymentPolicy, attendanceCapture, monthAttendance, monthSourceFacts, vehicleCosts, peoplePolicies, periodCosts, stationFlags] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
       p_company: company,
       p_from: from,
       p_through: to,
@@ -78,7 +80,10 @@ const snapshot = cache(
         p_from: attendanceFrom,
         p_through: to,
         p_stations: codes
-      }), supabaseAdmin.rpc("ops_cps_vehicle_costs", {p_company:company,p_from:from,p_through:to,p_stations:codes})]);
+      }), supabaseAdmin.rpc("ops_cps_vehicle_costs", {p_company:company,p_from:from,p_through:to,p_stations:codes}),
+    supabaseAdmin.from("ops_cps_people_policies").select("designation_code,designation_name,mode,head,label,allocation,effective_from").eq("company_id",company).lte("effective_from",to).limit(1000),
+    supabaseAdmin.rpc("ops_cps_period_expenses",{p_company:company,p_from:from,p_through:to,p_stations:codes}),
+    supabaseAdmin.from("stations").select("id,is_ho").eq("company_id",company).limit(1000)]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
       throw Error("CPS data could not be loaded. Please retry shortly.");
@@ -93,7 +98,10 @@ const snapshot = cache(
     if (paymentPolicy.error || attendanceCapture.error || monthAttendance.error || monthSourceFacts.error) throw Error("Workforce attendance payment policy could not be loaded. Please retry.");
     if (vehicleCosts.error || !Array.isArray(vehicleCosts.data?.breakup) || !Array.isArray(vehicleCosts.data?.gaps))
       throw Error("Fleet vehicle costs could not be loaded. Please retry.");
+    if(stationFlags.error || stationFlags.data?.length===1000 || peoplePolicies.error || peoplePolicies.data?.length===1000 || periodCosts.error) throw Error("CPS allocation settings could not be loaded.");
     const sourceFacts = facts.data as CpsFacts;
+    sourceFacts.stations=sourceFacts.stations.map(s=>({...s,is_ho:stationFlags.data?.find(f=>f.id===s.id)?.is_ho??s.is_ho}));
+    sourceFacts.people_policies=peoplePolicies.data as CpsFacts["people_policies"];
     const attendanceFacts = (monthSourceFacts.data ?? sourceFacts) as CpsFacts;
     sourceFacts.payment_policy_history = paymentPolicy.data ?? [];
     sourceFacts.attendance_capture_history = (attendanceCapture.data ?? []) as WorkforceAttendanceCaptureSetting[];
@@ -104,7 +112,7 @@ const snapshot = cache(
     sourceFacts.attendance_providers = attendanceFacts.providers ?? [];
     sourceFacts.attendance_stations = attendanceFacts.stations ?? [];
     return rebuildCps({...result.data, breakup:[...result.data.breakup,...vehicleCosts.data.breakup],
-      vehicles:vehicleCosts.data.vehicles, gaps:vehicleCosts.data.gaps} as CpsSnapshot, sourceFacts);
+      expense_periods:periodCosts.data ?? [], vehicles:vehicleCosts.data.vehicles, gaps:vehicleCosts.data.gaps} as CpsSnapshot, sourceFacts);
   },
 );
 export async function loadCpsSnapshot(
@@ -196,7 +204,7 @@ export async function loadCpsInputs(company: string, codes: string[], allAccess 
       .in("station_code", codes)
       .order("effective_from", { ascending: false })
       .limit(1000),
-    supabaseAdmin.from("employees").select("id,employee_code,full_name,stations(station_code)").eq("company_id",company).is("deleted_at",null).eq("is_active",true).order("full_name").limit(1000),
+    supabaseAdmin.from("employees").select("id,employee_code,stations(station_code)").eq("company_id",company).is("deleted_at",null).eq("is_active",true).order("employee_code").limit(1000),
   ]);
   if (costs.error || targets.error || employees.error)
     throw Error("CPS inputs could not be loaded.");
@@ -204,7 +212,7 @@ export async function loadCpsInputs(company: string, codes: string[], allAccess 
     throw Error("Select fewer stations to manage this many input records.");
   // Do not reveal shared allocations outside the viewer's editable scope.
   return {
-    employees: (employees.data ?? []).filter((e:any) => allAccess || codes.includes((Array.isArray(e.stations)?e.stations[0]:e.stations)?.station_code)).map((e:any) => ({id:e.id,label:`${e.employee_code} · ${e.full_name}`})),
+    employees: (employees.data ?? []).filter((e:any) => allAccess || codes.includes((Array.isArray(e.stations)?e.stations[0]:e.stations)?.station_code)).map((e:any) => ({id:e.id,label:e.employee_code})),
     costs: (costs.data ?? []).filter((r) =>
       r.station_codes.every((c: string) => codes.includes(c)),
     ) as CpsCostInput[],
