@@ -13,10 +13,10 @@ export async function OpsWorkforcePeople() {
   const locations = await loadOpsWorkforceLocations(companyId, authorization);
   const data = await loadCanonicalWorkforcePeople(companyId, locations.map(location => location.id), false, {
     canView: true, canEdit: !authorization.readOnly && hasPermission(authorization, "delivery_associates", "edit"),
-    isOwner: isCompanyOwner(authorization), surface: "ops", basePath: "/work-force-register", activeOnly: true
+    isOwner: isCompanyOwner(authorization), surface: "ops", basePath: "/work-force-register", activeOnly: false
   });
   return <AppShell active="Workforce Register" pageCode="delivery_associates">
-    <PageHead eyebrow="Workforce master" title="Workforce Register" subtitle="Active associate IDs for your locations." />
+    <PageHead eyebrow="Workforce master" title="Workforce Register" subtitle="All associate IDs for your locations, including pending and inactive records." />
     <OpsWorkforceNavigation register />
     {data.error ? <section className="panel message-panel error"><div className="panel-body">{data.error}</div></section> : null}
     <AllPeopleRegister rows={data.rows} today={peopleDateKey()} registerPath="/work-force-register?section=register" />

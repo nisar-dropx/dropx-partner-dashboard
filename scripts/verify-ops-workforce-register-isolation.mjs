@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const page = read("src/components/ops-work-force-register-page.tsx");
+const people = read("src/components/ops-workforce-people.tsx");
 const shared = read("src/components/field-executive-page-content.tsx");
+const canonicalPeople = read("src/lib/canonical-workforce-people.ts");
 const actions = read("src/app/field-executive/actions.ts");
 const route = read("src/app/ops-pulse/work-force-register/page.tsx");
 const helperRoute = read("src/app/ops-pulse/work-force-register/helpers/page.tsx");
@@ -28,6 +30,8 @@ const checks = [
   [!middleware.match(/CLEAN_OPS_ROOTS[^;]+/)?.[0].includes('"/helpers"'), "The standalone Helper register must not be reachable on the OpsPulse host."],
   [permissionMigration.includes("role.product_code = 'operations'") && permissionMigration.includes("page.code in ('contractors', 'workers', 'vendors')"), "Existing Operations-role access must be moved to Workforce without retaining unrelated register grants."],
   [page.includes("FieldExecutivePageContent") && page.includes("OpsWorkforcePeople"), "Ops must reuse Dashboard onboarding and canonical register components."],
+  [people.includes("activeOnly: false") && !people.includes("activeOnly: true"), "The Ops Workforce register must include current IDs in every onboarding and active state, including inactive records."],
+  [canonicalPeople.includes("migration_state") && /!\s*row\.deleted_at/.test(canonicalPeople) && canonicalPeople.includes('"reclassified", "moved_to_vendor"'), "The all-ID register must still exclude soft-deleted and migrated non-Workforce rows."],
   [shared.includes('accessSurface !== "ops" ? <FieldExecutiveBulkImportPanel') && actions.includes("Bulk workforce onboarding is not available in OpsPulse"), "Bulk upload must be hidden and rejected on Ops."],
   [shared.includes("workforceRegisterLocations(rawLocations, authorization)"), "Ops records must exclude Amazon Now and expand only descendants in location scope."],
 ];

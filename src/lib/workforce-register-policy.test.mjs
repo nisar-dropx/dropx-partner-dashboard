@@ -31,7 +31,9 @@ test("pending registration and active IDs are separate from activation flags", (
   assert.equal(pendingWorkforceRegistration({ onboarding_status: "pending", is_active: true }), true);
   assert.equal(pendingWorkforceRegistration({ onboarding_status: "returned", is_active: false }), true);
   for (const onboarding_status of ["active", "under_review", "approved", "rejected", "cancelled"]) assert.equal(pendingWorkforceRegistration({ onboarding_status, is_active: true }), false);
-  assert.equal(activeWorkforceRegistration({ onboarding_status: "pending", is_active: true }), false);
+  for (const onboarding_status of ["pending", "returned", "under_review", "approved", "rejected", "cancelled"]) {
+    assert.equal(activeWorkforceRegistration({ onboarding_status, is_active: true }), false);
+  }
   assert.equal(activeWorkforceRegistration({ onboarding_status: "active", is_active: false }), false);
   assert.equal(activeWorkforceRegistration({ onboarding_status: "active", is_active: true }), true);
   for (const state of [{ deleted_at: "2026-10-03" }, { people_lifecycle_status: "offboarded" }, { people_lifecycle_status: "suspended" }]) {
