@@ -488,3 +488,4 @@ button, input, select, textarea { font: inherit; }
 .fc-rent-editor p.full { color: #708090; font-size: 13px; line-height: 1.6; }
 dialog.fc-rent-editor { margin: auto; padding: 0; width: min(720px, calc(100vw - 32px)); max-height: 86vh; color: #263748; background: white; box-shadow: 0 22px 80px #14283c35; }
 dialog.fc-rent-editor::backdrop { background: #14283c66; backdrop-filter: blur(3px); }
+.fc-identity-editor{width:min(1000px,94vw)}.fc-master-tabs{display:flex;gap:6px;margin:12px 20px;padding:6px;background:#f2f5f9;border-radius:12px}.fc-master-tabs button{border:0;border-radius:8px;padding:12px 18px;background:transparent;color:#52637a;font-weight:650;cursor:pointer}.fc-master-tabs .active{background:#182332;color:white}.fc-invoice-evidence{padding:24px}.fc-identity-editor textarea{min-height:72px;padding:12px;border:1px solid #dce3ec;border-radius:8px;font:inherit}.fc-identity-editor .fc-add-form{max-height:none}.fc-vehicle-rent-master small{display:block}
