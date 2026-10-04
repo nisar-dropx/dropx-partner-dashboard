@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pilotStatus} from './amazon-pilot.ts';
+import {readFileSync} from 'node:fs';
+import {pilotStatus,withLiveAmazonEvidence} from './amazon-pilot.ts';
 const now=Date.parse('2026-10-02T12:00:00Z');
 const status=(evidence={},extra={})=>pilotStatus({evidence,trial_completed_at:null,closed_at:null,...extra},now);
 test('invitation does not imply registration or BGC completion',()=>{
@@ -18,3 +19,25 @@ test('a stale SCC record is not current package eligibility',()=>{assert.equal(s
 test('identity conflicts override apparent delivery activity',()=>assert.equal(status({conflict:true,employeeId:'2001',firstDelivery:'2026-10-02'}).stage,'exception'));
 test('BGC failure remains actionable even if an old SCC match exists',()=>assert.equal(status({providerId:'p',employeeId:'2001',sccAt:'2026-10-02T10:00:00Z',report:{categories:'12-DA BGC Failed by BGC Vendor'}}).stage,'exception'));
 test('report freshness is exposed to the associate',()=>assert.equal(status({reportDate:'2026-09-29'}).stale,true));
+test('live invitation evidence replaces a stale queued snapshot immediately',()=>{
+ const evidence=withLiveAmazonEvidence({invitationStatus:'queued',providerId:null},{status:'sent',external_reference:'amzn1.flex.provider.live',completed_at:'2026-10-04T11:46:18Z'},null);
+ assert.equal(evidence.invitationStatus,'sent');
+ assert.equal(evidence.providerId,'amzn1.flex.provider.live');
+ assert.equal(status(evidence).stage,'registration_pending');
+});
+test('activation-only registration is reachable and submits to beta draft storage',()=>{
+ const flow=readFileSync(new URL('../components/connect-login-flow.tsx',import.meta.url),'utf8');
+ const profile=readFileSync(new URL('../components/connect-profile-app.tsx',import.meta.url),'utf8');
+ assert.match(flow,/account\.activationOnly && next !== "activation" && next !== "profile"/);
+ assert.match(flow,/>Registration<\/button>/);
+ assert.match(profile,/if \(account\.activationOnly\)[\s\S]*?_beta_status = "submitted"[\s\S]*?fetch\("\/api\/connect\/profile-draft"/);
+ const betaBranch=profile.slice(profile.indexOf('if (account.activationOnly)'),profile.indexOf('const data = new FormData(formRef.current)',profile.indexOf('if (account.activationOnly)')));
+ assert.doesNotMatch(betaBranch,/fetch\(endpoint/);
+});
+test('joining API uses only the later LSC Driver ID as operational identity',()=>{
+ const route=readFileSync(new URL('../../app/api/connect/workforce-joining/route.ts',import.meta.url),'utf8');
+ assert.match(route,/driverId:p\.evidence\.employeeId/);
+ assert.match(route,/workforce_amazon_pilot_sources/);
+ assert.doesNotMatch(route,/driverId:account\.reference/);
+ assert.doesNotMatch(route,/dropxId:account\.reference/);
+});

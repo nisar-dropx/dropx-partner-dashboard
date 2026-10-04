@@ -6,6 +6,19 @@ export type PilotEvidence = {
  firstDelivery?: string | null; conflict?: boolean;
 };
 export type Pilot = {workforce_id:string;company_id:string;station_id:string;reported_on:string;trial_days:number;trial_completed_at:string|null;readiness_note?:string|null;closed_at:string|null;evidence:PilotEvidence;last_checked_at:string|null;sync_error:string|null;created_at:string};
+export type InvitationSnapshot = {status?:string|null;external_reference?:string|null;completed_at?:string|null;error_message?:string|null};
+export type PortalSnapshot = {amazon_provider_id?:string|null;transporter_id?:string|null};
+export function withLiveAmazonEvidence(evidence:PilotEvidence|undefined,invitation?:InvitationSnapshot|null,portal?:PortalSnapshot|null):PilotEvidence {
+ const current=evidence??{};
+ return {
+  ...current,
+  providerId:portal?.amazon_provider_id||(invitation?.status==='sent'?invitation.external_reference:null)||current.providerId||null,
+  transporterId:portal?.transporter_id||current.transporterId||null,
+  invitationStatus:invitation?.status||current.invitationStatus||null,
+  invitationError:invitation?.error_message??current.invitationError??null,
+  invitationAt:invitation?.completed_at||current.invitationAt||null
+ };
+}
 export const pilotStages = {
  invitation_pending:'Amazon invitation pending', registration_pending:'DA In-App Registration Pending',
  verification_pending:'Amazon Verification Pending', station_pending:'Station setup pending',

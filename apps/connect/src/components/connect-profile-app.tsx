@@ -578,6 +578,37 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     setError("");
     setNotice("");
     try {
+      if (account.activationOnly) {
+        const form = new FormData(formRef.current);
+        const draftData: Record<string, string> = {};
+        form.forEach((value, key) => {
+          if (typeof value === "string" && key !== "profile_verification_results") draftData[key] = value;
+        });
+        draftData.has_pf_uan = pfAnswer;
+        draftData.has_esi_no = esiAnswer;
+        draftData._beta_status = "submitted";
+        draftData._beta_submitted_at = new Date().toISOString();
+        const staged = new FormData();
+        staged.set("account_id", account.id);
+        staged.set("profile_type", account.profileType);
+        staged.set("draft_data", JSON.stringify(draftData));
+        const currentChecks = Object.values(verifications).filter((item) => currentCheck(item.kind) === item);
+        currentChecks.forEach((item) => staged.append("profile_verification_results", JSON.stringify(item)));
+        for (const slot of Object.keys(draftUploadSlots)) {
+          const file = form.get(slot);
+          if (file instanceof File && file.size > 0) staged.set(slot, file);
+        }
+        await compressFormImages(staged);
+        if (formFileBytes(staged) > MAX_UPLOAD_REQUEST_BYTES) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
+        const response = await fetch("/api/connect/profile-draft", { method: "POST", body: staged });
+        if (response.status === 413) throw new Error(UPLOAD_TOO_LARGE_MESSAGE);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Unable to stage registration.");
+        setConfirmationOpen(false);
+        setNotice("Beta registration submitted for review. Your main Workforce record has not been changed.");
+        await onSubmitted?.();
+        return;
+      }
       const data = new FormData(formRef.current);
       data.set(executive ? "executive_id" : "employee_id", account.id);
       if (executive) data.set("profile_type", account.profileType);

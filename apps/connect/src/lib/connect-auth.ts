@@ -1006,7 +1006,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       profileType: account.profile_type,
       name: account.full_name,
       email: account.email ?? null,
-      reference: account.employee_id || account.dropx_id || null,
+      reference: activationOnly ? null : account.employee_id || account.dropx_id || null,
       role: account.profile_type === "user"
         ? account.role ?? null
         : account.designation_id
@@ -1022,7 +1022,9 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,
       companyName: companyNameById.get(account.company_id) ?? "Company",
-      label: accountLabel(account, companyNameById),
+      label: activationOnly
+        ? [companyNameById.get(account.company_id) ?? "Company", account.full_name].filter(Boolean).join(" - ")
+        : accountLabel(account, companyNameById),
       workspace,
       workspaceLabel: workspace === "people" ? "People workspace" : "Workforce workspace",
       designationCode: designationId ? designationCodeById.get(designationId) ?? null : null,
