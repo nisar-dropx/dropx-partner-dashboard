@@ -34,7 +34,7 @@ function inWindow(now: string, configured: string) {
 
 async function processCompany(company: { id: string; name: string | null }, date: string, time: string, force = false) {
   if (!supabaseAdmin) return "failed";
-  const setting = await supabaseAdmin.from("fleet_control_settings").select("daily_status_email_enabled,daily_status_send_time,daily_status_only_affected,daily_status_email_config").eq("company_id", company.id).maybeSingle();
+  const setting = await supabaseAdmin.from("fleet_control_settings").select("daily_status_email_enabled,daily_status_send_time,daily_status_only_affected,daily_status_email_config").eq("company_id", company.id).eq("daily_status_email_enabled", true).order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (setting.error || !setting.data?.daily_status_email_enabled || (!force && !inWindow(time, clean(setting.data.daily_status_send_time)))) return "disabled";
   const config = normalizeFleetDailyStatusEmailConfig(setting.data.daily_status_email_config);
   const locationsResult = await loadCodLocations(company.id, [], true);
