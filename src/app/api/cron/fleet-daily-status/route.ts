@@ -116,13 +116,18 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const force = params.get("force") === "1";
   const requestedCompanyId = clean(params.get("company_id"));
-  let companyQuery = supabaseAdmin.from("companies").select("id,name");
-  if (force && requestedCompanyId) companyQuery = companyQuery.eq("id", requestedCompanyId);
-  const companies = await companyQuery;
-  if (companies.error) return NextResponse.json({ error: companies.error.message }, { status: 500 });
+  let settingsQuery = supabaseAdmin.from("fleet_control_settings").select("company_id").eq("daily_status_email_enabled", true);
+  if (force && requestedCompanyId) settingsQuery = settingsQuery.eq("company_id", requestedCompanyId);
+  const configured = await settingsQuery;
+  if (configured.error) return NextResponse.json({ error: configured.error.message }, { status: 500 });
+  const companyIds = [...new Set((configured.data ?? []).map((row) => clean(row.company_id)).filter(Boolean))];
+  const companyNames = companyIds.length ? await supabaseAdmin.from("companies").select("id,name").in("id", companyIds) : { data: [], error: null };
+  if (companyNames.error) return NextResponse.json({ error: companyNames.error.message }, { status: 500 });
+  const namesById = new Map((companyNames.data ?? []).map((company) => [company.id, company.name]));
+  const companies = companyIds.map((id) => ({ id, name: namesById.get(id) ?? "DropX" }));
   const totals: Record<string, number> = {};
   const details: Array<{ companyId: string; company: string | null; outcome: string }> = [];
-  for (const company of companies.data ?? []) {
+  for (const company of companies) {
     try {
       const outcome = await processCompany(company, date, time, force);
       totals[outcome] = (totals[outcome] || 0) + 1;
