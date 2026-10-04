@@ -11,6 +11,7 @@ import {
   Wallet,
 } from "lucide-react";
 import {
+  cpsReviewItems,
   groupCps,
   ratio,
   summarizeCps,
@@ -88,7 +89,7 @@ export function CpsCostWorkspace({
     Van: total.van,
     Other: total.other + total.rent + total.overhead,
   };
-  const gaps = snapshot.gaps ?? [];
+  const { gaps, bills } = cpsReviewItems(snapshot);
   const isMapping = (g: (typeof gaps)[number]) =>
     /unmapped|mapping|provider id|payment setup|rate/i.test(g.kind) &&
     g.owner === "Workforce team";
@@ -102,9 +103,7 @@ export function CpsCostWorkspace({
   const pendingIds = new Set(
     mappingGaps.map((g) => `${g.station_code}|${g.provider_id || g.dropx_id}`),
   ).size;
-  const assumedBills = (snapshot.expense_periods ?? []).filter(
-    (b) => !b.confirmed,
-  ).length;
+  const assumedBills = bills.length;
   const bySource = new Map<
     string,
     { label: string; source: string; head: string; amount: number }
@@ -235,12 +234,18 @@ export function CpsCostWorkspace({
                         {g.name || "—"}
                         {g.dropx_id && <small>DropX ID: {g.dropx_id}</small>}
                         {g.provider_id && (
-                          <small>Provider / vehicle ID: {g.provider_id}</small>
+                          <small>
+                            {g.owner === "Finance billing"
+                              ? "Bill source ID"
+                              : "Provider / vehicle ID"}: {g.provider_id}
+                          </small>
                         )}
                       </td>
                       <td>
                         {g.first_date} – {g.last_date}
-                        <small>{g.days} affected days</small>
+                        <small>
+                          {g.days} affected {g.days === 1 ? "day" : "days"}
+                        </small>
                       </td>
                       <td>{count(g.deliveries)}</td>
                       <td>
@@ -261,9 +266,7 @@ export function CpsCostWorkspace({
           )}
           {issueFilter !== "mapping" && assumedBills > 0 && (
             <CpsBillPeriods
-              rows={(snapshot.expense_periods ?? []).filter(
-                (b) => !b.confirmed,
-              )}
+              rows={bills}
               canEdit={canEditBilling}
               defaultOpen
             />

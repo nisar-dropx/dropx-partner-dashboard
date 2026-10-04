@@ -98,13 +98,15 @@ export function CpsFilters({
         className="cps-date-form"
         onSubmit={(e) => {
           e.preventDefault();
-          apply(from, to);
+          const dates = new FormData(e.currentTarget);
+          apply(String(dates.get("from") || ""), String(dates.get("to") || ""));
         }}
       >
         <label>
           From
           <input
             type="date"
+            name="from"
             required
             max={today}
             value={from}
@@ -115,6 +117,7 @@ export function CpsFilters({
           Through
           <input
             type="date"
+            name="to"
             required
             min={from}
             max={today}

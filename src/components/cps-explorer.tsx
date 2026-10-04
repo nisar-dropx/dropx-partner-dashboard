@@ -4,6 +4,7 @@ import { CpsCostWorkspace } from "./cps-cost-workspace";
 import { SearchableSelect } from "./searchable-select";
 import {
   cpsForStation,
+  cpsReviewItems,
   groupCps,
   ratio,
   selectedCpsStations,
@@ -171,12 +172,13 @@ export function CpsExplorer({
             </thead>
             <tbody>
               {shown.map((r) => {
-                const issues =
-                  (snapshot.gaps ?? []).filter((g) => g.station_code === r.key)
-                    .length +
-                  (snapshot.expense_periods ?? []).filter(
-                    (b) => b.station_code === r.key && !b.confirmed,
-                  ).length;
+                const issues = cpsReviewItems({
+                  ...snapshot,
+                  gaps: snapshot.gaps?.filter((g) => g.station_code === r.key),
+                  expense_periods: snapshot.expense_periods?.filter(
+                    (b) => b.station_code === r.key,
+                  ),
+                }).count;
                 return (
                   <tr
                     key={r.key}

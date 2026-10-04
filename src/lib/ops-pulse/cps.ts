@@ -299,6 +299,16 @@ export type CpsExpensePeriod = {
   period_to: string;
   confirmed: boolean;
 };
+export function cpsReviewItems(data: CpsSnapshot) {
+  const bills = (data.expense_periods ?? []).filter((b) => !b.confirmed);
+  const billKeys = new Set(bills.map((b) => `${b.station_code}|${b.source_id}`));
+  const gaps = (data.gaps ?? []).filter(
+    (g) =>
+      g.kind !== "Billing period unconfirmed" ||
+      !billKeys.has(`${g.station_code}|${g.provider_id}`),
+  );
+  return { gaps, bills, count: gaps.length + bills.length };
+}
 export function selectedCpsStations(value?: string) {
   return [
     ...new Set(

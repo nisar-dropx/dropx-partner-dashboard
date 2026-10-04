@@ -161,8 +161,6 @@ export default async function CpsPage({
                 <>
                   <CpsExplorer
                     key={JSON.stringify({
-                      from: period.from,
-                      to: period.to,
                       scope: selected.map((l) => l.station_code),
                     })}
                     snapshot={{ ...snapshot, associates: undefined }}

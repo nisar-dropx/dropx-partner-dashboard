@@ -188,3 +188,12 @@ test('cross-month combination sums cost numerators, deduplicates bills and keeps
  const data=module.exports.mergeCpsMonths([first,second]);
  assert.equal(summarizeCps(data.daily).cps,30);assert.equal(data.expense_periods.length,1);assert.equal(data.gaps.length,1);assert.equal(data.gaps[0].days,2);assert.equal(data.gaps[0].last_date,'2026-09-01');
 });
+test('review counts each bill once and retains mapping and unmatched bill issues',()=>{
+ const bill={source:'payment',source_id:'bill',station_code:'A',confirmed:false};
+ const billingGap={kind:'Billing period unconfirmed',provider_id:'bill',station_code:'A'};
+ const mappingGap={kind:'Unmapped',provider_id:'bill',station_code:'A'};
+ const otherStation={...billingGap,station_code:'B'};
+ const items=module.exports.cpsReviewItems({daily:[],breakup:[],expense_periods:[bill,{...bill,source_id:'confirmed',confirmed:true}],gaps:[billingGap,mappingGap,otherStation]});
+ assert.equal(items.count,3);assert.equal(items.bills.length,1);
+ assert.deepEqual(items.gaps,[mappingGap,otherStation]);
+});
