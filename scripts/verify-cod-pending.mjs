@@ -67,7 +67,9 @@ assert.ok(!policy.codPendingCsv(eligibleRows).includes('ERSE'));
 assert.ok(!policy.codPendingCsv(eligibleRows).includes('TCC3'));
 assert.equal(scope.resolveCodRecipients([station,inactive],[{...memberships[0],location_scope_ids:['closed']}],roles,profiles,new Set(['r']),'example.com').length,0);
 for(const email of ['store@example.com','closed@example.com'])assert.equal(scope.resolveCodRecipients([station],allMembership,roles,[{...profiles[0],email}],new Set(['r']),'example.com',[station,nowStore,inactive]).length,0,'Prefiltered report must not lose excluded mailbox protection');
-const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./ops-pulse/cod-no-update-streak':streakPolicy,'./cod-pending-mail-scope':scope,'./ops-pulse/cod-return-policy':compile('src/lib/ops-pulse/cod-return-policy.ts')});
+const attachmentMail=compile('src/lib/portal-digest-attachments.ts');
+const attachmentBuilder=compile('src/lib/cod-pending-attachments.ts',{'./portal-digest-attachments':attachmentMail,'./ops-pulse/cod-no-update-streak':streakPolicy,'./ops-pulse/review-cod':compile('src/lib/ops-pulse/review-cod.ts')});
+const digest=compile('src/lib/cod-pending-digest.ts',{'./cod-pending-attachments':attachmentBuilder,'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./ops-pulse/cod-no-update-streak':streakPolicy,'./cod-pending-mail-scope':scope,'./ops-pulse/cod-return-policy':compile('src/lib/ops-pulse/cod-return-policy.ts')});
 const source={uploadDate:date,dataDate:'2026-09-01',batchId:'batch1',importedAt:'2026-09-02T08:30:00Z',fileName:'file.csv',error:null,stations:[age,{...age,stationCode:'GNTI',total:999999}]};
 const recipients=[{email:'user@example.com',name:'User',stationIds:['s1']}];
 const evening=digest.buildCodDigestMessages(rows,source,recipients,date,'evening','OpsPulse | COD report | {{month}} {{year}}')[0];
@@ -95,7 +97,7 @@ for(const code of ['GNTI','ST03','ST04','ST05','ST06'])assert.match(streakMail.h
 assert.match(streakMail.text,/Consecutive days without a COD update/);
 assert.equal(rows.find(r=>r.station.id==='s1').slipUploaded,true);
 assert.equal(rows.find(r=>r.station.id==='s2').slipUploaded,false);
-const delivery=compile('src/lib/portal-digest-delivery.ts',{'server-only':{},'./timeout-fetch':{timeoutFetch:f=>f},'./adhoc-digest-scope':{},'./cod-pending-mail-scope':{},'./ops-pulse/cod-pending-data':{}});
+const delivery=compile('src/lib/portal-digest-delivery.ts',{'./portal-digest-attachments':attachmentMail,'server-only':{},'./timeout-fetch':{timeoutFetch:f=>f},'./adhoc-digest-scope':{},'./cod-pending-mail-scope':{},'./ops-pulse/cod-pending-data':{}});
 const control={state:'enabled',paused_until:null,config:{delivery_ready:true,timezone:'Asia/Kolkata',schedule_time:'20:30',day_offset:0,delivery_window_minutes:30,first_report_date:'2026-09-01'}};
 assert.equal(delivery.dueReportDate(control,new Date('2026-09-02T14:59:59Z')),null);
 assert.equal(delivery.dueReportDate(control,now),date);
@@ -155,7 +157,7 @@ console.log('PASS COD export: signed-out denial, permission denial, invalid date
 const currentDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 let mailOptions=null,threadFilters=[];
 const sendModule=compile('src/lib/portal-digest-delivery.ts',{
- 'server-only':{},'./timeout-fetch':{},'./adhoc-digest-scope':{},
+ './portal-digest-attachments':attachmentMail,'server-only':{},'./timeout-fetch':{},'./adhoc-digest-scope':{},
  './cod-pending-mail-scope':{loadCodMailRecipients:async()=>[{email:'user@example.com',stationIds:['s1']}]},
  './ops-pulse/cod-pending-data':{loadCodPendingReport:async()=>[{station}]},
  nodemailer:{default:{createTransport:()=>({sendMail:async options=>{mailOptions=options;return {accepted:['user@example.com'],messageId:options.messageId,response:'mock accepted'};},close(){}})}}
@@ -166,14 +168,44 @@ const responses={
  profiles:[{id:'u'}],portal_digest_threads:{root_message_id:'<evening-root@example.com>',last_message_id:'<evening-last@example.com>',subject:'COD | monthly'},
  portal_digest_deliveries:{scope_summary:{stationIds:['s1']}}
 };
-const mailDb={rpc:async(name)=>name==='portal_finish_digest'?{data:true,error:null}:{data:[{id:'delivery1',company_id:'c',event_key:'cod_pending_morning',recipient_email:'user@example.com',report_date:currentDate,subject:'COD | monthly',html:'mock',body:'mock'}],error:null},from(table){const q=new Proxy({}, {get(_,key){if(key==='then')return(resolve)=>resolve({data:responses[table],error:null});return(...args)=>{if(table==='portal_digest_threads')threadFilters.push([key,...args]);return q;};}});return q;}};
+const mailDb={rpc:async(name)=>name==='portal_finish_digest'?{data:true,error:null}:{data:[{id:'delivery1',company_id:'c',event_key:'cod_pending_morning',recipient_email:'user@example.com',report_date:currentDate,subject:'COD | monthly',html:'mock',body:'mock',attachments:evening.attachments}],error:null},from(table){const q=new Proxy({}, {get(_,key){if(key==='then')return(resolve)=>resolve({data:responses[table],error:null});return(...args)=>{if(table==='portal_digest_threads')threadFilters.push([key,...args]);return q;};}});return q;}};
 const sent=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});
-assert.equal(sent.accepted,1);assert.equal(mailOptions.inReplyTo,'<evening-last@example.com>');assert.deepEqual(mailOptions.references,['<evening-root@example.com>','<evening-last@example.com>']);assert.ok(threadFilters.some(f=>f[0]==='in'&&f[1]==='event_key'&&f[2].includes('cod_pending_evening')));
+assert.equal(sent.accepted,1);assert.equal(mailOptions.attachments.length,2);assert.equal(mailOptions.attachments[1].content.toString('base64'),evening.attachments[1].content);assert.equal(mailOptions.inReplyTo,'<evening-last@example.com>');assert.deepEqual(mailOptions.references,['<evening-root@example.com>','<evening-last@example.com>']);assert.ok(threadFilters.some(f=>f[0]==='in'&&f[1]==='event_key'&&f[2].includes('cod_pending_evening')));
 mailOptions=null;mailDb.rpc=async name=>name==='portal_finish_digest'?{data:true,error:null}:{data:[{id:'manual-delivery',company_id:'c',event_key:'cod_pending_current',recipient_email:'user@example.com',report_date:currentDate,subject:'COD | monthly',html:'mock',body:'mock'}],error:null};
 const manual=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});
-assert.equal(manual.accepted,1);assert.equal(mailOptions.inReplyTo,'<evening-last@example.com>');assert.match(mailOptions.messageId,/-manual-manualdeliv/);
+assert.equal(manual.accepted,1);assert.deepEqual(mailOptions.attachments,[],'Legacy queued mail still sends without attachments');assert.equal(mailOptions.inReplyTo,'<evening-last@example.com>');assert.match(mailOptions.messageId,/-manual-manualdeliv/);
 mailOptions=null;responses.portal_digest_deliveries={scope_summary:{stationIds:['s2']}};
 const held=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});assert.equal(held.skipped,1);assert.equal(mailOptions,null);
 responses.portal_digest_deliveries={scope_summary:{stationIds:['s1','now']}};
 const staleNow=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});assert.equal(staleNow.skipped,1);assert.equal(mailOptions,null,'Previously queued Amazon Now content must not reach SMTP');
 console.log('PASS COD delivery: evening/morning share monthly thread; removed station scope prevents SMTP.');
+
+// Attachments are scoped, include exactly two days, preserve provenance and never fabricate missing cash.
+const decode=file=>Buffer.from(file.content,'base64').toString('utf8');
+assert.equal(evening.attachments.length,2);
+for(const file of evening.attachments){assert.ok(!decode(file).includes('GNTI'));assert.ok(decode(file).startsWith('\uFEFF'));}
+assert.match(decode(evening.attachments[1]),/"2 DAYS","Pending","100"/);
+assert.ok(!decode(evening.attachments[1]).includes('0-1 DAYS'));
+assert.match(decode(evening.attachments[1]),/"2026-09-01","file.csv","batch1"/);
+assert.deepEqual(evening.attachments,morning.attachments,'Both reminders use the same pinned EDSP evidence');
+const noCash={...source,stations:[]};
+assert.equal(attachmentBuilder.buildCodPendingAttachments(rows,noCash,[{stationId:'s2',days:1}],date).length,0);
+const twoDayFiles=attachmentBuilder.buildCodPendingAttachments(rows,noCash,[{stationId:'s2',days:2}],date);
+assert.equal(twoDayFiles.length,1);assert.match(decode(twoDayFiles[0]),/GNTI/);assert.ok(!decode(twoDayFiles[0]).includes('NLRC'));
+assert.match(decode(twoDayFiles[0]),/"2","2026-09-01"/);
+const failedFiles=attachmentBuilder.buildCodPendingAttachments(rows,{...source,error:'EDSP source unavailable'},[{stationId:'s1',days:7}],date);
+assert.equal(failedFiles.length,1);assert.match(decode(failedFiles[0]),/"7\+","2026-08-27"/);assert.match(decode(failedFiles[0]),/"","2026-09-01","EDSP source unavailable"/);
+const unknownSource={...source,stations:[{...age,lines:[line('',101,'2026-08-30'),line('',102,'2026-08-31'),line('0-1 DAYS',999,'2020-01-01'),line('2 DAYS',0),{...line('2 DAYS',103),associate:'=HYPERLINK("bad")'}]}]};
+const unknownFiles=attachmentBuilder.buildCodPendingAttachments(rows,unknownSource,[],date);
+assert.equal(unknownFiles.length,2);assert.match(decode(unknownFiles[0]),/"204"/);assert.ok(!decode(unknownFiles[1]).includes('"102"'));assert.ok(!decode(unknownFiles[1]).includes('"999"'));assert.match(decode(unknownFiles[1]),/"'=HYPERLINK/);
+const flipkartRows=policy.buildCodPendingRows([{...station,providers:{code:'FLIPKART'},location_models:{code:'ODH'}}],[],date,now);
+assert.equal(attachmentBuilder.buildCodPendingAttachments(flipkartRows,source,[],date).length,0);
+const fk=attachmentBuilder.buildCodPendingAttachments(flipkartRows,source,[{stationId:'s1',days:2}],date);assert.equal(fk.length,1);assert.match(decode(fk[0]),/Not applicable/);
+assert.equal(attachmentBuilder.buildCodPendingAttachments(rows.filter(row=>row.station.id==='s1'),noCash,[{stationId:'s2',days:7}],date).length,0,'Outside-scope streak cannot produce an attachment');
+for(const value of [{},[{},{}],[...evening.attachments,...evening.attachments]])assert.throws(()=>attachmentMail.digestMailAttachments(value));
+for(const patch of [{filename:'../secret.csv'},{contentType:'text/html'},{content:'file:///tmp/private'},{content:'abcd==='},{encoding:'utf8'}])assert.throws(()=>attachmentMail.digestMailAttachments([{...evening.attachments[0],...patch}]));
+assert.throws(()=>attachmentMail.digestMailAttachments([{...evening.attachments[0],content:Buffer.alloc(10_000_001).toString('base64')}]),/10 MB/);
+const streamTransport=require('nodemailer').createTransport({streamTransport:true,buffer:true,newline:'windows',disableFileAccess:true,disableUrlAccess:true});
+const mime=await streamTransport.sendMail({from:'mail@example.invalid',to:'recipient@example.invalid',subject:'COD attachment test',text:'Scoped report',attachments:attachmentMail.digestMailAttachments(evening.attachments)});
+assert.match(mime.message.toString(),/multipart\/mixed/);for(const file of evening.attachments)assert.ok(mime.message.toString().includes(file.filename));
+console.log('PASS COD attachments: inclusive two-day boundary, scoped station and shipment CSVs, pinned dates, absent-source handling, formula escaping, size limits, persisted SMTP bytes and MIME generation without sending.');

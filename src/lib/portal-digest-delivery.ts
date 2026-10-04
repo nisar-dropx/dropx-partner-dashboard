@@ -6,10 +6,11 @@ import {timeoutFetch} from "./timeout-fetch";
 import {loadCodMailRecipients} from "./cod-pending-mail-scope";
 import {loadCodPendingReport} from "./ops-pulse/cod-pending-data";
 import {loadAdHocMailScope} from "./adhoc-digest-scope";
+import {digestMailAttachments,type DigestAttachment} from "./portal-digest-attachments";
 
 export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:string;state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
-export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>};
-type DigestDelivery = {id:string;company_id:string;event_key:string;report_date:string;recipient_email:string;subject:string;html:string;body:string};
+export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>;attachments?:DigestAttachment[]};
+type DigestDelivery = {id:string;company_id:string;event_key:string;report_date:string;recipient_email:string;subject:string;html:string;body:string;attachments?:DigestAttachment[]};
 export type DigestBuilder = (db:SupabaseClient,control:DigestControl,date:string)=>Promise<{checkedAt:string;messages:DigestMessage[]}>;
 export type DeliverySummary = {queued:number;accepted:number;uncertain:number;skipped:number;errors:string[]};
 export function digestDatabase() {
@@ -132,8 +133,9 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     if(prepared.error)throw new Error(prepared.error.message);
     const port=Number(smtp.smtp_port);
     transport=nodemailer.createTransport({host:smtp.smtp_host,port,secure:port===465||(Boolean(smtp.smtp_secure)&&port!==587),auth:{user:smtp.smtp_user,pass:smtp.smtp_pass},connectionTimeout:10000,greetingTimeout:10000,socketTimeout:25000,disableFileAccess:true,disableUrlAccess:true});
+    const attachments=digestMailAttachments(delivery.attachments);
     sending=true;
-    const receipt=await transport.sendMail({from:'"'+String(smtp.from_name||"DropX Logistics").replace(/["\r\n]/g,"")+'" <'+smtp.smtp_from+">",to:[delivery.recipient_email],subject,html:delivery.html,text:delivery.body,messageId,inReplyTo:thread?.last_message_id,references:thread?[...new Set([thread.root_message_id,thread.last_message_id])]:undefined});
+    const receipt=await transport.sendMail({from:'"'+String(smtp.from_name||"DropX Logistics").replace(/["\r\n]/g,"")+'" <'+smtp.smtp_from+">",to:[delivery.recipient_email],subject,html:delivery.html,text:delivery.body,attachments,messageId,inReplyTo:thread?.last_message_id,references:thread?[...new Set([thread.root_message_id,thread.last_message_id])]:undefined});
     if(!receipt.accepted?.includes(delivery.recipient_email))throw new Error("SMTP did not accept the recipient");
     const finished=await db.rpc("portal_finish_digest",{p_id:delivery.id,p_message_id:receipt.messageId,p_root_id:root,p_response:receipt.response});
     if(finished.error||finished.data!==true)throw new Error("SMTP accepted but receipt persistence needs verification");
