@@ -22,9 +22,12 @@ import {
   LayoutDashboard,
   ListChecks,
   MapPin,
+  Mail,
   Menu,
   MoreHorizontal,
   Pencil,
+  Pause,
+  Play,
   PlugZap,
   Plus,
   Search,
@@ -54,6 +57,7 @@ import { FleetVehicleLifecycle } from "@/components/fleet-vehicle-lifecycle";
 import { FleetVehicleLiveStatus } from "@/components/fleet-vehicle-live-status";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { FleetAuditTemplate, FleetChecklistItem, FleetControlData, FleetControlPayment, FleetControlVehicle, FleetDocumentDefinition, FleetVehicleStatusDefinition, FleetVehicleStatusReason } from "@/lib/fleet-control";
+import { buildFleetDailyStatusEmail } from "@/lib/fleet/daily-status-email";
 
 type Section = "overview" | "vehicles" | "documents" | "tracking" | "fuel" | "service" | "audits" | "approvals" | "adhoc" | "reports" | "settings" | "masters";
 
@@ -208,8 +212,11 @@ export function FleetControlDashboard({
   const [auditTemplateEditor, setAuditTemplateEditor] = useState<FleetAuditTemplate | null | "new">(null);
   const [documentTypeEditor, setDocumentTypeEditor] = useState<FleetDocumentDefinition | null | "new">(null);
   type MasterTab = "vehicle_audit" | "vehicle_documents" | "vehicle_statuses";
+  type SettingsTab = "general" | "auto_mail";
   const initialMaster = ["vehicle_audit", "vehicle_documents", "vehicle_statuses"].includes(initialMasterTab ?? "") ? initialMasterTab as MasterTab : "vehicle_audit";
   const [masterTab, setMasterTab] = useState<MasterTab>(initialMaster);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [mailPreviewOpen, setMailPreviewOpen] = useState(false);
   const [adminMenusOpen, setAdminMenusOpen] = useState({ settings: section === "settings", masters: section === "masters" });
   const [statusMasterEditor, setStatusMasterEditor] = useState<{ kind: "status"; item: FleetVehicleStatusDefinition | null } | { kind: "reason"; status: FleetVehicleStatusDefinition; item: FleetVehicleStatusReason | null } | null>(null);
   const [savingAction, setSavingAction] = useState<string | null>(null);
@@ -234,7 +241,10 @@ export function FleetControlDashboard({
       setSection(value && validSections.has(value) && visibleSectionSet.has(value) ? value : firstVisibleSection);
       const master = new URLSearchParams(window.location.search).get("master");
       if (["vehicle_audit", "vehicle_documents", "vehicle_statuses"].includes(master ?? "")) setMasterTab(master as MasterTab);
+      const settings = new URLSearchParams(window.location.search).get("settings");
+      if (["general", "auto_mail"].includes(settings ?? "")) setSettingsTab(settings as SettingsTab);
     };
+    updateFromUrl();
     window.addEventListener("popstate", updateFromUrl);
     return () => window.removeEventListener("popstate", updateFromUrl);
   }, []);
@@ -282,6 +292,7 @@ export function FleetControlDashboard({
     params.delete("error");
     params.delete("request");
     if (next !== "masters") params.delete("master");
+    if (next !== "settings") params.delete("settings");
     window.history.pushState({}, "", `${window.location.pathname}?${params.toString()}`);
   }
 
@@ -297,6 +308,20 @@ export function FleetControlDashboard({
     params.delete("notice");
     params.delete("error");
     params.delete("request");
+    window.history.pushState({}, "", `${window.location.pathname}?${params.toString()}`);
+  }
+
+  function openSettings(next: SettingsTab) {
+    if (!visibleSectionSet.has("settings")) return;
+    setSection("settings");
+    setSettingsTab(next);
+    setAdminMenusOpen((current) => ({ ...current, settings: true }));
+    setMobileNav(false);
+    const params = new URLSearchParams(window.location.search);
+    params.set("section", "settings");
+    params.set("settings", next);
+    params.delete("notice");
+    params.delete("error");
     window.history.pushState({}, "", `${window.location.pathname}?${params.toString()}`);
   }
 
@@ -465,8 +490,20 @@ export function FleetControlDashboard({
     if (!window.confirm(`Remove “${item.label}” from the reason list?`)) return;
     await fleetAction("vehicle-status-reason.remove", { id: item.id });
   }
-  async function submitSettings(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); await fleetAction("settings.update", { ...Object.fromEntries(form.entries()), autoSuggestAudits: form.get("autoSuggestAudits") === "on", auditEmailEnabled: form.get("auditEmailEnabled") === "on", auditVideoRequired: form.get("auditVideoRequired") === "on", breakdownVehicleLinkRequired: form.get("breakdownVehicleLinkRequired") === "on", dailyStatusEmailEnabled: form.get("dailyStatusEmailEnabled") === "on", dailyStatusOnlyAffected: form.get("dailyStatusOnlyAffected") === "on" }); }
+  async function submitSettings(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); await fleetAction("settings.update", { ...Object.fromEntries(form.entries()), autoSuggestAudits: form.get("autoSuggestAudits") === "on", auditEmailEnabled: form.get("auditEmailEnabled") === "on", auditVideoRequired: form.get("auditVideoRequired") === "on", breakdownVehicleLinkRequired: form.get("breakdownVehicleLinkRequired") === "on" }); }
+  async function submitMailSettings(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); await fleetAction("settings.update-mail", { dailyStatusEmailEnabled: form.get("dailyStatusEmailEnabled") === "on", dailyStatusSendTime: form.get("dailyStatusSendTime"), dailyStatusOnlyAffected: form.get("dailyStatusOnlyAffected") === "on" }); }
   async function submitStatusRecipient(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); await fleetAction("status-recipient.upsert", { name: form.get("name"), email: form.get("email"), stationCodes: String(form.get("stationCodes") ?? "").split(",").map((value) => value.trim()).filter(Boolean) }, () => event.currentTarget.reset()); }
+  async function toggleStatusRecipient(recipientId: string, isActive: boolean) { await fleetAction("status-recipient.toggle", { recipientId, isActive }); }
+  async function deleteStatusRecipient(recipientId: string, name: string) { if (!window.confirm(`Delete ${name} from the daily Fleet mail list?`)) return; await fleetAction("status-recipient.delete", { recipientId }); }
+
+  const dailyMailPreview = useMemo(() => {
+    const activeVehicles = vehicles.filter((vehicle) => !["sold", "disposed", "returned"].includes(vehicle.status));
+    const approvedStates = new Set(["approved", "final_approved", "processing", "processed", "paid"]);
+    const approvedVans = data.adHocRows.filter((row) => row.date === data.today && row.requestType === "Van" && (row.source === "Cashbook" || approvedStates.has(row.approvalStatus)));
+    const codes = [...new Set([...activeVehicles.map((vehicle) => vehicle.stationCode), ...approvedVans.map((row) => row.stationCode)])];
+    const rows = codes.map((station) => { const stationVehicles = activeVehicles.filter((vehicle) => vehicle.stationCode === station); const own = stationVehicles.filter((vehicle) => vehicle.ownershipType === "own"); const partner = stationVehicles.filter((vehicle) => vehicle.ownershipType !== "own"); const ownOperational = own.filter((vehicle) => vehicle.status === "active").length; const partnerOperational = partner.filter((vehicle) => vehicle.status === "active").length; return { station, ownTotal: own.length, ownOperational, ownNonOperational: own.length - ownOperational, partnerTotal: partner.length, partnerOperational, partnerNonOperational: partner.length - partnerOperational, totalNonOperational: stationVehicles.filter((vehicle) => vehicle.status !== "active").length, adHocVans: approvedVans.filter((row) => row.stationCode === station).length }; }).filter((row) => !data.settings.dailyStatusOnlyAffected || row.totalNonOperational > 0 || row.adHocVans > 0);
+    return buildFleetDailyStatusEmail({ companyName: data.operator.company, date: data.today, rows, exceptions: activeVehicles.filter((vehicle) => vehicle.status !== "active").map((vehicle) => ({ vehicle_no: vehicle.vehicleNo, station_code: vehicle.stationCode, model: vehicle.model, ownership_type: vehicle.ownershipType, status: vehicle.status, non_operational_since: vehicle.nonOperationalSince, expected_operational_date: vehicle.expectedOperationalDate, status_comment: vehicle.statusComment, status_reason_key: vehicle.statusReasonKey })) });
+  }, [vehicles, data.adHocRows, data.today, data.operator.company, data.settings.dailyStatusOnlyAffected]);
 
   const title = sections.find((item) => item.key === section)?.label ?? "Command Center";
   const scopeProps = { clusters, onClusters: setClusters, onRegions: setRegions, onStations: setStations, regions, stationOptions: data.stationOptions, stations };
@@ -499,7 +536,8 @@ export function FleetControlDashboard({
           {visibleSectionSet.has("settings") || data.capabilities.canAccessUsers ? <div className="fc-nav-group">
             <button className={section === "settings" ? "active" : ""} onClick={() => setAdminMenusOpen((current) => ({ ...current, settings: !current.settings }))} type="button"><Settings size={18} /><span>Settings</span><ChevronDown className={adminMenusOpen.settings ? "open" : ""} size={15} /></button>
             {adminMenusOpen.settings ? <div className="fc-nav-children">
-              {visibleSectionSet.has("settings") ? <button className={section === "settings" ? "active" : ""} onClick={() => changeSection("settings")} type="button">General Settings</button> : null}
+              {visibleSectionSet.has("settings") ? <button className={section === "settings" && settingsTab === "general" ? "active" : ""} onClick={() => openSettings("general")} type="button"><Settings size={15} />General Settings</button> : null}
+              {visibleSectionSet.has("settings") ? <button className={section === "settings" && settingsTab === "auto_mail" ? "active" : ""} onClick={() => openSettings("auto_mail")} type="button"><Mail size={15} />Auto Mail Scheduler</button> : null}
               {data.capabilities.canAccessUsers ? <a href="/users?section=users"><Users size={15} /><span>Users</span></a> : null}
               {data.capabilities.canAccessUsers ? <a href="/users?section=roles"><ShieldCheck size={15} /><span>User Roles</span></a> : null}
             </div> : null}
@@ -665,10 +703,15 @@ export function FleetControlDashboard({
           {section === "reports" ? <section className="fc-section"><FleetReportsWorkspace data={{ ...data, vehicles, payments, movements }} /></section> : null}
 
           {section === "settings" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Administration</span><h1>Settings</h1><p>Control Fleet policy, automated reminders and connected vehicle data.</p></div></div>
-            <div className="fc-settings-grid"><article className="fc-panel fc-settings-card"><div className="fc-panel-head"><div><span className="fc-eyebrow">Fleet policy</span><h2>Audit and service rules</h2></div><Settings size={20} /></div><form className="fc-settings-form" onSubmit={submitSettings}><label><span>Routine audit cadence</span><div><input defaultValue={data.settings.defaultAuditCadenceDays} min="1" name="defaultAuditCadenceDays" type="number" /><small>days</small></div></label><label><span>Document warning</span><div><input defaultValue={data.settings.documentWarningDays} min="1" name="documentWarningDays" type="number" /><small>days</small></div></label><label><span>Service warning</span><div><input defaultValue={data.settings.serviceWarningDays} min="1" name="serviceWarningDays" type="number" /><small>days</small></div></label><label className="fc-toggle"><input defaultChecked={data.settings.autoSuggestAudits} name="autoSuggestAudits" type="checkbox" /><span>System audit suggestions</span></label><label className="fc-toggle"><input defaultChecked={data.settings.auditVideoRequired} name="auditVideoRequired" type="checkbox" /><span>Require walk-around video</span></label><label className="fc-toggle"><input defaultChecked={data.settings.auditEmailEnabled} name="auditEmailEnabled" type="checkbox" /><span>Email audit findings</span></label><label className="fc-toggle"><input defaultChecked={data.settings.breakdownVehicleLinkRequired} name="breakdownVehicleLinkRequired" type="checkbox" /><span>Activate breakdown-to-vehicle link</span><small>Keep off until the ad-hoc request form is released.</small></label><div className="fc-settings-divider"><strong>Daily fleet status email</strong><small>One monthly thread · scheduled for 8:30 p.m. IST</small></div><label><span>Send time</span><div><input defaultValue={data.settings.dailyStatusSendTime} name="dailyStatusSendTime" type="time" /><small>IST</small></div></label><label className="fc-toggle"><input defaultChecked={data.settings.dailyStatusEmailEnabled} name="dailyStatusEmailEnabled" type="checkbox" /><span>Enable daily status email</span><small>Currently disabled until source and status data is complete.</small></label><label className="fc-toggle"><input defaultChecked={data.settings.dailyStatusOnlyAffected} name="dailyStatusOnlyAffected" type="checkbox" /><span>Send only when stations are affected</span></label>{data.capabilities.canManageSettings ? <button className="fc-button primary" disabled={savingAction === "settings.update"} type="submit">Save policy</button> : null}</form></article>
-              <article className="fc-panel fc-settings-card"><div className="fc-panel-head"><div><span className="fc-eyebrow">Integrations</span><h2>Connected vehicle data</h2></div><PlugZap size={20} /></div><div className="fc-integration-list">{data.integrations.map((integration) => <div key={integration.key}><span className={`fc-integration-mark ${integration.key}`}>{integration.key === "paytap" ? "P" : "W"}</span><div><strong>{integration.name}</strong><p>{integration.purpose}</p><small>{integration.detail}{integration.lastSyncAt ? ` · Last sync ${date(integration.lastSyncAt)}` : ""}</small></div><b className={integration.status}>{integration.status.replaceAll("_", " ")}</b></div>)}</div></article><article className="fc-panel fc-settings-card fc-status-recipients"><div className="fc-panel-head"><div><span className="fc-eyebrow">Daily status distribution</span><h2>Recipients by station</h2><p>People station mappings are included automatically. Add exceptions or additional recipients here.</p></div><Users size={20} /></div><div className="fc-recipient-list">{data.statusRecipients.filter((row) => row.isActive).map((row) => <div key={row.id}><span>{row.name.slice(0,1).toUpperCase()}</span><div><strong>{row.name}</strong><small>{row.email} · {row.stationCodes.length ? row.stationCodes.join(", ") : "All affected stations"}</small></div>{data.capabilities.canManageSettings ? <button aria-label={`Remove ${row.name}`} onClick={() => fleetAction("status-recipient.remove", { recipientId: row.id })} type="button"><Trash2 size={14} /></button> : null}</div>)}{!data.statusRecipients.some((row) => row.isActive) ? <p className="fc-recipient-empty">No manual exceptions. Station and operations owners from People remain the default recipients.</p> : null}</div>{data.capabilities.canManageSettings ? <form className="fc-recipient-form" onSubmit={submitStatusRecipient}><input name="name" placeholder="Name" required /><input name="email" placeholder="Email" required type="email" /><input name="stationCodes" placeholder="Station codes, comma separated · blank = all affected" /><button className="fc-button secondary" disabled={savingAction === "status-recipient.upsert"} type="submit"><Plus size={14} /> Add recipient</button></form> : null}</article>
-            </div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Administration</span><h1>{settingsTab === "auto_mail" ? "Auto Mail Scheduler" : "Settings"}</h1><p>{settingsTab === "auto_mail" ? "Schedule and control the station-scoped DropX Daily Fleet Update." : "Control Fleet policy, automated reminders and connected vehicle data."}</p></div>{settingsTab === "auto_mail" ? <button className="fc-button secondary" onClick={() => setMailPreviewOpen(true)} type="button"><Eye size={16} /> Preview sample mail</button> : null}</div>
+            {settingsTab === "general" ? <div className="fc-settings-grid"><article className="fc-panel fc-settings-card"><div className="fc-panel-head"><div><span className="fc-eyebrow">Fleet policy</span><h2>Audit and service rules</h2></div><Settings size={20} /></div><form className="fc-settings-form" onSubmit={submitSettings}><label><span>Routine audit cadence</span><div><input defaultValue={data.settings.defaultAuditCadenceDays} min="1" name="defaultAuditCadenceDays" type="number" /><small>days</small></div></label><label><span>Document warning</span><div><input defaultValue={data.settings.documentWarningDays} min="1" name="documentWarningDays" type="number" /><small>days</small></div></label><label><span>Service warning</span><div><input defaultValue={data.settings.serviceWarningDays} min="1" name="serviceWarningDays" type="number" /><small>days</small></div></label><label className="fc-toggle"><input defaultChecked={data.settings.autoSuggestAudits} name="autoSuggestAudits" type="checkbox" /><span>System audit suggestions</span></label><label className="fc-toggle"><input defaultChecked={data.settings.auditVideoRequired} name="auditVideoRequired" type="checkbox" /><span>Require walk-around video</span></label><label className="fc-toggle"><input defaultChecked={data.settings.auditEmailEnabled} name="auditEmailEnabled" type="checkbox" /><span>Email audit findings</span></label><label className="fc-toggle"><input defaultChecked={data.settings.breakdownVehicleLinkRequired} name="breakdownVehicleLinkRequired" type="checkbox" /><span>Activate breakdown-to-vehicle link</span><small>Keep off until the ad-hoc request form is released.</small></label>{data.capabilities.canManageSettings ? <button className="fc-button primary" disabled={savingAction === "settings.update"} type="submit">Save policy</button> : null}</form></article>
+              <article className="fc-panel fc-settings-card"><div className="fc-panel-head"><div><span className="fc-eyebrow">Integrations</span><h2>Connected vehicle data</h2></div><PlugZap size={20} /></div><div className="fc-integration-list">{data.integrations.map((integration) => <div key={integration.key}><span className={`fc-integration-mark ${integration.key}`}>{integration.key === "paytap" ? "P" : "W"}</span><div><strong>{integration.name}</strong><p>{integration.purpose}</p><small>{integration.detail}{integration.lastSyncAt ? ` · Last sync ${date(integration.lastSyncAt)}` : ""}</small></div><b className={integration.status}>{integration.status.replaceAll("_", " ")}</b></div>)}</div></article></div> : null}
+            {settingsTab === "auto_mail" ? <div className="fc-mail-settings">
+              <article className="fc-panel fc-mail-schedule"><div className="fc-panel-head"><div><span className="fc-eyebrow">Daily dispatch</span><h2>DropX Daily Fleet Update</h2><p>One conversation per month. Every daily update replies in the same thread.</p></div><span className={`fc-mail-state ${data.settings.dailyStatusEmailEnabled ? "active" : "held"}`}>{data.settings.dailyStatusEmailEnabled ? <><Play size={13} /> Active</> : <><Pause size={13} /> On hold</>}</span></div><form className="fc-mail-schedule-form" onSubmit={submitMailSettings}><label><span>Send every day at</span><div><input defaultValue={data.settings.dailyStatusSendTime || "20:30"} name="dailyStatusSendTime" required type="time" /><small>IST</small></div></label><label className="fc-toggle"><input defaultChecked={data.settings.dailyStatusEmailEnabled} name="dailyStatusEmailEnabled" type="checkbox" /><span>Enable automatic mail</span><small>Turn this off to hold all future dispatches without deleting the recipient list.</small></label><label className="fc-toggle"><input defaultChecked={data.settings.dailyStatusOnlyAffected} name="dailyStatusOnlyAffected" type="checkbox" /><span>Affected stations only</span><small>Send when a station has a non-operational vehicle or approved ad hoc van.</small></label>{data.capabilities.canManageSettings ? <button className="fc-button primary" disabled={savingAction === "settings.update-mail"} type="submit">{savingAction === "settings.update-mail" ? "Saving…" : "Save mail schedule"}</button> : null}</form></article>
+              <article className="fc-panel fc-mail-guardrails"><div className="fc-panel-head"><div><span className="fc-eyebrow">Audience rules</span><h2>Station-safe distribution</h2></div><ShieldCheck size={20} /></div><ul><li><Check size={15} /><span><strong>Operations from People</strong>Active Operations users are included only when their mapped station is in the report.</span></li><li><Check size={15} /><span><strong>Fleet and Business Head</strong>All-location Operations roles receive every affected station.</span></li><li><X size={15} /><span><strong>Amazon Now excluded</strong>Amazon Now stations are removed before the report and recipient list are built.</span></li><li><Mail size={15} /><span><strong>Monthly thread</strong>Subject: DropX Daily Fleet Update · each day replies to the month’s first mail.</span></li></ul><button className="fc-button secondary" onClick={() => setMailPreviewOpen(true)} type="button"><Eye size={15} /> Open sample email</button></article>
+              <article className="fc-panel fc-status-recipients"><div className="fc-panel-head"><div><span className="fc-eyebrow">Additional distribution</span><h2>Manual recipients</h2><p>People station mappings are automatic. Add Fleet leadership or named exceptions here; leave stations blank for all affected stations.</p></div><Users size={20} /></div><div className="fc-recipient-list">{data.statusRecipients.map((row) => <div className={row.isActive ? "" : "held"} key={row.id}><span>{row.name.slice(0,1).toUpperCase()}</span><div><strong>{row.name}{!row.isActive ? " · On hold" : ""}</strong><small>{row.email} · {row.stationCodes.length ? row.stationCodes.join(", ") : "All affected stations"}</small></div>{data.capabilities.canManageSettings ? <div className="fc-recipient-actions"><button aria-label={`${row.isActive ? "Hold" : "Resume"} ${row.name}`} onClick={() => toggleStatusRecipient(row.id, !row.isActive)} title={row.isActive ? "Hold" : "Resume"} type="button">{row.isActive ? <Pause size={14} /> : <Play size={14} />}</button><button aria-label={`Delete ${row.name}`} className="danger" onClick={() => deleteStatusRecipient(row.id, row.name)} title="Delete" type="button"><Trash2 size={14} /></button></div> : null}</div>)}{!data.statusRecipients.length ? <p className="fc-recipient-empty">No manual recipients yet. People-mapped Operations recipients are still resolved automatically at send time.</p> : null}</div>{data.capabilities.canManageSettings ? <form className="fc-recipient-form" onSubmit={submitStatusRecipient}><input name="name" placeholder="Name" required /><input name="email" placeholder="Email" required type="email" /><input name="stationCodes" placeholder="Station codes, comma separated · blank = all" /><button className="fc-button secondary" disabled={savingAction === "status-recipient.upsert"} type="submit"><Plus size={14} /> Add recipient</button></form> : null}</article>
+            </div> : null}
+            {mailPreviewOpen ? <div className="fc-modal-backdrop"><section className="fc-modal wide fc-mail-preview"><button aria-label="Close preview" className="fc-modal-close" onClick={() => setMailPreviewOpen(false)} type="button"><X size={19} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Mail size={22} /></span><div><small>Email preview · live fleet data</small><h2>DropX Daily Fleet Update</h2><p>This is the actual responsive HTML design used by the 8:30 p.m. scheduler.</p></div></div><iframe srcDoc={dailyMailPreview.html} title="DropX Daily Fleet Update sample" /></section></div> : null}
           </section> : null}
 
           {section === "masters" ? <section className="fc-section">

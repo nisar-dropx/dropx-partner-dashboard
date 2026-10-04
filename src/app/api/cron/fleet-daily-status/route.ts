@@ -5,6 +5,7 @@ import { loadAdHocActivity, isAdHocActivityLocation } from "@/lib/ops-pulse/adho
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { fleetAdHocRequestType } from "@/lib/fleet-control-adhoc-scope";
 import { buildFleetDailyStatusEmail, type FleetDailyStatusSummary as Summary, type FleetDailyStatusVehicle as Vehicle } from "@/lib/fleet/daily-status-email";
+import { loadFleetDailyStatusRecipients } from "@/lib/fleet/daily-status-recipients";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -37,17 +38,20 @@ async function processCompany(company: { id: string; name: string | null }, date
   const approvedVans = activity.stations.flatMap(station => station.days.flatMap(day => day.entries.map(entry => ({ station: station.code, entry })))).filter(({entry}) => fleetAdHocRequestType(entry) === "Van" && approved(entry.approvalStatus, entry.source));
   const codes = [...new Set([...vehicles.map(row=>clean(row.station_code).toUpperCase()),...approvedVans.map(row=>row.station)].filter(Boolean))].sort();
   const allRows = codes.map((station): Summary => { const rows=vehicles.filter(row=>clean(row.station_code).toUpperCase()===station); const owned=rows.filter(row=>own(row.ownership_type)); const partner=rows.filter(row=>!own(row.ownership_type)); const ownOperational=owned.filter(row=>active(row.status)).length; const partnerOperational=partner.filter(row=>active(row.status)).length; return {station,ownTotal:owned.length,ownOperational,ownNonOperational:owned.length-ownOperational,partnerTotal:partner.length,partnerOperational,partnerNonOperational:partner.length-partnerOperational,totalNonOperational:rows.filter(row=>!active(row.status)).length,adHocVans:approvedVans.filter(row=>row.station===station).length}; });
-  const rows = setting.data.daily_status_only_affected === false ? allRows : allRows.filter(row=>row.totalNonOperational>0 || row.adHocVans>0);
+  const rows = (setting.data.daily_status_only_affected === false ? allRows : allRows.filter(row=>row.totalNonOperational>0 || row.adHocVans>0))
+    .sort((a,b)=>b.totalNonOperational-a.totalNonOperational || b.adHocVans-a.adHocVans || a.station.localeCompare(b.station));
   if (!rows.length) return "no_affected_station";
   const affected = rows.map(row=>row.station);
-  const defaults = locations.filter(location=>affected.includes(clean(location.station_code).toUpperCase())).flatMap(location=>[email(location.station_manager_email)]).filter((value): value is string=>Boolean(value));
+  const reportStations = locations.filter(location=>affected.includes(clean(location.station_code).toUpperCase()));
+  const peopleRecipients = await loadFleetDailyStatusRecipients(supabaseAdmin, company.id, reportStations);
+  const defaults = peopleRecipients.filter(row=>row.stationCodes.some(code=>affected.includes(code))).map(row=>row.email);
   const manual = (recipientsResult.data ?? []).flatMap(row => { const scopes=Array.isArray(row.station_codes)?row.station_codes.map((value:string)=>clean(value).toUpperCase()):[]; const address=email(row.email); return address && (!scopes.length || scopes.some((code:string)=>affected.includes(code))) ? [address] : []; });
   const recipients=[...new Set([...defaults,...manual])];
   if (!recipients.length) throw new Error("No People station owner or Fleet status recipient was found for the affected stations.");
   const month=date.slice(0,7); const monthLabel=new Intl.DateTimeFormat("en-IN",{month:"long",year:"numeric",timeZone:"Asia/Kolkata"}).format(new Date(`${month}-01T12:00:00+05:30`));
   const prior=await supabaseAdmin.from("fleet_status_report_logs").select("message_id,root_message_id,subject").eq("company_id",company.id).eq("report_month",month).eq("status","sent").order("created_at",{ascending:false}).limit(1).maybeSingle();
-  const subject=prior.data?.subject || `DropX Fleet | Daily status | ${monthLabel}`; const root=prior.data?.root_message_id || prior.data?.message_id || null; const last=prior.data?.message_id || null; const messageId=last?`<dropx.fleet-status.${randomUUID()}@partner.dropxlogistics.com>`:`<dropx.fleet-status.${company.id}.${month}@partner.dropxlogistics.com>`;
-  const down=vehicles.filter(row=>!active(row.status)&&affected.includes(clean(row.station_code).toUpperCase()));
+  const subject=prior.data?.subject || `DropX Daily Fleet Update | ${monthLabel}`; const root=prior.data?.root_message_id || prior.data?.message_id || null; const last=prior.data?.message_id || null; const messageId=last?`<dropx.fleet-status.${randomUUID()}@partner.dropxlogistics.com>`:`<dropx.fleet-status.${company.id}.${month}@partner.dropxlogistics.com>`;
+  const down=vehicles.filter(row=>!active(row.status)&&affected.includes(clean(row.station_code).toUpperCase())).sort((a,b)=>(a.non_operational_since||date).localeCompare(b.non_operational_since||date));
   const presentation=buildFleetDailyStatusEmail({companyName:company.name,date,rows,exceptions:down});
   const result=await sendEmail({companyId:company.id,to:recipients,subject,body:presentation.text,html:presentation.html,messageId,inReplyTo:last||undefined,references:last?[...new Set([root,last].filter((value):value is string=>Boolean(value)))]:undefined});
   await supabaseAdmin.from("fleet_status_report_logs").insert({company_id:company.id,report_date:date,report_month:month,affected_station_codes:affected,recipients,subject,status:"sent",message_id:result.messageId||messageId,root_message_id:root||result.messageId||messageId});
