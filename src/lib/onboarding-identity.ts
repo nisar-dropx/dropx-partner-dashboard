@@ -38,11 +38,15 @@ function existingProfile(match: OnboardingIdentityMatch | undefined) {
   return `${name} (${designation})`;
 }
 
-export function assertOnboardingIdentityAllowed(evaluation: OnboardingIdentityEvaluation, allowDifferentWorkforceDesignation: boolean) {
+export function assertOnboardingIdentityAllowed(evaluation: OnboardingIdentityEvaluation, options: {
+  allowDifferentWorkforceDesignation?: boolean;
+  allowDuplicateMobile?: boolean;
+} = {}) {
+  if (options.allowDuplicateMobile) return;
   if (evaluation.exactMatches.length) {
     throw new Error(`This mobile number is already registered to ${existingProfile(evaluation.exactMatches[0])}. Continue the existing profile; the same designation cannot be registered twice.`);
   }
-  if (evaluation.otherMatches.length && !allowDifferentWorkforceDesignation) {
+  if (evaluation.otherMatches.length && !options.allowDifferentWorkforceDesignation) {
     throw new Error(`This mobile number already belongs to ${existingProfile(evaluation.otherMatches[0])}. Only a different Workforce engagement can continue, and it requires lifecycle approval.`);
   }
 }

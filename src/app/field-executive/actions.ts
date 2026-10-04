@@ -404,7 +404,8 @@ export async function createFieldExecutive(formData: FormData) {
       companyId,
       mobile,
       email,
-      excludeRegister: table
+      excludeRegister: table,
+      allowDuplicateMobile: table === "workforce"
     });
     const identityEvaluation = await evaluateOnboardingIdentity({
       client: supabaseAdmin,
@@ -413,7 +414,10 @@ export async function createFieldExecutive(formData: FormData) {
       designationId: designationRuleResult.data.id,
       designationName: designation
     });
-    assertOnboardingIdentityAllowed(identityEvaluation, table === "workforce");
+    assertOnboardingIdentityAllowed(identityEvaluation, {
+      allowDifferentWorkforceDesignation: table === "workforce",
+      allowDuplicateMobile: table === "workforce"
+    });
     // Second role for someone already in People (e.g. an SSA who also works as
     // a DA): the Workforce record reuses their People DropX ID and biometric ID.
     const peopleIdentity = table === "workforce" ? await peopleIdentityForDualRole(companyId, identityEvaluation) : null;
@@ -726,7 +730,8 @@ export async function updateFieldExecutive(formData: FormData) {
       mobile: payload.mobile,
       email: payload.email,
       excludeId: executiveId,
-      excludeRegister: table
+      excludeRegister: table,
+      allowDuplicateMobile: table === "workforce"
     });
     const corePayload = {
       full_name: payload.full_name,
@@ -1085,7 +1090,10 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         designationName: designation.name
       });
       try {
-        assertOnboardingIdentityAllowed(identityEvaluation, table === "workforce");
+        assertOnboardingIdentityAllowed(identityEvaluation, {
+          allowDifferentWorkforceDesignation: table === "workforce",
+          allowDuplicateMobile: table === "workforce"
+        });
       } catch (error) {
         throw new Error(`Row ${rowNumber}: ${error instanceof Error ? error.message : "Mobile identity conflict."}`);
       }
