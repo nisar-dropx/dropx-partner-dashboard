@@ -4,3 +4,8 @@
 node_modules
 .vercel
 *.tsbuildinfo
+
+.tmp*
+tmp-*
+*.log
+supabase/.temp
