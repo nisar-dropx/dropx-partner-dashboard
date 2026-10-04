@@ -1,0 +1,16 @@
+import {PGlite} from '@electric-sql/pglite';import fs from 'node:fs';import assert from 'node:assert/strict';
+const db=new PGlite();
+await db.exec(`create role anon;create role authenticated;create role service_role;
+create table companies(id uuid primary key);create table profiles(id uuid primary key);create table fleet_vehicles(id uuid primary key);`);
+const original=fs.readFileSync('supabase/migrations/20260926183000_fleet_control_system.sql','utf8');
+await db.exec(original.slice(original.indexOf('create table if not exists public.fleet_audit_templates'),original.indexOf('create table if not exists public.fleet_control_settings')));
+await db.exec("alter table fleet_audit_checklist_items add column audit_mode text default 'both'");
+await db.exec(fs.readFileSync('supabase/migrations/20261004225138_fleet_practical_audits_pwa.sql','utf8'));
+const c='00000000-0000-4000-8000-000000000001',u='00000000-0000-4000-8000-000000000002',v='00000000-0000-4000-8000-000000000003',a='00000000-0000-4000-8000-000000000004',t='00000000-0000-4000-8000-000000000005',i='00000000-0000-4000-8000-000000000006';
+await db.exec(`insert into companies values('${c}');insert into profiles values('${u}');insert into fleet_vehicles values('${v}');insert into fleet_audit_templates(id,company_id,name) values('${t}','${c}','Test');insert into fleet_audit_checklist_items(id,company_id,template_id,category,label) values('${i}','${c}','${t}','Tyres','Front tyre');insert into fleet_audits(id,company_id,vehicle_id,template_id,scheduled_for,scheduled_reason) values('${a}','${c}','${v}','${t}','2026-10-05','[mode:physical] Test');`);
+const payload={responses:[{itemId:i,passed:false,comments:'Worn',snapshot:{value:'poor',label:'Front tyre',days:7}}],evidence:[{itemId:i,type:'photo',url:'https://example.com/photo.jpg',caption:'Tyre'}],findings:[{itemId:i,category:'Tyres',finding:'Worn tyre',severity:'invalid',actionRequired:'Replace',expectedCompletionDate:'2026-10-12'}],status:'failed',score:0,summary:'Tyre follow-up',odometerKm:12};
+const call=(company,data)=>db.query('select fleet_complete_audit_v2($1,$2,$3,$4::jsonb)',[company,a,u,JSON.stringify(data)]);
+await assert.rejects(()=>call(c,payload));assert.equal((await db.query('select count(*)::int as n from fleet_audit_responses')).rows[0].n,0,'failed finding must rollback response');assert.equal((await db.query('select count(*)::int as n from fleet_audit_evidence')).rows[0].n,0);
+payload.findings[0].severity='high';await assert.rejects(()=>call(v,payload));await call(c,payload);await assert.rejects(()=>call(c,payload));assert.equal((await db.query('select count(*)::int as n from fleet_audit_findings')).rows[0].n,1);assert.equal((await db.query('select status from fleet_audits')).rows[0].status,'failed');
+const permissions=await db.query("select has_function_privilege('anon','fleet_complete_audit_v2(uuid,uuid,uuid,jsonb)','execute') as anon,has_function_privilege('authenticated','fleet_complete_audit_v2(uuid,uuid,uuid,jsonb)','execute') as authenticated");assert.equal(permissions.rows[0].anon,false);assert.equal(permissions.rows[0].authenticated,false);
+await db.close();console.log('Practical audits: transaction rollback, company isolation, duplicate completion, follow-up persistence and RPC grants passed.');

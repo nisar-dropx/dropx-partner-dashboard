@@ -1,3 +1,5 @@
+import { auditApplies, evaluateAuditResponse, normalizeAuditConfig } from "@/lib/fleet/audit-rules";
+import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { NextResponse } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -51,7 +53,7 @@ async function access() {
   const hasMembership = authorization.isMasterOwner || await hasActiveFleetMembership(companyId, authorization.userId);
   const hasFleetPermission = fleetAccessPageCodes.some((code) => hasPermission(authorization, code, "access"));
   if (!hasMembership || !hasFleetPermission) return { error: NextResponse.json({ error: "Fleet portal access has not been assigned. Contact HR or your department administrator." }, { status: 403 }) };
-  const canManageFleet = authorization.isMasterOwner || hasPermission(authorization, "fleet_maintenance", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
+  const canManageFleet = authorization.isMasterOwner || hasPermission(authorization, "fleet_audits", "edit") || hasPermission(authorization, "fleet_maintenance", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
   const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit");
   return { authorization, companyId, canManageFleet, canManageSettings };
 }
@@ -64,6 +66,27 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid request body." }, { status: 400 }); }
   const action = clean(body.action);
   try {
+    const canAudit = context.authorization.isMasterOwner || hasPermission(context.authorization, "fleet_audits", "edit");
+    const canService = context.authorization.isMasterOwner || hasPermission(context.authorization, "fleet_maintenance", "edit");
+    if ((action.startsWith("audit.") && !canAudit) || (action.startsWith("service.") && !canService) || (action === "finding.update" && !canAudit && !canService)) return NextResponse.json({error:"You do not have permission for this action."},{status:403});
+    if (action === "audit.auto-schedule" && !context.authorization.isMasterOwner && !context.authorization.hasAllLocationAccess) return NextResponse.json({error:"Company-wide scheduling requires access to all locations."},{status:403});
+    if (body.otherAuditId && !context.authorization.isMasterOwner && !context.authorization.hasAllLocationAccess) {
+      const other = await supabaseAdmin.from("fleet_audits").select("fleet_vehicles!inner(station_code)").eq("company_id",context.companyId).eq("id",body.otherAuditId).single();
+      const otherVehicle = Array.isArray(other.data?.fleet_vehicles) ? other.data.fleet_vehicles[0] : other.data?.fleet_vehicles;
+      const locations = await supabaseAdmin.from("stations").select("station_code").eq("company_id",context.companyId).in("id",context.authorization.locationScopeIds.length ? context.authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
+      if(other.error || locations.error || !otherVehicle || !locations.data?.some(s=>s.station_code===otherVehicle.station_code)) return NextResponse.json({error:"The other audit is outside your assigned locations."},{status:403});
+    }
+    if (body.auditId || body.vehicleId || body.findingId) {
+      let vehicleId = clean(body.vehicleId);
+      let auditId = clean(body.auditId);
+      if (body.findingId) { const f = await supabaseAdmin.from("fleet_audit_findings").select("audit_id").eq("company_id",context.companyId).eq("id",body.findingId).single(); if(f.error) throw new Error("Finding not found."); auditId=f.data.audit_id; }
+      if (auditId) { const a = await supabaseAdmin.from("fleet_audits").select("vehicle_id").eq("company_id",context.companyId).eq("id",auditId).single(); if(a.error) throw new Error("Audit not found."); vehicleId=a.data.vehicle_id; }
+      if (vehicleId && !context.authorization.isMasterOwner && !context.authorization.hasAllLocationAccess) {
+        const v = await assertVehicle(context.companyId,vehicleId);
+        const stations = await supabaseAdmin.from("stations").select("station_code").eq("company_id",context.companyId).in("id",context.authorization.locationScopeIds.length ? context.authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
+        if(stations.error || !(stations.data ?? []).some(x=>x.station_code === v.station_code)) return NextResponse.json({error:"This vehicle is outside your assigned locations."},{status:403});
+      }
+    }
     if (action === "service.create") return await createService(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "service.schedule") return await scheduleService(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.schedule") return await scheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
@@ -72,6 +95,8 @@ export async function POST(request: Request) {
     if (action === "audit.auto-schedule") return context.canManageFleet ? NextResponse.json({ ok: true, ...await generateFleetAuditProgramme(context.companyId, required(body.month, "Audit month"), context.authorization.userId) }) : NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
     if (action === "audit.cancel") return await cancelAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.start") return await startAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.draft") return await saveAuditDraft(context.companyId, context.canManageFleet, body);
+    if (action === "finding.update") return await updateFinding(context.companyId, context.canManageFleet, body);
     if (action === "audit.complete") return await completeAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "checklist.create") return await createChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "checklist.update") return await updateChecklistItem(context.companyId, context.canManageSettings, body);
@@ -258,47 +283,62 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
   if (auditResult.error) throw new Error(auditResult.error.message);
   if (!auditResult.data) throw new Error("Audit was not found.");
   if (!["scheduled", "in_progress"].includes(clean(auditResult.data.status))) throw new Error("Only an open audit can be completed.");
-  const responses = Array.isArray(body.responses) ? body.responses : [];
-  if (responses.length) {
-    const rows = responses.map((response: Payload) => ({ company_id: companyId, audit_id: auditId, checklist_item_id: required(response.itemId, "Checklist item"), response_value: { value: response.value }, passed: response.passed == null ? null : Boolean(response.passed), comments: clean(response.comments) || null, responded_by: userId }));
-    const saved = await supabaseAdmin!.from("fleet_audit_responses").upsert(rows, { onConflict: "audit_id,checklist_item_id" });
-    if (saved.error) throw new Error(saved.error.message);
-  }
+  const input = Array.isArray(body.responses) ? body.responses : [];
   const evidence = Array.isArray(body.evidence) ? body.evidence.filter((item: Payload) => clean(item.url)) : [];
+  for (const item of evidence) {
+    if (!['photo','video','document'].includes(item.type)) throw new Error('Invalid evidence type.');
+    const url = clean(item.url);
+    if (!/^https:\/\//i.test(url) && !url.startsWith('/api/fleet/audit-evidence?')) throw new Error('Evidence must be a secure link or an uploaded file.');
+    if (url.startsWith('/api/fleet/audit-evidence?') && !new URL(url,'https://fleet.dropxlogistics.com').searchParams.get('path')?.startsWith(`${companyId}/audits/${auditId}/`)) throw new Error('Evidence belongs to a different audit.');
+  }
   const auditMode = /^\[mode:video\]/i.test(clean(auditResult.data.scheduled_reason)) ? "video" : "physical";
-  if (auditMode === "video" && !evidence.some((item: Payload) => clean(item.type) === "video")) throw new Error("A complete walk-around video link is required for the remote video audit.");
-  let checklistRuleQuery = supabaseAdmin!.from("fleet_audit_checklist_items").select("id,label,guidance,response_type,is_required,audit_mode").eq("company_id", companyId).eq("is_active", true);
-  if (auditResult.data.template_id) checklistRuleQuery = checklistRuleQuery.eq("template_id", auditResult.data.template_id);
-  const checklistRules = await checklistRuleQuery;
-  if (checklistRules.error) throw new Error(checklistRules.error.message);
-  for (const item of (checklistRules.data ?? []).filter((row: any) => !row.audit_mode || row.audit_mode === "both" || row.audit_mode === auditMode)) {
-    const response = responses.find((entry: Payload) => clean(entry.itemId) === item.id);
-    if (item.is_required && !clean(response?.value)) throw new Error(`${item.label} must be completed before the audit can be submitted.`);
-    const rules = checklistEvidenceRules(item.guidance, item.response_type);
-    const selectedRule = response?.passed === false ? rules.fail : rules.pass;
-    if (response?.passed === false && rules.failRemarksRequired && !clean(response?.comments)) throw new Error(`${item.label} requires a remark when marked non-compliant.`);
-    const evidenceType = selectedRule.type;
-    const minimum = selectedRule.minimum;
-    if (!minimum) continue;
-    const attached = evidence.filter((entry: Payload) => clean(entry.itemId) === item.id && (evidenceType === "any" || clean(entry.type) === evidenceType)).length;
-    if (attached < minimum) throw new Error(`${item.label} requires ${minimum} ${evidenceType === "any" ? "attachment" : evidenceType} ${minimum === 1 ? "link" : "links"} when marked ${response?.passed === false ? "non-compliant" : "compliant"}.`);
+  const settings = await supabaseAdmin!.from('fleet_control_settings').select('audit_video_required,audit_email_enabled').eq('company_id',companyId).maybeSingle();
+  if(settings.error) throw new Error(settings.error.message);
+  if (auditMode === 'video' && settings.data?.audit_video_required !== false && !evidence.some((item: Payload)=>item.type==='video' && !item.itemId)) throw new Error('Attach the complete walk-around video.');
+  const vehicle = await supabaseAdmin!.from('fleet_vehicles').select('fuel_type').eq('company_id',companyId).eq('id',auditResult.data.vehicle_id).single();
+  if(vehicle.error) throw new Error(vehicle.error.message);
+  let query = supabaseAdmin!.from('fleet_audit_checklist_items').select('*').eq('company_id',companyId).eq('is_active',true);
+  if(auditResult.data.template_id) query=query.eq('template_id',auditResult.data.template_id);
+  const checklist = await query;
+  if(checklist.error) throw new Error(checklist.error.message);
+  const items = (checklist.data ?? []).filter(item=>(item.audit_mode === 'both' || item.audit_mode === auditMode) && auditApplies(normalizeAuditConfig(item.response_config),vehicle.data.fuel_type));
+  if(!items.length) throw new Error('Configure an audit checklist before completing the audit.');
+  const allowedIds = new Set(items.map(i=>i.id));
+  if(input.some((r:Payload)=>!allowedIds.has(r.itemId)) || new Set(input.map((r:Payload)=>r.itemId)).size !== input.length) throw new Error('Checklist changed. Reopen the audit and review its questions.');
+  if(evidence.some((e:Payload)=>e.itemId && !allowedIds.has(e.itemId))) throw new Error('Evidence references an invalid checklist item.');
+  const responses: Payload[]=[];
+  const findings: Payload[]=[];
+  for(const item of items) {
+    const r=input.find((x:Payload)=>x.itemId===item.id) || {};
+    const value=clean(r.value), comments=clean(r.comments);
+    if(item.is_required && !value) throw new Error(`${item.label}: choose a response.`);
+    const config=normalizeAuditConfig(item.response_config);
+    let passed: boolean|null=null, minimum=0, type='none';
+    if(config) {
+      let evaluation;
+      try { evaluation=evaluateAuditResponse(config,value,comments,r.days,todayKolkata()); } catch(e) { throw new Error(`${item.label}: ${e instanceof Error ? e.message : 'Invalid response'}`); }
+      passed=evaluation.passed; minimum=evaluation.option?.photos || 0; type='photo';
+      if(evaluation.option?.issue) findings.push({itemId:item.id,category:item.category,finding:`${item.label}: ${evaluation.option.label}${comments ? ' — '+comments : ''}`,severity:evaluation.option.severity,actionRequired:clean(r.action) || (evaluation.option.followUp==='immediate' ? 'Immediate inspection / repair before next route' : 'Review and complete follow-up'),expectedCompletionDate:evaluation.due});
+      if(evaluation.option?.followUp !== 'none' && evaluation.option?.issue && !clean(r.action)) throw new Error(`${item.label}: describe the follow-up action.`);
+    } else {
+      if(['pass_fail','yes_no'].includes(item.response_type) && value && !['pass','fail','yes','no','na'].includes(value)) throw new Error(`${item.label}: invalid response.`);
+      passed=['pass','yes'].includes(value) ? true : ['fail','no'].includes(value) ? false : null;
+      const rules=checklistEvidenceRules(item.guidance,item.response_type), rule=passed===false ? rules.fail : rules.pass;
+      minimum=rule.minimum; type=rule.type;
+      if(passed===false && rules.failRemarksRequired && !comments) throw new Error(`${item.label}: add a remark.`);
+      if(passed===false) findings.push({itemId:item.id,category:item.category,finding:`${item.label}: ${comments || value}`,severity:item.failure_severity,actionRequired:'Review and rectify',expectedCompletionDate:todayKolkata()});
+    }
+    if(value && new Set(evidence.filter((e:Payload)=>e.itemId===item.id && (type==='any' || e.type===type)).map((e:Payload)=>clean(e.url))).size < minimum) throw new Error(`${item.label}: attach ${minimum} ${type} evidence.`);
+    responses.push({itemId:item.id,passed,comments,snapshot:{value,label:item.label,config,days:r.days || null,action:clean(r.action)}});
   }
-  if (evidence.length) {
-    const saved = await supabaseAdmin!.from("fleet_audit_evidence").insert(evidence.map((item: Payload) => ({ company_id: companyId, audit_id: auditId, checklist_item_id: clean(item.itemId) || null, media_type: ["photo", "video", "document"].includes(clean(item.type)) ? clean(item.type) : "photo", media_url: clean(item.url), caption: clean(item.caption) || null, captured_at: clean(item.capturedAt) || null, uploaded_by: userId })));
-    if (saved.error) throw new Error(saved.error.message);
-  }
-  const findings = Array.isArray(body.findings) ? body.findings.filter((item: Payload) => clean(item.finding)) : [];
-  if (findings.length) {
-    const saved = await supabaseAdmin!.from("fleet_audit_findings").insert(findings.map((item: Payload) => ({ company_id: companyId, audit_id: auditId, category: clean(item.category) || "General", finding: clean(item.finding), severity: clean(item.severity) || "medium", action_required: clean(item.actionRequired) || null, expected_completion_date: clean(item.expectedCompletionDate) || null })));
-    if (saved.error) throw new Error(saved.error.message);
-  }
-  const failed = responses.some((response: Payload) => response.passed === false) || findings.some((item: Payload) => ["critical", "high"].includes(clean(item.severity)));
-  const scored = responses.filter((response: Payload) => response.passed != null);
-  const score = scored.length ? Math.round((scored.filter((response: Payload) => response.passed).length / scored.length) * 10000) / 100 : null;
-  const update = await supabaseAdmin!.from("fleet_audits").update({ status: failed ? "failed" : "passed", score, summary: clean(body.summary) || (failed ? "Issues found during routine vehicle audit." : "No critical issues found."), odometer_km: numberOrNull(body.odometerKm), completed_at: new Date().toISOString(), completed_by: userId, updated_at: new Date().toISOString(), email_status: body.sendEmail === false ? "not_sent" : "queued" }).eq("company_id", companyId).eq("id", auditId);
-  if (update.error) throw new Error(update.error.message);
+  if(clean(body.finding)) findings.push({category:clean(body.findingCategory)||'General',finding:clean(body.finding),severity:['low','medium','high','critical'].includes(body.severity)?body.severity:'medium',actionRequired:clean(body.actionRequired),expectedCompletionDate:clean(body.expectedCompletionDate)||null});
+  const failed=responses.some(r=>r.passed===false);
+  const scored=responses.filter(r=>r.passed!==null);
+  const score=scored.length ? Math.round(scored.filter(r=>r.passed).length/scored.length*100) : null;
+  const update = await supabaseAdmin!.rpc('fleet_complete_audit_v2',{p_company:companyId,p_audit:auditId,p_user:userId,p_data:{responses,evidence,findings,status:failed?'failed':'passed',score,summary:clean(body.summary),odometerKm:numberOrNull(body.odometerKm)}});
+  if(update.error) throw new Error(update.error.message);
   let emailStatus = "not_sent";
-  if (body.sendEmail !== false) emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, failed, score, clean(body.summary), findings, evidence);
+  if (body.sendEmail !== false && settings.data?.audit_email_enabled !== false) emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, failed, score, clean(body.summary), findings, evidence);
   return NextResponse.json({ ok: true, message: emailStatus === "sent" ? "Audit completed and summary emailed." : "Audit completed.", emailStatus });
 }
 
@@ -311,7 +351,7 @@ async function sendAuditEmail(companyId: string, auditId: string, audit: Payload
   if (!to.length) { await supabaseAdmin!.from("fleet_audits").update({ email_status: "failed" }).eq("id", auditId); return "failed"; }
   const settings = await supabaseAdmin!.from("fleet_control_settings").select("risk_weights").eq("company_id", companyId).maybeSingle();
   const config = auditProgrammeFromRiskWeights(settings.data?.risk_weights);
-  const mail = buildFleetAuditEmail({ auditId, auditDate: audit.scheduled_for, auditMode: /^\[mode:video\]/i.test(clean(audit.scheduled_reason)) ? "video" : "physical", stationCode: vehicle.station_code, vehicleNo: vehicle.vehicle_no, model: vehicle.model, failed, score, summary, findings, evidence, config });
+  const mail = buildFleetAuditEmail({ auditId, auditDate: audit.scheduled_for, auditMode: /^\[mode:video\]/i.test(clean(audit.scheduled_reason)) ? "video" : "physical", stationCode: vehicle.station_code, vehicleNo: vehicle.vehicle_no, model: vehicle.model, failed, score, summary, findings, evidence: evidence.map(item=>({...item,url:clean(item.url).startsWith("/api/fleet/audit-evidence?") ? `https://fleet.dropxlogistics.com${item.url}` : item.url})), config });
   try { await sendEmail({ companyId, subject: mail.subject, body: mail.text, html: mail.html, to, cc, messageId: `<dropx.fleet-audit.${auditId}@partner.dropxlogistics.com>` }); await supabaseAdmin!.from("fleet_audits").update({ email_status: "sent", email_sent_at: new Date().toISOString(), email_recipients: { to, cc } }).eq("id", auditId); return "sent"; }
   catch { await supabaseAdmin!.from("fleet_audits").update({ email_status: "failed", email_recipients: { to, cc } }).eq("id", auditId); return "failed"; }
 }
@@ -331,7 +371,7 @@ function checklistItemValues(body: Payload) {
   const pass = evidenceRule(body.passEvidenceType, body.passMinEvidence);
   const fail = evidenceRule(body.failEvidenceType, body.failMinEvidence);
   const guidance = `[remarks-fail:${body.failRemarksRequired === false ? "optional" : "required"}] [evidence-pass:${pass.type}:${pass.minimum}] [evidence-fail:${fail.type}:${fail.minimum}] ${clean(body.guidance)}`.trim();
-  return { audit_mode: ["video", "physical"].includes(clean(body.auditMode)) ? clean(body.auditMode) : "both", category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance, response_type: clean(body.responseType) || "pass_fail", is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999), is_active: true };
+  return { response_config: normalizeAuditConfig(body.responseConfig ? (typeof body.responseConfig === "string" ? JSON.parse(body.responseConfig) : body.responseConfig) : null), audit_mode: ["video", "physical"].includes(clean(body.auditMode)) ? clean(body.auditMode) : "both", category: required(body.category, "Category"), label: required(body.label, "Checklist item"), guidance, response_type: clean(body.responseType) || "pass_fail", is_required: body.isRequired !== false, failure_severity: clean(body.failureSeverity) || "medium", sort_order: Number(body.sortOrder ?? 999), is_active: true };
 }
 
 async function updateChecklistItem(companyId: string, allowed: boolean, body: Payload) {
@@ -589,4 +629,23 @@ async function upsertMember(companyId: string, userId: string, allowed: boolean,
   const result = await supabaseAdmin!.from("fleet_portal_memberships").upsert({ company_id: companyId, user_id: profile.data.id, access_level: clean(body.accessLevel) || "viewer", has_all_location_access: Boolean(body.hasAllLocationAccess), location_scope_ids: scopeIds, is_active: body.isActive !== false, created_by: userId, updated_at: new Date().toISOString() }, { onConflict: "company_id,user_id" });
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, message: "Fleet user access updated." });
+}
+
+async function saveAuditDraft(companyId:string,allowed:boolean,body:Payload) {
+ if(!allowed) return NextResponse.json({error:'Audit permission denied.'},{status:403});
+ const draft=body.draft && typeof body.draft==='object' ? body.draft : {};
+ if(Array.isArray(draft) || Object.values(draft).some(value=>typeof value!=='string')) throw new Error('Draft answers must be text values.');
+ if(JSON.stringify(draft).length>200000) throw new Error('Draft is too large.');
+ const result=await supabaseAdmin!.from('fleet_audits').update({draft,updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',required(body.auditId,'Audit')).in('status',['scheduled','in_progress']).select('id').maybeSingle();
+ if(result.error || !result.data) throw new Error(result.error?.message || 'Audit is no longer open.');
+ return NextResponse.json({ok:true,message:'Draft saved. You can continue on any device.'});
+}
+async function updateFinding(companyId:string,allowed:boolean,body:Payload) {
+ if(!allowed) return NextResponse.json({error:'Maintenance permission denied.'},{status:403});
+ const status=clean(body.status);
+ if(!['open','in_progress','resolved'].includes(status)) throw new Error('Choose a valid action status.');
+ const note=required(body.resolutionNote,'Update / resolution note');
+ const result=await supabaseAdmin!.from('fleet_audit_findings').update({status,resolution_note:note,resolved_at:status==='resolved'?new Date().toISOString():null,updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',required(body.findingId,'Finding')).select('id').maybeSingle();
+ if(result.error || !result.data) throw new Error(result.error?.message || 'Finding not found.');
+ return NextResponse.json({ok:true,message:status==='resolved'?'Finding resolved.':'Follow-up updated.'});
 }

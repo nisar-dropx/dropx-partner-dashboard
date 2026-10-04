@@ -1,10 +1,10 @@
-"use client";
-
-import { Download } from "lucide-react";
-
-export function FleetAppInstall({ compact = false }: { compact?: boolean }) {
-  return <div className={`fleet-app-install ${compact ? "compact" : ""}`}>
-    <a className={compact ? "fc-button secondary" : "fleet-install-button"} download="DropX-Fleet-v2.1.0-arm64.apk" href="/downloads/DropX-Fleet-v2.1.0-arm64.apk"><Download size={15} /> Download Android app · v2.1.0 · 18 MB</a>
-    {!compact ? <p>For modern Android phones. <a download="DropX-Fleet-v2.1.0-32bit.apk" href="/downloads/DropX-Fleet-v2.1.0-32bit.apk">Older 32-bit phone · 15 MB</a></p> : null}
-  </div>;
+'use client';
+import { useEffect,useState } from 'react';
+import { Download, Smartphone, X } from 'lucide-react';
+type InstallEvent=Event & {prompt:()=>Promise<void>;userChoice:Promise<{outcome:string}>};
+export function FleetAppInstall({compact=false}:{compact?:boolean}){
+ const [prompt,setPrompt]=useState<InstallEvent|null>(null);const [installed,setInstalled]=useState(false);const [help,setHelp]=useState(false);
+ useEffect(()=>{setInstalled(window.matchMedia('(display-mode: standalone)').matches);const ready=(e:Event)=>{e.preventDefault();setPrompt(e as InstallEvent);};const done=()=>{setInstalled(true);setPrompt(null);};window.addEventListener('beforeinstallprompt',ready);window.addEventListener('appinstalled',done);return()=>{window.removeEventListener('beforeinstallprompt',ready);window.removeEventListener('appinstalled',done);};},[]);
+ if(installed)return null;
+ return <div className={`fleet-app-install ${compact?'compact':''}`}><button className={compact?'fc-button secondary':'fleet-install-button'} type="button" onClick={async()=>{if(prompt){await prompt.prompt();await prompt.userChoice;setPrompt(null);}else setHelp(true);}}><Smartphone size={18}/>Install DropX Fleet</button>{!compact&&<p>Full Fleet workspace · fits your phone · updates automatically</p>}{help&&<div className="fleet-install-help" role="status"><button type="button" aria-label="Close installation help" onClick={()=>setHelp(false)}><X size={18}/></button><strong>Add Fleet to your home screen</strong><p>Android: open this page in Chrome, tap ⋮, then “Add to Home screen” or “Install app”.</p><p>iPhone: open in Safari, tap Share, then “Add to Home Screen”.</p><p>You can also continue using Fleet directly in this browser.</p></div>}{!compact&&<details className="fleet-apk-alternative"><summary>Previous Android APK</summary><a href="/downloads/DropX-Fleet-v2.1.0-arm64.apk" download><Download size={14}/>Download v2.1.0 · 18 MB</a><p>The installed web app above has the latest workflows.</p></details>}</div>;
 }

@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   if (!payload.ownership_type) payload.ownership_type = "own";
   if (!payload.vehicle_no) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
   if (!payload.station_code) return NextResponse.json({ error: "Location is required." }, { status: 400 });
-  if (!payload.model) return NextResponse.json({ error: "Model is required." }, { status: 400 });
+  if (!payload.model) payload.model = "";
   if (!payload.fuel_type) return NextResponse.json({ error: "Fuel type is required." }, { status: 400 });
   if (!payload.deployment_status) payload.deployment_status = "deployed";
   if (!payload.current_location_type) payload.current_location_type = "station";

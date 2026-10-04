@@ -1,0 +1,20 @@
+'use client';
+import { useState } from 'react';
+import { auditPresets, type AuditConfig, type AuditOption } from '@/lib/fleet/audit-rules';
+export function FleetAuditRuleEditor({ initial }: { initial: AuditConfig | null }) {
+ const [config,setConfig]=useState<AuditConfig>(initial || JSON.parse(JSON.stringify(auditPresets.condition)));
+ const update=(i:number,patch:Partial<AuditOption>)=>setConfig(c=>({...c,options:c.options.map((o,n)=>n===i?{...o,...patch}:o)}));
+ return <section className="fc-rule-editor full">
+ <input type="hidden" name="responseConfig" value={JSON.stringify(config)}/>
+ <div className="fc-rule-toolbar"><label><span>Response format</span><select value={config.kind} onChange={e=>setConfig({...config,kind:e.target.value as AuditConfig['kind']})}><option value="choice">Choice with follow-up rules</option><option value="text">Short text</option><option value="number">Number</option><option value="date">Date</option></select></label><label><span>Start from a template</span><select value="" onChange={e=>setConfig(JSON.parse(JSON.stringify(auditPresets[e.target.value])))}><option value="" disabled>Select template</option>{Object.keys(auditPresets).map(k=><option key={k} value={k}>{k}</option>)}</select></label></div>
+ {config.kind==='choice' && <><p>Set what each answer requires. Changes apply to future submissions; completed answers keep their original wording.</p>{config.options.map((o,i)=><div className="fc-rule-option" key={i}>
+ <label><span>Answer</span><input required value={o.label} onChange={e=>update(i,{label:e.target.value})}/></label>
+ <label><span>Photo count</span><input type="number" min="0" max="6" value={o.photos} onChange={e=>update(i,{photos:Number(e.target.value)})}/></label>
+ <label><span>Priority</span><select value={o.severity} onChange={e=>update(i,{severity:e.target.value})}>{['low','medium','high','critical'].map(v=><option key={v}>{v}</option>)}</select></label>
+ <label><span>Follow-up</span><select value={o.followUp} onChange={e=>update(i,{followUp:e.target.value as AuditOption['followUp'],issue:e.target.value!=='none'||o.issue})}><option value="none">No deadline</option><option value="planned">Within days</option><option value="immediate">Today / before next route</option></select></label>
+ {o.followUp==='planned' && <label><span>Suggested days</span><input type="number" min="1" max="365" value={o.days} onChange={e=>update(i,{days:Number(e.target.value)})}/></label>}
+ <label className="fc-toggle"><input type="checkbox" checked={o.issue} onChange={e=>update(i,{issue:e.target.checked,followUp:e.target.checked?o.followUp:'none'})}/>Needs attention</label><label className="fc-toggle"><input type="checkbox" checked={o.remarks} onChange={e=>update(i,{remarks:e.target.checked})}/>Remark required</label>
+ <button type="button" className="fc-button secondary" aria-label={`Remove answer ${o.label}`} onClick={()=>setConfig({...config,options:config.options.filter((_,n)=>n!==i)})}>Remove</button></div>)}<button type="button" className="fc-button secondary" onClick={()=>setConfig({...config,options:[...config.options,{value:`option_${Date.now()}`,label:'',issue:false,severity:'medium',photos:0,remarks:false,followUp:'none',days:7}]})}>+ Add answer</button></>}
+ <div className="fc-rule-toolbar"><label><span>Vehicle applicability</span><select value={config.fuels.length===1&&config.fuels[0]==='EV'?'ev':config.fuels.length?'combustion':'all'} onChange={e=>setConfig({...config,fuels:e.target.value==='ev'?['EV']:e.target.value==='combustion'?['Diesel','Petrol','CNG']:[]})}><option value="all">All vehicles</option><option value="ev">EV only</option><option value="combustion">Diesel / petrol / CNG</option></select></label><label><span>Show saved document (optional)</span><select value={config.documentType} onChange={e=>setConfig({...config,documentType:e.target.value})}><option value="">None</option>{['REGISTRATION','INSURANCE','PUC','FITNESS','TAX'].map(t=><option value={`FLEET_${t}`} key={t}>{t}</option>)}</select></label></div>
+ </section>;
+}
