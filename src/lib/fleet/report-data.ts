@@ -3,14 +3,15 @@ import { requireCompanyId } from '@/lib/company-scope';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { readAllRows } from '@/lib/supabase-pagination';
 import { buildDailyFleetRows, type ReportVehicle, type DailyFleetReport } from './daily-report';
-import { hasActiveFleetMembership } from '@/lib/fleet-control';
 
 export class FleetReportError extends Error { constructor(message: string, public status = 500) { super(message); } }
 export async function reportScope(auth: AuthorizationContext) {
   if (!supabaseAdmin) throw new FleetReportError('Fleet data is temporarily unavailable.', 503);
   const companyId = requireCompanyId(auth);
-  const hasMembership = auth.isMasterOwner || await hasActiveFleetMembership(companyId, auth.userId);
   const hasFleetPage = hasPermission(auth, 'fleet_reports', 'access') || hasPermission(auth, 'fleet', 'access') || hasPermission(auth, 'fleet_action_center', 'access') || hasPermission(auth, 'fleet_vehicle_view', 'access');
+  if (!hasFleetPage) throw new FleetReportError('You do not have access to DropX Fleet. Contact HR or your department administrator.', 403);
+  const membership = auth.isMasterOwner ? null : await supabaseAdmin.from('company_product_memberships').select('id,role_id').eq('company_id', companyId).eq('product_code', 'fleet').eq('user_id', auth.userId).eq('is_active', true).maybeSingle();
+  const hasMembership = auth.isMasterOwner || Boolean(membership?.data?.id && membership.data.role_id);
   if (!hasMembership || !hasFleetPage) throw new FleetReportError('You do not have access to DropX Fleet. Contact HR or your department administrator.', 403);
   let stationCodes: string[] | null = null;
   if (!auth.isMasterOwner && !auth.hasAllLocationAccess) {

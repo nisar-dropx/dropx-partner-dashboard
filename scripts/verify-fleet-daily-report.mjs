@@ -55,15 +55,16 @@ assert.equal(p.buildDailyFleetRows([v], [{ ...km, review_status: 'needs_review',
 const calls = []; let stationFailure = false;
 const db = { from(table) {
   const filters = []; const query = { select() { return this; }, eq(key, value) { filters.push(['eq', key, value]); return this; }, in(key, value) { filters.push(['in', key, value]); return this; }, order() { return this; },
+    async maybeSingle() { calls.push({ table, filters }); return table === 'company_product_memberships' ? { data: { id: 'fleet-membership', role_id: 'fleet-role' }, error: null } : { data: null, error: null }; },
     async then(resolve) { calls.push({ table, filters }); return resolve(table === 'stations' ? { data: [{ station_code: 'ERSE' }], error: stationFailure ? { message: 'denied' } : null } : { data: [v], error: null }); } };
   return query;
 } };
 const scope = compile('src/lib/fleet/report-data.ts', { '@/lib/authorization': { hasPermission: a => a.allowed }, '@/lib/company-scope': { requireCompanyId: a => a.companyId }, '@/lib/supabase-admin': { supabaseAdmin: db }, '@/lib/supabase-pagination': { readAllRows: async q => await q }, './daily-report': p });
-const locationAuth = { allowed: true, companyId: 'company-A', isMasterOwner: false, hasAllLocationAccess: false, locationScopeIds: ['station-id'] };
+const locationAuth = { allowed: true, companyId: 'company-A', userId: 'fleet-user', isMasterOwner: false, hasAllLocationAccess: false, locationScopeIds: ['station-id'] };
 await assert.rejects(scope.reportScope({ ...locationAuth, allowed: false }), error => error.status === 403);
 assert.equal(calls.length, 0);
 assert.deepEqual((await scope.reportScope({ ...locationAuth, locationScopeIds: [] })).vehicles, []);
-assert.equal(calls.length, 0);
+assert.equal(calls.length, 1);
 assert.equal((await scope.reportScope(locationAuth)).vehicles.length, 1);
 assert.ok(calls.every(call => call.filters.some(([op, key, value]) => op === 'eq' && key === 'company_id' && value === 'company-A')));
 assert.deepEqual(calls.find(call => call.table === 'fleet_vehicles').filters.find(([, key]) => key === 'station_code')[2], ['ERSE']);
