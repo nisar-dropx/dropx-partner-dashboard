@@ -118,8 +118,6 @@ export async function GET(request: Request) {
   const requestedCompanyId = clean(params.get("company_id"));
   let companyQuery = supabaseAdmin.from("companies").select("id,name");
   if (force && requestedCompanyId) companyQuery = companyQuery.eq("id", requestedCompanyId);
-  else if (force) companyQuery = companyQuery.ilike("name", "%dropx%");
-  else companyQuery = companyQuery.eq("is_active", true);
   const companies = await companyQuery;
   if (companies.error) return NextResponse.json({ error: companies.error.message }, { status: 500 });
   const totals: Record<string, number> = {};
