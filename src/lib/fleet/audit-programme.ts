@@ -133,7 +133,11 @@ export async function generateFleetAuditProgramme(companyId: string, month: stri
   if (config.autoMoveForLeave) {
     for (const audit of existing.filter((item) => item.status === "scheduled" && (config.excludedWeekdays.includes(new Date(`${item.scheduled_for}T12:00:00+05:30`).getDay()) || inspector.leaveDates.has(item.scheduled_for)))) {
       const next = dates.find((date) => date > audit.scheduled_for) ?? dates[0];
-      if (next && next !== audit.scheduled_for) { const update = await supabaseAdmin.from("fleet_audits").update({ scheduled_for: next, scheduled_reason: `${clean(audit.scheduled_reason).replace(/\s*\[auto-moved:[^\]]+\]/g, "")} [auto-moved:${audit.scheduled_for}]`, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", audit.id).eq("status", "scheduled"); if (!update.error) moved += 1; }
+      if (next && next !== audit.scheduled_for) {
+        const update = await supabaseAdmin.from("fleet_audits").update({ scheduled_for: next, scheduled_reason: `${clean(audit.scheduled_reason).replace(/\s*\[auto-moved:[^\]]+\]/g, "")} [auto-moved:${audit.scheduled_for}]`, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", audit.id).eq("status", "scheduled").select("id");
+        if (update.error) throw new Error(update.error.message);
+        moved += update.data?.length ?? 0;
+      }
     }
   }
   return { created, moved, vehicles: vehicles.length, message: `${created} missing audit slot${created === 1 ? "" : "s"} scheduled for ${vehicles.length} vehicles${moved ? `; ${moved} moved around Sunday or approved leave` : ""}.` };
