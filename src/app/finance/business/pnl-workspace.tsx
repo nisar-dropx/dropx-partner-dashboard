@@ -37,9 +37,11 @@ const dateLabel = (d: string | null) =>
       })
     : "Not available";
 const opsLink = (href: string) =>
-  href.startsWith("/")
-    ? `https://ops.dropxlogistics.com${href}`
-    : "https://ops.dropxlogistics.com/cps";
+  /^https:\/\/(?:dashboard|ops)\.dropxlogistics\.com\//.test(href)
+    ? href
+    : href.startsWith("/") && !href.startsWith("//")
+      ? `https://ops.dropxlogistics.com${href}`
+      : "https://ops.dropxlogistics.com/cps";
 
 function Statement({
   total,
@@ -545,7 +547,10 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
         <strong>
           {dateLabel(report.filters.from)} – {dateLabel(report.filters.to)}
         </strong>
-        <span>{total.stations} stations · each station counted once</span>
+        <span>
+          {total.stations} {total.stations === 1 ? "station" : "stations"} ·
+          each station counted once
+        </span>
         <span>
           Shipment data: {dateLabel(available?.from)} –{" "}
           {dateLabel(available?.to)}
@@ -601,7 +606,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
             <span>
               <strong>
                 {issueStations
-                  ? `${issueStations} stations have incomplete inputs`
+                  ? `${issueStations} ${issueStations === 1 ? "station has" : "stations have"} incomplete inputs`
                   : "Source coverage"}
               </strong>{" "}
               · {total.shipmentDays}/{total.stationDays} station-days have
@@ -726,7 +731,11 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                     <td>{money(total.cost === null ? null : total.da)}</td>
                     <td>{money(total.cost === null ? null : total.utr)}</td>
                     <td>{money(total.cost === null ? null : total.van)}</td>
-                    <td>{money(total.cost === null ? null : total.rent + total.other)}</td>
+                    <td>
+                      {money(
+                        total.cost === null ? null : total.rent + total.other,
+                      )}
+                    </td>
                     <td>{money(total.cost)}</td>
                     <td>{money(total.cps, 2)}</td>
                     <td>{money(total.profit)}</td>
@@ -794,7 +803,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
               </div>
               <Link href="/master/pricing">Pricing Master →</Link>
             </div>
-            <details open={report.reviews.length > 0}>
+            <details>
               <summary className="pnl-review-summary">
                 Mapping & cost inputs <b>{report.reviews.length}</b>
               </summary>
