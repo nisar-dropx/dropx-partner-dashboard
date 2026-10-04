@@ -225,6 +225,8 @@ button, input, select, textarea { font: inherit; }
 .fc-document-mode p { margin: 0; color: var(--fc-muted); font-size: 9px; }
 .fc-service-filters { grid-template-columns: minmax(230px,1.2fr) repeat(2,minmax(180px,.8fr)); }
 .fc-service-filters .fc-filter-search > span { display: block; margin-bottom: 5px; color: var(--fc-muted); font-size: 8px; font-weight: 780; text-transform: uppercase; }
+.fc-service-filter-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; align-self:end; }
+.fc-service-filter-actions .fc-button { min-height:40px; }
 .fc-due-pill { display: inline-flex; align-items: center; padding: 5px 8px; border-radius: 999px; font-size: 8px; font-weight: 800; }.fc-due-pill.good { color: #19755d; background: #e8f7f1; }.fc-due-pill.warn { color: #93620b; background: #fff4d6; }.fc-due-pill.bad { color: #b42c43; background: #ffeaee; }.fc-due-pill.neutral { color: #6f7d82; background: #edf1f1; }
 .fc-button.danger { color: #b4233e; border-color: #f1b5c1; background: #fff1f4; }
 .fc-live-dot { width: 7px; height: 7px; border-radius: 50%; background: #22aa76; box-shadow: 0 0 0 4px rgba(34,170,118,.12); }
