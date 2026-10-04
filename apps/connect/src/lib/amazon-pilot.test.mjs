@@ -41,6 +41,16 @@ test('joining API uses only the later LSC Driver ID as operational identity',()=
  const route=readFileSync(new URL('../../app/api/connect/workforce-joining/route.ts',import.meta.url),'utf8');
  assert.match(route,/driverId:p\.evidence\.employeeId/);
  assert.match(route,/workforce_amazon_pilot_sources/);
+ assert.match(route,/workforce_idfy_observations/);
+ assert.match(route,/attendance_daily/);
+ assert.match(route,/bgcChecks/);
  assert.doesNotMatch(route,/driverId:account\.reference/);
  assert.doesNotMatch(route,/dropxId:account\.reference/);
+});
+test('guided beta is limited to an explicitly enrolled pilot account',()=>{
+ const auth=readFileSync(new URL('./connect-auth.ts',import.meta.url),'utf8');
+ const activation=readFileSync(new URL('../components/connect-activation-status.tsx',import.meta.url),'utf8');
+ assert.match(auth,/let onboardingBeta = false/);
+ assert.match(auth,/if\(pilot\.data\)\{activationOnly=true;onboardingBeta=true;/);
+ assert.match(activation,/if \(account\.onboardingBeta\) return <ConnectBetaOnboarding/);
 });

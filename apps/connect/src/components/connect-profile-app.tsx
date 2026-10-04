@@ -30,6 +30,7 @@ export type AppAccount = {
   designationCode?: string | null;
   providerMappingRequired?: boolean;
   activationOnly?: boolean;
+  onboardingBeta?: boolean;
   activationStage?: string | null;
 };
 

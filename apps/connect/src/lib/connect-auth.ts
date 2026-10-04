@@ -36,6 +36,7 @@ export type ConnectAccount = {
   designationCode: string | null;
   providerMappingRequired: boolean;
   activationOnly: boolean;
+  onboardingBeta: boolean;
   activationStage: string | null;
 };
 
@@ -977,6 +978,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       }
 
       let activationOnly = false;
+      let onboardingBeta = false;
       let activationStage: string | null = null;
       const providerMappingRequired = designationId
         ? Boolean(providerMappingRequiredByDesignationId.get(designationId))
@@ -996,7 +998,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         const pilot=await supabaseAdmin!.from("workforce_amazon_pilots").select("workforce_id,closed_at").eq("company_id",account.company_id).eq("workforce_id",account.id).maybeSingle();
         // Additive pilot schema may be deployed independently of DropX One.
         if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status is temporarily unavailable.");
-        if(pilot.data){activationOnly=true;activationStage=pilot.data.closed_at?"closed":"amazon_pilot";}
+        if(pilot.data){activationOnly=true;onboardingBeta=true;activationStage=pilot.data.closed_at?"closed":"amazon_pilot";}
 
       }
 
@@ -1030,6 +1032,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       designationCode: designationId ? designationCodeById.get(designationId) ?? null : null,
       providerMappingRequired,
       activationOnly,
+      onboardingBeta,
       activationStage
       };
     }));

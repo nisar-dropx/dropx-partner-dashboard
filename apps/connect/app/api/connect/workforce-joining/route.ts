@@ -7,6 +7,19 @@ import { amazonTasks, amazonTaskStates, joiningStages, joiningState, providerSta
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
+const checkLabel=(key:string)=>key.replace(/[_-]+/g," ").replace(/\b\w/g,letter=>letter.toUpperCase());
+const checkState=(value:unknown)=>{
+  const text=String(value??"").trim().toLowerCase();
+  if(/clear|verified|complete|green|approved|pass/.test(text))return "complete";
+  if(/insuff|fail|reject|mismatch|action|red|upload|resubmit/.test(text))return "action";
+  if(/progress|pending|processing|review|initiated|submitted/.test(text))return "in_progress";
+  return "pending";
+};
+function reportChecks(report:Record<string,string>|null|undefined){
+  return Object.entries(report??{}).filter(([key,value])=>/(court|efir|police|address)/i.test(key)&&String(value??"").trim()).map(([key,value])=>({
+    code:key,label:checkLabel(key),status:checkState(value),detail:String(value),owner:"IDfy",source:"DA In-App onboarding",updatedAt:null
+  }));
+}
 // Stop rather than publish a partial calculation if an unexpected history exceeds the limit.
 async function allRows(query: any): Promise<any[]> {
   const rows: any[] = [];
@@ -35,12 +48,14 @@ export async function GET(request: NextRequest) {
     const pilot=await db.from("workforce_amazon_pilots").select("*").eq("company_id",company).eq("workforce_id",person.id).maybeSingle();
     if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status unavailable.");
     if(pilot.data){
-      const [invitation,portal,registrationDraft,liveSources,exitReasons]=await Promise.all([
+      const [invitation,portal,registrationDraft,liveSources,exitReasons,attendance,idfy]=await Promise.all([
         db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_message").eq("company_id",company).eq("workforce_id",person.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
         db.from("workforce_amazon_portal_links").select("amazon_provider_id,transporter_id").eq("company_id",company).eq("workforce_id",person.id).maybeSingle(),
         db.from("mob_app_registration_drafts").select("draft_data,updated_at").eq("company_id",company).eq("profile_type",account.profileType).eq("account_id",person.id).maybeSingle(),
         db.rpc("workforce_amazon_pilot_sources",{p_company:company,p_workforce:person.id}),
-        db.from("workforce_onboarding_exit_reasons").select("id,label,description,requires_note").eq("company_id",company).eq("client_code","AMAZON").eq("is_active",true).order("sort_order").order("label")
+        db.from("workforce_onboarding_exit_reasons").select("id,label,description,requires_note").eq("company_id",company).eq("client_code","AMAZON").eq("is_active",true).order("sort_order").order("label"),
+        db.from("attendance_daily").select("punch_date,in_time,out_time,status,updated_at").eq("company_id",company).eq("workforce_id",person.id).order("punch_date",{ascending:false}).limit(1).maybeSingle(),
+        db.from("workforce_idfy_observations").select("idfy_profile_id,status,has_insufficiency,highlight,observed_at").eq("company_id",company).eq("workforce_id",person.id).order("observed_at",{ascending:false}).limit(1).maybeSingle()
       ]);
       const base=pilot.data as Pilot;
       const sourceEvidence=liveSources.error||!liveSources.data?base.evidence:liveSources.data as Pilot["evidence"];
@@ -49,7 +64,13 @@ export async function GET(request: NextRequest) {
       const betaData=(registrationDraft.data?.draft_data??{}) as Record<string,unknown>;
       const betaSubmitted=betaData._beta_status==="submitted";
       const registrationRequired=["pending","returned"].includes(String(person.onboarding_status??"").toLowerCase())&&!betaSubmitted;
-      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),driverId:p.evidence.employeeId??null,biometricId:account.biometricId,amazonAccountId:p.evidence.providerId,invitationEmail:person.email??account.email,registrationRequired,registrationStatus:betaSubmitted?"submitted":person.onboarding_status,offboardingRequested:Boolean(p.closed_at&&p.exit_requested_source==='associate'),offboardingRequestedAt:p.exit_requested_at??null,exitReasons:exitReasons.data??[],actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.evidence.invitationAt||p.last_checked_at,tasks:[],training:null},{headers});
+      const idfyRow=idfy.error?null:idfy.data;
+      const bgcChecks=reportChecks(p.evidence.report);
+      if(idfyRow&&!bgcChecks.some(item=>item.code==="idfy_background_verification"))bgcChecks.unshift({
+        code:"idfy_background_verification",label:"IDfy background verification",status:idfyRow.has_insufficiency?"action":checkState(idfyRow.status),
+        detail:String(idfyRow.highlight||idfyRow.status||"IDfy verification is in progress."),owner:idfyRow.has_insufficiency?"Associate / Workforce":"IDfy",source:"IDfy",updatedAt:idfyRow.observed_at??null
+      });
+      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),driverId:p.evidence.employeeId??null,biometricId:account.biometricId,amazonAccountId:p.evidence.providerId,invitationEmail:person.email??account.email,invitationStatus:p.evidence.invitationStatus??null,registrationRequired,registrationStatus:betaSubmitted?"submitted":person.onboarding_status,registrationUpdatedAt:registrationDraft.data?.updated_at??null,offboardingRequested:Boolean(p.closed_at&&p.exit_requested_source==='associate'),offboardingRequestedAt:p.exit_requested_at??null,exitReasons:exitReasons.data??[],actionOwner:s.owner,category:s.category,amazonAction:s.action,bgcChecks,latestAttendance:attendance.error||!attendance.data?null:{date:attendance.data.punch_date,inTime:attendance.data.in_time,outTime:attendance.data.out_time,status:attendance.data.status,updatedAt:attendance.data.updated_at},configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.evidence.invitationAt||p.last_checked_at,tasks:[],training:null},{headers});
     }
 
     const partnerState=(await loadPartnerOnboardingStates(db,company,[person.id])).get(person.id);
