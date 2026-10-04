@@ -704,8 +704,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     const sections = [
       { name: executive ? "Profile details" : "Employee details", values: {
         "Full name": read.fullName,
-        [executive ? "DropX ID" : "ID"]: read[executive ? "reference" : "employeeId"],
-        "Biometric ID": read.biometricId,
+        ...(account.activationOnly ? {} : { [executive ? "DropX ID" : "ID"]: read[executive ? "reference" : "employeeId"] }),
+        [account.activationOnly ? "Biometric ID · attendance only" : "Biometric ID"]: read.biometricId,
         Email: read.email,
         Location: read.location,
         Designation: read.designation,
@@ -895,7 +895,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       </aside>
     ) : null}
     <ProfileSection title={executive ? "Profile details" : "Employee details"}>
-      {Object.entries(profile.readOnly).map(([label, value]) => <div className="dx-readonly" key={label}><span>{title(label)}</span><strong>{value || "-"}</strong></div>)}
+      {Object.entries(profile.readOnly)
+        .filter(([label]) => !account.activationOnly || !["reference", "employeeId", "dropxId"].includes(label))
+        .map(([label, value]) => <div className="dx-readonly" key={label}><span>{account.activationOnly && label === "biometricId" ? "Biometric ID · attendance only" : title(label)}</span><strong>{value || "-"}</strong></div>)}
     </ProfileSection>
     <ProfileSection title="Personal details">
       {input("gender","Gender",{ choices: ["Male","Female","Other"] })}

@@ -29,10 +29,13 @@ test('activation-only registration is reachable and submits to beta draft storag
  const flow=readFileSync(new URL('../components/connect-login-flow.tsx',import.meta.url),'utf8');
  const profile=readFileSync(new URL('../components/connect-profile-app.tsx',import.meta.url),'utf8');
  assert.match(flow,/account\.activationOnly && next !== "activation" && next !== "profile"/);
+ assert.match(flow,/!\(account\.activationOnly && next === "activation"\)/);
  assert.match(flow,/>Registration<\/button>/);
  assert.match(profile,/if \(account\.activationOnly\)[\s\S]*?_beta_status = "submitted"[\s\S]*?fetch\("\/api\/connect\/profile-draft"/);
  const betaBranch=profile.slice(profile.indexOf('if (account.activationOnly)'),profile.indexOf('const data = new FormData(formRef.current)',profile.indexOf('if (account.activationOnly)')));
  assert.doesNotMatch(betaBranch,/fetch\(endpoint/);
+ assert.match(profile,/!account\.activationOnly \|\| !\["reference", "employeeId", "dropxId"\]\.includes\(label\)/);
+ assert.match(profile,/Biometric ID · attendance only/);
 });
 test('joining API uses only the later LSC Driver ID as operational identity',()=>{
  const route=readFileSync(new URL('../../app/api/connect/workforce-joining/route.ts',import.meta.url),'utf8');
