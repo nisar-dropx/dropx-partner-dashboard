@@ -7,6 +7,8 @@ import { normalizeFleetDailyStatusEmailConfig } from "@/lib/fleet/daily-status-e
 import { buildFleetAuditEmail } from "@/lib/fleet/audit-email";
 import { auditProgrammeFromRiskWeights, normalizeFleetAuditProgrammeConfig } from "@/lib/fleet/audit-programme-config";
 import { generateFleetAuditProgramme } from "@/lib/fleet/audit-programme";
+import { fleetAccessPageCodes } from "@/lib/access-surface";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 type Payload = Record<string, any>;
 const emailPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -46,8 +48,11 @@ async function access() {
   const authorization = await getAuthorization();
   if (!authorization) return { error: NextResponse.json({ error: "Login required." }, { status: 401 }) };
   const companyId = requireCompanyId(authorization);
+  const hasMembership = authorization.isMasterOwner || await hasActiveFleetMembership(companyId, authorization.userId);
+  const hasFleetPermission = fleetAccessPageCodes.some((code) => hasPermission(authorization, code, "access"));
+  if (!hasMembership || !hasFleetPermission) return { error: NextResponse.json({ error: "Fleet portal access has not been assigned. Contact HR or your department administrator." }, { status: 403 }) };
   const canManageFleet = authorization.isMasterOwner || hasPermission(authorization, "fleet_maintenance", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
-  const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit") || hasPermission(authorization, "app_settings", "edit") || hasPermission(authorization, "users", "edit");
+  const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit");
   return { authorization, companyId, canManageFleet, canManageSettings };
 }
 

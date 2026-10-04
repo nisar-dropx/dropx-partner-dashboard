@@ -337,11 +337,14 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     if (!membershipResult.error && !isMasterOwner) {
       const membershipRows = membershipResult.data ?? [];
       const membershipRoleIds = membershipRows.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId));
-      // Ops/People/Finance must use the product membership role matrix from Settings.
-      // Keep prior roles only when no active membership is configured yet.
+      // A Fleet session must never inherit a person's wider Dashboard/People role.
+      // Fleet access is granted only through its product membership and role matrix.
       if (membershipRoleIds.length) {
         effectiveRoleIds = Array.from(new Set(membershipRoleIds));
         primaryRoleId = membershipRoleIds[0] ?? null;
+      } else if (accessSurface === "fleet") {
+        effectiveRoleIds = [];
+        primaryRoleId = null;
       }
       hasAllLocationAccess = membershipRows.some((membership) => membership.has_all_location_access);
       locationScopeIds = hasAllLocationAccess

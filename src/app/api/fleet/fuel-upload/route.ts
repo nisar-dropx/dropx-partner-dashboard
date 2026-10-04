@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getWheelseyeAccessToken } from "@/lib/wheelseye";
 import { saveDailyWheelseyeKm } from "@/lib/fleet/gps-storage";
 import { loadWheelseyeMovement } from "@/lib/wheelseye-history";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 type FuelProvider = "IOC" | "BPCL";
 type SheetRow = Array<string | number | boolean | null | undefined>;
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
   const authorization = await getAuthorization();
   if (!authorization) return Response.json({ error: "Login required." }, { status: 401 });
   const companyId = requireCompanyId(authorization);
+  if (!authorization.isMasterOwner && !await hasActiveFleetMembership(companyId, authorization.userId)) return Response.json({ error: "You do not have access to DropX Fleet. Contact HR or your department administrator." }, { status: 403 });
   if (!hasPermission(authorization, "fleet_fuel_log", "add") && !hasPermission(authorization, "fleet_fuel_log", "edit") && !hasPermission(authorization, "fleet", "add") && !hasPermission(authorization, "fleet", "edit")) {
     return Response.json({ error: "Fuel upload permission denied." }, { status: 403 });
   }

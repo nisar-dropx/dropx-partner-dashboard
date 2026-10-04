@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { type AuthorizationContext, getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 const bucketName = "fleet-documents";
 
@@ -14,6 +15,7 @@ export async function GET(request: Request) {
     const authorization = await getAuthorization();
     if (!authorization) return NextResponse.json({ error: "Login required." }, { status: 401 });
     const companyId = requireCompanyId(authorization);
+    if (!authorization.isMasterOwner && !await hasActiveFleetMembership(companyId, authorization.userId)) return NextResponse.json({ error: "You do not have access to DropX Fleet. Contact HR or your department administrator." }, { status: 403 });
     const allowed =
       hasPermission(authorization, "fleet_vehicle_view", "access") ||
       hasPermission(authorization, "fleet_date_view", "access") ||

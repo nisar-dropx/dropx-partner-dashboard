@@ -21,7 +21,8 @@ export async function GET(request: NextRequest) {
 
     const companyId = requireCompanyId(authorization);
     const canReadPayments = hasPermission(authorization, "payment_approvals", "access") || hasPermission(authorization, "payment_requests", "access");
-    const hasFleetAccess = canReadPayments || hasPermission(authorization, "fleet_action_center", "access") || hasPermission(authorization, "fleet_vehicle_view", "access") || await hasActiveFleetMembership(companyId, authorization.userId);
+    const hasMembership = authorization.isMasterOwner || await hasActiveFleetMembership(companyId, authorization.userId);
+    const hasFleetAccess = hasMembership && (canReadPayments || hasPermission(authorization, "fleet_action_center", "access") || hasPermission(authorization, "fleet_vehicle_view", "access"));
     if (!hasFleetAccess) return NextResponse.json({ error: "Fleet payment access denied." }, { status: 403 });
 
     const requestId = request.nextUrl.searchParams.get("requestId")?.trim();

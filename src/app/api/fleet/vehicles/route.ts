@@ -3,6 +3,7 @@ import { type AuthorizationContext, getAuthorization, hasPermission } from "@/li
 import { requireCompanyId } from "@/lib/company-scope";
 import { writeEventLog } from "@/lib/event-log";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 const editableFields = [
   "vehicle_no",
@@ -236,6 +237,7 @@ async function requireFleetMutationPermission(action: "add" | "edit") {
   const authorization = await getAuthorization();
   if (!authorization) return { error: NextResponse.json({ error: "Login required." }, { status: 401 }) };
   const companyId = requireCompanyId(authorization);
+  if (!authorization.isMasterOwner && !await hasActiveFleetMembership(companyId, authorization.userId)) return { error: NextResponse.json({ error: "You do not have access to DropX Fleet. Contact HR or your department administrator." }, { status: 403 }) };
   const allowed = action === "add"
     ? hasPermission(authorization, "fleet_vehicle_view", "add") || hasPermission(authorization, "fleet", "add")
     : hasPermission(authorization, "fleet_vehicle_view", "edit") || hasPermission(authorization, "fleet_date_view", "edit") || hasPermission(authorization, "fleet", "edit");

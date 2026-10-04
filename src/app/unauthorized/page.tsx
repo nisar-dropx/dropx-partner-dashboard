@@ -17,6 +17,8 @@ const pageNames: Record<string, string> = {
   ops_portal: "OpsPulse",
   people_portal: "DropX People",
   finance_portal: "DropX Finance",
+  fleet_portal: "DropX Fleet",
+  fleet_action_center: "DropX Fleet",
   platform_admin_portal: "Platform Admin",
   connect_portal: "DropX Connect",
   ops_reports: "Reports",

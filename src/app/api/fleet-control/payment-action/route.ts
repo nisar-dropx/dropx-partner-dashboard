@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { approvePaymentRequest, rejectPaymentRequest, returnPaymentRequest } from "@/app/payments/approvals/actions";
-import { getAuthorization } from "@/lib/authorization";
+import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isFleetManagerPaymentHead } from "@/lib/fleet-control-payment-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 function text(value: unknown) { return String(value ?? "").trim(); }
 
@@ -13,6 +14,8 @@ export async function POST(request: NextRequest) {
     if (!authorization) return NextResponse.json({ error: "Your session has expired. Sign in again." }, { status: 401 });
     if (!supabaseAdmin) return NextResponse.json({ error: "Database service is unavailable." }, { status: 503 });
     const companyId = requireCompanyId(authorization);
+    const hasMembership = authorization.isMasterOwner || await hasActiveFleetMembership(companyId, authorization.userId);
+    if (!hasMembership || !hasPermission(authorization, "payment_approvals", "edit")) return NextResponse.json({ error: "Fleet payment approval access has not been assigned." }, { status: 403 });
     const body = await request.json();
     const action = text(body.action) as "approve" | "return" | "reject";
     const requestId = text(body.requestId);

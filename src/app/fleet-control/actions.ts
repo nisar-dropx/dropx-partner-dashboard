@@ -7,10 +7,11 @@ import {
   rejectPaymentRequest,
   returnPaymentRequest
 } from "@/app/payments/approvals/actions";
-import { getAuthorization } from "@/lib/authorization";
+import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isFleetManagerPaymentHead } from "@/lib/fleet-control-payment-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 function message(error: unknown) {
   return error instanceof Error ? error.message : "The payment request could not be updated.";
@@ -28,6 +29,8 @@ async function requireFleetManagerPayment(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) throw new Error("Your session has expired. Sign in again.");
   const companyId = requireCompanyId(authorization);
+  const hasMembership = authorization.isMasterOwner || await hasActiveFleetMembership(companyId, authorization.userId);
+  if (!hasMembership || !hasPermission(authorization, "payment_approvals", "edit")) throw new Error("Fleet payment approval access has not been assigned.");
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) throw new Error("Payment request is required.");
 

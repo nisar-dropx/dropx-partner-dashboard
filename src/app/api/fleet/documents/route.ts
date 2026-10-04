@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { type AuthorizationContext, getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 const bucketName = "fleet-documents";
 const fallbackDocumentTypes = new Set(["FLEET_REGISTRATION", "FLEET_INSURANCE", "FLEET_PUC", "FLEET_FITNESS", "FLEET_TAX"]);
@@ -201,6 +202,7 @@ async function requireDocumentPermission(action: "access" | "edit") {
   const authorization = await getAuthorization();
   if (!authorization) return { error: NextResponse.json({ error: "Login required." }, { status: 401 }) };
   const companyId = requireCompanyId(authorization);
+  if (!authorization.isMasterOwner && !await hasActiveFleetMembership(companyId, authorization.userId)) return { error: NextResponse.json({ error: "You do not have access to DropX Fleet. Contact HR or your department administrator." }, { status: 403 }) };
   const allowed = action === "access"
     ? hasPermission(authorization, "fleet_vehicle_view", "access") || hasPermission(authorization, "fleet_date_view", "access") || hasPermission(authorization, "fleet", "access")
     : hasPermission(authorization, "fleet_vehicle_view", "edit") || hasPermission(authorization, "fleet_date_view", "edit") || hasPermission(authorization, "fleet", "edit");

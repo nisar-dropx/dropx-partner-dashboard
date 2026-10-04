@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { hasActiveFleetMembership, loadFleetControlData } from "@/lib/fleet-control";
+import { fleetAccessPageCodes } from "@/lib/access-surface";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,13 +13,10 @@ export async function GET() {
     return NextResponse.json({ error: "Your session has expired. Sign in again." }, { status: 401 });
   }
   const companyId = requireCompanyId(authorization);
-  const canEnter = hasPermission(authorization, "fleet_action_center", "access")
-    || hasPermission(authorization, "fleet_vehicle_view", "access")
-    || hasPermission(authorization, "fleet_date_view", "access")
-    || hasPermission(authorization, "payment_approvals", "access")
-    || await hasActiveFleetMembership(companyId, authorization.userId);
+  const hasMembership = authorization.isMasterOwner || await hasActiveFleetMembership(companyId, authorization.userId);
+  const canEnter = hasMembership && fleetAccessPageCodes.some((code) => hasPermission(authorization, code, "access"));
   if (!canEnter) {
-    return NextResponse.json({ error: "Fleet access is not enabled for this account." }, { status: 403 });
+    return NextResponse.json({ error: "You do not have access to DropX Fleet. Contact HR or your department administrator." }, { status: 403 });
   }
 
   const data = await loadFleetControlData(companyId, authorization);

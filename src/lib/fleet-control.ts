@@ -101,13 +101,9 @@ function checklistEvidence(responseType: string, guidanceValue: unknown) {
 
 export async function hasActiveFleetMembership(companyId: string | null, userId: string) {
   if (!supabaseAdmin || !companyId) return false;
-  const [product, legacy] = await Promise.all([
-    supabaseAdmin.from("company_product_memberships").select("id").eq("company_id", companyId).eq("product_code", "fleet").eq("user_id", userId).eq("is_active", true).maybeSingle(),
-    supabaseAdmin.from("fleet_portal_memberships").select("id").eq("company_id", companyId).eq("user_id", userId).eq("is_active", true).maybeSingle()
-  ]);
-  if (product.data?.id) return true;
-  if (legacy.error && isFeatureSetupError(legacy.error.message)) return false;
-  return Boolean(legacy.data?.id);
+  const product = await supabaseAdmin.from("company_product_memberships").select("id,role_id").eq("company_id", companyId).eq("product_code", "fleet").eq("user_id", userId).eq("is_active", true).maybeSingle();
+  if (product.error && !isFeatureSetupError(product.error.message)) return false;
+  return Boolean(product.data?.id && product.data.role_id);
 }
 
 export async function loadFleetControlData(companyId: string, authorization: AuthorizationContext): Promise<FleetControlData> {
@@ -116,7 +112,7 @@ export async function loadFleetControlData(companyId: string, authorization: Aut
   const locations = locationsResult.locations.filter(isAdHocActivityLocation); const stationCodes = locations.map((location) => normalized(location.station_code));
   const canManageFleet = authorization.isMasterOwner || hasPermission(authorization, "fleet_maintenance", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
   const canManageDocuments = authorization.isMasterOwner || hasPermission(authorization, "fleet_date_view", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
-  const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit") || hasPermission(authorization, "app_settings", "edit") || hasPermission(authorization, "users", "edit");
+  const canManageSettings = authorization.isMasterOwner || hasPermission(authorization, "fleet_settings", "edit") || hasPermission(authorization, "fleet_masters", "edit");
   const visibleSections = [
     ["overview", "fleet_action_center"],
     ["vehicles", "fleet_vehicle_view"],
@@ -132,8 +128,6 @@ export async function loadFleetControlData(companyId: string, authorization: Aut
     ["masters", "fleet_masters"]
   ].filter(([, code]) => hasPermission(authorization, code, "access")).map(([section]) => section);
   if (!visibleSections.includes("audits") && hasPermission(authorization, "fleet_action_center", "access")) visibleSections.push("audits");
-  if (!visibleSections.includes("settings") && (hasPermission(authorization, "app_settings", "access") || hasPermission(authorization, "users", "edit"))) visibleSections.push("settings");
-  if (!visibleSections.includes("masters") && (hasPermission(authorization, "app_settings", "access") || hasPermission(authorization, "users", "edit"))) visibleSections.push("masters");
   const base: FleetControlData = { generatedAt: new Date().toISOString(), today, operator: { name: authorization.fullName || authorization.email || "Fleet controller", role: authorization.roleName || authorization.designationName || "Fleet controller", company: authorization.companyName || "DropX Logistics" }, capabilities: { canApprovePayments: hasPermission(authorization, "payment_approvals", "edit"), canAddVehicles: hasPermission(authorization, "fleet_vehicle_view", "add"), canEditVehicles: hasPermission(authorization, "fleet_date_view", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit"), canManageDocuments, canManageFleet, canManageSettings, canAccessUsers: hasPermission(authorization, "users", "access"), visibleSections }, counts: { vehicles: 0, active: 0, underService: 0, unavailable: 0, documentAttention: 0, pendingPayments: 0, pendingAmount: 0, adHocToday: 0, adHocTodayAmount: 0, serviceDue: 0, auditsDue: 0 }, vehicles: [], vehicleStatuses: [], statusHistory: [], dailyKm: [], documents: [], documentTypes: defaultDocumentTypes, movements: [], payments: [], adHocRows: [], serviceHistory: [], audits: [], auditSuggestions: [], auditTemplates: [], checklistItems: [], members: [], statusRecipients: [], resolvedStatusRecipients: [], designationAccess: [], settings: defaultSettings(), integrations: [{ key: "paytap", name: "Paytap", purpose: "Fuel cards and fuel transaction reconciliation", status: "in_progress", detail: "Integration workspace prepared", lastSyncAt: null }, { key: "wheelseye", name: "WheelsEye", purpose: "GPS location, daily kilometres and route visibility", status: "not_configured", detail: "Access token required", lastSyncAt: null }], featureReady: false, stationOptions: locations.map((location) => ({ code: normalized(location.station_code), name: text(location.station_name || location.city || location.station_code), cluster: text(location.cluster || location.cluster_manager) || "Unassigned cluster", region: text(location.region) || "Unassigned region" })), errors };
   if (!supabaseAdmin) return { ...base, errors: [...errors, "Database service is unavailable."] };
 

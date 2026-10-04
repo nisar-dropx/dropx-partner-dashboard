@@ -5,11 +5,17 @@ import { type AuthorizationContext, getAuthorization } from "@/lib/authorization
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getWheelseyeAccessToken } from "@/lib/wheelseye";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
+import { fleetAccessPageCodes } from "@/lib/access-surface";
+import { hasPermission } from "@/lib/authorization";
 
 export async function GET() {
   const authorization = await getAuthorization();
   if (!authorization) return Response.json({ error: "Login required." }, { status: 401 });
   const companyId = requireCompanyId(authorization);
+  const hasMembership = authorization.isMasterOwner || await hasActiveFleetMembership(companyId, authorization.userId);
+  const hasFleetPermission = fleetAccessPageCodes.some((code) => hasPermission(authorization, code, "access"));
+  if (!hasMembership || !hasFleetPermission) return Response.json({ error: "You do not have access to DropX Fleet. Contact HR or your department administrator." }, { status: 403 });
   const locationAccess = await resolveFleetLocationAccess(authorization, companyId);
   const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
   const [vehicles, locations, documentTypes, gpsLive, fuelTransactions, dailyKmRows, todayKmRows] = await Promise.all([
