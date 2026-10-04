@@ -18096,3 +18096,34 @@ img.dx-selfie-live {
 .dx-approval-history-pages { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 4px; font-size: 13px; }
 
 .dx-amazon-pilot-banner{background:#fff7f9;border:1px solid #f2dfe6;border-radius:12px;padding:16px;margin-bottom:16px}.dx-amazon-pilot-banner small{font-size:10px;letter-spacing:.12em;color:#b23d61;font-weight:700}.dx-amazon-pilot-banner p{font-size:13px;color:#776c71;margin:7px 0 0}.dx-amazon-pilot-next{background:#fff;border:1px solid #eae6e3;border-radius:12px;padding:18px;margin:14px 0}.dx-amazon-pilot-next>strong{font-size:13px;color:#b23d61}.dx-amazon-pilot-next p{font-size:13px;color:#69636a;line-height:1.65}.dx-amazon-pilot-next>div{background:#fcfaf5;border-radius:9px;padding:15px;margin:14px 0}.dx-amazon-pilot-next>div small{display:block;font-size:9px;color:#928577;letter-spacing:.09em}.dx-amazon-pilot-next b{display:block;font-size:24px;color:#38383d;margin-top:6px;letter-spacing:2px}.dx-amazon-pilot-next summary{font-size:12px;color:#79717a;cursor:pointer}
+
+/* Compact beta onboarding. Registration is staged separately from the canonical Workforce profile. */
+.dx-activation-only{max-width:860px}
+.dx-activation-only .dx-page-intro{padding-bottom:4px}
+.dx-activation-only .dx-page-intro h1{margin:4px 0 5px;font-size:clamp(24px,3vw,30px)}
+.dx-activation-only .dx-page-intro p{margin:0;font-size:12px}
+.dx-activation-only .dx-joining-card{max-width:none;margin-top:12px;padding:18px;border-top:0;border-radius:15px;box-shadow:0 10px 28px rgba(16,24,40,.06)}
+.dx-joining-card h2{margin:2px 0 10px;font-size:17px}
+.dx-joining-card>header>div{display:grid;gap:1px}
+.dx-joining-card>header>div>small{font-size:9px;font-weight:800;letter-spacing:.1em;color:#b54708}
+.dx-joining-card>header>button{display:grid;place-items:center;width:34px;height:34px;padding:0}
+.dx-joining-status{grid-template-columns:minmax(150px,.38fr) minmax(0,1fr);align-items:center;gap:16px;padding:13px 14px}
+.dx-joining-status>strong{font-size:13px}
+.dx-joining-status>span{font-size:12px}
+.dx-registration-cta{display:flex!important;width:100%;align-items:center;justify-content:space-between;gap:16px;margin-top:12px;padding:13px 14px!important;border-color:#f3c6d3!important;background:#fff7f9!important;color:#8f2949!important;text-align:left}
+.dx-registration-cta span{display:grid;gap:2px}
+.dx-registration-cta strong{font-size:13px}
+.dx-registration-cta small{font-size:10px!important}
+.dx-amazon-pilot-next{padding:13px 14px;margin:12px 0 0;background:#fff}
+.dx-pilot-next-line{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0!important;margin:0!important;background:transparent!important}
+.dx-pilot-next-line span{display:grid;gap:2px}
+.dx-pilot-next-line small{font-size:8px!important;letter-spacing:.09em;color:#98a2b3!important}
+.dx-pilot-next-line strong{font-size:12px;color:#344054}
+.dx-pilot-next-line time{color:#98a2b3;font-size:9px;white-space:nowrap}
+.dx-pilot-identifiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 0}
+.dx-pilot-identifiers>div{min-width:0;padding:10px!important;margin:0!important;border-radius:8px;background:#f8f7f5!important}
+.dx-pilot-identifiers dt{color:#98a2b3;font-size:8px;text-transform:uppercase;letter-spacing:.05em}
+.dx-pilot-identifiers dd{overflow:hidden;margin:4px 0 0;color:#344054;font-size:11px;font-weight:750;text-overflow:ellipsis;white-space:nowrap}
+.dx-joining-error{display:flex;justify-content:space-between;gap:12px;margin:8px 0 12px;padding:9px 11px;border-radius:8px;background:#fff8e8;color:#8a6118;font-size:10px}
+.dx-spin{animation:dx-spin .75s linear infinite}
+@media(max-width:620px){.dx-activation-only .dx-joining-card{padding:14px}.dx-joining-status{grid-template-columns:1fr;gap:4px}.dx-pilot-next-line{align-items:flex-start}.dx-pilot-identifiers{grid-template-columns:1fr 1fr}.dx-pilot-identifiers>div:last-child{grid-column:1/-1}}

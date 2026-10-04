@@ -1,4 +1,4 @@
-import {pilotStatus,type Pilot} from '@/lib/amazon-pilot';
+import {pilotStatus,withLiveAmazonEvidence,type Pilot} from '@/lib/amazon-pilot';
 import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
 import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
@@ -35,8 +35,20 @@ export async function GET(request: NextRequest) {
     const pilot=await db.from("workforce_amazon_pilots").select("*").eq("company_id",company).eq("workforce_id",person.id).maybeSingle();
     if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status unavailable.");
     if(pilot.data){
-      const p=pilot.data as Pilot,s=pilotStatus(p);
-      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),driverId:account.reference,biometricId:account.biometricId,actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.last_checked_at,tasks:[],training:null},{headers});
+      const [invitation,portal,registrationDraft,liveSources]=await Promise.all([
+        db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_message").eq("company_id",company).eq("workforce_id",person.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
+        db.from("workforce_amazon_portal_links").select("amazon_provider_id,transporter_id").eq("company_id",company).eq("workforce_id",person.id).maybeSingle(),
+        db.from("mob_app_registration_drafts").select("draft_data,updated_at").eq("company_id",company).eq("profile_type",account.profileType).eq("account_id",person.id).maybeSingle(),
+        db.rpc("workforce_amazon_pilot_sources",{p_company:company,p_workforce:person.id})
+      ]);
+      const base=pilot.data as Pilot;
+      const sourceEvidence=liveSources.error||!liveSources.data?base.evidence:liveSources.data as Pilot["evidence"];
+      const p={...base,evidence:withLiveAmazonEvidence(sourceEvidence,invitation.data,portal.data)};
+      const s=pilotStatus(p);
+      const betaData=(registrationDraft.data?.draft_data??{}) as Record<string,unknown>;
+      const betaSubmitted=betaData._beta_status==="submitted";
+      const registrationRequired=["pending","returned"].includes(String(person.onboarding_status??"").toLowerCase())&&!betaSubmitted;
+      return NextResponse.json({available:true,pilot:true,stage:s.stage,stageLabel:s.label,instruction:s.instruction,reportUpdatedAt:p.evidence.reportSyncedAt,reportDate:p.evidence.reportDate,stale:s.stale,syncDelayed:Boolean(p.sync_error),driverId:p.evidence.employeeId??null,biometricId:account.biometricId,amazonAccountId:p.evidence.providerId,registrationRequired,registrationStatus:betaSubmitted?"submitted":person.onboarding_status,actionOwner:s.owner,category:s.category,amazonAction:s.action,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,updatedAt:p.evidence.invitationAt||p.last_checked_at,tasks:[],training:null},{headers});
     }
 
     const partnerState=(await loadPartnerOnboardingStates(db,company,[person.id])).get(person.id);
