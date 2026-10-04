@@ -1,4 +1,6 @@
 "use client";
+import { CpsAssociateTable, CpsDaCohorts } from "./cps-associate-breakdown";
+import { CpsFuelInsights } from "./cps-fuel-insights";
 import { CpsBillPeriods } from "./cps-bill-periods";
 import { Fragment, useState } from "react";
 import {
@@ -354,7 +356,7 @@ export function CpsCostWorkspace({
             <h2>{head} cost breakdown</h2>
             <p>
               {head === "UTR"
-                ? "People CTC is accrued by calendar day for active employment dates. Attendance does not reduce this cost. Manager and telecaller shares use configured station mappings. HO / HR / Finance / Fleet costs are excluded by default. Individual salaries remain private."
+                ? "Under the roof: active station-team CTC plus mapped manager shares up to Area Operations Manager and configured telecaller shares. Cost follows calendar days, without attendance deductions. HO / HR / Finance / Fleet costs are excluded. People names and individual salaries remain private."
                 : head === "Van"
                   ? "Rent follows dated Fleet deployments. Fuel, driver costs, repairs and approved ad hoc requests are shown separately."
                   : head === "Other"
@@ -364,6 +366,7 @@ export function CpsCostWorkspace({
           </div>
           <strong>{money(costs[head])}</strong>
         </div>
+        {head === "DA" && <CpsDaCohorts rows={snapshot.da_details ?? []} />}
         <div className="cps-table-wrap">
           <table>
             <thead>
@@ -422,7 +425,7 @@ export function CpsCostWorkspace({
                       {expanded === key && (
                         <tr className="cps-expanded-row">
                           <td colSpan={4}>
-                            <div className="cps-allocation-grid">
+                            {r.source === "Workforce rate card" && head === "DA" ? <CpsAssociateTable rows={snapshot.da_details ?? []} source={r.source} component={/fuel/i.test(r.label)?"fuel":/salary|guarantee/i.test(r.label)?"salary":"variable"}/> : <div className="cps-allocation-grid">
                               {[...allocations]
                                 .sort(([a], [b]) => a.localeCompare(b))
                                 .map(([station, item]) => (
@@ -449,7 +452,7 @@ export function CpsCostWorkspace({
                                     </small>
                                   </article>
                                 ))}
-                            </div>
+                            </div>}
                             <p className="cps-footnote">
                               {r.source === "People CTC"
                                 ? "Grouped staff allocation. People identities and individual CTC are kept private."
@@ -474,6 +477,7 @@ export function CpsCostWorkspace({
             </tfoot>
           </table>
         </div>
+        {head === "UTR" && !staff.some(p=>p.group !== "Manager share" && p.group !== "Telecaller share") && <p className="cps-footnote">No active station-team CTC was allocated for these dates. Check active People assignments and effective CTC if a station team should be included. Unassigned manager roles add no cost or exception.</p>}
         {!bySource.size && (
           <p className="panel-body">
             No recorded {head.toLowerCase()} costs in this period. Check the
@@ -499,7 +503,7 @@ export function CpsCostWorkspace({
                 <tbody>
                   {staff.map((p, i) => (
                     <tr key={`${p.group}|${p.station_code}|${i}`}>
-                      <td>{p.group}</td>
+                      <td>{p.group}<small>{p.roles?.join(" · ")}</small></td>
                       <td>{p.station_code}</td>
                       <td>
                         {p.from_date} – {p.through_date}
@@ -528,7 +532,7 @@ export function CpsCostWorkspace({
             canEdit={canEditBilling}
           />
         )}
-        {(head === "DA" || head === "Van") && (
+        {head === "Van" && (
           <details className="cps-drilldown">
             <summary>
               Associate / driver payout details{" "}
@@ -573,6 +577,7 @@ export function CpsCostWorkspace({
             </p>
           </details>
         )}
+        {head === "Van" && <CpsFuelInsights snapshot={snapshot} />}
         {head === "Van" && (
           <details className="cps-drilldown" open>
             <summary>

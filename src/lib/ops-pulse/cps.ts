@@ -137,6 +137,7 @@ export function cpsForStation(data: CpsSnapshot, station: string): CpsSnapshot {
     daily: only(data.daily) ?? [],
     breakup: only(data.breakup) ?? [],
     associates: only(data.associates),
+    da_details: only(data.da_details),
     gaps: only(data.gaps),
     people: only(data.people),
     staff: only(data.staff),
@@ -173,6 +174,14 @@ export function mergeCpsMonths(parts: CpsSnapshot[]): CpsSnapshot {
       ]),
     ) as CpsSnapshot["source_dates"],
     associates: parts.flatMap((p) => p.associates ?? []),
+    da_details: merge(parts.flatMap(p=>p.da_details??[]), p=>`${p.worker_id}|${p.station_code}|${p.cohort}`, (a,b)=>({
+      ...a, provider_ids:[...new Set([...a.provider_ids,...b.provider_ids])],
+      work_dates:[...new Set([...a.work_dates,...b.work_dates])], cost_dates:[...new Set([...a.cost_dates,...b.cost_dates])],
+      work_bases:[...new Set([...a.work_bases,...b.work_bases])], periods:[...a.periods,...b.periods],
+      deliveries:a.deliveries+b.deliveries,customer_returns:a.customer_returns+b.customer_returns,
+      seller_pickups:a.seller_pickups+b.seller_pickups,seller_returns:a.seller_returns+b.seller_returns,
+      salary:a.salary+b.salary,variable:a.variable+b.variable,fuel:a.fuel+b.fuel,van:a.van+b.van
+    })),
     staff: parts.flatMap((p) => p.staff ?? []),
     vehicles: parts.flatMap((p) => p.vehicles ?? []),
     allocation_notices: [
@@ -262,6 +271,7 @@ export type CpsSnapshot = {
   gaps?: import("./cps-engine").CpsGap[];
   people?: import("./cps-engine").CpsPersonCost[];
   staff?: CpsStaffCost[];
+  da_details?: import("./cps-details").CpsDaDetail[];
   allocation_notices?: string[];
   expense_periods?: CpsExpensePeriod[];
   vehicles?: CpsVehicleCost[];
@@ -275,6 +285,7 @@ export type CpsStaffCost = {
   through_date: string;
   amount: number;
   allocation: string;
+  roles?: string[];
 };
 export type CpsPeoplePolicy = {
   id?: string;

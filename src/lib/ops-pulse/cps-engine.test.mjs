@@ -8,8 +8,10 @@ const direct={exports:{}};
 new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../direct-workforce-pay.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(direct.exports,direct,(id)=>{if(id==='./workforce-payment-policy.ts')return policy.exports;throw new Error(`Unexpected import ${id}`);});
 const attendanceCapture={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-attendance-capture.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(attendanceCapture.exports,attendanceCapture);
+const details={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -293,5 +295,60 @@ test('People assignments use dated mapped stations, deduplicate duties and prese
  let r=rebuildCps(base([day(),day('B')]),f);near(r.daily[0].utr,500);near(r.daily[1].utr,500);
  r=rebuildCps(base(),f);near(r.daily[0].utr,500);assert.ok(r.staff.every(s=>s.station_code==='A'));assert.ok(!JSON.stringify(r).includes('Private manager'));assert.ok(!JSON.stringify(r).includes('PRIVATE1'));
  r=rebuildCps(base([day('A','2026-09-16'),day('B','2026-09-16')]),f);near(r.daily[0].utr,0);near(r.daily[1].utr,1000);
- f.people_assignments=[];r=rebuildCps(base(),f);near(r.daily[0].utr,0);assert.ok(r.allocation_notices.some(n=>n.includes('mapped operating stations are missing')));
+ f.people_assignments=[];r=rebuildCps(base(),f);near(r.daily[0].utr,0);assert.deepEqual(r.allocation_notices,[]);assert.ok(!r.gaps.some(g=>g.kind==='Overhead allocation missing'));assert.equal(r.daily[0].utr_configured,true);
+});
+
+
+test('DA cohorts use their own delivered count and show returns and effective rates',()=>{
+ const f=facts(); f.shipments[0].c_return=5;
+ f.components.push({payment_method_id:'per-packet',component_code:'RETURN',label:'Customer return',component_type:'production',calculation_source:'c_return'});
+ f.mappings[0].payment_values.RETURN=4;
+ f.workforce.push({...f.workforce[0],id:'w2',dropx_id:'D2'});
+ f.mappings.push({...f.mappings[0],id:'m2',workforce_id:'w2',provider_member_id:'AM2',payment_method_id:null,pay_type:'MG',delivery_rate:8,guarantee_amount:600});
+ f.shipments.push({...f.shipments[0],id:'s2',provider_employee_id:'AM2',total_delivery:50,c_return:0});
+ const r=rebuildCps(base([day('A','2026-09-01',150)]),f);
+ const v=details.exports.daCohortTotals(r.da_details,'variable'),mg=details.exports.daCohortTotals(r.da_details,'guarantee');
+ assert.equal(v.amount,1020);assert.equal(v.cps,10.2);assert.equal(mg.amount,600);assert.equal(mg.cps,12);
+ near(v.amount+mg.amount,r.daily[0].da);assert.equal(v.people[0].customer_returns,5);
+ assert.deepEqual(v.people[0].periods[0].rates.find(r=>r.label==='Customer return'),{label:'Customer return',rate:4,basis:'c return'});
+ assert.equal(mg.people[0].salary,200);assert.equal(mg.people[0].variable,400);
+});
+test('worked days deduplicate provider IDs and do not count idle calendar salary days',()=>{
+ const f=facts();f.mappings[0].payment_values={SALARY:30000};f.components=[{payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'}];
+ f.mappings.push({...f.mappings[0],id:'m2',provider_member_id:'AM2'});f.shipments.push({...f.shipments[0],id:'s2',provider_employee_id:'AM2',total_delivery:50});
+ const r=rebuildCps(base([day('A','2026-09-01',150),day('A','2026-09-02',0)]),f),p=r.da_details[0];
+ assert.equal(p.work_dates.length,1);assert.equal(p.cost_dates.length,2);assert.equal(p.deliveries,150);assert.equal(p.salary,2000);assert.deepEqual(p.provider_ids,['AM1','AM2']);
+});
+test('cohort follows dated rate-card changes and never invents zero-delivery CPS',()=>{
+ const f=facts();f.shipments.push({...f.shipments[0],id:'s2',work_date:'2026-09-02'});
+ f.mappings.push({...f.mappings[0],id:'m2',effective_from:'2026-09-02',payment_values:{SALARY:30000},payment_method_id:'fixed'});
+ f.components.push({payment_method_id:'fixed',component_code:'SALARY',component_type:'amount',pay_schedule:'per_month'});
+ const r=rebuildCps(base([day(),day('A','2026-09-02'),day('A','2026-09-03',0)]),f);
+ assert.equal(r.da_details.length,2);assert.equal(details.exports.daCohortTotals(r.da_details,'variable').deliveries,100);
+ const fixed=r.da_details.find(p=>p.cohort==='guarantee');assert.equal(fixed.deliveries,100);assert.equal(fixed.salary,2000);assert.equal(fixed.periods[0].card_from,'2026-09-02');
+ assert.equal(details.exports.daCohortTotals([{...fixed,deliveries:0}],'guarantee').cps,null);
+});
+test('People DA cost replaces card salary and is reconciled in the same cohort',()=>{
+ const f=facts();f.workforce[0].source_profile_type='employee';f.workforce[0].source_profile_id='e1';
+ f.employees=[{id:'e1',employee_code:'E1',full_name:'DA employee',location_id:'station-a',is_active:true,designation:'DA'}];f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:30000}];
+ const r=rebuildCps(base(),f);assert.equal(r.da_details.length,1);assert.equal(r.da_details[0].cohort,'guarantee');
+ assert.equal(r.da_details[0].salary+r.da_details[0].variable,r.daily[0].da);assert.equal(r.da_details[0].deliveries,100);
+});
+test('home assignment dates override legacy location; inactive station staff stay excluded and private',()=>{
+ const f=facts();f.employees=[{id:'e',employee_code:'SECRET',full_name:'PRIVATE_STAFF',designation:'SSA',location_id:'station-a',is_active:true,has_home_assignments:true}];
+ f.salaries=[{employee_id:'e',monthly_ctc:30000,effective_from:'2026-01-01'}];
+ f.people_assignments=[{employee_id:'e',station_code:'B',kind:'home',effective_from:'2026-09-01',effective_to:'2026-09-15'}];
+ let r=rebuildCps(base([day('A'),day('B')]),f);assert.equal(r.daily[0].utr,0);assert.equal(r.daily[1].utr,1000);
+ assert.ok(!JSON.stringify(r).includes('PRIVATE_STAFF'));assert.ok(!JSON.stringify(r).includes('SECRET'));
+ r=rebuildCps(base([day('A','2026-09-16'),day('B','2026-09-16')]),f);assert.equal(r.daily.reduce((n,d)=>n+d.utr,0),0);
+ f.employees[0].is_active=false;r=rebuildCps(base([day('B')]),f);assert.equal(r.daily[0].utr,0);
+});
+test('fuel trend preserves source, DA versus Van allocation and zero-delivery days',()=>{
+ const b=base([day(),day('A','2026-09-02',0)]);b.breakup=[
+  {station_code:'A',work_date:'2026-09-01',head:'Van',sub_head:'IOCL fuel',source:'Fuel import',amount:500},
+  {station_code:'A',work_date:'2026-09-01',head:'Van',sub_head:'Van fuel expenses',source:'Cashbook',amount:100},
+  {station_code:'A',work_date:'2026-09-01',head:'DA',sub_head:'DA fuel',source:'Workforce rate card',amount:200},
+  {station_code:'A',work_date:'2026-09-02',head:'Van',sub_head:'BPCL fuel',source:'Fuel import',amount:400},
+  {station_code:'A',work_date:'2026-09-01',head:'Van',sub_head:'Rent',source:'Fleet',amount:1000}];
+ const r=details.exports.cpsFuelTrend(b);assert.equal(r[0].amount,800);assert.equal(r[0].cps,8);assert.equal(r[0].sources.length,3);assert.equal(r[1].cps,null);
 });
