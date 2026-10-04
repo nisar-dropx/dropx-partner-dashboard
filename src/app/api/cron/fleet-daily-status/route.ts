@@ -115,9 +115,12 @@ export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!supabaseAdmin) return NextResponse.json({ error: "Database service is unavailable." }, { status: 500 });
-  const { date, time } = kolkataParts();
   const params = new URL(request.url).searchParams;
   const force = params.get("force") === "1";
+  const now = kolkataParts();
+  const requestedDate = clean(params.get("date"));
+  const date = force && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : now.date;
+  const time = now.time;
   const requestedCompanyId = clean(params.get("company_id"));
   let settingsQuery = supabaseAdmin.from("fleet_control_settings").select("company_id").eq("daily_status_email_enabled", true);
   if (force && requestedCompanyId) settingsQuery = settingsQuery.eq("company_id", requestedCompanyId);
