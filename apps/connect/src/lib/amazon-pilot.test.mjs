@@ -78,3 +78,19 @@ test('isolated email pilot is visible without converting an active Workforce acc
  assert.match(beta,/private\/incognito window/);
  assert.match(beta,/com\.amazon\.flex\.rabbit/);
 });
+test('isolated pilot treats the generated address as the Amazon Flex sign-in ID',()=>{
+ const beta=readFileSync(new URL('../components/connect-beta-onboarding.tsx',import.meta.url),'utf8');
+ const joining=readFileSync(new URL('../../app/api/connect/workforce-joining/route.ts',import.meta.url),'utf8');
+ const draft=readFileSync(new URL('../../app/api/connect/profile-draft/route.ts',import.meta.url),'utf8');
+ const pilotProfile=readFileSync(new URL('../../app/api/connect/pilot-profile/route.ts',import.meta.url),'utf8');
+ assert.match(beta,/Amazon Flex sign-in ID/);
+ assert.match(beta,/You do not need mailbox access/);
+ assert.match(beta,/Continue with Amazon/);
+ assert.match(beta,/Complete DropX registration first/);
+ assert.match(joining,/workforce_amazon_email_pilot_registrations/);
+ assert.match(joining,/workforce_update_isolated_amazon_email_pilot_decision/);
+ assert.match(joining,/host\.endsWith\("\.idfy\.com"\)/);
+ assert.match(draft,/workforce_amazon_email_pilot_registrations/);
+ assert.match(draft,/amazon-email-pilot/);
+ assert.doesNotMatch(pilotProfile,/\.from\("workforce"\)/);
+});

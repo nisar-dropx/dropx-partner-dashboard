@@ -329,8 +329,11 @@ function ReadTile({ label, value, verified, url, full }: { label: string; value?
 
 export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: AppAccount; onPhoto?: (url: string) => void; onSubmitted?: () => Promise<void> | void }) {
   const executive = account.profileType !== "employee" && account.profileType !== "user";
-  const endpoint = executive ? "/api/connect/field-executive-profile" : "/api/connect/profile";
-  const query = executive
+  const isolatedPilot = Boolean(account.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
+  const endpoint = isolatedPilot ? "/api/connect/pilot-profile" : executive ? "/api/connect/field-executive-profile" : "/api/connect/profile";
+  const query = isolatedPilot
+    ? `candidateId=${account.id}`
+    : executive
     ? `executiveId=${account.id}&profileType=${encodeURIComponent(account.profileType)}`
     : `employeeId=${account.id}`;
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -378,7 +381,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
         if (!response.ok) throw new Error(payload.error);
         return payload.profile as Profile;
       }),
-      fetch(`/api/connect/verification?accountId=${account.id}&profileType=${account.profileType}`).then((response) => response.json()),
+      isolatedPilot
+        ? Promise.resolve({ verifications: [] })
+        : fetch(`/api/connect/verification?accountId=${account.id}&profileType=${account.profileType}`).then((response) => response.json()),
       fetch(`/api/connect/profile-draft?accountId=${account.id}&profileType=${account.profileType}`).then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || "Unable to load draft.");
@@ -407,7 +412,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       if (draft) setNotice("Draft restored.");
       if (next.profilePhotoUrl) onPhoto?.(next.profilePhotoUrl);
     }).catch((reason) => setError(userFacingError(reason, "Unable to load profile. Please try again.")));
-  }, [account.id, account.profileType, endpoint, query]);
+  }, [account.id, account.profileType, endpoint, isolatedPilot, query]);
 
   const enabled = useMemo(() => {
     const configured = profile?.fieldRules?.enabled;

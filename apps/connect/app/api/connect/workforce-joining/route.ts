@@ -16,6 +16,16 @@ const amazonInvitationUrl=(value:unknown)=>{
     return url.toString();
   }catch{return null;}
 };
+const idfyActionUrl=(value:unknown)=>{
+  const cleaned=String(value??"").trim().replace(/[\]\)}>.,;]+$/g,"");
+  if(!cleaned)return null;
+  try{
+    const url=new URL(cleaned);
+    const host=url.hostname.toLowerCase();
+    if(url.protocol!=="https:"||!(host==="idfy.com"||host.endsWith(".idfy.com")))return null;
+    return url.toString();
+  }catch{return null;}
+};
 const checkLabel=(key:string)=>key.replace(/[_-]+/g," ").replace(/\b\w/g,letter=>letter.toUpperCase());
 const checkState=(value:unknown)=>{
   const text=String(value??"").trim().toLowerCase();
@@ -48,32 +58,50 @@ export async function GET(request: NextRequest) {
     if (!supabaseAdmin) throw new Error("Joining details are temporarily unavailable.");
     const db = supabaseAdmin, company = account.companyId;
     if(account.onboardingBeta&&account.activationStage?.startsWith("amazon_email_pilot:")){
-      const candidate=await db.from("workforce_amazon_email_pilot_candidates").select("id,full_name,mobile,biometric_id,alias_email,inbox_status,status,last_message_at,updated_at").eq("company_id",company).eq("id",account.id).is("closed_at",null).maybeSingle();
+      const candidate=await db.from("workforce_amazon_email_pilot_candidates").select("id,full_name,mobile,biometric_id,alias_email,inbox_status,status,last_message_at,updated_at,continuation_status,continuation_decided_at").eq("company_id",company).eq("id",account.id).is("closed_at",null).maybeSingle();
       if(candidate.error&&!['42P01','42703','PGRST205'].includes(candidate.error.code))throw new Error("Email-pilot status is unavailable.");
       if(!candidate.data)return NextResponse.json({available:false},{headers});
-      const [message,invitation,attendance]=await Promise.all([
-        db.from("workforce_amazon_email_pilot_messages").select("subject,preview,action_url,received_at").eq("company_id",company).eq("candidate_id",candidate.data.id).order("received_at",{ascending:false}).limit(1).maybeSingle(),
+      const [messages,invitation,attendance,registration,exitReasons,exitRequest]=await Promise.all([
+        db.from("workforce_amazon_email_pilot_messages").select("id,sender,subject,preview,action_url,received_at").eq("company_id",company).eq("candidate_id",candidate.data.id).order("received_at",{ascending:false}).limit(20),
         db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_code,error_message,updated_at").eq("company_id",company).eq("email_pilot_candidate_id",candidate.data.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
-        candidate.data.biometric_id?db.from("attendance_daily").select("punch_date,in_time,out_time,status,updated_at").eq("company_id",company).eq("enrolment_id",candidate.data.biometric_id).order("punch_date",{ascending:false}).limit(1).maybeSingle():Promise.resolve({data:null,error:null})
+        candidate.data.biometric_id?db.from("attendance_daily").select("punch_date,in_time,out_time,status,updated_at").eq("company_id",company).eq("enrolment_id",candidate.data.biometric_id).order("punch_date",{ascending:false}).limit(1).maybeSingle():Promise.resolve({data:null,error:null}),
+        db.from("workforce_amazon_email_pilot_registrations").select("status,submitted_at,confirmed_at,returned_at,return_note,updated_at").eq("company_id",company).eq("candidate_id",candidate.data.id).maybeSingle(),
+        db.from("workforce_onboarding_exit_reasons").select("id,label,description,requires_note").eq("company_id",company).eq("client_code","AMAZON").eq("is_active",true).order("sort_order").order("label"),
+        db.from("workforce_amazon_email_pilot_exit_requests").select("status,created_at,completed_at,error_message").eq("company_id",company).eq("candidate_id",candidate.data.id).order("created_at",{ascending:false}).limit(1).maybeSingle()
       ]);
-      const invitationUrl=amazonInvitationUrl(message.data?.action_url);
-      const providerId=invitationUrl?new URL(invitationUrl).searchParams.get("providerId"):null;
-      const invitationReceived=Boolean(invitationUrl||message.data?.received_at);
+      const inboxMessages=messages.error?[]:messages.data??[];
+      const amazonMessage=inboxMessages.find(item=>amazonInvitationUrl(item.action_url));
+      const idfyMessages=inboxMessages.filter(item=>idfyActionUrl(item.action_url));
+      const rawInvitationUrl=amazonInvitationUrl(amazonMessage?.action_url);
+      const providerId=invitation.data?.external_reference??(rawInvitationUrl?new URL(rawInvitationUrl).searchParams.get("providerId"):null);
+      const invitationReceived=Boolean(rawInvitationUrl||amazonMessage?.received_at);
+      const registrationStatus=registration.error?"pending":registration.data?.status??"pending";
+      const registrationSubmitted=["submitted","confirmed"].includes(registrationStatus);
+      const continuing=candidate.data.continuation_status==="continuing";
+      const offboardingRequested=candidate.data.continuation_status==="not_continuing";
+      const invitationUrl=registrationSubmitted&&continuing?rawInvitationUrl:null;
+      const bgcChecks=idfyMessages.map((item,index)=>({
+        code:`idfy_email_${item.id??index}`,label:item.subject||"IDfy verification",status:"action",
+        detail:item.preview||"Open the IDfy request and complete the required verification.",owner:"Associate",source:"DropX monitored inbox",
+        updatedAt:item.received_at,actionUrl:idfyActionUrl(item.action_url)
+      }));
+      const stage=!registrationSubmitted?"dropx_registration_pending":offboardingRequested?"not_continuing":!continuing?"training_decision_pending":bgcChecks.length?"bgc_action":invitationReceived?"registration_pending":"invitation_pending";
       return NextResponse.json({
         available:true,pilot:true,isolatedBeta:true,
-        stage:invitationReceived?"registration_pending":"invitation_pending",
-        stageLabel:invitationReceived?"Amazon invitation ready":"Waiting for Amazon invitation",
-        instruction:invitationReceived?"Open or copy the invitation link below to continue Amazon account setup.":"The Amazon invitation has been requested. This page will update when the email arrives.",
+        stage,
+        stageLabel:stage==="dropx_registration_pending"?"Complete DropX registration":stage==="training_decision_pending"?"Confirm after training":stage==="not_continuing"?"Exit requested":stage==="bgc_action"?"IDfy action required":invitationReceived?"Amazon invitation ready":"Waiting for Amazon invitation",
+        instruction:!registrationSubmitted?"Complete your private beta registration first.":!continuing&&!offboardingRequested?"Attend training for 1–2 days, then choose whether to continue with Amazon.":invitationReceived?"Use the Amazon Flex sign-in ID below and open the monitored invitation link.":"The Amazon invitation has been requested. This page will update when DropX receives it.",
         reportUpdatedAt:null,reportDate:null,stale:false,syncDelayed:false,
         driverId:null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
         invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
-        invitationUrl,invitationReceivedAt:message.data?.received_at??candidate.data.last_message_at,
-        registrationRequired:false,registrationStatus:"isolated_beta",registrationUpdatedAt:null,
-        offboardingRequested:false,offboardingRequestedAt:null,exitReasons:[],
-        actionOwner:invitationReceived?"Associate":"Amazon / system",category:"amazon_email_pilot",amazonAction:null,bgcChecks:[],
+        invitationUrl,invitationAvailable:Boolean(rawInvitationUrl),invitationReceivedAt:amazonMessage?.received_at??candidate.data.last_message_at,
+        registrationRequired:!registrationSubmitted,registrationStatus,registrationUpdatedAt:registration.data?.updated_at??null,
+        continuationStatus:candidate.data.continuation_status,continuationDecidedAt:candidate.data.continuation_decided_at,
+        offboardingRequested,offboardingRequestedAt:exitRequest.data?.created_at??null,offboardingStatus:exitRequest.data?.status??null,exitReasons:exitReasons.error?[]:exitReasons.data??[],
+        actionOwner:invitationReceived?"Associate":"Amazon / system",category:"amazon_email_pilot",amazonAction:null,bgcChecks,
         latestAttendance:attendance.error||!attendance.data?null:{date:attendance.data.punch_date,inTime:attendance.data.in_time,outTime:attendance.data.out_time,status:attendance.data.status,updatedAt:attendance.data.updated_at},
         configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,
-        updatedAt:message.data?.received_at??invitation.data?.updated_at??candidate.data.updated_at,tasks:[],training:null,paymentHolds:[]
+        updatedAt:amazonMessage?.received_at??invitation.data?.updated_at??candidate.data.updated_at,tasks:[],training:null,paymentHolds:[]
       },{headers});
     }
     let personQuery = db.from("workforce").select("id,email,mobile,location_id,source_profile_type,source_profile_id,onboarding_status,lifecycle_status,is_active,onboarding_approved_at,last_working_date")
@@ -160,10 +188,15 @@ export async function POST(request:NextRequest){
  try{
   const body=await request.json() as {accountId?:string;profileType?:ConnectAccount["profileType"];action?:string;reasonId?:string;note?:string};
   const account=await requireConnectAccount(body.profileType as ConnectAccount["profileType"],body.accountId??"",{allowActivationOnly:true});
-  if(account.workspace!=="workforce"||body.action!=="not_continuing")return NextResponse.json({error:"This action is unavailable."},{status:403,headers});
+  if(account.workspace!=="workforce"||!["not_continuing","continue_amazon"].includes(body.action??""))return NextResponse.json({error:"This action is unavailable."},{status:403,headers});
   if(!supabaseAdmin)throw new Error("Onboarding is temporarily unavailable.");
   const note=String(body.note??"").trim();
-  if(!body.reasonId||note.length>1000)return NextResponse.json({error:"Choose a reason and keep the note under 1,000 characters."},{status:400,headers});
+  if(body.action==="not_continuing"&&(!body.reasonId||note.length>1000))return NextResponse.json({error:"Choose a reason and keep the note under 1,000 characters."},{status:400,headers});
+  if(account.onboardingBeta&&account.activationStage?.startsWith("amazon_email_pilot:")){
+   const result=await supabaseAdmin.rpc("workforce_update_isolated_amazon_email_pilot_decision",{p_company:account.companyId,p_candidate:account.id,p_action:body.action,p_reason:body.reasonId??null,p_note:note});
+   if(result.error)throw new Error(result.error.message);
+   return NextResponse.json({ok:true,result:result.data},{headers});
+  }
   let personQuery=supabaseAdmin.from("workforce").select("id").eq("company_id",account.companyId).is("deleted_at",null).neq("migration_state","reclassified");
   personQuery=account.profileType==="workforce"?personQuery.eq("id",account.id):personQuery.eq("source_profile_type",account.profileType).eq("source_profile_id",account.id);
   const person=await personQuery.maybeSingle();
