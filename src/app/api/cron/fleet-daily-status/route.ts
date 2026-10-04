@@ -67,8 +67,9 @@ async function processCompany(company: { id: string; name: string | null }, date
   const dailyLabel=new Intl.DateTimeFormat("en-IN",{day:"2-digit",month:"short",year:"numeric",timeZone:"Asia/Kolkata"}).format(new Date(`${date}T12:00:00+05:30`));
   const subject=prior.data?.subject || `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`; const root=prior.data?.root_message_id || prior.data?.message_id || null; const last=prior.data?.message_id || null; const messageId=last?`<dropx.fleet-status.${randomUUID()}@partner.dropxlogistics.com>`:`<dropx.fleet-status.${company.id}.${config.monthlyThread ? month : date}@partner.dropxlogistics.com>`;
   const down=vehicles.filter(row=>!active(row.status)).sort((a,b)=>(a.non_operational_since||date).localeCompare(b.non_operational_since||date));
-  const totals={...summaryTotals(rows),adHoc:adHocRows.reduce((sum,row)=>sum+row.todayCount,0),adHocPending:adHocRows.reduce((sum,row)=>sum+row.pendingCount,0)};
-  const presentation=buildFleetDailyStatusEmail({companyName:company.name,date,rows,exceptions:down,adHocRows,totals,config});
+  const fleetRows=rows.filter(row=>row.ownTotal+row.partnerTotal>0);
+  const totals={...summaryTotals(fleetRows),adHoc:adHocRows.reduce((sum,row)=>sum+row.todayCount,0),adHocPending:adHocRows.reduce((sum,row)=>sum+row.pendingCount,0)};
+  const presentation=buildFleetDailyStatusEmail({companyName:company.name,date,rows:fleetRows,exceptions:down,adHocRows,totals,config});
   const result=await sendEmail({companyId:company.id,to:recipients,subject,body:presentation.text,html:presentation.html,messageId,inReplyTo:last||undefined,references:last?[...new Set([root,last].filter((value):value is string=>Boolean(value)))]:undefined});
   await supabaseAdmin.from("fleet_status_report_logs").insert({company_id:company.id,report_date:date,report_month:month,affected_station_codes:attentionRows.map(row=>row.station),recipients,subject,status:"sent",message_id:result.messageId||messageId,root_message_id:root||result.messageId||messageId});
   return "sent";
