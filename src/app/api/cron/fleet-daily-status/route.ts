@@ -82,9 +82,8 @@ async function processCompany(company: { id: string; name: string | null }, date
   const sentToday = new Set((existing.data ?? []).map((row) => clean(row.recipient_email).toLowerCase()));
   const month = date.slice(0, 7); const monthLabel = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${month}-01T12:00:00+05:30`));
   const dailyLabel = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${date}T12:00:00+05:30`));
-  let sent = 0; let failed = 0; let skipped = 0;
-  for (const delivery of deliveries) {
-    if (sentToday.has(delivery.email)) { skipped += 1; continue; }
+  const deliveryResults = await Promise.all(deliveries.map(async (delivery) => {
+    if (sentToday.has(delivery.email)) return "skipped" as const;
     const stationScope = new Set(delivery.stationCodes); const scopedRows = rows.filter((row) => stationScope.has(row.station)); const scopedFleetRows = scopedRows.filter((row) => row.ownTotal + row.partnerTotal > 0);
     const scopedVehicles = vehicles.filter((row) => stationScope.has(clean(row.station_code).toUpperCase())); const scopedAdHocRows = adHocRows.filter((row) => stationScope.has(row.station)); const scopedAttention = attentionRows.filter((row) => stationScope.has(row.station));
     const totals = { ...summaryTotals(scopedFleetRows), adHoc: scopedAdHocRows.reduce((sum, row) => sum + row.todayCount, 0), adHocPending: scopedAdHocRows.reduce((sum, row) => sum + row.pendingCount, 0) };
@@ -96,12 +95,15 @@ async function processCompany(company: { id: string; name: string | null }, date
       const presentation = buildFleetDailyStatusEmail({ companyName: company.name, date, rows: scopedFleetRows, exceptions: scopedVehicles.filter((row) => !active(row.status)), adHocRows: scopedAdHocRows, totals, config });
       const result = await sendEmail({ companyId: company.id, to: [delivery.email], subject, body: presentation.text, html: presentation.html, messageId, inReplyTo: last || undefined, references: last ? [...new Set([root, last].filter((value): value is string => Boolean(value)))] : undefined });
       const log = await supabaseAdmin.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject, status: "sent", message_id: result.messageId || messageId, root_message_id: root || result.messageId || messageId, error_message: null }, { onConflict: "company_id,report_date,recipient_email" });
-      if (log.error) throw new Error(log.error.message); sent += 1;
+      if (log.error) throw new Error(log.error.message); return "sent" as const;
     } catch (error) {
-      failed += 1;
       await supabaseAdmin.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject: `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`, status: "failed", error_message: error instanceof Error ? error.message : "Unable to send report." }, { onConflict: "company_id,report_date,recipient_email" });
+      return "failed" as const;
     }
-  }
+  }));
+  const sent = deliveryResults.filter((result) => result === "sent").length;
+  const failed = deliveryResults.filter((result) => result === "failed").length;
+  const skipped = deliveryResults.filter((result) => result === "skipped").length;
   if (failed && !sent) return "failed";
   if (failed) return "partial_failed";
   if (sent) return "sent";
