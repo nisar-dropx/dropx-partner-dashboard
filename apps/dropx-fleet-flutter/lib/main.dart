@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+part 'enhanced_screens.dart';
+
 const apiOrigin = 'https://fleet.dropxlogistics.com';
 const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
@@ -38,24 +40,66 @@ class DropXFleetApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'DropX Fleet',
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: brand),
+          colorScheme: ColorScheme.fromSeed(
+              seedColor: brand,
+              primary: brand,
+              secondary: const Color(0xff0f766e),
+              surface: Colors.white),
           scaffoldBackgroundColor: canvas,
           useMaterial3: true,
+          visualDensity: VisualDensity.standard,
           appBarTheme: const AppBarTheme(
               backgroundColor: Colors.white,
               foregroundColor: ink,
-              surfaceTintColor: Colors.transparent),
-          cardTheme: const CardThemeData(
-              color: Colors.white, elevation: 0, margin: EdgeInsets.zero),
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              centerTitle: false),
+          cardTheme: CardThemeData(
+              color: Colors.white,
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: const BorderSide(color: Color(0xffe7eaf0)))),
+          navigationBarTheme: NavigationBarThemeData(
+              height: 70,
+              backgroundColor: Colors.white,
+              indicatorColor: const Color(0xffffe7ef),
+              labelTextStyle: WidgetStateProperty.resolveWith((states) =>
+                  TextStyle(
+                      color:
+                          states.contains(WidgetState.selected)
+                              ? brand
+                              : const Color(0xff687386),
+                      fontSize: 11,
+                      fontWeight: states.contains(WidgetState.selected)
+                          ? FontWeight.w900
+                          : FontWeight.w700))),
+          filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                  textStyle: const TextStyle(fontWeight: FontWeight.w900),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)))),
+          outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  side: const BorderSide(color: Color(0xffd7dce5)))),
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
             fillColor: Colors.white,
             border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
                 borderSide: const BorderSide(color: Color(0xffdfe3e8))),
             enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
                 borderSide: const BorderSide(color: Color(0xffdfe3e8))),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: brand, width: 1.6)),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
         ),
         home: supabaseUrl.isEmpty || supabaseAnonKey.isEmpty
@@ -411,11 +455,21 @@ class _FleetHomeState extends State<FleetHome> {
           retry: refresh,
           logout: logout);
     final pages = [
-      TodayScreen(snapshot: snapshot!, refresh: refresh),
+      EnhancedTodayScreen(
+          api: widget.api,
+          snapshot: snapshot!,
+          refresh: refresh,
+          openTab: (value) => setState(() => index = value)),
       VehiclesScreen(api: widget.api, snapshot: snapshot!, refresh: refresh),
-      AuditsScreen(api: widget.api, snapshot: snapshot!, refresh: refresh),
-      PaymentsScreen(api: widget.api, snapshot: snapshot!, refresh: refresh),
-      MoreScreen(snapshot: snapshot!, refresh: refresh, logout: logout),
+      EnhancedAuditsScreen(
+          api: widget.api, snapshot: snapshot!, refresh: refresh),
+      EnhancedPaymentsScreen(
+          api: widget.api, snapshot: snapshot!, refresh: refresh),
+      MoreScreen(
+          api: widget.api,
+          snapshot: snapshot!,
+          refresh: refresh,
+          logout: logout),
     ];
     return Scaffold(
       appBar: AppBar(
@@ -816,10 +870,12 @@ class PaymentsScreen extends StatelessWidget {
 class MoreScreen extends StatelessWidget {
   const MoreScreen(
       {super.key,
+      required this.api,
       required this.snapshot,
       required this.refresh,
       required this.logout});
   final FleetSnapshot snapshot;
+  final FleetApi api;
   final Future<void> Function() refresh;
   final Future<void> Function() logout;
   @override
@@ -862,8 +918,15 @@ class MoreScreen extends StatelessWidget {
                         child: InkWell(
                             onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute(
-                                    builder: (_) => ModuleScreen(
-                                        spec: module, snapshot: snapshot))),
+                                    builder: (_) => module.key == 'dailyKm'
+                                        ? EnhancedTrackingScreen(
+                                            snapshot: snapshot)
+                                        : module.key == 'integrations'
+                                            ? EnhancedFuelScreen(
+                                                snapshot: snapshot)
+                                            : ModuleScreen(
+                                                spec: module,
+                                                snapshot: snapshot))),
                             borderRadius: BorderRadius.circular(12),
                             child: Padding(
                                 padding: const EdgeInsets.all(15),
@@ -1244,8 +1307,12 @@ class FleetApi {
 
   Future<FleetSnapshot> snapshot() async {
     try {
-      final response = await dio.get('/api/fleet/mobile');
-      final raw = Map<String, dynamic>.from(response.data as Map);
+      final responses = await Future.wait([
+        dio.get('/api/fleet/mobile'),
+        dio.get('/api/fleet/summary'),
+      ]);
+      final raw = Map<String, dynamic>.from(responses[0].data as Map);
+      raw['summary'] = Map<String, dynamic>.from(responses[1].data as Map);
       await preferences.setString('fleet_snapshot_v2', jsonEncode(raw));
       return FleetSnapshot(raw);
     } on DioException catch (error) {
@@ -1253,8 +1320,13 @@ class FleetApi {
         final active = Supabase.instance.client.auth.currentSession;
         if (active != null) {
           await exchangeSession(active);
-          final retry = await dio.get('/api/fleet/mobile');
-          return FleetSnapshot(Map<String, dynamic>.from(retry.data as Map));
+          final retries = await Future.wait([
+            dio.get('/api/fleet/mobile'),
+            dio.get('/api/fleet/summary'),
+          ]);
+          final raw = Map<String, dynamic>.from(retries[0].data as Map);
+          raw['summary'] = Map<String, dynamic>.from(retries[1].data as Map);
+          return FleetSnapshot(raw);
         }
       }
       final cached = preferences.getString('fleet_snapshot_v2');
@@ -1271,6 +1343,18 @@ class FleetApi {
       String path, Map<String, dynamic> data) async {
     try {
       final response = await dio.post(path, data: data);
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (error) {
+      throw ApiError(error.response?.data is Map
+          ? text((error.response?.data as Map)['error'])
+          : error.message ?? 'Request failed');
+    }
+  }
+
+  Future<Map<String, dynamic>> get(String path,
+      {Map<String, dynamic>? queryParameters}) async {
+    try {
+      final response = await dio.get(path, queryParameters: queryParameters);
       return Map<String, dynamic>.from(response.data as Map);
     } on DioException catch (error) {
       throw ApiError(error.response?.data is Map
@@ -1313,6 +1397,15 @@ class FleetSnapshot {
 
   Map<String, dynamic> map(String key) =>
       data[key] is Map ? Map<String, dynamic>.from(data[key] as Map) : {};
+  Map<String, dynamic> get summary => raw['summary'] is Map
+      ? Map<String, dynamic>.from(raw['summary'] as Map)
+      : {};
+  List<Map<String, dynamic>> summaryList(String key) => summary[key] is List
+      ? (summary[key] as List)
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList()
+      : [];
   List<Map<String, dynamic>> list(String key) => data[key] is List
       ? (data[key] as List)
           .whereType<Map>()
