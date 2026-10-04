@@ -32,10 +32,10 @@ function inWindow(now: string, configured: string) {
   return delta >= 0 && delta < 30;
 }
 
-async function processCompany(company: { id: string; name: string | null }, date: string, time: string) {
+async function processCompany(company: { id: string; name: string | null }, date: string, time: string, force = false) {
   if (!supabaseAdmin) return "failed";
   const setting = await supabaseAdmin.from("fleet_control_settings").select("daily_status_email_enabled,daily_status_send_time,daily_status_only_affected,daily_status_email_config").eq("company_id", company.id).maybeSingle();
-  if (setting.error || !setting.data?.daily_status_email_enabled || !inWindow(time, clean(setting.data.daily_status_send_time))) return "disabled";
+  if (setting.error || !setting.data?.daily_status_email_enabled || (!force && !inWindow(time, clean(setting.data.daily_status_send_time)))) return "disabled";
   const config = normalizeFleetDailyStatusEmailConfig(setting.data.daily_status_email_config);
   const locationsResult = await loadCodLocations(company.id, [], true);
   const excludedCodes = new Set(config.excludedStationCodes);
@@ -112,9 +112,15 @@ export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!supabaseAdmin) return NextResponse.json({ error: "Database service is unavailable." }, { status: 500 });
-  const { date, time } = kolkataParts(); const companies = await supabaseAdmin.from("companies").select("id,name").eq("is_active", true);
+  const { date, time } = kolkataParts();
+  const params = new URL(request.url).searchParams;
+  const force = params.get("force") === "1";
+  const requestedCompanyId = clean(params.get("company_id"));
+  let companyQuery = supabaseAdmin.from("companies").select("id,name");
+  companyQuery = force && requestedCompanyId ? companyQuery.eq("id", requestedCompanyId) : companyQuery.eq("is_active", true);
+  const companies = await companyQuery;
   if (companies.error) return NextResponse.json({ error: companies.error.message }, { status: 500 });
   const totals: Record<string, number> = {};
-  for (const company of companies.data ?? []) { try { const outcome = await processCompany(company, date, time); totals[outcome] = (totals[outcome] || 0) + 1; } catch { totals.failed = (totals.failed || 0) + 1; } }
-  return NextResponse.json({ date, time, ...totals }, { status: totals.failed || totals.partial_failed ? 500 : 200 });
+  for (const company of companies.data ?? []) { try { const outcome = await processCompany(company, date, time, force); totals[outcome] = (totals[outcome] || 0) + 1; } catch { totals.failed = (totals.failed || 0) + 1; } }
+  return NextResponse.json({ date, time, forced: force, ...totals }, { status: totals.failed || totals.partial_failed ? 500 : 200 });
 }
