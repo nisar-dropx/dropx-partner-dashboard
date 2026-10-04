@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-export function LiveRefresh() {
+export function LiveRefresh({ paused = false }: { paused?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   useEffect(() => {
     const refresh = () => {
-      if (document.visibilityState === "visible")
+      if (!paused && document.visibilityState === "visible")
         startTransition(() => router.refresh());
     };
     const timer = setInterval(refresh, 60000);
@@ -15,7 +15,7 @@ export function LiveRefresh() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [router]);
+  }, [router, paused]);
   return (
     <button
       className="button secondary"

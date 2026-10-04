@@ -166,8 +166,24 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery) {
     breakup: [],
     generated_at: new Date().toISOString(),
   };
+  const report = buildPnl(revenue, cps, locations, filters.from, filters.to);
+  const covered = new Set(
+    report.days
+      .filter((d) => d.cost !== null || d.revenue !== null)
+      .map((d) => `${d.station}/${d.date}`),
+  );
   return {
-    ...buildPnl(revenue, cps, locations, filters.from, filters.to),
+    ...report,
+    revenueCalculations: revenue.flatMap((r) =>
+      r.daily
+        .filter((d) => covered.has(`${r.station}/${d.date}`))
+        .map((d) => ({
+          station: r.station,
+          provider: r.provider,
+          model: r.model,
+          ...d,
+        })),
+    ),
     filters,
     readAt: snapshot.read_at,
     availability: snapshot.availability,
@@ -190,6 +206,21 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery) {
       mfn: r.mfnRate,
       mg: r.mg,
       mgVolume: r.mgVolume,
+      monthlyFee: r.model === "xpt" ? null : r.monthlyFee,
+      model: r.model,
+      parent: r.parentStation,
+      swaRate:
+        effectiveCards(
+          history,
+          r.daily[0]?.date.slice(0, 7) || filters.month,
+        ).find((c) => c.station_code === r.station && c.provider === r.provider)
+          ?.rates.swa_delivery_rate ?? null,
+      slabs:
+        effectiveCards(
+          history,
+          r.daily[0]?.date.slice(0, 7) || filters.month,
+        ).find((c) => c.station_code === r.station && c.provider === r.provider)
+          ?.slabs ?? [],
     })),
   };
 }

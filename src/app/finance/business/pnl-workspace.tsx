@@ -14,6 +14,11 @@ import type { LivePnl } from "@/lib/finance/pnl-data";
 import { pnlGroup, type PnlTotal, type PnlDay } from "@/lib/finance/pnl";
 import { todayIndia } from "@/lib/finance/pricing";
 import { LiveRefresh } from "./refresh";
+import {
+  RevenueCalculation,
+  ExpenseCalculation,
+  useFinanceEvidence,
+} from "./pnl-calculations";
 
 const money = (n: number | null, digits = 0) =>
   n === null
@@ -71,6 +76,9 @@ function Statement({
   rows: PnlDay[];
   report: LivePnl;
 }) {
+  const evidence = useFinanceEvidence(rows, report.readAt);
+  const [openIncome, setOpenIncome] = useState<Set<string>>(() => new Set());
+  const [openCosts, setOpenCosts] = useState<Set<string>>(() => new Set());
   const dayKeys = useMemo(
     () => new Set(rows.map((d) => `${d.station}/${d.date}`)),
     [rows],
@@ -129,16 +137,42 @@ function Statement({
             </div>
             <ArrowDownRight size={22} />
           </div>
-          {[
-            ["MG / fixed payout + monthly fee", total.base],
-            ["Excess deliveries / delivery slabs", total.variable],
-            ["SWA delivery earnings", total.swa],
-            ["MFN earnings", total.mfn],
-          ].map(([label, value]) => (
-            <div className="pnl-line" key={String(label)}>
-              <span>{label}</span>
-              <strong>{money(value as number | null, 2)}</strong>
-            </div>
+          {(
+            [
+              ["base", "MG / fixed payout + monthly fee", total.base],
+              [
+                "variable",
+                "Excess deliveries / delivery slabs",
+                total.variable,
+              ],
+              ["swa", "SWA delivery earnings", total.swa],
+              ["mfn", "MFN earnings", total.mfn],
+            ] as const
+          ).map(([kind, label, value]) => (
+            <details
+              className="pnl-expense"
+              key={kind}
+              onToggle={(e) => {
+                const open = e.currentTarget.open;
+                setOpenIncome((previous) => {
+                  const next = new Set(previous);
+                  if (open) next.add(kind);
+                  else next.delete(kind);
+                  return next;
+                });
+              }}
+            >
+              <summary>
+                <span>
+                  <ChevronDown size={14} />
+                  {label}
+                </span>
+                <strong>{money(value, 2)}</strong>
+              </summary>
+              {openIncome.has(kind) && (
+                <RevenueCalculation kind={kind} rows={rows} report={report} />
+              )}
+            </details>
           ))}
           <div className="pnl-line pnl-total">
             <strong>Revenue</strong>
@@ -218,7 +252,20 @@ function Statement({
                 : c.head === head,
             );
             return (
-              <details className="pnl-expense" key={String(head)}>
+              <details
+                className="pnl-expense"
+                key={String(head)}
+                onToggle={(e) => {
+                  const open = e.currentTarget.open;
+                  if (open) evidence.load();
+                  setOpenCosts((previous) => {
+                    const next = new Set(previous);
+                    if (open) next.add(String(head));
+                    else next.delete(String(head));
+                    return next;
+                  });
+                }}
+              >
                 <summary>
                   <span>
                     <ChevronDown size={14} /> {label}
@@ -244,22 +291,11 @@ function Statement({
                       source coverage before treating it as complete.
                     </p>
                   )}
-                  {head === "UTR" && (
-                    <p>
-                      Grouped People CTC only. Active station team and
-                      configured manager / telecaller shares accrue by calendar
-                      day; individual salaries and names remain private.
-                      Attendance is not required.{" "}
-                      {[
-                        ...new Set(
-                          report.staffGroups
-                            .filter((g) =>
-                              rows.some((d) => d.station === g.station),
-                            )
-                            .flatMap((g) => g.roles),
-                        ),
-                      ].join(" · ")}
-                    </p>
+                  {openCosts.has(String(head)) && (
+                    <ExpenseCalculation
+                      head={String(head)}
+                      evidence={evidence}
+                    />
                   )}
                 </div>
               </details>
@@ -360,9 +396,15 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
           </p>
         </div>
         <div className="pnl-actions">
-          <LiveRefresh />
+          <LiveRefresh
+            paused={
+              pending ||
+              JSON.stringify(filters) !== JSON.stringify(report.filters)
+            }
+          />
           <a
             className="pnl-btn primary"
+            download
             href={href().replace(
               "/finance/business?",
               "/finance/business/export?",
