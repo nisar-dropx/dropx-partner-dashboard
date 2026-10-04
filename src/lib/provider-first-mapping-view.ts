@@ -1,4 +1,5 @@
 import { matchNames } from "./name-match.ts";
+import type { PaymentAllocationHistoryEntry } from "./payment-allocation-history.ts";
 
 export type ProviderFirstWorkerView = {
   id: string;
@@ -31,6 +32,7 @@ export type ProviderFirstMappingRowView = {
   paymentValues: Record<string, string>;
   effectiveFrom: string;
   effectiveTo: string;
+  history: PaymentAllocationHistoryEntry[];
 };
 
 export type ProviderFirstPaymentMethodView = {

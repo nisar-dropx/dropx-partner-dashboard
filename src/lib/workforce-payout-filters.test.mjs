@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchesWorkforcePayoutFilters } from "./workforce-payout-filters.ts";
+import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "./workforce-payout-filters.ts";
 
 const row = {
   dropxId: "KOZA5249",
@@ -71,4 +71,12 @@ test("search and multi-select facets are both applied", () => {
     statuses: ["Ready for review"]
   }), true);
   assert.equal(matchesWorkforcePayoutFilters(row, "another person", all), false);
+});
+
+test("dated allocations remain filterable by every location and provider segment", () => {
+  const transferred = { ...row, location: "KOZA / KTUO", provider: "Amazon / Flipkart" };
+  assert.deepEqual(workforcePayoutFacetValues(transferred.location), ["KOZA", "KTUO"]);
+  assert.equal(matchesWorkforcePayoutFilters(transferred, "", { ...all, locations: ["KTUO"] }), true);
+  assert.equal(matchesWorkforcePayoutFilters(transferred, "", { ...all, providers: ["Flipkart"] }), true);
+  assert.equal(matchesWorkforcePayoutFilters(transferred, "", { ...all, locations: ["KLZH"] }), false);
 });

@@ -147,3 +147,23 @@ test("separately configured heads with the same display name remain identifiable
   assert.ok(table.headers.includes("Recovery [RECOVERY_A] Deduction (INR)"));
   assert.ok(table.headers.includes("Recovery [RECOVERY_B] Deduction (INR)"));
 });
+
+test("the same production head at two dated rates exports both segment totals", () => {
+  const row = {
+    ...combinedMethodRow,
+    productionBreakdown: [
+      { code: "DELIVERY", label: "Delivery", componentType: "production", count: 100, rate: 13, amount: 1300 },
+      { code: "DELIVERY", label: "Delivery", componentType: "production", count: 50, rate: 15, amount: 750 }
+    ]
+  };
+  const table = buildWorkforcePayoutExportTable([row], "Workforce");
+  const rate13Count = table.headers.indexOf("Delivery @ INR 13 Count");
+  const rate15Count = table.headers.indexOf("Delivery @ INR 15 Count");
+
+  assert.notEqual(rate13Count, -1);
+  assert.notEqual(rate15Count, -1);
+  assert.equal(table.rows[0][rate13Count], 100);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery @ INR 13 Amount (INR)")], 1300);
+  assert.equal(table.rows[0][rate15Count], 50);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery @ INR 15 Amount (INR)")], 750);
+});

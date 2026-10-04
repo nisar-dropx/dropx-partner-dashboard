@@ -3,12 +3,15 @@
 import { ChevronDown, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
-import { matchesWorkforcePayoutFilters } from "@/lib/workforce-payout-filters";
+import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "@/lib/workforce-payout-filters";
+import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
+import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
+  history: PaymentAllocationHistoryEntry[];
   productionBreakdown: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number; sortOrder?: number }>;
   dailyBreakdown: Array<{
     date: string;
@@ -140,9 +143,9 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const deferredSearch = useDeferredValue(search);
-  const locationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.location || "-")).values()).sort(), [rows]);
+  const locationOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.location || "-"))).values()).sort(), [rows]);
   const designationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.designation).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [rows]);
-  const providerOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.provider || "-")).values()).sort(), [rows]);
+  const providerOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.provider || "-"))).values()).sort(), [rows]);
   const mappingStatusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.mappingStatus).filter(Boolean))).sort(), [rows]);
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status || "-")).values()).sort(), [rows]);
   const methodOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [rows]);
@@ -277,7 +280,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
                 <td className="negative payout-money">{row.paymentDetailsAvailable ? row.deductions ? `- ${money(row.deductions)}` : "—" : null}</td>
                 <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <strong>{money(row.netAmount)}</strong> : null}</td>
                 <td><div className="payout-status-stack"><span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span>{row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
-                <td>{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}</td>
+                <td><div className="payout-detail-actions">{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}<PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId || row.providerMemberId || row.name} · ${row.name}`} /></div></td>
               </tr>,
               expanded ? <tr className="payout-total-detail-row" key={`${row.id}-totals`}>
                 <td colSpan={tableColumnCount}>
@@ -300,7 +303,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
                             <caption className="sr-only">Payment-head totals for {row.name}</caption>
                             <thead><tr><th scope="col">Payment</th><th className="payout-money" scope="col">Units</th><th className="payout-money" scope="col">Rate</th><th className="payout-money" scope="col">Total</th></tr></thead>
                             <tbody>
-                              {paymentTotals.map((item) => <tr key={item.code}><td><strong>{item.label}</strong></td><td className="payout-money">{units(item.count)}</td><td className="payout-money">{rateMoney(item.rate)}</td><td className="payout-money"><strong>{money(item.amount)}</strong></td></tr>)}
+                              {paymentTotals.map((item) => <tr key={`${item.code}|${item.componentType}|${item.rate}`}><td><strong>{item.label}</strong></td><td className="payout-money">{units(item.count)}</td><td className="payout-money">{rateMoney(item.rate)}</td><td className="payout-money"><strong>{money(item.amount)}</strong></td></tr>)}
                               {row.additions ? <tr><td><strong>Additional payments</strong></td><td className="payout-money">—</td><td className="payout-money">—</td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
                               {!paymentTotals.length && !row.additions ? <tr><td className="empty-cell" colSpan={4}>No payment amount for this period.</td></tr> : null}
                             </tbody>

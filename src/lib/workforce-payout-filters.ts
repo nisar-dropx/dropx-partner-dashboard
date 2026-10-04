@@ -25,6 +25,14 @@ function includesSelected(selected: readonly string[], value: string) {
   return selected.length === 0 || selected.includes(value);
 }
 
+export function workforcePayoutFacetValues(value: string) {
+  return String(value ?? "").split(" / ").map((item) => item.trim()).filter(Boolean);
+}
+
+function includesSelectedFacet(selected: readonly string[], value: string) {
+  return selected.length === 0 || workforcePayoutFacetValues(value).some((item) => selected.includes(item));
+}
+
 export function matchesWorkforcePayoutFilters(
   row: WorkforcePayoutFilterableRow,
   search: string,
@@ -38,8 +46,8 @@ export function matchesWorkforcePayoutFilters(
 
   return matchesSearch
     && includesSelected(filters.designations, row.designation)
-    && includesSelected(filters.locations, row.location)
-    && includesSelected(filters.providers, row.provider)
+    && includesSelectedFacet(filters.locations, row.location)
+    && includesSelectedFacet(filters.providers, row.provider)
     && matchesMethod
     && includesSelected(filters.mappingStatuses, row.mappingStatus)
     && includesSelected(filters.statuses, row.status);
