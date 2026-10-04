@@ -132,10 +132,10 @@ test('rate revisions use effective dates and reject simultaneous conflicting car
  let r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);
  f.mappings[1].effective_from='2026-01-01';r=rebuildCps(base(),f);assert.equal(r.daily[0].da,0);assert.match(r.gaps[0].kind,/Conflicting rate/);
 });
-test('People CTC includes full employer cost, dates, and shared overhead without filter leakage',()=>{
+test('People CTC includes full employer cost, dates, and shared UTR without filter leakage',()=>{
  const f=facts();f.employees=[{id:'e1',employee_code:'E1',full_name:'Staff',location_id:'station-a',is_active:true,date_of_join:'2026-01-01',designation:'SSA'},{id:'e2',employee_code:'E2',full_name:'Manager',location_id:'ho',is_active:true,date_of_join:'2026-01-01',designation:'CLM',location_scope_ids:['station-a','station-b']}];
  f.stations.push({id:'ho',station_code:'HO_KL',state:'KL',is_active:true});f.salaries=f.employees.map(e=>({employee_id:e.id,effective_from:'2026-01-01',monthly_ctc:30000}));f.volumes.push({station_code:'B',work_date:'2026-09-01',deliveries:300});
- const r=rebuildCps(base(),f);assert.equal(r.daily[0].utr,1000);assert.equal(r.daily[0].overhead,250);assert.equal(r.daily[0].utr_configured,true);
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].utr,1250);assert.equal(r.daily[0].overhead,0);assert.equal(r.staff.reduce((s,p)=>s+p.amount,0),1250);assert.equal(r.daily[0].utr_configured,true);
 });
 test('People allocation override replaces automatic allocation and missing CTC is flagged',()=>{
  const f=facts();f.employees=[{id:'e1',employee_code:'E1',full_name:'Staff',location_id:'station-a',is_active:true,designation:'SSA'}];f.salaries=[{employee_id:'e1',effective_from:'2026-01-01',monthly_ctc:30000}];f.people_rules=[{employee_id:'e1',station_codes:['A','B'],head:'Overhead',allocation:'equal',effective_from:'2026-01-01'}];

@@ -48,7 +48,7 @@ const snapshot = cache(
     const codes: string[] = JSON.parse(codesKey);
     if (!supabaseAdmin) throw Error("CPS data is temporarily unavailable.");
     const attendanceFrom = workforcePaymentMonthStart(from);
-    const [result, facts, paymentPolicy, attendanceCapture, monthAttendance, monthSourceFacts] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
+    const [result, facts, paymentPolicy, attendanceCapture, monthAttendance, monthSourceFacts, vehicleCosts] = await Promise.all([supabaseAdmin.rpc("ops_cps_base_v2", {
       p_company: company,
       p_from: from,
       p_through: to,
@@ -78,7 +78,7 @@ const snapshot = cache(
         p_from: attendanceFrom,
         p_through: to,
         p_stations: codes
-      })]);
+      }), supabaseAdmin.rpc("ops_cps_vehicle_costs", {p_company:company,p_from:from,p_through:to,p_stations:codes})]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
       throw Error("CPS data could not be loaded. Please retry shortly.");
@@ -91,6 +91,8 @@ const snapshot = cache(
       throw Error("CPS returned an incomplete response.");
     if (facts.error || !facts.data || !Array.isArray(facts.data.shipments)) throw Error("Live workforce cost sources could not be loaded. Please retry.");
     if (paymentPolicy.error || attendanceCapture.error || monthAttendance.error || monthSourceFacts.error) throw Error("Workforce attendance payment policy could not be loaded. Please retry.");
+    if (vehicleCosts.error || !Array.isArray(vehicleCosts.data?.breakup) || !Array.isArray(vehicleCosts.data?.gaps))
+      throw Error("Fleet vehicle costs could not be loaded. Please retry.");
     const sourceFacts = facts.data as CpsFacts;
     const attendanceFacts = (monthSourceFacts.data ?? sourceFacts) as CpsFacts;
     sourceFacts.payment_policy_history = paymentPolicy.data ?? [];
@@ -101,7 +103,8 @@ const snapshot = cache(
     sourceFacts.attendance_workforce = attendanceFacts.workforce ?? [];
     sourceFacts.attendance_providers = attendanceFacts.providers ?? [];
     sourceFacts.attendance_stations = attendanceFacts.stations ?? [];
-    return rebuildCps(result.data as CpsSnapshot, sourceFacts);
+    return rebuildCps({...result.data, breakup:[...result.data.breakup,...vehicleCosts.data.breakup],
+      vehicles:vehicleCosts.data.vehicles, gaps:vehicleCosts.data.gaps} as CpsSnapshot, sourceFacts);
   },
 );
 export async function loadCpsSnapshot(

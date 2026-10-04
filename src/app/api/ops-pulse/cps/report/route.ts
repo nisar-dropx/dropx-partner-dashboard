@@ -30,7 +30,11 @@ const summaryRow = (s: ReturnType<typeof summarizeCps>) => ({
   "DA cost": s.da,
   "UTR cost": s.utr,
   "Van cost": s.van,
-  "Other cost": s.other,
+  "Other cost (incl rent & overhead)": s.other+s.rent+s.overhead,
+  "DA CPS": ratio(s.da,s.deliveries),
+  "UTR CPS": ratio(s.utr,s.deliveries),
+  "Van CPS": ratio(s.van,s.deliveries),
+  "Other CPS": ratio(s.other+s.rent+s.overhead,s.deliveries),
   "Rent": s.rent,
   "Overhead": s.overhead,
   "DA salary": s.salary,
@@ -106,7 +110,7 @@ export async function GET(request: Request) {
               Calculation:
                 "Total recorded cost divided by delivered shipments. Missing costs and shipment days are flagged. Not an average of CPS.",
               Sources:
-                "People CTC, live workforce rate cards, daily shipments, fuel imports, Cashbook, approved Adhoc, Finance rent and cost setup.",
+                "People CTC, live workforce rate cards, daily shipments, fuel imports, Cashbook, approved operating payments, Finance rent, Fleet vehicle rent and cost setup.",
             },
           ],
         },
@@ -143,6 +147,8 @@ export async function GET(request: Request) {
             ),
           })),
         },
+        {name:"People CTC",rows:(result.staff??[]).map(p=>({"Employee ID":p.employee_code,Name:p.name,Designation:p.designation,Station:p.station_code,Head:p.head,"Monthly CTC":p.monthly_ctc,From:p.from_date,Through:p.through_date,"Accrued days":p.days,Allocation:p.allocation,"Period cost":p.amount}))},
+        {name:"Vehicle rent",rows:(result.vehicles??[]).map(v=>({Vehicle:v.vehicle_no,Model:v.model,Station:v.station_code,"Monthly rent":v.monthly_rent,From:v.from_date,Through:v.through_date,"Deployed days":v.days,"Period rent":v.amount,Status:v.monthly_rent==null?'Setup required':'Configured'}))},
         ...(result.gaps ? [{name:"Needs attention",rows:result.gaps.map(g=>({Issue:g.kind,Owner:g.owner,Station:g.station_code,"DropX ID":g.dropx_id,"Provider ID":g.provider_id,Name:g.name,"First seen":g.first_date,Through:g.last_date,Days:g.days,"Affected deliveries":g.deliveries,Action:g.href}))}] : []),
         ...(result.people ? [{name:"DA productivity",rows:result.people.map(p=>({"DropX ID":p.dropx_id,Name:p.name,Station:p.station_code,Deliveries:p.deliveries,"Fixed pay":p.salary,"Variable pay":p.variable,"DA fuel":p.fuel,"Van cost":p.van,"Salary CPS":ratio(p.salary,p.deliveries),"Paid days":p.paid_days,"Zero delivery paid days":p.zero_delivery_days}))}] : []),
         ...(people

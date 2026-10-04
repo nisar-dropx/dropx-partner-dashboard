@@ -1,4 +1,4 @@
-import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput } from './cps';
+import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput, CpsStaffCost } from './cps';
 import {
   allocationActiveOn,
   directPayAttendanceUnit,
@@ -227,7 +227,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const dailyVolumes=new Map<string,Map<string,number>>();
   facts.volumes.forEach(v=>{const map=dailyVolumes.get(v.work_date)??new Map();map.set(v.station_code,num(v.deliveries));dailyVolumes.set(v.work_date,map);});
   const lines:CpsLine[]=base.breakup.filter(l=>l.source!=='Shipment payment mapping').map(l=>({...l,head:l.source==='Finance Rent Master'||(l.head==='Other'&&/^(station|office|premise|facility) rent$/i.test(l.sub_head))?'Rent':l.head}));
-  const gaps=new Map<string,CpsGap>();
+  const gaps=new Map<string,CpsGap>((base.gaps ?? []).filter(g=>selected.has(g.station_code)).map(g=>[g.key,g]));
   const gapDates=new Map<string,Set<string>>();
   function gap(kind:string, station:string,date:string, id='',name='',dropx='',deliveries=0,cost=0, owner='Workforce team') {
     if(!selected.has(station)) return;
@@ -440,6 +440,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     if(!current.some(m=>key(m.provider_member_id))) gap('Provider ID not linked',station,through,'',w.full_name,w.dropx_id);
     else if(!current.some(configured) && ![...gaps.values()].some(g=>g.dropx_id===w.dropx_id && g.kind==='Payment setup missing')) gap('Payment setup missing',station,through,current[0].provider_member_id,w.full_name,w.dropx_id);
   }
+  const staff=new Map<string,CpsStaffCost>();
   const staffed=new Set<string>(),missingCtc=new Set<string>();
   const operating=facts.stations.filter(s=>s.is_active && !s.hide_from_location_list && !/^HO(?:_|$)/.test(s.station_code));
   for(const e of facts.employees) for(const date of dates) {
@@ -456,7 +457,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       ??stationById.get(linkedPolicy?.station_id)?.station_code
       ??linkedPolicy?.station_code_snapshot;
     let codes:string[]=rule?.station_codes??[];
-    let head:CpsHead=rule?.head ?? (overhead?'Overhead':e.designation==='DR'?'Van':['DA','DCD','ODCD','WM','PTDA'].includes(e.designation)?'DA':'UTR');
+    let head:CpsHead=rule?.head ?? (e.designation==='DR'?'Van':['DA','DCD','ODCD','WM','PTDA'].includes(e.designation)?'DA':'UTR');
     if(!rule) {
       if(!overhead) codes=datedWorkforceOwnership?(workforceStation?[workforceStation]:[]):home?[home.station_code]:[];
       else {
@@ -480,7 +481,14 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const shares=allocateCost(monthlyAccrual(num(salary.monthly_ctc),date),codes,dailyVolumes.get(date)??new Map(),rule?.allocation??(overhead?'delivery_share':'equal'));
     for(const [station,amount] of shares) {
       if(head==='UTR')staffed.add(`${station}|${date}`);
-      add(station,date,head,rule?.sub_head||rule?.label||(head==='Overhead'?`${e.designation || 'Shared staff'} CTC`:head==='DA'?'Salary / minimum guarantee':head==='Van'?'Van driver CTC':'Station staff CTC'),amount,'People CTC');
+      add(station,date,head,rule?.sub_head||rule?.label||(head==='Overhead'?`${e.designation || 'Shared staff'} CTC`:head==='DA'?'Salary / minimum guarantee':head==='Van'?'Van driver CTC':overhead?'Shared staff CTC':'Station staff CTC'),amount,'People CTC');
+      if(selected.has(station)) {
+        const staffKey=`${e.id}|${station}|${head}|${salary.id ?? salary.effective_from}`;
+        const row=staff.get(staffKey) ?? {employee_id:e.id,employee_code:e.employee_code,name:e.full_name,designation:e.designation,
+          station_code:station,head,monthly_ctc:num(salary.monthly_ctc),days:0,from_date:date,through_date:date,amount:0,
+          allocation:rule?.allocation ?? (overhead?'delivery_share':'equal')};
+        row.days++;row.through_date=date;row.amount+=amount;staff.set(staffKey,row);
+      }
       if(head==='DA' && selected.has(station)) {
         const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
         p.salary+=amount;people.set(k,p);
@@ -491,8 +499,13 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     if(facts.rent_coverage && !facts.rent_coverage.some(r=>r.station_code===d.station_code && activeOn(r,d.work_date)) && !(facts.manual_inputs??[]).some(r=>r.head==='Rent' && r.station_codes.includes(d.station_code) && activeOn(r,d.work_date))) gap('Facility rent missing',d.station_code,d.work_date,'','','',0,0,'People / Finance');
     if(!d.shipment_present) gap('Shipment upload missing',d.station_code,d.work_date,'','','',0,0,'Operations uploads');
   }
+  const ledgerByDay=new Map<string,CpsLine[]>();
+  for(const line of lines) {
+    const key=`${line.station_code}|${line.work_date}`;
+    const group=ledgerByDay.get(key)??[];group.push(line);ledgerByDay.set(key,group);
+  }
   const daily=base.daily.map(d=>{
-    const ledger=lines.filter(l=>l.station_code===d.station_code&&l.work_date===d.work_date);
+    const ledger=ledgerByDay.get(`${d.station_code}|${d.work_date}`)??[];
     const sum=(head:string,sub?:string)=>ledger.filter(l=>l.head===head&&(!sub||l.sub_head===sub)).reduce((n,l)=>n+num(l.amount),0);
     const daBucket=(bucket:string)=>ledger.filter(l=>l.head==='DA' && (bucket==='salary'?/salary|minimum|guarantee|\bmg\b|fixed/i.test(l.sub_head):bucket==='fuel'?/fuel/i.test(l.sub_head):!/salary|minimum|guarantee|\bmg\b|fixed|fuel/i.test(l.sub_head))).reduce((n,l)=>n+num(l.amount),0);
     const rows=associates.filter(r=>r.station_code===d.station_code&&r.work_date===d.work_date);
@@ -504,5 +517,5 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       exposed_deliveries:unresolved.reduce((n,r)=>n+num(r.total_delivery),0),cost_gaps:dayGaps.length,
       utr_configured:!missingCtc.has(`${d.station_code}|${d.work_date}`)&&(staffed.has(`${d.station_code}|${d.work_date}`)||d.utr_configured)};
   });
-  return {...base,daily,breakup:lines,associates:associates.filter(r=>selected.has(r.station_code)),gaps:[...gaps.values()].sort((a,b)=>b.deliveries-a.deliveries||a.first_date.localeCompare(b.first_date)),people:[...people.values()].filter(p=>selected.has(p.station_code)).sort((a,b)=>b.salary-a.salary)};
+  return {...base,staff:[...staff.values()].sort((a,b)=>b.amount-a.amount),daily,breakup:lines,associates:associates.filter(r=>selected.has(r.station_code)),gaps:[...gaps.values()].sort((a,b)=>b.deliveries-a.deliveries||a.first_date.localeCompare(b.first_date)),people:[...people.values()].filter(p=>selected.has(p.station_code)).sort((a,b)=>b.salary-a.salary)};
 }

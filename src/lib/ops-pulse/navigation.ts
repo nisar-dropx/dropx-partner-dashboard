@@ -71,11 +71,7 @@ const cps: NavItem = {
   label: "CPS",
   icon: "C",
   children: [
-    { code: "cps_overview", label: "Overview", href: "/cps" },
-    { code: "cps_associates", label: "DA productivity", href: "/cps?view=associates" },
-    { code: "cps_unmapped", label: "Needs attention", href: "/cps?view=unmapped" },
-    { code: "cps_cost_breakup", label: "Cost breakup", href: "/cps?view=breakup" },
-    { code: "cps_inputs", label: "Cost setup", href: "/cps?view=inputs" },
+    { code: "cps_overview", label: "Cost overview", href: "/cps" },
     { code: "cps_overview", label: "Adhoc Van & DA", href: "/cps/adhoc-activity" }
 
   ]

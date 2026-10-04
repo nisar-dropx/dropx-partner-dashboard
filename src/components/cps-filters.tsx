@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import type { CpsParams } from "@/lib/ops-pulse/cps";
 export function CpsFilters({
   params,
@@ -15,7 +15,9 @@ export function CpsFilters({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  return (
+  const [mode,setMode]=useState(period.mode);
+  return (<>
+    <div className="cps-quick-periods">{[{label:"MTD",period:"mtd",month:""},{label:"Last month",period:"monthly",month:new Date(Date.UTC(Number(today.slice(0,4)),Number(today.slice(5,7))-1,0)).toISOString().slice(0,7)}].map(p=><button key={p.label} type="button" disabled={pending} onClick={()=>{const q=new URLSearchParams(params as Record<string,string>);q.set("view","overview");q.set("period",p.period);q.delete("date");if(p.month)q.set("month",p.month);else q.delete("month");start(()=>router.push(`/cps?${q}`,{scroll:false}));}}>{p.label}</button>)}</div>
     <form
       className="cps-filters panel"
       aria-busy={pending}
@@ -27,7 +29,7 @@ export function CpsFilters({
         });
         start(() => {
           router.push(`/cps?${query.toString()}`, { scroll: false });
-          router.refresh();
+
         });
       }}
     >
@@ -36,7 +38,8 @@ export function CpsFilters({
         Period
         <select
           name="period"
-          defaultValue={period.mode}
+          value={mode}
+          onChange={e=>setMode(e.target.value)}
           disabled={["daily", "monthly", "mtd"].includes(params.view ?? "")}
         >
           <option value="daily">Day</option>
@@ -44,11 +47,11 @@ export function CpsFilters({
           <option value="monthly">Month</option>
         </select>
       </label>
-      <label>
+      {mode!=="monthly"&&<label>
         Date / MTD through
         <input type="date" name="date" defaultValue={period.date} max={today} />
-      </label>
-      <label>
+      </label>}
+      {mode==="monthly"&&<label>
         Month
         <input
           type="month"
@@ -56,7 +59,7 @@ export function CpsFilters({
           defaultValue={period.month}
           max={today.slice(0, 7)}
         />
-      </label>
+      </label>}
       <label>
         Region
         <select name="region" defaultValue={params.region || ""}>
@@ -101,6 +104,6 @@ export function CpsFilters({
         Day and MTD use the selected date. Month uses the selected calendar
         month.
       </span>
-    </form>
+    </form></>
   );
 }

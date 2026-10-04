@@ -21,6 +21,7 @@ export type CpsParams = {
   cluster?: string;
   region?: string;
   page?: string;
+  head?: string;
 };
 export const cpsHeads = ["DA", "UTR", "Van", "Rent", "Overhead", "Other"] as const;
 export type CpsHead = (typeof cpsHeads)[number];
@@ -122,9 +123,21 @@ export type CpsSnapshot = {
   daily: CpsDay[];
   breakup: CpsLine[];
   generated_at: string;
+  source_dates?: {shipments:string|null;fuel:string|null;cashbook:string|null};
   associates?: import("./cps-engine").LiveAssociate[];
   gaps?: import("./cps-engine").CpsGap[];
   people?: import("./cps-engine").CpsPersonCost[];
+  staff?: CpsStaffCost[];
+  vehicles?: CpsVehicleCost[];
+};
+export type CpsStaffCost = {
+  employee_id: string; employee_code: string; name: string; designation: string;
+  station_code: string; head: CpsHead; monthly_ctc: number; days: number;
+  from_date: string; through_date: string; amount: number; allocation: string;
+};
+export type CpsVehicleCost = {
+  vehicle_id: string; vehicle_no: string; model: string; station_code: string;
+  monthly_rent: number | null; from_date: string; through_date: string; days: number; amount: number | null;
 };
 export function ratio(cost: number, deliveries: number) {
   return deliveries > 0 ? cost / deliveries : null;

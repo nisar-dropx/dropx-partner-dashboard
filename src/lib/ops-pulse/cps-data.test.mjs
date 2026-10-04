@@ -92,6 +92,7 @@ test("RPC receives company, sorted station scope and exact period; empty scope d
   const db = {
     rpc: async (...args) => {
       if(args[0] === "ops_cps_source_facts") return { data: { shipments: [] }, error: null };
+      if(args[0] === "ops_cps_vehicle_costs") return { data: { breakup: [], gaps: [], vehicles: [] }, error: null };
       calls.push(args);
       return { data: { daily: [], breakup: [] }, error: null };
     },
@@ -275,6 +276,8 @@ test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", 
     "Station CPS",
     "Daily CPS",
     "Cost breakup",
+    "People CTC",
+    "Vehicle rent",
   ]);
   assert.equal(XLSX.utils.sheet_to_json(book.Sheets["Daily CPS"]).length, 31);
   const [summary] = XLSX.utils.sheet_to_json(book.Sheets.Summary);
