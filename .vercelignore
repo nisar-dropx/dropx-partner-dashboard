@@ -4,3 +4,10 @@
 node_modules
 .vercel
 *.tsbuildinfo
+apps/dropx-fleet-flutter/build
+apps/dropx-fleet-flutter/.dart_tool
+apps/dropx-fleet-flutter/android/.gradle
+apps/dropx-fleet-flutter/android/app/.cxx
+apps/dropx-fleet-flutter/android/app/build
+apps/dropx-fleet-flutter/.flutter-plugins
+apps/dropx-fleet-flutter/.flutter-plugins-dependencies
