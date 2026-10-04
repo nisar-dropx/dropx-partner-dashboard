@@ -884,10 +884,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
 
   return <form className="dx-profile-form" onSubmit={prepareSubmit} ref={formRef}>
     <p className="dx-company">{account.companyName}</p>
-    <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
+    {!account.activationOnly ? <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
       setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
       onPhoto?.(url);
-    }} />
+    }} /> : null}
     {profile.status.trim().toLowerCase() === "returned" && profile.returnRemarks ? (
       <aside className="dx-return-notice">
         <strong>Profile returned for correction</strong>
