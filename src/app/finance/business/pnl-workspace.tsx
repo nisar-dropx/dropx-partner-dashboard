@@ -491,9 +491,14 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                   type="date"
                   value={filters.from}
                   max={filters.to}
-                  onChange={(e) =>
-                    setFilters({ ...filters, from: e.target.value })
-                  }
+                  onInput={(e) => {
+                    const value = e.currentTarget.value;
+                    setFilters((current) => ({ ...current, from: value }));
+                  }}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setFilters((current) => ({ ...current, from: value }));
+                  }}
                 />
               </label>
               <label>
@@ -503,9 +508,14 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                   value={filters.to}
                   min={filters.from}
                   max={today}
-                  onChange={(e) =>
-                    setFilters({ ...filters, to: e.target.value })
-                  }
+                  onInput={(e) => {
+                    const value = e.currentTarget.value;
+                    setFilters((current) => ({ ...current, to: value }));
+                  }}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setFilters((current) => ({ ...current, to: value }));
+                  }}
                 />
               </label>
             </>
@@ -1069,7 +1079,8 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
           {new Date(report.readAt).toLocaleString("en-IN", {
             timeZone: "Asia/Kolkata",
           })}{" "}
-          IST · refreshes every minute while open
+          IST · auto-refresh pauses while you edit filters or read expanded
+          details
         </span>
         <div>
           {Object.entries(report.availability).map(([source, range]) => (

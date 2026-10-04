@@ -6,7 +6,11 @@ export function LiveRefresh({ paused = false }: { paused?: boolean }) {
   const [pending, startTransition] = useTransition();
   useEffect(() => {
     const refresh = () => {
-      if (!paused && document.visibilityState === "visible")
+      if (
+        !paused &&
+        document.visibilityState === "visible" &&
+        !document.querySelector(".live-pnl details[open]")
+      )
         startTransition(() => router.refresh());
     };
     const timer = setInterval(refresh, 60000);
