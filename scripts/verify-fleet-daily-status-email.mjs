@@ -13,8 +13,8 @@ const report = exports.buildFleetDailyStatusEmail({
   rows,
   exceptions: [],
   adHocRows: [
-    { station: 'KOZA', type: 'Van', todayCount: 2, todayAmount: 1500, pendingCount: 1, pendingAmount: 1600, mtdCount: 8, mtdAmount: 6400 },
-    { station: 'KOZA', type: 'Driver', todayCount: 1, todayAmount: 700, pendingCount: 2, pendingAmount: 1400, mtdCount: 4, mtdAmount: 2800 }
+    { station: 'KOZA', type: 'Van', todayCount: 2, todayAmount: 1500, todayPendingCount: 1, todayPendingAmount: 1600, pendingCount: 3, pendingAmount: 4200, mtdCount: 8, mtdAmount: 6400 },
+    { station: 'KOZA', type: 'Driver', todayCount: 1, todayAmount: 700, todayPendingCount: 2, todayPendingAmount: 1400, pendingCount: 4, pendingAmount: 2800, mtdCount: 4, mtdAmount: 2800 }
   ],
   totals: { totalVehicles: 32, operational: 26, nonOperational: 6, adHoc: 3, adHocPending: 3, stationCount: 12 },
   config: { title: 'Configured title', footer: 'Configured footer', accentColor: '#123456' }
@@ -34,6 +34,8 @@ assert.match(report.html, /V 1 req pending · ₹1,600/);
 assert.match(report.html, /D 2 req pending · ₹1,400/);
 assert.match(report.html, /V 8 req · ₹6,400/);
 assert.match(report.html, /D 4 req · ₹2,800/);
+assert.match(report.html, /V 3 req open · ₹4,200/);
+assert.match(report.html, /D 4 req open · ₹2,800/);
 assert.doesNotMatch(report.html, /Approved ad hoc usage/);
 assert.doesNotMatch(report.html, /Review and update Fleet|Review Fleet:/);
 assert.match(report.text, /32 vehicles/);
