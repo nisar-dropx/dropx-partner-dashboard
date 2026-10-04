@@ -3,6 +3,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeFleetDailyStatusEmailConfig } from "@/lib/fleet/daily-status-email";
 
 type Payload = Record<string, any>;
 const emailPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -480,17 +481,10 @@ async function updateSettings(companyId: string, userId: string, allowed: boolea
 async function updateMailSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
   const enabled = Boolean(body.dailyStatusEmailEnabled);
-  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, daily_status_email_enabled: enabled, daily_status_send_time: clean(body.dailyStatusSendTime) || "20:30", daily_status_only_affected: body.dailyStatusOnlyAffected !== false, updated_by: userId, updated_at: new Date().toISOString() });
+  const emailConfig = normalizeFleetDailyStatusEmailConfig(body.dailyStatusEmailConfig);
+  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, daily_status_email_enabled: enabled, daily_status_send_time: clean(body.dailyStatusSendTime) || "20:30", daily_status_only_affected: body.dailyStatusOnlyAffected !== false, daily_status_email_config: emailConfig, updated_by: userId, updated_at: new Date().toISOString() });
   if (result.error) throw new Error(result.error.message);
-  if (enabled) {
-    const profile = await supabaseAdmin!.from("profiles").select("full_name,email").eq("company_id", companyId).eq("id", userId).maybeSingle();
-    const email = clean(profile.data?.email).toLowerCase();
-    if (email && emailPattern.test(email)) {
-      const recipient = await supabaseAdmin!.from("fleet_status_report_recipients").upsert({ company_id: companyId, profile_id: userId, name: clean(profile.data?.full_name) || email, email, station_codes: [], source: "manual", is_active: true, created_by: userId, updated_at: new Date().toISOString() }, { onConflict: "company_id,email" });
-      if (recipient.error) throw new Error(recipient.error.message);
-    }
-  }
-  return NextResponse.json({ ok: true, message: enabled ? "Daily Fleet mail scheduled. You are included in the distribution list." : "Daily Fleet mail placed on hold." });
+  return NextResponse.json({ ok: true, message: enabled ? "Daily Fleet mail configuration saved and scheduled." : "Daily Fleet mail configuration saved on hold." });
 }
 
 async function upsertStatusRecipient(companyId: string, userId: string, allowed: boolean, body: Payload) {
@@ -499,9 +493,13 @@ async function upsertStatusRecipient(companyId: string, userId: string, allowed:
   if (!emailPattern.test(email)) throw new Error("Enter a valid recipient email.");
   const stationCodes = Array.isArray(body.stationCodes) ? [...new Set(body.stationCodes.map((value: unknown) => clean(value).toUpperCase()).filter(Boolean))] : [];
   const values = { company_id: companyId, name: clean(body.name) || email, email, station_codes: stationCodes, source: "manual", is_active: true, created_by: userId, updated_at: new Date().toISOString() };
-  const result = await supabaseAdmin!.from("fleet_status_report_recipients").upsert(values, { onConflict: "company_id,email" }).select("id").single();
+  const recipientId = clean(body.recipientId);
+  const result = recipientId
+    ? await supabaseAdmin!.from("fleet_status_report_recipients").update(values).eq("company_id", companyId).eq("id", recipientId).select("id").maybeSingle()
+    : await supabaseAdmin!.from("fleet_status_report_recipients").upsert(values, { onConflict: "company_id,email" }).select("id").single();
   if (result.error) throw new Error(result.error.message);
-  return NextResponse.json({ ok: true, id: result.data.id, message: "Daily status recipient saved." });
+  if (!result.data) throw new Error("Daily status recipient was not found.");
+  return NextResponse.json({ ok: true, id: result.data.id, message: recipientId ? "Daily status recipient updated." : "Daily status recipient added." });
 }
 
 async function removeStatusRecipient(companyId: string, allowed: boolean, body: Payload) {

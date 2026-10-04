@@ -28,7 +28,10 @@ async function allRows<T>(query: (offset: number) => PromiseLike<{ data: unknown
 }
 
 /** Resolve only active Operations users whose People/product scope includes a report station. */
-export async function loadFleetDailyStatusRecipients(db: SupabaseClient, companyId: string, stations: Station[]) {
+export async function loadFleetDailyStatusRecipients(db: SupabaseClient, companyId: string, stations: Station[], options: { includeMappedOperations?: boolean; includeAllLocationOperations?: boolean; includeStationMailboxes?: boolean } = {}) {
+  const includeMappedOperations = options.includeMappedOperations !== false;
+  const includeAllLocationOperations = options.includeAllLocationOperations !== false;
+  const includeStationMailboxes = options.includeStationMailboxes !== false;
   const [memberships, roles, profiles] = await Promise.all([
     allRows<Membership>((offset) => db.from("company_product_memberships")
       .select("user_id,role_id,has_all_location_access,location_scope_ids")
@@ -46,16 +49,17 @@ export async function loadFleetDailyStatusRecipients(db: SupabaseClient, company
     const profile = profileById.get(membership.user_id);
     const email = address(profile?.email);
     if (!role || !profile || !email) continue;
-    const scoped = stations.filter((station) => membership.has_all_location_access
-      || role.location_access_mode === "all_locations"
-      || membership.location_scope_ids?.includes(station.id));
+    const allLocations = membership.has_all_location_access || role.location_access_mode === "all_locations";
+    const scoped = stations.filter((station) => allLocations
+      ? includeAllLocationOperations
+      : includeMappedOperations && membership.location_scope_ids?.includes(station.id));
     if (!scoped.length) continue;
     const current = recipients.get(email) ?? { email, name: profile.full_name || email, stationCodes: [], source: "people" as const };
     current.stationCodes = [...new Set([...current.stationCodes, ...scoped.map((station) => String(station.station_code ?? "").trim().toUpperCase()).filter(Boolean)])].sort();
     recipients.set(email, current);
   }
   // Station-manager mailboxes remain a safe fallback because the station itself owns that mapping.
-  for (const station of stations) {
+  for (const station of includeStationMailboxes ? stations : []) {
     const email = address(station.station_manager_email);
     const code = String(station.station_code ?? "").trim().toUpperCase();
     if (!email || !code) continue;
