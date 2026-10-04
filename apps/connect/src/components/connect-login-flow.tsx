@@ -600,7 +600,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       if (pathname !== "/activation") router.replace(urlFor("activation"));
       return;
     }
-    if (!active(account) && next !== "profile" && next !== "settings") {
+    if (!active(account) && next !== "profile" && next !== "settings" && !(account.activationOnly && next === "activation")) {
       setStep("profile");
       if (pathname !== "/profile") router.replace(urlFor("profile"));
       return;
