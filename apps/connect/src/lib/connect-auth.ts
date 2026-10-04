@@ -52,6 +52,8 @@ type AccountRow = {
   role?: string | null;
   designation_id?: string | null;
   status?: string | null;
+  mobile?: string | null;
+  mobile_country_code?: string | null;
   source_profile_type?: string | null;
   source_profile_id?: string | null;
   profile_type: "user" | WorkforceProfileType;
@@ -999,6 +1001,28 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         // Additive pilot schema may be deployed independently of DropX One.
         if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status is temporarily unavailable.");
         if(pilot.data){activationOnly=true;onboardingBeta=true;activationStage=pilot.data.closed_at?"closed":"amazon_pilot";}
+
+        if (!pilot.data) {
+          const pilotMobile = String(account.mobile ?? "").replace(/\D/g, "").slice(-10);
+          if (pilotMobile.length === 10) {
+            const emailPilot = await supabaseAdmin!
+              .from("workforce_amazon_email_pilot_candidates")
+              .select("id,status,closed_at")
+              .eq("company_id", account.company_id)
+              .eq("mobile", pilotMobile)
+              .is("closed_at", null)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (emailPilot.error && !["42P01", "42703", "PGRST205"].includes(emailPilot.error.code)) {
+              throw new Error("Email-pilot status is temporarily unavailable.");
+            }
+            if (emailPilot.data) {
+              onboardingBeta = true;
+              activationStage = `amazon_email_pilot:${emailPilot.data.status}`;
+            }
+          }
+        }
 
       }
 

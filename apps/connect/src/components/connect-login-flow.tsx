@@ -622,7 +622,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       (next !== "payments" || workforcePaymentsAvailable(account)) &&
       (next !== "work" || workforceWorkAvailable(account)) &&
       (next !== "refer" || allowed(account, "refer_earn")) &&
-      (next !== "activation" || Boolean(account.activationOnly)) &&
+      (next !== "activation" || Boolean(account.activationOnly || account.onboardingBeta)) &&
       (next !== "reimbursements" || (allowed(account, "reimbursements") && peopleSelfService(account)));
     if (!permitted) {
       const destination = landingPage(account);
@@ -716,6 +716,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         <small className="dx-nav-label">Workspace</small>
         {account.activationOnly ? <><button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck />Work setup</button>{!active(account)?<button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />Registration</button>:null}</> : isWorkforceWorkspace(account) ? <>
           <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Home</button>
+          {account.onboardingBeta ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck />Amazon setup <small>Beta</small></button> : null}
           {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><CreditCard />Payments</button> : null}
           {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays />Work schedule</button> : null}
           {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target />Performance</button> : null}
@@ -772,6 +773,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       <nav>
         {account.activationOnly ? <><button onClick={() => open("activation")}><ShieldCheck />Work setup<ChevronRight /></button>{!active(account)?<button onClick={() => open("profile")}><UserRound />Registration<ChevronRight /></button>:null}</> : isWorkforceWorkspace(account) ? <>
           <button onClick={() => open("dashboard")}><Gauge />Home<ChevronRight /></button>
+          {account.onboardingBeta ? <button onClick={() => open("activation")}><ShieldCheck />Amazon setup <small>Beta</small><ChevronRight /></button> : null}
           {workforcePaymentsAvailable(account) ? <button onClick={() => open("payments")}><CreditCard />Payments<ChevronRight /></button> : null}
           {workforceWorkAvailable(account) ? <button onClick={() => open("work")}><CalendarDays />Work schedule<ChevronRight /></button> : null}
           {allowed(account, "performance") ? <button onClick={() => open("performance")}><Target />Performance<ChevronRight /></button> : null}
@@ -830,7 +832,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       ) : null}
       {account ? <ConnectNativeBridge account={account} /> : null}
       <PullToRefresh />
-      {step === "activation" && account?.activationOnly ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
+      {step === "activation" && account?.onboardingBeta ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
@@ -866,6 +868,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     {loggedIn && account ? <nav aria-label="Primary navigation" className="dx-mobile-nav">
       {account.activationOnly ? <><button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Setup</span></button>{!active(account)?<button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Register</span></button>:null}</> : isWorkforceWorkspace(account) ? <>
         <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Home /><span>Home</span></button>
+        {account.onboardingBeta ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Amazon</span></button> : null}
         {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><IndianRupee /><span>Payments</span></button> : null}
         {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays /><span>Work</span></button> : null}
         {allowed(account, "connect") ? <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore /><span>Connect</span></button> : null}
