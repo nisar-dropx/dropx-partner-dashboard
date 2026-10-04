@@ -22,8 +22,17 @@ export type CpsParams = {
   region?: string;
   page?: string;
   head?: string;
+  from?: string;
+  to?: string;
 };
-export const cpsHeads = ["DA", "UTR", "Van", "Rent", "Overhead", "Other"] as const;
+export const cpsHeads = [
+  "DA",
+  "UTR",
+  "Van",
+  "Rent",
+  "Overhead",
+  "Other",
+] as const;
 export type CpsHead = (typeof cpsHeads)[number];
 export function cpsView(value?: string): CpsView {
   return value && Object.hasOwn(cpsViews, value)
@@ -52,7 +61,7 @@ export function cpsPeriod(params: CpsParams, today: string) {
         ? "monthly"
         : view === "mtd"
           ? "mtd"
-          : ["daily", "monthly", "mtd"].includes(params.period ?? "")
+          : ["daily", "monthly", "mtd", "custom"].includes(params.period ?? "")
             ? params.period!
             : "mtd";
   const month =
@@ -72,6 +81,27 @@ export function cpsPeriod(params: CpsParams, today: string) {
         ? `${month}-01`
         : `${date.slice(0, 7)}-01`;
   const to = mode === "monthly" ? (end > today ? today : end) : date;
+  if (mode === "custom") {
+    if (
+      !isoDate(params.from) ||
+      !isoDate(params.to) ||
+      params.to > today ||
+      params.from > params.to
+    )
+      throw Error("Choose a valid date range ending on or before today.");
+    const days =
+      Math.round((Date.parse(params.to) - Date.parse(params.from)) / 86400000) +
+      1;
+    if (days > 93) throw Error("Choose a date range of up to 93 days.");
+    return {
+      mode,
+      date: params.to,
+      month: params.from.slice(0, 7),
+      from: params.from,
+      to: params.to,
+      days,
+    };
+  }
   return {
     mode,
     date,
@@ -79,6 +109,106 @@ export function cpsPeriod(params: CpsParams, today: string) {
     from,
     to,
     days: Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1,
+  };
+}
+// Every slice stays inside a calendar month so monthly payment rules and
+// rent denominators are evaluated independently before totals are combined.
+export function cpsMonthSlices(from: string, through: string) {
+  const slices: { from: string; to: string }[] = [];
+  for (let start = from; start <= through; ) {
+    const next = new Date(
+      Date.UTC(Number(start.slice(0, 4)), Number(start.slice(5, 7)), 1),
+    )
+      .toISOString()
+      .slice(0, 10);
+    const end = new Date(Date.parse(next) - 86400000)
+      .toISOString()
+      .slice(0, 10);
+    slices.push({ from: start, to: end < through ? end : through });
+    start = next;
+  }
+  return slices;
+}
+export function cpsForStation(data: CpsSnapshot, station: string): CpsSnapshot {
+  const only = <T extends { station_code: string }>(rows?: T[]) =>
+    rows?.filter((r) => r.station_code === station);
+  return {
+    ...data,
+    daily: only(data.daily) ?? [],
+    breakup: only(data.breakup) ?? [],
+    associates: only(data.associates),
+    gaps: only(data.gaps),
+    people: only(data.people),
+    staff: only(data.staff),
+    vehicles: only(data.vehicles),
+    expense_periods: only(data.expense_periods),
+  };
+}
+export function mergeCpsMonths(parts: CpsSnapshot[]): CpsSnapshot {
+  const merge = <T>(
+    rows: T[],
+    key: (row: T) => string,
+    combine: (a: T, b: T) => T,
+  ) => {
+    const result = new Map<string, T>();
+    for (const row of rows) {
+      const k = key(row),
+        old = result.get(k);
+      result.set(k, old ? combine(old, row) : row);
+    }
+    return [...result.values()];
+  };
+  return {
+    daily: parts.flatMap((p) => p.daily),
+    breakup: parts.flatMap((p) => p.breakup),
+    generated_at: parts.at(-1)?.generated_at ?? new Date().toISOString(),
+    source_dates: Object.fromEntries(
+      ["shipments", "fuel", "cashbook"].map((k) => [
+        k,
+        parts
+          .map((p) => p.source_dates?.[k as "shipments"])
+          .filter(Boolean)
+          .sort()
+          .at(-1) ?? null,
+      ]),
+    ) as CpsSnapshot["source_dates"],
+    associates: parts.flatMap((p) => p.associates ?? []),
+    staff: parts.flatMap((p) => p.staff ?? []),
+    vehicles: parts.flatMap((p) => p.vehicles ?? []),
+    allocation_notices: [
+      ...new Set(parts.flatMap((p) => p.allocation_notices ?? [])),
+    ],
+    expense_periods: merge(
+      parts.flatMap((p) => p.expense_periods ?? []),
+      (b) => `${b.source}|${b.source_id}`,
+      (_, b) => b,
+    ),
+    gaps: merge(
+      parts.flatMap((p) => p.gaps ?? []),
+      (g) => g.key,
+      (a, b) => ({
+        ...a,
+        days: a.days + b.days,
+        deliveries: a.deliveries + b.deliveries,
+        known_cost: a.known_cost + b.known_cost,
+        first_date: a.first_date < b.first_date ? a.first_date : b.first_date,
+        last_date: a.last_date > b.last_date ? a.last_date : b.last_date,
+      }),
+    ),
+    people: merge(
+      parts.flatMap((p) => p.people ?? []),
+      (p) => `${p.id}|${p.station_code}`,
+      (a, b) => ({
+        ...a,
+        deliveries: a.deliveries + b.deliveries,
+        salary: a.salary + b.salary,
+        variable: a.variable + b.variable,
+        fuel: a.fuel + b.fuel,
+        van: a.van + b.van,
+        paid_days: a.paid_days + b.paid_days,
+        zero_delivery_days: a.zero_delivery_days + b.zero_delivery_days,
+      }),
+    ),
   };
 }
 export type CpsDay = {
@@ -123,7 +253,11 @@ export type CpsSnapshot = {
   daily: CpsDay[];
   breakup: CpsLine[];
   generated_at: string;
-  source_dates?: {shipments:string|null;fuel:string|null;cashbook:string|null};
+  source_dates?: {
+    shipments: string | null;
+    fuel: string | null;
+    cashbook: string | null;
+  };
   associates?: import("./cps-engine").LiveAssociate[];
   gaps?: import("./cps-engine").CpsGap[];
   people?: import("./cps-engine").CpsPersonCost[];
@@ -134,26 +268,57 @@ export type CpsSnapshot = {
 };
 // Public CPS data contains grouped staff cost only; never employee identities or CTC.
 export type CpsStaffCost = {
-  group: string; station_code: string; head: CpsHead;
-  from_date: string; through_date: string; amount: number; allocation: string;
+  group: string;
+  station_code: string;
+  head: CpsHead;
+  from_date: string;
+  through_date: string;
+  amount: number;
+  allocation: string;
 };
 export type CpsPeoplePolicy = {
-  id?: string; designation_code: string; designation_name: string;
-  mode: 'excluded' | 'home' | 'managed'; head: CpsHead; label: string;
-  allocation: 'equal' | 'delivery_share'; effective_from: string;
+  id?: string;
+  designation_code: string;
+  designation_name: string;
+  mode: "excluded" | "home" | "managed";
+  head: CpsHead;
+  label: string;
+  allocation: "equal" | "delivery_share";
+  effective_from: string;
   updated_at?: string;
 };
 export type CpsExpensePeriod = {
-  source: 'payment' | 'cashbook'; source_id: string; station_code: string;
-  label: string; reference: string; amount: number; booked_on: string;
-  period_from: string; period_to: string; confirmed: boolean;
+  source: "payment" | "cashbook";
+  source_id: string;
+  station_code: string;
+  label: string;
+  reference: string;
+  amount: number;
+  booked_on: string;
+  period_from: string;
+  period_to: string;
+  confirmed: boolean;
 };
 export function selectedCpsStations(value?: string) {
-  return [...new Set((value || '').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean))];
+  return [
+    ...new Set(
+      (value || "")
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ];
 }
 export type CpsVehicleCost = {
-  vehicle_id: string; vehicle_no: string; model: string; station_code: string;
-  monthly_rent: number | null; from_date: string; through_date: string; days: number; amount: number | null;
+  vehicle_id: string;
+  vehicle_no: string;
+  model: string;
+  station_code: string;
+  monthly_rent: number | null;
+  from_date: string;
+  through_date: string;
+  days: number;
+  amount: number | null;
 };
 export function ratio(cost: number, deliveries: number) {
   return deliveries > 0 ? cost / deliveries : null;
@@ -178,7 +343,8 @@ export function summarizeCps(rows: CpsDay[]) {
       salary: a.salary + Number(r.da_salary ?? 0),
       variable: a.variable + Number(r.da_variable ?? 0),
       fuel: a.fuel + Number(r.da_fuel ?? 0),
-      exposedDeliveries: a.exposedDeliveries + Number(r.exposed_deliveries ?? 0),
+      exposedDeliveries:
+        a.exposedDeliveries + Number(r.exposed_deliveries ?? 0),
       costGaps: a.costGaps + Number(r.cost_gaps ?? 0),
       total: a.total + Number(r.total),
       unmapped: a.unmapped + Number(r.unmapped),
@@ -205,7 +371,12 @@ export function summarizeCps(rows: CpsDay[]) {
       van: 0,
       other: 0,
       rent: 0,
-      overhead: 0, salary: 0, variable: 0, fuel: 0, exposedDeliveries: 0, costGaps: 0,
+      overhead: 0,
+      salary: 0,
+      variable: 0,
+      fuel: 0,
+      exposedDeliveries: 0,
+      costGaps: 0,
       total: 0,
       unmapped: 0,
       unpaid: 0,
@@ -221,7 +392,11 @@ export function summarizeCps(rows: CpsDay[]) {
       ? ratio(totals.targetCost, totals.deliveries)
       : null;
   const provisional = Boolean(
-    totals.missingDays || totals.unmapped || totals.unpaid || totals.missingUtr || totals.costGaps,
+    totals.missingDays ||
+      totals.unmapped ||
+      totals.unpaid ||
+      totals.missingUtr ||
+      totals.costGaps,
   );
   return {
     ...totals,
@@ -319,10 +494,18 @@ export function validateCostInput(
   const notes = String(raw.notes ?? "").trim();
   if (notes.length > 500) throw Error("Notes must be 500 characters or fewer.");
   const employee = String(raw.employee_id ?? "").trim();
-  if (employee && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employee)) throw Error("Choose a valid People employee.");
-  if (employee && raw.frequency !== "monthly") throw Error("People CTC accrues monthly.");
+  if (
+    employee &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      employee,
+    )
+  )
+    throw Error("Choose a valid People employee.");
+  if (employee && raw.frequency !== "monthly")
+    throw Error("People CTC accrues monthly.");
   const sub = String(raw.sub_head ?? "").trim();
-  if (sub.length > 120) throw Error("Cost breakup name must be 120 characters or fewer.");
+  if (sub.length > 120)
+    throw Error("Cost breakup name must be 120 characters or fewer.");
   return {
     label,
     sub_head: sub || label,

@@ -299,3 +299,18 @@ test('multiple station selection respects access and excludes HO masters',async(
  assert.deepEqual((await d.cpsScope(context,{station:'a,B,FORGED'})).selected.map(s=>s.station_code),['A','B']);
  assert.equal((await d.cpsScope(context,{station:'OFFICE'})).selected.length,0);
 });
+test('cross-month reads split RPC boundaries and reuse bill snapshot without another bill RPC',async()=>{
+ const calls=[];
+ const db={rpc:async(name,args)=>{
+  calls.push([name,args]);
+  if(name==='ops_cps_source_facts')return {data:{shipments:[],stations:[]},error:null};
+  if(name==='ops_cps_vehicle_costs')return {data:{breakup:[],gaps:[],vehicles:[]},error:null};
+  if(name==='ops_cps_people_assignments')return {data:{employees:[],salaries:[],stations:[],volumes:[],assignments:[]},error:null};
+  return {data:{daily:[],breakup:[],expense_periods:[{source:'payment',source_id:'shared-bill'}]},error:null};
+ }};
+ const result=await dataModule(db).loadCpsSnapshot('company-a','2026-08-31','2026-09-02',all);
+ const base=calls.filter(([name])=>name==='ops_cps_base_v2');
+ assert.deepEqual(base.map(([,a])=>[a.p_from,a.p_through]),[['2026-08-31','2026-08-31'],['2026-09-01','2026-09-02']]);
+ assert.ok(base.every(([,a])=>a.p_company==='company-a'&&a.p_stations.join(',')==='A,B'));
+ assert.equal(calls.some(([n])=>n==='ops_cps_period_expenses'),false);assert.equal(result.expense_periods.length,1);
+});

@@ -81,6 +81,7 @@ insert into designations values('${company}','HRM','HR Head'),('${company}','CLM
 alter table payment_requests add column id uuid default gen_random_uuid();
 alter table cps_cashbook_daily add column id uuid default gen_random_uuid();`);
 await db.exec(readFileSync(new URL('../supabase/migrations/20261004171601_cps_allocation_privacy_and_period_costs.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261004181144_cps_expense_lookup_performance.sql',import.meta.url),'utf8'));
 assert.equal((await query("select mode from ops_cps_people_policies where designation_code='HRM'"))[0].mode,'excluded');
 assert.equal((await query("select allocation from ops_cps_people_policies where designation_code='CLM'"))[0].allocation,'equal');
 await db.exec(`insert into ops_cps_expense_policies(company_id,cost_label,mode,effective_from) values('${company}','electricity','monthly','2026-09-01');`);
@@ -96,6 +97,11 @@ await query("insert into ops_cps_expense_periods(company_id,source,source_id,per
 result=await costs('ops_cps_base_v2',['A']);
 assert.ok(Math.abs(result.breakup.filter(r=>r.source==='Approved payment requests'&&r.sub_head==='Electricity').reduce((s,r)=>s+r.amount,0)-483.87)<0.001,'cross-month service period conserves its total and allocates covered days');
 assert.equal((await costs('ops_cps_base_v2',['B'])).breakup.length,0,'selected station cannot regain a duplicate');
+const august=await costs('ops_cps_base_v2',['A'],'2026-08-01','2026-08-31');
+assert.ok(Math.abs(august.breakup.filter(r=>r.source==='Approved payment requests'&&r.sub_head==='Electricity').reduce((s,r)=>s+r.amount,0)-816.13)<0.001,'a later-booked bill remains visible through an overlapping service-date override');
+assert.equal(result.expense_periods.length,2,'base RPC returns the same bill evidence used in cost calculation');
+assert.equal((await query("select has_function_privilege('authenticated','ops_cps_base_v2(uuid,date,date,text[])','execute') allowed"))[0].allowed,false);
+
 assert.equal((await query("select count(*) n from ops_cps_configuration_changes"))[0].n,2,'settings and bill changes are audited');
 await assert.rejects(query("insert into ops_cps_expense_periods(company_id,source,source_id,period_from,period_to,reason) values($1,'cashbook',$2,'2026-09-02','2026-09-01','Invalid')",[company,bill.source_id]),/check constraint/);
 assert.equal((await query("select has_table_privilege('authenticated','ops_cps_people_policies','select') allowed"))[0].allowed,false);

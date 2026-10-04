@@ -168,3 +168,23 @@ test("cost input preserves zero and disabled status, rejects bad periods", () =>
     /period/,
   );
 });
+test('custom periods validate ordering, real dates, future dates and bounded ranges',()=>{
+ const p=cpsPeriod({period:'custom',from:'2026-08-20',to:'2026-09-10'},'2026-10-04');
+ assert.equal(p.days,22);assert.equal(p.from,'2026-08-20');assert.equal(p.to,'2026-09-10');
+ for(const [from,to] of [['2026-10-02','2026-09-01'],['2026-02-30','2026-03-01'],['2026-10-01','2026-10-05'],['2026-01-01','2026-10-01']]) assert.throws(()=>cpsPeriod({period:'custom',from,to},'2026-10-04'));
+ assert.deepEqual(module.exports.cpsMonthSlices('2024-02-28','2024-03-02'),[{from:'2024-02-28',to:'2024-02-29'},{from:'2024-03-01',to:'2024-03-02'}]);
+});
+test('single-station detail cannot include another station costs or issues',()=>{
+ const a={...day,station_code:'A'},b={...day,station_code:'B',deliveries:1,total:100000};
+ const data={daily:[a,b],breakup:[{station_code:'A',amount:1500},{station_code:'B',amount:100000}],gaps:[{key:'a',station_code:'A'},{key:'b',station_code:'B'}],expense_periods:[{station_code:'B',amount:999}],people:[{station_code:'B',name:'Other DA'}],staff:[{station_code:'B',amount:1234}],vehicles:[{station_code:'B',amount:999}]};
+ const single=module.exports.cpsForStation(data,'A');
+ assert.equal(summarizeCps(single.daily).cps,15);assert.equal(single.breakup.length,1);assert.equal(single.gaps.length,1);assert.equal(single.expense_periods.length,0);assert.equal(single.people.length,0);assert.equal(single.staff.length,0);assert.equal(single.vehicles.length,0);
+ assert.equal(module.exports.cpsForStation(data,'FORGED').daily.length,0);
+});
+test('cross-month combination sums cost numerators, deduplicates bills and keeps gap dates',()=>{
+ const gap={key:'id',station_code:'A',days:1,deliveries:100,known_cost:10,first_date:'2026-08-31',last_date:'2026-08-31'};
+ const first={daily:[day],breakup:[],expense_periods:[{source:'payment',source_id:'bill'}],gaps:[gap]};
+ const second={daily:[{...day,total:3000,deliveries:50}],breakup:[],expense_periods:first.expense_periods,gaps:[{...gap,first_date:'2026-09-01',last_date:'2026-09-01'}]};
+ const data=module.exports.mergeCpsMonths([first,second]);
+ assert.equal(summarizeCps(data.daily).cps,30);assert.equal(data.expense_periods.length,1);assert.equal(data.gaps.length,1);assert.equal(data.gaps[0].days,2);assert.equal(data.gaps[0].last_date,'2026-09-01');
+});
