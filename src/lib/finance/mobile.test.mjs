@@ -40,3 +40,20 @@ test('published release matches the signed APK and Finance install identity',()=
  const manifest=JSON.parse(read('../../../public/finance-app/manifest.webmanifest'));assert.equal(manifest.display,'standalone');assert.equal(manifest.id,'https://fin.dropxlogistics.com/');assert.ok(manifest.icons.some(i=>i.purpose==='maskable'));
  const android=read('../../../apps/dropx-finance-android/app/src/main/AndroidManifest.xml');assert.match(android,/usesCleartextTraffic="false"/);assert.doesNotMatch(android,/ACCESS_FINE_LOCATION|CAMERA|READ_CONTACTS|POST_NOTIFICATIONS/);
 });
+test('anonymous installs can read the manifest while financial pages still require sign-in',async()=>{
+ const {NextRequest}=require('next/server');
+ const {middleware}=compile('../../middleware.ts',{
+  '@/lib/people/surface':{isPeopleHostName:()=>false,isPeoplePortalPath:()=>false},
+  '@/lib/finance/surface':compile('./surface.ts'),
+  '@/lib/provider-mapping-host':{providerMappingPageCodeForHost:()=>null},
+  '@/lib/timeout-fetch':{timeoutFetch:()=>fetch},
+  '@/lib/with-timeout':{TimeoutError:class extends Error{},withTimeout:p=>p},
+  '@supabase/supabase-js':{createClient:()=>({auth:{getUser:async()=>({data:{user:null},error:null})}})}
+ });
+ for(const path of ['/finance-app/manifest.webmanifest','/finance-sw.js','/downloads/DropX-Finance-1.0.0.apk']){
+  const response=await middleware(new NextRequest('https://fin.dropxlogistics.com'+path,{headers:{host:'fin.dropxlogistics.com'}}));
+  assert.equal(response.status,200,path);assert.equal(response.headers.get('location'),null,path);
+ }
+ const page=await middleware(new NextRequest('https://fin.dropxlogistics.com/finance',{headers:{host:'fin.dropxlogistics.com'}}));
+ assert.equal(page.status,307);assert.match(page.headers.get('location'),/\/login/);
+});

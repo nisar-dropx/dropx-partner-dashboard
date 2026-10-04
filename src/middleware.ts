@@ -72,6 +72,7 @@ function isAssetPath(path: string) {
 
 function isPublicOpsInstallAsset(path: string) {
   return path === "/manifest.webmanifest" ||
+    path === "/finance-app/manifest.webmanifest" ||
     path === "/sw.js" ||
     path.startsWith("/opspulse/") ||
     path.startsWith("/downloads/") ||
