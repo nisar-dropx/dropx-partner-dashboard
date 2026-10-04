@@ -80,7 +80,7 @@ await db.exec(`create table designations(company_id uuid,code text,name text);
 insert into designations values('${company}','HRM','HR Head'),('${company}','CLM','Cluster Manager');
 alter table payment_requests add column id uuid default gen_random_uuid();
 alter table cps_cashbook_daily add column id uuid default gen_random_uuid();`);
-await db.exec(readFileSync(new URL('../supabase/migrations/20261004165411_cps_allocation_privacy_and_period_costs.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261004171601_cps_allocation_privacy_and_period_costs.sql',import.meta.url),'utf8'));
 assert.equal((await query("select mode from ops_cps_people_policies where designation_code='HRM'"))[0].mode,'excluded');
 assert.equal((await query("select allocation from ops_cps_people_policies where designation_code='CLM'"))[0].allocation,'equal');
 await db.exec(`insert into ops_cps_expense_policies(company_id,cost_label,mode,effective_from) values('${company}','electricity','monthly','2026-09-01');`);
@@ -102,7 +102,7 @@ assert.equal((await query("select has_table_privilege('authenticated','ops_cps_p
 
 await db.exec(`alter table fleet_vehicles add column color text;alter table fleet_vehicles add column rc_location text;
 create table document_types(id uuid default gen_random_uuid(),company_id uuid,code text,name text,description text,requires_expiry boolean,document_module text,is_active boolean,sort_order integer);`);
-await db.exec(readFileSync(new URL('../supabase/migrations/20261004170002_fleet_vehicle_identity_master.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261004171605_fleet_vehicle_identity_master.sql',import.meta.url),'utf8'));
 await query("update fleet_vehicles set chassis_number='TEST-CHASSIS',purchase_value=400000,invoice_number='INV-TEST',master_updated_by=$1 where id=$2",[station,vehicle]);
 assert.equal((await query('select count(*) n from fleet_vehicle_master_changes'))[0].n,1);
 assert.equal((await query("select before_values->>'chassis_number' old,after_values->>'chassis_number' new from fleet_vehicle_master_changes"))[0].new,'TEST-CHASSIS');
