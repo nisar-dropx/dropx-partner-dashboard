@@ -34,6 +34,7 @@ function inWindow(now: string, configured: string) {
 
 async function processCompany(company: { id: string; name: string | null }, date: string, time: string, force = false) {
   if (!supabaseAdmin) return "failed";
+  const database = supabaseAdmin;
   const setting = await supabaseAdmin.from("fleet_control_settings").select("daily_status_email_enabled,daily_status_send_time,daily_status_only_affected,daily_status_email_config").eq("company_id", company.id).eq("daily_status_email_enabled", true).order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (setting.error || !setting.data?.daily_status_email_enabled || (!force && !inWindow(time, clean(setting.data.daily_status_send_time)))) return "disabled";
   const config = normalizeFleetDailyStatusEmailConfig(setting.data.daily_status_email_config);
@@ -88,16 +89,16 @@ async function processCompany(company: { id: string; name: string | null }, date
     const scopedVehicles = vehicles.filter((row) => stationScope.has(clean(row.station_code).toUpperCase())); const scopedAdHocRows = adHocRows.filter((row) => stationScope.has(row.station)); const scopedAttention = attentionRows.filter((row) => stationScope.has(row.station));
     const totals = { ...summaryTotals(scopedFleetRows), adHoc: scopedAdHocRows.reduce((sum, row) => sum + row.todayCount, 0), adHocPending: scopedAdHocRows.reduce((sum, row) => sum + row.pendingCount, 0) };
     try {
-      const prior = config.monthlyThread ? await supabaseAdmin.from("fleet_status_report_logs").select("message_id,root_message_id,subject").eq("company_id", company.id).eq("recipient_email", delivery.email).eq("report_month", month).eq("status", "sent").order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null, error: null };
+      const prior = config.monthlyThread ? await database.from("fleet_status_report_logs").select("message_id,root_message_id,subject").eq("company_id", company.id).eq("recipient_email", delivery.email).eq("report_month", month).eq("status", "sent").order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null, error: null };
       if (prior.error) throw new Error(prior.error.message);
       const subject = prior.data?.subject || `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`; const root = prior.data?.root_message_id || prior.data?.message_id || null; const last = prior.data?.message_id || null;
       const messageId = last ? `<dropx.fleet-status.${randomUUID()}@partner.dropxlogistics.com>` : `<dropx.fleet-status.${company.id}.${config.monthlyThread ? month : date}.${randomUUID()}@partner.dropxlogistics.com>`;
       const presentation = buildFleetDailyStatusEmail({ companyName: company.name, date, rows: scopedFleetRows, exceptions: scopedVehicles.filter((row) => !active(row.status)), adHocRows: scopedAdHocRows, totals, config });
       const result = await sendEmail({ companyId: company.id, to: [delivery.email], subject, body: presentation.text, html: presentation.html, messageId, inReplyTo: last || undefined, references: last ? [...new Set([root, last].filter((value): value is string => Boolean(value)))] : undefined });
-      const log = await supabaseAdmin.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject, status: "sent", message_id: result.messageId || messageId, root_message_id: root || result.messageId || messageId, error_message: null }, { onConflict: "company_id,report_date,recipient_email" });
+      const log = await database.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject, status: "sent", message_id: result.messageId || messageId, root_message_id: root || result.messageId || messageId, error_message: null }, { onConflict: "company_id,report_date,recipient_email" });
       if (log.error) throw new Error(log.error.message); return "sent" as const;
     } catch (error) {
-      await supabaseAdmin.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject: `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`, status: "failed", error_message: error instanceof Error ? error.message : "Unable to send report." }, { onConflict: "company_id,report_date,recipient_email" });
+      await database.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject: `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`, status: "failed", error_message: error instanceof Error ? error.message : "Unable to send report." }, { onConflict: "company_id,report_date,recipient_email" });
       return "failed" as const;
     }
   }));
