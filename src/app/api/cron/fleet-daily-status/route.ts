@@ -16,7 +16,11 @@ const email = (value: unknown) => { const result = clean(value).toLowerCase(); r
 const active = (status: unknown) => clean(status).toLowerCase() === "active";
 const closed = (status: unknown) => ["sold", "disposed", "returned"].includes(clean(status).toLowerCase());
 const own = (type: unknown) => !["odcd", "rented", "leased"].includes(clean(type).toLowerCase());
-const approved = (status: unknown, source: string) => source === "Cashbook" || ["approved", "final_approved", "processing", "processed", "paid"].includes(clean(status).toLowerCase());
+const approved = (status: unknown, source: string) => {
+  const value = clean(status).toLowerCase();
+  return source === "Cashbook" || ["approved", "final_approved", "re_approved", "processing", "processed", "paid"].includes(value) || value.endsWith("_approved");
+};
+const pending = (status: unknown, source: string) => source !== "Cashbook" && ["pending", "re_pending", "submitted", "resubmitted", "under_review", "awaiting_approval"].includes(clean(status).toLowerCase());
 const isAmazonNow = (location: any) => (Array.isArray(location.location_models) ? location.location_models : [location.location_models]).some((model: any) => /(?:^|\s)(?:AMAZON\s+)?NOW(?:\s|$)/i.test(`${clean(model?.code)} ${clean(model?.name)}`));
 const summaryTotals = (rows: Summary[]) => ({ totalVehicles: rows.reduce((sum, row) => sum + row.ownTotal + row.partnerTotal, 0), operational: rows.reduce((sum, row) => sum + row.ownOperational + row.partnerOperational, 0), nonOperational: rows.reduce((sum, row) => sum + row.totalNonOperational, 0), adHoc: 0, adHocPending: 0, stationCount: rows.length });
 
@@ -51,10 +55,11 @@ async function processCompany(company: { id: string; name: string | null }, date
   const vehicles = ((vehiclesResult.data ?? []) as Vehicle[]).filter((row) => { const code = clean(row.station_code).toUpperCase(); return !closed(row.status) && !excludedCodes.has(code) && !(config.excludeAmazonNow && amazonNowCodes.has(code)); });
   const typedActivity = activity.stations.flatMap((station) => station.days.flatMap((day) => day.entries.flatMap((entry) => { const type = fleetAdHocRequestType(entry); return type ? [{ station: clean(station.code).toUpperCase(), date: day.date, type, amount: Number(entry.amount) || 0, approvalStatus: entry.approvalStatus, source: entry.source }] : []; })));
   const approvedActivity = typedActivity.filter((row) => approved(row.approvalStatus, row.source));
-  const pendingActivity = typedActivity.filter((row) => !approved(row.approvalStatus, row.source));
+  const pendingActivity = typedActivity.filter((row) => pending(row.approvalStatus, row.source));
   const todayActivity = approvedActivity.filter((row) => row.date === date); const todayPendingActivity = pendingActivity.filter((row) => row.date === date);
   const approvedVans = todayActivity.filter((row) => row.type === "Van");
-  const adHocKeys = [...new Set([...approvedActivity, ...pendingActivity].map((row) => `${row.station}|${row.type}`))];
+  const todayAdHocStations = new Set([...todayActivity, ...todayPendingActivity].map((row) => row.station));
+  const adHocKeys = [...new Set([...approvedActivity, ...pendingActivity].filter((row) => todayAdHocStations.has(row.station)).map((row) => `${row.station}|${row.type}`))];
   const adHocRows: FleetDailyStatusAdHocSummary[] = adHocKeys.map((key) => {
     const [station, typeValue] = key.split("|"); const type = typeValue as "Van" | "Driver";
     const todayRows = todayActivity.filter((row) => row.station === station && row.type === type); const todayPendingRows = todayPendingActivity.filter((row) => row.station === station && row.type === type);
@@ -62,7 +67,7 @@ async function processCompany(company: { id: string; name: string | null }, date
     return { station, type, todayCount: todayRows.length, todayAmount: todayRows.reduce((sum, row) => sum + row.amount, 0), todayPendingCount: todayPendingRows.length, todayPendingAmount: todayPendingRows.reduce((sum, row) => sum + row.amount, 0), pendingCount: pendingRows.length, pendingAmount: pendingRows.reduce((sum, row) => sum + row.amount, 0), mtdCount: mtdRows.length, mtdAmount: mtdRows.reduce((sum, row) => sum + row.amount, 0) };
   });
   const todayAdHocByStation = new Map<string, number>(); for (const row of adHocRows) todayAdHocByStation.set(row.station, (todayAdHocByStation.get(row.station) || 0) + row.todayCount + row.todayPendingCount);
-  const codes = [...new Set([...vehicles.map((row) => clean(row.station_code).toUpperCase()), ...approvedActivity.map((row) => row.station), ...pendingActivity.map((row) => row.station)].filter(Boolean))].sort();
+  const codes = [...new Set([...vehicles.map((row) => clean(row.station_code).toUpperCase()), ...todayActivity.map((row) => row.station), ...todayPendingActivity.map((row) => row.station)].filter(Boolean))].sort();
   const allRows = codes.map((station): Summary => {
     const stationVehicles = vehicles.filter((row) => clean(row.station_code).toUpperCase() === station); const owned = stationVehicles.filter((row) => own(row.ownership_type)); const partner = stationVehicles.filter((row) => !own(row.ownership_type));
     const ownOperational = owned.filter((row) => active(row.status)).length; const partnerOperational = partner.filter((row) => active(row.status)).length;
@@ -87,7 +92,7 @@ async function processCompany(company: { id: string; name: string | null }, date
     if (sentToday.has(delivery.email)) return "skipped" as const;
     const stationScope = new Set(delivery.stationCodes); const scopedRows = rows.filter((row) => stationScope.has(row.station)); const scopedFleetRows = scopedRows.filter((row) => row.ownTotal + row.partnerTotal > 0);
     const scopedVehicles = vehicles.filter((row) => stationScope.has(clean(row.station_code).toUpperCase())); const scopedAdHocRows = adHocRows.filter((row) => stationScope.has(row.station)); const scopedAttention = attentionRows.filter((row) => stationScope.has(row.station));
-    const totals = { ...summaryTotals(scopedFleetRows), adHoc: scopedAdHocRows.reduce((sum, row) => sum + row.todayCount, 0), adHocPending: scopedAdHocRows.reduce((sum, row) => sum + row.pendingCount, 0) };
+    const totals = { ...summaryTotals(scopedFleetRows), adHoc: scopedAdHocRows.reduce((sum, row) => sum + row.todayCount, 0), adHocPending: scopedAdHocRows.reduce((sum, row) => sum + row.todayPendingCount, 0) };
     try {
       const prior = config.monthlyThread ? await database.from("fleet_status_report_logs").select("message_id,root_message_id,subject").eq("company_id", company.id).eq("recipient_email", delivery.email).eq("report_month", month).eq("status", "sent").order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null, error: null };
       if (prior.error) throw new Error(prior.error.message);

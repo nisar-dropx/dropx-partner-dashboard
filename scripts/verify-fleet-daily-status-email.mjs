@@ -19,7 +19,8 @@ const report = exports.buildFleetDailyStatusEmail({
   exceptions: [],
   adHocRows: [
     { station: 'KOZA', type: 'Van', todayCount: 2, todayAmount: 1500, todayPendingCount: 1, todayPendingAmount: 1600, pendingCount: 3, pendingAmount: 4200, mtdCount: 8, mtdAmount: 6400 },
-    { station: 'KOZA', type: 'Driver', todayCount: 1, todayAmount: 700, todayPendingCount: 2, todayPendingAmount: 1400, pendingCount: 4, pendingAmount: 2800, mtdCount: 4, mtdAmount: 2800 }
+    { station: 'KOZA', type: 'Driver', todayCount: 1, todayAmount: 700, todayPendingCount: 2, todayPendingAmount: 1400, pendingCount: 4, pendingAmount: 2800, mtdCount: 4, mtdAmount: 2800 },
+    { station: 'MTDO', type: 'Van', todayCount: 0, todayAmount: 0, todayPendingCount: 0, todayPendingAmount: 0, pendingCount: 2, pendingAmount: 3200, mtdCount: 5, mtdAmount: 8000 }
   ],
   totals: { totalVehicles: 32, operational: 26, nonOperational: 6, adHoc: 3, adHocPending: 3, stationCount: 12 },
   config: { title: 'Configured title', footer: 'Configured footer', accentColor: '#123456' }
@@ -49,6 +50,9 @@ assert.match(report.html, /Pending 3 · ₹4,200/);
 assert.match(report.html, /Total <strong>8<\/strong> · ₹5,600/);
 assert.match(report.html, /Approved 4 · ₹2,800/);
 assert.match(report.html, /Pending 4 · ₹2,800/);
+assert.doesNotMatch(report.html, /MTDO/);
+assert.match(report.html, /Ad hoc approved today/);
+assert.match(report.html, /3 pending approvals today/);
 assert.doesNotMatch(report.html, /Open pending/);
 assert.doesNotMatch(report.html, /Ad hoc today/);
 assert.doesNotMatch(report.html, /Ad hoc MTD \+ open/);
@@ -80,6 +84,9 @@ const route = readFileSync('src/app/api/cron/fleet-daily-status/route.ts', 'utf8
 assert.match(route, /to: \[delivery\.email\]/);
 assert.match(route, /\.eq\("recipient_email", delivery\.email\)/);
 assert.match(route, /stationScope\.has/);
+assert.match(route, /typedActivity\.filter\(\(row\) => pending\(row\.approvalStatus, row\.source\)\)/);
+assert.match(route, /todayAdHocStations\.has\(row\.station\)/);
+assert.match(route, /row\.todayPendingCount/);
 const migration = readFileSync('supabase/migrations/20261004172422_fleet_daily_status_recipient_threads.sql', 'utf8');
 assert.match(migration, /unique \(company_id, report_date, recipient_email\)/i);
 assert.match(migration, /daily_status_send_time = '20:00:00'/);
