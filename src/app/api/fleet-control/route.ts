@@ -3,6 +3,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeFleetDailyStatusEmailConfig } from "@/lib/fleet/daily-status-email";
 
 type Payload = Record<string, any>;
 const emailPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -65,9 +66,12 @@ export async function POST(request: Request) {
     if (action === "vehicle-status-reason.upsert") return await upsertVehicleStatusReason(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status-reason.remove") return await removeVehicleStatusReason(context.companyId, context.canManageSettings, body);
     if (action === "settings.update") return await updateSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
+    if (action === "settings.update-mail") return await updateMailSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "member.upsert") return await upsertMember(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "status-recipient.upsert") return await upsertStatusRecipient(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "status-recipient.remove") return await removeStatusRecipient(context.companyId, context.canManageSettings, body);
+    if (action === "status-recipient.toggle") return await toggleStatusRecipient(context.companyId, context.canManageSettings, body);
+    if (action === "status-recipient.delete") return await deleteStatusRecipient(context.companyId, context.canManageSettings, body);
     return NextResponse.json({ error: "Unsupported Fleet Control action." }, { status: 400 });
   } catch (error) {
     return NextResponse.json({ error: setupError(error instanceof Error ? error.message : "Fleet action failed.") }, { status: 400 });
@@ -469,9 +473,18 @@ async function removeVehicleStatusReason(companyId: string, allowed: boolean, bo
 
 async function updateSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
-  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, default_audit_cadence_days: Number(body.defaultAuditCadenceDays ?? 30), document_warning_days: Number(body.documentWarningDays ?? 30), service_warning_days: Number(body.serviceWarningDays ?? 14), auto_suggest_audits: Boolean(body.autoSuggestAudits), breakdown_vehicle_link_required: Boolean(body.breakdownVehicleLinkRequired), audit_email_enabled: Boolean(body.auditEmailEnabled), audit_video_required: Boolean(body.auditVideoRequired), daily_status_email_enabled: Boolean(body.dailyStatusEmailEnabled), daily_status_send_time: clean(body.dailyStatusSendTime) || "20:30", daily_status_only_affected: body.dailyStatusOnlyAffected !== false, updated_by: userId, updated_at: new Date().toISOString() });
+  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, default_audit_cadence_days: Number(body.defaultAuditCadenceDays ?? 30), document_warning_days: Number(body.documentWarningDays ?? 30), service_warning_days: Number(body.serviceWarningDays ?? 14), auto_suggest_audits: Boolean(body.autoSuggestAudits), breakdown_vehicle_link_required: Boolean(body.breakdownVehicleLinkRequired), audit_email_enabled: Boolean(body.auditEmailEnabled), audit_video_required: Boolean(body.auditVideoRequired), updated_by: userId, updated_at: new Date().toISOString() });
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, message: "Fleet settings updated." });
+}
+
+async function updateMailSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const enabled = Boolean(body.dailyStatusEmailEnabled);
+  const emailConfig = normalizeFleetDailyStatusEmailConfig(body.dailyStatusEmailConfig);
+  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, daily_status_email_enabled: enabled, daily_status_send_time: clean(body.dailyStatusSendTime) || "20:30", daily_status_only_affected: body.dailyStatusOnlyAffected !== false, daily_status_email_config: emailConfig, updated_by: userId, updated_at: new Date().toISOString() });
+  if (result.error) throw new Error(result.error.message);
+  return NextResponse.json({ ok: true, message: enabled ? "Daily Fleet mail configuration saved and scheduled." : "Daily Fleet mail configuration saved on hold." });
 }
 
 async function upsertStatusRecipient(companyId: string, userId: string, allowed: boolean, body: Payload) {
@@ -480,9 +493,13 @@ async function upsertStatusRecipient(companyId: string, userId: string, allowed:
   if (!emailPattern.test(email)) throw new Error("Enter a valid recipient email.");
   const stationCodes = Array.isArray(body.stationCodes) ? [...new Set(body.stationCodes.map((value: unknown) => clean(value).toUpperCase()).filter(Boolean))] : [];
   const values = { company_id: companyId, name: clean(body.name) || email, email, station_codes: stationCodes, source: "manual", is_active: true, created_by: userId, updated_at: new Date().toISOString() };
-  const result = await supabaseAdmin!.from("fleet_status_report_recipients").upsert(values, { onConflict: "company_id,email" }).select("id").single();
+  const recipientId = clean(body.recipientId);
+  const result = recipientId
+    ? await supabaseAdmin!.from("fleet_status_report_recipients").update(values).eq("company_id", companyId).eq("id", recipientId).select("id").maybeSingle()
+    : await supabaseAdmin!.from("fleet_status_report_recipients").upsert(values, { onConflict: "company_id,email" }).select("id").single();
   if (result.error) throw new Error(result.error.message);
-  return NextResponse.json({ ok: true, id: result.data.id, message: "Daily status recipient saved." });
+  if (!result.data) throw new Error("Daily status recipient was not found.");
+  return NextResponse.json({ ok: true, id: result.data.id, message: recipientId ? "Daily status recipient updated." : "Daily status recipient added." });
 }
 
 async function removeStatusRecipient(companyId: string, allowed: boolean, body: Payload) {
@@ -492,6 +509,24 @@ async function removeStatusRecipient(companyId: string, allowed: boolean, body: 
   if (result.error) throw new Error(result.error.message);
   if (!result.data) throw new Error("Recipient was not found.");
   return NextResponse.json({ ok: true, message: "Daily status recipient removed." });
+}
+
+async function toggleStatusRecipient(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const recipientId = required(body.recipientId, "Recipient");
+  const result = await supabaseAdmin!.from("fleet_status_report_recipients").update({ is_active: body.isActive !== false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", recipientId).select("id").maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Recipient was not found.");
+  return NextResponse.json({ ok: true, message: body.isActive !== false ? "Recipient resumed." : "Recipient placed on hold." });
+}
+
+async function deleteStatusRecipient(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const recipientId = required(body.recipientId, "Recipient");
+  const result = await supabaseAdmin!.from("fleet_status_report_recipients").delete().eq("company_id", companyId).eq("id", recipientId).select("id").maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Recipient was not found.");
+  return NextResponse.json({ ok: true, message: "Recipient deleted." });
 }
 
 async function upsertMember(companyId: string, userId: string, allowed: boolean, body: Payload) {

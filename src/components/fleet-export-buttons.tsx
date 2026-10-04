@@ -4,7 +4,7 @@ import { FileImage, FileSpreadsheet, FileText } from "lucide-react";
 import { useState } from "react";
 import { downloadFleetExcel, downloadFleetImage, downloadFleetPdf, type FleetReportTable } from "@/lib/fleet/report-export";
 
-export function FleetExportButtons({ report, compact = false, image = false }: { report: FleetReportTable; compact?: boolean; image?: boolean }) {
+export function FleetExportButtons({ report, compact = false, image = true }: { report: FleetReportTable; compact?: boolean; image?: boolean }) {
   const [busy, setBusy] = useState<"excel" | "image" | "pdf" | null>(null);
   async function run(format: "excel" | "image" | "pdf") {
     setBusy(format);
