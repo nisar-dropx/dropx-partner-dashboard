@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     }
 
     const partnerState=(await loadPartnerOnboardingStates(db,company,[person.id])).get(person.id);
-    if(account.activationOnly && partnerState) return NextResponse.json({available:true,stage:partnerState.stage,stageLabel:partnerState.label,instruction:partnerState.instruction,reportUpdatedAt:partnerState.report_updated_at,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:partnerState.label,nextFollowUp:null,updatedAt:partnerState.report_updated_at,tasks:[],training:null},{headers});
+    if(account.activationOnly && partnerState) return NextResponse.json({available:true,stage:partnerState.stage,stageLabel:partnerState.label,instruction:partnerState.instruction,reportDate:partnerState.report_date,reportUpdatedAt:partnerState.report_updated_at,configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:partnerState.label,nextFollowUp:null,updatedAt:null,tasks:[],training:null},{headers});
     const ids = [{column:"workforce_id",id:person.id}];
     if (person.source_profile_id && ["contractor","field_executive"].includes(person.source_profile_type ?? "")) ids.push({column:`${person.source_profile_type}_id`,id:person.source_profile_id});
     const [planResult, mappingLists] = await Promise.all([

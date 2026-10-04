@@ -1,4 +1,4 @@
-import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
+import { loadPartnerOnboardingStates, partnerReportStillBlocksWorkspace } from "@/lib/partner-onboarding";
 import { createHash, randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { normalizeMobile } from "@/lib/connect-otp";
@@ -983,7 +983,15 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         : false;
       if (workspace === "workforce" && account.profile_type === "workforce") {
         const state=(await loadPartnerOnboardingStates(supabaseAdmin!,account.company_id,[account.id])).get(account.id);
-        activationOnly=Boolean(state?.registration_ready && state.restrict_dropx_one && !state.mapping_confirmed);
+        const todayIst = todayInIndia();
+        activationOnly = partnerReportStillBlocksWorkspace({
+          accountStatus: account.status,
+          mappingConfirmed: Boolean(state?.mapping_confirmed),
+          registrationReady: Boolean(state?.registration_ready),
+          reportDate: state?.report_date,
+          restrictDropxOne: Boolean(state?.restrict_dropx_one),
+          today: todayIst
+        });
         activationStage=state?.stage??null;
         const pilot=await supabaseAdmin!.from("workforce_amazon_pilots").select("workforce_id,closed_at").eq("company_id",account.company_id).eq("workforce_id",account.id).maybeSingle();
         // Additive pilot schema may be deployed independently of DropX One.
