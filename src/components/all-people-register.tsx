@@ -71,6 +71,11 @@ const yesNoOptions = [
   { value: "No", label: "No" }
 ];
 
+const activationStatusOptions = [
+  { value: "Yes", label: "Active" },
+  { value: "No", label: "Inactive" }
+];
+
 const genderOptions = [
   { value: "Male", label: "Male" },
   { value: "Female", label: "Female" },
@@ -138,7 +143,7 @@ const viewVerificationKindByField: Partial<Record<AllPeopleExportKey, SheetVerif
 const sheetLeadingKeys: AllPeopleExportKey[] = ["dropxId", "fullName", "biometricId"];
 const sheetColumns = [
   ...sheetLeadingKeys.map((key) => allPeopleExportColumns.find((column) => column.key === key)!),
-  ...allPeopleExportColumns.filter((column) => !sheetLeadingKeys.includes(column.key))
+  ...allPeopleExportColumns.filter((column) => !sheetLeadingKeys.includes(column.key) && column.key !== "active")
 ];
 const viewSheetColumns = sheetColumns.map((column) => (
   column.key === "aadhaarNumber"
@@ -165,6 +170,16 @@ const workforceEditableKeys = new Set<AllPeopleExportKey>([
 
 type FilterOption = { value: string; label: string; categoryCodes?: string[] };
 type SheetEditOptions = Partial<Record<"location" | "designation" | "status" | "active", FilterOption[]>>;
+
+function sheetFieldKey(key: AllPeopleExportKey): AllPeopleExportKey {
+  return key === "status" ? "active" : key;
+}
+
+function activationStatusLabel(value: string) {
+  if (value === "Yes") return "Active";
+  if (value === "No") return "Inactive";
+  return "";
+}
 
 function MultiCheckFilter({
   allLabel,
@@ -535,6 +550,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
   const [selectedExportColumns, setSelectedExportColumns] = useState<AllPeopleExportKey[]>(() => allPeopleExportColumns.map((column) => column.key));
   const [drafts, setDrafts] = useState<Record<string, Partial<AllPeopleExportValues>>>({});
   const [savedValues, setSavedValues] = useState<Record<string, Partial<AllPeopleExportValues>>>({});
+  const [activationFilterValues, setActivationFilterValues] = useState<Record<string, string>>({});
   const [versions, setVersions] = useState<Record<string, string>>({});
   const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
   const [savingAll, setSavingAll] = useState(false);
@@ -553,8 +569,10 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
   ), [rows]);
   const locationOptions = useMemo(() => editOptions.location ?? optionsFrom(rows.map((row) => row.location)), [editOptions.location, rows]);
   const designationOptions = useMemo<FilterOption[]>(() => editOptions.designation ?? optionsFrom(rows.map((row) => row.designation)), [editOptions.designation, rows]);
-  const statusOptions = useMemo(() => editOptions.status ?? optionsFrom(rows.map((row) => row.status)), [editOptions.status, rows]);
-  const activeOptions = useMemo(() => editOptions.active ?? yesNoOptions, [editOptions.active]);
+  const statusOptions = useMemo(
+    () => editableSheet ? activationStatusOptions : editOptions.status ?? optionsFrom(rows.map((row) => row.status)),
+    [editOptions.status, editableSheet, rows]
+  );
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -562,10 +580,13 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
       if (categories.length && !categories.includes(row.categoryCode)) return false;
       if (locations.length && !locations.includes(row.location)) return false;
       if (designations.length && !designations.includes(row.designation)) return false;
-      if (statuses.length && !statuses.includes(row.status)) return false;
+      const statusValue = editableSheet
+        ? activationFilterValues[`${row.categoryCode}:${row.id}`] ?? row.exportValues.active
+        : row.status;
+      if (statuses.length && !statuses.includes(statusValue)) return false;
       return !term || `${row.code} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.model} ${row.provider} ${row.designation} ${row.category}`.toLowerCase().includes(term);
     });
-  }, [categories, designations, locations, rows, search, statuses]);
+  }, [activationFilterValues, categories, designations, editableSheet, locations, rows, search, statuses]);
   const totalPages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visibleRows = pageSize === "all"
@@ -575,6 +596,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
   const lastVisibleRecord = pageSize === "all" ? filteredRows.length : Math.min(currentPage * pageSize, filteredRows.length);
 
   useEffect(() => setPage(1), [categories, designations, locations, pageSize, search, statuses]);
+  useEffect(() => setStatuses([]), [editableSheet]);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -753,6 +775,10 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
 
     const savedPatch = "savedValues" in result ? result.savedValues : patch;
     setSavedValues((current) => ({ ...current, [keyValue]: { ...(current[keyValue] ?? {}), ...savedPatch } }));
+    const savedActivation = savedPatch.active;
+    if (typeof savedActivation === "string" && !result.warning) {
+      setActivationFilterValues((current) => ({ ...current, [keyValue]: savedActivation }));
+    }
     setVerificationSummaryInvalidations((current) => ({
       ...current,
       [keyValue]: Array.from(new Set([...(current[keyValue] ?? []), ...result.invalidatedVerificationKinds]))
@@ -910,14 +936,17 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
               return (
                 <tr className={rowDirty ? "sheet-row-dirty" : undefined} key={rowId}>
                   {activeSheetColumns.map((column) => {
-                    const editable = canEditField(row, column.key);
-                    const cellDirty = Object.prototype.hasOwnProperty.call(rowPatch, column.key);
+                    const fieldKey = sheetFieldKey(column.key);
+                    const editable = canEditField(row, fieldKey);
+                    const cellDirty = Object.prototype.hasOwnProperty.call(rowPatch, fieldKey);
                     const fieldOptions = column.key === "location"
                       ? locationOptions
                       : column.key === "designation"
                         ? designationOptions.filter((option) => option.categoryCodes === undefined || option.categoryCodes.includes(row.categoryCode))
-                        : column.key === "active" || column.key === "handicapped"
-                          ? activeOptions
+                        : column.key === "status"
+                          ? activationStatusOptions
+                          : column.key === "handicapped"
+                            ? yesNoOptions
                           : column.key === "gender"
                             ? genderOptions
                             : column.key === "bloodGroup"
@@ -925,7 +954,8 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
                               : column.key === "stateCode"
                                 ? stateCodeOptions
                           : undefined;
-                    const cellValue = values[column.key] ?? "";
+                    const cellValue = values[fieldKey] ?? "";
+                    const displayValue = column.key === "status" ? activationStatusLabel(cellValue) : cellValue;
                     const linkedField = column.key === "model" || column.key === "provider";
                     const fileField = fileFieldKeys.has(column.key);
                     const dateField = dateFieldKeys.has(column.key);
@@ -965,7 +995,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
                         aria-label={`${column.label} for ${row.fullName}`}
                         className="sheet-cell-input"
                         disabled={rowSaving}
-                        onChange={(event) => changeValue(row, column.key, dateField ? toDisplayDateValue(event.target.value) : event.target.value)}
+                        onChange={(event) => changeValue(row, fieldKey, dateField ? toDisplayDateValue(event.target.value) : event.target.value)}
                         type={dateField ? "date" : "text"}
                         value={dateField ? toDateInputValue(cellValue) : cellValue}
                       />
@@ -989,7 +1019,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
                             <SheetStatutorySelect
                               disabled={rowSaving}
                               label={`${column.label} for ${row.fullName}`}
-                              onChange={(value) => changeValue(row, column.key, value)}
+                              onChange={(value) => changeValue(row, fieldKey, value)}
                               value={cellValue}
                             />
                           ) : fieldOptions ? (
@@ -997,7 +1027,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
                               aria-label={`${column.label} for ${row.fullName}`}
                               className="sheet-cell-input sheet-cell-select"
                               disabled={rowSaving}
-                              onChange={(event) => changeValue(row, column.key, event.target.value)}
+                              onChange={(event) => changeValue(row, fieldKey, event.target.value)}
                               value={cellValue}
                             >
                               <option value="">Select…</option>
@@ -1019,7 +1049,7 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
                               </SheetVerificationControl>
                             ) : textInput
                           )
-                        ) : <span className={`sheet-cell-value ${expiredVehicleDate ? "sheet-expired-date" : ""}`.trim()}>{cellValue || "-"}{expiredVehicleDate ? <span className="sheet-screen-reader-only"> Expired.</span> : null}</span>}
+                        ) : <span className={`sheet-cell-value ${expiredVehicleDate ? "sheet-expired-date" : ""}`.trim()}>{displayValue || "-"}{expiredVehicleDate ? <span className="sheet-screen-reader-only"> Expired.</span> : null}</span>}
                         {editNote ? <small className="sheet-verification-note">{editNote}</small> : null}
                         {viewSummary ? <small className={`sheet-view-verification-note ${viewSummary.tone}`}>{viewSummary.text}{viewSummaryStatus ? <span className="sheet-screen-reader-only">. {viewSummaryStatus}.</span> : null}</small> : null}
                       </td>

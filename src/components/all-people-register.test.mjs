@@ -60,11 +60,24 @@ test("designation editing is limited to options valid for the row category and s
   assert.match(styles, /\.sheet-save-warning\s*\{/);
 });
 
-test("boolean fields always offer both Yes and No", () => {
+test("status replaces the separate active column and persists through the active field", () => {
+  assert.match(component, /column\.key !== "active"/);
+  assert.match(component, /key === "status" \? "active" : key/);
+  assert.match(component, /\{ value: "Yes", label: "Active" \}/);
+  assert.match(component, /\{ value: "No", label: "Inactive" \}/);
+  assert.match(component, /column\.key === "status"[\s\S]*?activationStatusOptions/);
+  assert.match(component, /changeValue\(row, fieldKey, event\.target\.value\)/);
+  assert.match(component, /activationFilterValues\[`\$\{row\.categoryCode\}:\$\{row\.id\}`\] \?\? row\.exportValues\.active/);
+  assert.match(component, /typeof savedActivation === "string" && !result\.warning/);
+  assert.match(component, /setActivationFilterValues/);
+  assert.match(component, /useEffect\(\(\) => setStatuses\(\[\]\), \[editableSheet\]\)/);
+});
+
+test("other boolean fields still offer both Yes and No", () => {
   assert.match(component, /const yesNoOptions = \[/);
   assert.match(component, /value: "Yes", label: "Yes"/);
   assert.match(component, /value: "No", label: "No"/);
-  assert.match(component, /column\.key === "active" \|\| column\.key === "handicapped"/);
+  assert.match(component, /column\.key === "handicapped"[\s\S]*?yesNoOptions/);
 });
 
 test("fixed horizontal scrollbar mirrors the table scroll position", () => {
