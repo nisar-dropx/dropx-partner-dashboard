@@ -168,8 +168,8 @@ const palette = {
 
 function statusTone(value: unknown) {
   const text = pdfText(value).toLowerCase();
-  if (/approved|active|operational|completed|passed|paid|connected|compliant/.test(text) && !/non[- ]?operational/.test(text)) return "green";
   if (/rejected|expired|breakdown|failed|overdue|non[- ]?operational|inactive/.test(text)) return "red";
+  if (/approved|active|operational|completed|passed|paid|connected|compliant/.test(text)) return "green";
   if (/pending|processing|service|maintenance|due|expiring|scheduled/.test(text)) return "amber";
   if (/driver|video|gps|live/.test(text)) return "blue";
   return null;
