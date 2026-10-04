@@ -21,10 +21,10 @@ import {
   BarChart3,
   LayoutDashboard,
   ListChecks,
+  LogOut,
   MapPin,
   Mail,
   Menu,
-  MoreHorizontal,
   Pencil,
   Pause,
   Play,
@@ -153,7 +153,8 @@ export function FleetControlDashboard({
   initialSection,
   message,
   rejectAction,
-  returnAction
+  returnAction,
+  signOutAction
 }: {
   approveAction: (formData: FormData) => Promise<void>;
   data: FleetControlData;
@@ -163,6 +164,7 @@ export function FleetControlDashboard({
   message: { type: "notice" | "error"; text: string } | null;
   rejectAction: (formData: FormData) => Promise<void>;
   returnAction: (formData: FormData) => Promise<void>;
+  signOutAction: (formData: FormData) => void | Promise<void>;
 }) {
   const router = useRouter();
   const visibleSectionSet = new Set(data.capabilities.visibleSections as Section[]);
@@ -592,7 +594,7 @@ export function FleetControlDashboard({
         <div className="fc-user-card">
           <span>{data.operator.name.slice(0, 1).toUpperCase()}</span>
           <div><strong>{data.operator.name}</strong><small>{data.operator.role}</small></div>
-          <MoreHorizontal size={18} />
+          <form action={signOutAction}><button aria-label="Sign out" className="fc-sign-out" title="Sign out" type="submit"><LogOut size={17} /></button></form>
         </div>
       </aside>
 
@@ -603,6 +605,7 @@ export function FleetControlDashboard({
           <button aria-label="Open navigation" className="fc-menu" onClick={() => setMobileNav(true)} type="button"><Menu size={20} /></button>
           <div><span>Fleet Control</span><strong>{title}</strong></div>
           <label className="fc-search"><Search size={17} /><input onChange={(event) => setQuery(event.target.value)} placeholder="Search vehicle, station or request" value={query} /></label>
+          <form action={signOutAction} className="fc-mobile-sign-out"><button aria-label="Sign out" title="Sign out" type="submit"><LogOut size={18} /><span>Sign out</span></button></form>
           <button aria-label="Notifications" className="fc-icon-button" type="button"><Bell size={18} />{pendingPayments.length ? <i /> : null}</button>
         </header>
 

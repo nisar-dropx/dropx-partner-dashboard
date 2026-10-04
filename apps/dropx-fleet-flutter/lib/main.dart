@@ -418,6 +418,23 @@ class _FleetHomeState extends State<FleetHome> {
       MoreScreen(snapshot: snapshot!, refresh: refresh, logout: logout),
     ];
     return Scaffold(
+      appBar: AppBar(
+        toolbarHeight: 48,
+        titleSpacing: 18,
+        title: const Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.local_shipping_rounded, color: brand, size: 21),
+          SizedBox(width: 8),
+          Text('DropX Fleet',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900))
+        ]),
+        actions: [
+          IconButton(
+              tooltip: 'Sign out',
+              onPressed: logout,
+              icon: const Icon(Icons.logout_rounded, color: Color(0xffb52c58))),
+          const SizedBox(width: 6)
+        ],
+      ),
       body: SafeArea(child: IndexedStack(index: index, children: pages)),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
@@ -478,35 +495,37 @@ class TodayScreen extends StatelessWidget {
                     onPressed: refresh,
                     icon: const Icon(Icons.refresh_rounded))),
             const SizedBox(height: 18),
-            GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                childAspectRatio: 1.55,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                children: [
-                  MetricCard(
-                      label: 'Vehicles',
-                      value: '${counts['vehicles'] ?? 0}',
-                      tone: ink,
-                      icon: Icons.local_shipping_outlined),
-                  MetricCard(
-                      label: 'Operational',
-                      value: '${counts['active'] ?? 0}',
-                      tone: const Color(0xff087f5b),
-                      icon: Icons.check_circle_outline),
-                  MetricCard(
-                      label: 'Unavailable',
-                      value: '${counts['unavailable'] ?? 0}',
-                      tone: const Color(0xffc92a2a),
-                      icon: Icons.warning_amber_rounded),
-                  MetricCard(
-                      label: 'Approvals',
-                      value: '${counts['pendingPayments'] ?? 0}',
-                      tone: const Color(0xff8c5b00),
-                      icon: Icons.approval_outlined),
-                ]),
+            LayoutBuilder(
+                builder: (context, constraints) => GridView.count(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisCount: constraints.maxWidth < 330 ? 1 : 2,
+                        childAspectRatio:
+                            constraints.maxWidth < 330 ? 2.9 : 1.55,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                        children: [
+                          MetricCard(
+                              label: 'Vehicles',
+                              value: '${counts['vehicles'] ?? 0}',
+                              tone: ink,
+                              icon: Icons.local_shipping_outlined),
+                          MetricCard(
+                              label: 'Operational',
+                              value: '${counts['active'] ?? 0}',
+                              tone: const Color(0xff087f5b),
+                              icon: Icons.check_circle_outline),
+                          MetricCard(
+                              label: 'Unavailable',
+                              value: '${counts['unavailable'] ?? 0}',
+                              tone: const Color(0xffc92a2a),
+                              icon: Icons.warning_amber_rounded),
+                          MetricCard(
+                              label: 'Approvals',
+                              value: '${counts['pendingPayments'] ?? 0}',
+                              tone: const Color(0xff8c5b00),
+                              icon: Icons.approval_outlined),
+                        ])),
             const SizedBox(height: 20),
             SectionTitle(
                 title: 'Needs attention',
@@ -827,46 +846,49 @@ class MoreScreen extends StatelessWidget {
               title: 'More',
               subtitle: snapshot.userName),
           const SizedBox(height: 18),
-          GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 1.25,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10),
-              itemCount: modules.length,
-              itemBuilder: (_, index) {
-                final module = modules[index];
-                return Card(
-                    child: InkWell(
-                        onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => ModuleScreen(
-                                    spec: module, snapshot: snapshot))),
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                            padding: const EdgeInsets.all(15),
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Container(
-                                      width: 42,
-                                      height: 42,
-                                      decoration: BoxDecoration(
-                                          color: module.color.withValues(alpha: .11),
-                                          borderRadius:
-                                              BorderRadius.circular(12)),
-                                      child: Icon(module.icon,
-                                          color: module.color)),
-                                  Text(module.title,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 16))
-                                ]))));
-              }),
+          LayoutBuilder(
+              builder: (context, constraints) => GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: constraints.maxWidth < 330 ? 1 : 2,
+                      childAspectRatio: constraints.maxWidth < 330 ? 2.8 : 1.25,
+                      crossAxisSpacing: 10,
+                      mainAxisSpacing: 10),
+                  itemCount: modules.length,
+                  itemBuilder: (_, index) {
+                    final module = modules[index];
+                    return Card(
+                        child: InkWell(
+                            onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => ModuleScreen(
+                                        spec: module, snapshot: snapshot))),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                                padding: const EdgeInsets.all(15),
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                          width: 42,
+                                          height: 42,
+                                          decoration: BoxDecoration(
+                                              color: module.color
+                                                  .withValues(alpha: .11),
+                                              borderRadius:
+                                                  BorderRadius.circular(12)),
+                                          child: Icon(module.icon,
+                                              color: module.color)),
+                                      Text(module.title,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 16))
+                                    ]))));
+                  })),
           const SizedBox(height: 20),
           Card(
               child: Column(children: [

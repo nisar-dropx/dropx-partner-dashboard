@@ -3,6 +3,7 @@ import { FleetControlDashboard } from "@/components/fleet-control-dashboard";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { hasActiveFleetMembership, loadFleetControlData } from "@/lib/fleet-control";
+import { signOut } from "@/app/login/actions";
 import { approveFleetPayment, rejectFleetPayment, returnFleetPayment } from "./actions";
 import "./fleet-control.css";
 
@@ -38,6 +39,7 @@ export default async function FleetControlPage({ searchParams }: { searchParams?
       message={searchParams?.error ? { type: "error", text: searchParams.error } : searchParams?.notice ? { type: "notice", text: searchParams.notice } : null}
       rejectAction={rejectFleetPayment}
       returnAction={returnFleetPayment}
+      signOutAction={signOut}
     />
   );
 }
