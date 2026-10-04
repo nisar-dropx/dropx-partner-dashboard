@@ -1,0 +1,4 @@
+import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
+let host='fleet.dropxlogistics.com';const exports={};new Function('exports','require',ts.transpileModule(fs.readFileSync('src/app/manifest.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(exports,()=>({headers:()=>({get:key=>key==='host'?host:null})}));
+for(host of ['fleet.dropxlogistics.com','dropx-fleet-test.vercel.app']){const manifest=exports.default();assert.equal(manifest.name,'DropX Fleet');assert.equal(manifest.display,'standalone');assert.equal(manifest.start_url,'/fleet-control?source=installed_app');for(const icon of manifest.icons)assert.ok(fs.existsSync(`public${icon.src}`));}
+host='ops.dropxlogistics.com';assert.equal(exports.default().name,'DropX OpsPulse');assert.equal(exports.dynamic,'force-dynamic');console.log('PWA manifests: Fleet production/preview identity, icon files, standalone launch and OpsPulse isolation passed.');
