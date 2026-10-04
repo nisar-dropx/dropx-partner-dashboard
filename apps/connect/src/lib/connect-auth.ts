@@ -52,8 +52,6 @@ type AccountRow = {
   role?: string | null;
   designation_id?: string | null;
   status?: string | null;
-  mobile?: string | null;
-  mobile_country_code?: string | null;
   source_profile_type?: string | null;
   source_profile_id?: string | null;
   profile_type: "user" | WorkforceProfileType;
@@ -88,6 +86,17 @@ type DesignationAccessRow = {
   dropx_one_activation_gate?: boolean | null;
   is_field_operations?: boolean | null;
   provider_mapping_required?: boolean | null;
+};
+
+type IsolatedAmazonPilotAccountRow = {
+  id: string;
+  company_id: string;
+  designation_id: string | null;
+  full_name: string | null;
+  alias_email: string | null;
+  mobile: string | null;
+  biometric_id: string | null;
+  status: string | null;
 };
 
 type DesignationCategoryRow = {
@@ -314,8 +323,6 @@ function mapNonEmployeeAccountRow(
     email?: string | null;
     dropx_id?: string | null;
     biometric_id?: string | null;
-    mobile?: string | null;
-    mobile_country_code?: string | null;
     designation_id?: string | null;
     designation?: string | null;
     onboarding_status?: string | null;
@@ -332,8 +339,6 @@ function mapNonEmployeeAccountRow(
     email: profile.email,
     dropx_id: profile.dropx_id,
     biometric_id: profile.biometric_id,
-    mobile: profile.mobile ?? null,
-    mobile_country_code: profile.mobile_country_code ?? null,
     designation_id: profile.designation_id ?? null,
     role: profile.designation || workforceLabel(profileType),
     status: profile.onboarding_status === "active"
@@ -768,6 +773,22 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     if (resolved) loginAccounts = [resolved];
   }
 
+  const pilotMobile = String(localMobile || mobile).replace(/\D/g, "").slice(-10);
+  let isolatedPilotRows: IsolatedAmazonPilotAccountRow[] = [];
+  if (pilotMobile.length === 10) {
+    const isolatedPilots = await supabaseAdmin
+      .from("workforce_amazon_email_pilot_candidates")
+      .select("id,company_id,designation_id,full_name,alias_email,mobile,biometric_id,status")
+      .eq("mobile", pilotMobile)
+      .is("closed_at", null)
+      .order("created_at", { ascending: false });
+    // The beta must never make a normal account unavailable. If its isolated
+    // table is absent or unhealthy, return the canonical account list unchanged.
+    if (!isolatedPilots.error) {
+      isolatedPilotRows = (isolatedPilots.data ?? []) as IsolatedAmazonPilotAccountRow[];
+    }
+  }
+
   const assignmentMetadata = await loadPeopleAssignmentMetadata(loginAccounts);
   for (const account of loginAccounts) {
     const metadata = assignmentMetadata.get(peopleWorkerKey(account.profile_type, account.company_id, account.id));
@@ -776,7 +797,10 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     account.role = metadata.positionTitle || account.role;
   }
 
-  const companyIds = Array.from(new Set(loginAccounts.map((account) => account.company_id)));
+  const companyIds = Array.from(new Set([
+    ...loginAccounts.map((account) => account.company_id),
+    ...isolatedPilotRows.map((pilot) => pilot.company_id)
+  ]));
   const companiesResult = companyIds.length
     ? await supabaseAdmin.from("companies").select("id, name, code").in("id", companyIds).eq("is_active", true)
     : { data: [], error: null };
@@ -929,7 +953,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     [...new Set(loginAccounts.map((account) => account.company_id))]
   );
 
-  return Promise.all(loginAccounts
+  const resolvedAccounts = await Promise.all(loginAccounts
     .filter((account) => companyNameById.has(account.company_id))
     .map(async (account): Promise<ConnectAccount> => {
       const categoryCode = categoryCodeForProfile(account.profile_type);
@@ -1006,28 +1030,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status is temporarily unavailable.");
         if(pilot.data){activationOnly=true;onboardingBeta=true;activationStage=pilot.data.closed_at?"closed":"amazon_pilot";}
 
-        if (!pilot.data) {
-          const pilotMobile = String(account.mobile ?? "").replace(/\D/g, "").slice(-10);
-          if (pilotMobile.length === 10) {
-            const emailPilot = await supabaseAdmin!
-              .from("workforce_amazon_email_pilot_candidates")
-              .select("id,status,closed_at")
-              .eq("company_id", account.company_id)
-              .eq("mobile", pilotMobile)
-              .is("closed_at", null)
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            if (emailPilot.error && !["42P01", "42703", "PGRST205"].includes(emailPilot.error.code)) {
-              throw new Error("Email-pilot status is temporarily unavailable.");
-            }
-            if (emailPilot.data) {
-              onboardingBeta = true;
-              activationStage = `amazon_email_pilot:${emailPilot.data.status}`;
-            }
-          }
-        }
-
       }
 
       return {
@@ -1064,6 +1066,32 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       activationStage
       };
     }));
+  const isolatedPilotAccounts: ConnectAccount[] = isolatedPilotRows
+    .filter((pilot) => companyNameById.has(pilot.company_id))
+    .map((pilot) => ({
+      id: pilot.id,
+      companyId: pilot.company_id,
+      profileType: "workforce",
+      name: pilot.full_name,
+      email: pilot.alias_email,
+      reference: null,
+      role: "Amazon onboarding · Beta",
+      status: "Pending",
+      biometricId: pilot.biometric_id,
+      profilePhotoUrl: null,
+      pageAccess: ["activation"],
+      isDefault: false,
+      companyName: companyNameById.get(pilot.company_id) ?? "Company",
+      label: [companyNameById.get(pilot.company_id) ?? "Company", pilot.full_name, "Amazon onboarding beta"].filter(Boolean).join(" - "),
+      workspace: "workforce",
+      workspaceLabel: "Workforce workspace",
+      designationCode: pilot.designation_id ? designationCodeById.get(pilot.designation_id) ?? null : null,
+      providerMappingRequired: false,
+      activationOnly: true,
+      onboardingBeta: true,
+      activationStage: `amazon_email_pilot:${pilot.status ?? "pending"}`
+    }));
+  return [...resolvedAccounts, ...isolatedPilotAccounts];
 }
 
 export function createSecretHash(value: string) {
