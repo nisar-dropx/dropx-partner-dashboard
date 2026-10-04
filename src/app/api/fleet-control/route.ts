@@ -56,6 +56,10 @@ export async function POST(request: Request) {
     if (action === "checklist.create") return await createChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "checklist.update") return await updateChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "checklist.remove") return await removeChecklistItem(context.companyId, context.canManageSettings, body);
+    if (action === "audit-template.upsert") return await upsertAuditTemplate(context.companyId, context.authorization.userId, context.canManageSettings, body);
+    if (action === "audit-template.remove") return await removeAuditTemplate(context.companyId, context.canManageSettings, body);
+    if (action === "document-type.upsert") return await upsertDocumentType(context.companyId, context.canManageSettings, body);
+    if (action === "document-type.remove") return await removeDocumentType(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status.upsert") return await upsertVehicleStatus(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status.remove") return await removeVehicleStatus(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status-reason.upsert") return await upsertVehicleStatusReason(context.companyId, context.canManageSettings, body);
@@ -302,6 +306,94 @@ async function removeChecklistItem(companyId: string, allowed: boolean, body: Pa
   if (result.error) throw new Error(result.error.message);
   if (!result.data) throw new Error("Checklist item was already removed or could not be found.");
   return NextResponse.json({ ok: true, message: "Checklist item removed from future audits." });
+}
+
+async function upsertAuditTemplate(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = clean(body.id);
+  const makeDefault = Boolean(body.isDefault);
+  const values = {
+    company_id: companyId,
+    name: required(body.name, "Template name"),
+    description: clean(body.description) || null,
+    cadence_days: Math.max(1, Math.min(365, Number(body.cadenceDays ?? 30) || 30)),
+    is_default: makeDefault,
+    is_active: true,
+    updated_at: new Date().toISOString()
+  };
+  if (makeDefault) {
+    const cleared = await supabaseAdmin!.from("fleet_audit_templates").update({ is_default: false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("is_default", true);
+    if (cleared.error) throw new Error(cleared.error.message);
+  }
+  const result = id
+    ? await supabaseAdmin!.from("fleet_audit_templates").update(values).eq("company_id", companyId).eq("id", id).select("id").maybeSingle()
+    : await supabaseAdmin!.from("fleet_audit_templates").insert({ ...values, created_by: userId }).select("id").single();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Audit template was not found.");
+  return NextResponse.json({ ok: true, id: result.data.id, message: id ? "Audit template updated." : "Audit template added." });
+}
+
+async function removeAuditTemplate(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = required(body.id, "Audit template");
+  const [template, controls, audits] = await Promise.all([
+    supabaseAdmin!.from("fleet_audit_templates").select("id,is_default").eq("company_id", companyId).eq("id", id).eq("is_active", true).maybeSingle(),
+    supabaseAdmin!.from("fleet_audit_checklist_items").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("template_id", id).eq("is_active", true),
+    supabaseAdmin!.from("fleet_audits").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("template_id", id)
+  ]);
+  if (template.error || controls.error || audits.error) throw new Error(template.error?.message ?? controls.error?.message ?? audits.error?.message ?? "Template could not be checked.");
+  if (!template.data) throw new Error("Audit template was not found.");
+  if (template.data.is_default) throw new Error("Set another template as default before removing this one.");
+  if ((controls.count ?? 0) > 0 || (audits.count ?? 0) > 0) throw new Error("Remove its checklist controls first. Templates already used by an audit are retained for history.");
+  const result = await supabaseAdmin!.from("fleet_audit_templates").update({ is_active: false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", id);
+  if (result.error) throw new Error(result.error.message);
+  return NextResponse.json({ ok: true, message: "Audit template removed." });
+}
+
+function documentTypeCode(value: unknown, name: unknown) {
+  const raw = clean(value || name).toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!raw) throw new Error("Document code is required.");
+  return raw.startsWith("FLEET_") ? raw : `FLEET_${raw}`;
+}
+
+async function upsertDocumentType(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = clean(body.id);
+  const code = documentTypeCode(body.code, body.name);
+  const expiryMode = clean(body.expiryMode);
+  const values = {
+    company_id: companyId,
+    code,
+    name: required(body.name, "Document name"),
+    description: clean(body.description) || null,
+    requires_expiry: expiryMode === "required",
+    reminder_days: Math.max(0, Math.min(365, Number(body.reminderDays ?? 30) || 0)),
+    sort_order: Math.max(0, Number(body.sortOrder ?? 100) || 0),
+    document_module: "fleet",
+    doc_scope: "fleet",
+    is_active: true,
+    updated_at: new Date().toISOString()
+  };
+  const result = id
+    ? await supabaseAdmin!.from("document_types").update(values).eq("company_id", companyId).eq("id", id).eq("document_module", "fleet").select("id").maybeSingle()
+    : await supabaseAdmin!.from("document_types").insert(values).select("id").single();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Document type was not found.");
+  return NextResponse.json({ ok: true, id: result.data.id, message: id ? "Document rule updated." : "Document rule added." });
+}
+
+async function removeDocumentType(companyId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
+  const id = required(body.id, "Document type");
+  const type = await supabaseAdmin!.from("document_types").select("id,code").eq("company_id", companyId).eq("id", id).eq("document_module", "fleet").eq("is_active", true).maybeSingle();
+  if (type.error) throw new Error(type.error.message);
+  if (!type.data) throw new Error("Document type was not found.");
+  const used = await supabaseAdmin!.from("fleet_vehicle_documents").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("document_type", type.data.code).eq("is_active", true);
+  if (used.error) throw new Error(used.error.message);
+  if ((used.count ?? 0) > 0) throw new Error("This document type is used by vehicle files. Keep it for history or remove those files first.");
+  const result = await supabaseAdmin!.from("document_types").update({ is_active: false, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", id);
+  if (result.error) throw new Error(result.error.message);
+  return NextResponse.json({ ok: true, message: "Document rule removed." });
 }
 
 function masterKey(value: unknown, label: string) {

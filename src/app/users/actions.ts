@@ -43,7 +43,7 @@ function locationAccessMode(value: FormDataEntryValue | null) {
 
 function accessSurfaceFromForm(value: FormDataEntryValue | null): AdminAccessSurface {
   const surface = clean(value);
-  return surface === "ops" || surface === "people" || surface === "finance" ? surface : "dashboard";
+  return surface === "ops" || surface === "people" || surface === "finance" || surface === "fleet" ? surface : "dashboard";
 }
 
 function appBaseUrl() {
@@ -319,9 +319,29 @@ export async function configureSurfaceDesignationRole(formData: FormData) {
       supabaseAdmin.from("designation_product_access_policies").select("id,default_role_id,location_access_mode,is_enabled").eq("company_id", companyId).eq("designation_id", designationId).eq("product_code", productCode).maybeSingle()
     ]);
     if (designationResult.error || !designationResult.data) throw new Error(designationResult.error?.message ?? "People designation was not found.");
-    if (policyResult.error || !policyResult.data?.is_enabled) throw new Error(policyResult.error?.message ?? "Enable this portal in People Designation Master first.");
+    if (policyResult.error) throw new Error(policyResult.error.message);
 
-    let roleId = policyResult.data.default_role_id as string | null;
+    let policy = policyResult.data;
+    if (productCode !== "fleet" && !policy?.is_enabled) throw new Error("Enable this portal in People Designation Master first.");
+    if (!policy) {
+      const createdPolicy = await supabaseAdmin.from("designation_product_access_policies").insert({
+        company_id: companyId,
+        designation_id: designationId,
+        product_code: productCode,
+        is_enabled: true,
+        default_role_id: null,
+        location_access_mode: "assignment",
+        updated_by: authorization.userId
+      }).select("id,default_role_id,location_access_mode,is_enabled").single();
+      if (createdPolicy.error || !createdPolicy.data) throw new Error(createdPolicy.error?.message ?? "Fleet access could not be enabled for this designation.");
+      policy = createdPolicy.data;
+    } else if (!policy.is_enabled) {
+      const enabledPolicy = await supabaseAdmin.from("designation_product_access_policies").update({ is_enabled: true, updated_by: authorization.userId, updated_at: new Date().toISOString() }).eq("id", policy.id).select("id,default_role_id,location_access_mode,is_enabled").single();
+      if (enabledPolicy.error || !enabledPolicy.data) throw new Error(enabledPolicy.error?.message ?? "Fleet access could not be enabled for this designation.");
+      policy = enabledPolicy.data;
+    }
+
+    let roleId = policy.default_role_id as string | null;
     if (!roleId) {
       const normalized = String(designationResult.data.code ?? designationResult.data.name).toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 28);
       const roleCode = `${productCode.toUpperCase()}_${normalized}`;
@@ -335,14 +355,14 @@ export async function configureSurfaceDesignationRole(formData: FormData) {
           code: roleCode,
           name: designationResult.data.name,
           parent_role_id: null,
-          location_access_mode: policyResult.data.location_access_mode === "all_locations" ? "all_locations" : "role_based",
+          location_access_mode: policy.location_access_mode === "all_locations" ? "all_locations" : "role_based",
           is_system: false,
           is_active: true
         }).select("id").single();
         if (created.error || !created.data) throw new Error(created.error?.message ?? "Portal designation role could not be created.");
         roleId = created.data.id;
       }
-      const updated = await supabaseAdmin.from("designation_product_access_policies").update({ default_role_id: roleId, updated_by: authorization.userId, updated_at: new Date().toISOString() }).eq("id", policyResult.data.id);
+      const updated = await supabaseAdmin.from("designation_product_access_policies").update({ default_role_id: roleId, updated_by: authorization.userId, updated_at: new Date().toISOString() }).eq("id", policy.id);
       if (updated.error) throw new Error(updated.error.message);
     }
     const reconciled = await supabaseAdmin.rpc("reconcile_designation_product_memberships", { p_company_id: companyId, p_designation_id: designationId, p_actor_user_id: authorization.userId });

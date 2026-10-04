@@ -224,7 +224,7 @@ function sectionHref(section: "roles" | "users", params?: Record<string, string>
 async function loadCanonicalUserAccess(companyId: string, users: UserRow[], locations: LocationRow[]) {
   if (!supabaseAdmin || !users.length) return { users, error: null as string | null };
   const userIds = users.map((user) => user.id);
-  const [candidateResult, membershipResult] = await Promise.all([
+  const [candidateResult, membershipResult, fleetMembershipResult] = await Promise.all([
     supabaseAdmin.from("people_portal_access_candidates")
       .select("user_id,designation_id,worker_type,employee_id,contractor_id,location_scope_ids,has_all_location_access")
       .eq("company_id", companyId)
@@ -233,10 +233,15 @@ async function loadCanonicalUserAccess(companyId: string, users: UserRow[], loca
       .select("user_id,product_code,source_system,location_scope_ids,has_all_location_access,is_active")
       .eq("company_id", companyId)
       .eq("is_active", true)
+      .in("user_id", userIds),
+    supabaseAdmin.from("fleet_portal_memberships")
+      .select("user_id,is_active")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
       .in("user_id", userIds)
   ]);
-  if (candidateResult.error || membershipResult.error) {
-    return { users, error: candidateResult.error?.message ?? membershipResult.error?.message ?? "Access identities could not be loaded." };
+  if (candidateResult.error || membershipResult.error || fleetMembershipResult.error) {
+    return { users, error: candidateResult.error?.message ?? membershipResult.error?.message ?? fleetMembershipResult.error?.message ?? "Access identities could not be loaded." };
   }
   const designationIds = [...new Set((candidateResult.data ?? []).map((candidate) => candidate.designation_id).filter(Boolean))];
   const designationResult = designationIds.length
@@ -250,6 +255,7 @@ async function loadCanonicalUserAccess(companyId: string, users: UserRow[], loca
   for (const membership of membershipResult.data ?? []) {
     membershipsByUser.set(membership.user_id, [...(membershipsByUser.get(membership.user_id) ?? []), membership]);
   }
+  const legacyFleetUsers = new Set((fleetMembershipResult.data ?? []).map((membership) => membership.user_id));
   const stationIdsByEmail = new Map<string, string[]>();
   for (const location of locations) {
     const email = location.station_email?.trim().toLowerCase();
@@ -279,7 +285,7 @@ async function loadCanonicalUserAccess(companyId: string, users: UserRow[], loca
         access_label: isLocation ? "Location" : designation?.name ?? user.role,
         access_code: isLocation ? "LOCATION" : designation?.code ?? user.role_id,
         access_source: isLocation ? "location" as const : designation ? "people" as const : "manual" as const,
-        portal_codes: [...new Set(memberships.map((membership) => membership.product_code))].sort(),
+        portal_codes: [...new Set([...memberships.map((membership) => membership.product_code), ...(legacyFleetUsers.has(user.id) ? ["fleet"] : [])])].sort(),
         people_profile_url: !candidate ? null : candidate.worker_type === "employee" && candidate.employee_id
           ? `https://people.dropxlogistics.com/employees?edit=${candidate.employee_id}`
           : candidate.worker_type === "contractor" && candidate.contractor_id
@@ -611,7 +617,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const canonicalUserAccess = needsUserData
     ? await loadCanonicalUserAccess(companyId, loadedUsers, locations)
     : { users: loadedUsers, error: null as string | null };
-  const users = canonicalUserAccess.users;
+  const users = accessSurface === "fleet"
+    ? canonicalUserAccess.users.filter((user) => user.id === authorization.userId || user.portal_codes?.includes("fleet") || loadedRoles.find((role) => role.id === user.role_id)?.code === "OWNER" || loadedRoles.find((role) => role.id === user.role_id)?.code === "MASTER_OWNER")
+    : canonicalUserAccess.users;
   const surfaceDesignationAccess = showRolesSection && accessSurface !== "dashboard"
     ? await loadSurfaceDesignationAccess(companyId, accessSurface)
     : { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, locationRoleId: null as string | null, error: null as string | null };
@@ -838,7 +846,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
             ? permissionText(loadedRoles.find((role) => role.id === surfaceDesignationAccess.locationRoleId)!, permissions, pages)
             : "Portal owner setup required"
         }}
-        rows={surfaceDesignationAccess.designations.filter((designation) => designation.enabled).map((designation) => {
+        rows={surfaceDesignationAccess.designations.filter((designation) => accessSurface === "fleet" || designation.enabled).map((designation) => {
           const role = designation.defaultRoleId ? loadedRoles.find((candidate) => candidate.id === designation.defaultRoleId) ?? null : null;
           return { designationId: designation.id, code: designation.code, name: designation.name, enabled: designation.enabled, roleId: role?.id ?? null, locationAccessMode: role?.location_access_mode ?? null, permissionSummary: role ? permissionText(role, permissions, pages) : designation.enabled ? "Portal owner setup required" : "Not enabled for this portal" };
         })}

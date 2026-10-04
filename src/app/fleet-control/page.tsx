@@ -13,6 +13,7 @@ type SearchParams = {
   notice?: string;
   error?: string;
   request?: string;
+  master?: string;
 };
 
 export default async function FleetControlPage({ searchParams }: { searchParams?: SearchParams }) {
@@ -32,6 +33,7 @@ export default async function FleetControlPage({ searchParams }: { searchParams?
       approveAction={approveFleetPayment}
       data={data}
       initialRequestId={searchParams?.request}
+      initialMasterTab={searchParams?.master}
       initialSection={searchParams?.section}
       message={searchParams?.error ? { type: "error", text: searchParams.error } : searchParams?.notice ? { type: "notice", text: searchParams.notice } : null}
       rejectAction={rejectFleetPayment}

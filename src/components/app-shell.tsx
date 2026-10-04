@@ -40,10 +40,16 @@ const fleetAdminNavItems: NavItem[] = [
   { code: "payment_approvals", label: "Vehicle Payments", href: "/fleet-control?section=approvals", icon: "P" },
   { code: "fleet_reports", label: "Ad Hoc Usage", href: "/fleet-control?section=adhoc", icon: "+" },
   { code: "fleet_reports", label: "Reports", href: "/fleet-control?section=reports", icon: "R" },
-  { code: "users", label: "Users", href: "/users?section=users", icon: "U" },
-  { code: "users", label: "User Roles", href: "/users?section=roles", icon: "R" },
-  { code: "fleet_settings", label: "Settings", href: "/fleet-control?section=settings", icon: "S" },
-  { code: "fleet_masters", label: "Masters", href: "/fleet-control?section=masters", icon: "M" }
+  { code: "fleet_settings", label: "Settings", icon: "S", children: [
+    { code: "fleet_settings", label: "General Settings", href: "/fleet-control?section=settings" },
+    { code: "users", label: "Users", href: "/users?section=users" },
+    { code: "users", label: "User Roles", href: "/users?section=roles" }
+  ] },
+  { code: "fleet_masters", label: "Masters", icon: "M", children: [
+    { code: "fleet_masters", label: "Vehicle Audit", href: "/fleet-control?section=masters&master=vehicle_audit" },
+    { code: "fleet_masters", label: "Vehicle Documents", href: "/fleet-control?section=masters&master=vehicle_documents" },
+    { code: "fleet_masters", label: "Vehicle Statuses", href: "/fleet-control?section=masters&master=vehicle_statuses" }
+  ] }
 ];
 
 export async function AppShell({ children, active, pageCode }: { children: ReactNode; active: string; pageCode?: string }) {
