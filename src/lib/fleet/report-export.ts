@@ -32,6 +32,124 @@ export async function downloadFleetExcel(report: FleetReportTable) {
   XLSX.writeFile(workbook, `${report.fileName}.xlsx`, { compression: true });
 }
 
+const imageText = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim() || "—";
+
+function fitImageText(context: CanvasRenderingContext2D, value: unknown, width: number) {
+  const source = imageText(value);
+  if (context.measureText(source).width <= width) return source;
+  let text = source;
+  while (text.length > 1 && context.measureText(`${text}…`).width > width) text = text.slice(0, -1);
+  return `${text.trimEnd()}…`;
+}
+
+export async function downloadFleetImage(report: FleetReportTable) {
+  const width = 1800;
+  const edge = 48;
+  const brandHeight = 126;
+  const headerHeight = 58;
+  const rowHeight = 52;
+  const footerHeight = 48;
+  const maximumHeight = 15_500;
+  const maximumRows = Math.max(1, Math.floor((maximumHeight - brandHeight - headerHeight - footerHeight - edge * 2) / rowHeight));
+  const rows = report.rows.slice(0, maximumRows);
+  const height = edge * 2 + brandHeight + headerHeight + rows.length * rowHeight + footerHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Image export is not supported by this browser.");
+
+  const usableWidth = width - edge * 2;
+  const rawWidths = report.headers.map((header, index) => {
+    const longest = Math.max(header.length, ...rows.slice(0, 120).map((row) => imageText(row[index]).length));
+    return Math.max(105, Math.min(265, longest * 10 + 34));
+  });
+  const rawTotal = rawWidths.reduce((sum, value) => sum + value, 0);
+  const columns = rawWidths.map((value) => value / rawTotal * usableWidth);
+  const generated = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date());
+
+  context.fillStyle = "#f4f6f8";
+  context.fillRect(0, 0, width, height);
+  const gradient = context.createLinearGradient(edge, edge, width - edge, edge + brandHeight);
+  gradient.addColorStop(0, "#111a2e");
+  gradient.addColorStop(1, "#283650");
+  context.fillStyle = gradient;
+  context.fillRect(edge, edge, usableWidth, brandHeight);
+  context.fillStyle = "#db2d67";
+  context.fillRect(edge, edge, 10, brandHeight);
+  context.fillStyle = "#ffffff";
+  context.font = "700 27px Arial, sans-serif";
+  context.fillText("DropX Fleet", edge + 34, edge + 42);
+  context.fillStyle = "#c7d0dc";
+  context.font = "700 12px Arial, sans-serif";
+  context.fillText("VEHICLE OPERATIONS", edge + 35, edge + 65);
+  context.fillStyle = "#ffffff";
+  context.font = "700 30px Arial, sans-serif";
+  context.fillText(fitImageText(context, report.title, 820), edge + 330, edge + 47);
+  context.fillStyle = "#c7d0dc";
+  context.font = "400 16px Arial, sans-serif";
+  context.fillText(fitImageText(context, report.subtitle || "Fleet operations report", 900), edge + 330, edge + 76);
+  context.fillStyle = "#ffcd4c";
+  context.font = "700 16px Arial, sans-serif";
+  context.textAlign = "right";
+  context.fillText(`${report.rows.length} records`, width - edge - 28, edge + 43);
+  context.fillStyle = "#c7d0dc";
+  context.font = "400 13px Arial, sans-serif";
+  context.fillText(`Generated ${generated}`, width - edge - 28, edge + 70);
+  context.textAlign = "left";
+
+  let y = edge + brandHeight;
+  context.fillStyle = "#202b40";
+  context.fillRect(edge, y, usableWidth, headerHeight);
+  context.fillStyle = "#ef5931";
+  context.fillRect(edge, y, usableWidth, 5);
+  let x = edge;
+  context.font = "700 13px Arial, sans-serif";
+  report.headers.forEach((header, index) => {
+    context.fillStyle = "#ffffff";
+    context.fillText(fitImageText(context, header.toUpperCase(), columns[index] - 20), x + 10, y + 36);
+    x += columns[index];
+    if (index < columns.length - 1) { context.strokeStyle = "#435066"; context.beginPath(); context.moveTo(x, y + 5); context.lineTo(x, y + headerHeight); context.stroke(); }
+  });
+  y += headerHeight;
+
+  rows.forEach((row, rowIndex) => {
+    context.fillStyle = rowIndex % 2 ? "#f8fafb" : "#ffffff";
+    context.fillRect(edge, y, usableWidth, rowHeight);
+    x = edge;
+    row.forEach((value, index) => {
+      if (index >= columns.length) return;
+      const tone = statusTone(value);
+      if (tone && imageText(value).length <= 24) {
+        context.fillStyle = tone === "green" ? "#e8f7f1" : tone === "red" ? "#ffeaee" : tone === "amber" ? "#fff4d6" : "#eaf5fb";
+        context.fillRect(x + 6, y + 9, Math.max(8, columns[index] - 12), rowHeight - 18);
+      }
+      context.fillStyle = index === 0 ? "#172136" : "#475466";
+      context.font = `${index === 0 ? "700" : "400"} 14px Arial, sans-serif`;
+      context.fillText(fitImageText(context, value, columns[index] - 20), x + 10, y + 32);
+      x += columns[index];
+      if (index < columns.length - 1) { context.strokeStyle = "#e0e5e8"; context.beginPath(); context.moveTo(x, y); context.lineTo(x, y + rowHeight); context.stroke(); }
+    });
+    context.strokeStyle = "#e0e5e8";
+    context.beginPath(); context.moveTo(edge, y + rowHeight); context.lineTo(width - edge, y + rowHeight); context.stroke();
+    y += rowHeight;
+  });
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(edge, y, usableWidth, footerHeight);
+  context.fillStyle = "#778392";
+  context.font = "400 12px Arial, sans-serif";
+  context.fillText("DropX Fleet  |  Controlled vehicle operations report", edge + 10, y + 30);
+  context.textAlign = "right";
+  context.fillStyle = "#b52b59";
+  context.font = "700 12px Arial, sans-serif";
+  context.fillText(rows.length < report.rows.length ? `Showing ${rows.length} of ${report.rows.length} records` : `${rows.length} records`, width - edge - 10, y + 30);
+  context.textAlign = "left";
+
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("Image export could not be created.")), "image/png"));
+  save(blob, `${report.fileName}.png`);
+}
+
 const pdfText = (value: unknown) => String(value ?? "").replaceAll("₹", "INR ").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim();
 
 const palette = {

@@ -435,7 +435,7 @@ button, input, select, textarea { font: inherit; }
 /* Consistent filtered exports and report centre. */
 .fc-export-buttons { display:inline-flex; align-items:center; gap:6px; }
 .fc-export-buttons button { display:inline-flex; min-height:36px; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid #d9e1e3; border-radius:9px; color:#415a62; background:#fff; cursor:pointer; font-size:9px; font-weight:800; }
-.fc-export-buttons button:first-child { color:#26705b; background:#f3fbf8; }.fc-export-buttons button:last-child { color:#a52c54; background:#fff5f8; }
+.fc-export-buttons button.excel { color:#26705b; background:#f3fbf8; }.fc-export-buttons button.image { color:#296a9a; background:#f1f8fd; }.fc-export-buttons button.pdf { color:#a52c54; background:#fff5f8; }
 .fc-export-buttons button:disabled { cursor:not-allowed; opacity:.48; }.fc-export-buttons.compact button { min-height:32px; padding:0 9px; font-size:8px; }
 .fc-gps-list-head .fc-export-buttons { margin-left:auto; }.fc-gps-list-head .fc-export-buttons button { min-width:0; padding-inline:7px; }.fc-gps-list-head .fc-export-buttons button svg { display:block; }
 .fc-report-catalog { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; margin-bottom:12px; }
