@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
-import { RemittanceVerifyButton } from "./remittance-verify-button";
 import { createCodSubmission, type CodSubmissionActionState } from "./actions";
 import { CodSubmitPendingOverlay } from "./cod-submit-overlay";
 import { useCodFormState } from "./use-cod-form-state";
@@ -39,7 +38,6 @@ export function CodSubmissionForm({
     () => stationOptions.find((option) => option.value === locationId) ?? null,
     [locationId, stationOptions]
   );
-  const isAmazon = selected?.formType === "amazon" || (!selected && client === "amazon");
 
   useEffect(() => {
     if (state?.ok) router.refresh();
@@ -66,8 +64,7 @@ export function CodSubmissionForm({
 
       <form action={formAction} className="form-grid three" encType="multipart/form-data" style={{ position: "relative" }}>
         <CodSubmitPendingOverlay
-          isAmazon={isAmazon}
-          detail="Sidebar stays available. This can take a few seconds while we check Amazon portal."
+          detail="Uploading your slip and recording the daily update."
         />
         {client ? <input type="hidden" name="client" value={client} /> : null}
         <input type="hidden" name="station_code" value={selected?.stationCode ?? ""} />
@@ -125,10 +122,10 @@ export function CodSubmissionForm({
         <label className="span-3">Remarks
           <textarea className="field" name="remarks" placeholder="Exception notes, if any" rows={3} />
         </label>
-        {isAmazon ? <RemittanceVerifyButton /> : null}
+        <p className="subtle span-3">Your slip is saved immediately. Slip review and remittance verification are separate; Amazon/SCC availability does not block this upload.</p>
         <div className="form-actions span-3 align-right">
-          <SubmitButton disabled={!canAdd} pendingText={isAmazon ? "Verifying remittance…" : "Saving…"}>
-            {isAmazon ? "Verify & submit COD" : "Submit COD"}
+          <SubmitButton disabled={!canAdd} pendingText="Uploading slip…">
+            Upload COD slip
           </SubmitButton>
         </div>
       </form>

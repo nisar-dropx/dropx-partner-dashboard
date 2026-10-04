@@ -23,6 +23,8 @@ assert.equal(policy.buildCodPendingRows([station],[{...slip,deposit_slip_attachm
 const duplicate=policy.buildCodPendingRows([station],[slip,{...slip,id:'b',created_at:'2026-09-02T14:01:00Z'}],date,now)[0];
 assert.equal(duplicate.amount,100);assert.equal(duplicate.duplicates,1);assert.equal(duplicate.status,'Duplicate review');
 assert.equal(policy.buildCodPendingRows([station],[{...slip,validated_amount:null,validation_status:'Pending'}],date,now)[0].expected,null);
+const portalPending=policy.buildCodPendingRows([station],[{...slip,validated_amount:null,validation_status:'Pending'}],date,now)[0];
+assert.equal(portalPending.status,'Pending verification');assert.equal(portalPending.slipUploaded,true);assert.equal(portalPending.updateRecorded,true);assert.equal(portalPending.pending,false);assert.equal(portalPending.overdue,false,'Portal downtime must not turn a reviewed upload into an overdue station miss');
 assert.equal(policy.buildCodPendingRows([station],[{...slip,created_at:'2026-09-03T03:00:00Z'}],date,new Date('2026-09-03T03:30:00Z'))[0].late,true);
 assert.equal(policy.buildCodPendingRows([{...station,station_code:'TEST 2'},{...station,hide_from_location_list:true}],[],date,now).length,0);
 assert.equal(policy.validReportDate('2026-02-30'),false);assert.equal(policy.validReportDate('2026-02-28'),true);

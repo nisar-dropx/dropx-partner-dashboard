@@ -12,15 +12,10 @@ import {
   numberFromForm,
   required,
   clientForFormType,
-  submitterLooksLikePortalLogin,
   type CodAttachment,
   type CodFormType,
   type CodLocationRow
 } from "@/lib/ops-pulse/cod";
-import {
-  isCashReconWorkerConfigured,
-  verifyRemittance
-} from "@/lib/ops-pulse/cash-recon-worker";
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -48,17 +43,11 @@ function withoutFormPayload<T extends { form_payload?: unknown }>(row: T) {
 }
 
 function readCodSubmissionFields(formData: FormData) {
-  return {
+  const fields = {
     clientHint: String(formData.get("client") ?? "").trim().toLowerCase(),
     locationId: required(formData.get("location_id"), "Station"),
     remittanceCode: alphaNumericRequired(formData.get("remittance_code"), "Remittance code").toUpperCase(),
-    // Free-text, HR-entered name of the actual person who submitted the cash.
-    // Never blocked/gated on the Amazon portal's own submittedBy/createdBy
-    // login handle (that's one login per store/remittance record, not the
-    // individual who deposited the cash) — but it IS compared against that
-    // login as a non-blocking flag (see verifyAmazonRemittance) in case the
-    // habit of typing the portal login here (from when it used to be
-    // required to match) is still happening.
+    // The actual depositor is recorded independently of any portal login.
     submitterName: alphaNumericRequired(formData.get("submitter_name"), "Submitted by"),
     amount: numberFromForm(formData.get("deposited_amount"), "Deposited amount"),
     depositDate: dateFromForm(formData.get("deposit_date"), "Deposit date"),
@@ -66,46 +55,30 @@ function readCodSubmissionFields(formData: FormData) {
     codPeriodTo: dateFromForm(formData.get("cod_period_to") || formData.get("cod_period_from"), "COD to date"),
     remarks: String(formData.get("remarks") ?? "").trim() || null
   };
+  if (fields.amount <= 0) throw new Error("Deposited amount must be greater than zero.");
+  for (const date of [fields.depositDate, fields.codPeriodFrom, fields.codPeriodTo]) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(date).toISOString().slice(0, 10) !== date) {
+      throw new Error("Enter valid deposit and COD dates.");
+    }
+  }
+  if (fields.codPeriodFrom > fields.codPeriodTo) throw new Error("COD from date must be on or before COD to date.");
+  return fields;
 }
 
-async function amazonValidationOrPending(params: {
-  formType: string;
-  stationCode: string | null | undefined;
-  depositDate: string;
-  codPeriodFrom: string;
-  codPeriodTo: string;
-  remittanceCode: string;
-  amount: number;
-  submitterName: string;
-}) {
-  if (params.formType !== "amazon") {
-    return {
-      validationStatus: "Pending",
-      validationPayload: null as Record<string, unknown> | null,
-      validatedAmount: null as number | null,
-      validatedAt: null as string | null,
-      remittanceCreationDate: null as string | null,
-      remittanceSubmissionDate: null as string | null
-    };
-  }
-  const stationCode = String(params.stationCode ?? "").trim().toUpperCase();
-  if (!stationCode) throw new Error("Selected station is missing a station code.");
-  const verified = await verifyAmazonRemittance({
-    stationCode,
-    depositDate: params.depositDate,
-    codPeriodFrom: params.codPeriodFrom,
-    codPeriodTo: params.codPeriodTo,
-    remittanceCode: params.remittanceCode,
-    amount: params.amount,
-    submitterName: params.submitterName
-  });
+// Recording a bank slip must never depend on a third-party portal session.
+// A saved upload is evidence received, not confirmation that cash reconciles.
+function pendingRemittanceValidation() {
   return {
-    validationStatus: "Matched",
-    validationPayload: verified.validationPayload,
-    validatedAmount: params.amount,
-    validatedAt: new Date().toISOString(),
-    remittanceCreationDate: verified.remittanceCreationDate,
-    remittanceSubmissionDate: verified.remittanceSubmissionDate
+    validation_status: "Pending",
+    validated_amount: null,
+    validated_at: null,
+    remittance_creation_date: null,
+    remittance_submission_date: null,
+    validation_payload: {
+      source: "cod_submission",
+      verification: "pending",
+      reason: "Deposit slip saved independently. Remittance verification is separate."
+    }
   };
 }
 
@@ -155,74 +128,6 @@ async function stationDetails(companyId: string, locationId: string) {
   return data as CodLocationRow;
 }
 
-async function verifyAmazonRemittance(params: {
-  stationCode: string;
-  depositDate: string;
-  codPeriodFrom: string;
-  codPeriodTo: string;
-  remittanceCode: string;
-  amount: number;
-  submitterName: string;
-}) {
-  if (!isCashReconWorkerConfigured()) {
-    throw new Error(
-      "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY."
-    );
-  }
-  const verify = await verifyRemittance({
-    stationCode: params.stationCode,
-    date: params.depositDate,
-    remittanceCode: params.remittanceCode,
-    amount: params.amount,
-    codPeriodFrom: params.codPeriodFrom,
-    codPeriodTo: params.codPeriodTo,
-    fresh: true
-  });
-  const match = verify.matches[0] ?? null;
-  const validationPayload = {
-    remittance_verify: {
-      verified: verify.verified,
-      codeFound: verify.codeFound,
-      amountMatched: verify.amountMatched,
-      depositDateMatched: verify.depositDateMatched,
-      creationPeriodMatched: verify.creationPeriodMatched,
-      submitterMatched: verify.submitterMatched,
-      failureReason: verify.failureReason,
-      remittanceCode: verify.remittanceCode,
-      amount: verify.amount,
-      matches: verify.matches,
-      nearMisses: verify.nearMisses,
-      checkedAt: new Date().toISOString(),
-      source: "executive/remittance/verify"
-    }
-  };
-  if (!verify.verified) {
-    throw new Error(
-      verify.failureReason ||
-        (!verify.codeFound
-          ? `Remittance code ${params.remittanceCode} was not found on Amazon portal.`
-          : `Remittance code found but details do not match for deposit ${params.depositDate}.`)
-    );
-  }
-  // The Amazon portal's own submittedBy/createdBy is a login handle, not a
-  // person's name (e.g. "dliraja") — someone entering that exact handle in
-  // "Submitted By" means they typed the portal login instead of their actual
-  // name, the same old habit from when this field used to be checked against
-  // the portal. Block it the same way a remittance-code/amount mismatch is
-  // blocked, so the submission never gets recorded with a login handle as
-  // the submitter's identity.
-  if (submitterLooksLikePortalLogin(params.submitterName, [match?.submittedBy, match?.createdBy])) {
-    throw new Error(
-      `"${params.submitterName}" looks like the Amazon portal login, not a person's name. Enter the full name of the person who actually submitted this cash.`
-    );
-  }
-  return {
-    validationPayload,
-    remittanceCreationDate: match?.creationDateIst ?? null,
-    remittanceSubmissionDate: match?.submissionDateIst ?? null
-  };
-}
-
 async function uploadSlipPhotos(companyId: string, submissionId: string, formData: FormData) {
   return (
     await Promise.all(
@@ -266,16 +171,6 @@ export async function createCodSubmission(
 
     const station = await stationDetails(companyId, fields.locationId);
     const formType = resolveFormType(station, fields.clientHint);
-    const amazon = await amazonValidationOrPending({
-      formType,
-      stationCode: station.station_code,
-      depositDate: fields.depositDate,
-      codPeriodFrom: fields.codPeriodFrom,
-      codPeriodTo: fields.codPeriodTo,
-      remittanceCode: fields.remittanceCode,
-      amount: fields.amount,
-      submitterName: fields.submitterName
-    });
 
     const submissionId = randomUUID();
     const depositAttachments = await uploadSlipPhotos(companyId, submissionId, formData);
@@ -301,7 +196,7 @@ export async function createCodSubmission(
       {
         id: submissionId,
         ai_result: EMPTY_JSON,
-        ai_status: "Not queued",
+        ai_status: "Review pending",
         ai_summary: null,
         attachments: depositAttachments,
         client: formType ? clientForFormType(formType) : null,
@@ -324,18 +219,13 @@ export async function createCodSubmission(
         remarks: fields.remarks,
         remittance_amount: fields.amount,
         remittance_code: fields.remittanceCode,
-        remittance_creation_date: amazon.remittanceCreationDate,
-        remittance_submission_date: amazon.remittanceSubmissionDate,
         source: COD_SUBMISSION_SOURCE,
         station_code: station.station_code,
         status: "Submitted",
         submission_no: `COD-${Date.now().toString(36).toUpperCase()}`,
         submitter_name: fields.submitterName,
         updated_at: nowIso,
-        validation_status: amazon.validationStatus,
-        validated_amount: amazon.validatedAmount,
-        validated_at: amazon.validatedAt,
-        validation_payload: amazon.validationPayload ?? EMPTY_JSON
+        ...pendingRemittanceValidation()
       },
       companyId
     );
@@ -349,10 +239,7 @@ export async function createCodSubmission(
     return {
       ok: true,
       submissionId,
-      notice:
-        formType === "amazon"
-          ? "COD submission saved — remittance verified (deposit = submissionDate, COD period = creationDate, amount, submitter)."
-          : "COD submission saved with deposit slip."
+      notice: "COD slip uploaded. Your daily update is recorded; slip review and remittance verification are pending."
     };
   } catch (error) {
     return {
@@ -400,16 +287,6 @@ export async function updateCodSubmission(
     const formType =
       resolveFormType(station, fields.clientHint) ||
       (existing.form_type === "amazon" || existing.form_type === "flipkart" ? existing.form_type : "");
-    const amazon = await amazonValidationOrPending({
-      formType,
-      stationCode: station.station_code,
-      depositDate: fields.depositDate,
-      codPeriodFrom: fields.codPeriodFrom,
-      codPeriodTo: fields.codPeriodTo,
-      remittanceCode: fields.remittanceCode,
-      amount: fields.amount,
-      submitterName: fields.submitterName
-    });
 
     const existingAttachments = Array.isArray(existing.deposit_slip_attachments)
       ? (existing.deposit_slip_attachments as CodAttachment[])
@@ -457,15 +334,10 @@ export async function updateCodSubmission(
       remarks: fields.remarks,
       remittance_amount: fields.amount,
       remittance_code: fields.remittanceCode,
-      remittance_creation_date: amazon.remittanceCreationDate,
-      remittance_submission_date: amazon.remittanceSubmissionDate,
       source: COD_SUBMISSION_SOURCE,
       station_code: station.station_code,
       submitter_name: fields.submitterName,
-      validation_status: amazon.validationStatus,
-      validated_amount: amazon.validatedAmount,
-      validated_at: amazon.validatedAt,
-      validation_payload: amazon.validationPayload ?? EMPTY_JSON,
+      ...pendingRemittanceValidation(),
       updated_at: new Date().toISOString()
     };
     let query=supabaseAdmin.from('cod_submissions').update(updateRow).eq('company_id',companyId).eq('id',submissionId).eq('proof_version',version);
@@ -479,10 +351,7 @@ export async function updateCodSubmission(
     return {
       ok: true,
       submissionId,
-      notice:
-        formType === "amazon"
-          ? "COD submission updated — remittance re-verified."
-          : "COD submission updated."
+      notice: "COD slip updated. Your daily update is recorded; slip review and remittance verification are pending."
     };
   } catch (error) {
     return {

@@ -158,7 +158,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
       <PageHead
         eyebrow="Ops Pulse"
         title="COD Submission"
-        subtitle="Enter remittance details, verify against the portal (Amazon), and upload a photo of the deposit slip."
+        subtitle="Upload your deposit slip and record the daily COD update. Review and reconciliation happen separately."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
       <CodSectionTabs active="submission" />
@@ -186,7 +186,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
             <div className="panel-head toolbar">
               <div>
                 <h2>Submit COD deposit</h2>
-                <p className="subtle">Amazon submissions are checked against the portal for remittance code, deposit date, and amount before saving.</p>
+                <p className="subtle">Save the deposit details and slip without waiting for Amazon/SCC. Uploading records the daily update; it does not mark the cash as verified.</p>
               </div>
             </div>
             <div className="panel-body">

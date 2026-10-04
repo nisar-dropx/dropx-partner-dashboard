@@ -8,7 +8,6 @@ import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/searchable-select";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
-import { RemittanceVerifyButton } from "./remittance-verify-button";
 import { updateCodSubmission, type CodSubmissionActionState } from "./actions";
 import { CodSubmitPendingOverlay } from "./cod-submit-overlay";
 import { useCodFormState } from "./use-cod-form-state";
@@ -70,7 +69,6 @@ function EditSubmissionModal({
     () => stationOptions.find((option) => option.value === locationId) ?? null,
     [locationId, stationOptions]
   );
-  const isAmazon = selected?.formType === "amazon" || editing.formType === "amazon" || client === "amazon";
 
   useEffect(() => {
     if (state?.ok) {
@@ -91,7 +89,7 @@ function EditSubmissionModal({
         <div className="panel-head toolbar">
           <div>
             <h2>{editing.returned?'Re-upload returned slip':'Edit COD submission'}</h2>{editing.returned?<p style={{color:'#b91c1c'}}>{editing.proofReason}</p>:null}
-            <p className="subtle">Update details and optionally replace the deposit slip photo. Amazon rows are re-verified on save.</p>
+            <p className="subtle">Update details and optionally replace the deposit slip photo. Changes are saved for review without waiting for Amazon/SCC.</p>
           </div>
           <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
         </div>
@@ -102,7 +100,7 @@ function EditSubmissionModal({
             </section>
           ) : null}
           <form action={formAction} className="form-grid three" encType="multipart/form-data" style={{ position: "relative" }}>
-            <CodSubmitPendingOverlay isAmazon={isAmazon} savingLabel="Saving changes…" />
+            <CodSubmitPendingOverlay savingLabel="Saving changes…" />
             <input type="hidden" name="submission_id" value={editing.id} /><input type="hidden" name="proof_version" value={editing.proofVersion} />
             {client ? <input type="hidden" name="client" value={client} /> : null}
             <input type="hidden" name="station_code" value={selected?.stationCode || editing.stationCode} />
@@ -156,11 +154,10 @@ function EditSubmissionModal({
             <label className="span-3">Remarks
               <textarea className="field" name="remarks" defaultValue={editing.remarks} rows={3} />
             </label>
-            {isAmazon ? <RemittanceVerifyButton /> : null}
             <div className="form-actions span-3 align-right" style={{ gap: 10 }}>
               <button type="button" className="button secondary" onClick={onClose}>Cancel</button>
-              <SubmitButton pendingText={isAmazon ? "Verifying…" : "Saving…"}>
-                {isAmazon ? "Verify & save" : "Save changes"}
+              <SubmitButton pendingText="Saving…">
+                Save changes
               </SubmitButton>
             </div>
           </form>
@@ -246,7 +243,7 @@ export function CodSubmissionRegister({
                     <span className="subtle">Missing</span>
                   )}
                 </td>
-                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{proofStatusLabel(row.proofStatus)}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofStatus==='Review pending'||row.proofStatus==='Validation pending'?'Upload recorded; manual review pending':compactCodReason(row.proofReason)}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode} status={row.proofStatus}/></div></td>
+                <td><StatusPill status={row.status === "Pending" ? "Remittance pending" : row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{proofStatusLabel(row.proofStatus)}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofStatus==='Review pending'||row.proofStatus==='Validation pending'?'Upload recorded; manual review pending':compactCodReason(row.proofReason)}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode} status={row.proofStatus}/></div></td>
                 <td>{row.remarks || "-"}</td>
                 <td>
                   {canEdit ? (

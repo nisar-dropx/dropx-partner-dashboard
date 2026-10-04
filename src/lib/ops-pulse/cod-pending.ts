@@ -40,8 +40,9 @@ export function buildCodPendingRows(stations:PendingStation[],slips:PendingSlip[
   const validationReason=entries.length?[...new Set((entries.some(s=>s.returned_at)?entries.filter(s=>s.returned_at).map(s=>s.return_reason):entries.map(s=>s.ai_summary)).filter(Boolean))].join(' '):exception?.reason||'No daily update has been recorded.';
   const status:PendingStatus=validation==='Returned'?'Returned':!unique.length?(exception?.kind==='No Cash'?'No Cash':exception?.kind==='Banker Not Reported'?'Banker Not Reported':'Missing slip'):unique.some(s=>!hasSlipProof(s))?'Slip missing proof':unique.some(s=>s.validation_status==='Rejected')?'Rejected':short>0||unique.some(s=>s.validation_status==='Short')?'Short':excess>0||unique.some(s=>s.validation_status==='Excess')?'Excess':duplicates?'Duplicate review':validation==='Not valid'?'Not valid':validation!=='Valid'?'Review pending':unique.some(s=>s.validation_status!=='Matched'||nullableMoney(s.deposited_amount)===null)?'Pending verification':'Complete';
   const last=entries[0]?.created_at||null;
-  // An uploaded slip waiting for manual review is a recorded daily update, not a station upload failure.
-  const reportComplete=status==='Complete'||status==='No Cash'||status==='Banker Not Reported'||status==='Review pending';
+  // An uploaded slip awaiting review or remittance verification is a recorded daily update.
+  // Outstanding cash remains unreconciled; connector availability is not a station upload failure.
+  const reportComplete=status==='Complete'||status==='No Cash'||status==='Banker Not Reported'||status==='Review pending'||status==='Pending verification';
   return {station,date,exception,validation,validationReason,updateRecorded:entries.length>0||Boolean(exception),slipUploaded:unique.some(hasSlipProof),client:codClient(station),status,pending:!reportComplete,amount:amount===null?null:Math.round(amount*100)/100,expected:expected===null?null:Math.round(expected*100)/100,short:Math.round(short*100)/100,excess:Math.round(excess*100)/100,duplicates,entries,unique,last,deadline:deadline.toISOString(),overdue:!reportComplete&&now>=deadline,late:unique.some(s=>Date.parse(s.created_at)>deadline.getTime())};
  }).sort((a,b)=>pendingStatuses.indexOf(a.status)-pendingStatuses.indexOf(b.status)||a.station.station_code.localeCompare(b.station.station_code));
 }
