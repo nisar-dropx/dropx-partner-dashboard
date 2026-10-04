@@ -840,11 +840,11 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                             </div>
                           </details>
                         )}
-                        {view === "stations" && (
+                        {view === "stations" && row.dataThrough && (
                           <a
                             className="pnl-btn"
                             href={opsLink(
-                              `/cps?period=custom&from=${report.filters.from}&to=${report.filters.to}&station=${encodeURIComponent(row.key)}`,
+                              `/cps?period=custom&from=${report.filters.from}&to=${row.dataThrough}&station=${encodeURIComponent(row.key)}`,
                             )}
                           >
                             Open full CPS & associate details →
