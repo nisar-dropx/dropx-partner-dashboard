@@ -351,11 +351,12 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       row.van_pay=first?vanByStation.get(row.station_code)??0:0;
       row.da_total_pay=row.variable_pay+row.mg_pay+row.fuel_pay;row.pay_type=card!.pay_type;row.mapping_status='Mapped';
       const attendance=attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined;
-      const worked=attendance ? directPayAttendanceUnit(attendance)>0 : num(row.total_activity)>0;
+      const attendanceWorked=directPayAttendanceUnit(attendance)>0;
+      const worked=attendanceWorked || [row.total_activity,row.total_delivery,row.c_return,row.mfn,row.mfn_return].some(v=>num(v)>0);
       detailDays.push({worker_id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,
         station_code:row.station_code,date:g.date,provider_ids:[row.provider_employee_id],
         cohort:hasFixedDaPay(card!,cs)||employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`)?'guarantee':'variable',
-        worked,work_basis:attendance?'attendance':worked?'shipment activity':'no work evidence',
+        worked,work_basis:attendanceWorked?'attendance':worked?'shipment activity':'no work evidence',
         deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:num(row.mfn),seller_returns:num(row.mfn_return),
         salary:row.mg_pay,variable:row.variable_pay,fuel:row.fuel_pay,van:row.van_pay,
         source:'Workforce rate card',card_from:card!.effective_from,rates:detailRates(card!,cs,String(row.client??'Amazon'))});

@@ -352,3 +352,9 @@ test('fuel trend preserves source, DA versus Van allocation and zero-delivery da
   {station_code:'A',work_date:'2026-09-01',head:'Van',sub_head:'Rent',source:'Fleet',amount:1000}];
  const r=details.exports.cpsFuelTrend(b);assert.equal(r[0].amount,800);assert.equal(r[0].cps,8);assert.equal(r[0].sources.length,3);assert.equal(r[1].cps,null);
 });
+
+test('shipment activity remains work evidence when the attendance record is absent',()=>{
+ const f=facts();f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'A'}];
+ const r=rebuildCps(base(),f);assert.equal(r.da_details[0].work_dates.length,1);assert.deepEqual(r.da_details[0].work_bases,['shipment activity']);
+ assert.equal(r.daily[0].da,1000,'displayed work evidence does not change payroll rules');
+});
