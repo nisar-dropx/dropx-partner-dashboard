@@ -60,6 +60,7 @@ test('isolated email pilot is visible without converting an active Workforce acc
  const route=readFileSync(new URL('../../app/api/connect/workforce-joining/route.ts',import.meta.url),'utf8');
  const beta=readFileSync(new URL('../components/connect-beta-onboarding.tsx',import.meta.url),'utf8');
  assert.match(auth,/workforce_amazon_email_pilot_candidates/);
+ assert.match(auth,/mobile: profile\.mobile \?\? null/);
  assert.match(auth,/onboardingBeta = true/);
  assert.doesNotMatch(auth,/emailPilot\.data\)\{activationOnly=true/);
  assert.match(flow,/account\.activationOnly \|\| account\.onboardingBeta/);
