@@ -7,7 +7,6 @@ import { amazonTasks, amazonTaskStates, joiningStages, joiningState, providerSta
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
-const mobileTail=(value:unknown)=>String(value??"").replace(/\D/g,"").slice(-10);
 const amazonInvitationUrl=(value:unknown)=>{
   const cleaned=String(value??"").trim().replace(/[\]\)}>.,;]+$/g,"");
   if(!cleaned)return null;
@@ -48,6 +47,35 @@ export async function GET(request: NextRequest) {
     if (account.workspace !== "workforce" || (!account.activationOnly && !account.pageAccess.some(code => ["dashboard", "earnings", "profile"].includes(code)))) return NextResponse.json({error:"This view is not enabled for your account."},{status:403,headers});
     if (!supabaseAdmin) throw new Error("Joining details are temporarily unavailable.");
     const db = supabaseAdmin, company = account.companyId;
+    if(account.onboardingBeta&&account.activationStage?.startsWith("amazon_email_pilot:")){
+      const candidate=await db.from("workforce_amazon_email_pilot_candidates").select("id,full_name,mobile,biometric_id,alias_email,inbox_status,status,last_message_at,updated_at").eq("company_id",company).eq("id",account.id).is("closed_at",null).maybeSingle();
+      if(candidate.error&&!['42P01','42703','PGRST205'].includes(candidate.error.code))throw new Error("Email-pilot status is unavailable.");
+      if(!candidate.data)return NextResponse.json({available:false},{headers});
+      const [message,invitation,attendance]=await Promise.all([
+        db.from("workforce_amazon_email_pilot_messages").select("subject,preview,action_url,received_at").eq("company_id",company).eq("candidate_id",candidate.data.id).order("received_at",{ascending:false}).limit(1).maybeSingle(),
+        db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_code,error_message,updated_at").eq("company_id",company).eq("email_pilot_candidate_id",candidate.data.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
+        candidate.data.biometric_id?db.from("attendance_daily").select("punch_date,in_time,out_time,status,updated_at").eq("company_id",company).eq("enrolment_id",candidate.data.biometric_id).order("punch_date",{ascending:false}).limit(1).maybeSingle():Promise.resolve({data:null,error:null})
+      ]);
+      const invitationUrl=amazonInvitationUrl(message.data?.action_url);
+      const providerId=invitationUrl?new URL(invitationUrl).searchParams.get("providerId"):null;
+      const invitationReceived=Boolean(invitationUrl||message.data?.received_at);
+      return NextResponse.json({
+        available:true,pilot:true,isolatedBeta:true,
+        stage:invitationReceived?"registration_pending":"invitation_pending",
+        stageLabel:invitationReceived?"Amazon invitation ready":"Waiting for Amazon invitation",
+        instruction:invitationReceived?"Open or copy the invitation link below to continue Amazon account setup.":"The Amazon invitation has been requested. This page will update when the email arrives.",
+        reportUpdatedAt:null,reportDate:null,stale:false,syncDelayed:false,
+        driverId:null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
+        invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
+        invitationUrl,invitationReceivedAt:message.data?.received_at??candidate.data.last_message_at,
+        registrationRequired:false,registrationStatus:"isolated_beta",registrationUpdatedAt:null,
+        offboardingRequested:false,offboardingRequestedAt:null,exitReasons:[],
+        actionOwner:invitationReceived?"Associate":"Amazon / system",category:"amazon_email_pilot",amazonAction:null,bgcChecks:[],
+        latestAttendance:attendance.error||!attendance.data?null:{date:attendance.data.punch_date,inTime:attendance.data.in_time,outTime:attendance.data.out_time,status:attendance.data.status,updatedAt:attendance.data.updated_at},
+        configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,
+        updatedAt:message.data?.received_at??invitation.data?.updated_at??candidate.data.updated_at,tasks:[],training:null,paymentHolds:[]
+      },{headers});
+    }
     let personQuery = db.from("workforce").select("id,email,mobile,location_id,source_profile_type,source_profile_id,onboarding_status,lifecycle_status,is_active,onboarding_approved_at,last_working_date")
       .eq("company_id",company).is("deleted_at",null).neq("migration_state","reclassified");
     personQuery = account.profileType === "workforce" ? personQuery.eq("id",account.id) : personQuery.eq("source_profile_type",account.profileType).eq("source_profile_id",account.id);
@@ -57,37 +85,6 @@ export async function GET(request: NextRequest) {
     const person = personResult.data as JoiningPerson;
     const pilot=await db.from("workforce_amazon_pilots").select("*").eq("company_id",company).eq("workforce_id",person.id).maybeSingle();
     if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status unavailable.");
-    const isolatedMobile=mobileTail((person as JoiningPerson&{mobile?:string|null}).mobile);
-    if(!pilot.data&&account.onboardingBeta&&isolatedMobile.length===10){
-      const candidate=await db.from("workforce_amazon_email_pilot_candidates").select("id,full_name,mobile,biometric_id,alias_email,inbox_status,status,last_message_at,updated_at").eq("company_id",company).eq("mobile",isolatedMobile).is("closed_at",null).order("created_at",{ascending:false}).limit(1).maybeSingle();
-      if(candidate.error&&!['42P01','42703','PGRST205'].includes(candidate.error.code))throw new Error("Email-pilot status is unavailable.");
-      if(candidate.data){
-        const [message,invitation,attendance]=await Promise.all([
-          db.from("workforce_amazon_email_pilot_messages").select("subject,preview,action_url,received_at").eq("company_id",company).eq("candidate_id",candidate.data.id).order("received_at",{ascending:false}).limit(1).maybeSingle(),
-          db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_code,error_message,updated_at").eq("company_id",company).eq("email_pilot_candidate_id",candidate.data.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
-          candidate.data.biometric_id?db.from("attendance_daily").select("punch_date,in_time,out_time,status,updated_at").eq("company_id",company).eq("enrolment_id",candidate.data.biometric_id).order("punch_date",{ascending:false}).limit(1).maybeSingle():Promise.resolve({data:null,error:null})
-        ]);
-        const invitationUrl=amazonInvitationUrl(message.data?.action_url);
-        const providerId=invitationUrl?new URL(invitationUrl).searchParams.get("providerId"):null;
-        const invitationReceived=Boolean(invitationUrl||message.data?.received_at);
-        return NextResponse.json({
-          available:true,pilot:true,isolatedBeta:true,
-          stage:invitationReceived?"registration_pending":"invitation_pending",
-          stageLabel:invitationReceived?"Amazon invitation ready":"Waiting for Amazon invitation",
-          instruction:invitationReceived?"Open or copy the invitation link below to continue Amazon account setup.":"The Amazon invitation has been requested. This page will update when the email arrives.",
-          reportUpdatedAt:null,reportDate:null,stale:false,syncDelayed:false,
-          driverId:null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
-          invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
-          invitationUrl,invitationReceivedAt:message.data?.received_at??candidate.data.last_message_at,
-          registrationRequired:false,registrationStatus:"isolated_beta",registrationUpdatedAt:null,
-          offboardingRequested:false,offboardingRequestedAt:null,exitReasons:[],
-          actionOwner:invitationReceived?"Associate":"Amazon / system",category:"amazon_email_pilot",amazonAction:null,bgcChecks:[],
-          latestAttendance:attendance.error||!attendance.data?null:{date:attendance.data.punch_date,inTime:attendance.data.in_time,outTime:attendance.data.out_time,status:attendance.data.status,updatedAt:attendance.data.updated_at},
-          configured:true,mode:null,firstPunch:null,mappingEffectiveFrom:null,providerStage:null,nextFollowUp:null,
-          updatedAt:message.data?.received_at??invitation.data?.updated_at??candidate.data.updated_at,tasks:[],training:null,paymentHolds:[]
-        },{headers});
-      }
-    }
     if(pilot.data){
       const [invitation,portal,registrationDraft,liveSources,exitReasons,attendance,idfy]=await Promise.all([
         db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_message").eq("company_id",company).eq("workforce_id",person.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
