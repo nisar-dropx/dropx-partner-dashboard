@@ -83,27 +83,34 @@ async function processCompany(company: { id: string; name: string | null }, date
   const manual = (recipientsResult.data ?? []).map((row) => ({ name: clean(row.name), email: email(row.email), stationCodes: Array.isArray(row.station_codes) ? row.station_codes.map((value: string) => clean(value).toUpperCase()).filter(Boolean) : [] }));
   const deliveries = resolveFleetDailyStatusDeliveryRecipients(automatic, manual, rows.map((row) => row.station), triggerStationCodes, setting.data.daily_status_only_affected !== false);
   if (!deliveries.length) throw new Error("No station-scoped Operations, Fleet, Business Head, station mailbox or manual recipient was found for the affected stations.");
-  const existing = await supabaseAdmin.from("fleet_status_report_logs").select("recipient_email").eq("company_id", company.id).eq("report_date", date).eq("status", "sent");
+  const existing = await supabaseAdmin.from("fleet_status_report_logs").select("recipient_email,status").eq("company_id", company.id).eq("report_date", date);
   if (existing.error) throw new Error(existing.error.message);
-  const sentToday = new Set((existing.data ?? []).map((row) => clean(row.recipient_email).toLowerCase()));
+  const existingStatus = new Map((existing.data ?? []).map((row) => [clean(row.recipient_email).toLowerCase(), clean(row.status).toLowerCase()]));
   const month = date.slice(0, 7); const monthLabel = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${month}-01T12:00:00+05:30`));
   const dailyLabel = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${date}T12:00:00+05:30`));
   const deliveryResults = await Promise.all(deliveries.map(async (delivery) => {
-    if (sentToday.has(delivery.email)) return "skipped" as const;
+    const deliveryEmail = clean(delivery.email).toLowerCase();
+    if (["sent", "skipped"].includes(existingStatus.get(deliveryEmail) || "")) return "skipped" as const;
     const stationScope = new Set(delivery.stationCodes); const scopedRows = rows.filter((row) => stationScope.has(row.station)); const scopedFleetRows = scopedRows.filter((row) => row.ownTotal + row.partnerTotal > 0);
     const scopedVehicles = vehicles.filter((row) => stationScope.has(clean(row.station_code).toUpperCase())); const scopedAdHocRows = adHocRows.filter((row) => stationScope.has(row.station)); const scopedAttention = attentionRows.filter((row) => stationScope.has(row.station));
     const totals = { ...summaryTotals(scopedFleetRows), adHoc: scopedAdHocRows.reduce((sum, row) => sum + row.todayCount, 0), adHocPending: scopedAdHocRows.reduce((sum, row) => sum + row.todayPendingCount, 0) };
     try {
-      const prior = config.monthlyThread ? await database.from("fleet_status_report_logs").select("message_id,root_message_id,subject").eq("company_id", company.id).eq("recipient_email", delivery.email).eq("report_month", month).eq("status", "sent").order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null, error: null };
+      const claimPayload = { company_id: company.id, report_date: date, report_month: month, recipient_email: deliveryEmail, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [deliveryEmail], subject: `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`, status: "skipped", error_message: null };
+      const claim = existingStatus.get(deliveryEmail) === "failed"
+        ? await database.from("fleet_status_report_logs").update(claimPayload).eq("company_id", company.id).eq("report_date", date).eq("recipient_email", deliveryEmail).eq("status", "failed").select("id").maybeSingle()
+        : await database.from("fleet_status_report_logs").upsert(claimPayload, { onConflict: "company_id,report_date,recipient_email", ignoreDuplicates: true }).select("id").maybeSingle();
+      if (claim.error) throw new Error(claim.error.message);
+      if (!claim.data) return "skipped" as const;
+      const prior = config.monthlyThread ? await database.from("fleet_status_report_logs").select("message_id,root_message_id,subject").eq("company_id", company.id).eq("recipient_email", deliveryEmail).eq("report_month", month).eq("status", "sent").order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null, error: null };
       if (prior.error) throw new Error(prior.error.message);
       const subject = prior.data?.subject || `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`; const root = prior.data?.root_message_id || prior.data?.message_id || null; const last = prior.data?.message_id || null;
       const messageId = last ? `<dropx.fleet-status.${randomUUID()}@partner.dropxlogistics.com>` : `<dropx.fleet-status.${company.id}.${config.monthlyThread ? month : date}.${randomUUID()}@partner.dropxlogistics.com>`;
       const presentation = buildFleetDailyStatusEmail({ companyName: company.name, date, rows: scopedFleetRows, exceptions: scopedVehicles.filter((row) => !active(row.status)), adHocRows: scopedAdHocRows, totals, config });
-      const result = await sendEmail({ companyId: company.id, to: [delivery.email], subject, body: presentation.text, html: presentation.html, messageId, inReplyTo: last || undefined, references: last ? [...new Set([root, last].filter((value): value is string => Boolean(value)))] : undefined });
-      const log = await database.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject, status: "sent", message_id: result.messageId || messageId, root_message_id: root || result.messageId || messageId, error_message: null }, { onConflict: "company_id,report_date,recipient_email" });
+      const result = await sendEmail({ companyId: company.id, to: [deliveryEmail], subject, body: presentation.text, html: presentation.html, messageId, inReplyTo: last || undefined, references: last ? [...new Set([root, last].filter((value): value is string => Boolean(value)))] : undefined });
+      const log = await database.from("fleet_status_report_logs").update({ affected_station_codes: scopedAttention.map((row) => row.station), recipients: [deliveryEmail], subject, status: "sent", message_id: result.messageId || messageId, root_message_id: root || result.messageId || messageId, error_message: null }).eq("company_id", company.id).eq("report_date", date).eq("recipient_email", deliveryEmail).eq("status", "skipped");
       if (log.error) throw new Error(log.error.message); return "sent" as const;
     } catch (error) {
-      await database.from("fleet_status_report_logs").upsert({ company_id: company.id, report_date: date, report_month: month, recipient_email: delivery.email, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [delivery.email], subject: `${config.subjectPrefix} | ${config.monthlyThread ? monthLabel : dailyLabel}`, status: "failed", error_message: error instanceof Error ? error.message : "Unable to send report." }, { onConflict: "company_id,report_date,recipient_email" });
+      await database.from("fleet_status_report_logs").update({ status: "failed", error_message: error instanceof Error ? error.message : "Unable to send report." }).eq("company_id", company.id).eq("report_date", date).eq("recipient_email", deliveryEmail).eq("status", "skipped");
       return "failed" as const;
     }
   }));

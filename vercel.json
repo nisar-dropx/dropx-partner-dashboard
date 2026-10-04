@@ -66,6 +66,10 @@
     {
       "path": "/api/cron/fleet-daily-status",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/fleet-audit-programme",
+      "schedule": "30 0 * * *"
     }
   ]
 }

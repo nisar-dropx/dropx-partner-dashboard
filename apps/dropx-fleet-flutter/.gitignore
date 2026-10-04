@@ -3,6 +3,8 @@
 .packages
 build/
 android/.gradle/
+android/app/.cxx/
+android/app/src/main/java/io/flutter/plugins/
 android/local.properties
 android/key.properties
 *.jks

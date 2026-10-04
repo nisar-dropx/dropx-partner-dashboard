@@ -4,6 +4,9 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeFleetDailyStatusEmailConfig } from "@/lib/fleet/daily-status-email";
+import { buildFleetAuditEmail } from "@/lib/fleet/audit-email";
+import { auditProgrammeFromRiskWeights, normalizeFleetAuditProgrammeConfig } from "@/lib/fleet/audit-programme-config";
+import { generateFleetAuditProgramme } from "@/lib/fleet/audit-programme";
 
 type Payload = Record<string, any>;
 const emailPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -30,6 +33,15 @@ function checklistEvidenceRules(guidanceValue: unknown, responseType: unknown) {
   return { pass: evidenceRule(pass?.[1] || (legacy ? fallbackType : "none"), pass?.[2] || (legacy ? fallbackMinimum : 0)), fail: evidenceRule(fail?.[1] || fallbackType, fail?.[2] || fallbackMinimum), failRemarksRequired };
 }
 
+async function assertAuditDateAllowed(companyId: string, value: string) {
+  const parsed = new Date(`${value}T12:00:00+05:30`);
+  if (Number.isNaN(parsed.getTime())) throw new Error("Choose a valid audit date.");
+  const settings = await supabaseAdmin!.from("fleet_control_settings").select("risk_weights").eq("company_id", companyId).maybeSingle();
+  if (settings.error) throw new Error(settings.error.message);
+  const config = auditProgrammeFromRiskWeights(settings.data?.risk_weights);
+  if (config.excludedWeekdays.includes(parsed.getDay())) throw new Error("This weekday is excluded in Settings → Vehicle audit programme. Choose another date.");
+}
+
 async function access() {
   const authorization = await getAuthorization();
   if (!authorization) return { error: NextResponse.json({ error: "Login required." }, { status: 401 }) };
@@ -51,6 +63,8 @@ export async function POST(request: Request) {
     if (action === "service.schedule") return await scheduleService(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.schedule") return await scheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.reschedule") return await rescheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.swap") return await swapAudits(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.auto-schedule") return context.canManageFleet ? NextResponse.json({ ok: true, ...await generateFleetAuditProgramme(context.companyId, required(body.month, "Audit month"), context.authorization.userId) }) : NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
     if (action === "audit.cancel") return await cancelAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.start") return await startAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.complete") return await completeAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
@@ -66,6 +80,7 @@ export async function POST(request: Request) {
     if (action === "vehicle-status-reason.upsert") return await upsertVehicleStatusReason(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status-reason.remove") return await removeVehicleStatusReason(context.companyId, context.canManageSettings, body);
     if (action === "settings.update") return await updateSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
+    if (action === "settings.update-audit-programme") return await updateAuditProgrammeSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "settings.update-mail") return await updateMailSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "member.upsert") return await upsertMember(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "status-recipient.upsert") return await upsertStatusRecipient(context.companyId, context.authorization.userId, context.canManageSettings, body);
@@ -143,6 +158,7 @@ async function scheduleAudit(companyId: string, userId: string, allowed: boolean
     scheduled_reason: `[mode:${mode}] ${reason}`,
     risk_score: Math.max(0, Math.min(100, Number(body.riskScore ?? 0))), status: "scheduled", assigned_to: clean(body.assignedTo) || null, created_by: userId
   }));
+  for (const row of rows) await assertAuditDateAllowed(companyId, row.scheduled_for);
   if (new Set(rows.map((row) => row.scheduled_for.slice(0, 7))).size > 1) throw new Error("Both audits must be scheduled in the same month.");
   const duplicateChecks = await Promise.all(rows.map((row) => {
     const monthStart = `${row.scheduled_for.slice(0, 7)}-01`;
@@ -163,6 +179,7 @@ async function rescheduleAudit(companyId: string, userId: string, allowed: boole
   if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
   const auditId = required(body.auditId, "Audit");
   const scheduledFor = required(body.scheduledFor, "New audit date");
+  await assertAuditDateAllowed(companyId, scheduledFor);
   const reason = required(body.rescheduleReason, "Reschedule reason");
   const current = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,scheduled_for,scheduled_reason,status").eq("company_id", companyId).eq("id", auditId).maybeSingle();
   if (current.error) throw new Error(current.error.message);
@@ -180,6 +197,25 @@ async function rescheduleAudit(companyId: string, userId: string, allowed: boole
   if (update.error) throw new Error(update.error.message);
   await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_rescheduled", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: { from_date: current.data.scheduled_for, to_date: scheduledFor, reason } });
   return NextResponse.json({ ok: true, message: "Audit moved to the new date." });
+}
+
+async function swapAudits(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const auditId = required(body.auditId, "Audit");
+  const otherAuditId = required(body.otherAuditId, "Swap audit");
+  if (auditId === otherAuditId) throw new Error("Choose a different audit to swap.");
+  const audits = await supabaseAdmin!.from("fleet_audits").select("id,scheduled_for,scheduled_reason,status").eq("company_id", companyId).in("id", [auditId, otherAuditId]);
+  if (audits.error) throw new Error(audits.error.message);
+  if ((audits.data ?? []).length !== 2 || (audits.data ?? []).some((audit) => audit.status !== "scheduled")) throw new Error("Both audits must be scheduled and not started.");
+  const first = audits.data!.find((audit) => audit.id === auditId)!; const second = audits.data!.find((audit) => audit.id === otherAuditId)!;
+  const now = new Date().toISOString();
+  const [firstUpdate, secondUpdate] = await Promise.all([
+    supabaseAdmin!.from("fleet_audits").update({ scheduled_for: second.scheduled_for, scheduled_reason: `${clean(first.scheduled_reason).replace(/\s*\[swapped:[^\]]+\]/g, "")} [swapped:${first.scheduled_for}]`, updated_at: now }).eq("company_id", companyId).eq("id", first.id).eq("status", "scheduled"),
+    supabaseAdmin!.from("fleet_audits").update({ scheduled_for: first.scheduled_for, scheduled_reason: `${clean(second.scheduled_reason).replace(/\s*\[swapped:[^\]]+\]/g, "")} [swapped:${second.scheduled_for}]`, updated_at: now }).eq("company_id", companyId).eq("id", second.id).eq("status", "scheduled")
+  ]);
+  if (firstUpdate.error || secondUpdate.error) throw new Error(firstUpdate.error?.message || secondUpdate.error?.message || "Audit dates could not be swapped.");
+  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_swapped", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: { other_audit_id: otherAuditId, first_date: first.scheduled_for, second_date: second.scheduled_for } });
+  return NextResponse.json({ ok: true, message: "Audit dates swapped without changing either monthly requirement." });
 }
 
 async function cancelAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
@@ -257,22 +293,21 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
   const update = await supabaseAdmin!.from("fleet_audits").update({ status: failed ? "failed" : "passed", score, summary: clean(body.summary) || (failed ? "Issues found during routine vehicle audit." : "No critical issues found."), odometer_km: numberOrNull(body.odometerKm), completed_at: new Date().toISOString(), completed_by: userId, updated_at: new Date().toISOString(), email_status: body.sendEmail === false ? "not_sent" : "queued" }).eq("company_id", companyId).eq("id", auditId);
   if (update.error) throw new Error(update.error.message);
   let emailStatus = "not_sent";
-  if (body.sendEmail !== false) emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, failed, clean(body.summary), findings, evidence);
+  if (body.sendEmail !== false) emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, failed, score, clean(body.summary), findings, evidence);
   return NextResponse.json({ ok: true, message: emailStatus === "sent" ? "Audit completed and summary emailed." : "Audit completed.", emailStatus });
 }
 
-async function sendAuditEmail(companyId: string, auditId: string, audit: Payload, failed: boolean, summary: string, findings: Payload[], evidence: Payload[]) {
+async function sendAuditEmail(companyId: string, auditId: string, audit: Payload, failed: boolean, score: number | null, summary: string, findings: Payload[], evidence: Payload[]) {
   const vehicle = Array.isArray(audit.fleet_vehicles) ? audit.fleet_vehicles[0] : audit.fleet_vehicles;
   const station = await supabaseAdmin!.from("stations").select("station_email,station_manager_email").eq("company_id", companyId).eq("station_code", vehicle.station_code).maybeSingle();
   const admins = await supabaseAdmin!.from("fleet_portal_memberships").select("profiles:user_id(email)").eq("company_id", companyId).eq("is_active", true).in("access_level", ["administrator", "approver"]);
   const to = [station.data?.station_email, station.data?.station_manager_email].map(clean).filter((email) => emailPattern.test(email));
   const cc = (admins.data ?? []).flatMap((row: any) => { const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles; return clean(profile?.email); }).filter((email: string) => emailPattern.test(email) && !to.includes(email));
   if (!to.length) { await supabaseAdmin!.from("fleet_audits").update({ email_status: "failed" }).eq("id", auditId); return "failed"; }
-  const subject = `Routine Van Audit Key Findings - ${vehicle.station_code} ${vehicle.vehicle_no}, ${vehicle.model} | ${audit.scheduled_for}`;
-  const findingLines = findings.length ? findings.map((item) => `- ${clean(item.finding)}${clean(item.actionRequired) ? ` — Action: ${clean(item.actionRequired)}` : ""}`).join("\n") : "- No material issue recorded.";
-  const evidenceLines = evidence.length ? evidence.map((item) => `- ${clean(item.type)}: ${clean(item.url)}`).join("\n") : "- No evidence link recorded.";
-  const body = `Vehicle Audit Details\nStation: ${vehicle.station_code}\nVehicle: ${vehicle.vehicle_no}\nModel: ${vehicle.model}\nAudit date: ${audit.scheduled_for}\nResult: ${failed ? "Issues found" : "Passed"}\n\nSummary\n${summary || (failed ? "Issues found during the inspection." : "Vehicle passed the routine inspection.")}\n\nKey findings and required action\n${findingLines}\n\nPhoto / video evidence\n${evidenceLines}`;
-  try { await sendEmail({ companyId, subject, body, to, cc, messageId: `<dropx.fleet-audit.${auditId}@partner.dropxlogistics.com>` }); await supabaseAdmin!.from("fleet_audits").update({ email_status: "sent", email_sent_at: new Date().toISOString(), email_recipients: { to, cc } }).eq("id", auditId); return "sent"; }
+  const settings = await supabaseAdmin!.from("fleet_control_settings").select("risk_weights").eq("company_id", companyId).maybeSingle();
+  const config = auditProgrammeFromRiskWeights(settings.data?.risk_weights);
+  const mail = buildFleetAuditEmail({ auditId, auditDate: audit.scheduled_for, auditMode: /^\[mode:video\]/i.test(clean(audit.scheduled_reason)) ? "video" : "physical", stationCode: vehicle.station_code, vehicleNo: vehicle.vehicle_no, model: vehicle.model, failed, score, summary, findings, evidence, config });
+  try { await sendEmail({ companyId, subject: mail.subject, body: mail.text, html: mail.html, to, cc, messageId: `<dropx.fleet-audit.${auditId}@partner.dropxlogistics.com>` }); await supabaseAdmin!.from("fleet_audits").update({ email_status: "sent", email_sent_at: new Date().toISOString(), email_recipients: { to, cc } }).eq("id", auditId); return "sent"; }
   catch { await supabaseAdmin!.from("fleet_audits").update({ email_status: "failed", email_recipients: { to, cc } }).eq("id", auditId); return "failed"; }
 }
 
@@ -476,6 +511,17 @@ async function updateSettings(companyId: string, userId: string, allowed: boolea
   const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, default_audit_cadence_days: Number(body.defaultAuditCadenceDays ?? 30), document_warning_days: Number(body.documentWarningDays ?? 30), service_warning_days: Number(body.serviceWarningDays ?? 14), auto_suggest_audits: Boolean(body.autoSuggestAudits), breakdown_vehicle_link_required: Boolean(body.breakdownVehicleLinkRequired), audit_email_enabled: Boolean(body.auditEmailEnabled), audit_video_required: Boolean(body.auditVideoRequired), updated_by: userId, updated_at: new Date().toISOString() });
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, message: "Fleet settings updated." });
+}
+
+async function updateAuditProgrammeSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const existing = await supabaseAdmin!.from("fleet_control_settings").select("risk_weights").eq("company_id", companyId).maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+  const riskWeights = existing.data?.risk_weights && typeof existing.data.risk_weights === "object" ? existing.data.risk_weights as Record<string, unknown> : {};
+  const auditProgramme = normalizeFleetAuditProgrammeConfig(body.auditProgramme);
+  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, risk_weights: { ...riskWeights, audit_programme: auditProgramme }, updated_by: userId, updated_at: new Date().toISOString() });
+  if (result.error) throw new Error(result.error.message);
+  return NextResponse.json({ ok: true, message: auditProgramme.enabled ? "Automatic audit programme and email design saved." : "Audit programme settings saved on hold." });
 }
 
 async function updateMailSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {

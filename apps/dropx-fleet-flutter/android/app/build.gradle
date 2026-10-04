@@ -2,9 +2,16 @@ plugins { id "com.android.application"; id "kotlin-android"; id "dev.flutter.flu
 android {
   namespace = "com.dropxlogistics.fleet"
   compileSdk = flutter.compileSdkVersion
-  ndkVersion = flutter.ndkVersion
+  ndkVersion = "27.0.12077973"
   compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
   kotlinOptions { jvmTarget = JavaVersion.VERSION_17 }
   defaultConfig { applicationId = "com.dropxlogistics.fleet"; minSdk = 23; targetSdk = flutter.targetSdkVersion; versionCode = flutter.versionCode; versionName = flutter.versionName }
+  buildTypes {
+    release {
+      // Replace this with the Play Store upload key before store publication.
+      // The development key keeps the direct-download APK installable during rollout.
+      signingConfig = signingConfigs.debug
+    }
+  }
 }
 flutter { source = "../.." }

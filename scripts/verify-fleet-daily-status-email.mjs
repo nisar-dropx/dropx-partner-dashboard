@@ -81,8 +81,9 @@ assert.deepEqual(deliveries.find((row) => row.email === 'leader@example.com').st
 assert.ok(!deliveries.some((row) => row.email === 'quiet@example.com'));
 
 const route = readFileSync('src/app/api/cron/fleet-daily-status/route.ts', 'utf8');
-assert.match(route, /to: \[delivery\.email\]/);
-assert.match(route, /\.eq\("recipient_email", delivery\.email\)/);
+assert.match(route, /to: \[deliveryEmail\]/);
+assert.match(route, /ignoreDuplicates: true/);
+assert.match(route, /\.eq\("recipient_email", deliveryEmail\)/);
 assert.match(route, /stationScope\.has/);
 assert.match(route, /typedActivity\.filter\(\(row\) => pending\(row\.approvalStatus, row\.source\)\)/);
 assert.match(route, /todayAdHocStations\.has\(row\.station\)/);
