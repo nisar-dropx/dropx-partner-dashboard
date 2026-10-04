@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { workforceRegisterLocations, workforceStationPolicy, workforceStationEmailError } from "./workforce-register-policy.ts";
+import { workforceProfileStatus, workforceRegisterLocations, workforceStationPolicy, workforceStationEmailError } from "./workforce-register-policy.ts";
 const station = (id, model, provider = "Amazon", parent) => ({ id, station_code: id, parent_station_id: parent, providers: { name: provider }, location_models: { code: model } });
 for (const model of ["EDSP", "XPT", "AMXL"]) test(`${model} requires station email, accepting any domain and case`, () => {
   assert.equal(workforceStationPolicy(station("KOZA", model)).requiresStationEmail, true);
@@ -20,6 +20,15 @@ test("station scope includes child XPT but not sibling, parent or Amazon Now", (
 });
 test("Now policy tolerates relationship arrays and canonical model aliases", () => {
   assert.equal(workforceStationPolicy({ id: "n", providers: [{ name: "Amazon" }], location_models: [{ code: "Amazon Now" }] }).excluded, true);
+});
+
+test("onboarding status takes precedence over the activation flag", () => {
+  assert.equal(workforceProfileStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: false }), "Pending");
+  assert.equal(workforceProfileStatus({ onboarding_status: "under_review", is_active: false }), "Under Review");
+  assert.equal(workforceProfileStatus({ onboarding_status: "returned", is_active: false }), "Returned");
+  assert.equal(workforceProfileStatus({ onboarding_status: "active", is_active: true }), "Active");
+  assert.equal(workforceProfileStatus({ onboarding_status: "active", is_active: false }), "Inactive");
+  assert.equal(workforceProfileStatus({ onboarding_status: "pending", people_lifecycle_status: "offboarded", is_active: false }), "Offboarded");
 });
 
 import { pendingWorkforceRegistration, activeWorkforceRegistration, registrationFilledFields, registrationProgress } from "./workforce-registration-progress.ts";

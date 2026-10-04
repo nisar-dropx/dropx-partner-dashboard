@@ -1,4 +1,11 @@
 type Relation<T> = T | T[] | null;
+export type WorkforceProfileStatusSource = {
+  onboarding_status?: string | null;
+  lifecycle_status?: string | null;
+  people_lifecycle_status?: string | null;
+  is_active?: boolean | null;
+  deleted_at?: unknown;
+};
 export type WorkforceStation = {
   id: string;
   station_code?: string;
@@ -10,6 +17,20 @@ export type WorkforceStation = {
 };
 function first<T>(value: Relation<T> | undefined) { return Array.isArray(value) ? value[0] : value; }
 function normalized(value: string | undefined) { return (value ?? "").trim().toUpperCase().replace(/[ _-]/g, ""); }
+function humanizedStatus(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export function workforceProfileStatus(source?: WorkforceProfileStatusSource | null) {
+  if (!source) return "";
+  if (source.deleted_at) return "Inactive";
+  const lifecycle = String(source.people_lifecycle_status ?? source.lifecycle_status ?? "").trim().toLowerCase();
+  if (lifecycle && lifecycle !== "active" && lifecycle !== "onboarding") return humanizedStatus(lifecycle);
+  const onboarding = String(source.onboarding_status ?? "").trim().toLowerCase();
+  if (onboarding && onboarding !== "active") return humanizedStatus(onboarding);
+  return source.is_active === true ? "Active" : "Inactive";
+}
+
 export function workforceStationPolicy(station: WorkforceStation) {
   const provider = normalized(first(station.providers)?.name);
   const model = normalized(first(station.location_models)?.code || first(station.location_models)?.name);

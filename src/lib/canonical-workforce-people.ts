@@ -5,6 +5,7 @@ import { allPeopleExportColumns, type AllPeopleExportValues } from "@/lib/all-pe
 import { ALL_PEOPLE_SHEET_EDITABLE_KEYS } from "@/lib/all-people-sheet";
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { workforceProfileStatus } from "@/lib/workforce-register-policy";
 
 function first<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
@@ -85,7 +86,7 @@ export async function loadCanonicalWorkforcePeople(
 
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, source_profile_type, source_profile_id, migration_state, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile_country_code, mobile, email, onboarding_status, is_active, deleted_at, statutory_applicability, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, postal_pin, landmark, bank_account_no, ifsc_code, pf_uan, pf_account_no, esi_no, emergency_contact_number, emergency_contact_name, emergency_contact_relation, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, profile_return_remarks, created_at, updated_at, stations (station_code, providers (name), location_models (code, name)), designations (id, code, name, portal_permissions)")
+    .select("id, source_profile_type, source_profile_id, migration_state, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile_country_code, mobile, email, onboarding_status, lifecycle_status, is_active, deleted_at, statutory_applicability, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, postal_pin, landmark, bank_account_no, ifsc_code, pf_uan, pf_account_no, esi_no, emergency_contact_number, emergency_contact_name, emergency_contact_relation, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, profile_return_remarks, created_at, updated_at, stations (station_code, providers (name), location_models (code, name)), designations (id, code, name, portal_permissions)")
     .eq("company_id", companyId)
     .order("full_name");
   if (result.error) return { rows: [], error: result.error.message };
@@ -113,13 +114,7 @@ export async function loadCanonicalWorkforcePeople(
       const designationRecord = first(row.designations as { id?: string; code?: string; name?: string; portal_permissions?: unknown } | Array<{ id?: string; code?: string; name?: string; portal_permissions?: unknown }> | null);
       const location = String(station?.station_code ?? "-"); const modelRecord = first(station?.location_models); const model = String(modelRecord?.code ?? modelRecord?.name ?? "-"); const provider = String(first(station?.providers)?.name ?? "-");
       const designation = String(designationRecord?.name ?? designationRecord?.code ?? "-").trim() || "-";
-      const active = row.is_active !== false && !row.deleted_at;
-      const onboardingStatus = String(row.onboarding_status ?? "").trim().replaceAll("_", " ");
-      const status = active
-        ? onboardingStatus
-          ? onboardingStatus.replace(/\b\w/g, (letter) => letter.toUpperCase())
-          : "Active"
-        : "Inactive";
+      const status = workforceProfileStatus(row);
       const canEdit = actions.canEdit && canAccessDesignationPortal(designationRecord, actions.surface ?? "dashboard", "edit", { isOwner: actions.isOwner });
       return {
         id: String(row.id),

@@ -1,3 +1,5 @@
+import { workforceProfileStatus } from "./workforce-register-policy.ts";
+
 export type WorkforcePayoutShipmentIdentity = {
   provider_employee_id?: string | null;
   provider_employee_name?: string | null;
@@ -69,16 +71,6 @@ export function resolveShipmentPayoutMapping(
   return { kind: "mapped", workforceId: workforceIds[0], matches };
 }
 
-function humanizeStatus(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 export function workforcePayoutDropxStatus(source?: WorkforcePayoutStatusSource | null) {
-  if (!source) return "";
-  if (source.deleted_at) return "Inactive";
-  const lifecycle = String(source.lifecycle_status ?? "").trim().toLowerCase();
-  if (lifecycle && lifecycle !== "active" && lifecycle !== "onboarding") return humanizeStatus(lifecycle);
-  const onboarding = String(source.onboarding_status ?? "").trim().toLowerCase();
-  if (onboarding && onboarding !== "active") return humanizeStatus(onboarding);
-  return source.is_active === true ? "Active" : "Inactive";
+  return workforceProfileStatus(source);
 }
