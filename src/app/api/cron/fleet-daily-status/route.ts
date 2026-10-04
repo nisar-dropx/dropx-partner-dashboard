@@ -117,10 +117,22 @@ export async function GET(request: Request) {
   const force = params.get("force") === "1";
   const requestedCompanyId = clean(params.get("company_id"));
   let companyQuery = supabaseAdmin.from("companies").select("id,name");
-  companyQuery = force && requestedCompanyId ? companyQuery.eq("id", requestedCompanyId) : companyQuery.eq("is_active", true);
+  if (force && requestedCompanyId) companyQuery = companyQuery.eq("id", requestedCompanyId);
+  else if (force) companyQuery = companyQuery.ilike("name", "%dropx%");
+  else companyQuery = companyQuery.eq("is_active", true);
   const companies = await companyQuery;
   if (companies.error) return NextResponse.json({ error: companies.error.message }, { status: 500 });
   const totals: Record<string, number> = {};
-  for (const company of companies.data ?? []) { try { const outcome = await processCompany(company, date, time, force); totals[outcome] = (totals[outcome] || 0) + 1; } catch { totals.failed = (totals.failed || 0) + 1; } }
-  return NextResponse.json({ date, time, forced: force, ...totals }, { status: totals.failed || totals.partial_failed ? 500 : 200 });
+  const details: Array<{ companyId: string; company: string | null; outcome: string }> = [];
+  for (const company of companies.data ?? []) {
+    try {
+      const outcome = await processCompany(company, date, time, force);
+      totals[outcome] = (totals[outcome] || 0) + 1;
+      details.push({ companyId: company.id, company: company.name, outcome });
+    } catch {
+      totals.failed = (totals.failed || 0) + 1;
+      details.push({ companyId: company.id, company: company.name, outcome: "failed" });
+    }
+  }
+  return NextResponse.json({ date, time, forced: force, ...totals, details }, { status: totals.failed || totals.partial_failed ? 500 : 200 });
 }
