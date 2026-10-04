@@ -5,6 +5,7 @@ export type WorkforcePayoutExportComponent = {
   count: number;
   rate: number;
   amount: number;
+  sortOrder?: number;
 };
 
 export type WorkforcePayoutExportRow = {
@@ -35,8 +36,6 @@ export type WorkforcePayoutExportRow = {
 
 type ExportValue = string | number;
 
-const preferredProductionCodes = ["DELIVERY", "CRETURN", "SELLER_PICKUP", "SLLLER_RETURN"];
-
 function withUniqueLabels<T extends { code: string; label: string }>(items: T[]) {
   const labelCounts = new Map<string, number>();
   for (const item of items) {
@@ -61,19 +60,10 @@ function componentColumns(rows: WorkforcePayoutExportRow[]) {
       componentType: current?.componentType === "production" || item.componentType === "production" ? "production" : "amount"
     });
   }
-  return withUniqueLabels(Array.from(values.values()).sort((left, right) => {
-    if (left.componentType !== right.componentType) return left.componentType === "production" ? -1 : 1;
-    if (left.componentType === "production") {
-      const leftIndex = preferredProductionCodes.indexOf(left.code);
-      const rightIndex = preferredProductionCodes.indexOf(right.code);
-      if (leftIndex !== rightIndex) {
-        if (leftIndex === -1) return 1;
-        if (rightIndex === -1) return -1;
-        return leftIndex - rightIndex;
-      }
-    }
-    return left.label.localeCompare(right.label) || left.code.localeCompare(right.code);
-  }));
+  // Each payout row is already arranged by its payment method's configured
+  // field order. A CSV can contain methods with conflicting orders, so retain
+  // the first visible occurrence instead of imposing a new alphabetic order.
+  return withUniqueLabels(Array.from(values.values()));
 }
 
 function deductionColumns(rows: WorkforcePayoutExportRow[]) {

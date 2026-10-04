@@ -11,6 +11,7 @@ export type DirectPayComponent = {
   pay_schedule?: string | null;
   calculation_type?: string | null;
   calculation_source?: string | null;
+  sort_order?: number | string | null;
 };
 
 export type DirectPayAttendance = {
@@ -29,6 +30,7 @@ export type DirectPayLine = {
   rate: number;
   amount: number;
   bucket: "salary" | "fuel" | "van";
+  sortOrder: number;
 };
 
 const rounded = (value: number) => Math.round(value * 100) / 100;
@@ -85,7 +87,15 @@ export function directPayForDay(
   let missing = components.length === 0;
   const lines: DirectPayLine[] = [];
 
-  for (const component of components) {
+  const orderedComponents = components
+    .map((component, index) => ({ component, index, rank: Number(component.sort_order) }))
+    .sort((left, right) => {
+      const leftRank = Number.isFinite(left.rank) ? left.rank : left.index;
+      const rightRank = Number.isFinite(right.rank) ? right.rank : right.index;
+      return leftRank - rightRank || left.index - right.index;
+    });
+
+  for (const { component, index } of orderedComponents) {
     const code = String(component.component_code ?? "").trim().toUpperCase();
     const label = String(component.label ?? code).trim() || code;
     if (!code || component.component_type === "production" || component.calculation_type === "count_x_rate") {
@@ -136,7 +146,8 @@ export function directPayForDay(
       : rounded(rate * count);
     const normalized = `${code} ${label}`.toUpperCase();
     const bucket = /VAN|VEHICLE|DOCK/.test(normalized) ? "van" : /FUEL|KILOMET|\bKM\b/.test(normalized) ? "fuel" : "salary";
-    lines.push({ code, label, schedule, count, rate, amount, bucket });
+    const configuredOrder = Number(component.sort_order);
+    lines.push({ code, label, schedule, count, rate, amount, bucket, sortOrder: Number.isFinite(configuredOrder) ? configuredOrder : index });
   }
 
   return { lines, total: rounded(lines.reduce((sum, line) => sum + line.amount, 0)), missing, present, attendanceUnit, minutes };

@@ -15,6 +15,9 @@ const helperPayoutLoader = read("src/lib/helper-payout-loader.ts");
 const directAllocationPage = read("src/app/provider-mapping/direct-pay/page.tsx");
 const directAllocationAction = read("src/app/provider-mapping/direct-pay/actions.ts");
 const directAllocationWorksheet = read("src/components/direct-payment-allocation-worksheet.tsx");
+const paymentMethodForm = read("src/components/payment-method-form.tsx");
+const providerIdMappingPage = read("src/app/provider-id-mapping/page.tsx");
+const exportComponentColumns = workforceExport.match(/function componentColumns[\s\S]*?function deductionColumns/)?.[0] ?? "";
 
 assert.match(oneRoute, /provider_employee_name/, "DropX One must return the Amazon associate name");
 assert.match(oneRoute, /const deliveries = Number\(row\.total_delivery/, "Delivery must use the combined total_delivery count");
@@ -33,6 +36,9 @@ assert.match(workforcePage, /"MFN return"/, "Workforce must use the requested MF
 assert.match(workforcePage, /summarizeWorkDays/, "Workforce must summarize capture-aware attendance as Work Days");
 assert.match(workforcePage, /workDayUnits:\s*calculation\.attendanceUnit/, "Direct payout Work Days must use canonical attendance units");
 assert.match(workforcePage, /paymentMethodBreakdown/, "Workforce must subtotal each mapped payment method separately");
+assert.match(workforcePage, /select\("payment_method_id,component_code,component_type,label,pay_schedule,sort_order,/, "Workforce payout must load the saved payment-field order");
+assert.match(workforcePage, /const lines = orderPayoutLines\(\[\.\.\.productionLines, \.\.\.attendanceLines\], configuredComponentOrder\)/, "Mixed payout fields must use the payment method's configured order");
+assert.match(workforcePage, /const currentComponentOrder = paymentComponentOrderMap\(componentsByMethod\.get\(methodId\)[\s\S]*?lines: orderPayoutLines\(calculation\.lines\.map/, "Existing direct-allocation values must render in the payment method's current field order");
 assert.match(workforcePage, /Shipment data unavailable/, "Providerless shipment attendance must be shown as unavailable instead of zero");
 assert.match(workforcePage, /const lineMap = new Map[\s\S]*for \(const day of dailyBreakdown\) for \(const line of day\.lines\)/, "Existing component units, rates and amounts must remain in the payout breakup");
 assert.match(workforceTable, /aria-expanded=\{expanded\}/, "The Workforce breakup must be keyboard-accessible");
@@ -50,6 +56,7 @@ assert.match(workforceTable, /row\.paymentDetailsAvailable \? <strong>\{row\.pay
 assert.doesNotMatch(workforceTable, /overview-method-|daily-method-/, "The visible worksheet must not render global payment-method columns");
 assert.match(workforceExport, /"Attendance Source"/, "The Workforce payout export must identify the attendance source");
 assert.match(workforceExport, /"Designation"/, "The shared Workforce and Helper payout export must include designation");
+assert.doesNotMatch(exportComponentColumns, /preferredProductionCodes|left\.label\.localeCompare\(right\.label\)/, "Payout export must not replace the configured payment-field order with a hardcoded or alphabetic order");
 assert.match(workforceTable, /DropX associate/, "Workforce must identify the registered associate");
 assert.match(workforceTable, /Partner ID/, "Workforce must show the mapped partner ID without coupling the shared UI to Amazon");
 assert.match(workforceTable, /Partner name/, "Workforce must show the source partner-account name");
@@ -122,6 +129,8 @@ assert.match(helperPayoutLoader, /\.in\("enrolment_id", biometricVariants/, "Hel
 assert.match(helperPayoutLoader, /from\("biometric_enrolments"\)[\s\S]*\.eq\("profile_type", "worker"\)/, "Helper attendance must use the effective-dated worker enrolment history");
 assert.match(helperPayoutLoader, /biometricIdBelongsOnlyToProfile\(helperId, "worker",[\s\S]*rowOwnedByAnotherProfile/, "Helper attendance must fail closed when a biometric ID belongs to another profile on the work date");
 assert.match(helperPayoutLoader, /attendanceSource:\s*"biometric"/, "Provider-independent Helper payment must calculate from biometric attendance");
+assert.match(helperPayoutLoader, /pay_schedule,sort_order,payment_fields/, "Helper payout fallback fields must load the saved payment-field order");
+assert.match(helperPayoutLoader, /const currentComponentOrder = paymentComponentOrderMap\(componentsByMethod\.get\(methodId\)[\s\S]*?lines: sortByPaymentFieldOrder/, "Existing Helper allocation values must render in the payment method's current field order");
 assert.doesNotMatch(helperPayoutLoader, /from\("stations"\)[\s\S]{0,160}\.eq\("is_active", true\)/, "Historical Helper payouts must remain visible after a station is deactivated");
 assert.doesNotMatch(helperPayoutLoader, /field_executive_provider_mappings|provider_member_id/, "Helper payout calculation must not require provider mapping");
 assert.match(directAllocationPage, /from\("helper_payment_allocations"\)/, "Helper payment methods must be allocatable from the direct-pay worksheet");
@@ -130,5 +139,11 @@ assert.match(directAllocationWorksheet, /name="subject_type"[\s\S]*value=\{audie
 assert.match(workforcePeriodFilter, /name="audience"/, "Changing a payout period must preserve the selected population tab");
 assert.doesNotMatch(workforcePeriodFilter, /payrollStatus/, "The removed confirmed-payroll filter must not remain in the period selector");
 assert.match(workforcePage, /<WorkforcePayoutTable key=\{audience\}/, "Switching Workforce and Helpers must reset client-side row filters");
+
+assert.match(paymentMethodForm, /const \[selectedIds, setSelectedIds\] = useState\(\(\) => normalizePaymentFieldOrder/, "Payment method editing must preserve the stored field order");
+assert.match(paymentMethodForm, /draggable[\s\S]*movePaymentField\(current, activeId, field\.id/, "Payment fields must support drag reordering");
+assert.match(paymentMethodForm, /movePaymentFieldByOffset/, "Payment field ordering must include a keyboard-accessible fallback");
+assert.doesNotMatch(paymentMethodForm, /availableFields\.filter\(\(field\) => selectedIds\.has/, "Selected payment fields must not be rebuilt in alphabetic master-field order");
+assert.match(providerIdMappingPage, /sort_order[\s\S]*\.sort\(\(a, b\) => a\.sort_order - b\.sort_order\)/, "ID Mapping must consume the same saved payment-field order");
 
 console.log("Workforce payment breakup verification passed.");

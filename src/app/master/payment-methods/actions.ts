@@ -74,6 +74,8 @@ export async function createPaymentMethod(formData: FormData) {
   if (componentError) throw new Error(componentError.message);
 
   revalidatePath("/master/payment-methods");
+  revalidatePath("/provider-id-mapping");
+  revalidatePath("/payments/workforce-payouts");
 }
 
 async function selectedPaymentFields(formData: FormData, companyId: string) {
@@ -153,6 +155,7 @@ export async function updatePaymentMethod(formData: FormData) {
 
   revalidatePath("/master/payment-methods");
   revalidatePath("/provider-id-mapping");
+  revalidatePath("/payments/workforce-payouts");
   redirect("/master/payment-methods");
 }
 

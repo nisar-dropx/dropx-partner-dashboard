@@ -4454,6 +4454,130 @@ h3 {
   font-weight: 500;
 }
 
+.payment-field-picker-summary {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.payment-field-order-list {
+  display: grid;
+  gap: 7px;
+}
+
+.payment-field-order-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #ffffff;
+  cursor: grab;
+  transition: border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.payment-field-order-item:hover {
+  border-color: #f2a478;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
+}
+
+.payment-field-order-item.dragging {
+  opacity: 0.48;
+  cursor: grabbing;
+}
+
+.payment-field-order-item.drop-before::before,
+.payment-field-order-item.drop-after::after {
+  position: absolute;
+  right: 6px;
+  left: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--brand);
+  content: "";
+}
+
+.payment-field-order-item.drop-before::before {
+  top: -5px;
+}
+
+.payment-field-order-item.drop-after::after {
+  bottom: -5px;
+}
+
+.payment-field-order-grip {
+  display: grid;
+  width: 28px;
+  height: 30px;
+  place-items: center;
+  border-radius: 7px;
+  color: #8390a3;
+}
+
+.payment-field-order-item:hover .payment-field-order-grip {
+  background: #f4f6f9;
+  color: var(--ink);
+}
+
+.payment-field-order-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.payment-field-order-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payment-field-order-copy small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.payment-field-order-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.payment-field-order-actions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #536076;
+  cursor: pointer;
+}
+
+.payment-field-order-actions button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: #f7f8fa;
+  color: var(--ink);
+}
+
+.payment-field-order-actions button.remove:hover:not(:disabled) {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+
+.payment-field-order-actions button:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
 .payment-field-multi-menu {
   z-index: 55;
 }

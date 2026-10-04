@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronDown, GripVertical, X } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
+import {
+  movePaymentField,
+  movePaymentFieldByOffset,
+  normalizePaymentFieldOrder,
+  togglePaymentFieldSelection
+} from "@/lib/payment-field-order";
 
 export type PaymentFieldOption = {
   id: string;
@@ -31,14 +38,21 @@ export function PaymentMethodForm({ action, availableFields, initialMethod, subm
   initialMethod?: InitialPaymentMethod;
   submitLabel?: string;
 }) {
-  const initialIds = useMemo(() => new Set(
-    (initialMethod?.components ?? []).map((component) => component.payment_field_id).filter(Boolean) as string[]
-  ), [initialMethod]);
-  const [selectedIds, setSelectedIds] = useState(initialIds);
+  const fieldById = useMemo(() => new Map(availableFields.map((field) => [field.id, field])), [availableFields]);
+  const [selectedIds, setSelectedIds] = useState(() => normalizePaymentFieldOrder(
+    (initialMethod?.components ?? []).map((component) => component.payment_field_id).filter(Boolean) as string[],
+    availableFields.map((field) => field.id)
+  ));
   const [search, setSearch] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; placement: "before" | "after" } | null>(null);
+  const draggedIdRef = useRef<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
-  const selectedFields = availableFields.filter((field) => selectedIds.has(field.id));
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedFields = selectedIds
+    .map((id) => fieldById.get(id))
+    .filter((field): field is PaymentFieldOption => Boolean(field));
   const visibleFields = availableFields.filter((field) =>
     `${field.code} ${field.label}`.toLowerCase().includes(search.trim().toLowerCase())
   );
@@ -52,12 +66,13 @@ export function PaymentMethodForm({ action, availableFields, initialMethod, subm
   }, []);
 
   function toggleField(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelectedIds((current) => togglePaymentFieldSelection(current, id));
+  }
+
+  function finishDrag() {
+    draggedIdRef.current = null;
+    setDraggedId(null);
+    setDropTarget(null);
   }
 
   return (
@@ -71,65 +86,98 @@ export function PaymentMethodForm({ action, availableFields, initialMethod, subm
 
         <div className="payment-field-picker">
           <div className="payment-component-head">
-            <div><strong>Payment fields</strong><p className="subtle">Select reusable fields for this payment method.</p></div>
-            <span className="selection-count">{selectedIds.size} selected</span>
+            <div><strong>Payment fields</strong><p className="subtle">Select fields, then drag them into the order used in ID Mapping and Workforce Payouts.</p></div>
+            <span className="selection-count">{selectedIds.length} selected</span>
           </div>
           {selectedFields.map((field) => <input key={field.id} name="field_ids" type="hidden" value={field.id} />)}
           {availableFields.length ? (
-            <div className="multi-select payment-field-multi-select" ref={pickerRef}>
-              <button
-                aria-expanded={pickerOpen}
-                className={`multi-select-trigger payment-field-multi-trigger ${pickerOpen ? "open" : ""}`}
-                onClick={() => setPickerOpen((current) => !current)}
-                type="button"
-              >
-                {selectedFields.length ? (
-                  <span className="payment-field-selected-tags">
-                    {selectedFields.map((field) => (
-                      <span className="payment-field-selected-tag" key={field.id}>
-                        <span>{field.label}</span>
-                        <span
-                          aria-label={`Remove ${field.label}`}
-                          className="payment-field-selected-remove"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            toggleField(field.id);
-                          }}
-                          role="button"
-                          tabIndex={0}
-                        >×</span>
-                      </span>
-                    ))}
+            <>
+              <div className="multi-select payment-field-multi-select" ref={pickerRef}>
+                <button
+                  aria-expanded={pickerOpen}
+                  className={`multi-select-trigger payment-field-multi-trigger ${pickerOpen ? "open" : ""}`}
+                  onClick={() => setPickerOpen((current) => !current)}
+                  type="button"
+                >
+                  <span className={selectedFields.length ? "payment-field-picker-summary" : "payment-field-placeholder"}>
+                    {selectedFields.length ? "Add or remove payment fields" : "Select payment fields"}
                   </span>
-                ) : <span className="payment-field-placeholder">Select payment fields</span>}
-                <span aria-hidden="true" className="multi-select-chevron">⌄</span>
-              </button>
-              {pickerOpen ? (
-                <div className="multi-select-menu payment-field-multi-menu">
-                  <div className="multi-select-search">
-                    <input autoFocus aria-label="Search payment fields" className="field multi-select-search-field" onChange={(event) => setSearch(event.target.value)} placeholder="Search field ID or label" type="search" value={search} />
+                  <ChevronDown aria-hidden="true" className="multi-select-chevron" size={16} />
+                </button>
+                {pickerOpen ? (
+                  <div className="multi-select-menu payment-field-multi-menu">
+                    <div className="multi-select-search">
+                      <input autoFocus aria-label="Search payment fields" className="field multi-select-search-field" onChange={(event) => setSearch(event.target.value)} placeholder="Search field ID or label" type="search" value={search} />
+                    </div>
+                    <div className="multi-select-options payment-field-multi-options">
+                      {visibleFields.map((field) => (
+                        <label className={`multi-select-option payment-field-multi-option ${selectedIdSet.has(field.id) ? "selected" : ""}`} key={field.id}>
+                          <input checked={selectedIdSet.has(field.id)} onChange={() => toggleField(field.id)} type="checkbox" />
+                          <span className="payment-field-option-copy">
+                            <strong>{field.label}</strong>
+                            <small>{field.code} · {field.field_type === "amount" ? "Amount" : "Production"}{scheduleLabel(field.pay_schedule) ? ` · ${scheduleLabel(field.pay_schedule)}` : ""}</small>
+                          </span>
+                        </label>
+                      ))}
+                      {!visibleFields.length ? <p className="searchable-empty">No matching payment fields.</p> : null}
+                    </div>
                   </div>
-                  <div className="multi-select-options payment-field-multi-options">
-                    {visibleFields.map((field) => (
-                      <label className={`multi-select-option payment-field-multi-option ${selectedIds.has(field.id) ? "selected" : ""}`} key={field.id}>
-                        <input checked={selectedIds.has(field.id)} onChange={() => toggleField(field.id)} type="checkbox" />
-                        <span className="payment-field-option-copy">
-                          <strong>{field.label}</strong>
-                          <small>{field.code} · {field.field_type === "amount" ? "Amount" : "Production"}{scheduleLabel(field.pay_schedule) ? ` · ${scheduleLabel(field.pay_schedule)}` : ""}</small>
+                ) : null}
+              </div>
+              {selectedFields.length ? (
+                <div aria-label="Payment field order" className="payment-field-order-list" role="list">
+                  {selectedFields.map((field, index) => {
+                    const target = dropTarget?.id === field.id ? dropTarget.placement : null;
+                    return (
+                      <div
+                        aria-label={`${field.label}, position ${index + 1} of ${selectedFields.length}`}
+                        className={`payment-field-order-item ${draggedId === field.id ? "dragging" : ""} ${target ? `drop-${target}` : ""}`}
+                        draggable
+                        key={field.id}
+                        onDragEnd={finishDrag}
+                        onDragOver={(event) => {
+                          const activeId = draggedIdRef.current ?? draggedId;
+                          if (!activeId || activeId === field.id) return;
+                          event.preventDefault();
+                          const bounds = event.currentTarget.getBoundingClientRect();
+                          setDropTarget({ id: field.id, placement: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after" });
+                        }}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", field.id);
+                          draggedIdRef.current = field.id;
+                          setDraggedId(field.id);
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const activeId = event.dataTransfer.getData("text/plain") || draggedIdRef.current || draggedId;
+                          if (activeId && activeId !== field.id) {
+                            const bounds = event.currentTarget.getBoundingClientRect();
+                            const placement = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+                            setSelectedIds((current) => movePaymentField(current, activeId, field.id, placement));
+                          }
+                          finishDrag();
+                        }}
+                        role="listitem"
+                      >
+                        <span aria-hidden="true" className="payment-field-order-grip" title="Drag to reorder"><GripVertical size={16} /></span>
+                        <span className="payment-field-order-copy"><strong>{field.label}</strong><small>{field.code}</small></span>
+                        <span className="payment-field-order-actions">
+                          <button aria-label={`Move ${field.label} up`} disabled={index === 0} onClick={() => setSelectedIds((current) => movePaymentFieldByOffset(current, field.id, -1))} title="Move up" type="button"><ArrowUp size={14} /></button>
+                          <button aria-label={`Move ${field.label} down`} disabled={index === selectedFields.length - 1} onClick={() => setSelectedIds((current) => movePaymentFieldByOffset(current, field.id, 1))} title="Move down" type="button"><ArrowDown size={14} /></button>
+                          <button aria-label={`Remove ${field.label}`} className="remove" onClick={() => toggleField(field.id)} title="Remove" type="button"><X size={14} /></button>
                         </span>
-                      </label>
-                    ))}
-                    {!visibleFields.length ? <p className="searchable-empty">No matching payment fields.</p> : null}
-                  </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null}
-            </div>
+            </>
           ) : <p className="empty-cell">Create a reusable payment field before adding a payment method.</p>}
         </div>
       </div>
       <div className="form-actions">
-        <SubmitButton confirmationBlocked={!selectedIds.size} confirmMessage="Select at least one payment field.">{submitLabel}</SubmitButton>
+        <SubmitButton confirmationBlocked={!selectedIds.length} confirmMessage="Select at least one payment field.">{submitLabel}</SubmitButton>
       </div>
     </form>
   );
