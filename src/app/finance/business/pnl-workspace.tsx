@@ -13,6 +13,7 @@ import {
 import type { LivePnl } from "@/lib/finance/pnl-data";
 import { pnlGroup, type PnlTotal, type PnlDay } from "@/lib/finance/pnl";
 import { todayIndia } from "@/lib/finance/pricing";
+import { PnlInsights } from "./pnl-insights";
 import { LiveRefresh } from "./refresh";
 import {
   RevenueCalculation,
@@ -312,6 +313,7 @@ function Statement({
 }
 
 export function PnlWorkspace({ report }: { report: LivePnl }) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const router = useRouter(),
     [pending, startTransition] = useTransition();
   const [filters, setFilters] = useState(report.filters),
@@ -340,6 +342,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
     return `/finance/business?${q}`;
   };
   function apply(next = filters) {
+    setFiltersOpen(false);
     const q = new URLSearchParams({
       tab: "pnl",
       period: next.period,
@@ -466,7 +469,8 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
           </button>
           <span>Month or custom dates below</span>
         </div>
-        <div className="pnl-filter-grid">
+        <button type="button" className="pnl-filter-toggle" aria-expanded={filtersOpen} aria-controls="pnl-filter-fields" onClick={() => setFiltersOpen(!filtersOpen)}><span>Dates & stations <small>{report.filters.location || "All permitted stations"}</small></span><ChevronDown size={18} /></button>
+        <div id="pnl-filter-fields" className={`pnl-filter-grid${filtersOpen ? " is-open" : ""}`}>
           <label>
             Period
             <select
@@ -743,6 +747,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
             </span>
             <span>Review ↓</span>
           </a>
+          <PnlInsights daily={report.daily} total={total} />
           <Statement total={total} rows={report.days} report={report} />
           <section className="pnl-panel">
             <div className="pnl-panel-head">
@@ -779,7 +784,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
               ))}
             </div>
             <div className="pnl-scroll">
-              <table>
+              <table className="pnl-comparison-table">
                 <thead>
                   <tr>
                     <th>
@@ -909,18 +914,18 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                 <tfoot>
                   <tr>
                     <th>Total</th>
-                    <td>{count(total.deliveries)}</td>
-                    <td>{money(total.revenue)}</td>
-                    <td>{money(total.cost)}</td>
-                    <td>
+                    <td data-label="Delivered">{count(total.deliveries)}</td>
+                    <td data-label="Revenue">{money(total.revenue)}</td>
+                    <td data-label="Expenses">{money(total.cost)}</td>
+                    <td data-label="Profit / loss">
                       {resultLabel(total.profit)}{" "}
                       {money(
                         total.profit === null ? null : Math.abs(total.profit),
                       )}
                     </td>
-                    <td>{money(total.cps, 2)}</td>
-                    <td>{total.margin?.toFixed(1) ?? "—"}%</td>
-                    <td>
+                    <td data-label="CPS">{money(total.cps, 2)}</td>
+                    <td data-label="Margin">{total.margin?.toFixed(1) ?? "—"}%</td>
+                    <td data-label="Reported days">
                       {total.shipmentDays}/{total.stationDays}
                     </td>
                   </tr>
@@ -1120,16 +1125,16 @@ function PnlTableRow({
             {title}
           </button>
         </th>
-        <td>{count(row.deliveries)}</td>
-        <td>{money(row.revenue)}</td>
-        <td>{money(row.cost)}</td>
-        <td className={(row.profit ?? 0) < 0 ? "pnl-negative" : "pnl-positive"}>
+        <td data-label="Delivered">{count(row.deliveries)}</td>
+        <td data-label="Revenue">{money(row.revenue)}</td>
+        <td data-label="Expenses">{money(row.cost)}</td>
+        <td data-label="Profit / loss" className={(row.profit ?? 0) < 0 ? "pnl-negative" : "pnl-positive"}>
           {resultLabel(row.profit)}{" "}
           {row.profit === null ? "" : money(Math.abs(row.profit))}
         </td>
-        <td>{money(row.cps, 2)}</td>
-        <td>{row.margin === null ? "—" : `${row.margin.toFixed(1)}%`}</td>
-        <td>
+        <td data-label="CPS">{money(row.cps, 2)}</td>
+        <td data-label="Margin">{row.margin === null ? "—" : `${row.margin.toFixed(1)}%`}</td>
+        <td data-label="Data through">
           <span className={row.issueDays ? "pnl-badge" : "pnl-badge good"}>
             {dateLabel(through)}
             <small>
@@ -1140,7 +1145,7 @@ function PnlTableRow({
         </td>
       </tr>
       {open && (
-        <tr>
+        <tr className="pnl-expanded-row">
           <td colSpan={8} className="pnl-expanded">
             {children}
           </td>

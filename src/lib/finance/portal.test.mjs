@@ -65,12 +65,19 @@ test("Finance root redirects to Finance; main Dashboard keeps its existing rende
 test("Finance sign-in keeps authenticated and new sessions on the Finance surface", async () => {
   let user = auth;
   let signedIn = true;
+  const financeLogin = compile("../../components/finance-login-panel.tsx", {
+    "@/app/login/actions": { signInWithGoogle: "/test-signin" },
+    "@/components/submit-button": { SubmitButton: passthrough },
+    "@/components/finance-brand": { FinanceBrand: () => null },
+    "@/components/finance-install": { FinanceInstall: () => null }
+  });
   const page = compile("../../app/login/page.tsx", {
     ...rootMocks,
     "next/headers": { headers: () => new Headers({ host: "fin.dropxlogistics.com" }) },
     "@/components/document-title": { DocumentTitle: () => null },
     "@/components/ops-login-panel": { OpsLoginPanel: () => null },
     "@/components/people-login-panel": { PeopleLoginPanel: () => null },
+    "@/components/finance-login-panel": financeLogin,
     "@/components/submit-button": { SubmitButton: passthrough },
     "@/lib/authorization": { getAuthorization: async () => user, hasPermission },
     "@/lib/access-surface": { opsAccessPageCodes: [] },
@@ -89,7 +96,8 @@ test("Finance sign-in keeps authenticated and new sessions on the Finance surfac
   await assert.rejects(page({}), /redirect:\/unauthorized\?page=finance_portal/);
   signedIn = false;
   const html = renderToStaticMarkup(await page({ searchParams: { next: "//example.com" } }));
-  assert.match(html, /Sign in to DropX Finance/);
+  assert.match(html, /Your finance desk/);
+  assert.match(html, /Sign in with Google/);
   assert.match(html, /name="next"[^>]*value="\/"/);
 });
 
