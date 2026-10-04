@@ -80,8 +80,34 @@ async function signedUrl(path: string) {
   return result.data?.signedUrl ?? "";
 }
 
-async function serializeDraft(accountId: string, companyId: string, profileType: WorkforceProfileType) {
-  const draft = await loadProfileDraft({ accountId, companyId, profileType });
+function isIsolatedPilot(account: { onboardingBeta?: boolean; activationStage?: string | null }) {
+  return Boolean(account.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
+}
+
+async function loadIsolatedPilotDraft(candidateId: string, companyId: string) {
+  if (!supabaseAdmin) return null;
+  const result = await supabaseAdmin
+    .from("workforce_amazon_email_pilot_registrations")
+    .select("draft_data,verification_results,file_paths,status,submitted_at,updated_at")
+    .eq("candidate_id", candidateId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (result.error && !["42P01", "PGRST205"].includes(result.error.code ?? "")) throw new Error(result.error.message);
+  if (!result.data) return null;
+  return {
+    data: (result.data.draft_data ?? {}) as Record<string, string>,
+    verificationResults: Array.isArray(result.data.verification_results) ? result.data.verification_results : [],
+    filePaths: (result.data.file_paths ?? {}) as Partial<Record<ProfileDraftFileSlot, string>>,
+    updatedAt: result.data.updated_at,
+    status: result.data.status,
+    submittedAt: result.data.submitted_at
+  };
+}
+
+async function serializeDraft(account: Awaited<ReturnType<typeof authenticatedAccount>>) {
+  const draft = isIsolatedPilot(account)
+    ? await loadIsolatedPilotDraft(account.id, account.companyId)
+    : await loadProfileDraft({ accountId: account.id, companyId: account.companyId, profileType: account.profileType });
   if (!draft) return null;
   const uploads = Object.fromEntries(
     profileDraftFileSlots.map((slot) => [slot, Boolean(draft.filePaths[slot])])
@@ -94,7 +120,9 @@ async function serializeDraft(accountId: string, companyId: string, profileType:
     verificationResults: draft.verificationResults,
     uploads,
     uploadUrls,
-    updatedAt: draft.updatedAt
+    updatedAt: draft.updatedAt,
+    status: "status" in draft ? draft.status : undefined,
+    submittedAt: "submittedAt" in draft ? draft.submittedAt : undefined
   };
 }
 
@@ -103,11 +131,14 @@ async function uploadDraftFile(
   companyId: string,
   profileType: WorkforceProfileType,
   accountId: string,
-  slot: ProfileDraftFileSlot
+  slot: ProfileDraftFileSlot,
+  isolatedPilot = false
 ) {
   if (!supabaseAdmin || !(file instanceof File) || file.size === 0) return null;
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${companyId}/registration-drafts/${profileType}/${accountId}/${slot}-${Date.now()}${fileExt(safeName)}`;
+  const path = isolatedPilot
+    ? `${companyId}/amazon-email-pilot/${accountId}/${slot}-${Date.now()}${fileExt(safeName)}`
+    : `${companyId}/registration-drafts/${profileType}/${accountId}/${slot}-${Date.now()}${fileExt(safeName)}`;
   const result = await supabaseAdmin.storage
     .from("employee-profile-documents")
     .upload(path, Buffer.from(await file.arrayBuffer()), {
@@ -126,7 +157,7 @@ export async function GET(request: Request) {
     const account = await authenticatedAccount(accountId, profileType);
     return NextResponse.json({
       ok: true,
-      draft: await serializeDraft(account.id, account.companyId, account.profileType)
+      draft: await serializeDraft(account)
     });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load draft.") }, { status: 400 });
@@ -140,11 +171,10 @@ export async function POST(request: Request) {
     const accountId = String(formData.get("account_id") ?? "");
     const profileType = String(formData.get("profile_type") ?? "");
     const account = await authenticatedAccount(accountId, profileType);
-    const current = await loadProfileDraft({
-      accountId: account.id,
-      companyId: account.companyId,
-      profileType: account.profileType
-    });
+    const isolatedPilot = isIsolatedPilot(account);
+    const current = isolatedPilot
+      ? await loadIsolatedPilotDraft(account.id, account.companyId)
+      : await loadProfileDraft({ accountId: account.id, companyId: account.companyId, profileType: account.profileType });
     const nextPaths = { ...(current?.filePaths ?? {}) };
     const replacedPaths: string[] = [];
 
@@ -154,22 +184,37 @@ export async function POST(request: Request) {
         account.companyId,
         account.profileType,
         account.id,
-        slot
+        slot,
+        isolatedPilot
       );
       if (!path) continue;
       if (nextPaths[slot] && nextPaths[slot] !== path) replacedPaths.push(nextPaths[slot]!);
       nextPaths[slot] = path;
     }
 
-    const saveResult = await supabaseAdmin.from("mob_app_registration_drafts").upsert({
-      company_id: account.companyId,
-      profile_type: account.profileType,
-      account_id: account.id,
-      draft_data: parseObject(formData.get("draft_data")),
-      verification_results: parseVerificationRows(formData.getAll("profile_verification_results")),
-      file_paths: nextPaths,
-      updated_at: new Date().toISOString()
-    }, { onConflict: "company_id,profile_type,account_id" });
+    const draftData = parseObject(formData.get("draft_data"));
+    const now = new Date().toISOString();
+    const submitted = draftData._beta_status === "submitted";
+    const saveResult = isolatedPilot
+      ? await supabaseAdmin.from("workforce_amazon_email_pilot_registrations").upsert({
+        candidate_id: account.id,
+        company_id: account.companyId,
+        draft_data: draftData,
+        verification_results: parseVerificationRows(formData.getAll("profile_verification_results")),
+        file_paths: nextPaths,
+        status: submitted ? "submitted" : (current && "status" in current ? current.status : "draft"),
+        submitted_at: submitted ? now : (current && "submittedAt" in current ? current.submittedAt : null),
+        updated_at: now
+      }, { onConflict: "candidate_id" })
+      : await supabaseAdmin.from("mob_app_registration_drafts").upsert({
+        company_id: account.companyId,
+        profile_type: account.profileType,
+        account_id: account.id,
+        draft_data: draftData,
+        verification_results: parseVerificationRows(formData.getAll("profile_verification_results")),
+        file_paths: nextPaths,
+        updated_at: now
+      }, { onConflict: "company_id,profile_type,account_id" });
     if (saveResult.error) {
       if (isMissingProfileDraftTable(saveResult.error)) {
         throw new Error("Draft storage is not installed. Run scripts/mob_app_registration_drafts_v1.sql in Supabase.");
@@ -181,8 +226,8 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({
       ok: true,
-      draft: await serializeDraft(account.id, account.companyId, account.profileType),
-      notice: "Details saved in draft"
+      draft: await serializeDraft(account),
+      notice: isolatedPilot ? "Private beta registration saved" : "Details saved in draft"
     });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to save draft.") }, { status: 400 });
