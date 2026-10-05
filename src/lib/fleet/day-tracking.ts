@@ -21,4 +21,6 @@ export function trackingFuel(rows:Array<{fuel_quantity:number|string|null;fuel_a
  return {litres:rows.length&&!missing?Math.round(litres*100)/100:null,estimatedLitres:Math.round(estimatedLitres*100)/100,missing};
 }
 export const dayTime=(value:string|null)=>value?new Date(value).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'}):'—';
-export const dayDuration=(minutes:number|null)=>minutes==null?'—':`${Math.floor(minutes/60)}h ${Math.round(minutes%60)}m`;
+// Keep stored GPS precision in minutes; convert only for display and exports.
+export const dayHours=(minutes:number|null)=>minutes==null?null:Number((minutes/60).toFixed(2));
+export const dayDuration=(minutes:number|null)=>minutes==null?'—':`${(minutes/60).toFixed(2)} hr`;
