@@ -171,3 +171,13 @@ test('MTD comparison includes late prior-day actuals and station daily Excel',()
  const daily=require('xlsx').utils.sheet_to_json(workbook.Sheets['Station daily summary']);
  assert.equal(daily[0]['Difference INR'],600);assert.equal(daily[0].Date,'2026-09-10');
 });
+
+
+test("additional recipients cannot bypass Operations eligibility with broad location access", () => {
+  const roles = [{id:"hr",code:"HR_HEAD",location_access_mode:"all_locations"},{id:"fin",code:"FINANCE_MANAGER",location_access_mode:"all_locations"},{id:"owner",code:"OWNER",location_access_mode:"all_locations"}];
+  const memberships = ["hr","fin","owner"].map(id=>({user_id:id,role_id:id,has_all_location_access:true,location_scope_ids:[]}));
+  assert.equal(scope.canReceiveAdditionalAdHocMail("hr",memberships,roles,new Set()),false);
+  assert.equal(scope.canReceiveAdditionalAdHocMail("fin",memberships,roles,new Set()),false);
+  assert.equal(scope.canReceiveAdditionalAdHocMail("owner",memberships,roles,new Set()),true);
+  assert.equal(scope.canReceiveAdditionalAdHocMail("ops",memberships,roles,new Set(["ops"])),true);
+});

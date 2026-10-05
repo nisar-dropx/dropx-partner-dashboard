@@ -78,6 +78,11 @@ export function resolveAdHocRecipients(
   return [...recipients.values()].sort((a, b) => a.email.localeCompare(b.email));
 }
 
+export function canReceiveAdditionalAdHocMail(userId: string, memberships: AdHocMembership[], roles: AdHocRole[], operationsUserIds: ReadonlySet<string>) {
+  // An owner copy must be explicitly configured; it is never inferred from broad access.
+  return operationsUserIds.has(userId) || memberships.some(m => m.user_id === userId && roles.some(r => r.id === m.role_id && r.code === "OWNER"));
+}
+
 // Page every source; a capped recipient list must never silently omit a station team.
 async function allRows<T>(query: (offset: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>): Promise<T[]> {
   const rows: T[] = [];
@@ -137,6 +142,7 @@ export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, 
   for (const email of additionalEmails.map(value=>value.trim().toLowerCase())) {
     const profile=profiles.find(p=>p.email?.trim().toLowerCase()===email);
     if(!profile || !email.endsWith('@'+domain.toLowerCase()) || !/^[^\s@<>]+@[^\s@<>]+$/.test(email)) continue;
+    if (!canReceiveAdditionalAdHocMail(profile.id, memberships, roles, operationsUserIds)) continue;
     const access=memberships.filter(m=>m.user_id===profile.id);
     const ids=included.filter(station=>access.some(m=>m.has_all_location_access||roles.find(r=>r.id===m.role_id)?.location_access_mode==='all_locations'||m.location_scope_ids?.includes(station.id))).map(s=>s.id);
     if(ids.length && !recipients.some(r=>r.email===email)) recipients.push({email,name:profile.full_name||email,stationIds:ids});
