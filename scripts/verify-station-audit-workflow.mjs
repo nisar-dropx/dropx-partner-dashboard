@@ -5,7 +5,11 @@ import ts from "typescript";
 const source = fs.readFileSync("src/lib/ops-pulse/station-audits.ts", "utf8");
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const mod = { exports: {} };
+const planningSource = fs.readFileSync("src/lib/ops-pulse/station-audit-planning.ts", "utf8");
+const planning = { exports: {} };
+new Function("module", "exports", ts.transpileModule(planningSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(planning, planning.exports);
 const mocks = {
+  "./station-audit-planning": planning.exports,
   "server-only": {},
   "node:crypto": { randomUUID: () => "test-id" },
   "@/lib/supabase-admin": { supabaseAdmin: {} }
