@@ -35,7 +35,7 @@ test('pay advances are scoped to the authenticated company and pending assigned 
 });
 test('removed assignment and database failures never call the decision RPC',async()=>{
   const f=fixture(); f.state.hr_pay_advance_steps[0].status='approved';
-  await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved',''),/no longer assigned/);
+  await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved',''),/no longer pending/);
   f.state.error={message:'Database unavailable'};
   await assert.rejects(f.decideConnectPayAdvanceApproval(account,'request-a','approved',''),/Database unavailable/);
   assert.equal(f.state.rpcCalls.length,0);
