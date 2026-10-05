@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NlLossRefresh } from "./nl-loss-refresh";
 import { LossTabs, type LossTab } from "@/components/ops-loss-report";
 import { NlLossCases } from "./nl-loss-cases";
 import type { NlView } from "@/lib/ops-pulse/nl-loss";
@@ -50,6 +51,7 @@ export function NlLossReport({
       </header>
       <div className={styles.context}>
         <span>Latest check: {time(v.checked)}</span>
+        {v.canRefresh ? <NlLossRefresh /> : null}
         {v.canMaster ? (
           <Link href="/master/loss-recovery">Loss Recovery Master ↗</Link>
         ) : null}
