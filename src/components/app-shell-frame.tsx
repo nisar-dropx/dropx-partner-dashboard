@@ -1,6 +1,7 @@
 "use client";
+import Link from "next/link";
 
-import { Menu, X } from "lucide-react";
+import { Menu, X, House, ChartNoAxesCombined, ListChecks } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -12,19 +13,20 @@ type AppShellFrameProps = {
   mobileActions: ReactNode;
   mobileBrand?: ReactNode;
   sidebar: ReactNode;
+  financeLinks?: { href: string; label: string; icon: string }[];
 };
 
 const flashQueryKeyPattern = /^(?:error|notice|success|sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 
-export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar }: AppShellFrameProps) {
+export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar, financeLinks }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   useEffect(() => {
     setSidebarOpen(false);
-  }, [pathname]);
+  }, [pathname, searchParams]);
 
   useEffect(() => {
     document.body.classList.toggle("mobile-nav-open", sidebarOpen);
@@ -79,6 +81,15 @@ export function AppShellFrame({ children, desktopActions, mobileActions, mobileB
       ) : null}
 
       {sidebar}
+      {financeLinks && <nav className="finance-bottom-nav" aria-label="Finance quick navigation">
+        {financeLinks.map((item) => {
+          const target = item.href.split("?")[0];
+          const selected = pathname === target && (!item.href.includes("tab=") || searchParams.get("tab") === "pnl");
+          const Icon = item.icon === "home" ? House : item.icon === "chart" ? ChartNoAxesCombined : ListChecks;
+          return <Link key={item.href} href={item.href} aria-current={selected ? "page" : undefined}><Icon size={21} /><span>{item.label}</span></Link>;
+        })}
+        <button type="button" onClick={() => setSidebarOpen(true)} aria-label="Open all Finance sections" aria-expanded={sidebarOpen}><Menu size={21} /><span>More</span></button>
+      </nav>}
 
       <main className="main">
         <header className="topbar">

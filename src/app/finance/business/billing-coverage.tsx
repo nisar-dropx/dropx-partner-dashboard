@@ -26,7 +26,7 @@ export function BillingCoverage({ rows }: { rows: BusinessRow[] }) {
       "Variable payout",
       "Daily imported deliveries and Variable_Slab rate",
       `Calculated: ${sum(amazon, "variable")}`,
-      "Parent: daily excess only. XPT: all its Amazon deliveries. SWA is separately priced and excluded. SMD eligibility and any IHS component need settlement rules to reconcile exactly.",
+      "Parent: daily excess only. XPT: all its Amazon deliveries. SWA is billed separately at the configured SWA delivery rate. SMD eligibility and any IHS component need settlement rules to reconcile exactly.",
     ],
     [
       "XPT fixed payout",
@@ -51,14 +51,14 @@ export function BillingCoverage({ rows }: { rows: BusinessRow[] }) {
     [
       "SWA delivered prepaid payout",
       "Standard SWA and consumable delivery counts are available",
-      "Prepaid split and confirmed rate missing",
-      "The August invoice supports an inferred rate. The current import does not separate prepaid from COD, so a daily prepaid payout cannot yet be calculated. Consumable deliveries are a separate field, not a COD count.",
+      "Combined SWA delivery estimate included where configured",
+      "The provisional combined SWA delivery rate is copied from the matching station / parent delivery rate. A prepaid/COD split requires separate source counts and confirmed settlement rates.",
     ],
     [
       "SWA COD delivered payout",
       "Combined SWA delivery count is available",
-      "COD split and confirmed rate missing",
-      "The August invoice supports an inferred rate. Need the payment-type count mapping and confirmed rate; avoid charging the same delivery twice.",
+      "Included in combined SWA delivery estimate",
+      "Do not add COD again: combined SWA is already counted. Separate settlement needs payment-type source counts.",
     ],
     [
       "SWA fuel surcharge",
@@ -141,8 +141,7 @@ export function BillingCoverage({ rows }: { rows: BusinessRow[] }) {
         </div>
         <p className="fin-footnote">
           Reference: supplied KGQA invoices for April and August 2026. Invoice
-          amounts and inferred SWA rates have not been copied into monthly
-          pricing. Revenue and P&L remain estimates until missing settlement
+          amounts are reference only. Provisional SWA delivery rates are now configured in Pricing Master from matching delivery rates. Revenue and P&L remain estimates until missing settlement
           items and expenses are entered.
         </p>
       </details>

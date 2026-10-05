@@ -483,6 +483,8 @@ test("Rent add, edit and delete use company-scoped atomic RPCs and active alloca
 test("Filtered CSV exports reuse the authorized loader and include estimate caveats", async () => {
   let seen;
   const route = compile("../../app/finance/business/export/route.ts", {
+    "@/lib/finance/pnl-data": { loadPnl: async () => { throw Error("Wrong export branch"); } },
+    "@/lib/finance/pnl": {},
     "next/server": {
       NextResponse: { json: (v, o) => new Response(JSON.stringify(v), o) },
     },
@@ -510,16 +512,15 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   });
   const response = await route.GET(
     new Request(
-      "https://fin.dropxlogistics.com/finance/business/export?tab=pnl&month=2026-08&region=KL&location=KOZA",
+      "https://fin.dropxlogistics.com/finance/business/export?tab=revenue&month=2026-08&region=KL&location=KOZA",
     ),
   );
-  assert.equal(seen.code, "finance_pnl");
+  assert.equal(seen.code, "finance_revenue");
   assert.equal(seen.q.location, "KOZA");
   assert.equal(seen.q.region, "KL");
   assert.equal(seen.context.companyId, "company-1");
   assert.match(response.headers.get("Cache-Control"), /no-store/);
   const body = await response.text();
-  assert.match(body, /623776.32/);
   assert.match(body, /Management estimate only/);
   assert.match(body, /"KOZA"/);
   const [headers, record] = pricing.parseCsv(body);
@@ -531,9 +532,6 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   assert.equal(values["Location"], "Kozhikode");
   assert.equal(values["Monthly MG"], "747233.1009887976");
   assert.equal(values["MTD revenue estimate INR"], "747233.10");
-  assert.equal(values["Known operating costs INR"], "123456.78");
-  assert.equal(values["Cost complete"], "Yes");
-  assert.equal(values["Estimated P&L INR"], "623776.32");
   const revenueResponse = await route.GET(
     new Request(
       "https://fin.dropxlogistics.com/finance/business/export?month=2026-08&location=KOZA",
@@ -808,6 +806,8 @@ test("Daily CSV contains only the selected authorized allocation and reconciles 
   const f = { ...filters, through: "2026-08-02" };
   const rows = performance.buildBusinessRows(snap, [pc], [location], f);
   const route = compile("../../app/finance/business/export/route.ts", {
+    "@/lib/finance/pnl-data": { loadPnl: async () => { throw Error("Wrong export branch"); } },
+    "@/lib/finance/pnl": {},
     "next/server": {
       NextResponse: { json: (v, o) => new Response(JSON.stringify(v), o) },
     },

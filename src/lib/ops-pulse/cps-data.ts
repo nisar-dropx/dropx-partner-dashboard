@@ -1,6 +1,7 @@
 import "server-only";
 import { rebuildCps, type CpsFacts } from "./cps-engine";
 import { cache } from "react";
+import type { CpsCalculationEvidence } from "./cps-details";
 import { requireCompanyId } from "@/lib/company-scope";
 import type { AuthorizationContext } from "@/lib/authorization";
 import { loadCodLocations, todayKolkata, type CodLocationRow } from "./cod";
@@ -53,7 +54,13 @@ export async function cpsScope(auth: AuthorizationContext, params: CpsParams) {
 // No cookies/auth context inside the cache. Every read is scoped first and every
 // company, station list and exact date range participates in the cache key.
 const snapshot = cache(
-  async (company: string, from: string, to: string, codesKey: string) => {
+  async (
+    company: string,
+    from: string,
+    to: string,
+    codesKey: string,
+    captureEvidence = false,
+  ) => {
     const codes: string[] = JSON.parse(codesKey);
     if (!supabaseAdmin) throw Error("CPS data is temporarily unavailable.");
     const attendanceFrom = workforcePaymentMonthStart(from);
@@ -307,7 +314,9 @@ const snapshot = cache(
       providers: productionThresholdFacts.providers ?? [],
       stations: productionThresholdFacts.stations ?? [],
     };
-    return rebuildCps(
+    let evidence: CpsCalculationEvidence = { staff: [], associates: [] };
+    const report = rebuildCps(
+
       {
         ...result.data,
         breakup: [...result.data.breakup, ...vehicleCosts.data.breakup],
@@ -316,7 +325,13 @@ const snapshot = cache(
         gaps: vehicleCosts.data.gaps,
       } as CpsSnapshot,
       sourceFacts,
+      captureEvidence
+        ? (value) => {
+            evidence = value;
+          }
+        : undefined,
     );
+    return { report, evidence };
   },
 );
 export async function loadCpsSnapshot(
@@ -337,9 +352,37 @@ export async function loadCpsSnapshot(
   const parts: CpsSnapshot[] = [];
   // Bound database concurrency; a date range never becomes a single oversized RPC.
   for (const slice of cpsMonthSlices(from, to))
-    parts.push(await snapshot(company, slice.from, slice.to, codes));
+    parts.push((await snapshot(company, slice.from, slice.to, codes)).report);
   return parts.length === 1 ? parts[0] : mergeCpsMonths(parts);
 }
+/** Internal server loader. Finance must authorize both the host and every station first. */
+export async function loadFinanceCpsEvidence(
+  company: string,
+  from: string,
+  to: string,
+  codes: string[],
+) {
+  const reports: CpsSnapshot[] = [];
+  const evidence: CpsCalculationEvidence = { staff: [], associates: [] };
+  if (!codes.length) throw Error("Choose a permitted station.");
+  for (const slice of cpsMonthSlices(from, to)) {
+    const part = await snapshot(
+      company,
+      slice.from,
+      slice.to,
+      JSON.stringify([...new Set(codes)].sort()),
+      true,
+    );
+    reports.push(part.report);
+    evidence.staff.push(...part.evidence.staff);
+    evidence.associates.push(...part.evidence.associates);
+  }
+  return {
+    report: reports.length === 1 ? reports[0] : mergeCpsMonths(reports),
+    evidence,
+  };
+}
+
 export type CpsAssociate = {
   id: string;
   work_date: string;

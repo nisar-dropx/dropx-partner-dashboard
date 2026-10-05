@@ -1,10 +1,12 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { OpsPwaRegister } from "@/components/ops-pwa-register";
 import { isPeopleHostName } from "@/lib/people/surface";
 import { isFinanceHostName } from "@/lib/finance/surface";
 import "./globals.css";
+import "./finance-mobile.css";
+import { FinancePwa } from "@/components/finance-pwa";
 
 function isOpsHost() {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
@@ -23,7 +25,9 @@ export function generateMetadata(): Metadata {
       title: { default: "DropX Finance", template: "%s · DropX Finance" },
       description: "DropX Finance for payment approvals, reporting and financial administration.",
       applicationName: "DropX Finance",
-      icons: { icon: "/favicon.png", shortcut: "/favicon.png", apple: "/favicon.png" }
+      manifest: "/finance-app/manifest.webmanifest",
+      appleWebApp: { capable: true, statusBarStyle: "default", title: "Finance" },
+      icons: { icon: "/finance-app/icon-192.png", shortcut: "/finance-app/icon-192.png", apple: "/finance-app/icon-180.png" }
     };
   }
   if (isOpsHost()) {
@@ -54,12 +58,19 @@ export function generateMetadata(): Metadata {
   };
 }
 
+export function generateViewport(): Viewport {
+  const host = headers().get("x-forwarded-host") ?? headers().get("host") ?? "";
+  return { width: "device-width", initialScale: 1, viewportFit: "cover", ...(isFinanceHostName(host) ? { themeColor: "#102e3b" } : {}) };
+}
+
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const opsHost = isOpsHost();
+  const financeHost = isFinanceHostName(headers().get("x-forwarded-host") ?? headers().get("host") ?? "");
   return (
     <html lang="en">
-      <body>
+      <body className={financeHost ? "finance-app" : undefined}>
         {opsHost ? <OpsPwaRegister /> : null}
+        {financeHost ? <FinancePwa /> : null}
         {children}
       </body>
     </html>

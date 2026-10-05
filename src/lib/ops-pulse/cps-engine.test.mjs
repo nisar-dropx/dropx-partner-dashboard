@@ -432,3 +432,14 @@ test('shipment activity remains work evidence when the attendance record is abse
  const r=rebuildCps(base(),f);assert.equal(r.da_details[0].work_dates.length,1);assert.deepEqual(r.da_details[0].work_bases,['shipment activity']);
  assert.equal(r.daily[0].da,1000,'displayed work evidence does not change payroll rules');
 });
+
+test('active base-location TL, SSA and sorter CTC accrues without attendance and is private',()=>{
+ const f=facts();f.shipments=[];f.workforce=[];f.mappings=[];f.attendance=[];
+ f.employees=['TL','SSA','SRTR'].map((designation,i)=>({id:`staff-${i}`,full_name:`PRIVATE_${i}`,employee_code:`SECRET_${i}`,location_id:'station-a',designation,is_active:true,date_of_join:'2026-08-01',has_home_assignments:true}));
+ f.people_policies=['TL','SSA','SRTR'].map(designation_code=>({designation_code,mode:'home',head:'UTR',label:'Station team',allocation:'equal',effective_from:'2026-09-01'}));
+ f.people_assignments=f.employees.map(e=>({employee_id:e.id,station_code:'A',kind:'home',effective_from:'2026-08-01',effective_to:null}));
+ f.salaries=f.employees.map(e=>({employee_id:e.id,effective_from:'2026-08-01',monthly_ctc:30000}));
+ const r=rebuildCps(base([day('A','2026-09-01',0),day('A','2026-09-02',0)]),f);
+ assert.deepEqual(r.daily.map(d=>d.utr),[3000,3000]);assert.equal(r.staff.length,1);assert.equal(r.staff[0].amount,6000);
+ assert.ok(!JSON.stringify(r).includes('PRIVATE_'));assert.ok(!JSON.stringify(r).includes('SECRET_'));
+});

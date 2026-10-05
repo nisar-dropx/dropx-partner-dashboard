@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PnlPage } from "./pnl-page";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { hasPermission } from "@/lib/authorization";
@@ -12,6 +13,7 @@ import { BusinessFilters } from "./filters";
 import "../finance.css";
 import "../business.css";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 const money = (v: string | null) =>
   v === null
     ? "Unavailable"
@@ -39,6 +41,7 @@ export default async function BusinessPage({
   const context = await financeContext(
     tab === "pnl" ? "finance_pnl" : "finance_revenue",
   );
+  if (searchParams.tab === "pnl") return <PnlPage context={context} query={searchParams}/>;
   let report: Awaited<ReturnType<typeof loadBusiness>> | null = null;
   let error = "";
   try {
@@ -226,8 +229,7 @@ export default async function BusinessPage({
         variable slab rate, plus MFN count × MFN rate. A rate card remains
         effective until a newer month replaces it. Rent and maintenance come
         from Rent Master and accrue over the selected month&apos;s actual calendar
-        days. SWA is excluded pending its
-        separate rates. IHS/SMD settlement rules, recoveries, other fees and tax
+        days. SWA is included separately where its delivery rate is configured. IHS/SMD settlement rules, recoveries, other fees and tax
         remain outside this estimate. Flipkart uses configured monthly
         delivery slabs. P&amp;L is shown only when operating costs are complete;
         known rent remains visible while other cost reports are pending.
@@ -377,7 +379,7 @@ export default async function BusinessPage({
                       <small>
                         MG billable {quantity(row.eligibleDeliveries)} incl.
                         C-returns {quantity(row.returns)} · SWA{" "}
-                        {quantity(row.swaDeliveries)} (unpriced)
+                        {quantity(row.swaDeliveries)} (separately priced)
                       </small>
                     )}
                     <small>

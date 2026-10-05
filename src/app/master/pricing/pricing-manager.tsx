@@ -561,6 +561,23 @@ export function PricingManager({
                     }
                   />
                 </label>
+                <label className="fin-label">
+                  SWA delivery rate
+                  <input
+                    inputMode="decimal"
+                    value={editing.rates.swa_delivery_rate ?? ""}
+                    placeholder="Not supplied"
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        rates: {
+                          ...editing.rates,
+                          swa_delivery_rate: e.target.value || null,
+                        },
+                      })
+                    }
+                  />
+                </label>
                 <p className="subtle">
                   You can save this blank. It remains pending, not zero. Once
                   supplied, the fixed payout accrues by calendar day and is

@@ -89,6 +89,10 @@ const peopleGroups: PermissionGroup[] = [
   { key: "settings", label: "Settings", codes: ["app_settings"] }
 ];
 
+const financeGroups: PermissionGroup[] = dashboardGroups.map((group) => group.key === "master_data"
+  ? { ...group, codes: [...group.codes, "finance_assets", "finance_rent"] }
+  : group);
+
 function emptyPermissionState(pages: PermissionPage[]) {
   return Object.fromEntries(pages.map((page) => [page.id, { view: false, add: false, edit: false }])) as Record<string, Record<PermissionAction, boolean>>;
 }
@@ -117,7 +121,7 @@ export function PermissionMatrix({
   });
 
   const groups = useMemo(() => {
-    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : dashboardGroups;
+    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : surface === "finance" ? financeGroups : dashboardGroups;
     const definedGroups = definitions.map((definition) => ({
       ...definition,
       pages: pages.filter((page) => definition.codes.includes(page.code) || definition.matches?.(page)),

@@ -121,6 +121,7 @@ export default async function FinanceDashboardPage() {
         action={hasPermission(authorization, "payment_process", "access") ? <Link className="button" href="/payments/process">Open payment process</Link> : null}
       />
 
+      {hasPermission(authorization, "finance_pnl", "access") && <section className="finance-home-feature"><div><span className="finance-kicker">THE BIG PICTURE</span><h2>Know what drives your profit.</h2><p>Explore revenue, costs and margin. From the whole business to every station.</p></div><Link href="/finance/business?tab=pnl">Explore live P&L →</Link></section>}
       {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load Finance data</strong><p className="subtle">{loadError}</p></div></section> : <>
 
       <section className="summary-grid">

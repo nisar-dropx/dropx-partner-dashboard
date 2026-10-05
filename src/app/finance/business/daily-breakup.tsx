@@ -31,6 +31,7 @@ export function DailyBreakup({
         | "eligibleDeliveries"
         | "returns"
         | "swa"
+        | "swaRevenue"
         | "mgVolume"
         | "excessVolume"
         | "base"
@@ -55,8 +56,8 @@ export function DailyBreakup({
         "smd",
         "ihs",
       ].includes(key)
-        ? addQuantities(days.map((d) => d[key]))
-        : addAmounts(days.map((d) => d[key]));
+        ? addQuantities(days.map((d) => d[key] ?? null))
+        : addAmounts(days.map((d) => d[key] ?? null));
     return {
       date,
       days,
@@ -141,8 +142,7 @@ export function DailyBreakup({
         </p>
       )}
       <div className="fin-notice">
-        SWA has separate pricing and is excluded from the calculation until its
-        rates are supplied. XPT revenue is fixed payout divided by calendar days
+        SWA delivery earnings use the separately configured SWA rate; unpriced SWA remains flagged. XPT revenue is fixed payout divided by calendar days
         plus all XPT Amazon deliveries and C-returns at the parent’s variable
         rate. Parent MG
         excess delivery earnings use Amazon deliveries plus C-returns and are
@@ -159,7 +159,7 @@ export function DailyBreakup({
             <tr>
               <th>Date</th>
               <th>All deliveries</th>
-              <th>SWA (unpriced)</th>
+              <th>SWA deliveries</th>
               <th>C-returns</th>
               <th>MG billable volume</th>
               <th>Daily MG volume</th>
@@ -168,6 +168,7 @@ export function DailyBreakup({
               <th>Variable / slab earnings</th>
               <th>MFN count</th>
               <th>MFN earnings</th>
+              <th>SWA earnings</th>
               <th>SMD / IHS counts</th>
               <th>Day revenue</th>
               {pnl && (
@@ -200,6 +201,7 @@ export function DailyBreakup({
                 <td>{money(sum("variable"))}</td>
                 <td>{quantity(sum("mfn"))}</td>
                 <td>{money(sum("mfnRevenue"))}</td>
+                <td>{money(sum("swaRevenue"))}</td>
                 <td>
                   {quantity(sum("smd"))} / {quantity(sum("ihs"))}
                 </td>

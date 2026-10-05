@@ -4,3 +4,13 @@
 node_modules
 .vercel
 *.tsbuildinfo
+
+.tmp*
+tmp-*
+*.log
+supabase/.temp
+
+apps/dropx-finance-android/.gradle
+apps/dropx-finance-android/build
+apps/dropx-finance-android/app/build
+apps/dropx-finance-android/local.properties

@@ -126,6 +126,7 @@ export type DailyCost = {
 export type BusinessDay = {
   eligibleDeliveries: string | null;
   swa: string | null;
+  swaRevenue?: string | null;
   date: string;
   deliveries: string | null;
   returns: string | null;
@@ -189,6 +190,7 @@ export function buildDailyRows(
   );
   const variableAccrual = accrual(),
     mfnAccrual = accrual(),
+    swaAccrual = accrual(),
     costAccrual = accrual(),
     rentAccrual = accrual();
   const rates = pricing?.rates ?? {};
@@ -215,7 +217,12 @@ export function buildDailyRows(
           ? addQuantities([amazonDeliveries, returns])
           : null
         : (s?.deliveries ?? null);
-    if (provider === "Amazon" && s?.swa != null && decimal(s.swa) > zero)
+    if (
+      provider === "Amazon" &&
+      s?.swa != null &&
+      decimal(s.swa) > zero &&
+      rates.swa_delivery_rate == null
+    )
       issues.push(
         "SWA revenue pending separate rates; excluded from MG and XPT variable earnings",
       );
@@ -264,11 +271,7 @@ export function buildDailyRows(
           rates.fire_safety_equipment_fee ?? null,
         ])!;
         base = subtractAmounts(
-          mgEstimate(
-            monthlyBase,
-            index + 1,
-            Number(monthDays),
-          ),
+          mgEstimate(monthlyBase, index + 1, Number(monthDays)),
           mgEstimate(monthlyBase, index, Number(monthDays)),
         );
       }
@@ -321,6 +324,19 @@ export function buildDailyRows(
         }
       }
     }
+    // SWA is a separate billable stream and never enters Amazon MG volume.
+    const swaRevenue =
+      provider === "Amazon" && s?.swa != null
+        ? decimal(s.swa) === zero
+          ? swaAccrual(zero)
+          : rates.swa_delivery_rate != null
+            ? swaAccrual(
+                (decimal(s.swa) * decimal(rates.swa_delivery_rate)) / scale,
+              )
+            : null
+        : null;
+    if (swaRevenue !== null && (revenue !== null || decimal(swaRevenue) > zero))
+      revenue = addAmounts([revenue, swaRevenue]);
     const cost =
       !sharedCost && c?.total != null ? costAccrual(decimal(c.total)) : null;
     const rentCost =
@@ -338,6 +354,7 @@ export function buildDailyRows(
       returns,
       eligibleDeliveries: eligible,
       swa: s?.swa ?? null,
+      swaRevenue,
       mgVolume,
       excessVolume,
       base,
@@ -462,7 +479,9 @@ export function buildBusinessRows(
       issues.push("Shared station cost needs client allocation");
     } else if (costRow?.missing_cost_rows) {
       costComplete = false;
-      issues.push("Operating costs incomplete; known rent and reported costs are shown");
+      issues.push(
+        "Operating costs incomplete; known rent and reported costs are shown",
+      );
     }
     if (!costRow) {
       costComplete = false;
