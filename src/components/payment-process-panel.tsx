@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
+import { formatApplyingMonth, formatWorkingDays } from "@/lib/pay-advance-worker-facts";
 
 export type PaymentProcessBank = {
   id: string;
@@ -37,10 +38,23 @@ export type PaymentProcessRequest = {
   approval_status: string | null;
   created_at: string;
   payment_head_name: string | null;
+  advance_context?: {
+    name: string;
+    workerCode: string;
+    applyingMonth: string;
+    workingDays: number;
+    monthlyCtc: number | null;
+    monthlyGross: number | null;
+  } | null;
 };
 
 function amountValue(request: PaymentProcessRequest) {
   return Number(request.amount ?? request.amount_requested ?? 0);
+}
+
+function rupees(value: number | null | undefined) {
+  if (value == null) return "—";
+  return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
 function isAccountTransfer(request: PaymentProcessRequest) {
@@ -441,6 +455,28 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
             </div>
             <form action={processFormAction} className="panel-body" id="payment-process-action-form">
               <input name="request_id" type="hidden" value={processRequest.id} />
+              {processRequest.advance_context ? (
+                <div className="form-grid two" style={{ marginBottom: 16 }}>
+                  <label>Person
+                    <input className="field" readOnly value={processRequest.advance_context.name} />
+                  </label>
+                  <label>Employee ID
+                    <input className="field" readOnly value={processRequest.advance_context.workerCode} />
+                  </label>
+                  <label>Applying month
+                    <input className="field" readOnly value={formatApplyingMonth(processRequest.advance_context.applyingMonth)} />
+                  </label>
+                  <label>Working days this month
+                    <input className="field" readOnly value={formatWorkingDays(processRequest.advance_context.workingDays)} />
+                  </label>
+                  <label>Monthly CTC
+                    <input className="field" readOnly value={rupees(processRequest.advance_context.monthlyCtc)} />
+                  </label>
+                  <label>Monthly gross
+                    <input className="field" readOnly value={rupees(processRequest.advance_context.monthlyGross)} />
+                  </label>
+                </div>
+              ) : null}
               {rejectConfirmationOpen ? <input name="process_action" type="hidden" value="rejected" /> : null}
               {statusKey(processRequest) === "processed" ? (
                 <div className="modal-inline-message warn">

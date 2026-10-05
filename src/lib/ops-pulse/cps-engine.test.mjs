@@ -8,10 +8,16 @@ const direct={exports:{}};
 new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../direct-workforce-pay.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(direct.exports,direct,(id)=>{if(id==='./workforce-payment-policy.ts')return policy.exports;throw new Error(`Unexpected import ${id}`);});
 const attendanceCapture={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-attendance-capture.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(attendanceCapture.exports,attendanceCapture);
+const productionThresholdConfig={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('../production-threshold-config.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(productionThresholdConfig.exports,productionThresholdConfig);
+const productionThresholdSnapshot={exports:{}};
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../production-threshold-snapshot.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(productionThresholdSnapshot.exports,productionThresholdSnapshot,(id)=>{if(id==='./production-threshold-config.ts')return productionThresholdConfig.exports;throw new Error(`Unexpected import ${id}`);});
+const workforceProductionThreshold={exports:{}};
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../workforce-production-threshold.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(workforceProductionThreshold.exports,workforceProductionThreshold,(id)=>{if(id==='./production-threshold-config.ts')return productionThresholdConfig.exports;if(id==='./production-threshold-snapshot.ts')return productionThresholdSnapshot.exports;throw new Error(`Unexpected import ${id}`);});
 const details={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -27,6 +33,74 @@ test('shared allocation conserves cents and splits zero-volume days equally',()=
 test('live mapping correction replaces stale import payout without reupload',()=>{
  const f=facts();f.mappings=[];let r=rebuildCps(base(),f);assert.equal(r.daily[0].da,0);assert.equal(r.daily[0].deliveries,100);assert.equal(r.daily[0].exposed_deliveries,100);
  f.mappings=facts().mappings;r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);assert.equal(r.associates[0].dropx_emp_code,'D1');assert.equal(r.daily[0].exposed_deliveries,0);
+});
+test('combined daily production minimum uses field order and each field rate',()=>{
+ const f=facts();
+ f.shipments[0]={...f.shipments[0],amazon_delivery:80,swa_delivery:0,total_delivery:80,total_activity:110,c_return:30};
+ f.components=[
+  {...f.components[0],sort_order:0},
+  {payment_method_id:'per-packet',component_code:'RETURN',component_type:'production',calculation_type:'count_x_rate',calculation_source:'c_return',sort_order:1}
+ ];
+ f.mappings[0].payment_values={DELIVERY:10,RETURN:20};
+ f.mappings[0].production_threshold_config={period:'day',component_codes:['DELIVERY','RETURN'],minimum_units:100};
+ f.mappings[0].method_production_threshold_config={period:'day',component_codes:['DELIVERY','RETURN']};
+ const r=rebuildCps(base([day('A','2026-09-01',80)]),f);
+ assert.equal(r.daily[0].da,200);
+ assert.equal(r.associates[0].variable_pay,200);
+ assert.equal(r.associates[0].mapping_status,'Mapped');
+});
+test('combined monthly production minimum accumulates across dates',()=>{
+ const f=facts();
+ f.shipments=[
+  {...f.shipments[0],id:'s1',work_date:'2026-09-01',amazon_delivery:80,swa_delivery:0,total_delivery:80,total_activity:80},
+  {...f.shipments[0],id:'s2',work_date:'2026-09-02',amazon_delivery:30,swa_delivery:0,total_delivery:30,total_activity:30}
+ ];
+ f.mappings[0].production_threshold_config={period:'month',component_codes:['DELIVERY'],minimum_units:100};
+ f.mappings[0].method_production_threshold_config={period:'month',component_codes:['DELIVERY']};
+ const r=rebuildCps(base([day('A','2026-09-01',80),day('A','2026-09-02',30)]),f);
+ assert.deepEqual(r.daily.map(row=>row.da),[0,100]);
+ assert.deepEqual(r.associates.map(row=>row.variable_pay),[0,100]);
+});
+test('daily CPS uses earlier calendar-month production to consume a monthly minimum without exposing carry-in rows',()=>{
+ const f=facts();
+ const current={...f.shipments[0],id:'current',work_date:'2026-09-15',amazon_delivery:30,swa_delivery:0,total_delivery:30,total_activity:30};
+ const carryIn={...f.shipments[0],id:'carry-in',work_date:'2026-09-01',amazon_delivery:80,swa_delivery:0,total_delivery:80,total_activity:80};
+ f.shipments=[current];
+ f.mappings[0].production_threshold_config={period:'month',component_codes:['DELIVERY'],minimum_units:100};
+ f.mappings[0].method_production_threshold_config={period:'month',component_codes:['DELIVERY']};
+ f.production_threshold_context={
+  shipments:[carryIn,current],mappings:f.mappings,workforce:f.workforce,
+  components:f.components,providers:f.providers,stations:f.stations
+ };
+ const r=rebuildCps(base([day('A','2026-09-15',30)]),f);
+ assert.equal(r.daily[0].da,100);
+ assert.deepEqual(r.associates.map(row=>[row.id,row.work_date,row.variable_pay]),[['current','2026-09-15',100]]);
+ assert.ok(r.breakup.filter(line=>line.source==='Workforce rate card').every(line=>line.work_date==='2026-09-15'));
+});
+test('custom CPS range carries monthly threshold consumption forward while returning only selected dates',()=>{
+ const f=facts();
+ const first={...f.shipments[0],id:'selected-1',work_date:'2026-09-10',amazon_delivery:20,swa_delivery:0,total_delivery:20,total_activity:20};
+ const second={...f.shipments[0],id:'selected-2',work_date:'2026-09-11',amazon_delivery:30,swa_delivery:0,total_delivery:30,total_activity:30};
+ const carryIn={...f.shipments[0],id:'carry-in',work_date:'2026-09-01',amazon_delivery:70,swa_delivery:0,total_delivery:70,total_activity:70};
+ f.shipments=[first,second];
+ f.mappings[0].production_threshold_config={period:'month',component_codes:['DELIVERY'],minimum_units:100};
+ f.mappings[0].method_production_threshold_config={period:'month',component_codes:['DELIVERY']};
+ f.production_threshold_context={
+  shipments:[carryIn,first,second],mappings:f.mappings,workforce:f.workforce,
+  components:f.components,providers:f.providers,stations:f.stations
+ };
+ const r=rebuildCps(base([day('A','2026-09-10',20),day('A','2026-09-11',30)]),f);
+ assert.deepEqual(r.daily.map(row=>row.da),[0,200]);
+ assert.deepEqual(r.associates.map(row=>row.work_date),['2026-09-10','2026-09-11']);
+ assert.equal(r.breakup.filter(line=>line.source==='Workforce rate card').reduce((sum,line)=>sum+line.amount,0),200);
+});
+test('enabled combined minimum without a person snapshot fails closed',()=>{
+ const f=facts();
+ f.mappings[0].method_production_threshold_config={period:'day',component_codes:['DELIVERY']};
+ const r=rebuildCps(base(),f);
+ assert.equal(r.daily[0].da,0);
+ assert.equal(r.associates[0].mapping_status,'Combined production minimum missing');
+ assert.ok(r.gaps.some(g=>g.kind==='Combined production minimum missing'));
 });
 test('DELIVERY rates cover Amazon plus SWA and van rent stays out of DA',()=>{
  const f=facts();f.components.push({payment_method_id:'per-packet',component_code:'VAN_RENT_PER_DAY',component_type:'amount',pay_schedule:'per_day'});f.mappings[0].payment_values.VAN_RENT_PER_DAY=700;

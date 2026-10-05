@@ -11,6 +11,7 @@ import { loadCodLocations, locationModelName, providerName } from "@/lib/ops-pul
 import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
+import type { WorkforceProductionThresholdInput } from "@/lib/workforce-production-threshold";
 import {
   aggregateShipmentDeliveriesByWorkforceDay,
   shipmentAttendanceRecord,
@@ -30,6 +31,12 @@ import {
   type ReportImportProviderMappingIdentity,
   type ReportImportWorkforceIdentity
 } from "./report-import-attendance";
+import {
+  allocateReportImportProductionThresholds,
+  mergeReportImportShipmentMonthRows,
+  reportImportCalendarMonthEnd,
+  reportImportShipmentMonthKey
+} from "./report-import-production-threshold";
 
 type SourceType = string;
 type CoreSourceType = "amazon_shipments" | "iocl_fuel" | "bpcl_fuel" | "cashbook";
@@ -853,6 +860,15 @@ function productionForSource(row: AmazonAggregateRow, source: string) {
   return 0;
 }
 
+function amazonProductionAllocationId(
+  row: AmazonAggregateRow,
+  mappingId: string,
+  componentCode: string,
+  componentIndex: number
+) {
+  return `${reportImportShipmentMonthKey(row)}|${mappingId}|${componentCode}|${componentIndex}`;
+}
+
 function daysInMonth(value: string) {
   const [year, month] = value.split("-").map(Number);
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -1045,35 +1061,36 @@ async function loadAmazonMappingAttendance(
 
 async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnType<typeof aggregateAmazonRows>) {
   if (!supabaseAdmin || !sourceRows.length) return sourceRows as AmazonAggregateRow[];
-  const rows = sourceRows as AmazonAggregateRow[];
-  const providerMemberIds = [...new Set(rows.map((row) => row.provider_employee_id))];
-  const historyFrom = workforcePaymentMonthStart(rows.map((row) => row.work_date).sort()[0]);
-  const policyThrough = rows.map((row) => row.work_date).sort().at(-1)!;
+  const incomingRows = sourceRows as AmazonAggregateRow[];
+  const providerMemberIds = [...new Set(incomingRows.map((row) => row.provider_employee_id))];
+  const historyFrom = workforcePaymentMonthStart(incomingRows.map((row) => row.work_date).sort()[0]);
+  const policyThrough = incomingRows.map((row) => row.work_date).sort().at(-1)!;
+  const affectedThrough = reportImportCalendarMonthEnd(policyThrough);
   const [stationsResult, providersResult, paymentPolicyResult, attendanceCaptureResult] = await Promise.all([
     readAllRows(supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).order("id")),
     readAllRows(supabaseAdmin.from("providers").select("id,code,name").eq("company_id", companyId).order("id")),
     supabaseAdmin.from("workforce_payment_settings")
       .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from")
       .eq("company_id", companyId)
-      .lte("effective_from", policyThrough)
+      .lte("effective_from", affectedThrough)
       .order("effective_from"),
     supabaseAdmin.from("workforce_attendance_capture_settings")
       .select("id,capture_method,minimum_daily_deliveries,effective_from")
       .eq("company_id", companyId)
-      .lte("effective_from", policyThrough)
+      .lte("effective_from", affectedThrough)
       .order("effective_from")
   ]);
-  if (stationsResult.error || providersResult.error || paymentPolicyResult.error || attendanceCaptureResult.error) return rows;
+  if (stationsResult.error || providersResult.error || paymentPolicyResult.error || attendanceCaptureResult.error) return incomingRows;
   const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
   const attendanceCaptureHistory = (attendanceCaptureResult.data ?? []) as WorkforceAttendanceCaptureSetting[];
   const amazonProviderIds = (providersResult.data ?? []).filter((provider) => /amazon/i.test(`${provider.code ?? ""} ${provider.name ?? ""}`)).map((provider) => provider.id);
-  if (!amazonProviderIds.length) return rows;
-  const amazonMappingSelect = "id,status,provider_id,provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,pay_type,delivery_rate,pickup_rate,mfn_rate,mfn_return_rate,guarantee_amount,guarantee_schedule,fuel_rate,workforce_id,employee_id,contractor_id,field_executive_id";
+  if (!amazonProviderIds.length) return incomingRows;
+  const amazonMappingSelect = "id,status,provider_id,provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,production_threshold_config,pay_type,delivery_rate,pickup_rate,mfn_rate,mfn_return_rate,guarantee_amount,guarantee_schedule,fuel_rate,workforce_id,employee_id,contractor_id,field_executive_id";
   const currentMappingsResult = await supabaseAdmin.from("field_executive_provider_mappings")
     .select(amazonMappingSelect)
     .eq("company_id", companyId).in("status", ["active", "closed"])
     .in("provider_id", amazonProviderIds).in("provider_member_id", providerMemberIds);
-  if (currentMappingsResult.error) return rows;
+  if (currentMappingsResult.error) return incomingRows;
   const currentMappings = currentMappingsResult.data ?? [];
   const canonicalLookupIds = [...new Set(currentMappings.flatMap((mapping) => [
     mapping.workforce_id,
@@ -1099,10 +1116,11 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     return requests;
   });
   const currentWorkforceResults = await Promise.all(currentWorkforceRequests);
-  if (currentWorkforceResults.some((result) => result.error)) return rows;
+  if (currentWorkforceResults.some((result) => result.error)) return incomingRows;
   const currentWorkers = [...new Map(currentWorkforceResults
     .flatMap((result) => result.data ?? [])
     .map((worker) => [worker.id, worker])).values()];
+  const currentWorkforceIndex = createReportImportWorkforceIndex(currentWorkers as ReportImportWorkforceIdentity[]);
   const expandedIdentities: ReportImportMappingIdentity[] = currentWorkers.map((worker) => ({
     workforce_id: worker.id,
     employee_id: worker.source_profile_type === "employee" ? worker.source_profile_id : null,
@@ -1119,23 +1137,56 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
         .in("status", ["active", "closed"])
         .in("provider_id", amazonProviderIds)
         .in(group.column, group.ids.slice(index, index + 100))
-        .lte("effective_from", policyThrough)
+        .lte("effective_from", affectedThrough)
         .or(`effective_to.is.null,effective_to.gte.${historyFrom}`)
         .order("effective_from")
         .order("id")));
     }
     return requests;
   }));
-  if (historyMappingResults.some((result) => result.error)) return rows;
+  if (historyMappingResults.some((result) => result.error)) return incomingRows;
   const mappings = [...new Map([...currentMappings, ...historyMappingResults.flatMap((result) => result.data ?? [])]
     .map((mapping) => [mapping.id, mapping])).values()];
   const methodIds = [...new Set(mappings.map((mapping) => mapping.payment_method_id).filter(Boolean))] as string[];
-  const componentsResult = methodIds.length
-    ? await supabaseAdmin.from("payment_method_components")
-      .select("payment_method_id,component_code,component_type,pay_schedule,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source,provider_calculation_sources)")
-      .in("payment_method_id", methodIds).eq("is_active", true).order("sort_order")
-    : { data: [], error: null };
-  if (componentsResult.error) return rows;
+  const [componentsResult, paymentMethodsResult] = methodIds.length
+    ? await Promise.all([
+      supabaseAdmin.from("payment_method_components")
+        .select("payment_method_id,component_code,component_type,pay_schedule,sort_order,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source,provider_calculation_sources)")
+        .in("payment_method_id", methodIds).eq("is_active", true).order("sort_order"),
+      supabaseAdmin.from("payment_methods")
+        .select("id,production_threshold_config")
+        .eq("company_id", companyId)
+        .in("id", methodIds)
+    ])
+    : [{ data: [], error: null }, { data: [], error: null }];
+  if (componentsResult.error || paymentMethodsResult.error) return incomingRows;
+  const methodThresholdConfigById = new Map(
+    (paymentMethodsResult.data ?? []).map((method) => [method.id, method.production_threshold_config])
+  );
+  const thresholdRelevant = mappings.some((mapping) => Boolean(mapping.production_threshold_config))
+    || [...methodThresholdConfigById.values()].some(Boolean);
+  let rows = incomingRows;
+  if (thresholdRelevant) {
+    const historicalProviderMemberIds = [...new Set(mappings
+      .map((mapping) => clean(mapping.provider_member_id))
+      .filter(Boolean))];
+    const existingRequests = [];
+    for (let index = 0; index < historicalProviderMemberIds.length; index += 100) {
+      existingRequests.push(readAllRows(supabaseAdmin.from("cps_shipment_daily")
+        .select("amazon_delivery,assigned_count,c_return,client,company_id,mfn,mfn_return,provider_employee_id,provider_employee_name,raw_row_count,shipment_type,source_batch_id,station_code,swa_delivery,total_activity,total_delivery,updated_at,work_date")
+        .eq("company_id", companyId)
+        .in("provider_employee_id", historicalProviderMemberIds.slice(index, index + 100))
+        .gte("work_date", historyFrom)
+        .lte("work_date", affectedThrough)
+        .order("work_date")));
+    }
+    const existingResults = await Promise.all(existingRequests);
+    if (existingResults.some((result) => result.error)) return incomingRows;
+    rows = mergeReportImportShipmentMonthRows(
+      existingResults.flatMap((result) => (result.data ?? []) as AmazonAggregateRow[]),
+      incomingRows
+    );
+  }
   const stationCodeById = new Map((stationsResult.data ?? []).map((station) => [station.id, String(station.station_code)]));
   const providerLabelsById = new Map((providersResult.data ?? []).map((provider) => [
     provider.id,
@@ -1163,9 +1214,54 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     : {
       attendanceByWorkforceDate: new Map<string, ReportImportAttendanceRow>(),
       cumulativeAttendanceUnitsBefore: new Map<string, number>(),
-      workforceIndex: createReportImportWorkforceIndex([])
+      workforceIndex: currentWorkforceIndex
     };
-  if (!attendanceContext) return rows;
+  if (!attendanceContext) return incomingRows;
+
+  const mappingSelections = rows.map((row) => ({
+    row,
+    mappingSelection: selectReportImportMapping(
+      mappings,
+      row,
+      mappingScope,
+      attendanceContext.workforceIndex
+    )
+  }));
+  const productionThresholdInputs: WorkforceProductionThresholdInput[] = [];
+  mappingSelections.forEach(({ row, mappingSelection }) => {
+    const mapping = mappingSelection.mapping;
+    if (!mapping) return;
+    const worker = canonicalWorkforceForMapping(mapping, attendanceContext.workforceIndex);
+    if (!worker) return;
+    const values = (mapping.payment_values && typeof mapping.payment_values === "object" ? mapping.payment_values : {}) as Record<string, unknown>;
+    const components = mapping.payment_method_id ? componentsByMethod.get(mapping.payment_method_id) ?? [] : [];
+    components.forEach((component, componentIndex) => {
+      const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
+      const componentCode = clean(field?.code || component.component_code).toUpperCase();
+      const calculationType = clean(field?.calculation_type || (component.component_type === "production" ? "count_x_rate" : "fixed_daily"));
+      const productionComponent = component.component_type === "production" || calculationType === "count_x_rate";
+      if (!productionComponent) return;
+      const source = clean((field?.provider_calculation_sources as Record<string, unknown> | null)?.amazon || field?.calculation_source || componentCode);
+      const rawRate = Number(values[componentCode] ?? values[component.component_code] ?? 0);
+      productionThresholdInputs.push({
+        id: amazonProductionAllocationId(row, mapping.id, componentCode, componentIndex),
+        workforceId: worker.id,
+        mappingId: mapping.id,
+        date: row.work_date,
+        effectiveFrom: mapping.effective_from,
+        effectiveTo: mapping.effective_to,
+        componentCode,
+        componentOrder: Number(component.sort_order ?? componentIndex),
+        reportedUnits: productionForSource(row, source),
+        rate: Number.isFinite(rawRate) ? rawRate : 0,
+        thresholdConfig: mapping.production_threshold_config,
+        methodThresholdConfig: mapping.payment_method_id
+          ? methodThresholdConfigById.get(mapping.payment_method_id)
+          : null
+      });
+    });
+  });
+  const productionThresholdAllocations = allocateReportImportProductionThresholds(productionThresholdInputs);
 
   const consumedAttendancePayments = new Set<string>();
   const unavailableAttendancePayments = new Set<string>();
@@ -1184,13 +1280,7 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     mg_salary: 0,
     variable_pay: 0
   });
-  return rows.map((row) => {
-    const mappingSelection = selectReportImportMapping(
-      mappings,
-      row,
-      mappingScope,
-      attendanceMethodIds.size ? attendanceContext.workforceIndex : undefined
-    );
+  return mappingSelections.map(({ row, mappingSelection }) => {
     const mapping = mappingSelection.mapping;
     // A DA with no active payment mapping row at all previously left del_rate
     // (and the other rate columns) completely unset here, which the upsert
@@ -1206,8 +1296,9 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
     let mgPay = 0;
     let fuelPay = 0;
     let attendanceConfigurationMissing = false;
+    let productionThresholdConfigurationMissing = false;
     const components = mapping.payment_method_id ? componentsByMethod.get(mapping.payment_method_id) ?? [] : [];
-    components.forEach((component) => {
+    components.forEach((component, componentIndex) => {
       const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
       const componentCode = clean(field?.code || component.component_code).toUpperCase();
       const fieldText = `${componentCode} ${field?.label ?? ""}`.toUpperCase();
@@ -1230,7 +1321,11 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       if (attendanceComponent && includeAttendancePayment) consumedAttendancePayments.add(attendancePaymentKey);
       let amount = 0;
       if (productionComponent) {
-        amount = productionForSource(row, source) * rate;
+        const allocation = productionThresholdAllocations.get(
+          amazonProductionAllocationId(row, mapping.id, componentCode, componentIndex)
+        );
+        productionThresholdConfigurationMissing ||= allocation?.thresholdConfigurationMissing ?? false;
+        amount = allocation?.amount ?? 0;
       } else if (attendanceComponent && includeAttendancePayment) {
         const attendanceCalculation = directPayForDay({ [componentCode]: rate }, [{
             component_code: componentCode,
@@ -1287,7 +1382,9 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       fuel_pay: fuelPay,
       fuel_rate: legacyFuelRate,
       mapped_at: new Date().toISOString(),
-      mapping_status: reportImportMappingStatus(configured, attendanceConfigurationMissing),
+      mapping_status: productionThresholdConfigurationMissing
+        ? "Combined production minimum missing"
+        : reportImportMappingStatus(configured, attendanceConfigurationMissing),
       mfn_rate: mfnRate,
       mfn_return_rate: mfnReturnRate,
       mg_pay: mgPay,
@@ -2321,12 +2418,17 @@ export async function POST(request: Request) {
     }));
     await importStep("Save raw import audit rows", () => insertInChunks("report_import_rows", rowPayload, 250));
 
+    let cpsRecalculationRows = factRows.map((row) => ({
+      stationCode: row.normalized?.stationCode,
+      workDate: row.normalized?.workDate
+    }));
     if (sourceType === "amazon_shipments") {
       const payload = await importStep("Apply configured DA payment mappings", () => applyAmazonPaymentMappings(
         companyId,
         aggregateAmazonRows(factRows, batch.data.id, companyId)
       ));
       await importStep("Refresh Amazon shipment totals", () => upsertInChunks("cps_shipment_daily", payload, "company_id,client,work_date,station_code,provider_employee_id", 250));
+      cpsRecalculationRows = payload.map((row) => ({ stationCode: row.station_code, workDate: row.work_date }));
     }
 
     if (sourceType === "iocl_fuel" || sourceType === "bpcl_fuel") {
@@ -2365,7 +2467,7 @@ export async function POST(request: Request) {
       await importStep("Save cashbook expenses", () => upsertInChunks("cps_cashbook_daily", payload, "company_id,source_row_hash", 250));
     }
 
-    await importStep("Recalculate CPS rows", () => recalculateCps(companyId, factRows.map((row) => ({ stationCode: row.normalized?.stationCode, workDate: row.normalized?.workDate }))));
+    await importStep("Recalculate CPS rows", () => recalculateCps(companyId, cpsRecalculationRows));
     if (["amazon_shipments", "da_inapp_onboarding"].includes(sourceType)) {
       await importStep("Refresh Provider ID suggestions", async () => {
         const result = await db.rpc("workforce_reconcile_amazon_activations", { p_company: companyId });

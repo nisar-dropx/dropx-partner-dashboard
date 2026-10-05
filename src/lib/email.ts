@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type SendEmailParams = {
+  attachments?: Array<{ filename?: string; content: Buffer; contentType?: string; cid?: string }>;
   timeoutMs?: number;
   body: string;
   cc?: string[];
@@ -78,7 +79,7 @@ function loadEnvEmailConfig(): EmailConfig {
   };
 }
 
-export async function sendEmail({ body, cc = [], companyId, subject, to, html, messageId, inReplyTo, references, timeoutMs }: SendEmailParams) {
+export async function sendEmail({ body, cc = [], companyId, subject, to, html, messageId, inReplyTo, references, timeoutMs, attachments }: SendEmailParams) {
   const recipients = Array.from(new Set(to.map((email) => email.trim().toLowerCase()).filter(Boolean)));
   const ccRecipients = Array.from(new Set(cc.map((email) => email.trim().toLowerCase()).filter(Boolean)));
   if (!recipients.length) throw new Error("No email recipients found.");
@@ -102,7 +103,8 @@ export async function sendEmail({ body, cc = [], companyId, subject, to, html, m
     html,
     messageId,
     inReplyTo,
-    references
+    references,
+    attachments
   });
   return { messageId: result.messageId, response: result.response };
 }

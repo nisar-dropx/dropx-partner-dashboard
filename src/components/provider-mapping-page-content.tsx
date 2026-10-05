@@ -10,6 +10,8 @@ import {
 } from "@/components/provider-mapping-worksheet";
 import { type AuthorizationContext, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
+import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type LocationRow = {
@@ -82,6 +84,7 @@ type MappingRow = {
   effective_to: string | null;
   payment_method_id: string | null;
   payment_values: Record<string, number | string> | null;
+  production_threshold_config: unknown;
   pay_type: string;
   delivery_rate: number | string | null;
   pickup_rate: number | string | null;
@@ -98,6 +101,7 @@ type PaymentMethodRow = {
   id: string;
   code: string;
   name: string;
+  production_threshold_config: unknown;
   payment_method_components?: Array<{
     component_code: string;
     component_type: "amount" | "production";
@@ -172,6 +176,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
         effective_to,
         payment_method_id,
         payment_values,
+        production_threshold_config,
         pay_type,
         delivery_rate,
         pickup_rate,
@@ -193,6 +198,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
         id,
         code,
         name,
+        production_threshold_config,
         payment_method_components (
           component_code,
           component_type,
@@ -209,6 +215,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
     id: method.id,
     code: method.code,
     name: method.name,
+    productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config),
     components: (method.payment_method_components ?? [])
       .slice()
       .sort((first, second) => first.sort_order - second.sort_order)
@@ -273,6 +280,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
   const mappings = workers.map((worker) => {
       const mapping = latestMappingByWorkerKey.get(`workforce:${worker.id}`);
       const stationId = mapping?.station_id ?? worker.locationId;
+      const thresholdSnapshot = parseProductionThresholdSnapshot(mapping?.production_threshold_config);
       return {
       id: worker.id,
       sourceType: worker.sourceType,
@@ -286,6 +294,8 @@ async function loadMappingData(authorization: AuthorizationContext) {
       effectiveTo: mapping?.effective_to ?? "",
       paymentMethodId: mapping?.payment_method_id ?? "",
       paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, amountValue(value)])),
+      productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null,
+      productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "",
       deliveryRate: amountValue(mapping?.delivery_rate),
       pickupRate: amountValue(mapping?.pickup_rate),
       mfnRate: amountValue(mapping?.mfn_rate),

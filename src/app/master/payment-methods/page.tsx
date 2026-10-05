@@ -14,6 +14,7 @@ import { createPaymentField, createPaymentMethod, deletePaymentField, deletePaym
 import { createDeductionHead, updateDeductionHead } from "./deduction-actions";
 import { cookies } from "next/headers";
 import type { PaymentCalculationSource, PaymentCalculationType, ProviderCalculationSources } from "@/lib/payment-calculation";
+import { parseProductionThresholdConfig, productionThresholdLabel, type ProductionThresholdConfig } from "@/lib/production-threshold-config";
 
 type PaymentComponentRow = {
   id: string;
@@ -49,6 +50,7 @@ type PaymentMethodRow = {
   code: string;
   name: string;
   is_active: boolean;
+  production_threshold_config: ProductionThresholdConfig | null;
   payment_method_components?: PaymentComponentRow[] | null;
   usage_count: number;
 };
@@ -68,6 +70,7 @@ async function loadPaymentMethods(companyId: string) {
       code,
       name,
       is_active,
+      production_threshold_config,
       payment_method_components (
         id,
         payment_field_id,
@@ -99,6 +102,7 @@ async function loadPaymentMethods(companyId: string) {
   return {
     methods: ((data ?? []) as Omit<PaymentMethodRow, "usage_count">[]).map((method) => ({
       ...method,
+      production_threshold_config: parseProductionThresholdConfig(method.production_threshold_config),
       usage_count: usageByMethod.get(method.id) ?? 0,
       payment_method_components: (method.payment_method_components ?? [])
         .slice()
@@ -277,6 +281,12 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
                           </span>
                         )) : <span className="subtle">No fields configured</span>}
                       </div>
+                      {method.production_threshold_config ? (
+                        <p className="payment-threshold-summary">
+                          <strong>{productionThresholdLabel(method.production_threshold_config)}</strong>
+                          <span>{method.production_threshold_config.component_codes.map((code) => method.payment_method_components?.find((component) => component.component_code.trim().toUpperCase() === code)?.label ?? code).join(" + ")}</span>
+                        </p>
+                      ) : null}
                     </td>
                     <td><StatusPill status={method.is_active ? "Active" : "Inactive"} /></td>
                     {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/master/payment-methods?edit=${method.id}`} scroll={false}>Edit</PendingLink></td> : null}
@@ -304,7 +314,8 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
                 id: editMethod.id,
                 code: editMethod.code,
                 name: editMethod.name,
-                components: editMethod.payment_method_components ?? []
+                components: editMethod.payment_method_components ?? [],
+                productionThresholdConfig: editMethod.production_threshold_config
               }}
               key={editMethod.id}
               submitLabel="Save changes"

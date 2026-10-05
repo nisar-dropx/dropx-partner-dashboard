@@ -815,7 +815,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       dailyTotals.set(dayKey, (dailyTotals.get(dayKey) ?? 0) + item.amount);
       if (!quoteById.get(item.id)?.rule_id && category.per_day_limit != null && Number(dailyTotals.get(dayKey)) > Number(category.per_day_limit)) throw new Error(`${category.name} exceeds the configured daily limit.`);
       const receiptNeeded = category.receipt_required && item.amount >= Number(category.receipt_threshold ?? 0);
-      if (receiptNeeded && !receiptFiles.length) throw new Error(`Receipt is required for ${category.name}.`);
+      if (receiptNeeded && !receiptFiles.length && !stagedReceipts.length) throw new Error(`Receipt is required for ${category.name}.`);
     }
 
     claimId = existingClaimId || randomUUID();

@@ -212,6 +212,7 @@ async function writeAudit(
   const { error } = await supabaseAdmin.from("verification_api_audit_logs").insert({
     company_id: input.companyId,
     provider_code: input.providerCode,
+    request_status: "completed",
     verification_kind: input.verificationKind,
     endpoint: input.endpoint,
     source: input.source,

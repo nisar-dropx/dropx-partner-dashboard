@@ -135,17 +135,23 @@ function refreshRosterViews() {
   revalidatePath("/payroll");
 }
 
-async function seedOpsDatedDraftEntries(
+type ApprovedWeekEntry = {
+  worker_type: string;
+  worker_id: string;
+  roster_date: string;
+  day_type: string;
+  shift_id: string | null;
+  notes: string | null;
+};
+
+/** Current week = dated assignment for that date, else the repeating weekday, else the same weekday last week. */
+async function collectApprovedWeekEntries(
   companyId: string,
   authorization: AuthorizationContext,
-  planId: string,
   locationId: string,
   periodStart: string,
   periodEnd: string
-) {
-  const cleared = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", planId);
-  if (cleared.error) throw new Error(cleared.error.message);
-
+): Promise<ApprovedWeekEntry[]> {
   const station = await authorisedStation(companyId, authorization, locationId);
   const previous = await db().from("hr_roster_plans")
     .select("id,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
@@ -161,27 +167,17 @@ async function seedOpsDatedDraftEntries(
 
   const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
   const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
-  const byKey = new Map<string, {
-    company_id: string;
-    plan_id: string;
-    worker_type: string;
-    worker_id: string;
-    location_id: string;
-    roster_date: string;
-    day_type: string;
-    shift_id: string | null;
-    notes: string | null;
-  }>();
+  const byKey = new Map<string, ApprovedWeekEntry>();
+  const put = (entry: ApprovedWeekEntry) => {
+    if (!allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`)) return;
+    byKey.set(`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, entry);
+  };
 
   for (const entry of previous.data?.hr_roster_entries ?? []) {
-    if (!allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`)) continue;
     for (const expanded of expandTemplateEntryAcrossWindow(entry, periodStart, periodEnd)) {
-      byKey.set(`${expanded.worker_type}:${expanded.worker_id}:${expanded.roster_date}`, {
-        company_id: companyId,
-        plan_id: planId,
+      put({
         worker_type: expanded.worker_type,
         worker_id: expanded.worker_id,
-        location_id: locationId,
         roster_date: expanded.roster_date,
         day_type: expanded.day_type,
         shift_id: expanded.shift_id,
@@ -190,31 +186,67 @@ async function seedOpsDatedDraftEntries(
     }
   }
 
+  const lookbackStart = addRosterDays(periodStart, -7);
   const datedApproved = await db().from("hr_roster_entries")
-    .select("worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes,hr_roster_plans!inner(status,roster_kind,location_id)")
+    .select("worker_type,worker_id,roster_date,day_type,shift_id,notes,hr_roster_plans!inner(status,roster_kind,location_id,superseded_at,revision_no)")
     .eq("company_id", companyId)
     .eq("hr_roster_plans.status", "approved")
     .eq("hr_roster_plans.roster_kind", "dated")
     .eq("hr_roster_plans.location_id", locationId)
-    .gte("roster_date", periodStart)
+    .is("hr_roster_plans.superseded_at", null)
+    .gte("roster_date", lookbackStart)
     .lte("roster_date", periodEnd);
   if (datedApproved.error) throw new Error(datedApproved.error.message);
-  for (const entry of datedApproved.data ?? []) {
-    if (!allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`)) continue;
-    byKey.set(`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, {
-      company_id: companyId,
-      plan_id: planId,
+  const datedRows = [...(datedApproved.data ?? [])].sort((left, right) => {
+    const leftPlan = Array.isArray(left.hr_roster_plans) ? left.hr_roster_plans[0] : left.hr_roster_plans;
+    const rightPlan = Array.isArray(right.hr_roster_plans) ? right.hr_roster_plans[0] : right.hr_roster_plans;
+    return Number(leftPlan?.revision_no ?? 0) - Number(rightPlan?.revision_no ?? 0);
+  });
+  const previousWeek = new Map<string, ApprovedWeekEntry>();
+  for (const entry of datedRows) {
+    const row = {
       worker_type: entry.worker_type,
       worker_id: entry.worker_id,
-      location_id: locationId,
       roster_date: entry.roster_date,
       day_type: entry.day_type,
       shift_id: entry.shift_id,
       notes: entry.notes
-    });
+    };
+    if (entry.roster_date < periodStart) previousWeek.set(`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, row);
+    else put(row);
   }
 
-  const rows = [...byKey.values()];
+  for (const person of currentPeople.people) {
+    for (let offset = 0; offset < 7; offset += 1) {
+      const rosterDate = addRosterDays(periodStart, offset);
+      if (rosterDate > periodEnd) break;
+      const key = `${person.workerType}:${person.id}:${rosterDate}`;
+      if (byKey.has(key)) continue;
+      const carried = previousWeek.get(`${person.workerType}:${person.id}:${addRosterDays(rosterDate, -7)}`);
+      if (!carried) continue;
+      put({ ...carried, roster_date: rosterDate });
+    }
+  }
+
+  return [...byKey.values()];
+}
+
+async function seedOpsDatedDraftEntries(
+  companyId: string,
+  authorization: AuthorizationContext,
+  planId: string,
+  locationId: string,
+  periodStart: string,
+  periodEnd: string
+) {
+  const cleared = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", planId);
+  if (cleared.error) throw new Error(cleared.error.message);
+  const rows = (await collectApprovedWeekEntries(companyId, authorization, locationId, periodStart, periodEnd)).map((entry) => ({
+    company_id: companyId,
+    plan_id: planId,
+    location_id: locationId,
+    ...entry
+  }));
   if (rows.length) {
     const inserted = await db().from("hr_roster_entries").insert(rows);
     if (inserted.error) throw new Error(`The roster draft was prepared, but its pattern could not be copied: ${inserted.error.message}`);
@@ -304,6 +336,53 @@ async function archiveOpsRosterApprovalRound(companyId: string, planId: string) 
   }];
   const saved = await db().from("hr_roster_plans").update({ approval_history: nextHistory }).eq("company_id", companyId).eq("id", planId);
   if (saved.error) throw new Error(saved.error.message);
+}
+
+/** First roster for a station that has never had an approved pattern. */
+async function createBlankOpsDatedDraft(
+  companyId: string,
+  authorization: AuthorizationContext,
+  station: { id: string; station_code: string },
+  start: string,
+  end: string
+) {
+  const created = await db().from("hr_roster_plans").insert({
+    company_id: companyId,
+    name: `${station.station_code} roster · ${start} → ${end}`,
+    location_id: station.id,
+    period_start: start,
+    period_end: end,
+    roster_kind: "dated",
+    effective_from: start,
+    revision_no: 1,
+    created_by: authorization.userId,
+    updated_by: authorization.userId,
+    planning_channel: "ops"
+  }).select("id").single();
+  const duplicate = created.error?.code === "23505" || /duplicate key|unique constraint/i.test(created.error?.message ?? "");
+  if (duplicate) {
+    const existing = await db().from("hr_roster_plans")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("location_id", station.id)
+      .eq("planning_channel", "ops")
+      .eq("roster_kind", "dated")
+      .in("status", ["draft", "returned"])
+      .eq("period_start", start)
+      .eq("period_end", end)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing.error) throw new Error(existing.error.message);
+    if (existing.data) return existing.data.id;
+  }
+  if (created.error || !created.data) throw new Error(created.error?.message ?? "The Ops roster draft could not be created.");
+  const linked = await db().from("hr_roster_plan_locations").insert({ company_id: companyId, plan_id: created.data.id, location_id: station.id });
+  if (linked.error) {
+    await db().from("hr_roster_plans").delete().eq("company_id", companyId).eq("id", created.data.id);
+    throw new Error(linked.error.message);
+  }
+  return created.data.id;
 }
 
 function mapPreparedEntries(entries: Array<{ worker_type: string; worker_id: string; roster_date: string; day_type: string; shift_id: string | null; notes: string | null }>): PreparedRosterEntry[] {
@@ -408,34 +487,38 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
       };
     }
 
-    // No Ops draft yet — reuse the approved pattern in-memory. A dated draft is created only on first save.
+    // No Ops draft yet — show the same week People shows: dated day, else repeating weekday, else last week.
     const previous = await db().from("hr_roster_plans")
-      .select("id,period_start,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
+      .select("id")
       .eq("company_id", companyId)
       .eq("location_id", locationId)
-      .eq("roster_kind", "recurring_weekly")
       .eq("status", "approved")
-      .is("superseded_at", null)
-      .order("effective_from", { ascending: false })
+      .in("roster_kind", ["dated", "recurring_weekly"])
       .limit(1)
       .maybeSingle();
     if (previous.error) throw new Error(previous.error.message);
     if (!previous.data) {
-      return { ok: false, message: "No approved roster exists for this station yet. Create one in People first, or save a new Ops draft after adding assignments." };
+      const planId = await createBlankOpsDatedDraft(companyId, authorization, station, start, end);
+      refreshRosterViews();
+      return {
+        ok: true,
+        planId,
+        periodStart: start,
+        periodEnd: end,
+        rosterKind: "dated",
+        entries: [],
+        message: "A new roster draft is ready. Add shifts or week offs, then save.",
+        persisted: true
+      };
     }
-    const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
-    const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
-    const projected = (previous.data.hr_roster_entries ?? [])
-      .filter((entry) => allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`))
-      .flatMap((entry) => expandTemplateEntryAcrossWindow(entry, start, end))
-      .map((entry) => ({
-        workerType: entry.worker_type as "employee" | "contractor",
-        workerId: entry.worker_id,
-        rosterDate: entry.roster_date,
-        dayType: entry.day_type as "working" | "weekly_off",
-        shiftId: entry.shift_id,
-        notes: entry.notes
-      }));
+    const projected = (await collectApprovedWeekEntries(companyId, authorization, locationId, start, end)).map((entry) => ({
+      workerType: entry.worker_type as "employee" | "contractor",
+      workerId: entry.worker_id,
+      rosterDate: entry.roster_date,
+      dayType: entry.day_type as "working" | "weekly_off",
+      shiftId: entry.shift_id,
+      notes: entry.notes
+    }));
     return {
       ok: true,
       planId: previous.data.id,
@@ -443,7 +526,7 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
       periodEnd: end,
       rosterKind: "dated",
       entries: projected,
-      message: "Showing the current approved roster. Save a change to start an Ops draft for approval.",
+      message: "Showing this week's approved roster, including last week's pattern where a day is still open. Save a change to start an Ops draft for approval.",
       // Nothing was written to hr_roster_plans — this is the approved baseline projected
       // in-memory. The caller's local optimistic state is already complete and correct;
       // no follow-up refresh is needed (there is nothing new for the server to say).
@@ -615,9 +698,103 @@ async function materializeOpsDraftFromApproved(
   return { ...created.data, hr_roster_plan_locations: [{ location_id: approved.location_id }] };
 }
 
+function lastFullWeekStart(periodStart: string, periodEnd: string) {
+  const containing = rosterMonday(periodStart);
+  let cursor = containing < periodStart ? addRosterDays(containing, 7) : containing;
+  let chosen: string | null = null;
+  while (addRosterDays(cursor, 6) <= periodEnd) {
+    chosen = cursor;
+    cursor = addRosterDays(cursor, 7);
+  }
+  return chosen;
+}
+
+/** An approved week becomes the pattern that repeats on later weeks. */
+async function syncRecurringBaselineFromDatedPlan(
+  companyId: string,
+  authorization: AuthorizationContext,
+  plan: { id: string; location_id: string | null; period_start: string; period_end: string; roster_kind?: string | null }
+) {
+  if (plan.roster_kind !== "dated" || !plan.location_id) return;
+  const weekStart = lastFullWeekStart(plan.period_start, plan.period_end);
+  if (!weekStart) return;
+  const weekEnd = addRosterDays(weekStart, 6);
+  const source = await db().from("hr_roster_entries")
+    .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
+    .eq("company_id", companyId)
+    .eq("plan_id", plan.id)
+    .gte("roster_date", weekStart)
+    .lte("roster_date", weekEnd);
+  if (source.error) throw new Error(source.error.message);
+  const byWorker = new Map<string, typeof source.data>();
+  for (const entry of source.data ?? []) {
+    const key = `${entry.worker_type}:${entry.worker_id}`;
+    byWorker.set(key, [...(byWorker.get(key) ?? []), entry]);
+  }
+  const complete = [...byWorker.values()].filter((rows) => new Set(rows.map((row) => row.roster_date)).size === 7);
+  if (!complete.length) return;
+
+  const newer = await db().from("hr_roster_plans")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("location_id", plan.location_id)
+    .eq("roster_kind", "recurring_weekly")
+    .eq("status", "approved")
+    .is("superseded_at", null)
+    .gte("effective_from", weekStart)
+    .neq("id", plan.id)
+    .limit(1);
+  if (newer.error) throw new Error(newer.error.message);
+  if (newer.data?.length) return;
+
+  const station = await authorisedStation(companyId, authorization, plan.location_id);
+  const created = await db().from("hr_roster_plans").insert({
+    company_id: companyId,
+    name: `${station.station_code} repeating roster · ${weekStart}`,
+    location_id: plan.location_id,
+    period_start: weekStart,
+    period_end: weekEnd,
+    roster_kind: "recurring_weekly",
+    effective_from: weekStart,
+    revision_no: 1,
+    status: "approved",
+    created_by: authorization.userId,
+    updated_by: authorization.userId,
+    planning_channel: "ops",
+    decided_at: new Date().toISOString(),
+    decision_note: "Repeating pattern taken from the latest approved week."
+  }).select("id").single();
+  if (created.error || !created.data) throw new Error(created.error?.message ?? "The repeating roster could not be saved.");
+  const linked = await db().from("hr_roster_plan_locations").insert({ company_id: companyId, plan_id: created.data.id, location_id: plan.location_id });
+  if (linked.error) {
+    await db().from("hr_roster_plans").delete().eq("company_id", companyId).eq("id", created.data.id);
+    throw new Error(linked.error.message);
+  }
+  const copied = await db().from("hr_roster_entries").insert(complete.flat().map((entry) => ({
+    company_id: companyId,
+    plan_id: created.data.id,
+    worker_type: entry.worker_type,
+    worker_id: entry.worker_id,
+    location_id: plan.location_id,
+    roster_date: entry.roster_date,
+    day_type: entry.day_type,
+    shift_id: entry.shift_id,
+    notes: entry.notes
+  })));
+  if (copied.error) throw new Error(copied.error.message);
+  const ended = await db().from("hr_roster_plans")
+    .update({ superseded_at: weekStart })
+    .eq("company_id", companyId)
+    .eq("location_id", plan.location_id)
+    .eq("roster_kind", "recurring_weekly")
+    .eq("status", "approved")
+    .is("superseded_at", null)
+    .lt("effective_from", weekStart);
+  if (ended.error) throw new Error(ended.error.message);
+}
+
 async function publishPlan(companyId: string, authorization: AuthorizationContext, plan: Awaited<ReturnType<typeof loadPlan>>, note: string, preserveSubmission = false) {
   const now = new Date().toISOString();
-  // Dated overlays must not supersede the recurring baseline used for other weeks.
   if (plan.roster_kind === "recurring_weekly") {
     const ended = await db().from("hr_roster_plans")
       .update({ superseded_at: plan.effective_from })
@@ -649,6 +826,15 @@ async function publishPlan(companyId: string, authorization: AuthorizationContex
     .select("id")
     .maybeSingle();
   if (approved.error || !approved.data) throw new Error(approved.error?.message ?? "This roster is no longer available.");
+  if (plan.roster_kind === "dated" && plan.location_id && plan.period_start && plan.period_end) {
+    await syncRecurringBaselineFromDatedPlan(companyId, authorization, {
+      id: plan.id,
+      location_id: plan.location_id,
+      period_start: plan.period_start,
+      period_end: plan.period_end,
+      roster_kind: plan.roster_kind
+    });
+  }
 }
 
 export async function cancelOpsRosterDraft(planId: string): Promise<ActionResult> {

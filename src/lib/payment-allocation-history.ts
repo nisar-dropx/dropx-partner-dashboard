@@ -1,3 +1,5 @@
+import type { ProductionThresholdSnapshot } from "./production-threshold-snapshot.ts";
+
 export type PaymentAllocationHistoryRate = {
   code: string;
   label: string;
@@ -15,6 +17,7 @@ export type PaymentAllocationHistoryEntry = {
   subjectLabel?: string;
   locationLabel?: string;
   reason?: string;
+  productionThreshold?: ProductionThresholdSnapshot | null;
   rates: PaymentAllocationHistoryRate[];
 };
 
@@ -25,9 +28,10 @@ export type PaymentAllocationHistoryComponent = {
 };
 
 export function paymentAllocationDisplayStatus(
-  entry: Pick<PaymentAllocationHistoryEntry, "effectiveFrom" | "effectiveTo">,
+  entry: Pick<PaymentAllocationHistoryEntry, "effectiveFrom" | "effectiveTo"> & Partial<Pick<PaymentAllocationHistoryEntry, "storedStatus">>,
   asOf: string
 ) {
+  if (entry.storedStatus === "cancelled") return "Cancelled";
   if (entry.effectiveFrom > asOf) return "Scheduled";
   if (!entry.effectiveTo || entry.effectiveTo >= asOf) return "Current";
   return "Ended";

@@ -7,19 +7,34 @@ import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "@/lib
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 
+export type WorkforcePayoutLine = {
+  code: string;
+  label: string;
+  componentType: "production" | "amount";
+  count: number;
+  rate: number;
+  amount: number;
+  sortOrder?: number;
+  reportedCount?: number;
+  thresholdDeducted?: number;
+  thresholdPeriod?: "day" | "month" | null;
+  thresholdMinimum?: number | null;
+  thresholdConfigurationMissing?: boolean;
+};
+
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
   history: PaymentAllocationHistoryEntry[];
-  productionBreakdown: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number; sortOrder?: number }>;
+  productionBreakdown: WorkforcePayoutLine[];
   dailyBreakdown: Array<{
     date: string;
     workDayUnits: number;
     attendanceSource: string;
     methodAmounts: Array<{ id: string; label: string; amount: number }>;
     baseAmount: number;
-    lines: Array<{ code: string; label: string; componentType: "production" | "amount"; count: number; rate: number; amount: number; sortOrder?: number }>;
+    lines: WorkforcePayoutLine[];
   }>;
   baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED" | ""; netAmount: number; status: string;
 };
@@ -265,7 +280,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
           {visible.length ? visible.flatMap((row) => {
             const expanded = expandedId === row.id;
             const detailId = `payout-breakup-${row.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-            const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0);
+            const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0 || item.reportedCount !== undefined);
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
             return [
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
@@ -301,9 +316,25 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
                         <div className="table-wrap payout-total-table-wrap">
                           <table>
                             <caption className="sr-only">Payment-head totals for {row.name}</caption>
-                            <thead><tr><th scope="col">Payment</th><th className="payout-money" scope="col">Units</th><th className="payout-money" scope="col">Rate</th><th className="payout-money" scope="col">Total</th></tr></thead>
+                            <thead><tr><th scope="col">Payment</th><th className="payout-money" scope="col">Units</th><th className="payout-money" scope="col">Rate</th><th className="payout-money" scope="col">Amount</th></tr></thead>
                             <tbody>
-                              {paymentTotals.map((item) => <tr key={`${item.code}|${item.componentType}|${item.rate}`}><td><strong>{item.label}</strong></td><td className="payout-money">{units(item.count)}</td><td className="payout-money">{rateMoney(item.rate)}</td><td className="payout-money"><strong>{money(item.amount)}</strong></td></tr>)}
+                              {paymentTotals.map((item) => <tr key={`${item.code}|${item.componentType}|${item.rate}|${item.reportedCount === undefined ? "standard" : `${item.thresholdPeriod}|${item.thresholdMinimum}|${item.thresholdConfigurationMissing === true}`}`}>
+                                <td>
+                                  <strong>{item.label}</strong>
+                                  {item.reportedCount !== undefined ? <small>{item.thresholdConfigurationMissing
+                                    ? "Combined threshold · minimum not saved"
+                                    : `${item.thresholdPeriod === "month" ? "Monthly" : "Daily"} combined minimum · ${units(item.thresholdMinimum ?? 0)} units`}</small> : null}
+                                </td>
+                                <td className="payout-money">{item.reportedCount === undefined
+                                  ? units(item.count)
+                                  : <span className="payout-threshold-units">
+                                    <span><small>Reported Units</small><strong>{units(item.reportedCount)}</strong></span>
+                                    <span><small>Threshold / Excluded Units</small><strong>{units(item.thresholdDeducted ?? 0)}</strong></span>
+                                    <span><small>Payable Units</small><strong>{units(item.count)}</strong></span>
+                                  </span>}</td>
+                                <td className="payout-money">{rateMoney(item.rate)}</td>
+                                <td className="payout-money"><strong>{money(item.amount)}</strong></td>
+                              </tr>)}
                               {row.additions ? <tr><td><strong>Additional payments</strong></td><td className="payout-money">—</td><td className="payout-money">—</td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
                               {!paymentTotals.length && !row.additions ? <tr><td className="empty-cell" colSpan={4}>No payment amount for this period.</td></tr> : null}
                             </tbody>

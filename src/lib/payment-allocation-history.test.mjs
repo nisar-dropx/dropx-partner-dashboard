@@ -11,6 +11,7 @@ test("payment history identifies ended, current and scheduled periods", () => {
   assert.equal(paymentAllocationDisplayStatus({ effectiveFrom: "2026-09-01", effectiveTo: "2026-09-05" }, "2026-09-06"), "Ended");
   assert.equal(paymentAllocationDisplayStatus({ effectiveFrom: "2026-09-06", effectiveTo: "" }, "2026-09-06"), "Current");
   assert.equal(paymentAllocationDisplayStatus({ effectiveFrom: "2026-10-01", effectiveTo: "" }, "2026-09-06"), "Scheduled");
+  assert.equal(paymentAllocationDisplayStatus({ effectiveFrom: "2026-09-01", effectiveTo: "", storedStatus: "cancelled" }, "2026-09-06"), "Cancelled");
 });
 
 test("payment history rates follow configured field order and retain unknown snapshots", () => {

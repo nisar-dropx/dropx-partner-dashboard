@@ -6,6 +6,11 @@ export type WorkforcePayoutExportComponent = {
   rate: number;
   amount: number;
   sortOrder?: number;
+  reportedCount?: number;
+  thresholdDeducted?: number;
+  thresholdPeriod?: "day" | "month" | null;
+  thresholdMinimum?: number | null;
+  thresholdConfigurationMissing?: boolean;
 };
 
 export type WorkforcePayoutExportRow = {
@@ -50,12 +55,15 @@ function withUniqueLabels<T extends { code: string; label: string }>(items: T[])
   }));
 }
 
-function componentIdentity(item: Pick<WorkforcePayoutExportComponent, "code" | "componentType" | "rate">) {
-  return `${item.code.trim().toUpperCase()}|${item.componentType}|${Number(item.rate)}`;
+function componentIdentity(item: Pick<WorkforcePayoutExportComponent, "code" | "componentType" | "rate" | "reportedCount" | "thresholdPeriod" | "thresholdMinimum" | "thresholdConfigurationMissing">) {
+  const thresholdIdentity = item.reportedCount === undefined
+    ? "standard"
+    : `threshold|${item.thresholdPeriod ?? "unknown"}|${item.thresholdMinimum ?? "missing"}|${item.thresholdConfigurationMissing === true}`;
+  return `${item.code.trim().toUpperCase()}|${item.componentType}|${Number(item.rate)}|${thresholdIdentity}`;
 }
 
 function componentColumns(rows: WorkforcePayoutExportRow[]) {
-  const values = new Map<string, Pick<WorkforcePayoutExportComponent, "code" | "label" | "componentType" | "rate">>();
+  const values = new Map<string, Pick<WorkforcePayoutExportComponent, "code" | "label" | "componentType" | "rate" | "reportedCount" | "thresholdPeriod" | "thresholdMinimum" | "thresholdConfigurationMissing">>();
   for (const row of rows) for (const item of row.productionBreakdown) {
     const identity = componentIdentity(item);
     if (values.has(identity)) continue;
@@ -63,7 +71,11 @@ function componentColumns(rows: WorkforcePayoutExportRow[]) {
       code: item.code,
       label: item.label,
       componentType: item.componentType,
-      rate: item.rate
+      rate: item.rate,
+      reportedCount: item.reportedCount,
+      thresholdPeriod: item.thresholdPeriod,
+      thresholdMinimum: item.thresholdMinimum,
+      thresholdConfigurationMissing: item.thresholdConfigurationMissing
     });
   }
   // Each payout row is already arranged by its payment method's configured
@@ -85,8 +97,13 @@ function componentColumns(rows: WorkforcePayoutExportRow[]) {
     const labelKey = item.label.trim().toLowerCase();
     const codeKey = item.code.trim().toUpperCase();
     const codeRateKey = `${codeKey}|${Number(item.rate)}`;
+    const thresholdQualifier = item.reportedCount === undefined
+      ? item.componentType
+      : item.thresholdConfigurationMissing
+        ? "threshold setup incomplete"
+        : `${item.thresholdPeriod ?? "combined"} minimum ${item.thresholdMinimum ?? "missing"}`;
     const exportLabel = (codeCounts.get(codeKey) ?? 0) > 1
-      ? `${item.label} @ INR ${item.rate}${(codeRateCounts.get(codeRateKey) ?? 0) > 1 ? ` [${item.componentType}]` : ""}`
+      ? `${item.label} @ INR ${item.rate}${(codeRateCounts.get(codeRateKey) ?? 0) > 1 ? ` [${thresholdQualifier}]` : ""}`
       : (labelCounts.get(labelKey) ?? 0) > 1
         ? `${item.label} [${item.code}]`
         : item.label;
@@ -120,8 +137,10 @@ function csvCell(value: ExportValue) {
 export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[], subjectLabel: "Workforce" | "Helper") {
   const details = componentColumns(rows);
   const deductions = deductionColumns(rows);
-  const detailHeaders = details.flatMap((item) => item.componentType === "production"
-    ? [`${item.exportLabel} Count`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
+  const detailHeaders = details.flatMap((item) => item.componentType === "production" && item.reportedCount !== undefined
+    ? [`${item.exportLabel} Threshold Period`, `${item.exportLabel} Minimum Units`, `${item.exportLabel} Reported Units`, `${item.exportLabel} Threshold / Excluded Units`, `${item.exportLabel} Payable Units`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
+    : item.componentType === "production"
+      ? [`${item.exportLabel} Count`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
     : [`${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]);
   const headers = [
     "DropX ID",
@@ -150,9 +169,21 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
   const exportRows = rows.map((row) => {
     const blankPayments = !row.paymentDetailsAvailable;
     const detailValues: ExportValue[] = details.flatMap((column): ExportValue[] => {
-      if (blankPayments) return column.componentType === "production" ? ["", "", ""] : ["", ""];
+      if (blankPayments) return column.componentType === "production" && column.reportedCount !== undefined
+        ? ["", "", "", "", "", "", ""]
+        : column.componentType === "production" ? ["", "", ""] : ["", ""];
       const item = row.productionBreakdown.find((value) => componentIdentity(value) === componentIdentity(column));
-      return column.componentType === "production"
+      return column.componentType === "production" && column.reportedCount !== undefined
+        ? [
+          item?.thresholdPeriod ?? column.thresholdPeriod ?? "",
+          item?.thresholdMinimum ?? column.thresholdMinimum ?? "",
+          item?.reportedCount ?? 0,
+          item?.thresholdDeducted ?? 0,
+          item?.count ?? 0,
+          item?.rate ?? 0,
+          item?.amount ?? 0
+        ]
+        : column.componentType === "production"
         ? [item?.count ?? 0, item?.rate ?? 0, item?.amount ?? 0]
         : [item?.rate ?? 0, item?.amount ?? 0];
     });

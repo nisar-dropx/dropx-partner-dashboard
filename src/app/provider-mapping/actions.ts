@@ -6,10 +6,17 @@ import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { getAuthorization } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
-import { matchNames } from "@/lib/name-match";
-import { isScientificProviderMemberId, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
+import { isScientificProviderMemberId, providerFirstNamesMatch, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { parseProductionThresholdConfig, type ProductionThresholdConfig } from "@/lib/production-threshold-config";
+import {
+  isFirstDayOfMonth,
+  monthlyThresholdChangeRequiresMonthStart,
+  parseProductionThresholdSnapshot,
+  resolveMappingProductionThresholdSnapshot,
+  type MappingProductionThresholdSnapshot
+} from "@/lib/production-threshold-snapshot";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -60,6 +67,7 @@ function nonEmptyRow(formData: FormData, index: number) {
     "effective_to",
     "payment_method_id",
     "payment_values_json",
+    "production_threshold_minimum_units",
     "delivery_rate",
     "pickup_rate",
     "mfn_rate",
@@ -91,6 +99,19 @@ type WorkforceDesignationReference = {
   designation?: string | null;
 };
 
+export type ProviderFirstReplacementConfirmation = {
+  kind: "owner" | "location";
+  clientKey: string;
+  mappingId: string;
+  providerMemberId: string;
+  providerMemberName: string;
+  existingDropxId: string;
+  existingDropxName: string;
+  existingLocationLabel?: string;
+  newLocationLabel?: string;
+  effectiveFrom?: string;
+};
+
 async function resolveFieldOperationsDesignationPolicy(
   companyId: string,
   worker: WorkforceDesignationReference
@@ -111,7 +132,7 @@ async function resolveFieldOperationsDesignationPolicy(
 }
 
 function providerHolderMatches(holderName: string, workerName: string) {
-  return matchNames(holderName, workerName).status !== "none";
+  return providerFirstNamesMatch(holderName, workerName);
 }
 
 function normalizedHeader(value: unknown) {
@@ -198,6 +219,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
         paymentMethodCode: bulkCell(row, ["PAYMENT_METHOD_CODE", "PAYMENT_METHOD", "METHOD_CODE"]).toUpperCase(),
         effectiveFromRaw: bulkCell(row, ["EFFECTIVE_FROM", "FROM_DATE"]),
         effectiveToRaw: bulkCell(row, ["EFFECTIVE_TO", "TO_DATE"]),
+        productionThresholdMinimumUnitsRaw: bulkCell(row, ["COMBINED_MINIMUM_UNITS", "PRODUCTION_MINIMUM_UNITS", "MINIMUM_UNITS"]),
         cells: Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizedHeader(key), String(value ?? "").trim()]))
       };
     }).filter((row) => row.dropxId || row.providerMemberId || row.paymentMethodCode);
@@ -209,7 +231,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, designation_id, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true).eq("provider_mapping_required", true),
-      supabaseAdmin.from("payment_methods").select("id, code, payment_method_components(component_code, label, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
+      supabaseAdmin.from("payment_methods").select("id, code, production_threshold_config, payment_method_components(component_code, label, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
     ]);
     if (employeeError) throw new Error(employeeError.message);
     if (contractorError) throw new Error(contractorError.message);
@@ -220,6 +242,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     const paymentMethodByCode = new Map((paymentMethods ?? []).map((method) => [String(method.code ?? "").trim().toUpperCase(), {
       id: String(method.id),
       code: String(method.code ?? "").trim(),
+      productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config),
       components: (method.payment_method_components ?? []) as ProviderPaymentComponent[]
     }]));
     const allPaymentFieldCodes = new Set(Array.from(paymentMethodByCode.values()).flatMap((method) => method.components.map((component) => normalizedHeader(component.component_code))));
@@ -289,7 +312,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data for the worker's location."); continue; }
       if (!providerHolderMatches(holderName, worker.fullName)) { skipped("Provider Member ID holder name does not match the DropX worker."); continue; }
       const suppliedPaymentValues = Array.from(allPaymentFieldCodes).some((code) => String(uploadRow.cells[code] ?? "").trim() !== "");
-      const hasAllocationData = Boolean(uploadRow.paymentMethodCode || uploadRow.effectiveFromRaw || uploadRow.effectiveToRaw || suppliedPaymentValues);
+      const hasAllocationData = Boolean(uploadRow.paymentMethodCode || uploadRow.effectiveFromRaw || uploadRow.effectiveToRaw || uploadRow.productionThresholdMinimumUnitsRaw || suppliedPaymentValues);
       const paymentMethod = uploadRow.paymentMethodCode ? paymentMethodByCode.get(uploadRow.paymentMethodCode) : null;
       if (hasAllocationData && !uploadRow.paymentMethodCode) { skipped("Payment Method Code is required when payment allocation data is supplied."); continue; }
       if (uploadRow.paymentMethodCode && !paymentMethod) { skipped("Payment Method Code is not active or does not exist."); continue; }
@@ -313,7 +336,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (invalidPaymentValue) { skipped(invalidPaymentValue); continue; }
       const workerColumn = worker.sourceType === "workforce" ? "workforce_id" : worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
-        .select("id, effective_from, effective_to, station_id")
+        .select("id, effective_from, effective_to, station_id, payment_method_id, production_threshold_config")
         .eq("company_id", companyId)
         .eq(workerColumn, worker.id)
         .is("effective_to", null)
@@ -327,12 +350,41 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       }
 
       const fallbackEffectiveFrom = /^\d{4}-\d{2}-\d{2}$/.test(worker.effectiveFrom) ? worker.effectiveFrom : new Date().toISOString().slice(0, 10);
+      const requestedEffectiveFrom = effectiveFrom || String(existing?.effective_from ?? fallbackEffectiveFrom);
+      const storedThresholdSnapshot = parseProductionThresholdSnapshot(existing?.production_threshold_config);
+      const editsExistingVersion = Boolean(existing)
+        && String(existing?.effective_from ?? "") === requestedEffectiveFrom;
+      const paymentMethodChanged = editsExistingVersion
+        && String(existing?.payment_method_id ?? "") !== String(paymentMethod?.id ?? "");
+      let productionThresholdConfig: MappingProductionThresholdSnapshot;
+      try {
+        productionThresholdConfig = resolveMappingProductionThresholdSnapshot({
+          existingValue: existing?.production_threshold_config,
+          editsExistingVersion,
+          paymentMethodChanged,
+          methodConfig: paymentMethod?.productionThresholdConfig ?? null,
+          minimumUnits: uploadRow.productionThresholdMinimumUnitsRaw,
+          inheritedMinimumUnits: storedThresholdSnapshot?.minimum_units
+        });
+        if (!paymentMethod?.productionThresholdConfig
+          && uploadRow.productionThresholdMinimumUnitsRaw
+          && !(editsExistingVersion && storedThresholdSnapshot)) {
+          throw new Error("The selected payment method does not use a combined production minimum.");
+        }
+      } catch (error) {
+        skipped(error instanceof Error ? error.message : "Combined minimum is invalid.");
+        continue;
+      }
       const allocationPayload = paymentMethod ? {
         payment_method_id: paymentMethod.id,
         payment_values: paymentValues,
+        production_threshold_config: productionThresholdConfig,
         pay_type: paymentMethod.code
       } : {};
-      const requestedEffectiveFrom = effectiveFrom || String(existing?.effective_from ?? fallbackEffectiveFrom);
+      if (monthlyThresholdChangeRequiresMonthStart(storedThresholdSnapshot, parseProductionThresholdSnapshot(productionThresholdConfig)) && !isFirstDayOfMonth(requestedEffectiveFrom)) {
+        skipped("Changes to an existing monthly combined minimum must start on the first day of a month.");
+        continue;
+      }
       const closureError = existing ? ongoingMappingClosureError({
         existingEffectiveFrom: String(existing.effective_from),
         existingEffectiveTo: existing.effective_to,
@@ -357,6 +409,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
               effective_to: effectiveTo || null,
               payment_method_id: paymentMethod.id,
               payment_values: paymentValues,
+              production_threshold_config: productionThresholdConfig,
               pay_type: paymentMethod.code,
               status: effectiveTo ? "closed" : "active"
             },
@@ -383,6 +436,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
           effective_to: effectiveTo || null,
           payment_method_id: paymentMethod.id,
           payment_values: paymentValues,
+          production_threshold_config: productionThresholdConfig,
           pay_type: paymentMethod.code,
           status: effectiveTo ? "closed" : "active",
           created_by: authorization.userId,
@@ -413,6 +467,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
           effective_to: effectiveTo || null,
           payment_method_id: paymentMethod?.id ?? null,
           payment_values: paymentMethod ? paymentValues : {},
+          production_threshold_config: paymentMethod ? productionThresholdConfig : null,
           pay_type: paymentMethod?.code ?? "UNALLOCATED",
           status: effectiveTo ? "closed" : "active",
           created_by: authorization.userId,
@@ -439,7 +494,8 @@ async function saveExecutiveMappingRow(
   index: number,
   createdBy: string,
   companyId: string,
-  allowedLocationIds: Set<string> | null
+  allowedLocationIds: Set<string> | null,
+  options: { allowWorkforceLocationRemap?: boolean; allowWorkforceLocationDriftEdit?: boolean } = {}
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const admin = supabaseAdmin;
@@ -450,6 +506,11 @@ async function saveExecutiveMappingRow(
     throw new Error(`Row ${index + 1}: Worker source is invalid.`);
   }
   const mappingId = rowValue(formData, index, "mapping_id");
+  const replacementMappingId = rowValue(formData, index, "replace_mapping_id");
+  const replacementConfirmed = rowValue(formData, index, "replacement_confirmed") === "yes";
+  if (Boolean(replacementMappingId) !== replacementConfirmed) {
+    throw new Error(`Row ${index + 1}: Mapping replacement confirmation is invalid. Reload the page and try again.`);
+  }
   const dropxId = rowRequired(formData, index, "dropx_id", "DropX ID").toUpperCase();
   const submittedProviderId = rowValue(formData, index, "provider_id");
   const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
@@ -464,9 +525,10 @@ async function saveExecutiveMappingRow(
   const effectiveTo = rowValue(formData, index, "effective_to");
   const paymentMethodId = rowRequired(formData, index, "payment_method_id", "Payment method");
   const rawPaymentValues = rowValue(formData, index, "payment_values_json") ?? "{}";
+  const productionThresholdMinimumUnits = rowValue(formData, index, "production_threshold_minimum_units");
   const { data: paymentMethod, error: methodError } = await supabaseAdmin
     .from("payment_methods")
-    .select("id, code, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
+    .select("id, code, production_threshold_config, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
     .eq("id", paymentMethodId)
     .eq("company_id", companyId)
     .eq("is_active", true)
@@ -474,6 +536,39 @@ async function saveExecutiveMappingRow(
 
   if (methodError) throw new Error(methodError.message);
   const methodComponents = (paymentMethod.payment_method_components ?? []) as ProviderPaymentComponent[];
+  const { data: existingThresholdMapping, error: existingThresholdMappingError } = mappingId
+    ? await supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("payment_method_id, production_threshold_config, effective_from")
+      .eq("id", mappingId)
+      .eq("company_id", companyId)
+      .maybeSingle()
+    : { data: null, error: null };
+  if (existingThresholdMappingError) throw new Error(existingThresholdMappingError.message);
+  const storedThresholdSnapshot = parseProductionThresholdSnapshot(existingThresholdMapping?.production_threshold_config);
+  const methodThresholdConfig = parseProductionThresholdConfig(paymentMethod.production_threshold_config);
+  const editsExistingVersion = Boolean(existingThresholdMapping)
+    && String(existingThresholdMapping?.effective_from ?? "") === effectiveFrom;
+  const paymentMethodChanged = editsExistingVersion
+    && String(existingThresholdMapping?.payment_method_id ?? "") !== paymentMethodId;
+  let productionThresholdConfig: MappingProductionThresholdSnapshot;
+  try {
+    productionThresholdConfig = resolveMappingProductionThresholdSnapshot({
+      existingValue: existingThresholdMapping?.production_threshold_config,
+      editsExistingVersion,
+      paymentMethodChanged,
+      methodConfig: methodThresholdConfig,
+      minimumUnits: productionThresholdMinimumUnits,
+      inheritedMinimumUnits: storedThresholdSnapshot?.minimum_units
+    });
+    if (!methodThresholdConfig
+      && productionThresholdMinimumUnits
+      && !(editsExistingVersion && storedThresholdSnapshot)) {
+      throw new Error("The selected payment method does not use a combined production minimum.");
+    }
+  } catch (error) {
+    throw new Error(`Row ${index + 1}: ${error instanceof Error ? error.message : "Combined minimum is invalid."}`);
+  }
 
   const [{ data: legacyWorker }, { data: station }] = await Promise.all([
     sourceType === "employee"
@@ -528,7 +623,10 @@ async function saveExecutiveMappingRow(
   if (allowedLocationIds && (!workerLocationId || !allowedLocationIds.has(workerLocationId))) {
     throw new Error(`Row ${index + 1}: The worker's current location is not allocated to your account.`);
   }
-  if (sourceType === "workforce" && String((worker as { location_id?: string | null }).location_id ?? "") !== stationId) {
+  if (sourceType === "workforce"
+    && String((worker as { location_id?: string | null }).location_id ?? "") !== stationId
+    && !options.allowWorkforceLocationRemap
+    && !options.allowWorkforceLocationDriftEdit) {
     throw new Error(`Row ${index + 1}: Location mismatch.`);
   }
   if (!station) throw new Error(`Row ${index + 1}: Location was not found for this company.`);
@@ -644,6 +742,12 @@ async function saveExecutiveMappingRow(
   if (effectiveTo && effectiveTo < effectiveFrom) {
     throw new Error(`Row ${index + 1}: Effective to cannot be before effective from.`);
   }
+  if (replacementMappingId && effectiveTo) {
+    throw new Error(`Row ${index + 1}: A replacement mapping must remain open-ended. Leave Effective to blank.`);
+  }
+  if (monthlyThresholdChangeRequiresMonthStart(storedThresholdSnapshot, parseProductionThresholdSnapshot(productionThresholdConfig)) && !isFirstDayOfMonth(effectiveFrom)) {
+    throw new Error(`Row ${index + 1}: Changes to an existing monthly combined minimum must start on the first day of a month.`);
+  }
 
   const mappingPayload = withCompany({
     workforce_id: sourceType === "workforce" ? id : null,
@@ -657,6 +761,7 @@ async function saveExecutiveMappingRow(
     effective_to: effectiveTo,
     payment_method_id: paymentMethodId,
     payment_values: paymentValues,
+    production_threshold_config: productionThresholdConfig,
     pay_type: paymentMethod.code,
     delivery_rate: null,
     pickup_rate: null,
@@ -706,16 +811,27 @@ async function saveExecutiveMappingRow(
     }) : null;
     if (closureError) throw new Error(`Row ${index + 1}: ${closureError}`);
 
-    const { error } = await supabaseAdmin.rpc("workforce_save_joining_mapping", {
-      p_company: companyId,
-      p_actor: createdBy,
-      p_workforce: id,
-      p_mapping: mappingId,
-      p_dropx: dropxId,
-      p_payload: mappingPayload,
-      p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
-      p_actor_name: "Dashboard mapping reviewer"
-    });
+    const { error } = replacementMappingId
+      ? await supabaseAdmin.rpc("workforce_replace_joining_mapping", {
+        p_company: companyId,
+        p_actor: createdBy,
+        p_workforce: id,
+        p_expected_old_mapping: replacementMappingId,
+        p_dropx: dropxId,
+        p_payload: mappingPayload,
+        p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
+        p_actor_name: "Dashboard mapping reviewer"
+      })
+      : await supabaseAdmin.rpc("workforce_save_joining_mapping", {
+        p_company: companyId,
+        p_actor: createdBy,
+        p_workforce: id,
+        p_mapping: mappingId,
+        p_dropx: dropxId,
+        p_payload: mappingPayload,
+        p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
+        p_actor_name: "Dashboard mapping reviewer"
+      });
     if (error) throw new Error(error.message);
     return;
   }
@@ -865,7 +981,9 @@ async function assertProviderFirstRowScope(
   stationId: string,
   sourceType: string,
   allowedLocationIds: Set<string> | null,
-  rowNumber: number
+  rowNumber: number,
+  locationRemapFromStationId: string | null = null,
+  allowCurrentMappingLocationDrift = false
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   if (sourceType !== "workforce") {
@@ -876,16 +994,199 @@ async function assertProviderFirstRowScope(
   }
   const { data: scopedWorker, error: scopedWorkerError } = await supabaseAdmin
     .from("workforce")
-    .select("id")
+    .select("id, location_id")
     .eq("company_id", companyId)
     .eq("id", workforceId)
-    .eq("location_id", stationId)
     .is("deleted_at", null)
     .maybeSingle();
   if (scopedWorkerError) throw new Error(scopedWorkerError.message);
   if (!scopedWorker) {
+    throw new Error(`Row ${rowNumber}: The selected DropX workforce ID is not available.`);
+  }
+  const currentStationId = String(scopedWorker.location_id ?? "");
+  if (allowedLocationIds && (!currentStationId || !allowedLocationIds.has(currentStationId))) {
+    throw new Error(`Row ${rowNumber}: The worker's current location is not allocated to your account.`);
+  }
+  if (currentStationId !== stationId
+    && currentStationId !== locationRemapFromStationId
+    && !allowCurrentMappingLocationDrift) {
     throw new Error(`Row ${rowNumber}: The selected DropX workforce ID is not available at this location.`);
   }
+}
+
+type ProviderFirstActiveMapping = {
+  id: string;
+  workforce_id: string | null;
+  station_id: string | null;
+  provider_id: string | null;
+  provider_member_id: string;
+};
+
+type ProviderFirstReplacementState = {
+  confirmation: ProviderFirstReplacementConfirmation | null;
+  locationRemap: { mappingId: string; stationId: string } | null;
+  currentMappingLocationDriftEdit: boolean;
+};
+
+async function providerFirstReplacementState({
+  formData,
+  index,
+  clientKey,
+  companyId,
+  workforceId,
+  providerMemberId,
+  stationId,
+  submittedMappingId,
+  allowedLocationIds
+}: {
+  formData: FormData;
+  index: number;
+  clientKey: string;
+  companyId: string;
+  workforceId: string;
+  providerMemberId: string;
+  stationId: string;
+  submittedMappingId: string | null;
+  allowedLocationIds: Set<string> | null;
+}): Promise<ProviderFirstReplacementState> {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const providerId = rowRequired(formData, index, "provider_id", "Provider");
+  const expectedReplacementId = rowValue(formData, index, "replace_mapping_id");
+  const replacementConfirmed = rowValue(formData, index, "replacement_confirmed") === "yes";
+  if (Boolean(expectedReplacementId) !== replacementConfirmed) {
+    throw new Error(`Row ${index + 1}: Mapping replacement confirmation is invalid. Reload the page and try again.`);
+  }
+
+  const [targetResult, providerResult] = await Promise.all([
+    supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("id, workforce_id, station_id, provider_id, provider_member_id")
+      .eq("company_id", companyId)
+      .eq("workforce_id", workforceId)
+      .is("effective_to", null)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(2),
+    supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("id, workforce_id, station_id, provider_id, provider_member_id")
+      .eq("company_id", companyId)
+      .eq("provider_id", providerId)
+      .eq("provider_member_id", providerMemberId)
+      .is("effective_to", null)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(2)
+  ]);
+  if (targetResult.error) throw new Error(targetResult.error.message);
+  if (providerResult.error) throw new Error(providerResult.error.message);
+  const targetMappings = (targetResult.data ?? []) as ProviderFirstActiveMapping[];
+  const providerMappings = (providerResult.data ?? []) as ProviderFirstActiveMapping[];
+  if (targetMappings.length > 1 || providerMappings.length > 1) {
+    throw new Error(`Row ${index + 1}: Multiple active mappings were found. Contact an administrator before changing this mapping.`);
+  }
+  const targetMapping = targetMappings[0] ?? null;
+  const providerMapping = providerMappings[0] ?? null;
+
+  if (targetMapping && allowedLocationIds && (!targetMapping.station_id || !allowedLocationIds.has(targetMapping.station_id))) {
+    throw new Error(`Row ${index + 1}: The destination's active mapping is outside your allocated locations.`);
+  }
+  if ((targetMapping?.id ?? null) !== submittedMappingId) {
+    throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
+  }
+  if (targetMapping && String(targetMapping.provider_member_id).trim().toUpperCase() !== providerMemberId.trim().toUpperCase()) {
+    throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
+  }
+
+  if (providerMapping && targetMapping && providerMapping.id !== targetMapping.id) {
+    throw new Error(`Row ${index + 1}: The Provider ID and destination DropX ID have different active mappings. Resolve them separately before continuing.`);
+  }
+  const existingMapping = providerMapping ?? (
+    targetMapping
+      && String(targetMapping.provider_member_id).trim().toUpperCase() === providerMemberId.trim().toUpperCase()
+      && targetMapping.provider_id === providerId
+      ? targetMapping
+      : null
+  );
+  const replacementRequired = Boolean(existingMapping && (
+    existingMapping.workforce_id !== workforceId
+    || existingMapping.station_id !== stationId
+    || existingMapping.provider_id !== providerId
+  ));
+  if (!replacementRequired) {
+    if (expectedReplacementId) {
+      throw new Error(`Row ${index + 1}: The active mapping changed after confirmation. Review it and try again.`);
+    }
+    return {
+      confirmation: null,
+      locationRemap: null,
+      currentMappingLocationDriftEdit: Boolean(existingMapping
+        && existingMapping.id === submittedMappingId
+        && existingMapping.workforce_id === workforceId
+        && existingMapping.station_id === stationId)
+    };
+  }
+  if (allowedLocationIds && (!existingMapping!.station_id || !allowedLocationIds.has(existingMapping!.station_id))) {
+    throw new Error(`Row ${index + 1}: The existing provider mapping is outside your allocated locations.`);
+  }
+
+  const changeKind: "owner" | "location" = existingMapping!.workforce_id === workforceId ? "location" : "owner";
+  if (changeKind === "location" && existingMapping!.provider_id !== providerId) {
+    throw new Error(`Row ${index + 1}: A location remap must remain with the same provider.`);
+  }
+
+  let existingDropxId = "Existing profile";
+  let existingDropxName = "Mapped associate";
+  if (existingMapping!.workforce_id) {
+    const { data: holder, error: holderError } = await supabaseAdmin
+      .from("workforce")
+      .select("dropx_id, full_name")
+      .eq("company_id", companyId)
+      .eq("id", existingMapping!.workforce_id)
+      .maybeSingle();
+    if (holderError) throw new Error(holderError.message);
+    existingDropxId = String(holder?.dropx_id ?? existingDropxId).trim() || existingDropxId;
+    existingDropxName = String(holder?.full_name ?? existingDropxName).trim() || existingDropxName;
+  }
+  let existingLocationLabel: string | undefined;
+  let newLocationLabel: string | undefined;
+  if (changeKind === "location") {
+    const { data: locationRows, error: locationsError } = await supabaseAdmin
+      .from("stations")
+      .select("id, station_code, station_name")
+      .eq("company_id", companyId)
+      .in("id", [String(existingMapping!.station_id), stationId]);
+    if (locationsError) throw new Error(locationsError.message);
+    const labelById = new Map((locationRows ?? []).map((station) => {
+      const code = String(station.station_code ?? "").trim();
+      const name = String(station.station_name ?? "").trim();
+      return [String(station.id), name && name !== code ? `${code} - ${name}` : code] as const;
+    }));
+    existingLocationLabel = labelById.get(String(existingMapping!.station_id)) ?? "the current location";
+    newLocationLabel = labelById.get(stationId) ?? "the selected location";
+  }
+  const replacement = {
+    kind: changeKind,
+    clientKey,
+    mappingId: existingMapping!.id,
+    providerMemberId,
+    providerMemberName: rowValue(formData, index, "provider_member_name") ?? "Unnamed provider member",
+    existingDropxId,
+    existingDropxName,
+    existingLocationLabel,
+    newLocationLabel,
+    effectiveFrom: rowValue(formData, index, "effective_from") ?? undefined
+  };
+  if (expectedReplacementId === existingMapping!.id) {
+    return {
+      confirmation: null,
+      locationRemap: changeKind === "location"
+        ? { mappingId: existingMapping!.id, stationId: String(existingMapping!.station_id) }
+        : null,
+      currentMappingLocationDriftEdit: false
+    };
+  }
+  return { confirmation: replacement, locationRemap: null, currentMappingLocationDriftEdit: false };
 }
 
 /** Saves the full provider-member-first worksheet.  It deliberately reuses the
@@ -922,26 +1223,15 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
       const stationId = rowRequired(formData, index, "station_id", "Location");
       const sourceType = rowRequired(formData, index, "source_type", "Worker source");
       const submittedMappingId = rowValue(formData, index, "mapping_id");
-      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1);
-      const { data: currentMapping, error: currentMappingError } = await supabaseAdmin!
-        .from("field_executive_provider_mappings")
-        .select("id, provider_member_id, station_id")
-        .eq("company_id", companyId)
-        .eq("workforce_id", workforceId)
-        .is("effective_to", null)
-        .neq("status", "cancelled")
-        .maybeSingle();
-      if (currentMappingError) throw new Error(currentMappingError.message);
-      if (currentMapping && allowedLocationIds && (!currentMapping.station_id || !allowedLocationIds.has(currentMapping.station_id))) {
-        throw new Error(`Row ${index + 1}: The existing active mapping is outside your allocated locations.`);
+      const replacementState = await providerFirstReplacementState({ formData, index, clientKey: rowValue(formData, index, "client_key") ?? String(index), companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null, replacementState.currentMappingLocationDriftEdit);
+      if (replacementState.confirmation) {
+        throw new Error(`Row ${index + 1}: Confirm the ${replacementState.confirmation.kind === "location" ? "location move" : "replacement"} before saving.`);
       }
-      if ((currentMapping?.id ?? null) !== submittedMappingId) {
-        throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
-      }
-      if (currentMapping && String(currentMapping.provider_member_id).trim().toUpperCase() !== providerMemberId.trim().toUpperCase()) {
-        throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
-      }
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, {
+        allowWorkforceLocationRemap: Boolean(replacementState.locationRemap),
+        allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit
+      });
       savedRows += 1;
     }
     revalidateTag("ops-cps");
@@ -958,10 +1248,20 @@ export type ProviderFirstInlineSavedRow = {
   clientKey: string;
   mappingId: string;
   workforceId: string;
+  profileStationId: string;
+  profileLocationLabel: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
   effectiveFrom: string;
   effectiveTo: string;
+  relocation?: {
+    previousMappingId: string;
+    previousStationId: string;
+    previousEffectiveTo: string;
+    previousStatus: "closed" | "cancelled";
+  };
 };
 
 export type ProviderFirstInlineSaveResult = {
@@ -969,6 +1269,7 @@ export type ProviderFirstInlineSaveResult = {
   message: string;
   savedRows: ProviderFirstInlineSavedRow[];
   failedClientKey?: string;
+  replacement?: ProviderFirstReplacementConfirmation;
 };
 
 /** Saves provider-first rows without redirecting or reloading the worksheet.
@@ -1001,31 +1302,28 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
       const stationId = rowRequired(formData, index, "station_id", "Location");
       const sourceType = rowRequired(formData, index, "source_type", "Worker source");
       const submittedMappingId = rowValue(formData, index, "mapping_id");
-      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1);
-      const { data: currentMapping, error: currentMappingError } = await supabaseAdmin
-        .from("field_executive_provider_mappings")
-        .select("id, provider_member_id, station_id")
-        .eq("company_id", companyId)
-        .eq("workforce_id", workforceId)
-        .is("effective_to", null)
-        .neq("status", "cancelled")
-        .maybeSingle();
-      if (currentMappingError) throw new Error(currentMappingError.message);
-      if (currentMapping && allowedLocationIds && (!currentMapping.station_id || !allowedLocationIds.has(currentMapping.station_id))) {
-        throw new Error(`Row ${index + 1}: The existing active mapping is outside your allocated locations.`);
-      }
-      if ((currentMapping?.id ?? null) !== submittedMappingId) {
-        throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
-      }
-      if (currentMapping && String(currentMapping.provider_member_id).trim().toUpperCase() !== providerMemberId.trim().toUpperCase()) {
-        throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
+      const replacementState = await providerFirstReplacementState({ formData, index, clientKey: currentClientKey, companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null, replacementState.currentMappingLocationDriftEdit);
+      if (replacementState.confirmation) {
+        return {
+          ok: false,
+          message: replacementState.confirmation.kind === "location"
+            ? "Confirm moving the provider mapping to the selected location."
+            : "Confirm replacement of the existing provider mapping.",
+          savedRows,
+          failedClientKey: currentClientKey,
+          replacement: replacementState.confirmation
+        };
       }
 
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, {
+        allowWorkforceLocationRemap: Boolean(replacementState.locationRemap),
+        allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit
+      });
 
       const { data: savedMapping, error: savedMappingError } = await supabaseAdmin
         .from("field_executive_provider_mappings")
-        .select("id, workforce_id, payment_method_id, payment_values, effective_from, effective_to")
+        .select("id, workforce_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to")
         .eq("company_id", companyId)
         .eq("workforce_id", workforceId)
         .eq("provider_member_id", providerMemberId)
@@ -1038,14 +1336,57 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
       if (savedMappingError) throw new Error(savedMappingError.message);
       if (!savedMapping) throw new Error(`Row ${index + 1}: The saved mapping could not be reloaded.`);
 
+      const { data: savedWorkforce, error: savedWorkforceError } = await supabaseAdmin
+        .from("workforce")
+        .select("location_id")
+        .eq("company_id", companyId)
+        .eq("id", workforceId)
+        .single();
+      if (savedWorkforceError) throw new Error(savedWorkforceError.message);
+      const profileStationId = String(savedWorkforce.location_id ?? "");
+      const { data: profileStation, error: profileStationError } = profileStationId
+        ? await supabaseAdmin
+          .from("stations")
+          .select("station_code")
+          .eq("company_id", companyId)
+          .eq("id", profileStationId)
+          .maybeSingle()
+        : { data: null, error: null };
+      if (profileStationError) throw new Error(profileStationError.message);
+
+      const { data: relocatedMapping, error: relocatedMappingError } = replacementState.locationRemap
+        ? await supabaseAdmin
+          .from("field_executive_provider_mappings")
+          .select("id, station_id, effective_to, status")
+          .eq("company_id", companyId)
+          .eq("id", replacementState.locationRemap.mappingId)
+          .single()
+        : { data: null, error: null };
+      if (relocatedMappingError) throw new Error(relocatedMappingError.message);
+      if (replacementState.locationRemap
+        && (!relocatedMapping || !["closed", "cancelled"].includes(String(relocatedMapping.status)))) {
+        throw new Error(`Row ${index + 1}: The previous location mapping could not be verified after saving.`);
+      }
+
+      const thresholdSnapshot = parseProductionThresholdSnapshot(savedMapping.production_threshold_config);
       savedRows.push({
         clientKey: currentClientKey,
         mappingId: String(savedMapping.id),
         workforceId: String(savedMapping.workforce_id ?? workforceId),
+        profileStationId,
+        profileLocationLabel: String(profileStation?.station_code ?? "No location"),
         paymentMethodId: String(savedMapping.payment_method_id ?? ""),
         paymentValues: Object.fromEntries(Object.entries((savedMapping.payment_values ?? {}) as Record<string, string | number>).map(([key, value]) => [key, String(value)])),
+        productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null,
+        productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "",
         effectiveFrom: String(savedMapping.effective_from ?? ""),
-        effectiveTo: String(savedMapping.effective_to ?? "")
+        effectiveTo: String(savedMapping.effective_to ?? ""),
+        relocation: relocatedMapping ? {
+          previousMappingId: String(relocatedMapping.id),
+          previousStationId: String(relocatedMapping.station_id ?? replacementState.locationRemap?.stationId ?? ""),
+          previousEffectiveTo: String(relocatedMapping.effective_to ?? ""),
+          previousStatus: String(relocatedMapping.status) as "closed" | "cancelled"
+        } : undefined
       });
     }
 

@@ -1,0 +1,9 @@
+import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
+const tables={profiles:[{id:'owner',full_name:'Owner',is_master_owner:true},{id:'person',full_name:'Auditor'},{id:'outside',full_name:'Other'}],company_product_memberships:[{user_id:'person',role_id:'clm',product_code:'operations',location_scope_ids:['A']},{user_id:'outside',role_id:'clm',product_code:'operations',location_scope_ids:['B']}],user_roles:[{id:'clm',code:'OPERATIONS_CLM',name:'Cluster manager',location_access_mode:'selected'}],app_pages:[{id:'audit-page',code:'station_audits'}],role_page_permissions:[...Array.from({length:1100},(_,i)=>({role_id:'clm',page_id:`unrelated-${i}`,can_edit:true})),{role_id:'clm',page_id:'audit-page',can_edit:true}]};
+for(const rows of Object.values(tables))for(const row of rows){row.company_id='company';row.is_active=true}
+const db={from(table){const filters=[];const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},in(k,v){filters.push(r=>v.includes(r[k]));return q},then(resolve){return Promise.resolve({data:tables[table].filter(r=>filters.every(f=>f(r))).slice(0,1000),error:null}).then(resolve)}};return q}};
+const mod={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync('src/lib/ops-pulse/station-audit-people.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id==='server-only'?{}:{supabaseAdmin:db},mod,mod.exports);
+assert.deepEqual((await mod.exports.loadAuditAssignees('company',['clm'],['A'])).map(p=>p.id),['person','owner']);
+assert.deepEqual((await mod.exports.loadAuditAssignees('company',[],['A'])).map(p=>p.id),['owner']);
+assert.deepEqual(await mod.exports.loadAuditAssignees('company',['clm'],[]),[]);
+console.log('Auditor directory tests passed: unrelated permissions exceeding row cap do not hide eligible auditors; location and configured-role restrictions hold.');

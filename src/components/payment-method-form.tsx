@@ -9,6 +9,7 @@ import {
   normalizePaymentFieldOrder,
   togglePaymentFieldSelection
 } from "@/lib/payment-field-order";
+import type { ProductionThresholdConfig, ProductionThresholdPeriod } from "@/lib/production-threshold-config";
 
 export type PaymentFieldOption = {
   id: string;
@@ -23,6 +24,7 @@ type InitialPaymentMethod = {
   code: string;
   name: string;
   components: Array<{ payment_field_id: string | null }>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
 };
 
 function scheduleLabel(value: PaymentFieldOption["pay_schedule"]) {
@@ -47,12 +49,24 @@ export function PaymentMethodForm({ action, availableFields, initialMethod, subm
   const [pickerOpen, setPickerOpen] = useState(false);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; placement: "before" | "after" } | null>(null);
+  const [thresholdEnabled, setThresholdEnabled] = useState(Boolean(initialMethod?.productionThresholdConfig));
+  const [thresholdPeriod, setThresholdPeriod] = useState<ProductionThresholdPeriod>(initialMethod?.productionThresholdConfig?.period ?? "month");
+  const [thresholdComponentIds, setThresholdComponentIds] = useState<string[]>(() => {
+    const configuredCodes = new Set(initialMethod?.productionThresholdConfig?.component_codes ?? []);
+    return availableFields
+      .filter((field) => field.field_type === "production" && configuredCodes.has(field.code.trim().toUpperCase()))
+      .map((field) => field.id);
+  });
   const draggedIdRef = useRef<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedFields = selectedIds
     .map((id) => fieldById.get(id))
     .filter((field): field is PaymentFieldOption => Boolean(field));
+  const selectedProductionFields = selectedFields.filter((field) => field.field_type === "production");
+  const selectedProductionIdSet = useMemo(() => new Set(
+    selectedIds.filter((id) => fieldById.get(id)?.field_type === "production")
+  ), [fieldById, selectedIds]);
   const visibleFields = availableFields.filter((field) =>
     `${field.code} ${field.label}`.toLowerCase().includes(search.trim().toLowerCase())
   );
@@ -65,6 +79,14 @@ export function PaymentMethodForm({ action, availableFields, initialMethod, subm
     return () => document.removeEventListener("mousedown", closePicker);
   }, []);
 
+  useEffect(() => {
+    setThresholdComponentIds((current) => {
+      const next = current.filter((id) => selectedProductionIdSet.has(id));
+      return next.length === current.length ? current : next;
+    });
+    if (!selectedProductionIdSet.size) setThresholdEnabled(false);
+  }, [selectedProductionIdSet]);
+
   function toggleField(id: string) {
     setSelectedIds((current) => togglePaymentFieldSelection(current, id));
   }
@@ -73,6 +95,12 @@ export function PaymentMethodForm({ action, availableFields, initialMethod, subm
     draggedIdRef.current = null;
     setDraggedId(null);
     setDropTarget(null);
+  }
+
+  function toggleThresholdComponent(id: string) {
+    setThresholdComponentIds((current) => current.includes(id)
+      ? current.filter((componentId) => componentId !== id)
+      : [...current, id]);
   }
 
   return (
@@ -172,12 +200,64 @@ export function PaymentMethodForm({ action, availableFields, initialMethod, subm
                   })}
                 </div>
               ) : null}
+              <div className={`payment-threshold-config ${thresholdEnabled ? "enabled" : ""}`}>
+                <label className="payment-threshold-toggle">
+                  <input
+                    checked={thresholdEnabled}
+                    disabled={!selectedProductionFields.length}
+                    name="production_threshold_enabled"
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      setThresholdEnabled(enabled);
+                      if (enabled && !thresholdComponentIds.some((id) => selectedProductionIdSet.has(id))) {
+                        setThresholdComponentIds(selectedProductionFields.map((field) => field.id));
+                      }
+                    }}
+                    type="checkbox"
+                    value="1"
+                  />
+                  <span><strong>Combined production minimum</strong><small>Pay only the production above one person-specific minimum.</small></span>
+                </label>
+                {!selectedProductionFields.length ? <p className="subtle payment-threshold-help">Select at least one production field to enable this rule.</p> : null}
+                {thresholdEnabled ? (
+                  <div className="payment-threshold-details">
+                    <label className="payment-threshold-period">
+                      <span>Minimum resets</span>
+                      <select className="field" name="production_threshold_period" onChange={(event) => setThresholdPeriod(event.target.value as ProductionThresholdPeriod)} value={thresholdPeriod}>
+                        <option value="day">Every day</option>
+                        <option value="month">Every calendar month</option>
+                      </select>
+                    </label>
+                    <fieldset className="payment-threshold-components">
+                      <legend>Production included in the combined minimum</legend>
+                      <div className="payment-threshold-component-list">
+                        {selectedProductionFields.map((field) => (
+                          <label key={field.id}>
+                            <input
+                              checked={thresholdComponentIds.includes(field.id)}
+                              name="production_threshold_component_codes"
+                              onChange={() => toggleThresholdComponent(field.id)}
+                              type="checkbox"
+                              value={field.code}
+                            />
+                            <span><strong>{field.label}</strong><small>{field.code}</small></span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <p className="payment-threshold-note">The minimum unit count is entered separately for each person in ID Mapping. Rates remain separate for every payment field.</p>
+                  </div>
+                ) : null}
+              </div>
             </>
           ) : <p className="empty-cell">Create a reusable payment field before adding a payment method.</p>}
         </div>
       </div>
       <div className="form-actions">
-        <SubmitButton confirmationBlocked={!selectedIds.length} confirmMessage="Select at least one payment field.">{submitLabel}</SubmitButton>
+        <SubmitButton
+          confirmationBlocked={!selectedIds.length || (thresholdEnabled && !thresholdComponentIds.length)}
+          confirmMessage={!selectedIds.length ? "Select at least one payment field." : "Select at least one production field for the combined production minimum."}
+        >{submitLabel}</SubmitButton>
       </div>
     </form>
   );

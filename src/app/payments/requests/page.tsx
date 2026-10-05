@@ -22,6 +22,8 @@ import { paymentQuestionDateBounds } from "@/lib/payment-question-date-rules";
 import { paymentRequestCancelEligibility, type CancelEligibility } from "@/lib/payment-request-cancel";
 import { buildPaymentApprovalFlow } from "@/lib/payment-approval-flow";
 import { loadApprovalSteps } from "@/lib/payment-approval-steps";
+import { loadPayAdvanceWorkerContexts, type PayAdvanceWorkerContext } from "@/lib/pay-advance-payment-context";
+import { formatApplyingMonth, formatWorkingDays, workerCodeFromDetails } from "@/lib/pay-advance-worker-facts";
 import { cancelPaymentRequest, createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
 
 type QuestionRow = { id: string; question_text: string; answer_type: string; dropdown_options: string | null; field_stage: string | null; is_required: boolean; sort_order: number; date_rule?: string | null; date_days?: number | null };
@@ -66,6 +68,12 @@ type PaymentRequestRow = {
   payment_portal: string | null;
   payment_reference: string | null;
   created_at: string;
+  work_date?: string | null;
+  source_type?: string | null;
+  source_id?: string | null;
+  requested_for_name?: string | null;
+  category?: string | null;
+  details?: unknown;
 };
 type AnswerRow = {
   id: string;
@@ -259,7 +267,7 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date, work_date, source_type, source_id, requested_for_name, category, details")
       .eq("company_id", companyId)
       .not("amount", "is", null)
       .order("created_at", { ascending: false });
@@ -466,6 +474,23 @@ export default async function PaymentRequestsPage({
   const viewHistory = (viewHistoryResult?.data ?? []) as HistoryRow[];
   const viewFlow = viewRequest ? await loadApprovalFlow(companyId, viewRequest, viewHistory) : null;
   const viewQuestionText = new Map((viewHead?.payment_head_questions ?? []).map((question) => [question.id, question.question_text]));
+  let viewAdvance: PayAdvanceWorkerContext | null = null;
+  if (viewRequest && (viewRequest.source_type === "pay_advance" || viewRequest.category === "pay_advance")) {
+    try {
+      const contexts = await loadPayAdvanceWorkerContexts(companyId, [{
+        id: viewRequest.id,
+        sourceId: viewRequest.source_id ?? null,
+        sourceType: viewRequest.source_type ?? "pay_advance",
+        requestedForName: viewRequest.requested_for_name ?? viewRequest.account_holder_name,
+        workerCode: workerCodeFromDetails(viewRequest.details),
+        createdAt: viewRequest.created_at,
+        workDate: viewRequest.work_date ?? null
+      }]);
+      viewAdvance = contexts.get(viewRequest.id) ?? null;
+    } catch {
+      viewAdvance = null;
+    }
+  }
   const viewCancel = viewRequest ? cancelEligibility(viewRequest) : null;
   const money = (value: number | null) => value == null ? "-" : `Rs ${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
@@ -803,6 +828,20 @@ export default async function PaymentRequestsPage({
                     </section>
                   );
                 })() : null}
+
+                {viewAdvance ? (
+                  <section className="payment-view-card">
+                    <h3>Person</h3>
+                    <dl>
+                      <div><dt>Name</dt><dd>{viewAdvance.name}</dd></div>
+                      <div><dt>Employee ID</dt><dd>{viewAdvance.workerCode}</dd></div>
+                      <div><dt>Applying month</dt><dd>{formatApplyingMonth(viewAdvance.applyingMonth)}</dd></div>
+                      <div><dt>Working days this month</dt><dd>{formatWorkingDays(viewAdvance.workingDays)}</dd></div>
+                      <div><dt>Monthly CTC</dt><dd>{viewAdvance.monthlyCtc == null ? "-" : money(viewAdvance.monthlyCtc)}</dd></div>
+                      <div><dt>Monthly gross</dt><dd>{viewAdvance.monthlyGross == null ? "-" : money(viewAdvance.monthlyGross)}</dd></div>
+                    </dl>
+                  </section>
+                ) : null}
 
                 <section className="payment-view-card">
                   <h3>Beneficiary</h3>

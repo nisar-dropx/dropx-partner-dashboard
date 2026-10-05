@@ -1,7 +1,7 @@
 import "server-only";
 
 import { resolveConfiguredApprovalWorkflow, type ConfiguredApprovalStep } from "@/lib/approval-workflow-routing";
-import { isManagingPartnerDesignation, isTeamLeadDesignation } from "@/lib/approval-designation-labels";
+import { isManagingPartnerDesignation, isStationSupportAttendanceDesignation, isStoreOrStationManagerDesignation, isTeamLeadDesignation } from "./approval-designation-labels";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -90,12 +90,53 @@ function isAttendanceExecutiveStop(designation: { name: string; code: string | n
   return isManagingPartnerDesignation(designation);
 }
 
+async function workerSkipsStationFloorManagers(companyId: string, workerType: "employee" | "contractor", workerId: string, asOf: string) {
+  const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
+  const engagement = await db().from("hr_engagements").select("id")
+    .eq("company_id", companyId).eq("worker_type", workerType).eq(workerColumn, workerId)
+    .eq("status", "active").order("start_date", { ascending: false }).limit(1).maybeSingle();
+  if (engagement.error || !engagement.data) return false;
+  const assignment = await db().from("hr_work_assignments").select("designation_id")
+    .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .lte("effective_from", asOf).or(`effective_to.is.null,effective_to.gte.${asOf}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data?.designation_id) return false;
+  const designation = await db().from("designations").select("name,code")
+    .eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle();
+  if (designation.error) throw new Error(designation.error.message);
+  return isStationSupportAttendanceDesignation(designation.data);
+}
+
+async function withoutStationFloorManagers(companyId: string, steps: AttendanceRegularizationApprovalStep[]) {
+  const kept: AttendanceRegularizationApprovalStep[] = [];
+  for (const step of steps) {
+    const engagement = await db().from("hr_engagements").select("id")
+      .eq("company_id", companyId).eq("person_id", step.approver_person_id).eq("status", "active")
+      .order("start_date", { ascending: false }).limit(1).maybeSingle();
+    if (engagement.error) throw new Error(engagement.error.message);
+    const assignment = engagement.data
+      ? await db().from("hr_work_assignments").select("designation_id")
+        .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+        .order("effective_from", { ascending: false }).limit(1).maybeSingle()
+      : { data: null, error: null };
+    if (assignment.error) throw new Error(assignment.error.message);
+    const designation = assignment.data?.designation_id
+      ? await db().from("designations").select("name,code").eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle()
+      : { data: null, error: null };
+    if (designation.error) throw new Error(designation.error.message);
+    if (isStoreOrStationManagerDesignation(designation.data)) continue;
+    kept.push(step);
+  }
+  return kept;
+}
+
 async function resolveChainFallbackSteps(input: {
   companyId: string;
   workerType: "employee" | "contractor";
   workerId: string;
   asOf: string;
   managerLevels: number;
+  skipStationFloorManagers?: boolean;
 }) {
   const workerColumn = input.workerType === "employee" ? "employee_id" : "contractor_id";
   const engagement = await db().from("hr_engagements").select("id,person_id,status")
@@ -141,6 +182,7 @@ async function resolveChainFallbackSteps(input: {
       designationLabel = designation.data ? { name: designation.data.name, code: designation.data.code } : null;
     }
     if (isTeamLeadDesignation(designationLabel)) continue;
+    if (input.skipStationFloorManagers && isStoreOrStationManagerDesignation(designationLabel)) continue;
     if (isAttendanceExecutiveStop(designationLabel)) continue;
 
     const managerEngagement = await db().from("hr_engagements").select("person_id,status,worker_type,employee_id,contractor_id")
@@ -197,6 +239,7 @@ export async function resolveAttendanceRegularizationApprovers(
 ): Promise<AttendanceRegularizationRouteResolution> {
   const today = asOf ?? indiaToday();
   const levels = await managerLevels(companyId);
+  const skipStationFloorManagers = await workerSkipsStationFloorManagers(companyId, workerType, workerId, today);
 
   try {
     const configured = await resolveConfiguredApprovalWorkflow({
@@ -210,6 +253,7 @@ export async function resolveAttendanceRegularizationApprovers(
 
     if (configured?.steps.length) {
       let steps = configured.steps.map(mapStep);
+      if (skipStationFloorManagers) steps = await withoutStationFloorManagers(companyId, steps);
       const targetLevels = Math.min(levels, await routeManagerLevelCap(companyId, configured.routeId));
       if (steps.length < targetLevels) {
         const chainSteps = await resolveChainFallbackSteps({
@@ -217,7 +261,8 @@ export async function resolveAttendanceRegularizationApprovers(
           workerType,
           workerId,
           asOf: today,
-          managerLevels: targetLevels
+          managerLevels: targetLevels,
+          skipStationFloorManagers
         });
         const seenPeople = new Set(steps.map((step) => step.approver_person_id));
         for (const step of chainSteps) {
@@ -227,12 +272,14 @@ export async function resolveAttendanceRegularizationApprovers(
           steps.push(step);
         }
       }
-      return {
-        routeName: configured.routeName,
-        steps,
-        requiresHrFinal: await routeRequiresHrFinal(companyId, configured.routeId),
-        directToHr: false
-      };
+      if (steps.length) {
+        return {
+          routeName: configured.routeName,
+          steps,
+          requiresHrFinal: await routeRequiresHrFinal(companyId, configured.routeId),
+          directToHr: false
+        };
+      }
     }
   } catch (error) {
     console.warn("Configured attendance regularization route failed, trying reporting-chain fallback:", error);
@@ -243,7 +290,8 @@ export async function resolveAttendanceRegularizationApprovers(
     workerType,
     workerId,
     asOf: today,
-    managerLevels: levels
+    managerLevels: levels,
+    skipStationFloorManagers
   });
   if (chainSteps.length) {
     return {

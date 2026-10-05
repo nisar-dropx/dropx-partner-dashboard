@@ -5,6 +5,7 @@ import ts from 'typescript';
 import {createRequire} from 'node:module';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
+import {allocateCombinedProductionThresholds} from '../../../../src/lib/workforce-production-threshold.ts';
 
 const compiled=ts.transpileModule(readFileSync(new URL('./workforce-own-adjustments.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {ownAdjustmentLedger,loadOwnAdjustmentLedger}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
@@ -137,6 +138,7 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null)
   '../../../../src/lib/connect-auth':{requireConnectAccount:authenticate},
   '../../../../src/lib/supabase-admin':{supabaseAdmin:db},
   '../../../../../../src/lib/workforce-attendance-capture.ts':attendanceCapture,
+  '../../../../../../src/lib/workforce-production-threshold.ts':{allocateCombinedProductionThresholds},
   '@/lib/workforce-own-adjustments':{loadOwnAdjustmentLedger},
   '@/lib/workforce-daily-card':{allocateOwnDailyCards},
   '@/lib/personal-payment-card':{personalPaymentCard},
@@ -209,6 +211,41 @@ test('route adds provider attendance heads once while production remains shipmen
  assert.equal(body.summary.baseAmount,1350);
  assert.equal(body.earnings[0].production.find(line=>line.label==='Delivery').amount,150);
  assert.equal(body.earnings[0].production.find(line=>line.label==='Fixed pay per day').amount,1200);
+});
+
+test('route applies one monthly combined minimum across provider IDs and never falls back to a rate card',async()=>{
+ const thresholdMethod={period:'month',component_codes:['DELIVERY','CUSTOMER_RETURN']};
+ const thresholdSnapshot={...thresholdMethod,minimum_units:1000};
+ const components=[
+  {component_code:'DELIVERY',component_type:'production',label:'Delivery',sort_order:1,is_active:true,payment_fields:{code:'DELIVERY',label:'Delivery',field_type:'production',calculation_type:'count_x_rate',calculation_source:'total_delivery'}},
+  {component_code:'CUSTOMER_RETURN',component_type:'production',label:'Customer return',sort_order:2,is_active:true,payment_fields:{code:'CUSTOMER_RETURN',label:'Customer return',field_type:'production',calculation_type:'count_x_rate',calculation_source:'customer_return'}}
+ ];
+ const makeMappings=snapshot=>['A','B'].map(id=>({id,provider_member_id:id,provider_id:'provider',station_id:'station',workforce_id:'person',payment_method_id:'method',payment_values:{DELIVERY:10,CUSTOMER_RETURN:5},production_threshold_config:snapshot,effective_from:from,effective_to:to,status:'active',providers:{name:'Provider'},payment_methods:{id:'method',name:'Combined threshold',production_threshold_config:thresholdMethod,payment_method_components:components}}));
+ const sources=[
+  {id:'delivery-source',provider_employee_id:'A',work_date:from,station_code:'TEST',client:'Provider',total_delivery:900,total_activity:900,c_return:0,mfn:0,mfn_return:0,da_total_pay:9999},
+  {id:'return-source',provider_employee_id:'B',work_date:from,station_code:'TEST',client:'Provider',total_delivery:0,total_activity:200,c_return:200,mfn:0,mfn_return:0,da_total_pay:9999}
+ ];
+ const allocations=[
+  {provider_id:'provider',provider_model_id:null,provider_production_metrics:{source_key:'total_delivery'},payment_fields:{code:'DELIVERY',label:'Delivery',field_type:'production'}},
+  {provider_id:'provider',provider_model_id:null,provider_production_metrics:{source_key:'customer_return'},payment_fields:{code:'CUSTOMER_RETURN',label:'Customer return',field_type:'production'}}
+ ];
+ const card={id:'card',provider_id:'provider',station_id:'station',designation_id:null,pay_type:'fixed_daily',effective_from:from,effective_to:to,status:'active',fixed_amount:5000};
+ const run=async snapshot=>{
+  const mappings=makeMappings(snapshot);
+  const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?sources:q.table==='stations'?[{id:'station',station_code:'TEST',location_model_id:null}]:q.table==='payment_field_provider_metrics'?allocations:q.table==='workforce_rate_cards'?[card]:[],error:null}));
+  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(mapping=>mapping.provider_member_id===row.provider_employee_id))(request());
+  return {response,body:await response.json()};
+ };
+ const configured=await run(thresholdSnapshot);
+ assert.equal(configured.response.status,200,JSON.stringify(configured.body));
+ assert.equal(configured.body.summary.baseAmount,500);
+ assert.deepEqual(configured.body.earnings.map(earning=>earning.baseAmount),[0,500]);
+ assert.equal(configured.body.earnings.flatMap(earning=>earning.daily).flatMap(day=>day.production).find(line=>line.label==='Customer return'&&line.amount===500)?.count,100);
+
+ const missing=await run(null);
+ assert.equal(missing.response.status,200,JSON.stringify(missing.body));
+ assert.equal(missing.body.summary.baseAmount,0);
+ assert.ok(missing.body.earnings.flatMap(earning=>earning.daily).flatMap(day=>day.production).some(line=>line.thresholdConfigurationMissing));
 });
 
 test('route reconciles daily incentives and adjustments separately without leaking policy rows',async()=>{

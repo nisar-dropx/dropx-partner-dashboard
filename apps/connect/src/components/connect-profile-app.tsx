@@ -10,6 +10,7 @@ import { ConnectExitManagement } from "./connect-exit-management";
 import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
 import { userFacingError } from "../lib/user-facing-error";
 import { compressFormImages, formFileBytes, MAX_UPLOAD_REQUEST_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from "../lib/compress-form-images";
+import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 
 export type AppAccount = {
   id: string;
@@ -536,16 +537,19 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       if (value && !rule.pattern.test(value)) return rule.message;
     }
 
-    const mandatory = [
-      ...(enabled.has("pan_number") ? ["pan"] : []),
-      ...(enabled.has("pan_number") && enabled.has("aadhaar_number") ? ["pan_aadhaar"] : []),
-      ...(enabled.has("bank_account_no") && enabled.has("ifsc") ? ["bank"] : []),
-      ...(pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? ["pf_uan"] : []),
-      ...(enabled.has("driving_license_no") ? ["dl"] : []),
-      ...(enabled.has("vehicle_reg_no") ? ["vehicle"] : [])
+    // An optional field left blank has nothing to verify, so it must not block submission.
+    const applies = (field: string, value: string | undefined) => enabled.has(field) && (required.has(field) || Boolean(value?.trim()));
+    const mandatory: Array<[string, string]> = [
+      ...(applies("pan_number", values.panNumber) ? [["pan", "PAN"] as [string, string]] : []),
+      ...(applies("pan_number", values.panNumber) && applies("aadhaar_number", values.aadhaarNumber) ? [["pan_aadhaar", "Aadhaar number"] as [string, string]] : []),
+      ...(applies("bank_account_no", values.bankAccountNo) && applies("ifsc", values.ifsc) ? [["bank", "Bank account"] as [string, string]] : []),
+      ...(pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? [["pf_uan", "PF UAN"] as [string, string]] : []),
+      ...(applies("driving_license_no", values.drivingLicenseNo) ? [["dl", "Driving license no"] as [string, string]] : []),
+      ...(applies("vehicle_reg_no", values.vehicleRegistrationNo) ? [["vehicle", "Vehicle reg no"] as [string, string]] : [])
     ];
-    if (mandatory.some((kind) => !attempted(kind))) {
-      return "Complete every applicable verification before saving.";
+    const pending = mandatory.filter(([kind]) => !attempted(kind)).map(([, label]) => label);
+    if (pending.length) {
+      return `Tap Verify for ${pending.join(", ")} before submitting.`;
     }
 
     const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
@@ -886,6 +890,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
 
   const dlCheck = currentCheck("dl");
   const vehicleCheck = currentCheck("vehicle");
+  const verifiedVehicleCheck = vehicleCheck?.verified === true;
   const drivingEnabled = ["driving_license_no","driving_license_exp_date","vehicle_reg_no","vehicle_reg_exp_date","vehicle_insurance_exp_date","vehicle_pollution_exp_date"].some((field) => enabled.has(field));
 
   return <form className="dx-profile-form" onSubmit={prepareSubmit} ref={formRef}>
@@ -986,9 +991,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
         <VerifyField label={`Vehicle reg no${required.has("vehicle_reg_no") ? " *" : ""}`} name="vehicle_reg_no" onChange={(value) => set("vehicleRegistrationNo", value, ["vehicle"])} onVerify={() => verify("vehicle")} running={running === "vehicle"} value={values.vehicleRegistrationNo || ""} verified={verified("vehicle")} error={verificationErrors.vehicle || verificationInputError("vehicle", values)} required={required.has("vehicle_reg_no")} />
         <VerificationText checks={[vehicleCheck]} running={running === "vehicle" ? "vehicle" : undefined} />
       </> : null}
-      {dateField("vehicle_reg_exp_date","Reg expiry date",{ readOnly: Boolean(vehicleCheck), warning: expired(values.registrationExpiry) ? "Vehicle registration has expired." : "" })}
-      {dateField("vehicle_insurance_exp_date","Vehicle Insurance expiry",{ readOnly: Boolean(vehicleCheck), warning: expired(values.insuranceExpiry) ? "Vehicle insurance has expired." : "" })}
-      {!vehicleCheck?.fuelType?.toLowerCase().includes("electric") ? dateField("vehicle_pollution_exp_date","Pollution expiry date",{ readOnly: Boolean(vehicleCheck), warning: expired(values.pollutionExpiry) ? "Pollution certificate has expired." : "" }) : null}
+      {dateField("vehicle_reg_exp_date","Reg expiry date",{ readOnly: verifiedVehicleCheck, warning: expired(values.registrationExpiry) ? "Vehicle registration has expired." : "" })}
+      {dateField("vehicle_insurance_exp_date","Vehicle Insurance expiry",{ readOnly: verifiedVehicleCheck, warning: expired(values.insuranceExpiry) ? "Vehicle insurance has expired." : "" })}
+      {!(verifiedVehicleCheck && isPureElectricFuel(vehicleCheck?.fuelType)) ? dateField("vehicle_pollution_exp_date","Pollution expiry date",{ readOnly: verifiedVehicleCheck, warning: expired(values.pollutionExpiry) ? "Pollution certificate has expired." : "" }) : null}
     </ProfileSection> : null}
     <ProfileSection title="Emergency contact">
       {input("emergency_contact_number","Emergency contact number")}{input("emergency_contact_name","Contact person name")}{input("emergency_contact_relation","Relation",{ choices: relations })}

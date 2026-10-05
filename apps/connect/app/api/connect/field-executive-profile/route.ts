@@ -14,6 +14,8 @@ import { loadWorkforceCategoryRules } from "../../../../src/lib/workforce-catego
 import { assertMinimumProfileAge } from "../../../../src/lib/profile-age";
 import { createProfileSubmittedNotification } from "../../../../src/lib/app-notifications";
 import { todayInIndia } from "../../../../src/lib/india-date";
+import { loadTrustedVehicleFuel } from "../../../../src/lib/trusted-vehicle-verification";
+import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 import {
   isNonEmployeeProfileType,
   profileFieldRuleCategory,
@@ -476,6 +478,22 @@ export async function POST(request: Request) {
     const esiValue = alphaNumValue(formData.get("esi_no"), "ESI No", isRequired("esi_no"));
     const dateOfBirth = dateValue("date_of_birth", "Date of birth");
     assertMinimumProfileAge(dateOfBirth);
+    const vehicleRegistrationNumber = alphaNumLengthValue(
+      formData.get("vehicle_reg_no"),
+      "Vehicle registration number",
+      4,
+      30,
+      isRequired("vehicle_reg_no")
+    );
+    const trustedVehicleFuel = vehicleRegistrationNumber
+      ? await loadTrustedVehicleFuel({
+        accountId: account.id,
+        companyId: account.companyId,
+        profileType: account.profileType,
+        registrationNumber: vehicleRegistrationNumber
+      })
+      : "";
+    const pollutionExpiryExempt = isPureElectricFuel(trustedVehicleFuel);
     const updatePayload: Record<string, unknown> = {
       gender: textValue("gender", "Gender"),
       date_of_birth: dateOfBirth,
@@ -499,10 +517,12 @@ export async function POST(request: Request) {
       emergency_contact_relation: textValue("emergency_contact_relation", "Emergency relation"),
       driving_license_no: alphaNumLengthValue(formData.get("driving_license_no"), "Driving license number", 4, 30, isRequired("driving_license_no")),
       driving_license_exp_date: dateValue("driving_license_exp_date", "DL expiry date"),
-      vehicle_reg_no: alphaNumLengthValue(formData.get("vehicle_reg_no"), "Vehicle registration number", 4, 30, isRequired("vehicle_reg_no")),
+      vehicle_reg_no: vehicleRegistrationNumber,
       vehicle_reg_exp_date: dateValue("vehicle_reg_exp_date", "Reg expiry date"),
       vehicle_insurance_exp_date: dateValue("vehicle_insurance_exp_date", "Vehicle Insurance expiry"),
-      vehicle_pollution_exp_date: dateValue("vehicle_pollution_exp_date", "Pollution expiry date"),
+      vehicle_pollution_exp_date: pollutionExpiryExempt
+        ? null
+        : dateValue("vehicle_pollution_exp_date", "Pollution expiry date"),
       updated_at: new Date().toISOString()
     };
 

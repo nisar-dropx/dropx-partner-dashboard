@@ -1,5 +1,6 @@
 import { matchNames } from "./name-match.ts";
 import type { PaymentAllocationHistoryEntry } from "./payment-allocation-history.ts";
+import type { ProductionThresholdConfig } from "./production-threshold-config.ts";
 
 export type ProviderFirstWorkerView = {
   id: string;
@@ -11,10 +12,14 @@ export type ProviderFirstWorkerView = {
   mappingId: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
   effectiveFrom: string;
   effectiveTo: string;
   mappedProviderMemberId: string;
   locationLabel: string;
+  profileStationId?: string;
+  profileLocationLabel?: string;
   onboardingStatus: string;
 };
 
@@ -30,14 +35,78 @@ export type ProviderFirstMappingRowView = {
   mappingId: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
   effectiveFrom: string;
   effectiveTo: string;
   history: PaymentAllocationHistoryEntry[];
 };
 
+export type ProviderFirstMappingReplacement = {
+  kind: "owner" | "location";
+  mappingId: string;
+  providerMemberId: string;
+  providerMemberName: string;
+  existingDropxId: string;
+  existingDropxName: string;
+  existingLocationLabel?: string;
+  newLocationLabel?: string;
+  effectiveFrom?: string;
+};
+
+export function providerFirstMappingReplacement(
+  previous: ProviderFirstMappingRowView,
+  next: ProviderFirstMappingRowView
+): ProviderFirstMappingReplacement | null {
+  if (!previous.mappingId || !previous.workforceId || !next.workforceId || previous.workforceId === next.workforceId) return null;
+  return {
+    kind: "owner",
+    mappingId: previous.mappingId,
+    providerMemberId: previous.providerMemberId,
+    providerMemberName: previous.providerMemberName,
+    existingDropxId: previous.dropxId,
+    existingDropxName: previous.dropxName
+  };
+}
+
+export function providerFirstLocationRemap(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+): ProviderFirstMappingReplacement | null {
+  if (!worker
+    || !row.workforceId
+    || row.workforceId !== worker.id
+    || !worker.mappingId
+    || row.mappingId !== worker.mappingId
+    || worker.stationId === row.stationId
+    || worker.providerId !== row.providerId
+    || !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
+    return null;
+  }
+  return {
+    kind: "location",
+    mappingId: worker.mappingId,
+    providerMemberId: row.providerMemberId,
+    providerMemberName: row.providerMemberName,
+    existingDropxId: worker.dropxId,
+    existingDropxName: worker.fullName,
+    existingLocationLabel: worker.locationLabel,
+    newLocationLabel: row.stationLabel,
+    effectiveFrom: row.effectiveFrom
+  };
+}
+
+export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
+  if (replacement.kind === "location") {
+    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nDo you want to move this mapping to ${replacement.newLocationLabel ?? "the selected location"} from ${replacement.effectiveFrom ?? "the selected effective date"}?\nThe old location will end on the preceding day and remain in History.`;
+  }
+  return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}.\nDo you want to replace this mapping?`;
+}
+
 export type ProviderFirstPaymentMethodView = {
   id: string;
   components: Array<{ code: string; label: string }>;
+  productionThresholdConfig?: ProductionThresholdConfig | null;
 };
 
 export type ProviderFirstFilters = {
@@ -164,8 +233,64 @@ function sameProviderMember(left: string, right: string) {
   return String(left ?? "").trim().toUpperCase() === String(right ?? "").trim().toUpperCase();
 }
 
+function providerHolderName(value: string) {
+  return String(value ?? "").split(/[|/]/, 1)[0].trim().slice(0, 200);
+}
+
+function providerNameTokens(value: string) {
+  return providerHolderName(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function commonPrefixLength(left: string, right: string) {
+  const limit = Math.min(left.length, right.length);
+  let length = 0;
+  while (length < limit && left[length] === right[length]) length += 1;
+  return length;
+}
+
+function editDistance(left: string, right: string) {
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+function providerSpellingVariantMatches(left: string, right: string) {
+  const longest = Math.max(left.length, right.length);
+  if (Math.min(left.length, right.length) < 5 || longest > 40) return false;
+  if (commonPrefixLength(left, right) < 3) return false;
+  const distance = editDistance(left, right);
+  const allowedDistance = Math.max(1, Math.floor(longest * 0.2));
+  return distance <= allowedDistance && 1 - (distance / longest) >= 0.78;
+}
+
 export function providerFirstNamesMatch(providerName: string, dropxName: string) {
-  return matchNames(providerName, dropxName).status !== "none";
+  const providerHolder = providerHolderName(providerName);
+  const dropxHolder = providerHolderName(dropxName);
+  if (matchNames(providerHolder, dropxHolder).status !== "none") return true;
+
+  const providerTokens = providerNameTokens(providerHolder);
+  const dropxTokens = providerNameTokens(dropxHolder);
+  if (providerTokens.length < 2 || providerTokens.length !== dropxTokens.length) return false;
+  return providerTokens.every((token, index) => providerSpellingVariantMatches(token, dropxTokens[index]));
 }
 
 export function providerFirstRowIssue(
@@ -176,7 +301,7 @@ export function providerFirstRowIssue(
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
   if (!row.workforceId) return "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
-  if (worker.stationId !== row.stationId) return "Location mismatch.";
+  if (worker.stationId !== row.stationId && !providerFirstLocationRemap(row, worker)) return "Location mismatch.";
   if (worker.mappedProviderMemberId && !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
     return "This DropX ID is already mapped to another Provider Member ID.";
   }
@@ -193,6 +318,14 @@ export function providerFirstRowIssue(
     const amount = Number(raw);
     if (!raw) return `${component.label} is required.`;
     if (!Number.isFinite(amount) || amount < 0) return `${component.label} must be a valid amount.`;
+  }
+  const productionThresholdConfig = row.productionThresholdConfig ?? method.productionThresholdConfig;
+  if (productionThresholdConfig) {
+    const raw = row.productionThresholdMinimumUnits.trim();
+    const minimumUnits = Number(raw);
+    if (!raw || !Number.isInteger(minimumUnits) || minimumUnits <= 0) {
+      return `Combined minimum per ${productionThresholdConfig.period} must be a positive whole number.`;
+    }
   }
   return null;
 }

@@ -715,3 +715,144 @@ export async function backfillEddPerformanceHistory(params: { stationCode: strin
   }
   return { status: "started", stationCode: String(raw.stationCode ?? stationCode).toUpperCase(), days: Number(raw.days ?? params.days ?? 30) };
 }
+
+export type LoadFlashHourlyPoint = {
+  hour: number;
+  at: string;
+  totalLoad: number;
+  eddToday: number;
+  outOnRoad: number;
+  delivered: number;
+  returnsToday: number;
+  pickupsAssigned: number;
+  pickupsSuccess: number;
+};
+
+export type LoadFlashStation = {
+  stationCode: string;
+  hasSnapshot: boolean;
+  fetchedAt: string | null;
+  businessDate: string;
+  inducted: number;
+  retained: number;
+  totalLoad: number;
+  eddPast: number;
+  eddToday: number;
+  eddFuture: number;
+  outOnRoad: number;
+  deliveredLive: number;
+  returnsToday: number;
+  pickupsAssigned: number;
+  pickupsSuccess: number;
+  morningLoad: number | null;
+  cohortDelivered: number;
+  deliveredPct: number;
+  pickupPct: number;
+  historyDone: boolean;
+};
+
+export type LoadFlashNetworkPayload = {
+  asOf: string;
+  businessDate: string;
+  dates: string[];
+  hourly: LoadFlashHourlyPoint[];
+  stations: LoadFlashStation[];
+  run: EddNetworkRunStatus | null;
+};
+
+function num(value: unknown) {
+  return Number(value ?? 0) || 0;
+}
+
+function normalizeLoadFlashStation(raw: Record<string, unknown>): LoadFlashStation {
+  return {
+    stationCode: String(raw.stationCode ?? "").toUpperCase(),
+    hasSnapshot: Boolean(raw.hasSnapshot),
+    fetchedAt: raw.fetchedAt == null ? null : String(raw.fetchedAt),
+    businessDate: String(raw.businessDate ?? ""),
+    inducted: num(raw.inducted),
+    retained: num(raw.retained),
+    totalLoad: num(raw.totalLoad),
+    eddPast: num(raw.eddPast),
+    eddToday: num(raw.eddToday),
+    eddFuture: num(raw.eddFuture),
+    outOnRoad: num(raw.outOnRoad),
+    deliveredLive: num(raw.deliveredLive),
+    returnsToday: num(raw.returnsToday),
+    pickupsAssigned: num(raw.pickupsAssigned),
+    pickupsSuccess: num(raw.pickupsSuccess),
+    morningLoad: raw.morningLoad == null ? null : num(raw.morningLoad),
+    cohortDelivered: num(raw.cohortDelivered),
+    deliveredPct: num(raw.deliveredPct),
+    pickupPct: num(raw.pickupPct),
+    historyDone: Boolean(raw.historyDone)
+  };
+}
+
+export async function fetchLoadFlashNetwork(date?: string): Promise<LoadFlashNetworkPayload> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/network`);
+  if (date) url.searchParams.set("date", date);
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  const stations = Array.isArray(raw.stations)
+    ? raw.stations.map((row) => normalizeLoadFlashStation((row ?? {}) as Record<string, unknown>))
+    : [];
+  const hourly = Array.isArray(raw.hourly)
+    ? raw.hourly.map((row) => {
+        const point = (row ?? {}) as Record<string, unknown>;
+        return {
+          hour: num(point.hour),
+          at: String(point.at ?? ""),
+          totalLoad: num(point.totalLoad),
+          eddToday: num(point.eddToday),
+          outOnRoad: num(point.outOnRoad),
+          delivered: num(point.delivered),
+          returnsToday: num(point.returnsToday),
+          pickupsAssigned: num(point.pickupsAssigned),
+          pickupsSuccess: num(point.pickupsSuccess)
+        };
+      })
+    : [];
+  return {
+    asOf: String(raw.asOf ?? new Date().toISOString()),
+    businessDate: String(raw.businessDate ?? date ?? ""),
+    dates: Array.isArray(raw.dates) ? raw.dates.map((item) => String(item).slice(0, 10)) : [],
+    hourly,
+    stations,
+    run: normalizeRun(raw.run)
+  };
+}
+
+export async function refreshLoadFlashNetwork(): Promise<EddNetworkRunStatus | null> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  const response = await fetch(`${baseUrl}/api/admin/executive/edd/load-flash/network/refresh-all`, {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return normalizeRun(raw.run);
+}

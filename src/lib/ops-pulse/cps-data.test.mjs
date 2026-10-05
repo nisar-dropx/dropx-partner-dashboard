@@ -36,21 +36,22 @@ const context = {
   locationScopeIds: ["1"],
   hasAllLocationAccess: false,
 };
-const emptyQuery = () => ({
+const emptyQuery = (data = []) => ({
   select() { return this; },
   limit() { return this; },
   eq() { return this; },
+  in() { return this; },
   gte() { return this; },
   lte() { return this; },
   order() { return this; },
-  then(resolve) { return Promise.resolve(resolve({ data: [], error: null })); },
+  then(resolve) { return Promise.resolve(resolve({ data, error: null })); },
 });
-function dataModule(db, locations = all) {
+function dataModule(db, locations = all, rebuildCps = (base) => base) {
   const database = db ? { ...db, from: db.from ?? (() => emptyQuery()) } : db;
   return compile("./cps-data.ts", {
     "server-only": {},
     react: { cache: (fn) => fn },
-    "./cps-engine": { rebuildCps: (base) => base },
+    "./cps-engine": { rebuildCps },
     "@/lib/company-scope": { requireCompanyId: (a) => a.companyId },
     "@/lib/authorization": {},
     "./cod": {
@@ -118,6 +119,46 @@ test("RPC receives company, sorted station scope and exact period; empty scope d
   });
   assert.equal(calls[1][1].p_company, "company-b");
   assert.deepEqual(calls[1][1].p_stations, ["B"]);
+});
+test("daily CPS passes calendar-month production context to the engine without widening display facts", async () => {
+  let captured;
+  const mapping = {
+    id: "mapping-1", workforce_id: "worker-1", provider_id: "provider-1",
+    provider_member_id: "member-1", station_id: "1", effective_from: "2026-01-01",
+    effective_to: null, status: "active", payment_method_id: "method-1",
+    payment_values: { DELIVERY: 10 },
+  };
+  const currentShipment = { id: "current", work_date: "2026-09-15", station_code: "A" };
+  const carryInShipment = { id: "carry-in", work_date: "2026-09-01", station_code: "A" };
+  const commonFacts = {
+    mappings: [mapping], workforce: [{ id: "worker-1" }],
+    components: [{ payment_method_id: "method-1", component_code: "DELIVERY" }],
+    providers: [{ id: "provider-1", code: "AMAZON", name: "Amazon" }],
+    stations: [{ id: "1", station_code: "A" }], employees: [], salaries: [], volumes: [],
+  };
+  const db = {
+    rpc: async (name, args) => {
+      if (name === "ops_cps_base_v2") return { data: { daily: [{ station_code: "A", work_date: "2026-09-15" }], breakup: [] }, error: null };
+      if (name === "ops_cps_source_facts") return {
+        data: { ...commonFacts, shipments: args.p_from === "2026-09-01" ? [carryInShipment, currentShipment] : [currentShipment] },
+        error: null,
+      };
+      if (name === "ops_cps_vehicle_costs") return { data: { breakup: [], gaps: [], vehicles: [] }, error: null };
+      if (name === "ops_cps_people_assignments") return { data: { employees: [], salaries: [], stations: [], volumes: [], assignments: [] }, error: null };
+      throw Error(`Unexpected RPC ${name}`);
+    },
+    from: (table) => emptyQuery({
+      field_executive_provider_mappings: [{ id: "mapping-1", production_threshold_config: { period: "month", component_codes: ["DELIVERY"], minimum_units: 100 } }],
+      payment_methods: [{ id: "method-1", production_threshold_config: { period: "month", component_codes: ["DELIVERY"] } }],
+      payment_method_components: [{ payment_method_id: "method-1", component_code: "DELIVERY", sort_order: 7 }],
+    }[table] ?? []),
+  };
+  const d = dataModule(db, [all[0]], (base, facts) => { captured = facts; return base; });
+  await d.loadCpsSnapshot("company-a", "2026-09-15", "2026-09-15", [all[0]]);
+  assert.deepEqual(captured.shipments.map((row) => row.id), ["current"]);
+  assert.deepEqual(captured.production_threshold_context.shipments.map((row) => row.id), ["carry-in", "current"]);
+  assert.equal(captured.production_threshold_context.mappings[0].production_threshold_config.minimum_units, 100);
+  assert.equal(captured.production_threshold_context.components[0].sort_order, 7);
 });
 test("failed or malformed snapshot cannot become a healthy empty report", async () => {
   for (const result of [

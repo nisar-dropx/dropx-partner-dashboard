@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
+import { assertPaymentCalculationMetadataEditable } from "@/lib/payment-history-immutability";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function required(value: FormDataEntryValue | null, label: string) {
@@ -21,6 +22,39 @@ function normalizedKey(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
+async function assignedMappingCountForProviderMetric(companyId: string, providerMetricId: string) {
+  if (!supabaseAdmin) return 0;
+  const selections = await supabaseAdmin
+    .from("payment_field_provider_metrics")
+    .select("payment_field_id")
+    .eq("company_id", companyId)
+    .eq("provider_metric_id", providerMetricId);
+  if (selections.error) throw new Error(selections.error.message);
+  const paymentFieldIds = [...new Set((selections.data ?? [])
+    .map((selection) => String(selection.payment_field_id))
+    .filter(Boolean))];
+  if (!paymentFieldIds.length) return 0;
+
+  const components = await supabaseAdmin
+    .from("payment_method_components")
+    .select("payment_method_id")
+    .eq("company_id", companyId)
+    .in("payment_field_id", paymentFieldIds);
+  if (components.error) throw new Error(components.error.message);
+  const paymentMethodIds = [...new Set((components.data ?? [])
+    .map((component) => String(component.payment_method_id))
+    .filter(Boolean))];
+  if (!paymentMethodIds.length) return 0;
+
+  const mappings = await supabaseAdmin
+    .from("field_executive_provider_mappings")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .in("payment_method_id", paymentMethodIds);
+  if (mappings.error) throw new Error(mappings.error.message);
+  return mappings.count ?? 0;
+}
+
 export async function saveProviderProductionMetric(formData: FormData) {
   const authorization = await requirePagePermission("master_providers", "edit");
   const companyId = requireCompanyId(authorization);
@@ -36,6 +70,12 @@ export async function saveProviderProductionMetric(formData: FormData) {
     .filter(Boolean);
   if (!sourceKeys.length) throw new Error("Add at least one imported data key.");
   if (operation === "direct" && sourceKeys.length !== 1) throw new Error("Direct counts must use exactly one imported data key.");
+  if (id) {
+    assertPaymentCalculationMetadataEditable({
+      mappingCount: await assignedMappingCountForProviderMetric(companyId, id),
+      subject: "provider production count"
+    });
+  }
 
   const provider = await supabaseAdmin.from("providers").select("id").eq("id", providerId).eq("company_id", companyId).single();
   if (provider.error) throw new Error("Provider is not available for this company.");

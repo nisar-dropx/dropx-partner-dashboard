@@ -7,6 +7,10 @@ import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
   providerFirstPageWindow,
+  providerFirstLocationRemap,
+  providerFirstMappingReplacement,
+  providerFirstMappingReplacementMessage,
+  providerFirstNamesMatch,
   providerFirstValidationStatus,
   providerMemberIdFromSpreadsheetCells,
   providerMemberKey,
@@ -14,7 +18,7 @@ import {
   scientificProviderIdCouldRepresent
 } from "./provider-first-mapping-view.ts";
 
-const method = { id: "method-1", components: [{ code: "DELIVERY", label: "Delivery rate" }] };
+const method = { id: "method-1", components: [{ code: "DELIVERY", label: "Delivery rate" }], productionThresholdConfig: null };
 const worker = {
   id: "worker-1",
   dropxId: "DROPX1",
@@ -25,10 +29,14 @@ const worker = {
   mappingId: "mapping-1",
   paymentMethodId: method.id,
   paymentValues: { DELIVERY: "12" },
+  productionThresholdConfig: null,
+  productionThresholdMinimumUnits: "",
   effectiveFrom: "2026-09-01",
   effectiveTo: "",
   mappedProviderMemberId: "member-1",
   locationLabel: "KOZA",
+  profileStationId: "station-1",
+  profileLocationLabel: "KOZA",
   onboardingStatus: "Active"
 };
 const row = {
@@ -43,6 +51,8 @@ const row = {
   mappingId: worker.mappingId,
   paymentMethodId: method.id,
   paymentValues: { DELIVERY: "12" },
+  productionThresholdConfig: null,
+  productionThresholdMinimumUnits: "",
   effectiveFrom: "2026-09-01",
   effectiveTo: ""
 };
@@ -50,6 +60,102 @@ const row = {
 test("keys provider members by station and normalized member ID", () => {
   assert.equal(providerMemberKey("station-1", " abc "), "station-1|ABC");
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
+});
+
+test("requests an exact confirmation only when an existing provider mapping changes DropX owner", () => {
+  const replacement = providerFirstMappingReplacement(row, {
+    ...row,
+    workforceId: "worker-2",
+    dropxId: "DROPX1234",
+    dropxName: "New Associate",
+    mappingId: ""
+  });
+  assert.deepEqual(replacement, {
+    kind: "owner",
+    mappingId: "mapping-1",
+    providerMemberId: "member-1",
+    providerMemberName: "Asha Devi",
+    existingDropxId: "DROPX1",
+    existingDropxName: "Asha Devi"
+  });
+  assert.equal(
+    providerFirstMappingReplacementMessage(replacement),
+    "Provider ID member-1 - Asha Devi already mapped to DROPX1 - Asha Devi.\nDo you want to replace this mapping?"
+  );
+  assert.equal(providerFirstMappingReplacement(row, { ...row, paymentValues: { DELIVERY: "15" } }), null);
+  assert.equal(providerFirstMappingReplacement({ ...row, mappingId: "" }, { ...row, workforceId: "worker-2" }), null);
+});
+
+test("permits only an exact same-provider, same-member location remap", () => {
+  const destination = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "JUGF - Sundergarh",
+    effectiveFrom: "2026-06-28"
+  };
+  const sourceWorker = { ...worker, locationLabel: "JUGD - Jharsuguda" };
+  const remap = providerFirstLocationRemap(destination, sourceWorker);
+  assert.deepEqual(remap, {
+    kind: "location",
+    mappingId: "mapping-1",
+    providerMemberId: "member-1",
+    providerMemberName: "Asha Devi",
+    existingDropxId: "DROPX1",
+    existingDropxName: "Asha Devi",
+    existingLocationLabel: "JUGD - Jharsuguda",
+    newLocationLabel: "JUGF - Sundergarh",
+    effectiveFrom: "2026-06-28"
+  });
+  assert.equal(
+    providerFirstMappingReplacementMessage(remap),
+    "Provider ID member-1 - Asha Devi is currently mapped to DROPX1 - Asha Devi at JUGD - Jharsuguda.\nDo you want to move this mapping to JUGF - Sundergarh from 2026-06-28?\nThe old location will end on the preceding day and remain in History."
+  );
+  assert.equal(providerFirstValidationStatus(destination, sourceWorker, method), "ready");
+  assert.equal(providerFirstLocationRemap({ ...destination, providerId: "provider-2" }, sourceWorker), null);
+  assert.equal(providerFirstLocationRemap({ ...destination, providerMemberId: "member-2" }, sourceWorker), null);
+  assert.equal(providerFirstLocationRemap({ ...destination, mappingId: "stale-mapping" }, sourceWorker), null);
+  assert.equal(providerFirstValidationStatus({ ...destination, providerId: "provider-2" }, sourceWorker, method), "needs_attention");
+});
+
+test("uses the effective mapping station when the Workforce profile already moved", () => {
+  const driftedWorker = {
+    ...worker,
+    stationId: "station-1",
+    locationLabel: "JUGD",
+    profileStationId: "station-2",
+    profileLocationLabel: "JUGF"
+  };
+  assert.equal(providerFirstLocationRemap({ ...row, stationId: "station-1" }, driftedWorker), null);
+  assert.deepEqual(
+    providerFirstLocationRemap({
+      ...row,
+      stationId: "station-2",
+      stationLabel: "JUGF",
+      effectiveFrom: "2026-10-04"
+    }, driftedWorker),
+    {
+      kind: "location",
+      mappingId: "mapping-1",
+      providerMemberId: "member-1",
+      providerMemberName: "Asha Devi",
+      existingDropxId: "DROPX1",
+      existingDropxName: "Asha Devi",
+      existingLocationLabel: "JUGD",
+      newLocationLabel: "JUGF",
+      effectiveFrom: "2026-10-04"
+    }
+  );
+});
+
+test("matches controlled provider-report spelling variants without weakening global identity matching", () => {
+  assert.equal(providerFirstNamesMatch(
+    "Bhuwneshwar Bhardwaj / DROP / 205470133",
+    "BHUWANESWAR BHARADWAJ"
+  ), true);
+  assert.equal(providerFirstNamesMatch("Rithesh Kumar / SPVAN_DROP / 1001", "RITESH KUMAR"), true);
+  assert.equal(providerFirstNamesMatch("Asha Devi / DROP / 1002", "ASHA DEVI"), true);
+  assert.equal(providerFirstNamesMatch("Rajesh Sharma / DROP / 1003", "Ramesh Varma"), false);
+  assert.equal(providerFirstNamesMatch("Bhuwneshwar", "Bhuwaneswar"), false);
 });
 
 test("recognizes scientific provider IDs without fabricating missing digits", () => {
@@ -176,6 +282,26 @@ test("classifies every required mapped-row field consistently", () => {
   ]) assert.equal(providerFirstValidationStatus(invalid, worker, method), "needs_attention");
 });
 
+test("requires one positive whole-number combined minimum for a threshold method", () => {
+  const thresholdMethod = {
+    ...method,
+    components: [
+      { code: "DELIVERY", label: "Delivery rate" },
+      { code: "CUSTOMER_RETURN", label: "Customer return rate" }
+    ],
+    productionThresholdConfig: { period: "month", component_codes: ["DELIVERY", "CUSTOMER_RETURN"] }
+  };
+  const thresholdRow = {
+    ...row,
+    paymentValues: { DELIVERY: "12", CUSTOMER_RETURN: "8" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: ""
+  };
+  assert.match(providerFirstValidationStatus(thresholdRow, worker, thresholdMethod), /needs_attention/);
+  assert.equal(providerFirstValidationStatus({ ...thresholdRow, productionThresholdMinimumUnits: "1000" }, worker, thresholdMethod), "ready");
+  assert.equal(providerFirstValidationStatus({ ...thresholdRow, productionThresholdMinimumUnits: "10.5" }, worker, thresholdMethod), "needs_attention");
+});
+
 test("combines filter groups with AND and selections within a group with OR", () => {
   const second = { ...row, providerMemberId: "member-2", providerMemberName: "Ravi Kumar", workforceId: "", dropxId: "", dropxName: "", paymentMethodId: "", mappingId: "", paymentValues: {} };
   const indexes = filterProviderFirstRowIndexes({
@@ -211,13 +337,30 @@ test("paginates 1,103 filtered rows with every supported size", () => {
 });
 
 test("provider-first renders only the selected page and saves without navigation", async () => {
-  const [component, actions] = await Promise.all([
+  const [component, page, actions, replacementMigration, locationRemapMigration, correctionMigration] = await Promise.all([
     readFile(new URL("../components/provider-first-mapping-worksheet.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8")
+    readFile(new URL("../app/provider-id-mapping/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../supabase/migrations/20261005083434_provider_mapping_confirmed_replacement.sql", import.meta.url), "utf8"),
+    readFile(new URL("../../supabase/migrations/20261005102002_provider_mapping_location_remap.sql", import.meta.url), "utf8"),
+    readFile(new URL("../../supabase/migrations/20261005124958_provider_mapping_drift_and_period_corrections.sql", import.meta.url), "utf8")
   ]);
   assert.match(component, /paginatedIndexes\.map/);
   assert.match(component, /isScientificProviderMemberId\(row\.providerMemberId\)/);
   assert.match(component, /formData\.set\(`\$\{prefix\}\[provider_member_id\]`, row\.providerMemberId\)/);
+  assert.match(component, /Combined minimum \/ \{productionThresholdConfig\.period\}/);
+  assert.match(component, /production_threshold_minimum_units/);
+  assert.match(component, /mappingId: worker\.mappingId/);
+  assert.match(component, /Replace existing mapping\?/);
+  assert.match(component, /Move mapping to new location\?/);
+  assert.match(component, /Replace mapping/);
+  assert.match(component, /providerFirstLocationRemap/);
+  assert.match(component, /Mapped: \$\{worker\.locationLabel\} · Profile:/);
+  assert.match(component, /saved\?\.profileStationId/);
+  assert.match(page, /mapping\?\.station_id \?\? profileStationId/);
+  assert.match(component, /\[replace_mapping_id\]/);
+  assert.match(component, /\[replacement_confirmed\]/);
+  assert.match(component, /replacement && !confirmedMappingIds\[index\]/);
   assert.doesNotMatch(component, /<form action=\{saveProviderFirstMappingWorksheet\}/);
   const start = actions.indexOf("export async function saveProviderFirstMappingsInline");
   const end = actions.indexOf("/** Links an imported provider member", start);
@@ -225,6 +368,7 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(inlineAction, /getAuthorization\(\)/);
   assert.match(inlineAction, /canEditProviderMappings\(authorization\)/);
   assert.match(inlineAction, /saveExecutiveMappingRow/);
+  assert.match(inlineAction, /providerFirstReplacementState/);
   assert.doesNotMatch(inlineAction, /redirect\(|revalidatePath\(/);
   assert.match(actions, /isScientificProviderMemberId\(providerMemberId\)/);
   assert.match(actions, /XLSX\.read\(await file\.arrayBuffer\(\), \{ type: "array", raw: true \}\)/);
@@ -232,6 +376,60 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(actions, /providerMemberIdUnsafeNumber/);
   assert.match(actions, /memberNameByStationAndId\.get\(`\$\{station\.stationCode\}\|\$\{uploadRow\.providerMemberId\}`\)/);
   assert.match(actions, /providerHolderMatches\(holderName, worker\.fullName\)/);
+  assert.match(actions, /providerFirstNamesMatch\(holderName, workerName\)/);
+  assert.doesNotMatch(actions, /import \{ matchNames \} from "@\/lib\/name-match"/);
+  assert.match(actions, /production_threshold_config: productionThresholdConfig/);
+  assert.match(actions, /Changes to an existing monthly combined minimum must start on the first day of a month/);
   assert.match(actions, /const providerId = String\(station\.provider_id/);
   assert.match(actions, /worker's current location is not allocated to your account/);
+  assert.match(actions, /currentMappingLocationDriftEdit/);
+  assert.match(actions, /profileStationId/);
+  assert.match(actions, /workforce_replace_joining_mapping/);
+  assert.match(actions, /expectedReplacementId === existingMapping!\.id/);
+  assert.match(replacementMigration, /create or replace function public\.workforce_replace_joining_mapping/);
+  assert.match(replacementMigration, /p_expected_old_mapping uuid/);
+  assert.match(replacementMigration, /old_mapping\.status <> 'active'/);
+  assert.match(replacementMigration, /set status = 'cancelled'/);
+  assert.match(replacementMigration, /A replacement mapping cannot start in the future/);
+  assert.match(replacementMigration, /target\.status <> 'cancelled'/);
+  assert.match(replacementMigration, /daterange\(new_start, 'infinity'::date, '\[\]'\)/);
+  assert.match(replacementMigration, /perform public\.workforce_save_joining_mapping/);
+  assert.match(replacementMigration, /from public, anon, authenticated/);
+  assert.match(replacementMigration, /to service_role/);
+  assert.match(locationRemapMigration, /create or replace function public\.workforce_rebase_payment_policy_location/);
+  assert.match(locationRemapMigration, /is_location_move := old_mapping\.workforce_id = p_workforce/);
+  assert.match(locationRemapMigration, /target\.id <> old_mapping\.id/);
+  assert.match(locationRemapMigration, /provider_mapping_location_moved/);
+  assert.match(locationRemapMigration, /Payment-policy history contains a later location change/);
+  assert.match(locationRemapMigration, /from public, anon, authenticated/);
+  assert.match(locationRemapMigration, /to service_role/);
+  assert.match(correctionMigration, /provider_mapping_start_corrected/);
+  assert.match(correctionMigration, /effective_from = m\.effective_from/);
+  assert.match(correctionMigration, /Finalized Workforce payroll uses this mapping period/);
+  assert.match(correctionMigration, /coalesce\(payroll_item\.status, ''\) <> 'excluded'/);
+  assert.match(correctionMigration, /least\(new_start, old_mapping\.effective_from\)/);
+  assert.match(correctionMigration, /w\.location_id is distinct from v_old\.station_id/);
+  assert.match(correctionMigration, /person\.location_id is distinct from new_station_id/);
+  assert.match(correctionMigration, /policy\.station_id is distinct from p_new_station/);
+});
+
+test("locks provider mappings only across the associate's finalized payout dates", async () => {
+  const migration = await readFile(
+    new URL("../../supabase/migrations/20261005160446_provider_mapping_finalized_payout_period_guard.sql", import.meta.url),
+    "utf8"
+  );
+  const guardStart = migration.indexOf("create or replace function public.workforce_joining_mapping_guard");
+  const guardEnd = migration.indexOf("comment on function public.workforce_joining_mapping_guard", guardStart);
+  const guard = migration.slice(guardStart, guardEnd);
+
+  assert.match(guard, /lower\(coalesce\(payroll_run\.status, ''\)\) in \('approved', 'paid'\)/);
+  assert.match(guard, /coalesce\(payroll_item\.status, ''\) <> 'excluded'/);
+  assert.match(guard, /daterange\(payroll_run\.period_start, payroll_run\.period_end, '\[\]'\)[\s\S]*\* old_range/);
+  assert.match(guard, /\* old_range[\s\S]*is distinct from[\s\S]*\* new_range/);
+  assert.doesNotMatch(guard, /in \('review', 'approved', 'paid'\)/);
+  assert.match(migration, /create trigger field_executive_provider_mappings_01_finalized_payout_guard/);
+  assert.match(migration, /create or replace function public\.workforce_provider_mapping_person/);
+  assert.match(migration, /workforce\.source_profile_type = 'employee'/);
+  assert.doesNotMatch(migration, /daterange\(least\(new_start, old_mapping\.effective_from\)/);
+  assert.doesNotMatch(migration, /Finalized Workforce payroll uses this mapping period/);
 });

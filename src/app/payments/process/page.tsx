@@ -4,6 +4,8 @@ import { finalizePaymentProcess, updatePaymentProcessStatus } from "@/app/paymen
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { dashboardDateInputValue } from "@/lib/date-format";
+import { loadPayAdvanceWorkerContexts, type PayAdvanceWorkerContext } from "@/lib/pay-advance-payment-context";
+import { workerCodeFromDetails } from "@/lib/pay-advance-worker-facts";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type PaymentBankRow = {
@@ -41,6 +43,12 @@ type PaymentRequestRow = {
   current_approver_role_ids: string[] | null;
   payment_process_role_ids: string[] | null;
   created_at: string;
+  work_date: string | null;
+  source_type: string | null;
+  source_id: string | null;
+  requested_for_name: string | null;
+  category: string | null;
+  details: { worker_code?: string | null } | null;
   payment_heads?: { name: string; code: string } | null;
   payment_details?: Array<{ id: string; label: string; value: string | null; file_name: string | null }>;
   payment_history?: PaymentHistoryRow[];
@@ -130,7 +138,7 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
 
   let requestsQuery = supabaseAdmin
     .from("payment_requests")
-    .select("id, request_no, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, payment_heads ( name, code )")
+    .select("id, request_no, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
 
@@ -279,6 +287,22 @@ export default async function PaymentProcessPage({
   const pagePermission = authorization.permissions.payment_process;
   const canSeeAllFinalApproved = isCompanyOwner(authorization);
   const { banks, requests, error } = await loadPaymentProcess(companyId, authorization.userId, authorization.effectiveRoleIds, canSeeAllFinalApproved);
+  let advanceContexts = new Map<string, PayAdvanceWorkerContext>();
+  if (!error) {
+    try {
+      advanceContexts = await loadPayAdvanceWorkerContexts(companyId, requests.map((request) => ({
+        id: request.id,
+        sourceId: request.source_id,
+        sourceType: request.source_type ?? (request.category === "pay_advance" ? "pay_advance" : null),
+        requestedForName: request.requested_for_name,
+        workerCode: workerCodeFromDetails(request.details),
+        createdAt: request.created_at,
+        workDate: request.work_date
+      })));
+    } catch {
+      advanceContexts = new Map();
+    }
+  }
   const today = dashboardDateInputValue();
 
   return (
@@ -330,7 +354,8 @@ export default async function PaymentProcessPage({
             status: request.status,
             approval_status: request.approval_status,
             created_at: request.created_at,
-            payment_head_name: request.payment_heads?.name ?? null
+            payment_head_name: request.payment_heads?.name ?? null,
+            advance_context: advanceContexts.get(request.id) ?? null
           }))}
           finalizeAction={finalizePaymentProcess}
           finalizeResultKey={searchParams?.processError || searchParams?.processNotice || ""}

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isHrHeadDesignation, isHrHeadRoleCode, isOpsRosterPlannerRole, isRosterDirectPublishDesignation, isStationFloorRosterDesignation } from "@/lib/approval-designation-labels";
+import { isHrHeadDesignation, isHrHeadRoleCode, isOpsRosterPlannerRole, isRosterDirectPublishDesignation } from "@/lib/approval-designation-labels";
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
@@ -437,14 +437,6 @@ async function approverFromAssignment(companyId: string, assignmentId: string): 
     : null;
 }
 
-function isFloorRosterApprover(candidate: ApprovalCandidate) {
-  if (candidate.name === "Station roster owner") return true;
-  return isStationFloorRosterDesignation({
-    name: candidate.designationName ?? "",
-    code: candidate.designationCode
-  });
-}
-
 async function isActiveApproverUser(companyId: string, userId: string) {
   const profile = await db().from("profiles").select("id,is_active,company_id").eq("id", userId).maybeSingle();
   if (profile.error) throw new Error(profile.error.message);
@@ -454,11 +446,9 @@ async function isActiveApproverUser(companyId: string, userId: string) {
 }
 
 /**
- * Build manager approvers for a station roster:
- * 1. Walk station owner → solid-line managers
- * 2. Drop submitter and everyone at/below them
- * 3. Drop Store Manager / Station Manager / TL (not Senior Store Manager) and missing/inactive users — auto-skip to the next manager up
- * 4. Take up to `requiredLevels` usable managers (shortfall is filled by HR when configured)
+ * Station roster approval follows the station line, not who clicked edit.
+ * Owner first, then solid-line managers, capped at the policy level count.
+ * Inactive logins are skipped. HR is added by the caller when required.
  */
 async function locationRosterApprovalChain(authorization: AuthorizationContext, locationId: string, requiredLevels: number) {
   const companyId = authorization.companyId!;
@@ -507,11 +497,8 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
     push(await approverFromAssignment(companyId, nextAssignmentId));
   }
 
-  const submitterIndex = full.findIndex((candidate) => candidate.userId === authorization.userId);
-  const aboveSubmitter = submitterIndex >= 0 ? full.slice(submitterIndex + 1) : full;
   const usable: ApprovalCandidate[] = [];
-  for (const candidate of aboveSubmitter) {
-    if (isFloorRosterApprover(candidate)) continue;
+  for (const candidate of full) {
     if (!(await isActiveApproverUser(companyId, candidate.userId))) continue;
     usable.push(candidate);
     if (usable.length >= requiredLevels) break;
@@ -521,7 +508,7 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
     chain: usable,
     error: usable.length
       ? null
-      : "No active manager above the submitter could be resolved. Complete the People reporting line, or ensure HR roster approval is enabled."
+      : "No active station approver could be resolved. Complete the People reporting line, or ensure HR roster approval is enabled."
   };
 }
 

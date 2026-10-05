@@ -78,7 +78,36 @@ function discardPreparedReceipts(account: AppAccount, paths: string[]) {
   void fetch("/api/connect/reimbursements", { method: "POST", body: discard });
 }
 
-async function prepareAndUploadReceipts(account: AppAccount, receipts: File[]) {
+const receiptTypeByExtension: Record<string, string> = { pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
+
+// The merged receipt PDF can only embed JPG and PNG, so WebP is re-encoded as JPEG on the device.
+// Some Android file pickers also hand over files with no MIME type, which the server would reject.
+async function normaliseReceipt(file: File): Promise<File> {
+  const type = file.type || receiptTypeByExtension[file.name.toLowerCase().split(".").pop() ?? ""] || "";
+  if (type === "image/webp") {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas is unavailable.");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+      if (!blob) throw new Error("Conversion failed.");
+      return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg", lastModified: file.lastModified });
+    } catch {
+      throw new Error(`Unable to read ${file.name}. Use a PDF, JPG or PNG receipt.`);
+    }
+  }
+  return type === file.type ? file : new File([file], file.name, { type, lastModified: file.lastModified });
+}
+
+async function prepareAndUploadReceipts(account: AppAccount, selected: File[]) {
+  const receipts = await Promise.all(selected.map(normaliseReceipt));
   const prepare = new FormData();
   prepare.set("kind", "prepare_receipt_uploads");
   prepare.set("accountId", account.id);
@@ -691,9 +720,14 @@ export function ConnectReimbursements({ account, active = true }: { account: App
           <label className="dx-expense-upload">
             <Upload />
             <span><strong>Add images or PDFs</strong><small>PDF, JPG, PNG, WebP · max 10 MB each</small></span>
-            <input accept="application/pdf,image/jpeg,image/png,image/webp" multiple onChange={(event) => setReceipts(Array.from(event.target.files ?? []))} required={!editingClaimId || receipts.length === 0} type="file" />
+            <input accept="application/pdf,image/jpeg,image/png,image/webp" multiple onChange={(event) => {
+              // Each pick adds to the list; the input is cleared so the same file can be picked again after removal.
+              const picked = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              setReceipts((current) => [...current, ...picked.filter((file) => !current.some((existing) => existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified))].slice(0, 20));
+            }} required={receipts.length === 0} type="file" />
           </label>
-          {receipts.length ? <ul className="dx-expense-file-list">{receipts.map((file) => <li key={`${file.name}-${file.size}`}><FileText /><span>{file.name}</span><small>{Math.ceil(file.size / 1024)} KB</small></li>)}</ul> : null}
+          {receipts.length ? <ul className="dx-expense-file-list">{receipts.map((file, index) => <li key={`${file.name}-${file.size}-${file.lastModified}`}><FileText /><span>{file.name}</span><small>{Math.ceil(file.size / 1024)} KB</small><button aria-label={`Remove ${file.name}`} onClick={() => setReceipts((current) => current.filter((_, position) => position !== index))} type="button"><X /></button></li>)}</ul> : null}
         </section>
         <div id="dx-expense-claim-feedback" aria-live="polite">
           {error ? <div className="dx-alert error">{error}</div> : null}

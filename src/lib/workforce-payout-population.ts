@@ -19,6 +19,18 @@ export type WorkforcePayoutMappingIdentity = {
   paymentMethodId: string;
 };
 
+export type WorkforcePayoutMappingSourceIdentity = {
+  workforce_id?: string | null;
+  contractor_id?: string | null;
+  employee_id?: string | null;
+  field_executive_id?: string | null;
+};
+
+export type WorkforcePayoutCanonicalIdentity = {
+  id?: string | null;
+  source_profile_id?: string | null;
+};
+
 export type WorkforcePayoutMappingResolution = {
   kind: "mapped" | "unmapped" | "conflict";
   workforceId: string;
@@ -40,6 +52,27 @@ export function shipmentIdentityKey(row: WorkforcePayoutShipmentIdentity) {
   return [row.station_code, row.client, row.provider_employee_id]
     .map(normalizePayoutIdentity)
     .join("|");
+}
+
+/**
+ * Returns every effective mapping that belongs to an already-authorized
+ * canonical worker. This is used only to calculate hidden month-to-date
+ * threshold carry-in after a station transfer; callers still render and
+ * expose only their location-scoped mappings.
+ */
+export function mappingsForAuthorizedWorkforce<T extends WorkforcePayoutMappingSourceIdentity>(
+  mappings: readonly T[],
+  workers: readonly WorkforcePayoutCanonicalIdentity[]
+) {
+  const authorizedIdentityIds = new Set(workers.flatMap((worker) => [worker.id, worker.source_profile_id])
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean));
+  return mappings.filter((mapping) => [
+    mapping.workforce_id,
+    mapping.contractor_id,
+    mapping.employee_id,
+    mapping.field_executive_id
+  ].some((value) => authorizedIdentityIds.has(String(value ?? "").trim())));
 }
 
 export function payoutMappingMatchesShipment(

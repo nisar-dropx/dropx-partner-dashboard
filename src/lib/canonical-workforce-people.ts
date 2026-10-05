@@ -6,6 +6,7 @@ import { ALL_PEOPLE_SHEET_EDITABLE_KEYS } from "@/lib/all-people-sheet";
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforceProfileStatus } from "@/lib/workforce-register-policy";
+import { formatWorkforceMobile } from "@/lib/workforce-mobile-display";
 
 function first<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
@@ -123,7 +124,7 @@ export async function loadCanonicalWorkforcePeople(
         code: String(row.dropx_id ?? "-"),
         biometricId: String(row.biometric_id ?? "-") || "-",
         fullName: String(row.full_name ?? "-"),
-        mobile: String(row.mobile ?? "-") || "-",
+        mobile: formatWorkforceMobile(row.mobile_country_code, row.mobile),
         email: String(row.email ?? "-") || "-",
         location, model, provider, designation,
         status,

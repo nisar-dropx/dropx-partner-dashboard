@@ -6,13 +6,18 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
+import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
   providerFirstNamesMatch,
+  providerFirstLocationRemap,
+  providerFirstMappingReplacement,
+  providerFirstMappingReplacementMessage,
   providerFirstPageWindow,
   providerFirstRowIssue,
   providerMemberKey,
+  type ProviderFirstMappingReplacement,
   type ProviderFirstMappingRowView,
   type ProviderFirstPageSize,
   type ProviderFirstWorkerView
@@ -22,14 +27,14 @@ export type ProviderFirstWorker = ProviderFirstWorkerView;
 export type ProviderFirstMappingRow = ProviderFirstMappingRowView;
 
 function signature(row: ProviderFirstMappingRow) {
-  return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), row.effectiveFrom, row.effectiveTo].join("|");
+  return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), JSON.stringify(row.productionThresholdConfig), row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo].join("|");
 }
 
 function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderFirstWorker | undefined) {
   return Boolean(worker?.mappedProviderMemberId && providerMemberKey(row.stationId, worker.mappedProviderMemberId) !== providerMemberKey(row.stationId, row.providerMemberId));
 }
 
-function appendRow(formData: FormData, position: number, row: ProviderFirstMappingRow) {
+function appendRow(formData: FormData, position: number, row: ProviderFirstMappingRow, replacementMappingId = "") {
   const prefix = `rows[${position}]`;
   formData.set(`${prefix}[client_key]`, providerMemberKey(row.stationId, row.providerMemberId));
   formData.set(`${prefix}[id]`, row.workforceId);
@@ -40,11 +45,22 @@ function appendRow(formData: FormData, position: number, row: ProviderFirstMappi
   formData.set(`${prefix}[provider_id]`, row.providerId);
   formData.set(`${prefix}[station_id]`, row.stationId);
   formData.set(`${prefix}[provider_member_id]`, row.providerMemberId);
+  formData.set(`${prefix}[provider_member_name]`, row.providerMemberName);
   formData.set(`${prefix}[payment_method_id]`, row.paymentMethodId);
   formData.set(`${prefix}[payment_values_json]`, JSON.stringify(row.paymentValues));
+  formData.set(`${prefix}[production_threshold_minimum_units]`, row.productionThresholdMinimumUnits);
   formData.set(`${prefix}[effective_from]`, row.effectiveFrom);
   formData.set(`${prefix}[effective_to]`, row.effectiveTo);
+  formData.set(`${prefix}[replace_mapping_id]`, replacementMappingId);
+  formData.set(`${prefix}[replacement_confirmed]`, replacementMappingId ? "yes" : "");
 }
+
+type ReplacementSaveConfirmation = {
+  indexes: number[];
+  replacements: Array<{ index: number; replacement: ProviderFirstMappingReplacement }>;
+  cursor: number;
+  confirmedMappingIds: Record<number, string>;
+};
 
 function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   busy: boolean;
@@ -79,6 +95,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [savingIndexes, setSavingIndexes] = useState<Set<number>>(() => new Set());
   const [saveNotice, setSaveNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [replacementConfirmation, setReplacementConfirmation] = useState<ReplacementSaveConfirmation | null>(null);
 
   const paymentMethodById = useMemo(() => new Map(paymentMethods.map((method) => [method.id, method])), [paymentMethods]);
   const paymentOptions = useMemo(() => paymentMethods.filter((method) => method.isActive !== false).map((method) => ({ value: method.id, label: method.name, helper: method.code })), [paymentMethods]);
@@ -86,15 +103,27 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const workerOptions = useMemo(() => workerRows.map((worker) => ({
     value: worker.id,
     label: `${worker.dropxId} — ${worker.fullName}`,
-    helper: `${worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
+    helper: `${worker.profileStationId && worker.profileStationId !== worker.stationId
+      ? `Mapped: ${worker.locationLabel} · Profile: ${worker.profileLocationLabel ?? "No location"}`
+      : worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
   })), [workerRows]);
   const stations = useMemo(() => Array.from(new Map(rows.map((row) => [row.stationId, row.stationLabel])).entries()), [rows]);
-  const dirtyRows = useMemo(() => rows.map((row, index) => signature(row) !== signature(baselineRows[index])), [rows, baselineRows]);
+  const dirtyRows = useMemo(() => rows.map((row, index) => {
+    const thresholdConfig = row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig ?? null;
+    const minimumUnits = Number(row.productionThresholdMinimumUnits);
+    const thresholdIncomplete = Boolean(thresholdConfig && (!row.productionThresholdMinimumUnits.trim() || !Number.isInteger(minimumUnits) || minimumUnits <= 0));
+    return thresholdIncomplete || signature(row) !== signature(baselineRows[index]);
+  }), [rows, baselineRows, paymentMethodById]);
   const dirtyIndexes = useMemo(() => dirtyRows.flatMap((dirty, index) => dirty ? [index] : []), [dirtyRows]);
   const hasDirty = dirtyIndexes.length > 0;
   const hasDirtyNameMismatch = dirtyIndexes.some((index) => Boolean(rows[index].workforceId) && !providerFirstNamesMatch(rows[index].providerMemberName, rows[index].dropxName));
   const hasDirtyMappingConflict = dirtyIndexes.some((index) => isMappedToAnotherMember(rows[index], workerById.get(rows[index].workforceId)));
-  const hasDirtyLocationMismatch = dirtyIndexes.some((index) => Boolean(rows[index].workforceId) && workerById.get(rows[index].workforceId)?.stationId !== rows[index].stationId);
+  const hasDirtyLocationMismatch = dirtyIndexes.some((index) => {
+    const selectedWorker = workerById.get(rows[index].workforceId);
+    return Boolean(rows[index].workforceId)
+      && selectedWorker?.stationId !== rows[index].stationId
+      && !providerFirstLocationRemap(rows[index], selectedWorker);
+  });
   const isSaving = savingIndexes.size > 0;
 
   const visibleIndexes = useMemo(() => filterProviderFirstRowIndexes({
@@ -130,7 +159,38 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   }
 
-  function reconciledHistory(previous: ProviderFirstMappingRow, next: ProviderFirstMappingRow) {
+  function relocatedHistory(
+    history: ProviderFirstMappingRow["history"],
+    relocation: { previousMappingId: string; previousEffectiveTo: string; previousStatus: "closed" | "cancelled" }
+  ) {
+    return uniquePaymentAllocationHistory(history.map((entry) => entry.id === relocation.previousMappingId
+      ? { ...entry, effectiveTo: relocation.previousEffectiveTo, storedStatus: relocation.previousStatus }
+      : entry));
+  }
+
+  function clearCurrentMapping(row: ProviderFirstMappingRow, history: ProviderFirstMappingRow["history"]): ProviderFirstMappingRow {
+    return {
+      ...row,
+      workforceId: "",
+      dropxId: "",
+      dropxName: "",
+      mappingId: "",
+      paymentMethodId: "",
+      paymentValues: {},
+      productionThresholdConfig: null,
+      productionThresholdMinimumUnits: "",
+      effectiveFrom: "",
+      effectiveTo: "",
+      history
+    };
+  }
+
+  function reconciledHistory(
+    previous: ProviderFirstMappingRow,
+    next: ProviderFirstMappingRow,
+    sourceHistory = previous.history,
+    relocation?: { previousMappingId: string; previousEffectiveTo: string; previousStatus: "closed" | "cancelled" }
+  ) {
     const method = paymentMethodById.get(next.paymentMethodId);
     const nextEntry = {
       id: next.mappingId,
@@ -142,10 +202,13 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       sourceLabel: `Provider ID ${next.providerMemberId}`,
       subjectLabel: `${next.dropxId} · ${next.dropxName}`.replace(/^ · | · $/g, ""),
       locationLabel: next.stationLabel,
-      rates: paymentAllocationHistoryRates(next.paymentValues, (method?.components ?? []).map((component, index) => ({ code: component.code, label: component.label, sortOrder: index })))
+      rates: paymentAllocationHistoryRates(next.paymentValues, (method?.components ?? []).map((component, index) => ({ code: component.code, label: component.label, sortOrder: index }))),
+      productionThreshold: buildProductionThresholdSnapshot(next.productionThresholdConfig ?? method?.productionThresholdConfig ?? null, next.productionThresholdMinimumUnits)
     };
-    let history = previous.history;
-    if (previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
+    let history = relocation ? relocatedHistory(sourceHistory, relocation) : sourceHistory;
+    if (!relocation && previous.mappingId && previous.workforceId !== next.workforceId) {
+      history = history.filter((entry) => entry.id !== previous.mappingId);
+    } else if (!relocation && previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
       const closingDate = new Date(`${next.effectiveFrom}T00:00:00.000Z`);
       closingDate.setUTCDate(closingDate.getUTCDate() - 1);
       const effectiveTo = closingDate.toISOString().slice(0, 10);
@@ -157,24 +220,27 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   function chooseWorker(index: number, workerId: string) {
     const worker = workerById.get(workerId);
     if (!worker) {
-      update(index, { workforceId: "", dropxId: "", dropxName: "", mappingId: "", paymentMethodId: "", paymentValues: {}, effectiveFrom: "", effectiveTo: "" });
+      update(index, { workforceId: "", dropxId: "", dropxName: "", mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "" });
       return;
     }
     const row = rows[index];
+    const targetHasMapping = Boolean(worker.mappingId);
     update(index, {
       workforceId: worker.id,
       dropxId: worker.dropxId,
       dropxName: worker.fullName,
-      mappingId: row.mappingId || worker.mappingId,
+      mappingId: worker.mappingId,
       providerId: row.providerId || worker.providerId,
-      paymentMethodId: worker.paymentMethodId,
-      paymentValues: worker.paymentValues,
-      effectiveFrom: worker.effectiveFrom || worker.dateOfJoin,
-      effectiveTo: worker.effectiveTo
+      paymentMethodId: targetHasMapping ? worker.paymentMethodId : row.paymentMethodId,
+      paymentValues: targetHasMapping ? worker.paymentValues : row.paymentValues,
+      productionThresholdConfig: targetHasMapping ? worker.productionThresholdConfig : row.productionThresholdConfig,
+      productionThresholdMinimumUnits: targetHasMapping ? worker.productionThresholdMinimumUnits : row.productionThresholdMinimumUnits,
+      effectiveFrom: targetHasMapping ? worker.effectiveFrom : row.effectiveFrom || worker.dateOfJoin,
+      effectiveTo: targetHasMapping ? worker.effectiveTo : row.effectiveTo
     });
   }
 
-  async function saveIndexes(indexes: number[]) {
+  async function saveIndexes(indexes: number[], confirmedMappingIds: Record<number, string> = {}) {
     if (isSaving) return;
     const selected = Array.from(new Set(indexes)).filter((index) => dirtyRows[index]);
     const nextErrors: Record<number, string> = {};
@@ -189,46 +255,80 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       return;
     }
 
+    const replacements = selected.flatMap((index) => {
+      const replacement = providerFirstMappingReplacement(baselineRows[index], rows[index])
+        ?? providerFirstLocationRemap(rows[index], workerById.get(rows[index].workforceId));
+      return replacement && !confirmedMappingIds[index] ? [{ index, replacement }] : [];
+    });
+    if (replacements.length) {
+      setReplacementConfirmation({ indexes: selected, replacements, cursor: 0, confirmedMappingIds });
+      return;
+    }
+
     const snapshots = selected.map((index) => ({
       index,
       key: providerMemberKey(rows[index].stationId, rows[index].providerMemberId),
       row: { ...rows[index], paymentValues: { ...rows[index].paymentValues } },
-      previousWorkforceId: baselineRows[index]?.workforceId ?? ""
+      previousWorkforceId: baselineRows[index]?.workforceId ?? "",
+      replacementMappingId: confirmedMappingIds[index] ?? ""
     }));
     const snapshotByKey = new Map(snapshots.map((snapshot) => [snapshot.key, snapshot]));
     const snapshotByIndex = new Map(snapshots.map((snapshot) => [snapshot.index, snapshot]));
     const data = new FormData();
     data.set("row_count", String(snapshots.length));
-    snapshots.forEach((snapshot, position) => appendRow(data, position, snapshot.row));
+    snapshots.forEach((snapshot, position) => appendRow(data, position, snapshot.row, snapshot.replacementMappingId));
     setSavingIndexes(new Set(selected));
     setSaveNotice(null);
 
     try {
       const result = await saveProviderFirstMappingsInline(data);
       const canonicalByIndex = new Map<number, ProviderFirstMappingRow>();
+      const clearedByIndex = new Map<number, { row: ProviderFirstMappingRow; expectedMappingId: string }>();
       for (const saved of result.savedRows) {
         const snapshot = snapshotByKey.get(saved.clientKey);
         if (!snapshot) continue;
-        const canonical = {
+        let canonical = {
           ...snapshot.row,
           mappingId: saved.mappingId,
           workforceId: saved.workforceId,
           paymentMethodId: saved.paymentMethodId,
           paymentValues: saved.paymentValues,
+          productionThresholdConfig: saved.productionThresholdConfig,
+          productionThresholdMinimumUnits: saved.productionThresholdMinimumUnits,
           effectiveFrom: saved.effectiveFrom,
           effectiveTo: saved.effectiveTo
         };
-        canonicalByIndex.set(snapshot.index, { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical) });
+        if (saved.relocation) {
+          const originIndex = baselineRows.findIndex((candidate, candidateIndex) => candidateIndex !== snapshot.index && candidate.mappingId === saved.relocation?.previousMappingId);
+          const origin = originIndex >= 0 ? baselineRows[originIndex] : null;
+          const originHistory = origin
+            ? relocatedHistory(origin.history, saved.relocation)
+            : [];
+          const sourceHistory = uniquePaymentAllocationHistory([...originHistory, ...baselineRows[snapshot.index].history]);
+          canonical = { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical, sourceHistory, saved.relocation) };
+          if (origin && originIndex >= 0) {
+            clearedByIndex.set(originIndex, {
+              row: clearCurrentMapping(origin, originHistory),
+              expectedMappingId: saved.relocation.previousMappingId
+            });
+          }
+        } else {
+          canonical = { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical) };
+        }
+        canonicalByIndex.set(snapshot.index, canonical);
       }
 
       if (canonicalByIndex.size) {
-        setBaselineRows((current) => current.map((row, index) => canonicalByIndex.get(index) ?? row));
+        setBaselineRows((current) => current.map((row, index) => canonicalByIndex.get(index) ?? clearedByIndex.get(index)?.row ?? row));
         setRows((current) => current.map((row, index) => {
           const canonical = canonicalByIndex.get(index);
           const snapshot = snapshotByIndex.get(index);
-          if (!canonical || !snapshot) return row;
-          if (signature(row) === signature(snapshot.row)) return canonical;
-          return row.workforceId === snapshot.row.workforceId ? { ...row, mappingId: canonical.mappingId } : row;
+          if (canonical && snapshot) {
+            if (signature(row) === signature(snapshot.row)) return canonical;
+            return row.workforceId === snapshot.row.workforceId ? { ...row, mappingId: canonical.mappingId } : row;
+          }
+          const cleared = clearedByIndex.get(index);
+          return cleared && row.mappingId === cleared.expectedMappingId ? cleared.row : row;
         }));
         const workerUpdates = new Map<string, Partial<ProviderFirstWorker>>();
         const workerClears = new Map<string, string>();
@@ -238,19 +338,21 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           if (snapshot.previousWorkforceId && snapshot.previousWorkforceId !== canonical.workforceId) {
             workerClears.set(snapshot.previousWorkforceId, snapshot.row.providerMemberId);
           }
-          workerUpdates.set(canonical.workforceId, { mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
+          const saved = result.savedRows.find((candidate) => candidate.clientKey === snapshot.key);
+          workerUpdates.set(canonical.workforceId, { stationId: canonical.stationId, locationLabel: canonical.stationLabel, profileStationId: saved?.profileStationId ?? canonical.stationId, profileLocationLabel: saved?.profileLocationLabel ?? canonical.stationLabel, providerId: canonical.providerId, mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
         }
         setWorkerRows((current) => current.map((worker) => {
           const update = workerUpdates.get(worker.id);
           if (update) return { ...worker, ...update };
           const expectedMember = workerClears.get(worker.id);
           return expectedMember && providerMemberKey(worker.stationId, worker.mappedProviderMemberId) === providerMemberKey(worker.stationId, expectedMember)
-            ? { ...worker, mappingId: "", paymentMethodId: "", paymentValues: {}, effectiveFrom: "", effectiveTo: "", mappedProviderMemberId: "" }
+            ? { ...worker, mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "", mappedProviderMemberId: "" }
             : worker;
         }));
         setErrors((current) => {
           const next = { ...current };
           canonicalByIndex.forEach((_, index) => delete next[index]);
+          clearedByIndex.forEach((_, index) => delete next[index]);
           return next;
         });
       }
@@ -258,6 +360,17 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       if (!result.ok && result.failedClientKey) {
         const failed = snapshotByKey.get(result.failedClientKey);
         if (failed) setErrors((current) => ({ ...current, [failed.index]: result.message }));
+      }
+      if (result.replacement) {
+        const failed = snapshotByKey.get(result.replacement.clientKey);
+        if (failed) {
+          setReplacementConfirmation({
+            indexes: [failed.index],
+            replacements: [{ index: failed.index, replacement: result.replacement }],
+            cursor: 0,
+            confirmedMappingIds: {}
+          });
+        }
       }
       setSaveNotice({ kind: result.ok ? "success" : "error", message: result.message });
     } catch (error) {
@@ -288,8 +401,11 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const row = rows[index];
         const selectedWorker = workerById.get(row.workforceId);
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
-        const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId);
+        const locationRemap = providerFirstLocationRemap(row, selectedWorker);
+        const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId && !locationRemap);
+        const profileLocationDrift = Boolean(selectedWorker?.profileStationId && selectedWorker.profileStationId !== selectedWorker.stationId);
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
+        const productionThresholdConfig = row.productionThresholdConfig ?? selectedPaymentMethod?.productionThresholdConfig ?? null;
         const rowPaymentOptions = selectedPaymentMethod?.isActive === false
           ? [{ value: selectedPaymentMethod.id, label: `${selectedPaymentMethod.name} (Inactive)`, helper: selectedPaymentMethod.code }, ...paymentOptions]
           : paymentOptions;
@@ -307,10 +423,17 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           </div>
           <div className="mapping-edit-grid">
             <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Select DropX workforce" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : null}</div>
-            <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {} })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
+            {productionThresholdConfig ? <label>
+              Combined minimum / {productionThresholdConfig.period}
+              <input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="1" onChange={(event) => update(index, { productionThresholdMinimumUnits: event.target.value })} placeholder="Enter minimum units" step="1" type="number" value={row.productionThresholdMinimumUnits} />
+              <span className="provider-first-selected-detail">Combined across {productionThresholdConfig.component_codes.map((code) => components.find((component) => component.code === code)?.label ?? code).join(" + ")}</span>
+            </label> : null}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
+            {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Confirmation is required when saving.</div> : null}
+            {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
@@ -323,5 +446,28 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <div className="mapping-pagination-actions"><button className="button secondary compact" disabled={pageWindow.page <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} type="button">Previous</button><span>Page {pageWindow.page} of {pageWindow.totalPages}</span><button className="button secondary compact" disabled={pageWindow.page >= pageWindow.totalPages} onClick={() => setCurrentPage((page) => Math.min(pageWindow.totalPages, page + 1))} type="button">Next</button></div>
       </div>
     </section>
+    {replacementConfirmation ? (() => {
+      const active = replacementConfirmation.replacements[replacementConfirmation.cursor];
+      return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setReplacementConfirmation(null); }}>
+        <section aria-labelledby="provider-replacement-title" aria-modal="true" className="modal-panel confirmation-dialog" role="alertdialog">
+          <div className="modal-head"><div><h2 id="provider-replacement-title">{active.replacement.kind === "location" ? "Move mapping to new location?" : "Replace existing mapping?"}</h2></div></div>
+          <div className="confirmation-body"><p style={{ whiteSpace: "pre-line" }}>{providerFirstMappingReplacementMessage(active.replacement)}</p></div>
+          <div className="form-actions modal-actions confirmation-actions">
+            <button className="button secondary" disabled={isSaving} onClick={() => setReplacementConfirmation(null)} type="button">Cancel</button>
+            <button className="button" disabled={isSaving} onClick={() => {
+              const confirmedMappingIds = { ...replacementConfirmation.confirmedMappingIds, [active.index]: active.replacement.mappingId };
+              const nextCursor = replacementConfirmation.cursor + 1;
+              if (nextCursor < replacementConfirmation.replacements.length) {
+                setReplacementConfirmation({ ...replacementConfirmation, cursor: nextCursor, confirmedMappingIds });
+                return;
+              }
+              const indexes = replacementConfirmation.indexes;
+              setReplacementConfirmation(null);
+              void saveIndexes(indexes, confirmedMappingIds);
+            }} type="button">{active.replacement.kind === "location" ? "Move mapping" : "Replace mapping"}</button>
+          </div>
+        </section>
+      </div>;
+    })() : null}
   </div>;
 }

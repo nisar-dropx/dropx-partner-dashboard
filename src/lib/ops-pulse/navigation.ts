@@ -60,6 +60,7 @@ const payments: NavItem = {
   icon: "₹",
   children: [
     { code: "advance_requests", label: "Advance Request", href: "/payments/advance-request" },
+    { code: "payment_process", label: "Pay Advances", href: "/payments/pay-advances" },
     { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
     { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
     { code: "payment_reports", label: "Payment Report", href: "/payments/report" }
@@ -149,7 +150,7 @@ function modelOperations(mode: OperatingMode): NavItem {
   };
 }
 
-const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd", icon: "E" };
+const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash", icon: "E" };
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];

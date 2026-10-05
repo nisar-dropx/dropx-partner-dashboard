@@ -101,6 +101,39 @@ export function isHrHeadRoleCode(code: string | null | undefined) {
     || value === "HR_MANAGER";
 }
 
+/** Station manager, store manager, and senior store manager. */
+export function isStoreOrStationManagerDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase();
+  return code === "STM"
+    || code === "SM"
+    || code === "SRSM"
+    || code === "STATION_MANAGER"
+    || code === "STORE_MANAGER"
+    || code === "SENIOR_STORE_MANAGER"
+    || name.includes("station manager")
+    || name.includes("store manager");
+}
+
+/**
+ * Station-floor workers whose attendance regularization starts above the
+ * station and store managers: picker, station support, delivery associate,
+ * and the same kind of station role.
+ */
+export function isStationSupportAttendanceDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  if (isTeamLeadDesignation(designation) || isStoreOrStationManagerDesignation(designation)) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase().replaceAll("-", " ").replace(/\s+/g, " ").trim();
+  if ([
+    "PC", "PTPC", "SSA", "PTSSA", "DA", "PTDA", "DCD", "ODCD", "DR", "HK",
+    "SRTR", "QC", "TC", "WFA", "PICKER", "PACKER", "HELPER", "LOADER", "SORTER"
+  ].includes(code)) return true;
+  return /\b(pickers?|station support|delivery associates?|drivers?|house keeping|sorters?|telecallers?|packers?|helpers?|loaders?)\b/.test(name)
+    || name.includes("quality control");
+}
+
 export function isManagingPartnerDesignation(designation: DesignationLabel | null | undefined) {
   if (!designation) return false;
   const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
