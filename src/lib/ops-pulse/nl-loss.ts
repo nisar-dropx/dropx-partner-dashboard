@@ -3,6 +3,8 @@ import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+import { nlPeopleClusters } from "./nl-loss-clusters";
 import {
   isRecoverable,
   type NlCase,
@@ -21,7 +23,7 @@ export async function nlStationScope(auth: AuthorizationContext) {
   const company = requireCompanyId(auth);
   let q = supabaseAdmin
     .from("stations")
-    .select("id,station_code,station_name,cluster,cluster_name")
+    .select("id,station_code,station_name")
     .eq("company_id", company);
   if (!auth.hasAllLocationAccess)
     q = q.in(
@@ -51,7 +53,6 @@ export async function nlStationScope(auth: AuthorizationContext) {
       source_code: String(portals.get(s.id) || s.station_code)
         .trim()
         .toUpperCase(),
-      cluster: String(s.cluster_name || s.cluster || "Unassigned"),
     })),
   };
 }
@@ -60,7 +61,11 @@ export async function loadNlLoss(
   filters: NlFilters,
 ) {
   if (!supabaseAdmin) throw Error("Database unavailable.");
-  const { company, stations } = await nlStationScope(auth);
+  const { company, stations: scopedStations } = await nlStationScope(auth);
+  const hierarchy = await loadPeopleOperationalHierarchy(company, scopedStations.map((s) => s.id), { includeStationResponsibilities: true });
+  if (hierarchy.error) throw Error("Current People cluster mappings could not be loaded. Please retry.");
+  const clusters = nlPeopleClusters(scopedStations, hierarchy.byLocation);
+  const stations = scopedStations.map((s) => ({ ...s, ...clusters.byStation.get(s.id)! }));
   const codes = stations.map((s) => s.source_code);
   const [meta, runResult, failResult, outcomesResult, settingsResult] =
     await Promise.all([
@@ -121,9 +126,9 @@ export async function loadNlLoss(
     filters.month && months.includes(filters.month)
       ? filters.month
       : (months[0] ?? null);
-  const clusterOptions = [...new Set(stations.map((s) => s.cluster))].sort();
+  const clusterOptions = clusters.options;
   const cluster =
-    filters.cluster && clusterOptions.includes(filters.cluster)
+    filters.cluster && clusterOptions.some((option) => option.value === filters.cluster)
       ? filters.cluster
       : "";
   const monthRows = all.filter(
@@ -138,7 +143,7 @@ export async function loadNlLoss(
   const reason =
     filters.reason && reasons.includes(filters.reason) ? filters.reason : "";
   const matchingStations = stations.filter(
-    (s) => !cluster || s.cluster === cluster,
+    (s) => !cluster || s.clusterKeys.includes(cluster),
   );
   const allowed = new Set(matchingStations.map((s) => s.source_code));
   const station =

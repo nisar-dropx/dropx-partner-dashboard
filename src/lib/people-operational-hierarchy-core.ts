@@ -221,10 +221,28 @@ function firstAuthorityAbove(
   return null;
 }
 
+/** Resolve explicit station ownership to the person's current role, not an ended assignment version. */
+export function resolveStationResponsibilityRoots(
+  responsibilities: { stationId: string; personId: string }[],
+  currentAssignments: PeopleHierarchyAssignment[]
+) {
+  const roots = new Map<string, string[]>();
+  for (const responsibility of responsibilities) {
+    const ids = currentAssignments.filter((assignment) => {
+      const family = peopleOperationalRoleFamily(assignment);
+      return assignment.personId === responsibility.personId &&
+        (family === "cluster_manager" || family === "aom");
+    }).map((assignment) => assignment.id);
+    roots.set(responsibility.stationId, [...new Set([...(roots.get(responsibility.stationId) ?? []), ...ids])]);
+  }
+  return roots;
+}
+
 export function resolvePeopleOperationalHierarchy(
   locationIds: string[],
   assignments: PeopleHierarchyAssignment[],
-  relationships: PeopleHierarchyRelationship[]
+  relationships: PeopleHierarchyRelationship[],
+  stationAssignmentIds: ReadonlyMap<string, string[]> = new Map()
 ) {
   const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
   const managerBySubject = new Map<string, string>();
@@ -245,7 +263,13 @@ export function resolvePeopleOperationalHierarchy(
     const clusterCandidates = new Map<string, CandidateStats>();
     const aomCandidates = new Map<string, CandidateStats>();
     const authorityCandidates = new Map<string, CandidateStats>();
-    const roots = rootsByLocation.get(locationId) ?? [];
+    const roots = [...new Map([
+      ...(rootsByLocation.get(locationId) ?? []),
+      ...(stationAssignmentIds.get(locationId) ?? []).flatMap((id) => {
+        const assignment = assignmentById.get(id);
+        return assignment ? [assignment] : [];
+      })
+    ].map((assignment) => [assignment.id, assignment])).values()];
 
     roots.forEach((root) => {
       const seen = new Set<string>();

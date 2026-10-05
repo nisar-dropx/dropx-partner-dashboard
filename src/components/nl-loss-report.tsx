@@ -82,7 +82,7 @@ export function NlLossReport({
           <select name="cluster" defaultValue={v.cluster} key={v.cluster}>
             <option value="">All my clusters</option>
             {v.clusterOptions.map((c) => (
-              <option key={c}>{c}</option>
+              <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
         </label>
@@ -111,6 +111,7 @@ export function NlLossReport({
           Reset
         </Link>
       </form>
+      <p className={styles.context}>Cluster assignments use current active People records, including for earlier loss months.</p>
       <div className={styles.monthLine}>
         <h2>{v.month ? monthLabel(v.month) : "No recovery month available"}</h2>
         <span>Recoverable only · Source refreshed {time(v.monthLastSeen)}</span>
@@ -150,7 +151,7 @@ export function NlLossReport({
               <thead>
                 <tr>
                   <th>Station</th>
-                  <th>Cluster</th>
+                  <th>Current cluster · People</th>
                   <th>Cases</th>
                   <th>Recoverable value</th>
                   <th />

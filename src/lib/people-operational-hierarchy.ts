@@ -1,12 +1,14 @@
 import {
   resolveManagerChainForPersonIds,
   resolvePeopleOperationalHierarchy,
+  resolveStationResponsibilityRoots,
   type LocationOperationalHierarchy,
   type OperationalHierarchyPerson,
   type PeopleHierarchyAssignment,
   type PeopleHierarchyRelationship
 } from "@/lib/people-operational-hierarchy-core";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { readAllRows } from "@/lib/supabase-pagination";
 
 type WorkAssignmentRow = {
   id: string;
@@ -38,24 +40,25 @@ async function loadPeopleHierarchyGraph(companyId: string) {
   if (!supabaseAdmin) return { assignments: [] as PeopleHierarchyAssignment[], relationships: [] as PeopleHierarchyRelationship[], error: "Supabase service role key is not configured." };
   const day = indiaToday();
   const [assignmentsResult, engagementsResult, peopleResult, designationsResult, relationshipsResult] = await Promise.all([
-    supabaseAdmin.from("hr_work_assignments")
+    readAllRows(supabaseAdmin.from("hr_work_assignments")
       .select("id,engagement_id,location_id,designation_id,position_title")
       .eq("company_id", companyId).eq("is_primary", true)
-      .lte("effective_from", day).or(`effective_to.is.null,effective_to.gte.${day}`),
-    supabaseAdmin.from("hr_engagements")
+      .lte("effective_from", day).or(`effective_to.is.null,effective_to.gte.${day}`).order("id")),
+    readAllRows(supabaseAdmin.from("hr_engagements")
       .select("id,person_id,status")
-      .eq("company_id", companyId).eq("status", "active"),
-    supabaseAdmin.from("hr_people")
+      .eq("company_id", companyId).eq("status", "active")
+      .lte("start_date", day).or(`end_date.is.null,end_date.gte.${day}`).order("id")),
+    readAllRows(supabaseAdmin.from("hr_people")
       .select("id,display_name,status")
-      .eq("company_id", companyId).eq("status", "active"),
-    supabaseAdmin.from("designations")
+      .eq("company_id", companyId).eq("status", "active").order("id")),
+    readAllRows(supabaseAdmin.from("designations")
       .select("id,code,name")
-      .eq("company_id", companyId).eq("is_active", true),
-    supabaseAdmin.from("hr_reporting_relationships")
+      .eq("company_id", companyId).eq("is_active", true).order("id")),
+    readAllRows(supabaseAdmin.from("hr_reporting_relationships")
       .select("subject_assignment_id,manager_assignment_id,effective_from")
       .eq("company_id", companyId).eq("relationship_type", "solid_line").eq("is_primary", true)
       .lte("effective_from", day).or(`effective_to.is.null,effective_to.gte.${day}`)
-      .order("effective_from", { ascending: false })
+      .order("effective_from", { ascending: false }).order("id"))
   ]);
   const error = assignmentsResult.error?.message || engagementsResult.error?.message || peopleResult.error?.message ||
     designationsResult.error?.message || relationshipsResult.error?.message || null;
@@ -87,15 +90,60 @@ async function loadPeopleHierarchyGraph(companyId: string) {
   return { assignments, relationships, error: null as string | null };
 }
 
-export async function loadPeopleOperationalHierarchy(companyId: string, locationIds: string[]) {
+/** Current, explicit People station responsibilities supplement local reporting roots. */
+async function loadStationResponsibilityRoots(companyId: string, locationIds: string[], assignments: PeopleHierarchyAssignment[]) {
+  if (!supabaseAdmin) throw Error("Database unavailable.");
+  const now = new Date().toISOString();
+  const roles = await readAllRows(supabaseAdmin.from("station_responsibility_roles")
+    .select("id").eq("company_id", companyId).eq("is_active", true)
+    .eq("owning_product_code", "operations").order("id"));
+  if (roles.error) throw Error(roles.error.message);
+  if (!roles.data?.length) return new Map<string, string[]>();
+  const responsibilities = await readAllRows(supabaseAdmin.from("station_responsibility_assignments")
+    .select("station_id,assignment_id").eq("company_id", companyId).eq("is_primary", true)
+    .in("station_id", locationIds).in("responsibility_role_id", roles.data.map((row) => row.id))
+    .lte("effective_from", now).or(`effective_to.is.null,effective_to.gte.${now}`).order("id"));
+  if (responsibilities.error) throw Error(responsibilities.error.message);
+  const assignmentIds = [...new Set((responsibilities.data ?? []).map((row) => row.assignment_id).filter(Boolean))];
+  if (!assignmentIds.length) return new Map<string, string[]>();
+  // A responsibility can retain an old assignment ID after promotion. Only use
+  // that record to identify the person; the graph supplies their current role.
+  const historical = await readAllRows(supabaseAdmin.from("hr_work_assignments")
+    .select("id,engagement_id").eq("company_id", companyId).in("id", assignmentIds).order("id"));
+  if (historical.error) throw Error(historical.error.message);
+  const engagementIds = [...new Set((historical.data ?? []).map((row) => row.engagement_id))];
+  if (!engagementIds.length) return new Map<string, string[]>();
+  const engagements = await readAllRows(supabaseAdmin.from("hr_engagements")
+    .select("id,person_id").eq("company_id", companyId).in("id", engagementIds).order("id"));
+  if (engagements.error) throw Error(engagements.error.message);
+  const personByEngagement = new Map((engagements.data ?? []).map((row) => [row.id, row.person_id]));
+  const personByAssignment = new Map((historical.data ?? []).map((row) => [row.id, personByEngagement.get(row.engagement_id)]));
+  return resolveStationResponsibilityRoots((responsibilities.data ?? []).flatMap((row) => {
+    const personId = personByAssignment.get(row.assignment_id);
+    return personId ? [{ stationId: row.station_id, personId }] : [];
+  }), assignments);
+}
+
+export async function loadPeopleOperationalHierarchy(
+  companyId: string,
+  locationIds: string[],
+  options: { includeStationResponsibilities?: boolean } = {}
+) {
   const empty = new Map<string, LocationOperationalHierarchy>();
   if (!supabaseAdmin || !locationIds.length) return { byLocation: empty, error: null as string | null };
   const graph = await loadPeopleHierarchyGraph(companyId);
   if (graph.error) return { byLocation: empty, error: graph.error };
-  return {
-    byLocation: resolvePeopleOperationalHierarchy(locationIds, graph.assignments, graph.relationships),
-    error: null
-  };
+  try {
+    const roots = options.includeStationResponsibilities
+      ? await loadStationResponsibilityRoots(companyId, locationIds, graph.assignments)
+      : undefined;
+    return {
+      byLocation: resolvePeopleOperationalHierarchy(locationIds, graph.assignments, graph.relationships, roots),
+      error: null
+    };
+  } catch (error) {
+    return { byLocation: empty, error: error instanceof Error ? error.message : "People station responsibilities could not be loaded." };
+  }
 }
 
 /** Users whose Ops access includes this station (membership first, then profile scope). */
