@@ -7,6 +7,7 @@ import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
   providerFirstPageWindow,
+  providerFirstLocationRemap,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstNamesMatch,
@@ -68,6 +69,7 @@ test("requests an exact confirmation only when an existing provider mapping chan
     mappingId: ""
   });
   assert.deepEqual(replacement, {
+    kind: "owner",
     mappingId: "mapping-1",
     providerMemberId: "member-1",
     providerMemberName: "Asha Devi",
@@ -80,6 +82,37 @@ test("requests an exact confirmation only when an existing provider mapping chan
   );
   assert.equal(providerFirstMappingReplacement(row, { ...row, paymentValues: { DELIVERY: "15" } }), null);
   assert.equal(providerFirstMappingReplacement({ ...row, mappingId: "" }, { ...row, workforceId: "worker-2" }), null);
+});
+
+test("permits only an exact same-provider, same-member location remap", () => {
+  const destination = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "JUGF - Sundergarh",
+    effectiveFrom: "2026-06-28"
+  };
+  const sourceWorker = { ...worker, locationLabel: "JUGD - Jharsuguda" };
+  const remap = providerFirstLocationRemap(destination, sourceWorker);
+  assert.deepEqual(remap, {
+    kind: "location",
+    mappingId: "mapping-1",
+    providerMemberId: "member-1",
+    providerMemberName: "Asha Devi",
+    existingDropxId: "DROPX1",
+    existingDropxName: "Asha Devi",
+    existingLocationLabel: "JUGD - Jharsuguda",
+    newLocationLabel: "JUGF - Sundergarh",
+    effectiveFrom: "2026-06-28"
+  });
+  assert.equal(
+    providerFirstMappingReplacementMessage(remap),
+    "Provider ID member-1 - Asha Devi is currently mapped to DROPX1 - Asha Devi at JUGD - Jharsuguda.\nDo you want to move this mapping to JUGF - Sundergarh from 2026-06-28?\nThe old location will end on the preceding day and remain in History."
+  );
+  assert.equal(providerFirstValidationStatus(destination, sourceWorker, method), "ready");
+  assert.equal(providerFirstLocationRemap({ ...destination, providerId: "provider-2" }, sourceWorker), null);
+  assert.equal(providerFirstLocationRemap({ ...destination, providerMemberId: "member-2" }, sourceWorker), null);
+  assert.equal(providerFirstLocationRemap({ ...destination, mappingId: "stale-mapping" }, sourceWorker), null);
+  assert.equal(providerFirstValidationStatus({ ...destination, providerId: "provider-2" }, sourceWorker, method), "needs_attention");
 });
 
 test("matches controlled provider-report spelling variants without weakening global identity matching", () => {
@@ -272,10 +305,11 @@ test("paginates 1,103 filtered rows with every supported size", () => {
 });
 
 test("provider-first renders only the selected page and saves without navigation", async () => {
-  const [component, actions, replacementMigration] = await Promise.all([
+  const [component, actions, replacementMigration, locationRemapMigration] = await Promise.all([
     readFile(new URL("../components/provider-first-mapping-worksheet.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8"),
-    readFile(new URL("../../supabase/migrations/20261005083434_provider_mapping_confirmed_replacement.sql", import.meta.url), "utf8")
+    readFile(new URL("../../supabase/migrations/20261005083434_provider_mapping_confirmed_replacement.sql", import.meta.url), "utf8"),
+    readFile(new URL("../../supabase/migrations/20261005102002_provider_mapping_location_remap.sql", import.meta.url), "utf8")
   ]);
   assert.match(component, /paginatedIndexes\.map/);
   assert.match(component, /isScientificProviderMemberId\(row\.providerMemberId\)/);
@@ -284,7 +318,9 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /production_threshold_minimum_units/);
   assert.match(component, /mappingId: worker\.mappingId/);
   assert.match(component, /Replace existing mapping\?/);
+  assert.match(component, /Move mapping to new location\?/);
   assert.match(component, /Replace mapping/);
+  assert.match(component, /providerFirstLocationRemap/);
   assert.match(component, /\[replace_mapping_id\]/);
   assert.match(component, /\[replacement_confirmed\]/);
   assert.match(component, /replacement && !confirmedMappingIds\[index\]/);
@@ -310,7 +346,7 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(actions, /const providerId = String\(station\.provider_id/);
   assert.match(actions, /worker's current location is not allocated to your account/);
   assert.match(actions, /workforce_replace_joining_mapping/);
-  assert.match(actions, /expectedReplacementId === providerMapping!\.id/);
+  assert.match(actions, /expectedReplacementId === existingMapping!\.id/);
   assert.match(replacementMigration, /create or replace function public\.workforce_replace_joining_mapping/);
   assert.match(replacementMigration, /p_expected_old_mapping uuid/);
   assert.match(replacementMigration, /old_mapping\.status <> 'active'/);
@@ -321,4 +357,11 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(replacementMigration, /perform public\.workforce_save_joining_mapping/);
   assert.match(replacementMigration, /from public, anon, authenticated/);
   assert.match(replacementMigration, /to service_role/);
+  assert.match(locationRemapMigration, /create or replace function public\.workforce_rebase_payment_policy_location/);
+  assert.match(locationRemapMigration, /is_location_move := old_mapping\.workforce_id = p_workforce/);
+  assert.match(locationRemapMigration, /target\.id <> old_mapping\.id/);
+  assert.match(locationRemapMigration, /provider_mapping_location_moved/);
+  assert.match(locationRemapMigration, /Payment-policy history contains a later location change/);
+  assert.match(locationRemapMigration, /from public, anon, authenticated/);
+  assert.match(locationRemapMigration, /to service_role/);
 });

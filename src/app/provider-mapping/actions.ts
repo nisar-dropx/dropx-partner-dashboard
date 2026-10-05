@@ -100,12 +100,16 @@ type WorkforceDesignationReference = {
 };
 
 export type ProviderFirstReplacementConfirmation = {
+  kind: "owner" | "location";
   clientKey: string;
   mappingId: string;
   providerMemberId: string;
   providerMemberName: string;
   existingDropxId: string;
   existingDropxName: string;
+  existingLocationLabel?: string;
+  newLocationLabel?: string;
+  effectiveFrom?: string;
 };
 
 async function resolveFieldOperationsDesignationPolicy(
@@ -490,7 +494,8 @@ async function saveExecutiveMappingRow(
   index: number,
   createdBy: string,
   companyId: string,
-  allowedLocationIds: Set<string> | null
+  allowedLocationIds: Set<string> | null,
+  options: { allowWorkforceLocationRemap?: boolean } = {}
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const admin = supabaseAdmin;
@@ -618,7 +623,9 @@ async function saveExecutiveMappingRow(
   if (allowedLocationIds && (!workerLocationId || !allowedLocationIds.has(workerLocationId))) {
     throw new Error(`Row ${index + 1}: The worker's current location is not allocated to your account.`);
   }
-  if (sourceType === "workforce" && String((worker as { location_id?: string | null }).location_id ?? "") !== stationId) {
+  if (sourceType === "workforce"
+    && String((worker as { location_id?: string | null }).location_id ?? "") !== stationId
+    && !options.allowWorkforceLocationRemap) {
     throw new Error(`Row ${index + 1}: Location mismatch.`);
   }
   if (!station) throw new Error(`Row ${index + 1}: Location was not found for this company.`);
@@ -973,7 +980,8 @@ async function assertProviderFirstRowScope(
   stationId: string,
   sourceType: string,
   allowedLocationIds: Set<string> | null,
-  rowNumber: number
+  rowNumber: number,
+  locationRemapFromStationId: string | null = null
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   if (sourceType !== "workforce") {
@@ -984,14 +992,20 @@ async function assertProviderFirstRowScope(
   }
   const { data: scopedWorker, error: scopedWorkerError } = await supabaseAdmin
     .from("workforce")
-    .select("id")
+    .select("id, location_id")
     .eq("company_id", companyId)
     .eq("id", workforceId)
-    .eq("location_id", stationId)
     .is("deleted_at", null)
     .maybeSingle();
   if (scopedWorkerError) throw new Error(scopedWorkerError.message);
   if (!scopedWorker) {
+    throw new Error(`Row ${rowNumber}: The selected DropX workforce ID is not available.`);
+  }
+  const currentStationId = String(scopedWorker.location_id ?? "");
+  if (allowedLocationIds && (!currentStationId || !allowedLocationIds.has(currentStationId))) {
+    throw new Error(`Row ${rowNumber}: The worker's current location is not allocated to your account.`);
+  }
+  if (currentStationId !== stationId && currentStationId !== locationRemapFromStationId) {
     throw new Error(`Row ${rowNumber}: The selected DropX workforce ID is not available at this location.`);
   }
 }
@@ -1002,6 +1016,11 @@ type ProviderFirstActiveMapping = {
   station_id: string | null;
   provider_id: string | null;
   provider_member_id: string;
+};
+
+type ProviderFirstReplacementState = {
+  confirmation: ProviderFirstReplacementConfirmation | null;
+  locationRemap: { mappingId: string; stationId: string } | null;
 };
 
 async function providerFirstReplacementState({
@@ -1024,7 +1043,7 @@ async function providerFirstReplacementState({
   stationId: string;
   submittedMappingId: string | null;
   allowedLocationIds: Set<string> | null;
-}): Promise<ProviderFirstReplacementConfirmation | null> {
+}): Promise<ProviderFirstReplacementState> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const providerId = rowRequired(formData, index, "provider_id", "Provider");
   const expectedReplacementId = rowValue(formData, index, "replace_mapping_id");
@@ -1074,40 +1093,87 @@ async function providerFirstReplacementState({
     throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
   }
 
-  const replacementRequired = Boolean(providerMapping && providerMapping.workforce_id !== workforceId);
+  if (providerMapping && targetMapping && providerMapping.id !== targetMapping.id) {
+    throw new Error(`Row ${index + 1}: The Provider ID and destination DropX ID have different active mappings. Resolve them separately before continuing.`);
+  }
+  const existingMapping = providerMapping ?? (
+    targetMapping
+      && String(targetMapping.provider_member_id).trim().toUpperCase() === providerMemberId.trim().toUpperCase()
+      && targetMapping.provider_id === providerId
+      ? targetMapping
+      : null
+  );
+  const replacementRequired = Boolean(existingMapping && (
+    existingMapping.workforce_id !== workforceId
+    || existingMapping.station_id !== stationId
+    || existingMapping.provider_id !== providerId
+  ));
   if (!replacementRequired) {
     if (expectedReplacementId) {
       throw new Error(`Row ${index + 1}: The active mapping changed after confirmation. Review it and try again.`);
     }
-    return null;
+    return { confirmation: null, locationRemap: null };
   }
-  if (allowedLocationIds && (!providerMapping!.station_id || !allowedLocationIds.has(providerMapping!.station_id))) {
+  if (allowedLocationIds && (!existingMapping!.station_id || !allowedLocationIds.has(existingMapping!.station_id))) {
     throw new Error(`Row ${index + 1}: The existing provider mapping is outside your allocated locations.`);
+  }
+
+  const changeKind: "owner" | "location" = existingMapping!.workforce_id === workforceId ? "location" : "owner";
+  if (changeKind === "location" && existingMapping!.provider_id !== providerId) {
+    throw new Error(`Row ${index + 1}: A location remap must remain with the same provider.`);
   }
 
   let existingDropxId = "Existing profile";
   let existingDropxName = "Mapped associate";
-  if (providerMapping!.workforce_id) {
+  if (existingMapping!.workforce_id) {
     const { data: holder, error: holderError } = await supabaseAdmin
       .from("workforce")
       .select("dropx_id, full_name")
       .eq("company_id", companyId)
-      .eq("id", providerMapping!.workforce_id)
+      .eq("id", existingMapping!.workforce_id)
       .maybeSingle();
     if (holderError) throw new Error(holderError.message);
     existingDropxId = String(holder?.dropx_id ?? existingDropxId).trim() || existingDropxId;
     existingDropxName = String(holder?.full_name ?? existingDropxName).trim() || existingDropxName;
   }
+  let existingLocationLabel: string | undefined;
+  let newLocationLabel: string | undefined;
+  if (changeKind === "location") {
+    const { data: locationRows, error: locationsError } = await supabaseAdmin
+      .from("stations")
+      .select("id, station_code, station_name")
+      .eq("company_id", companyId)
+      .in("id", [String(existingMapping!.station_id), stationId]);
+    if (locationsError) throw new Error(locationsError.message);
+    const labelById = new Map((locationRows ?? []).map((station) => {
+      const code = String(station.station_code ?? "").trim();
+      const name = String(station.station_name ?? "").trim();
+      return [String(station.id), name && name !== code ? `${code} - ${name}` : code] as const;
+    }));
+    existingLocationLabel = labelById.get(String(existingMapping!.station_id)) ?? "the current location";
+    newLocationLabel = labelById.get(stationId) ?? "the selected location";
+  }
   const replacement = {
+    kind: changeKind,
     clientKey,
-    mappingId: providerMapping!.id,
+    mappingId: existingMapping!.id,
     providerMemberId,
     providerMemberName: rowValue(formData, index, "provider_member_name") ?? "Unnamed provider member",
     existingDropxId,
-    existingDropxName
+    existingDropxName,
+    existingLocationLabel,
+    newLocationLabel,
+    effectiveFrom: rowValue(formData, index, "effective_from") ?? undefined
   };
-  if (expectedReplacementId === providerMapping!.id) return null;
-  return replacement;
+  if (expectedReplacementId === existingMapping!.id) {
+    return {
+      confirmation: null,
+      locationRemap: changeKind === "location"
+        ? { mappingId: existingMapping!.id, stationId: String(existingMapping!.station_id) }
+        : null
+    };
+  }
+  return { confirmation: replacement, locationRemap: null };
 }
 
 /** Saves the full provider-member-first worksheet.  It deliberately reuses the
@@ -1144,12 +1210,12 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
       const stationId = rowRequired(formData, index, "station_id", "Location");
       const sourceType = rowRequired(formData, index, "source_type", "Worker source");
       const submittedMappingId = rowValue(formData, index, "mapping_id");
-      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1);
-      const replacement = await providerFirstReplacementState({ formData, index, clientKey: rowValue(formData, index, "client_key") ?? String(index), companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
-      if (replacement) {
-        throw new Error(`Row ${index + 1}: Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}. Confirm replacement before saving.`);
+      const replacementState = await providerFirstReplacementState({ formData, index, clientKey: rowValue(formData, index, "client_key") ?? String(index), companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null);
+      if (replacementState.confirmation) {
+        throw new Error(`Row ${index + 1}: Confirm the ${replacementState.confirmation.kind === "location" ? "location move" : "replacement"} before saving.`);
       }
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, { allowWorkforceLocationRemap: Boolean(replacementState.locationRemap) });
       savedRows += 1;
     }
     revalidateTag("ops-cps");
@@ -1172,6 +1238,12 @@ export type ProviderFirstInlineSavedRow = {
   productionThresholdMinimumUnits: string;
   effectiveFrom: string;
   effectiveTo: string;
+  relocation?: {
+    previousMappingId: string;
+    previousStationId: string;
+    previousEffectiveTo: string;
+    previousStatus: "closed" | "cancelled";
+  };
 };
 
 export type ProviderFirstInlineSaveResult = {
@@ -1212,19 +1284,21 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
       const stationId = rowRequired(formData, index, "station_id", "Location");
       const sourceType = rowRequired(formData, index, "source_type", "Worker source");
       const submittedMappingId = rowValue(formData, index, "mapping_id");
-      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1);
-      const replacement = await providerFirstReplacementState({ formData, index, clientKey: currentClientKey, companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
-      if (replacement) {
+      const replacementState = await providerFirstReplacementState({ formData, index, clientKey: currentClientKey, companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null);
+      if (replacementState.confirmation) {
         return {
           ok: false,
-          message: "Confirm replacement of the existing provider mapping.",
+          message: replacementState.confirmation.kind === "location"
+            ? "Confirm moving the provider mapping to the selected location."
+            : "Confirm replacement of the existing provider mapping.",
           savedRows,
           failedClientKey: currentClientKey,
-          replacement
+          replacement: replacementState.confirmation
         };
       }
 
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, { allowWorkforceLocationRemap: Boolean(replacementState.locationRemap) });
 
       const { data: savedMapping, error: savedMappingError } = await supabaseAdmin
         .from("field_executive_provider_mappings")
@@ -1241,6 +1315,20 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
       if (savedMappingError) throw new Error(savedMappingError.message);
       if (!savedMapping) throw new Error(`Row ${index + 1}: The saved mapping could not be reloaded.`);
 
+      const { data: relocatedMapping, error: relocatedMappingError } = replacementState.locationRemap
+        ? await supabaseAdmin
+          .from("field_executive_provider_mappings")
+          .select("id, station_id, effective_to, status")
+          .eq("company_id", companyId)
+          .eq("id", replacementState.locationRemap.mappingId)
+          .single()
+        : { data: null, error: null };
+      if (relocatedMappingError) throw new Error(relocatedMappingError.message);
+      if (replacementState.locationRemap
+        && (!relocatedMapping || !["closed", "cancelled"].includes(String(relocatedMapping.status)))) {
+        throw new Error(`Row ${index + 1}: The previous location mapping could not be verified after saving.`);
+      }
+
       const thresholdSnapshot = parseProductionThresholdSnapshot(savedMapping.production_threshold_config);
       savedRows.push({
         clientKey: currentClientKey,
@@ -1251,7 +1339,13 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null,
         productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "",
         effectiveFrom: String(savedMapping.effective_from ?? ""),
-        effectiveTo: String(savedMapping.effective_to ?? "")
+        effectiveTo: String(savedMapping.effective_to ?? ""),
+        relocation: relocatedMapping ? {
+          previousMappingId: String(relocatedMapping.id),
+          previousStationId: String(relocatedMapping.station_id ?? replacementState.locationRemap?.stationId ?? ""),
+          previousEffectiveTo: String(relocatedMapping.effective_to ?? ""),
+          previousStatus: String(relocatedMapping.status) as "closed" | "cancelled"
+        } : undefined
       });
     }
 

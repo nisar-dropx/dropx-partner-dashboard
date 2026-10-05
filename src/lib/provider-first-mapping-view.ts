@@ -41,11 +41,15 @@ export type ProviderFirstMappingRowView = {
 };
 
 export type ProviderFirstMappingReplacement = {
+  kind: "owner" | "location";
   mappingId: string;
   providerMemberId: string;
   providerMemberName: string;
   existingDropxId: string;
   existingDropxName: string;
+  existingLocationLabel?: string;
+  newLocationLabel?: string;
+  effectiveFrom?: string;
 };
 
 export function providerFirstMappingReplacement(
@@ -54,6 +58,7 @@ export function providerFirstMappingReplacement(
 ): ProviderFirstMappingReplacement | null {
   if (!previous.mappingId || !previous.workforceId || !next.workforceId || previous.workforceId === next.workforceId) return null;
   return {
+    kind: "owner",
     mappingId: previous.mappingId,
     providerMemberId: previous.providerMemberId,
     providerMemberName: previous.providerMemberName,
@@ -62,7 +67,37 @@ export function providerFirstMappingReplacement(
   };
 }
 
+export function providerFirstLocationRemap(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+): ProviderFirstMappingReplacement | null {
+  if (!worker
+    || !row.workforceId
+    || row.workforceId !== worker.id
+    || !worker.mappingId
+    || row.mappingId !== worker.mappingId
+    || worker.stationId === row.stationId
+    || worker.providerId !== row.providerId
+    || !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
+    return null;
+  }
+  return {
+    kind: "location",
+    mappingId: worker.mappingId,
+    providerMemberId: row.providerMemberId,
+    providerMemberName: row.providerMemberName,
+    existingDropxId: worker.dropxId,
+    existingDropxName: worker.fullName,
+    existingLocationLabel: worker.locationLabel,
+    newLocationLabel: row.stationLabel,
+    effectiveFrom: row.effectiveFrom
+  };
+}
+
 export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
+  if (replacement.kind === "location") {
+    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nDo you want to move this mapping to ${replacement.newLocationLabel ?? "the selected location"} from ${replacement.effectiveFrom ?? "the selected effective date"}?\nThe old location will end on the preceding day and remain in History.`;
+  }
   return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}.\nDo you want to replace this mapping?`;
 }
 
@@ -264,7 +299,7 @@ export function providerFirstRowIssue(
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
   if (!row.workforceId) return "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
-  if (worker.stationId !== row.stationId) return "Location mismatch.";
+  if (worker.stationId !== row.stationId && !providerFirstLocationRemap(row, worker)) return "Location mismatch.";
   if (worker.mappedProviderMemberId && !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
     return "This DropX ID is already mapped to another Provider Member ID.";
   }

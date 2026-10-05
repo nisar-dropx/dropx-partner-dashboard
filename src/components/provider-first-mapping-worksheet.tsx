@@ -11,6 +11,7 @@ import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
   providerFirstNamesMatch,
+  providerFirstLocationRemap,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstPageWindow,
@@ -115,7 +116,12 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const hasDirty = dirtyIndexes.length > 0;
   const hasDirtyNameMismatch = dirtyIndexes.some((index) => Boolean(rows[index].workforceId) && !providerFirstNamesMatch(rows[index].providerMemberName, rows[index].dropxName));
   const hasDirtyMappingConflict = dirtyIndexes.some((index) => isMappedToAnotherMember(rows[index], workerById.get(rows[index].workforceId)));
-  const hasDirtyLocationMismatch = dirtyIndexes.some((index) => Boolean(rows[index].workforceId) && workerById.get(rows[index].workforceId)?.stationId !== rows[index].stationId);
+  const hasDirtyLocationMismatch = dirtyIndexes.some((index) => {
+    const selectedWorker = workerById.get(rows[index].workforceId);
+    return Boolean(rows[index].workforceId)
+      && selectedWorker?.stationId !== rows[index].stationId
+      && !providerFirstLocationRemap(rows[index], selectedWorker);
+  });
   const isSaving = savingIndexes.size > 0;
 
   const visibleIndexes = useMemo(() => filterProviderFirstRowIndexes({
@@ -151,7 +157,38 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   }
 
-  function reconciledHistory(previous: ProviderFirstMappingRow, next: ProviderFirstMappingRow) {
+  function relocatedHistory(
+    history: ProviderFirstMappingRow["history"],
+    relocation: { previousMappingId: string; previousEffectiveTo: string; previousStatus: "closed" | "cancelled" }
+  ) {
+    return uniquePaymentAllocationHistory(history.map((entry) => entry.id === relocation.previousMappingId
+      ? { ...entry, effectiveTo: relocation.previousEffectiveTo, storedStatus: relocation.previousStatus }
+      : entry));
+  }
+
+  function clearCurrentMapping(row: ProviderFirstMappingRow, history: ProviderFirstMappingRow["history"]): ProviderFirstMappingRow {
+    return {
+      ...row,
+      workforceId: "",
+      dropxId: "",
+      dropxName: "",
+      mappingId: "",
+      paymentMethodId: "",
+      paymentValues: {},
+      productionThresholdConfig: null,
+      productionThresholdMinimumUnits: "",
+      effectiveFrom: "",
+      effectiveTo: "",
+      history
+    };
+  }
+
+  function reconciledHistory(
+    previous: ProviderFirstMappingRow,
+    next: ProviderFirstMappingRow,
+    sourceHistory = previous.history,
+    relocation?: { previousMappingId: string; previousEffectiveTo: string; previousStatus: "closed" | "cancelled" }
+  ) {
     const method = paymentMethodById.get(next.paymentMethodId);
     const nextEntry = {
       id: next.mappingId,
@@ -166,10 +203,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       rates: paymentAllocationHistoryRates(next.paymentValues, (method?.components ?? []).map((component, index) => ({ code: component.code, label: component.label, sortOrder: index }))),
       productionThreshold: buildProductionThresholdSnapshot(next.productionThresholdConfig ?? method?.productionThresholdConfig ?? null, next.productionThresholdMinimumUnits)
     };
-    let history = previous.history;
-    if (previous.mappingId && previous.workforceId !== next.workforceId) {
+    let history = relocation ? relocatedHistory(sourceHistory, relocation) : sourceHistory;
+    if (!relocation && previous.mappingId && previous.workforceId !== next.workforceId) {
       history = history.filter((entry) => entry.id !== previous.mappingId);
-    } else if (previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
+    } else if (!relocation && previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
       const closingDate = new Date(`${next.effectiveFrom}T00:00:00.000Z`);
       closingDate.setUTCDate(closingDate.getUTCDate() - 1);
       const effectiveTo = closingDate.toISOString().slice(0, 10);
@@ -217,7 +254,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     }
 
     const replacements = selected.flatMap((index) => {
-      const replacement = providerFirstMappingReplacement(baselineRows[index], rows[index]);
+      const replacement = providerFirstMappingReplacement(baselineRows[index], rows[index])
+        ?? providerFirstLocationRemap(rows[index], workerById.get(rows[index].workforceId));
       return replacement && !confirmedMappingIds[index] ? [{ index, replacement }] : [];
     });
     if (replacements.length) {
@@ -243,10 +281,11 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     try {
       const result = await saveProviderFirstMappingsInline(data);
       const canonicalByIndex = new Map<number, ProviderFirstMappingRow>();
+      const clearedByIndex = new Map<number, { row: ProviderFirstMappingRow; expectedMappingId: string }>();
       for (const saved of result.savedRows) {
         const snapshot = snapshotByKey.get(saved.clientKey);
         if (!snapshot) continue;
-        const canonical = {
+        let canonical = {
           ...snapshot.row,
           mappingId: saved.mappingId,
           workforceId: saved.workforceId,
@@ -257,17 +296,37 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           effectiveFrom: saved.effectiveFrom,
           effectiveTo: saved.effectiveTo
         };
-        canonicalByIndex.set(snapshot.index, { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical) });
+        if (saved.relocation) {
+          const originIndex = baselineRows.findIndex((candidate, candidateIndex) => candidateIndex !== snapshot.index && candidate.mappingId === saved.relocation?.previousMappingId);
+          const origin = originIndex >= 0 ? baselineRows[originIndex] : null;
+          const originHistory = origin
+            ? relocatedHistory(origin.history, saved.relocation)
+            : [];
+          const sourceHistory = uniquePaymentAllocationHistory([...originHistory, ...baselineRows[snapshot.index].history]);
+          canonical = { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical, sourceHistory, saved.relocation) };
+          if (origin && originIndex >= 0) {
+            clearedByIndex.set(originIndex, {
+              row: clearCurrentMapping(origin, originHistory),
+              expectedMappingId: saved.relocation.previousMappingId
+            });
+          }
+        } else {
+          canonical = { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical) };
+        }
+        canonicalByIndex.set(snapshot.index, canonical);
       }
 
       if (canonicalByIndex.size) {
-        setBaselineRows((current) => current.map((row, index) => canonicalByIndex.get(index) ?? row));
+        setBaselineRows((current) => current.map((row, index) => canonicalByIndex.get(index) ?? clearedByIndex.get(index)?.row ?? row));
         setRows((current) => current.map((row, index) => {
           const canonical = canonicalByIndex.get(index);
           const snapshot = snapshotByIndex.get(index);
-          if (!canonical || !snapshot) return row;
-          if (signature(row) === signature(snapshot.row)) return canonical;
-          return row.workforceId === snapshot.row.workforceId ? { ...row, mappingId: canonical.mappingId } : row;
+          if (canonical && snapshot) {
+            if (signature(row) === signature(snapshot.row)) return canonical;
+            return row.workforceId === snapshot.row.workforceId ? { ...row, mappingId: canonical.mappingId } : row;
+          }
+          const cleared = clearedByIndex.get(index);
+          return cleared && row.mappingId === cleared.expectedMappingId ? cleared.row : row;
         }));
         const workerUpdates = new Map<string, Partial<ProviderFirstWorker>>();
         const workerClears = new Map<string, string>();
@@ -277,7 +336,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           if (snapshot.previousWorkforceId && snapshot.previousWorkforceId !== canonical.workforceId) {
             workerClears.set(snapshot.previousWorkforceId, snapshot.row.providerMemberId);
           }
-          workerUpdates.set(canonical.workforceId, { mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
+          workerUpdates.set(canonical.workforceId, { stationId: canonical.stationId, locationLabel: canonical.stationLabel, providerId: canonical.providerId, mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
         }
         setWorkerRows((current) => current.map((worker) => {
           const update = workerUpdates.get(worker.id);
@@ -290,6 +349,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         setErrors((current) => {
           const next = { ...current };
           canonicalByIndex.forEach((_, index) => delete next[index]);
+          clearedByIndex.forEach((_, index) => delete next[index]);
           return next;
         });
       }
@@ -338,7 +398,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const row = rows[index];
         const selectedWorker = workerById.get(row.workforceId);
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
-        const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId);
+        const locationRemap = providerFirstLocationRemap(row, selectedWorker);
+        const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId && !locationRemap);
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
         const productionThresholdConfig = row.productionThresholdConfig ?? selectedPaymentMethod?.productionThresholdConfig ?? null;
         const rowPaymentOptions = selectedPaymentMethod?.isActive === false
@@ -367,6 +428,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             </label> : null}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
+            {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Confirmation is required when saving.</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
@@ -383,7 +445,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       const active = replacementConfirmation.replacements[replacementConfirmation.cursor];
       return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setReplacementConfirmation(null); }}>
         <section aria-labelledby="provider-replacement-title" aria-modal="true" className="modal-panel confirmation-dialog" role="alertdialog">
-          <div className="modal-head"><div><h2 id="provider-replacement-title">Replace existing mapping?</h2></div></div>
+          <div className="modal-head"><div><h2 id="provider-replacement-title">{active.replacement.kind === "location" ? "Move mapping to new location?" : "Replace existing mapping?"}</h2></div></div>
           <div className="confirmation-body"><p style={{ whiteSpace: "pre-line" }}>{providerFirstMappingReplacementMessage(active.replacement)}</p></div>
           <div className="form-actions modal-actions confirmation-actions">
             <button className="button secondary" disabled={isSaving} onClick={() => setReplacementConfirmation(null)} type="button">Cancel</button>
@@ -397,7 +459,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               const indexes = replacementConfirmation.indexes;
               setReplacementConfirmation(null);
               void saveIndexes(indexes, confirmedMappingIds);
-            }} type="button">Replace mapping</button>
+            }} type="button">{active.replacement.kind === "location" ? "Move mapping" : "Replace mapping"}</button>
           </div>
         </section>
       </div>;

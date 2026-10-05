@@ -40,7 +40,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
-    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
     supabaseAdmin.from("payment_methods").select("id, code, name, is_active, production_threshold_config, payment_method_components(component_code, component_type, label, sort_order, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("designations").select("id, code, name, is_field_operations, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
@@ -51,7 +51,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const stationCodeById = new Map(allStations.map((station) => [String(station.id), String(station.station_code ?? "").trim()]));
   const allMappingHistory = (mappingsResult.data ?? []) as Mapping[];
   const mappingHistory = allMappingHistory.filter((mapping) => allowed(mapping.station_id));
-  const activeMappings = mappingHistory.filter((mapping) => !mapping.effective_to);
+  const activeMappings = mappingHistory.filter((mapping) => mapping.status === "active" && !mapping.effective_to);
   const mappedSourceMemberKeys = new Set(allMappingHistory.map((mapping) => {
     const stationCode = stationCodeById.get(String(mapping.station_id ?? ""));
     return providerSourceMemberKey(stationCode || "*", mapping.provider_member_id);
