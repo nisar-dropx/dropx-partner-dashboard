@@ -61,7 +61,7 @@ export function buildAdHocMessages(input: {
   return input.recipients.flatMap(recipient => {
     const monthly = rows.filter(row => recipient.stationIds.includes(row.station.id));
     const included = monthly.filter(row => Object.values(row.day).some(v => v.count > 0));
-    if (!included.length) return [];
+    if (!included.length && !monthly.some(row => Object.values(row.mtd).some(value => value.count > 0))) return [];
     const mappedRegions = new Set(input.stations.filter(station => recipient.stationIds.includes(station.id) && isAdHocMailStation(station)).map(adHocRegionLabel));
     const showRegionBreakup = mappedRegions.size > 1;
     const grouped = [...new Set(included.map(row => row.region))].sort((a, b) => (regionOrder.get(a) ?? 99) - (regionOrder.get(b) ?? 99))

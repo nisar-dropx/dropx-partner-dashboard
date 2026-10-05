@@ -93,9 +93,9 @@ test("email separates driver and DA, deduplicates linked cashbook entries, and u
   assert.doesNotMatch(message.text, /9,999|NOW/);
 });
 
-test("DA-only activity qualifies; MTD-only activity does not", () => {
+test("DA-only and MTD-only activity qualify without adding inactive station rows", () => {
   assert.equal(digest.buildAdHocMessages({ ...options, recipients: [{ email: "b@example.com", name: "B", stationIds: ["b"] }] }).length, 1);
-  assert.equal(digest.buildAdHocMessages({...options,activity:[activity("b",[{date:"2026-09-10",entries:[entry("Van",100)]}])]}).length,0);
+  assert.equal(digest.buildAdHocMessages({...options,activity:[activity("b",[{date:"2026-09-10",entries:[entry("Van",100)]}])]}).length,1);
   assert.deepEqual(digest.buildAdHocMessages({ ...options, activity: [] }), []);
   const [message] = digest.buildAdHocMessages({ ...options, recipients: [{ email: "f@example.com", name: "F", stationIds: ["flip"] }] });
   assert.doesNotMatch(message.text, /Ad hoc Driver|\nA \|/);
@@ -161,3 +161,13 @@ test("delivery holds an email when the saved station is removed from the recipie
  assert.doesNotMatch(mail.html,/>Ad hoc DA \/ WM<\/td>/);
  assert.deepEqual(mail.scope.stationIds,["a","b"]);
  });
+
+test('MTD comparison includes late prior-day actuals and station daily Excel',()=>{
+ const row={date:'2026-09-10',station:'A',stationId:'a',head:'Adhoc Van',headCode:'VAN_ADHOC',reference:'LATE',status:'FINAL_APPROVED',estimated:1200,actual:1800,delta:600,percent:50,overrun:true,excluded:false,state:'Over estimate',shipments:40,cps:30};
+ const mail=costMail.adHocCostMail([row],options.date);
+ assert.match(mail.text,/MTD: 1\/1 compared; estimate ₹1,200, actual ₹1,800, difference ₹600/);
+ assert.match(mail.text,/Report day: 0\/0 compared/);
+ const workbook=require('xlsx').read(Buffer.from(mail.attachments[0].content,'base64'));
+ const daily=require('xlsx').utils.sheet_to_json(workbook.Sheets['Station daily summary']);
+ assert.equal(daily[0]['Difference INR'],600);assert.equal(daily[0].Date,'2026-09-10');
+});
