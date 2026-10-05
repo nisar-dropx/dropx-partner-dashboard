@@ -51,3 +51,13 @@ test('historical hub totals cannot become verified inbound or BAU', () => {
  const days=[7,14,21,28].map(n=>({date:shiftDay(date,-n),inbound:verifiedInbound([row(null,100)],'NLRE').inbound,delivered:20,deliverySource:''}));
  assert.equal(volumeBaseline(days,date).baseline,null);
 });
+
+// Single-station receiving totals remain available; mixed CP hubs require explicit destinations.
+test('normal stations count dock packages while mixed hubs withhold ambiguous routes', async () => {
+ const {groupedInbound}=await import('./payment-volume.ts');
+ const row={tracking_id:'one',station_code:'QLDA',snapshot_at:'2026-10-06',package_count:1,raw_payload:{}};
+ assert.equal(groupedInbound([row],['QLDA'],false).inbound,1);
+ assert.equal(groupedInbound([row],['NLRE'],true).inbound,null);
+ assert.equal(groupedInbound([row,{...row}],['KGQA','KGQC'],false).inbound,1);
+ assert.equal(groupedInbound([{...row,raw_payload:{serving_station_code:'NLRK'}}],['NLRE'],true).inbound,0);
+});

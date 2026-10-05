@@ -8,9 +8,10 @@ export const loadPaymentVolume = unstable_cache(async (company: string, station:
   const db = supabaseAdmin;
   if (!db) throw new Error('Volume data is temporarily unavailable.');
   const from = shiftDay(date, -28);
-  const stationRows=await db.from('stations').select('id,station_code,parent_station_id,is_active,location_models(code)').eq('company_id',company);
+  const stationRows=await db.from('stations').select('id,station_code,parent_station_id,is_active,inbound_requires_destination,location_models(code)').eq('company_id',company);
   if(stationRows.error)throw new Error('Unable to load station group.');
   const parent=stationRows.data.find(s=>s.station_code===station);
+  const requireDestination = parent?.inbound_requires_destination !== false;
   const groupStations=[station,...stationRows.data.filter(s=>s.is_active&&s.parent_station_id===parent?.id&&((Array.isArray(s.location_models)?s.location_models[0]:s.location_models) as {code?:string}|null)?.code==='XPT').map(s=>s.station_code)];
   const [daily,latestInbound,ruleResult,fleetResult,statusResult,sources,designations,availability]=await Promise.all([
     db.rpc('capacity_station_daily',{p_company_id:company,p_station_codes:groupStations,p_from:from,p_to:date}),
@@ -35,11 +36,11 @@ export const loadPaymentVolume = unstable_cache(async (company: string, station:
    if(offset>=99000)throw new Error('Inbound evidence exceeds the report limit.');
   }
   const days:VolumeDay[]=Array.from({length:29},(_,i)=>{
-   const workDate=shiftDay(from,i),verified=groupedInbound(evidence.get(workDate)??[],groupStations);
+   const workDate=shiftDay(from,i),verified=groupedInbound(evidence.get(workDate)??[],groupStations,requireDestination);
    const delivered=rows.filter(r=>r.work_date===workDate&&/Delivered detail|Daily shipment count/i.test(r.volume_source));
    return {date:workDate,inbound:verified.inbound,inboundUnverified:verified.unverified,delivered:delivered.length?delivered.reduce((sum,r)=>sum+Number(r.delivered),0):null,deliverySource:delivered.length?'Imported deliveries':'No source'};
   });
-  const requestedGroup=groupedInbound(evidence.get(date)??[],groupStations);
+  const requestedGroup=groupedInbound(evidence.get(date)??[],groupStations,requireDestination);
   let snapshotAt:string|null=null,bulky=0,classified=0,packages=0,routingVerified=0;
   for(const row of requestedGroup.accepted as Fact[]){
     const count=Math.max(1,Number(row.package_count)||1);packages+=count;
@@ -47,7 +48,7 @@ export const loadPaymentVolume = unstable_cache(async (company: string, station:
     if(row.raw_payload?.serving_station_code)routingVerified+=count;
     const size=shipmentSize(row,ruleResult.error?null:ruleResult.rule);if(size!=='unknown')classified+=count;if(size==='bulky')bulky+=count;
   }
-  const currentInbound=groupedInbound(evidence.get(today)??[],groupStations).inbound;
+  const currentInbound=groupedInbound(evidence.get(today)??[],groupStations,requireDestination).inbound;
   const statuses = new Map((statusResult.data ?? []).map(row => [row.status_key, row]));
   const sourceLabels: Record<string, string> = { own: 'Own', odcd: 'ODCD', rented: 'Van Rented', van_vendor: 'Van Vendor', vendor: 'Van Vendor' };
   const vehicles = (fleetResult.data ?? []).filter(row => !statuses.get(row.status)?.is_terminal).map(row => {
@@ -59,14 +60,14 @@ export const loadPaymentVolume = unstable_cache(async (company: string, station:
       partner: row.ownership_type === 'odcd' ? row.da_name || 'DA not recorded' : row.ownership_type === 'own' ? 'DropX' : row.vendor_name || 'Vendor not recorded',
       status: status?.label || dailyStatus || row.status || 'Unknown', operational: deployed && !dailyStatus && Boolean(status?.is_operational), deployed, location: row.current_location_label || 'Not recorded' };
   });
-  return { station, date, today, todayInbound: currentInbound, groupStations,breakup:requestedGroup.breakup,unallocated:requestedGroup.unallocated,
+  return { station, date, today, todayInbound: currentInbound, requireDestination, groupStations,breakup:requestedGroup.breakup,unallocated:requestedGroup.unallocated,
     days, ...volumeBaseline(days, date), snapshotAt, latestInboundSnapshot: latestInbound.data?.[0]?.snapshot_at ?? null,
     bulky: days.at(-1)?.inbound != null && classified ? bulky : null,
     classified: days.at(-1)?.inbound != null ? classified : 0, packages: days.at(-1)?.inbound != null ? packages : 0, routingVerified,
     vehicles, fleetError: fleetResult.error || statusResult.error || availability.error || sources.error || designations.error ? 'Fleet availability could not be verified.' : null,
     sizeRule: ruleResult.error ? null : ruleResult.rule,
     refreshedAt: new Date().toISOString() };
-}, ['payment-volume-xpt-groups-v4'], { revalidate: 60 });
+}, ['payment-volume-dock-arrivals-v5'], { revalidate: 60 });
 
 export function paymentVolumeToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());

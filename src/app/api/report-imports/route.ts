@@ -1610,11 +1610,12 @@ function parseInboundShipmentFacts(rows: SheetRow[], companyId: string, batchId:
       "Estimated Arrival Date", "Expected Arrival Date", "Arrival Date",
       "Promised Delivery Date", "Scheduled Delivery Start time"
     ]));
-    const expectedArrivalDate = preserveEmbeddedDates ? embeddedArrivalDate : selectedDate || embeddedArrivalDate;
+    const dockArrivalDate = parseDate(findValue(raw, ["Dock Arrival Date"]));
+    const expectedArrivalDate = dockArrivalDate || (preserveEmbeddedDates ? embeddedArrivalDate : selectedDate || embeddedArrivalDate);
     const postalCode = clean(findValue(raw, ["Postal", "Pincode", "Postal Code"])).match(/\d{6}/)?.[0] ?? "";
     const containerCount = clean(findValue(raw, ["Container Count"]));
     if (isContainerHierarchy && containerCount && !/^0\s*items?$/i.test(containerCount)) return;
-    if (!trackingId || !stationCode || !expectedArrivalDate || (!isContainerHierarchy && !postalCode)) {
+    if (!trackingId || !stationCode || !expectedArrivalDate || (!isContainerHierarchy && !postalCode && !dockArrivalDate)) {
       rejected.push({ rowNumber, issue: isContainerHierarchy
         ? "Missing container ID, station code in filename, or selected inbound date."
         : "Missing tracking ID, station, expected-arrival date or postal code." });
@@ -1643,7 +1644,7 @@ function parseInboundShipmentFacts(rows: SheetRow[], companyId: string, batchId:
       postal_code: postalCode,
       raw_payload: { ...(isContainerHierarchy ? { source_format: "container_hierarchy" } : {}),
         serving_station_code: servingStation.explicit ? stationCode : "",
-        station_source_field: servingStation.sourceField, receiving_station_code: fallbackStation || "" },
+        station_source_field: servingStation.sourceField, receiving_station_code: fallbackStation || "", dock_arrival_date: dockArrivalDate || "" },
       shipment_state: isContainerHierarchy ? "Inbound container" : clean(findValue(raw, ["State", "Shipment State"])) || null,
       snapshot_at: timestamp(findValue(raw, ["Last Updated Time", "Snapshot Time", "Report Time"])),
       source_batch_id: batchId,

@@ -574,6 +574,7 @@ export async function createLocation(formData: FormData) {
     station_manager_email: stationManagerEmail,
     parent_station_id: parentStationId,
     hide_from_location_list: hideFromLocationList,
+      inbound_requires_destination: formData.get("inbound_requires_destination") === "on",
     is_ho: isHo,
     is_active: true
   }, companyId);
@@ -653,6 +654,7 @@ export async function updateLocation(formData: FormData) {
       station_manager_email: stationManagerEmail,
       parent_station_id: parentStationId,
       hide_from_location_list: hideFromLocationList,
+      inbound_requires_destination: formData.get("inbound_requires_destination") === "on",
       is_ho: isHo,
       is_active: isActive
     };

@@ -1,7 +1,7 @@
 export type VolumeDay = { date: string; inbound: number | null; delivered: number | null; deliverySource: string; inboundUnverified?: number };
 export type PaymentVolume = {
   station: string; date: string; today: string; todayInbound: number | null;
-  groupStations?: string[]; breakup?: Array<{station:string;inbound:number}>; unallocated?: number;
+  requireDestination?: boolean; groupStations?: string[]; breakup?: Array<{station:string;inbound:number}>; unallocated?: number;
   days: VolumeDay[]; baseline: number | null; baselineDays: number; difference: number | null;
   snapshotAt: string | null; refreshedAt: string; latestInboundSnapshot?: string | null;
   bulky: number | null; classified: number; packages: number; routingVerified: number;
@@ -61,11 +61,11 @@ export function adhocApprovalContext(head:string|null|undefined,answers:Array<{a
 }
 
 export type RoutedInbound = { tracking_id: string; station_code: string; snapshot_at: string; package_count: number | string | null; raw_payload: {serving_station_code?:string}|null };
-export function groupedInbound(rows:RoutedInbound[],stations:string[]) {
+export function groupedInbound(rows:RoutedInbound[],stations:string[],requireDestination=true) {
  const latest=new Map<string,RoutedInbound>();
  for(const row of rows){const old=latest.get(row.tracking_id);if(!old||row.snapshot_at>old.snapshot_at||(row.snapshot_at===old.snapshot_at&&!old.raw_payload?.serving_station_code&&row.raw_payload?.serving_station_code))latest.set(row.tracking_id,row);}
  const unique=[...latest.values()];
- if(stations.length===1){const result=verifiedInbound(unique,stations[0]);return {...result,breakup:[{station:stations[0],inbound:result.inbound??0}],unallocated:0,accepted:unique.filter(r=>r.raw_payload?.serving_station_code===stations[0])};}
+ if(stations.length===1 && requireDestination){const result=verifiedInbound(unique,stations[0]);return {...result,breakup:[{station:stations[0],inbound:result.inbound??0}],unallocated:0,accepted:unique.filter(r=>r.raw_payload?.serving_station_code===stations[0])};}
  const counts=new Map(stations.map(s=>[s,0]));let unallocated=0;const accepted:RoutedInbound[]=[];
  for(const row of unique){const destination=row.raw_payload?.serving_station_code?.trim().toUpperCase();const count=Math.max(1,Number(row.package_count)||1);
  if(destination&&!counts.has(destination))continue;

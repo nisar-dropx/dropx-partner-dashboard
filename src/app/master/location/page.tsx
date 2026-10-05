@@ -56,6 +56,7 @@ type LocationRow = {
   station_manager_email: string | null;
   parent_station_id: string | null;
   hide_from_location_list: boolean;
+  inbound_requires_destination: boolean;
   is_ho: boolean;
   is_active: boolean;
   providers?: { code: string; name: string } | null;
@@ -173,6 +174,7 @@ async function loadMasterData(companyId: string) {
     station_manager_email,
     parent_station_id,
     hide_from_location_list,
+    inbound_requires_destination,
     is_ho,
     is_active,
     providers (code, name),
@@ -407,6 +409,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               </label>
               <label>Location email<input className="field" name="station_email" placeholder="Enter location email" /></label>
               <label>Parent Location<SearchableSelect name="parent_station_id" options={parentStationOptions} placeholder="Select parent location" /></label>
+              <label><input name="inbound_requires_destination" type="checkbox" />Mixed inbound hub: require destination station before counting volume (CP nodes)</label>
               <label className="check-row span-3">
                 <input name="hide_from_location_list" type="checkbox" />
                 <span>Hide from location list</span>
@@ -453,6 +456,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               </label>
               <label>Location email<input className="field" name="station_email" defaultValue={editLocation.station_email ?? ""} /></label>
               <label>Parent Location<SearchableSelect name="parent_station_id" options={parentStationOptions} defaultValue={editLocation.parent_station_id ?? ""} placeholder="Select parent location" /></label>
+              <label><input name="inbound_requires_destination" type="checkbox" defaultChecked={editLocation.inbound_requires_destination} />Mixed inbound hub: require destination station before counting volume (CP nodes)</label>
               <label>Status
                 <select className="select" name="is_active" defaultValue={editLocation.is_active ? "active" : "inactive"}>
                   <option value="active">Active</option>
