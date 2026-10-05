@@ -2,7 +2,7 @@ import 'server-only';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { resolveStepApprover, type ApprovalStepRow } from '@/lib/payment-approval-steps';
 import { dateKey } from '@/lib/payment-volume';
-import { eligibleAdhocVehicles, type AdhocContext, type AdhocRule } from '@/lib/adhoc-vehicle-policy';
+import { eligibleAdhocVehicles, requiredAdhocStatuses, type AdhocContext, type AdhocRule } from '@/lib/adhoc-vehicle-policy';
 
 export async function loadAdhocContext(company: string, station: string, date: string): Promise<AdhocContext> {
  const db=supabaseAdmin!;
@@ -17,7 +17,7 @@ export async function loadAdhocContext(company: string, station: string, date: s
  if ([rules,vehicles,sources,designations,states,days].some(r=>r.error)) throw new Error('Vehicle checks unavailable. Please retry.');
  const sourceCodes=new Map((sources.data??[]).map(s=>[s.id,s.designation_id ? designations.data?.find(d=>d.id===s.designation_id)?.code : 'OWN']));
  const terminal=new Set(states.data?.map(s=>s.status_key));
- const active=(vehicles.data??[]).filter(v=>!terminal.has(v.status)&&v.deployment_date<=date).map(v=>({id:v.id,number:v.vehicle_no,model:v.model,partner:v.da_name||v.vendor_name||'Name pending',source:sourceCodes.get(v.source_id)||'',status:v.status,deploymentDate:v.deployment_date,unavailable:Boolean(days.data?.some(d=>d.vehicle_id===v.id))}));
+ const active=(vehicles.data??[]).filter(v=>!terminal.has(v.status)&&v.deployment_date<=date).map(v=>({id:v.id,number:v.vehicle_no,model:v.model,partner:sourceCodes.get(v.source_id)==='OWN'?'':v.da_name||v.vendor_name||'',source:sourceCodes.get(v.source_id)||'',status:v.status,deploymentDate:v.deployment_date,unavailable:Boolean(days.data?.some(d=>d.vehicle_id===v.id))}));
  const availableRules=(rules.data as AdhocRule[]).filter(r=>!r.source_code||active.some(v=>v.source===r.source_code));
  const contactRule=(rules.data as AdhocRule[]).find(r=>r.contact_role_code);
  let contact: string|null=null;
@@ -40,8 +40,8 @@ export async function prepareAdhocRequest(company:string, head:string, station:s
  const rule=context.rules.find(r=>r.label===label);
  if(!rule)throw new Error('Select an available deployment reason. Refresh the form if needed.');
  const vehicle=String(form.get('adhoc_vehicle_id')||'');
- if(rule.source_code&&!eligibleAdhocVehicles(rule,context.vehicles,date).some(v=>v.id===vehicle))throw new Error(rule.required_status ? `No eligible breakdown vehicle. Contact Fleet Manager${context.contact?' · '+context.contact:''}.`:'Select an eligible vehicle at this station.');
- if(rule.required_status&&!rule.approval_steps)throw new Error('Fleet approval routing is not configured. Contact the administrator.');
+ if(rule.source_code&&!eligibleAdhocVehicles(rule,context.vehicles,date).some(v=>v.id===vehicle))throw new Error(requiredAdhocStatuses(rule).length ? `No eligible vehicle in the configured statuses. Contact Fleet Manager${context.contact?' · '+context.contact:''}.`:'Select an eligible vehicle at this station.');
+ if(rule.reason_key==='company_breakdown'&&!rule.approval_steps)throw new Error('Fleet approval routing is not configured. Contact the administrator.');
  return {fields:{adhoc_reason_key:rule.reason_key,adhoc_vehicle_id:rule.source_code?vehicle:null,adhoc_deployment_date:date,adhoc_approval_steps:rule.approval_steps},steps:rule.approval_steps as ApprovalStepRow[]|null};
 }
 

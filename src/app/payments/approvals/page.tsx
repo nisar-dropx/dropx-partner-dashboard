@@ -1,3 +1,4 @@
+import {adhocVehicleLabel} from '@/lib/adhoc-vehicle-policy';
 import { PaymentCostSummary } from "@/components/payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { PaymentVolumeContext } from "@/components/payment-volume-context";
@@ -553,7 +554,7 @@ export default async function PaymentApprovalsPage({
                 <article><small>Approval status</small><StatusPill status={paymentStatusLabel(selectedRequest)} tone={paymentApprovalStatusTone(selectedRequest)} /></article>
                 <article><small>Location</small><strong>{selectedLocationLabel}</strong>{shipmentCount !== null ? <span>{shipmentCount.toLocaleString("en-IN")} shipments</span> : null}</article>
               </div>
-              {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason} · {replacement.partner || "Name pending"}</strong><p style={{margin:"4px 0 0"}}>{replacement.number} · {replacement.model} · {replacement.source} · Fleet status at request: {replacement.status} · Replacement date: {replacement.date}</p></div> : null}
+              {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason}</strong><p style={{margin:"4px 0 0"}}>{adhocVehicleLabel(replacement)} · Replacement date: {replacement.date}</p></div> : null}
               <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />
               {volumeDate && volumeEvidence ? <PaymentVolumeContext date={volumeDate} initialData={volumeEvidence.data} initialError={volumeEvidence.error} /> : null}
               <details className="payment-review-additional-details">

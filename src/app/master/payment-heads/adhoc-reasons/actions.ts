@@ -10,9 +10,9 @@ export async function saveAdhocReason(form:FormData){
  const key=String(form.get('reason_key')||''),label=String(form.get('label')||'').trim(),sort=Number(form.get('sort_order'));
  if(!/^[a-z][a-z0-9_]{1,60}$/.test(key)||!label||label.length>100||!Number.isInteger(sort)||sort<0)throw new Error('Enter a valid reason name and order.');
  const existing=await db.from('fleet_adhoc_reason_rules').select('*').eq('company_id',company).eq('reason_key',key).single();if(existing.error)throw new Error('Reason not found.');
- const source=String(form.get('source_code')||'')||null,status=String(form.get('required_status')||'')||null,effect=String(form.get('effect_status')||'')||null;
+ const source=String(form.get('source_code')||'')||null,statuses=[...new Set(form.getAll('required_statuses').map(String).filter(Boolean))],effect=String(form.get('effect_status')||'')||null;
  if(source&&source!=='OWN'){const code=await db.from('designations').select('id').eq('company_id',company).eq('code',source).maybeSingle();if(!code.data)throw new Error('Invalid source.');}
- for(const value of [status,effect].filter(Boolean)){const check=await db.from('fleet_vehicle_status_master').select('id').eq('company_id',company).eq('status_key',value).maybeSingle();if(!check.data)throw new Error('Invalid vehicle status.');}
+ for(const value of [...statuses,effect].filter(Boolean)){const check=await db.from('fleet_vehicle_status_master').select('id').eq('company_id',company).eq('status_key',value).maybeSingle();if(!check.data)throw new Error('Invalid vehicle status.');}
  let steps=null;
  if(form.get('special_route')==='on'){
   const roleIds=['first_role','final_role','fallback_role'].map(k=>String(form.get(k)||''));
@@ -20,7 +20,7 @@ export async function saveAdhocReason(form:FormData){
   const allowed=await roleIdsWithPageEditAccess(company,roleIds,'payment_approvals');if(roleIds.some(id=>!allowed.has(id)))throw new Error('Approval roles must have Payment Approvals edit access.');
   steps=[{id:'first',step_order:1,is_required:true,candidates:[{role_id:roleIds[0],scope:'company'}]},{id:'final',step_order:2,is_required:true,candidates:[{role_id:roleIds[1],scope:'company'},{role_id:roleIds[2],scope:'company'}]}];
  }
- const result=await db.from('fleet_adhoc_reason_rules').update({label,source_code:source,required_status:status,effect_status:effect,block_rent:!!effect&&form.get('block_rent')==='on',sort_order:sort,is_active:form.get('is_active')==='on',approval_steps:steps}).eq('company_id',company).eq('reason_key',key);
+ const result=await db.from('fleet_adhoc_reason_rules').update({label,source_code:source,required_status:statuses[0]||null,required_statuses:statuses,effect_status:effect,block_rent:!!effect&&form.get('block_rent')==='on',sort_order:sort,is_active:form.get('is_active')==='on',approval_steps:steps}).eq('company_id',company).eq('reason_key',key);
  if(result.error)throw new Error(result.error.message);
  const rules=await db.from('fleet_adhoc_reason_rules').select('label').eq('company_id',company).eq('is_active',true).order('sort_order');
  const head=await db.from('payment_heads').select('id').eq('company_id',company).eq('code','VAN_ADHOC').single();
