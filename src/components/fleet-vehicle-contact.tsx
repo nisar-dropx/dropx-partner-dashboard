@@ -1,0 +1,24 @@
+"use client";
+import { useState, type FormEvent } from "react";
+import { UserRound } from "lucide-react";
+import type { FleetControlVehicle } from "@/lib/fleet-control";
+type Contacts = Pick<FleetControlVehicle, "daName" | "daContactNumber" | "vendorName" | "vendorContactNumber">;
+export function FleetVehicleContactFields({source,vehicle,disabled=false}:{source:string;vehicle?:FleetControlVehicle;disabled?:boolean}) {
+  if(source === "own")return null;
+  const da=source === "odcd";
+  return <><label><span>{da ? "DA Name" : "Vendor Name"}</span><input name={da ? "da_name" : "vendor_name"} defaultValue={(da ? vehicle?.daName : vehicle?.vendorName) ?? ""} maxLength={160} placeholder={da ? "Enter owner-driver name" : "Enter vendor name"} disabled={disabled} /></label><label><span>Contact Number</span><input name={da ? "da_contact_number" : "vendor_contact_number"} defaultValue={(da ? vehicle?.daContactNumber : vehicle?.vendorContactNumber) ?? ""} type="tel" inputMode="tel" autoComplete="tel" maxLength={24} placeholder="Mobile number" disabled={disabled} /></label></>;
+}
+export function FleetVehicleContactEditor({vehicle,canEdit,onSaved}:{vehicle:FleetControlVehicle;canEdit:boolean;onSaved:(values:Contacts)=>void}) {
+ const [saving,setSaving]=useState(false);const [message,setMessage]=useState<{error:boolean;text:string}|null>(null);
+ if(vehicle.ownershipType === "own")return null;
+ async function save(event:FormEvent<HTMLFormElement>){
+  event.preventDefault();const form=new FormData(event.currentTarget);setSaving(true);setMessage(null);
+  try {
+   const response=await fetch('/api/fleet/vehicles',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({vehicle_no:vehicle.vehicleNo,...Object.fromEntries(form.entries())})});
+   const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not save contact.');
+   onSaved({daName:result.vehicle.da_name,daContactNumber:result.vehicle.da_contact_number,vendorName:result.vehicle.vendor_name,vendorContactNumber:result.vehicle.vendor_contact_number});
+   setMessage({error:false,text:'Contact saved.'});
+  }catch(error){setMessage({error:true,text:error instanceof Error?error.message:'Could not save contact.'});}finally{setSaving(false);}
+ }
+ return <section className="fc-manage-card"><div className="fc-manage-card-head"><span><UserRound size={17}/></span><div><strong>{vehicle.ownershipType==='odcd'?'DA contact':'Vendor contact'}</strong><small>{vehicle.ownershipType==='odcd'?'Owner-driver details':'Vehicle provider details'}</small></div></div><form className="fc-placement-form" onSubmit={save}><div className="fc-placement-grid"><FleetVehicleContactFields source={vehicle.ownershipType} vehicle={vehicle} disabled={!canEdit||saving}/></div>{canEdit&&<button className="fc-button primary" type="submit" disabled={saving}>{saving?'Saving…':'Save contact'}</button>}{message&&<p role={message.error?'alert':'status'} style={{color:message.error?'#be123c':'#137660'}}>{message.text}</p>}</form></section>;
+}

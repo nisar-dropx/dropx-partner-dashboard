@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {parseVehicleContact} from '../src/lib/fleet/vehicle-contact.ts';
 import {PGlite} from '@electric-sql/pglite';
 import {documentApplies,sourceApplies,deploymentDateError} from '../src/lib/fleet/source-policy.ts';
 assert.equal(documentApplies({value:'FLEET_TAX',ownershipTypes:['own']},{ownershipType:'odcd',fuelType:'Diesel'}),false);
@@ -9,6 +10,10 @@ assert.equal(sourceApplies({ownershipTypes:['odcd']},'own'),false);
 assert.equal(deploymentDateError('2026-02-30','2026-10-05'),'Enter a valid deployment date.');
 assert.equal(deploymentDateError('2026-09-01','2026-10-05'),null);
 assert.ok(deploymentDateError('2026-10-06','2026-10-05'));
+assert.deepEqual(parseVehicleContact({da_name:' Driver ',da_contact_number:'+91 98765 43210'}).values,{da_name:'Driver',da_contact_number:'+919876543210'});
+assert.equal(parseVehicleContact({vendor_name:'Vendor',vendor_contact_number:''}).values.vendor_contact_number,null);
+assert.ok(parseVehicleContact({da_contact_number:'invalid'}).error);
+assert.deepEqual(parseVehicleContact({status:'active'}).values,{});
 const db=new PGlite();
 await db.exec(`create role anon;create role authenticated;create role service_role;
 create table document_types(id uuid default gen_random_uuid(),company_id uuid,code text,document_module text);
@@ -38,5 +43,9 @@ await assert.rejects(db.query("update fleet_vehicles set deployment_date='2099-0
 await db.query("update fleet_vehicles set deployment_status='not_deployed' where id=$1",[v]);
 const today=(await db.query("select (now() at time zone 'Asia/Kolkata')::date::text d")).rows[0].d;
 assert.equal((await db.query('select * from fleet_vehicle_rent_daily($1,$2,$2,null)',[c,today])).rows.length,0,'Non-deployed date does not accrue rent');
+await db.exec(fs.readFileSync('supabase/migrations/20261005155522_fleet_vehicle_source_contacts.sql','utf8'));
+await db.query("update fleet_vehicles set da_name='Owner driver',da_contact_number='+919876543210' where id=$1",[v]);
+assert.equal((await db.query('select da_name,vendor_name from fleet_vehicles where id=$1',[v])).rows[0].vendor_name,null,'DA and vendor identities remain separate');
+await assert.rejects(db.query("update fleet_vehicles set vendor_contact_number='abc' where id=$1",[v]),/fleet_vehicle_contacts_valid/);
 await db.close();
 console.log('Fleet document source, ODCD leave and historical deployment costing checks passed.');

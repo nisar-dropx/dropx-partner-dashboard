@@ -1,3 +1,4 @@
+import { parseVehicleContact } from "@/lib/fleet/vehicle-contact";
 import { deploymentDateError } from "@/lib/fleet/source-policy";
 import { parseVehicleRent } from "@/lib/fleet/vehicle-rent";
 import { NextResponse } from "next/server";
@@ -40,9 +41,11 @@ export async function POST(request: Request) {
   const access = await requireFleetMutationPermission("add");
   if ("error" in access) return access.error;
   const body = await request.json();
+  const contact = parseVehicleContact(body);
+  if (contact.error) return NextResponse.json({error:contact.error},{status:400});
   const rent = parseVehicleRent(body);
   if (rent.error) return NextResponse.json({ error: rent.error }, { status: 400 });
-  const payload: Record<string, string | null> = { ...sanitizePayload(body), ...rent.values, company_id: access.companyId };
+  const payload: Record<string, string | null> = { ...sanitizePayload(body), ...rent.values, ...contact.values, company_id: access.companyId };
   const dateError = deploymentDateError(payload.deployment_date ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()), new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
   if (dateError) return NextResponse.json({error:dateError},{status:400});
   if (!payload.status) payload.status = "active";
@@ -85,12 +88,14 @@ export async function PATCH(request: Request) {
   const access = await requireFleetMutationPermission("edit");
   if ("error" in access) return access.error;
   const body = await request.json();
+  const contact = parseVehicleContact(body);
+  if (contact.error) return NextResponse.json({error:contact.error},{status:400});
   const rent = parseVehicleRent(body);
   if (rent.error) return NextResponse.json({ error: rent.error }, { status: 400 });
   const vehicleNo = normalizeText(body.vehicle_no).toUpperCase();
   if (!vehicleNo) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
 
-  const payload = { ...sanitizePayload(body), ...rent.values };
+  const payload = { ...sanitizePayload(body), ...rent.values, ...contact.values };
   delete payload.vehicle_no;
   if ("deployment_date" in payload) {
     const dateError=deploymentDateError(payload.deployment_date,new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata"}).format(new Date()));
