@@ -1,3 +1,4 @@
+import { loadExpenseVariances, expenseVarianceExport } from "@/lib/expense-variance-data";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
@@ -68,6 +69,15 @@ export async function GET(request: Request) {
   if (!codes.length) return Response.json({ error: "No permitted stations." }, { status: 403 });
   const suffix = `${from}-to-${to}.csv`;
 
+  if (type === "expense_variance") {
+    if (locations.error) return Response.json({error:"Station scope is unavailable."},{status:503});
+    try {
+      const records = await loadExpenseVariances(db, companyId, locations.locations.filter(s=>codes.includes(s.station_code)), from, to);
+      const head=url.searchParams.get('head'),attention=url.searchParams.get('attention');
+      const rows=records.filter(r=>(!head||r.headCode===head)&&(!attention||(attention==='overrun'?r.overrun:r.state==='Actual pending')));
+      return workbookResponse([{name:'Expense comparison',rows:expenseVarianceExport(rows)},{name:'Read me',rows:[{Basis:'Work date; actual is submitted cost, not settled payment.',Estimate:'Saved expense estimate. Historical edits may have changed legacy estimates.',Attention:'Positive overruns on active requests; missing actuals are pending, not zero.'}]}],`expense-variance-${from}-to-${to}.xlsx`);
+    } catch { return Response.json({error:'Expense comparison could not be loaded.'},{status:503}); }
+  }
   if (type === "adhoc_da") {
     const head = await db.from("payment_heads").select("id").eq("company_id", companyId).eq("code", "ADHOC_DA").maybeSingle();
     if (head.error || !head.data) return Response.json({ error: "Adhoc DA payment head is unavailable." }, { status: 503 });

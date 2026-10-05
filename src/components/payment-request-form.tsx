@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { PaymentCostSummary } from "./payment-cost-summary";
+import { estimatedShipments } from "@/lib/expense-variance";
+import { PaymentVolumeContext } from "./payment-volume-context";
 import { AdhocDaFields } from "./adhoc-da-fields";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PaymentContactPicker } from "@/components/payment-contact-picker";
@@ -93,9 +96,9 @@ function inputForQuestion(question: PaymentQuestion, disabled = false) {
       disabled={disabled}
       name={name}
       required={question.is_required}
-      step={question.answer_type === "number" ? "0.01" : undefined}
+      step={question.answer_type === "number" ? (/^estimated shipments$/i.test(question.question_text.trim()) ? "1" : "0.01") : undefined}
       type={question.answer_type === "number" ? "number" : question.answer_type === "date" ? "date" : "text"}
-      min={dateBounds?.min}
+      min={/^estimated shipments$/i.test(question.question_text.trim()) ? 1 : dateBounds?.min}
       max={dateBounds?.max}
     />
     {dateBounds?.helper ? <span className="helper-text">Allowed: {dateBounds.helper}</span> : null}
@@ -113,6 +116,9 @@ export function PaymentRequestForm({
   showBankDetails = true,
   submitLabel = "Submit request"
 }: PaymentRequestFormProps) {
+  const [volumeReason, setVolumeReason] = useState("");
+  const [volumeDate, setVolumeDate] = useState("");
+  const [costAnswers, setCostAnswers] = useState<Record<string,string>>({});
   const [selectedHeadId, setSelectedHeadId] = useState("");
   const [selectedLocationId, setSelectedLocationId] = useState("");
   const [amountText, setAmountText] = useState("");
@@ -264,7 +270,7 @@ export function PaymentRequestForm({
         </label>
         <label>
           Payment Head
-          <SearchableSelect name="payment_head_id" options={headOptions} placeholder="Select payment head" required onValueChange={setSelectedHeadId} />
+          <SearchableSelect name="payment_head_id" options={headOptions} placeholder="Select payment head" required onValueChange={(id) => { setSelectedHeadId(id); setVolumeDate(""); setVolumeReason(""); setCostAnswers({}); }} />
         </label>
         <label>
           {amountLabel}
@@ -374,10 +380,19 @@ export function PaymentRequestForm({
         </>
       ) : null}
 
+      {selectedHead ? <PaymentCostSummary estimate={hasAmount ? amount : null} shipments={estimatedShipments(selectedHead.payment_head_questions.map(q => ({ answer_value: costAnswers[q.id] ?? null, payment_head_questions: q })))} /> : null}
+      {selectedHead?.code === "VAN_ADHOC" && volumeReason.trim().toLowerCase() === "high volume" ? <PaymentVolumeContext key={`${selectedLocationId}:${volumeDate}`} locationId={selectedLocationId} date={volumeDate} /> : null}
+
       {selectedHead?.payment_head_questions.length ? (
         <>
           <div className="section-divider" />
-          <div className="form-grid three">
+          <div className="form-grid three" key={selectedHead.id} onChange={(event) => {
+            const input = event.target as HTMLInputElement | HTMLSelectElement;
+            const question = selectedHead.payment_head_questions.find(q => `answers[${q.id}]` === input.name);
+            if (question) setCostAnswers(old => ({...old, [question.id]: input.value}));
+            if (/^deployment date$/i.test(question?.question_text.trim() ?? "")) setVolumeDate(input.value);
+            if (/reason.*(?:adhoc|ad hoc).*deployment/i.test(question?.question_text ?? "")) setVolumeReason(input.value);
+          }}>
             {selectedHead.payment_head_questions.map((question) => {
               const questionLabel = question.question_text.toLowerCase();
               const isWideField = question.answer_type === "textarea" || questionLabel.includes("mail subject") || questionLabel.includes("subject");

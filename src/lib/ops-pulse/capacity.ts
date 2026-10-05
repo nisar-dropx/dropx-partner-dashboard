@@ -178,7 +178,7 @@ export async function deleteCapacityRegionMap(companyId: string, id: string) {
 export async function loadShipmentSizeRule(companyId: string) {
   if (!supabaseAdmin) return { rule: null as ShipmentSizeRule | null, error: "Database service is unavailable." };
   const result = await supabaseAdmin.from("report_import_master").select("id,description")
-    .eq("company_id", companyId).eq("source_code", "capacity_shipment_size_rule").maybeSingle();
+    .eq("company_id", companyId).eq("source_code", "capacity_shipment_size_rule").eq("is_active", true).maybeSingle();
   try {
     return { rule: result.data ? { ...(JSON.parse(result.data.description ?? "{}") as ShipmentSizeRule), id: result.data.id } : null, error: result.error?.message ?? null };
   } catch {

@@ -1485,7 +1485,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
         location_code: locationResult.data.station_code,
         station_code: locationResult.data.station_code,
         amount: Number(amountText),
-        amount_requested: Number(amountText),
+        // Keep the expense estimate when actual payment details are resubmitted.
         payment_mode: paymentMode,
         payment_portal: isUpiPayment ? "UPI" : paymentPortal,
         payment_reference: paymentReference,

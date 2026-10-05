@@ -20,6 +20,7 @@ export default async function OpsReportsPage() {
     <PageHead eyebrow="Ops Pulse" title="Reports" subtitle="Date-range operational downloads for permitted stations." />
     {locationResult.error ? <section className="message-panel error">{locationResult.error}</section> : null}
     {hasPermission(authorization, "performance_review", "access") ? <ReviewReportBuilder stations={reviewLocations.map((row) => ({ code: row.station_code, name: row.station_name || row.city || row.station_code, cluster: row.cluster || "Unassigned" }))}/> : null}
+    <section className="panel" style={{padding:16,marginBottom:16}}><a className="button" href="/reports/expense-variance">Estimated vs Actual Expenses · Need attention</a><p className="subtle">Compare costs by payment head and station; filter overruns and pending actuals.</p></section>
     <OpsReportCenter stations={locations.map((row) => ({ code: row.station_code, name: row.station_name || row.city || row.station_code, cluster: row.cluster || "Unassigned" }))}/>
   </div></AppShell>;
 }

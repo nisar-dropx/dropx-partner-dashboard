@@ -99,7 +99,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!recipient.stationIds.includes(id)))throw new Error('Recipient COD access changed; reminder held.');
     }
     if(delivery.event_key.startsWith('adhoc_usage_digest')) {
-     const scope=await loadAdHocMailScope(db,delivery.company_id,String(controlResult.data.config.email_domain||""));
+     const scope=await loadAdHocMailScope(db,delivery.company_id,String(controlResult.data.config.email_domain||""),Array.isArray(controlResult.data.config.additional_recipient_emails)?controlResult.data.config.additional_recipient_emails:[]);
      const recipient=scope.recipients.find(row=>row.email===delivery.recipient_email);
      const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
      if(saved.error)throw new Error(saved.error.message);

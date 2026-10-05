@@ -54,3 +54,18 @@ export async function sendCodPendingCurrentStatus(){
  revalidatePath('/settings/notifications');
  redirect('/settings/notifications?notice='+encodeURIComponent(notice)+'#cod-pending');
 }
+
+export async function saveAdHocDigestSettings(form:FormData){
+ const auth=await requirePagePermission('ops_notification_settings','edit'),company=requireCompanyId(auth),db=digestDatabase();
+ let error='';
+ try{
+  const old=await db.from('portal_notification_controls').select('config').eq('company_id',company).eq('portal','ops').eq('event_key','adhoc_usage_digest').single();
+  if(old.error)throw new Error('Schedule unavailable.');
+  const update=validateDigestSettings(form,old.data.config);
+  const emails=[...new Set(String(form.get('additional_recipient_emails')||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean))];
+  if(emails.some(e=>!/^[^\s@<>]+@[^\s@<>]+$/.test(e)||!e.endsWith('@'+old.data.config.email_domain)))throw new Error('Use company email addresses only.');
+  const result=await db.from('portal_notification_controls').update({...update,config:{...update.config,additional_recipient_emails:emails},updated_by:auth.userId,updated_at:new Date().toISOString()}).eq('company_id',company).eq('portal','ops').eq('event_key','adhoc_usage_digest');
+  if(result.error)throw new Error('Settings could not be saved.');
+ }catch(e){error=e instanceof Error?e.message:'Settings unavailable.';}
+ revalidatePath('/settings/notifications');redirect('/settings/notifications?'+(error?'error='+encodeURIComponent(error):'saved=1')+'#adhoc-report');
+}

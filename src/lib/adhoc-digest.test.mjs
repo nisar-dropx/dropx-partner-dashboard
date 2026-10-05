@@ -14,7 +14,9 @@ function compile(path, mocks = {}) {
   return module.exports;
 }
 const scope = compile("./adhoc-digest-scope.ts");
-const digest = compile("./adhoc-digest.ts", {
+const costMail = compile("./adhoc-cost-mail.ts");
+const costMocks = {"./adhoc-cost-mail": costMail, "./expense-variance-data": {loadExpenseVariances:async()=>[]}};
+const digest = compile("./adhoc-digest.ts", { ...costMocks,
   "./ops-pulse/adhoc-activity": {}, "./adhoc-digest-scope": scope
 });
 const station = (id, provider = "AMAZON", model = "EDSP", region = "KL") => ({ id, station_code: id.toUpperCase(), station_name: id, cluster: "Test cluster", region, state: region === "KL" ? "Kerala" : region === "AP" ? "Andhra Pradesh" : "Odisha", providers: { code: provider }, location_models: { code: model } });
@@ -77,22 +79,23 @@ test("email separates driver and DA, deduplicates linked cashbook entries, and u
   assert.deepEqual(usage.day, { Van: { count: 1, amount: 150 }, DA: { count: 1, amount: 60 }, Driver: { count: 1, amount: 90 } });
   assert.deepEqual(usage.mtd.Van, { count: 2, amount: 350 });
   const [message] = digest.buildAdHocMessages(options);
-  assert.deepEqual(message.scope.stationIds, ["a", "flip"]);
+  assert.deepEqual(message.scope.stationIds, ["a", "b", "flip"]);
   assert.equal(message.subject, "Ad hoc usage | September 2026");
   assert.match(message.html, /Previous day: 11 Sept 2026 · MTD: 01 Sept 2026–11 Sept 2026/);
   assert.doesNotMatch(message.html, /Hello |Counts are usage instances|Data checked at/);
   assert.match(message.text, /Ad hoc Driver/);
-  assert.match(message.text, /Ad hoc Van — previous day: 2 instances, ₹270.00; MTD: 3 instances, ₹470.00/);
-  assert.match(message.text, /Ad hoc DA \/ WM — previous day: 1 instances, ₹60.00; MTD: 1 instances, ₹60.00/);
+  assert.match(message.text, /Ad hoc Van — previous day: 2 instances, ₹270.00; MTD: 4 instances, ₹570.00/);
+  assert.match(message.text, /Ad hoc DA \/ WM — previous day: 2 instances, ₹100.00; MTD: 2 instances, ₹100.00/);
   assert.match(message.text, /Ad hoc Driver — previous day: 1 instances, ₹90.00; MTD: 1 instances, ₹90.00/);
   assert.match(message.text, /KL REGION[\s\S]*KL total[\s\S]*Ad hoc Van total[\s\S]*Ad hoc DA \/ WM total[\s\S]*Ad hoc Driver total[\s\S]*ODCG REGION[\s\S]*ODCG total/);
   assert.doesNotMatch(message.text, /Station total|Regional total|Overall total/);
   assert.doesNotMatch(message.html, />Program</);
-  assert.doesNotMatch(message.text, /9,999|NOW|\nB \|/);
+  assert.doesNotMatch(message.text, /9,999|NOW/);
 });
 
-test("no message for recipients without a previous-day van; MTD-only and DA-only activity does not qualify", () => {
-  assert.deepEqual(digest.buildAdHocMessages({ ...options, recipients: [{ email: "b@example.com", name: "B", stationIds: ["b"] }] }), []);
+test("DA-only activity qualifies; MTD-only activity does not", () => {
+  assert.equal(digest.buildAdHocMessages({ ...options, recipients: [{ email: "b@example.com", name: "B", stationIds: ["b"] }] }).length, 1);
+  assert.equal(digest.buildAdHocMessages({...options,activity:[activity("b",[{date:"2026-09-10",entries:[entry("Van",100)]}])]}).length,0);
   assert.deepEqual(digest.buildAdHocMessages({ ...options, activity: [] }), []);
   const [message] = digest.buildAdHocMessages({ ...options, recipients: [{ email: "f@example.com", name: "F", stationIds: ["flip"] }] });
   assert.doesNotMatch(message.text, /Ad hoc Driver|\nA \|/);
@@ -112,7 +115,7 @@ test("8am IST trigger reports yesterday and retains the previous month on the fi
 
 test("builder stops on incomplete source data and missing operations recipients", async () => {
   const source = { error: "Source failed", stations: [] };
-  const module = compile("./adhoc-digest.ts", {
+  const module = compile("./adhoc-digest.ts", { ...costMocks,
     "./ops-pulse/adhoc-activity": { loadAdHocActivity: async () => source },
     "./adhoc-digest-scope": { ...scope, loadAdHocMailScope: async () => ({ stations: options.stations, recipients: [] }) }
   });

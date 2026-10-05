@@ -90,7 +90,7 @@ async function allRows<T>(query: (offset: number) => PromiseLike<{ data: unknown
   throw new Error("Ad hoc recipient scope exceeds the supported size.");
 }
 
-export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, domain: string) {
+export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, domain: string, additionalEmails: string[] = []) {
   const [stations, memberships, roles, profiles, personLinks, people, engagements, assignments, departments] = await Promise.all([
     allRows<AdHocMailStation>(offset => db.from("stations")
       .select("id,station_code,station_name,station_email,state,region,cluster,cluster_manager,aom,hide_from_location_list,providers(code,name),location_models(code,name)")
@@ -133,5 +133,13 @@ export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, 
     && adHocRegionLabel(station) === "Unassigned");
   if (unassignedRegions.length) throw new Error(`Ad hoc stations have no KL/AP/ODCG region: ${unassignedRegions.map(station => station.station_code).join(", ")}`);
   const included = stations.filter(station => !station.hide_from_location_list && isAdHocMailStation(station));
-  return { stations: included, recipients: resolveAdHocRecipients(included, memberships, roles, profiles, domain, operationsUserIds) };
+  const recipients = resolveAdHocRecipients(included, memberships, roles, profiles, domain, operationsUserIds);
+  for (const email of additionalEmails.map(value=>value.trim().toLowerCase())) {
+    const profile=profiles.find(p=>p.email?.trim().toLowerCase()===email);
+    if(!profile || !email.endsWith('@'+domain.toLowerCase()) || !/^[^\s@<>]+@[^\s@<>]+$/.test(email)) continue;
+    const access=memberships.filter(m=>m.user_id===profile.id);
+    const ids=included.filter(station=>access.some(m=>m.has_all_location_access||roles.find(r=>r.id===m.role_id)?.location_access_mode==='all_locations'||m.location_scope_ids?.includes(station.id))).map(s=>s.id);
+    if(ids.length && !recipients.some(r=>r.email===email)) recipients.push({email,name:profile.full_name||email,stationIds:ids});
+  }
+  return { stations: included, recipients };
 }

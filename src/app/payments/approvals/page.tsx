@@ -1,3 +1,8 @@
+import { PaymentCostSummary } from "@/components/payment-cost-summary";
+import { estimatedShipments } from "@/lib/expense-variance";
+import { PaymentVolumeContext } from "@/components/payment-volume-context";
+import { highVolumeContext } from "@/lib/payment-volume";
+import { loadPaymentVolume, paymentVolumeToday } from "@/lib/payment-volume-data";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentApprovalFilters, type PaymentApprovalFilterOption } from "@/components/payment-approval-filters";
@@ -368,6 +373,12 @@ export default async function PaymentApprovalsPage({
     payment_head_questions: firstRelation(answer.payment_head_questions)
   }));
   const shipmentCount = paymentShipmentCount(answers);
+  const volumeDate = highVolumeContext(selectedRequest?.payment_heads?.code, answers);
+  const volumeEvidence = volumeDate && selectedRequest
+    ? await loadPaymentVolume(companyId, selectedRequest.location_code, volumeDate, paymentVolumeToday())
+        .then(data => ({ data, error: "" })).catch(() => ({ data: null, error: "Volume evidence is unavailable. Reload to retry." }))
+    : null;
+
   const logs = selectedDetailData?.[2].logs ?? [];
   const currentApprovalCycle = Number(selectedRequest?.approval_cycle) || 1;
   const isResubmitted = selectedRequest ? isResubmittedPaymentStage(selectedRequest) : false;
@@ -540,6 +551,8 @@ export default async function PaymentApprovalsPage({
                 <article><small>Approval status</small><StatusPill status={paymentStatusLabel(selectedRequest)} tone={paymentApprovalStatusTone(selectedRequest)} /></article>
                 <article><small>Location</small><strong>{selectedLocationLabel}</strong>{shipmentCount !== null ? <span>{shipmentCount.toLocaleString("en-IN")} shipments</span> : null}</article>
               </div>
+              <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />
+              {volumeDate && volumeEvidence ? <PaymentVolumeContext date={volumeDate} initialData={volumeEvidence.data} initialError={volumeEvidence.error} /> : null}
               <details className="payment-review-additional-details">
                 <summary><span>Payment and beneficiary details</span><small>Open only when needed</small></summary>
                 <div className="form-grid three">

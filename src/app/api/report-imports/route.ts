@@ -1,3 +1,4 @@
+import { inboundServingStation } from "@/lib/inbound-serving-station";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
@@ -1603,7 +1604,8 @@ function parseInboundShipmentFacts(rows: SheetRow[], companyId: string, batchId:
   const preserveEmbeddedDates = embeddedDates.size > 1;
   records.forEach(({ raw, rowNumber }) => {
     const trackingId = clean(findValue(raw, ["Tracking ID", "Tracking Number", "Shipment ID", "Container Id", "Container ID"]));
-    const stationCode = normalizeStation(findValue(raw, ["Station", "Station Code", "Delivery Station"])) || fallbackStation;
+    const servingStation = inboundServingStation(raw, fallbackStation);
+    const stationCode = servingStation.stationCode;
     const embeddedArrivalDate = parseDate(findValue(raw, [
       "Estimated Arrival Date", "Expected Arrival Date", "Arrival Date",
       "Promised Delivery Date", "Scheduled Delivery Start time"
@@ -1639,7 +1641,9 @@ function parseInboundShipmentFacts(rows: SheetRow[], companyId: string, batchId:
       length_cm: lengthCm,
       package_count: isContainerHierarchy ? 1 : Math.max(1, toNumber(findValue(raw, ["Package Count"])) || 1),
       postal_code: postalCode,
-      raw_payload: isContainerHierarchy ? { source_format: "container_hierarchy" } : {},
+      raw_payload: { ...(isContainerHierarchy ? { source_format: "container_hierarchy" } : {}),
+        serving_station_code: servingStation.explicit ? stationCode : "",
+        station_source_field: servingStation.sourceField, receiving_station_code: fallbackStation || "" },
       shipment_state: isContainerHierarchy ? "Inbound container" : clean(findValue(raw, ["State", "Shipment State"])) || null,
       snapshot_at: timestamp(findValue(raw, ["Last Updated Time", "Snapshot Time", "Report Time"])),
       source_batch_id: batchId,
