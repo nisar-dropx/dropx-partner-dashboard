@@ -110,10 +110,11 @@ export default async function CpsPage({
                 <p>
                   People CTC, Dashboard DA payments, Finance station rent, Fleet
                   vehicle rent, fuel imports, approved payments and cashbook
-                  feed CPS automatically. Use the forms below only for
+                  and actual Meta advertising spend feed CPS automatically. Use the forms below only for
                   additional costs or allocation overrides.
                 </p>
                 <div>
+                  <a href="/master/advertising">Advertising master</a>
                   <a href="https://finance.dropxlogistics.com/master/rent">
                     Station rent master
                   </a>

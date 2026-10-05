@@ -143,6 +143,7 @@ export function cpsForStation(data: CpsSnapshot, station: string): CpsSnapshot {
     staff: only(data.staff),
     vehicles: only(data.vehicles),
     expense_periods: only(data.expense_periods),
+    advertising: only(data.advertising),
   };
 }
 export function mergeCpsMonths(parts: CpsSnapshot[]): CpsSnapshot {
@@ -173,6 +174,7 @@ export function mergeCpsMonths(parts: CpsSnapshot[]): CpsSnapshot {
           .at(-1) ?? null,
       ]),
     ) as CpsSnapshot["source_dates"],
+    advertising: parts.flatMap((p) => p.advertising ?? []),
     associates: parts.flatMap((p) => p.associates ?? []),
     da_details: merge(parts.flatMap(p=>p.da_details??[]), p=>`${p.worker_id}|${p.station_code}|${p.cohort}`, (a,b)=>({
       ...a, provider_ids:[...new Set([...a.provider_ids,...b.provider_ids])],
@@ -259,6 +261,7 @@ export type CpsLine = {
   amount: number;
 };
 export type CpsSnapshot = {
+  advertising?: import("./advertising").AdvertisingDetail[];
   daily: CpsDay[];
   breakup: CpsLine[];
   generated_at: string;

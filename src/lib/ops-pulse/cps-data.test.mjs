@@ -52,6 +52,8 @@ function dataModule(db, locations = all, rebuildCps = (base) => base) {
     "server-only": {},
     react: { cache: (fn) => fn },
     "./cps-engine": { rebuildCps },
+    "./advertising": { excludeAdvertisingSettlements: base => base },
+    "./advertising-data": { loadAdvertising: async () => ({breakup:[],gaps:[],rows:[],settlements:[]}) },
     "@/lib/company-scope": { requireCompanyId: (a) => a.companyId },
     "@/lib/authorization": {},
     "./cod": {
