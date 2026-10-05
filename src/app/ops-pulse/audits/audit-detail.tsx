@@ -1,4 +1,9 @@
 "use client";
+import { SearchableSelect } from "@/components/searchable-select";
+import {
+  auditMonthRange,
+  auditResponseLabel,
+} from "@/lib/ops-pulse/station-audit-planning";
 import { useState, useTransition } from "react";
 import {
   addAuditManagerComment,
@@ -7,6 +12,8 @@ import {
   respondToStationAudit,
   submitStationAudit,
   rescheduleStationAudit,
+  manageAuditAssignment,
+  retryStationAuditEmail,
 } from "./actions";
 import type {
   AuditChecklistItem,
@@ -40,17 +47,21 @@ const responseValue = (raw: unknown) =>
     ? value((raw as { value?: unknown }).value)
     : value(raw);
 function useAction() {
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
   const run = (action: () => Promise<Result>) =>
-    startTransition(async () => {
+    (async () => {
+      if (pending) return;
+      setPending(true);
       try {
         const result = await action();
         setNotice(result.message);
       } catch {
         setNotice("Unable to save. Please try again.");
+      } finally {
+        setPending(false);
       }
-    });
+    })();
   return { pending, notice, run };
 }
 type ShipmentDraft = {
@@ -67,13 +78,21 @@ export function AuditDetail({
   workspace,
   canManage,
   canRespond,
+  canDelete,
+  canPerform,
+  onDeleted,
 }: {
   audit: StationAudit;
   workspace: StationAuditWorkspace;
   canManage: boolean;
   canRespond: boolean;
+  canDelete: boolean;
+  canPerform: boolean;
+  onDeleted: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const editable =
+    canPerform && (audit.status_code === "in_progress" || editing);
   const type = workspace.auditTypes.find(
     (row) => row.id === audit.audit_type_id,
   );
@@ -117,6 +136,22 @@ export function AuditDetail({
   const denominations = workspace.options.filter(
     (option) => option.option_group === "cash_denomination",
   );
+  const [expectedCash, setExpectedCash] = useState(
+    audit.system_cash_amount == null ? "" : String(audit.system_cash_amount),
+  );
+  const [counts, setCounts] = useState<Record<string, number>>(() =>
+    Object.fromEntries(
+      [...cash].map(([id, row]) => [id || "", row.note_count]),
+    ),
+  );
+  const actualCash = denominations.reduce(
+    (sum, d) => sum + (counts[d.id] || 0) * Number(d.metadata.value || d.code),
+    0,
+  );
+  const variance =
+    expectedCash === ""
+      ? null
+      : Math.round((actualCash - Number(expectedCash)) * 100) / 100;
   const physicalStatuses = workspace.options.filter(
     (option) => option.option_group === "shipment_physical_status",
   );
@@ -171,7 +206,7 @@ export function AuditDetail({
           <span className={statusClass(audit.status_code)}>
             {auditStatusLabel(audit.status_code)}
           </span>
-          {canManage && audit.status_code === "scheduled" ? (
+          {canPerform && audit.status_code === "scheduled" ? (
             <button
               className="button compact"
               disabled={lifecycle.pending}
@@ -180,7 +215,9 @@ export function AuditDetail({
               Start audit
             </button>
           ) : null}
-          {canManage && audit.completed_at && audit.status_code !== "closed" ? (
+          {canPerform &&
+          audit.completed_at &&
+          audit.status_code !== "closed" ? (
             <button
               className="button secondary compact"
               onClick={() => setEditing(!editing)}
@@ -205,11 +242,60 @@ export function AuditDetail({
         </div>
       ) : null}
       <AuditIdentity audit={audit} workspace={workspace} />
+      {canManage && (
+        <AuditControls
+          audit={audit}
+          workspace={workspace}
+          canDelete={canDelete}
+          onDeleted={onDeleted}
+        />
+      )}
+      {audit.completed_at && (
+        <div className={styles.identity}>
+          <span>
+            Station response<strong>{auditResponseLabel(audit)}</strong>
+          </span>
+          <span>
+            Report email
+            <strong>
+              {audit.email_status === "sent"
+                ? "Sent"
+                : audit.email_status === "failed"
+                  ? "Failed"
+                  : "Not sent"}
+            </strong>
+            <small>
+              {audit.email_sent_at ? formatDateTime(audit.email_sent_at) : ""}
+            </small>
+            {audit.email_error && <small>{audit.email_error}</small>}
+          </span>
+          <span>
+            Recipients
+            <strong>
+              {(audit.email_recipients || []).join(", ") || "Not sent yet"}
+            </strong>
+          </span>
+          {canManage && audit.email_status !== "sent" && (
+            <button
+              className="button secondary compact"
+              disabled={lifecycle.pending}
+              onClick={() =>
+                lifecycle.run(() => retryStationAuditEmail(audit.id))
+              }
+            >
+              Retry report email
+            </button>
+          )}
+        </div>
+      )}
+
       {canManage && audit.status_code === "scheduled" ? (
         <Reschedule audit={audit} workspace={workspace} />
       ) : null}
-      <div className={styles.detailGrid}>
-        {canManage && (audit.status_code === "in_progress" || editing) ? (
+      <div
+        className={`${styles.detailGrid} ${canPerform && (audit.status_code === "in_progress" || editing) ? styles.editingAudit : ""}`}
+      >
+        {canPerform && (audit.status_code === "in_progress" || editing) ? (
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -219,56 +305,49 @@ export function AuditDetail({
             }}
           >
             <input type="hidden" name="audit_id" value={audit.id} />
+            <input type="hidden" name="updated_at" value={audit.updated_at} />
             <details className={styles.section} open>
               <summary>
-                Reconciliation snapshot{" "}
-                <span>cash, shipment and video evidence</span>
+                Cash check <span>expected · counted · difference</span>
               </summary>
               <div className={styles.sectionBody}>
                 <div className={styles.twoCol}>
                   <label className={styles.inputLabel}>
-                    Cash as per system
+                    Expected cash as per ERP (₹)
                     <input
                       name="system_cash_amount"
                       type="number"
                       min="0"
                       step="0.01"
-                      defaultValue={audit.system_cash_amount ?? ""}
+                      value={expectedCash}
+                      onChange={(e) => setExpectedCash(e.target.value)}
+                      required
                     />
                   </label>
                   <label className={styles.inputLabel}>
-                    Physical cash total{" "}
-                    <small>Must equal denominations below</small>
+                    ERP screenshot / proof
                     <input
-                      name="physical_cash_amount"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      defaultValue={audit.physical_cash_amount ?? ""}
+                      name="erp_evidence"
+                      type="file"
+                      accept="image/*,application/pdf"
+                      required={
+                        !evidence.some(
+                          (e) => e.evidence_kind_code === "erp_screenshot",
+                        )
+                      }
                     />
-                  </label>
-                  <label className={styles.inputLabel}>
-                    Shipments as per system
-                    <input
-                      name="system_shipment_count"
-                      type="number"
-                      min="0"
-                      defaultValue={audit.system_shipment_count ?? ""}
-                    />
-                  </label>
-                  <label className={styles.inputLabel}>
-                    Physical shipment count
-                    <input
-                      name="physical_shipment_count"
-                      type="number"
-                      min="0"
-                      defaultValue={audit.physical_shipment_count ?? ""}
-                    />
+                    <small>
+                      {evidence.some(
+                        (e) => e.evidence_kind_code === "erp_screenshot",
+                      )
+                        ? "Saved ERP proof is available below. Attach a replacement only if needed."
+                        : "Attach the ERP cash balance used for this comparison."}
+                    </small>
                   </label>
                 </div>
-                <div style={{ marginTop: 12 }}>
+                <div style={{ marginTop: 16 }}>
                   <div className={styles.checkTitle}>
-                    Physical cash denomination count
+                    Cash in hand · enter the number of notes / coins
                   </div>
                   <div className={styles.denoms}>
                     {denominations.map((option) => (
@@ -276,15 +355,83 @@ export function AuditDetail({
                         <span>{option.label}</span>
                         <input
                           name={`denomination_${option.id}`}
+                          aria-label={`${option.label} count`}
                           type="number"
                           min="0"
                           step="1"
-                          defaultValue={cash.get(option.id)?.note_count ?? 0}
+                          value={counts[option.id] ?? 0}
+                          onChange={(e) =>
+                            setCounts((v) => ({
+                              ...v,
+                              [option.id]: Number(e.target.value),
+                            }))
+                          }
                         />
+                        <small>
+                          ₹
+                          {(
+                            (counts[option.id] || 0) *
+                            Number(option.metadata.value || option.code)
+                          ).toLocaleString("en-IN")}
+                        </small>
                       </label>
                     ))}
                   </div>
                 </div>
+                <div className={styles.cashTotals} aria-live="polite">
+                  <div>
+                    <span>Actual cash · calculated</span>
+                    <strong>₹{actualCash.toLocaleString("en-IN")}</strong>
+                  </div>
+                  <div>
+                    <span>
+                      {variance === null
+                        ? "Difference"
+                        : variance === 0
+                          ? "Cash matches"
+                          : variance < 0
+                            ? "Shortage"
+                            : "Excess cash"}
+                    </span>
+                    <strong className={variance ? styles.fast : ""}>
+                      {variance === null
+                        ? "Enter expected cash"
+                        : `₹${Math.abs(variance).toLocaleString("en-IN")}`}
+                    </strong>
+                  </div>
+                </div>
+                <input
+                  type="hidden"
+                  name="physical_cash_amount"
+                  value={actualCash}
+                />
+                {variance !== null && variance !== 0 && (
+                  <div className={styles.varianceBox}>
+                    <strong>Cash difference requires a station response</strong>
+                    <p>
+                      The station will receive this finding and can explain or
+                      attach proof in OpsPulse.
+                    </p>
+                    <label className={styles.inputLabel}>
+                      Reason / finding
+                      <input
+                        name="cash_variance_reason"
+                        defaultValue={audit.cash_variance_reason || ""}
+                        placeholder="What explains the shortage or excess? Record what is known."
+                        required
+                        maxLength={1500}
+                      />
+                    </label>
+                    <label className={styles.inputLabel}>
+                      Supporting proof (optional)
+                      <input
+                        type="file"
+                        name="variance_evidence"
+                        accept="image/*,application/pdf"
+                      />
+                    </label>
+                  </div>
+                )}
                 {type.requires_video_link ? (
                   <div className={styles.twoCol} style={{ marginTop: 12 }}>
                     <label className={styles.inputLabel}>
@@ -313,7 +460,7 @@ export function AuditDetail({
                 ) : null}
               </div>
             </details>
-            <details className={styles.section} open style={{ marginTop: 12 }}>
+            <details className={styles.section} style={{ marginTop: 12 }}>
               <summary>
                 Shipment exceptions <span>{shipments.length} recorded</span>
               </summary>
@@ -419,39 +566,43 @@ export function AuditDetail({
                 </button>
               </div>
             </details>
-            {sections.map((section) => (
-              <details
-                className={styles.section}
-                open
-                key={section.id}
-                style={{ marginTop: 12 }}
-              >
-                <summary>
-                  {section.name}
-                  <span>
-                    {
-                      items.filter((item) => item.section_id === section.id)
-                        .length
-                    }{" "}
-                    checks
-                  </span>
-                </summary>
-                <div className={styles.sectionBody}>
-                  {section.guidance ? (
-                    <p className={styles.checkHelp}>{section.guidance}</p>
-                  ) : null}
-                  {items
-                    .filter((item) => item.section_id === section.id)
-                    .map((item) => (
-                      <AuditCheck
-                        key={item.id}
-                        item={item}
-                        response={responses.get(item.id)}
-                      />
-                    ))}
-                </div>
-              </details>
-            ))}
+            {sections
+              .filter((section) =>
+                items.some((item) => item.section_id === section.id),
+              )
+              .map((section) => (
+                <details
+                  className={styles.section}
+                  open
+                  key={section.id}
+                  style={{ marginTop: 12 }}
+                >
+                  <summary>
+                    {section.name}
+                    <span>
+                      {
+                        items.filter((item) => item.section_id === section.id)
+                          .length
+                      }{" "}
+                      checks
+                    </span>
+                  </summary>
+                  <div className={styles.sectionBody}>
+                    {section.guidance ? (
+                      <p className={styles.checkHelp}>{section.guidance}</p>
+                    ) : null}
+                    {items
+                      .filter((item) => item.section_id === section.id)
+                      .map((item) => (
+                        <AuditCheck
+                          key={item.id}
+                          item={item}
+                          response={responses.get(item.id)}
+                        />
+                      ))}
+                  </div>
+                </details>
+              ))}
             <details className={styles.section} open style={{ marginTop: 12 }}>
               <summary>
                 Evidence and submission{" "}
@@ -488,8 +639,7 @@ export function AuditDetail({
                   <textarea
                     name="overall_summary"
                     defaultValue={audit.overall_summary ?? ""}
-                    placeholder="Key reconciliation result, exceptions and operational findings"
-                    required
+                    placeholder="Optional observations or context"
                   />
                 </label>
                 <label className={styles.inputLabel} style={{ marginTop: 10 }}>
@@ -497,7 +647,7 @@ export function AuditDetail({
                   <textarea
                     name="manager_summary"
                     defaultValue={audit.manager_summary ?? ""}
-                    placeholder="Instructions for station and leadership"
+                    placeholder="Private note for audit managers"
                   />
                 </label>
                 <div className={styles.actions} style={{ marginTop: 12 }}>
@@ -519,38 +669,41 @@ export function AuditDetail({
           />
         )}
         <aside className={styles.timeline}>
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              Corrective actions{" "}
-              <span>
-                {
-                  actions.filter((action) => action.status_code !== "completed")
-                    .length
-                }{" "}
-                open
-              </span>
-            </div>
-            <div className={styles.sectionBody}>
-              {actions.length ? (
-                actions.map((action) => (
-                  <div className={styles.timelineItem} key={action.id}>
-                    <strong>{action.title}</strong>
-                    <span>{action.corrective_action}</span>
-                    <span>
-                      {action.due_at
-                        ? ` · due ${formatDateTime(action.due_at)}`
-                        : ""}{" "}
-                      · {action.status_code.replaceAll("_", " ")}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className={styles.checkHelp}>
-                  No corrective action has been raised.
-                </p>
-              )}
-            </div>
-          </section>
+          {(actions.length > 0 || !editable) && (
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                Corrective actions{" "}
+                <span>
+                  {
+                    actions.filter(
+                      (action) => action.status_code !== "completed",
+                    ).length
+                  }{" "}
+                  open
+                </span>
+              </div>
+              <div className={styles.sectionBody}>
+                {actions.length ? (
+                  actions.map((action) => (
+                    <div className={styles.timelineItem} key={action.id}>
+                      <strong>{action.title}</strong>
+                      <span>{action.corrective_action}</span>
+                      <span>
+                        {action.due_at
+                          ? ` · due ${formatDateTime(action.due_at)}`
+                          : ""}{" "}
+                        · {action.status_code.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className={styles.checkHelp}>
+                    No corrective action has been raised.
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
           {canRespond && audit.status_code === "awaiting_station_response" ? (
             <StationResponse
               audit={audit}
@@ -568,51 +721,57 @@ export function AuditDetail({
               notice={lifecycle.notice}
             />
           ) : null}
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              Conversation <span>{comments.length}</span>
-            </div>
-            <div className={styles.sectionBody}>
-              {comments.length ? (
-                comments.map((comment) => (
-                  <div className={styles.timelineItem} key={comment.id}>
-                    <strong>
-                      {comment.author_name || comment.author_email || "System"}
-                    </strong>
-                    <span>{comment.body}</span>
-                    <span>
-                      {formatDateTime(comment.created_at)}
-                      {comment.requests_station_response
-                        ? " · station response requested"
-                        : ""}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className={styles.checkHelp}>No follow-up messages yet.</p>
-              )}
-            </div>
-          </section>
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              Evidence <span>{evidence.length}</span>
-            </div>
-            <div className={`${styles.sectionBody} ${styles.evidence}`}>
-              {evidence.length ? (
-                evidence.map((item) => (
-                  <a
-                    href={`/api/ops-pulse/audits/evidence/${item.id}`}
-                    key={item.id}
-                    target="_blank"
-                  >
-                    {item.file_name || item.evidence_kind_code || "Evidence"}
-                  </a>
-                ))
-              ) : (
-                <p className={styles.checkHelp}>No files attached yet.</p>
-              )}
-            </div>
-          </section>
+          {(comments.length > 0 || !editable) && (
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                Conversation <span>{comments.length}</span>
+              </div>
+              <div className={styles.sectionBody}>
+                {comments.length ? (
+                  comments.map((comment) => (
+                    <div className={styles.timelineItem} key={comment.id}>
+                      <strong>
+                        {comment.author_name ||
+                          comment.author_email ||
+                          "System"}
+                      </strong>
+                      <span>{comment.body}</span>
+                      <span>
+                        {formatDateTime(comment.created_at)}
+                        {comment.requests_station_response
+                          ? " · station response requested"
+                          : ""}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className={styles.checkHelp}>No follow-up messages yet.</p>
+                )}
+              </div>
+            </section>
+          )}
+          {(evidence.length > 0 || !editable) && (
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                Evidence <span>{evidence.length}</span>
+              </div>
+              <div className={`${styles.sectionBody} ${styles.evidence}`}>
+                {evidence.length ? (
+                  evidence.map((item) => (
+                    <a
+                      href={`/api/ops-pulse/audits/evidence/${item.id}`}
+                      key={item.id}
+                      target="_blank"
+                    >
+                      {item.file_name || item.evidence_kind_code || "Evidence"}
+                    </a>
+                  ))
+                ) : (
+                  <p className={styles.checkHelp}>No files attached yet.</p>
+                )}
+              </div>
+            </section>
+          )}
         </aside>
       </div>
     </section>
@@ -628,6 +787,8 @@ function AuditCheck({
 }) {
   const options = item.response_options;
   const defaultValue = responseValue(response?.response_value);
+  const [outcome, setOutcome] = useState(defaultValue);
+  const needsAction = options.find((o) => o.value === outcome)?.requires_action;
   return (
     <div className={styles.check}>
       <div className={styles.checkTitle}>
@@ -643,7 +804,8 @@ function AuditCheck({
             Outcome
             <select
               name={`check_${item.id}`}
-              defaultValue={defaultValue}
+              value={outcome}
+              onChange={(e) => setOutcome(e.target.value)}
               required={item.is_required}
             >
               <option value="">Select outcome</option>
@@ -673,25 +835,27 @@ function AuditCheck({
           />
         </label>
       </div>
-      <div className={styles.twoCol}>
-        <label className={styles.inputLabel}>
-          Corrective action{" "}
-          <small>
-            Required only when the selected master outcome requires CAPA.
-          </small>
-          <input
-            name={`check_action_${item.id}`}
-            placeholder="Owner action / resolution"
-          />
-        </label>
-        <label className={styles.inputLabel}>
-          Preventive action
-          <input
-            name={`check_preventive_${item.id}`}
-            placeholder="Avoid recurrence"
-          />
-        </label>
-      </div>
+      {needsAction && (
+        <div className={styles.twoCol}>
+          <label className={styles.inputLabel}>
+            Corrective action{" "}
+            <small>
+              Required only when the selected master outcome requires CAPA.
+            </small>
+            <input
+              name={`check_action_${item.id}`}
+              placeholder="Owner action / resolution"
+            />
+          </label>
+          <label className={styles.inputLabel}>
+            Preventive action
+            <input
+              name={`check_preventive_${item.id}`}
+              placeholder="Avoid recurrence"
+            />
+          </label>
+        </div>
+      )}
     </div>
   );
 }
@@ -853,6 +1017,11 @@ function AuditIdentity({
     <div className={styles.identity}>
       <span>
         Assigned auditor <strong>{audit.assigned_name || "Unassigned"}</strong>
+        {!audit.assignment_verified && (
+          <small className={styles.fast}>
+            Confirm the user in Assign / reassign
+          </small>
+        )}
       </span>
       <span>
         Scheduled by{" "}
@@ -899,6 +1068,15 @@ function Reschedule({
   const type = workspace.auditTypes.find(
     (row) => row.id === audit.audit_type_id,
   )!;
+  const original = auditDay(audit.scheduled_for);
+  const slot = auditSlots(type).find(
+    (s) =>
+      Number(original.slice(-2)) >= s.startDay &&
+      Number(original.slice(-2)) <= s.endDay,
+  );
+  const end = auditMonthRange(original.slice(0, 7)).to;
+  const min = `${original.slice(0, 7)}-${String(slot?.startDay || 1).padStart(2, "0")}`;
+  const max = `${original.slice(0, 7)}-${String(Math.min(slot?.endDay || 31, Number(end.slice(-2)))).padStart(2, "0")}`;
   return (
     <details className={styles.reschedule}>
       <summary>Postpone / reschedule audit</summary>
@@ -921,7 +1099,8 @@ function Reschedule({
           <input
             name="scheduled_date"
             type="date"
-            min={auditDay()}
+            min={min > auditDay() ? min : auditDay()}
+            max={max}
             defaultValue={
               auditDay(audit.scheduled_for) < auditDay()
                 ? auditDay()
@@ -939,16 +1118,10 @@ function Reschedule({
             required
           />
         </label>
-        <label className={styles.inputLabel}>
-          Programme slot
-          <select name="period_slot" defaultValue={audit.period_slot}>
-            {auditSlots(type).map((slot) => (
-              <option key={slot.code} value={slot.code}>
-                {slot.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <p className={styles.muted}>
+          {slot?.label || "Current slot"}: {min} – {max}. Stay in this month and
+          date window.
+        </p>
         <label className={styles.inputLabel}>
           Reason
           <input
@@ -1123,6 +1296,99 @@ function SavedAudit({
             ))}
         </div>
       </details>
+    </div>
+  );
+}
+
+function AuditControls({
+  audit,
+  workspace,
+  canDelete,
+  onDeleted,
+}: {
+  audit: StationAudit;
+  workspace: StationAuditWorkspace;
+  canDelete: boolean;
+  onDeleted: () => void;
+}) {
+  const state = useAction();
+  return (
+    <div className={styles.controlRow}>
+      {audit.status_code === "scheduled" && (
+        <details className={styles.reschedule}>
+          <summary>Assign / reassign auditor</summary>
+          <form
+            className={styles.compactForm}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const data = new FormData(e.currentTarget);
+              state.run(() => manageAuditAssignment(data));
+            }}
+          >
+            <input type="hidden" name="audit_id" value={audit.id} />
+            <input type="hidden" name="updated_at" value={audit.updated_at} />
+            <input type="hidden" name="operation" value="reassign" />
+            <div className={styles.inputLabel}>
+              Auditor
+              <SearchableSelect
+                name="assigned_to"
+                required
+                defaultValue={
+                  audit.assignment_verified ? audit.assigned_to : ""
+                }
+                placeholder="Search authorized auditor"
+                options={workspace.assignees
+                  .filter((p) => p.stationIds.includes(audit.location_id))
+                  .map((p) => ({ value: p.id, label: p.name, helper: p.role }))}
+              />
+            </div>
+            <label className={styles.inputLabel}>
+              Reason
+              <input name="reason" required maxLength={500} />
+            </label>
+            <button className="button compact" disabled={state.pending}>
+              Assign auditor
+            </button>
+            <p role="status">{state.notice}</p>
+          </form>
+        </details>
+      )}
+      {canDelete && (
+        <details className={styles.reschedule}>
+          <summary>Delete audit</summary>
+          <form
+            className={styles.compactForm}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const data = new FormData(e.currentTarget);
+              state.run(async () => {
+                const result = await manageAuditAssignment(data);
+                if (result.ok) onDeleted();
+                return result;
+              });
+            }}
+          >
+            <input type="hidden" name="audit_id" value={audit.id} />
+            <input type="hidden" name="updated_at" value={audit.updated_at} />
+            <input type="hidden" name="operation" value="delete" />
+            <p>
+              Remove {audit.audit_number} from the schedule and tracker. Saved
+              history and evidence are retained for traceability.
+            </p>
+            <label className={styles.inputLabel}>
+              Reason for deletion
+              <input name="reason" required maxLength={500} />
+            </label>
+            <label>
+              <input type="checkbox" required /> Confirm deletion of this audit
+            </label>
+            <button className="button compact" disabled={state.pending}>
+              Delete audit
+            </button>
+            <p role="status">{state.notice}</p>
+          </form>
+        </details>
+      )}
     </div>
   );
 }

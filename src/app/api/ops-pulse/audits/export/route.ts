@@ -84,7 +84,7 @@ export async function GET(request: Request) {
     .select(
       "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,assigned_to,assigned_name,started_at,completed_at,completed_by,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
     )
-    .eq("company_id", companyId)
+    .eq("company_id", companyId).is("deleted_at", null)
     .in("location_id", stationIds)
     .gte("scheduled_for", `${from}T00:00:00+05:30`)
     .lte("scheduled_for", `${to}T23:59:59.999+05:30`)

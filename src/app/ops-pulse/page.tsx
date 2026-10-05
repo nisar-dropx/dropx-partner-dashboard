@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { AuditCommandCard } from "./audits/audit-command-card";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -164,6 +166,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
     return <AppShell active="Dashboard" pageCode="ops_pulse">
       <div className="ops-command-center">
         <PageHead eyebrow="Live workforce · scope controlled" title="Shift Attendance" subtitle="See each authorised office, station or store roster, reporting times and attendance exceptions." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
+        <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link href="/ops-pulse">Operations view</Link>
           <Link className="active" href="/ops-pulse?view=manpower">Shift attendance</Link>
@@ -308,6 +311,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
           action={<span className="ops-live-badge"><i /> {isNow ? "LIVE MODE" : "OPERATIONAL"}</span>}
         />
 
+        <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link className="active" href="/ops-pulse">Operations view</Link>
           <Link href="/ops-pulse?view=manpower">Shift attendance</Link>

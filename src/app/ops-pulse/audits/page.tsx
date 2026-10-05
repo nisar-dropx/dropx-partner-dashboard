@@ -1,3 +1,4 @@
+import { canDeleteStationAudit } from "@/lib/ops-pulse/station-audit-people";
 import { AppShell } from "@/components/app-shell";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -34,7 +35,7 @@ export default async function StationAuditsPage({
   if (searchParams?.audit && supabaseAdmin) {
     const focused = await supabaseAdmin.from("ops_station_audits")
       .select("location_id,scheduled_for,status_code,completed_at,station_response_status")
-      .eq("company_id", companyId).eq("id", searchParams.audit).maybeSingle();
+      .eq("company_id", companyId).eq("id", searchParams.audit).is("deleted_at", null).maybeSingle();
     if (focused.data && canUseStationAuditLocation(authorization, focused.data.location_id)
       && (canManage || stationCanSeeAudit(focused.data))) {
       month = auditDay(focused.data.scheduled_for).slice(0, 7);
@@ -74,6 +75,8 @@ export default async function StationAuditsPage({
             authorization.fullName || authorization.email || "Current user"
           }
           viewerRole={authorization.roleName || "Authorized user"}
+          viewerId={authorization.userId}
+          canDelete={canDeleteStationAudit(authorization)}
           canViewMaster={hasPermission(
             authorization,
             "station_audit_master",

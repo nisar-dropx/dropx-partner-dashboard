@@ -87,9 +87,21 @@ export function auditCycle(
 ) {
   if (!validAuditDate(date)) throw new Error("Choose a valid audit date.");
   const slots = auditSlots(type);
-  const slot = selectedSlot || slots[0].code;
+  const day = Number(date.slice(-2));
+  const slot =
+    selectedSlot ||
+    slots.find((s) => day >= s.startDay && day <= s.endDay)?.code ||
+    slots[0].code;
   if (!slots.some((row) => row.code === slot))
     throw new Error("Choose a programme slot configured in Audit Master.");
+  const chosen = slots.find((row) => row.code === slot)!;
+  if (
+    type.cadence_unit !== "weekly" &&
+    (day < chosen.startDay || day > chosen.endDay)
+  )
+    throw new Error(
+      `${chosen.label}: choose a date from day ${chosen.startDay} to ${Math.min(chosen.endDay, Number(auditMonthRange(date.slice(0, 7)).to.slice(-2)))}.`,
+    );
   return {
     cycleKey:
       type.cadence_unit === "weekly" ? auditWeek(date) : date.slice(0, 7),
@@ -105,7 +117,7 @@ export function auditPlanColumns(type: PlanningType, month: string) {
       cycleKey: month,
       key: `${month}:${slot.code}`,
       label: `Audit ${index + 1}`,
-      hint: slot.label,
+      hint: `${slot.startDay}–${Math.min(slot.endDay, Number(range.to.slice(-2)))} ${new Intl.DateTimeFormat("en-IN", { month: "short" }).format(new Date(`${month}-01T12:00:00Z`))}`,
       date: `${month}-${String(Math.min(slot.startDay, Number(range.to.slice(-2)))).padStart(2, "0")}`,
       endDate: `${month}-${String(Math.min(slot.endDay, Number(range.to.slice(-2)))).padStart(2, "0")}`,
     }));
@@ -167,5 +179,47 @@ export function stationCanSeeAudit(
       audit.status_code === "under_review" ||
       (audit.status_code === "awaiting_station_response" &&
         audit.station_response_status === "requested"))
+  );
+}
+
+export function isMyAudit(
+  audit: { assigned_to: string | null; assignment_verified?: boolean },
+  userId: string,
+) {
+  return audit.assignment_verified === true && audit.assigned_to === userId;
+}
+export function auditQueueBucket(
+  audit: AuditTiming & { scheduled_for: string },
+  today = auditDay(),
+) {
+  if (audit.completed_at) return "followup";
+  const day = auditDay(audit.scheduled_for);
+  if (day < today) return "overdue";
+  if (day === today) return "today";
+  if (day <= addAuditDays(today, 2)) return "next2";
+  if (day <= addAuditDays(today, 7)) return "week";
+  return "later";
+}
+export function auditResponseLabel(
+  audit: {
+    completed_at?: string | null;
+    station_response_status: string;
+    response_due_at?: string | null;
+  },
+  now = Date.now(),
+) {
+  if (!audit.completed_at) return "After audit";
+  if (audit.station_response_status === "requested")
+    return audit.response_due_at && Date.parse(audit.response_due_at) < now
+      ? "Overdue response"
+      : "Awaiting station";
+  return (
+    (
+      {
+        submitted: "Responded · review pending",
+        accepted: "Response accepted",
+        not_requested: "No response required",
+      } as Record<string, string>
+    )[audit.station_response_status] || "Not requested"
   );
 }

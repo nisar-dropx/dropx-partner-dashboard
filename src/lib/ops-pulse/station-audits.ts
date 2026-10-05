@@ -1,4 +1,5 @@
 import "server-only";
+import { loadAuditAssignees, type AuditAssignee } from "./station-audit-people";
 
 import {
   auditCycle,
@@ -113,6 +114,13 @@ export type StationAudit = {
   schedule_source: string;
   status_code: string;
   assigned_to: string | null;
+  assignment_verified: boolean;
+  deleted_at: string | null;
+  updated_at: string;
+  cash_variance_reason: string | null;
+  email_sent_at: string | null;
+  email_error: string | null;
+  email_recipients: string[];
   assigned_name: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -224,6 +232,7 @@ export type AuditEvent = {
 };
 
 export type StationAuditWorkspace = {
+  assignees: AuditAssignee[];
   events: AuditEvent[];
   truncated: boolean;
   auditTypes: AuditType[];
@@ -518,6 +527,14 @@ export async function loadStationAuditWorkspace(
     master.programmeSettings,
   );
   const stationIds = stations.map((station) => station.id);
+  const assignees =
+    !stationOnly && stationIds.length
+      ? await loadAuditAssignees(
+          companyId,
+          master.programmeSettings.scheduler_role_ids,
+          stationIds,
+        )
+      : [];
   master.options = master.options.flatMap((option) => {
     if (option.option_group !== "airways") return [option];
     const ids = stringList(option.metadata.station_ids).filter((id) =>
@@ -530,6 +547,7 @@ export async function loadStationAuditWorkspace(
   if (!stationIds.length)
     return {
       ...master,
+      assignees,
       stations,
       events: [],
       truncated: false,
@@ -547,6 +565,7 @@ export async function loadStationAuditWorkspace(
       "*,ops_audit_types(code,name,requires_video_link,default_response_hours,video_link_help),stations(station_code,station_name,city,cluster,cluster_name)",
     )
     .eq("company_id", companyId)
+    .is("deleted_at", null)
     .in("location_id", stationIds);
   auditsQuery = stationOnly
     ? auditsQuery
@@ -556,9 +575,9 @@ export async function loadStationAuditWorkspace(
           "under_review",
           "closed",
         ])
-    : auditsQuery
-        .gte("scheduled_for", `${from}T00:00:00+05:30`)
-        .lte("scheduled_for", `${to}T23:59:59.999+05:30`);
+    : auditsQuery.or(
+        `and(scheduled_for.gte.${from}T00:00:00+05:30,scheduled_for.lte.${to}T23:59:59.999+05:30),and(assigned_to.eq.${authorization.userId},assignment_verified.eq.true,status_code.neq.closed)`,
+      );
   const auditsResult = await auditsQuery
     .order("scheduled_for", { ascending: true })
     .limit(1501);
@@ -572,6 +591,7 @@ export async function loadStationAuditWorkspace(
   if (!auditIds.length)
     return {
       ...master,
+      assignees,
       stations,
       events: [],
       truncated: false,
@@ -653,6 +673,9 @@ export async function loadStationAuditWorkspace(
           : [
               "scheduled",
               "rescheduled",
+              "reassigned",
+              "email_sent",
+              "email_failed",
               "started",
               "submitted",
               "amended",
@@ -674,9 +697,12 @@ export async function loadStationAuditWorkspace(
   if (error) throw new Error(error.message);
   return {
     ...master,
+    assignees,
     stations,
     audits,
-    events: (events.data ?? []) as AuditEvent[],
+    events: (events.data ?? []).map((event) =>
+      stationOnly ? { ...event, before_data: {}, after_data: {} } : event,
+    ) as AuditEvent[],
     truncated: (auditsResult.data?.length ?? 0) > 1500,
     actions: (actions.data ?? []) as AuditAction[],
     comments: ((comments.data ?? []) as AuditComment[]).filter(
@@ -730,7 +756,7 @@ export async function createStationAudit(input: {
   scheduledDate: string;
   scheduledTime: string;
   periodSlot?: string;
-  assignedName?: string;
+  assignedUserId?: string;
   reason?: string;
   source?: string;
 }) {
@@ -758,6 +784,18 @@ export async function createStationAudit(input: {
   const station = stations.find((row) => row.id === input.locationId);
   if (!station)
     throw new Error("This station is unavailable or outside your scope.");
+  const assignees = await loadAuditAssignees(
+    input.companyId,
+    master.programmeSettings.scheduler_role_ids,
+    [station.id],
+  );
+  const assignee = assignees.find(
+    (row) => row.id === (input.assignedUserId || input.authorization.userId),
+  );
+  if (!assignee)
+    throw new Error(
+      "Choose an active auditor with audit access to this station.",
+    );
   const cycle = auditCycleFor(type, input.scheduledDate, input.periodSlot);
   const scheduledFor = auditTimestamp(input.scheduledDate, input.scheduledTime);
   const responseDue = new Date(
@@ -777,16 +815,10 @@ export async function createStationAudit(input: {
       scheduled_reason: String(input.reason ?? "").trim() || null,
       schedule_source: input.source ?? "manual",
       status_code: "scheduled",
-      assigned_to:
-        input.assignedName &&
-        input.assignedName !== input.authorization.fullName
-          ? null
-          : input.authorization.userId,
-      assigned_name:
-        String(input.assignedName ?? "").trim() ||
-        input.authorization.fullName ||
-        null,
-      assigned_email: input.authorization.email,
+      assigned_to: assignee.id,
+      assigned_name: assignee.name,
+      assigned_email: assignee.email,
+      assignment_verified: true,
       scheduled_by: input.authorization.userId,
       response_due_at: responseDue,
     })
@@ -804,7 +836,13 @@ export async function createStationAudit(input: {
     auditId: result.data.id,
     eventType: "scheduled",
     authorization: input.authorization,
-    after: { scheduledFor, cycle, source: input.source ?? "manual" },
+    after: {
+      scheduledFor,
+      cycle,
+      assigned_to: assignee.id,
+      assigned_name: assignee.name,
+      source: input.source ?? "manual",
+    },
   });
   return result.data;
 }

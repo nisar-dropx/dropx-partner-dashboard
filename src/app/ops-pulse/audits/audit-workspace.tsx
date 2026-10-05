@@ -36,6 +36,11 @@ import {
   auditTone,
   isFastAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
+import { AuditMonthTracker } from "./audit-month-tracker";
+import {
+  auditQueueBucket,
+  isMyAudit,
+} from "@/lib/ops-pulse/station-audit-planning";
 import { scheduleStationAudit } from "./actions";
 import { AuditDetail, auditActor } from "./audit-detail";
 import styles from "./audit-workspace.module.css";
@@ -208,31 +213,47 @@ function Schedule({
   workspace,
   seed,
   onSaved,
+  viewerId,
 }: {
   workspace: StationAuditWorkspace;
   seed: ScheduleSeed;
   onSaved: () => void;
+  viewerId: string;
 }) {
   const types = workspace.auditTypes.filter((type) => type.is_active);
   const [typeId, setTypeId] = useState(seed.typeId || types[0]?.id || "");
   const type = types.find((row) => row.id === typeId);
   const [stationId, setStationId] = useState(seed.stationId || "");
-  const [pending, start] = useTransition();
+  const [scheduledDate, setScheduledDate] = useState(
+    seed.date && seed.date >= auditDay() ? seed.date : auditDay(),
+  );
+  const dateSlot = type
+    ? auditSlots(type).find(
+        (slot) =>
+          Number(scheduledDate.slice(-2)) >= slot.startDay &&
+          Number(scheduledDate.slice(-2)) <= slot.endDay,
+      )
+    : null;
+  const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
-        start(async () => {
+        if (pending) return;
+        setPending(true);
+        void (async () => {
           try {
             const result = await scheduleStationAudit(data);
             setNotice(result.message);
             if (result.ok) onSaved();
           } catch {
             setNotice("Unable to schedule. Please try again.");
+          } finally {
+            setPending(false);
           }
-        });
+        })();
       }}
     >
       <p className={styles.muted}>
@@ -275,9 +296,8 @@ function Schedule({
             name="scheduled_date"
             type="date"
             min={auditDay()}
-            defaultValue={
-              seed.date && seed.date >= auditDay() ? seed.date : auditDay()
-            }
+            value={scheduledDate}
+            onChange={(e) => setScheduledDate(e.target.value)}
             required
           />
         </label>
@@ -293,25 +313,43 @@ function Schedule({
             required
           />
         </label>
-        <label className={styles.inputLabel}>
-          Programme slot
-          <select key={typeId} name="period_slot" defaultValue={seed.slot}>
-            {type &&
-              auditSlots(type).map((slot) => (
-                <option key={slot.code} value={slot.code}>
-                  {slot.label}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label className={styles.inputLabel}>
-          Assigned auditor
+        <div className={styles.inputLabel}>
+          Audit window<strong>{dateSlot?.label || "Choose a date"}</strong>
+          <small>
+            {dateSlot
+              ? `Days ${dateSlot.startDay}–${Math.min(dateSlot.endDay, Number(auditMonthRange(scheduledDate.slice(0, 7)).to.slice(-2)))}`
+              : ""}
+          </small>
           <input
-            name="assigned_name"
-            placeholder="Defaults to you"
-            maxLength={150}
+            type="hidden"
+            name="period_slot"
+            value={dateSlot?.code || ""}
           />
-        </label>
+        </div>
+        <div className={styles.inputLabel}>
+          Assigned auditor
+          <SearchableSelect
+            key={stationId}
+            name="assigned_to"
+            required
+            defaultValue={
+              workspace.assignees.some(
+                (p) => p.id === viewerId && p.stationIds.includes(stationId),
+              )
+                ? viewerId
+                : ""
+            }
+            placeholder={stationId ? "Search auditor" : "Select station first"}
+            disabled={!stationId}
+            maxOptions={100}
+            options={workspace.assignees
+              .filter((p) => p.stationIds.includes(stationId))
+              .map((p) => ({ value: p.id, label: p.name, helper: p.role }))}
+          />
+          <small>
+            Only active users with audit access to this station are listed.
+          </small>
+        </div>
         <label className={styles.inputLabel}>
           Purpose / context
           <input
@@ -347,6 +385,8 @@ export function AuditWorkspace({
   stationOnly,
   viewerName,
   viewerRole,
+  viewerId,
+  canDelete,
   month,
   focusAuditId,
   canViewMaster,
@@ -360,6 +400,8 @@ export function AuditWorkspace({
   stationOnly: boolean;
   viewerName: string;
   viewerRole: string;
+  viewerId: string;
+  canDelete: boolean;
   month: string;
   focusAuditId?: string;
   canViewMaster: boolean;
@@ -368,7 +410,7 @@ export function AuditWorkspace({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState("queue");
+  const [tab, setTab] = useState(stationOnly ? "queue" : "mine");
   const [typeId, setTypeId] = useState("all");
   const [stations, setStations] = useState<string[]>([]);
   const [clusters, setClusters] = useState<string[]>([]);
@@ -442,6 +484,11 @@ export function AuditWorkspace({
   );
   const queue = (stationOnly ? visibleAudits : monthAudits).filter(
     (audit) => !["closed", "completed"].includes(audit.status_code),
+  );
+  const mine = visibleAudits.filter(
+    (a) =>
+      isMyAudit(a, viewerId) &&
+      !["closed", "completed"].includes(a.status_code),
   );
   const history = (stationOnly ? visibleAudits : monthAudits).filter(
     (audit) => audit.completed_at,
@@ -729,13 +776,15 @@ export function AuditWorkspace({
           {(stationOnly
             ? [
                 ["queue", "Open responses"],
-                ["log", "Audit history"],
+                ["log", "Reports & history"],
               ]
             : [
-                ["queue", "Audit queue"],
+                ["mine", "My audits"],
+                ["tracker", "Team tracker"],
+                ["queue", "Team queue"],
                 ["plan", "Monthly plan"],
                 ["calendar", "Calendar"],
-                ["log", "Audit history"],
+                ["log", "Reports & history"],
               ]
           ).map(([key, name]) => (
             <button
@@ -782,6 +831,54 @@ export function AuditWorkspace({
         </p>
       )}
       {navigationPending && <p role="status">Loading {monthLabel(month)}…</p>}
+      {tab === "mine" && (
+        <section className={styles.personal}>
+          <div className={styles.calendarHead}>
+            <div>
+              <h2>My audits · {viewerName}</h2>
+              <p>
+                Your assigned work across months · today is {dateLabel(today)}.
+                Open an audit to start, reschedule or view the response.
+              </p>
+            </div>
+          </div>
+          <div className={styles.personalGrid}>
+            {[
+              ["overdue", "Overdue"],
+              ["today", "Today"],
+              ["next2", "Next 2 days"],
+              ["week", "Later this week"],
+              ["later", "Upcoming"],
+              ["followup", "Awaiting response / review"],
+            ].map(([key, label]) => {
+              const rows = mine.filter(
+                (a) => auditQueueBucket(a, today) === key,
+              );
+              return (
+                <section key={key}>
+                  <h3>
+                    {label} <span>{rows.length}</span>
+                  </h3>
+                  <div className={styles.list}>
+                    {rows.map(renderCard)}
+                    {!rows.length && (
+                      <p className={styles.muted}>Nothing waiting here.</p>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {tab === "tracker" && (
+        <AuditMonthTracker
+          workspace={workspace}
+          stations={filteredStations}
+          audits={monthAudits}
+          onOpen={showAudit}
+        />
+      )}
       {tab === "queue" && (
         <div className={styles.list}>
           {queue.map(renderCard)}
@@ -898,7 +995,12 @@ export function AuditWorkspace({
           close={close}
         >
           {seed ? (
-            <Schedule workspace={workspace} seed={seed} onSaved={close} />
+            <Schedule
+              workspace={workspace}
+              seed={seed}
+              viewerId={viewerId}
+              onSaved={close}
+            />
           ) : (
             <>
               {day && (
@@ -944,6 +1046,9 @@ export function AuditWorkspace({
                   audit={selected}
                   workspace={workspace}
                   canManage={canEdit}
+                  canDelete={canDelete}
+                  canPerform={canEdit && isMyAudit(selected, viewerId)}
+                  onDeleted={close}
                   canRespond={canRespond}
                 />
               ) : (
@@ -1016,30 +1121,37 @@ function MonthlyPlan({
                   <small>{station.station_name || station.city}</small>
                 </th>
                 {columns.map((column) => {
-                  const audit = allAudits.find(
+                  const slotAudits = allAudits.filter(
                     (a) =>
                       a.location_id === station.id &&
                       a.audit_type_id === type.id &&
-                      a.cycle_key === column.cycleKey &&
-                      a.period_slot === column.code,
+                      auditDay(a.scheduled_for) >= column.date &&
+                      auditDay(a.scheduled_for) <= column.endDate,
                   );
                   return (
                     <td key={column.key}>
-                      {audit ? (
-                        visible.has(audit.id) ? (
-                          <button
-                            className={`${styles.slot} ${styles[`${auditTone(audit)}Border`]}`}
-                            onClick={() => onOpen(audit)}
-                          >
-                            <Badge audit={audit} />
-                            <strong>
-                              {dateLabel(auditDay(audit.scheduled_for))} ·{" "}
-                              {auditLocalTime(audit.scheduled_for)}
-                            </strong>
-                            <small>{audit.assigned_name || "Unassigned"}</small>
-                          </button>
-                        ) : (
-                          <span className={styles.muted}>Hidden by filter</span>
+                      {slotAudits.length ? (
+                        slotAudits.map((audit) =>
+                          visible.has(audit.id) ? (
+                            <button
+                              key={audit.id}
+                              className={`${styles.slot} ${styles[`${auditTone(audit)}Border`]}`}
+                              onClick={() => onOpen(audit)}
+                            >
+                              <Badge audit={audit} />
+                              <strong>
+                                {dateLabel(auditDay(audit.scheduled_for))} ·{" "}
+                                {auditLocalTime(audit.scheduled_for)}
+                              </strong>
+                              <small>
+                                {audit.assigned_name || "Unassigned"}
+                              </small>
+                            </button>
+                          ) : (
+                            <span key={audit.id} className={styles.muted}>
+                              Hidden by filter
+                            </span>
+                          ),
                         )
                       ) : (
                         <button

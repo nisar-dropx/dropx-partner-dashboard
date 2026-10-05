@@ -1,5 +1,14 @@
 "use server";
 
+import {
+  canDeleteStationAudit,
+  loadAuditAssignees,
+} from "@/lib/ops-pulse/station-audit-people";
+import {
+  auditDay,
+  auditSlots,
+  isMyAudit,
+} from "@/lib/ops-pulse/station-audit-planning";
 import { revalidatePath } from "next/cache";
 import {
   requirePagePermission,
@@ -38,6 +47,7 @@ const message = (error: unknown): ActionResult => ({
 const clean = (value: FormDataEntryValue | null | undefined) =>
   String(value ?? "").trim();
 const number = (value: FormDataEntryValue | null | undefined) => {
+  if (!clean(value)) return null;
   const parsed = Number(clean(value));
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -100,6 +110,7 @@ async function readAudit(
       )
       .eq("company_id", companyId)
       .eq("id", auditId)
+      .is("deleted_at", null)
       .maybeSingle(),
     loadStationAuditMaster(companyId),
   ]);
@@ -148,7 +159,7 @@ export async function scheduleStationAudit(
       scheduledDate: date,
       scheduledTime: time,
       periodSlot: clean(formData.get("period_slot")) || undefined,
-      assignedName: clean(formData.get("assigned_name")) || undefined,
+      assignedUserId: clean(formData.get("assigned_to")) || undefined,
       reason: clean(formData.get("reason")) || undefined,
     });
     refreshAudits();
@@ -181,10 +192,18 @@ export async function rescheduleStationAudit(
     const reason = clean(formData.get("reason"));
     if (!reason || reason.length > 500)
       throw new Error("Enter a reason of up to 500 characters.");
+    const originalDay = auditDay(audit.scheduled_for);
+    if (date.slice(0, 7) !== originalDay.slice(0, 7))
+      throw new Error("Reschedule within the same month.");
+    const originalSlot = auditSlots(audit.ops_audit_types).find(
+      (s) =>
+        Number(originalDay.slice(-2)) >= s.startDay &&
+        Number(originalDay.slice(-2)) <= s.endDay,
+    );
     const cycle = auditCycle(
       audit.ops_audit_types,
       date,
-      clean(formData.get("period_slot")),
+      originalSlot?.code || audit.period_slot,
     );
     const result = await db().rpc("reschedule_station_audit", {
       p_company_id: companyId,
@@ -221,6 +240,10 @@ export async function beginStationAudit(
   try {
     const { authorization, companyId } = await assertManager("edit");
     const audit = await readAudit(companyId, auditId, authorization);
+    if (!isMyAudit(audit, authorization.userId))
+      throw new Error(
+        "Only the assigned auditor can start. Reassign this audit first if responsibility has changed.",
+      );
     if (audit.status_code !== "scheduled")
       throw new Error("Only scheduled audits can be started.");
     const update = await db()
@@ -228,14 +251,14 @@ export async function beginStationAudit(
       .update({
         status_code: "in_progress",
         started_at: audit.started_at ?? new Date().toISOString(),
-        assigned_to: authorization.userId,
-        assigned_name: authorization.fullName,
-        assigned_email: authorization.email,
       })
       .eq("id", auditId)
       .eq("company_id", companyId)
       .eq("status_code", "scheduled")
       .eq("scheduled_for", audit.scheduled_for)
+      .eq("assigned_to", authorization.userId)
+      .eq("assignment_verified", true)
+      .is("deleted_at", null)
       .select("id")
       .maybeSingle();
     if (update.error) throw new Error(update.error.message);
@@ -263,6 +286,12 @@ export async function submitStationAudit(
     const { authorization, companyId } = await assertManager("edit");
     const auditId = clean(formData.get("audit_id"));
     const audit = await readAudit(companyId, auditId, authorization);
+    if (clean(formData.get("updated_at")) !== audit.updated_at)
+      throw new Error(
+        "This audit changed. Reopen it before saving your findings.",
+      );
+    if (!isMyAudit(audit, authorization.userId))
+      throw new Error("Only the assigned auditor can submit findings.");
     if (
       !["in_progress", "under_review", "awaiting_station_response"].includes(
         audit.status_code,
@@ -314,7 +343,10 @@ export async function submitStationAudit(
         response_source: "auditor",
         responded_by: authorization.userId,
       });
-      requiresEvidence = requiresEvidence || behaviour.requiresEvidence;
+      requiresEvidence =
+        requiresEvidence ||
+        behaviour.requiresEvidence ||
+        item.evidence_rule === "always";
       if (behaviour.requiresAction) {
         const action = clean(formData.get(`check_action_${item.id}`));
         if (!action)
@@ -326,16 +358,39 @@ export async function submitStationAudit(
         });
       }
     }
-    const files = formData
-      .getAll("evidence_files")
-      .filter(
-        (entry): entry is File => entry instanceof File && entry.size > 0,
-      );
+    const files = [
+      ...formData.getAll("evidence_files"),
+      formData.get("erp_evidence"),
+      formData.get("variance_evidence"),
+    ].filter((entry): entry is File => entry instanceof File && entry.size > 0);
     if (files.length > 8)
       throw new Error("Attach up to 8 audit evidence files at one time.");
-    if (requiresEvidence && !files.length)
+    const existingProofs = await db()
+      .from("ops_station_audit_evidence")
+      .select("id,evidence_kind_code")
+      .eq("company_id", companyId)
+      .eq("audit_id", audit.id);
+    if (existingProofs.error) throw new Error(existingProofs.error.message);
+    if (requiresEvidence && !files.length && !existingProofs.data?.length)
       throw new Error("Attach evidence for the selected checklist outcome.");
+    const erp = formData.get("erp_evidence");
+    if (
+      !(erp instanceof File && erp.size > 0) &&
+      !existingProofs.data?.some(
+        (p) => p.evidence_kind_code === "erp_screenshot",
+      )
+    )
+      throw new Error(
+        "Attach the ERP screenshot or proof of the expected cash balance.",
+      );
+    for (const file of files)
+      if (file.size > 30 * 1024 * 1024)
+        throw new Error("Each proof must be under 30 MB.");
     const systemCash = number(formData.get("system_cash_amount"));
+    if (systemCash == null || systemCash < 0)
+      throw new Error(
+        "Enter the expected cash from ERP, including zero when no cash is expected.",
+      );
     const physicalCashEntered = number(formData.get("physical_cash_amount"));
     const denominations = master.options.filter(
       (option) => option.option_group === "cash_denomination",
@@ -369,6 +424,10 @@ export async function submitStationAudit(
       throw new Error(
         "Record the physical denomination count for the cash entered.",
       );
+    const cashVariance = Math.round((countedCash - systemCash) * 100) / 100;
+    const varianceReason = clean(formData.get("cash_variance_reason"));
+    if (cashVariance && !varianceReason)
+      throw new Error("Add a reason or finding for the cash difference.");
     const videoUrl = clean(formData.get("video_call_url"));
     if (type.requires_video_link && !isGoogleDriveUrl(videoUrl))
       throw new Error(
@@ -412,6 +471,9 @@ export async function submitStationAudit(
         .filter((option) => option.option_group === "shipment_discrepancy")
         .map((option) => [option.code, option]),
     );
+    const defaultResponseDueAt = new Date(
+      Date.now() + type.default_response_hours * 3600000,
+    ).toISOString();
     const allActions = [
       ...requiredActions.map((row) => ({
         company_id: companyId,
@@ -427,7 +489,7 @@ export async function submitStationAudit(
         owner_email: null,
         due_at:
           localDeadline(clean(formData.get("action_due_at"))) ||
-          audit.response_due_at,
+          defaultResponseDueAt,
         created_by: authorization.userId,
       })),
       ...unresolvedShipments
@@ -448,82 +510,70 @@ export async function submitStationAudit(
           owner_user_id: null,
           owner_name: null,
           owner_email: null,
-          due_at: row.due_at || audit.response_due_at,
+          due_at: row.due_at || defaultResponseDueAt,
           created_by: authorization.userId,
         })),
     ];
+    if (cashVariance)
+      allActions.push({
+        company_id: companyId,
+        audit_id: audit.id,
+        checklist_item_id: null,
+        title: `Cash ${cashVariance < 0 ? "shortage" : "excess"}: ₹${Math.abs(cashVariance).toLocaleString("en-IN")}`,
+        corrective_action: varianceReason,
+        preventive_action: null,
+        severity_code: "high",
+        status_code: "open",
+        owner_user_id: null,
+        owner_name: null,
+        owner_email: null,
+        due_at: new Date(
+          Date.now() + type.default_response_hours * 3600000,
+        ).toISOString(),
+        created_by: authorization.userId,
+      });
+    const responseDueAt = allActions.length
+      ? new Date(
+          Date.now() + type.default_response_hours * 3600000,
+        ).toISOString()
+      : null;
     const nextStatus = allActions.length
       ? "awaiting_station_response"
       : "under_review";
-    const update = await db()
-      .from("ops_station_audits")
-      .update({
-        status_code: nextStatus,
-        station_response_status: allActions.length
-          ? "requested"
-          : "not_requested",
-        system_cash_amount: systemCash,
-        physical_cash_amount: physicalCashEntered == null ? null : countedCash,
-        cash_variance_amount:
-          systemCash == null || physicalCashEntered == null
-            ? null
-            : countedCash - systemCash,
-        system_shipment_count: number(formData.get("system_shipment_count")),
-        physical_shipment_count: number(
-          formData.get("physical_shipment_count"),
-        ),
-        shipment_missing_count: shipmentRows.filter(
-          (row) =>
-            discrepancyOptions.get(row.discrepancy_code)?.metadata.count_as ===
-            "missing",
-        ).length,
-        shipment_excess_count: shipmentRows.filter(
-          (row) =>
-            discrepancyOptions.get(row.discrepancy_code)?.metadata.count_as ===
-            "excess",
-        ).length,
-        shipment_unresolved_count: unresolvedShipments.length,
-        video_call_url: videoUrl || null,
-        video_call_verified_at: videoUrl ? new Date().toISOString() : null,
-        overall_summary: clean(formData.get("overall_summary")) || null,
-        manager_summary: clean(formData.get("manager_summary")) || null,
-        completed_at: audit.completed_at || new Date().toISOString(),
-        completed_by: audit.completed_by || authorization.userId,
-      })
-      .eq("company_id", companyId)
-      .eq("id", audit.id);
-    if (update.error) throw new Error(update.error.message);
-    const deleteRelated = await Promise.all([
-      db()
-        .from("ops_station_audit_check_responses")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("audit_id", audit.id),
-      db()
-        .from("ops_station_audit_cash_counts")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("audit_id", audit.id),
-      db()
-        .from("ops_station_audit_shipments")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("audit_id", audit.id),
-      db()
-        .from("ops_station_audit_actions")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("audit_id", audit.id)
-        .eq("status_code", "open"),
-    ]);
-    const deleteError = deleteRelated.find((result) => result.error)?.error;
-    if (deleteError) throw new Error(deleteError.message);
-    if (responses.length) {
-      const inserted = await db()
-        .from("ops_station_audit_check_responses")
-        .insert(responses);
-      if (inserted.error) throw new Error(inserted.error.message);
-    }
+    const patch = {
+      status_code: nextStatus,
+      response_due_at: responseDueAt,
+      cash_variance_reason: clean(formData.get("cash_variance_reason")) || null,
+      station_response_status: allActions.length
+        ? "requested"
+        : "not_requested",
+      system_cash_amount: systemCash,
+      physical_cash_amount: countedCash,
+      cash_variance_amount: cashVariance,
+      system_shipment_count: number(formData.get("system_shipment_count")),
+      physical_shipment_count: number(formData.get("physical_shipment_count")),
+      shipment_missing_count: shipmentRows.filter(
+        (row) =>
+          discrepancyOptions.get(row.discrepancy_code)?.metadata.count_as ===
+          "missing",
+      ).length,
+      shipment_excess_count: shipmentRows.filter(
+        (row) =>
+          discrepancyOptions.get(row.discrepancy_code)?.metadata.count_as ===
+          "excess",
+      ).length,
+      shipment_unresolved_count: unresolvedShipments.length,
+      video_call_url: videoUrl || null,
+      video_call_verified_at: videoUrl ? new Date().toISOString() : null,
+      overall_summary:
+        clean(formData.get("overall_summary")) ||
+        (cashVariance
+          ? `Cash difference ₹${cashVariance}: ${varianceReason}`
+          : "Expected cash and counted cash match."),
+      manager_summary: clean(formData.get("manager_summary")) || null,
+      completed_at: audit.completed_at || new Date().toISOString(),
+      completed_by: audit.completed_by || authorization.userId,
+    };
     const countRows = cashRows
       .filter((row) => row.count > 0)
       .map((row) => ({
@@ -534,24 +584,7 @@ export async function submitStationAudit(
         denomination_value: row.amount,
         note_count: row.count,
       }));
-    if (countRows.length) {
-      const inserted = await db()
-        .from("ops_station_audit_cash_counts")
-        .insert(countRows);
-      if (inserted.error) throw new Error(inserted.error.message);
-    }
-    if (shipmentRows.length) {
-      const inserted = await db()
-        .from("ops_station_audit_shipments")
-        .insert(shipmentRows);
-      if (inserted.error) throw new Error(inserted.error.message);
-    }
-    if (allActions.length) {
-      const inserted = await db()
-        .from("ops_station_audit_actions")
-        .insert(allActions);
-      if (inserted.error) throw new Error(inserted.error.message);
-    }
+    const newEvidence: Array<Record<string, unknown>> = [];
     for (const [index, file] of files.entries()) {
       const proof = await uploadOpsProof({
         companyId,
@@ -562,68 +595,62 @@ export async function submitStationAudit(
         submissionId: audit.id,
       });
       if (!proof) continue;
-      const saved = await db()
-        .from("ops_station_audit_evidence")
-        .insert({
-          company_id: companyId,
-          audit_id: audit.id,
-          evidence_kind_code: "document",
-          file_name: proof.file_name,
-          media_url: `storage://${proof.storage_bucket}/${proof.storage_path}`,
-          caption: clean(formData.get("evidence_caption")) || null,
-          uploaded_by: authorization.userId,
-        });
-      if (saved.error) throw new Error(saved.error.message);
+      newEvidence.push({
+        company_id: companyId,
+        audit_id: audit.id,
+        evidence_kind_code:
+          file === erp
+            ? "erp_screenshot"
+            : file === formData.get("variance_evidence")
+              ? "cash_variance"
+              : "document",
+        file_name: proof.file_name,
+        media_url: `storage://${proof.storage_bucket}/${proof.storage_path}`,
+        caption:
+          file === erp
+            ? "ERP expected cash balance"
+            : clean(formData.get("evidence_caption")) || null,
+        uploaded_by: authorization.userId,
+      });
     }
-    await writeStationAuditEvent({
-      companyId,
-      auditId: audit.id,
-      eventType: audit.completed_at ? "amended" : "submitted",
-      authorization,
-      before: { status: audit.status_code },
-      after: {
-        status: nextStatus,
-        actionCount: allActions.length,
-        shipmentCount: shipmentRows.length,
-      },
+    const saved = await db().rpc("submit_station_audit_report", {
+      p_company_id: companyId,
+      p_audit_id: audit.id,
+      p_expected_updated_at: clean(formData.get("updated_at")),
+      p_patch: patch,
+      p_checks: responses,
+      p_counts: countRows,
+      p_shipments: shipmentRows,
+      p_actions: allActions,
+      p_evidence: newEvidence,
+      p_actor_id: authorization.userId,
+      p_actor_name: authorization.fullName,
+      p_actor_email: authorization.email,
+      p_actor_role: authorization.roleCode,
     });
+    if (saved.error) throw new Error(saved.error.message);
     const refreshed = {
       ...audit,
       status_code: nextStatus,
       system_cash_amount: systemCash,
-      physical_cash_amount: physicalCashEntered == null ? null : countedCash,
-      cash_variance_amount:
-        systemCash == null || physicalCashEntered == null
-          ? null
-          : countedCash - systemCash,
+      physical_cash_amount: countedCash,
+      cash_variance_amount: cashVariance,
       shipment_unresolved_count: unresolvedShipments.length,
     };
-    let emailMessage = "";
-    try {
-      const sent = await sendStationAuditCompletedEmail({
-        companyId,
-        audit: refreshed,
-        type,
-        station: audit.stations,
-        openActions: allActions.length,
-      });
-      await db()
-        .from("ops_station_audits")
-        .update({
-          email_status: "sent",
-          email_sent_at: new Date().toISOString(),
-          email_recipients: [...sent.to, ...sent.cc],
-        })
-        .eq("id", audit.id)
-        .eq("company_id", companyId);
-    } catch (emailError) {
-      await db()
-        .from("ops_station_audits")
-        .update({ email_status: "failed" })
-        .eq("id", audit.id)
-        .eq("company_id", companyId);
-      emailMessage = ` Audit saved; email needs attention: ${emailError instanceof Error ? emailError.message : "delivery failed"}`;
-    }
+    const emailMessage = await sendAndRecordAuditEmail(
+      companyId,
+      {
+        ...refreshed,
+        station_response_status: allActions.length
+          ? "requested"
+          : "not_requested",
+        response_due_at: responseDueAt,
+      },
+      type,
+      audit.stations,
+      allActions.length,
+      authorization,
+    );
     refreshAudits();
     return { ok: true, message: `Audit submitted for review.${emailMessage}` };
   } catch (error) {
@@ -656,18 +683,16 @@ export async function respondToStationAudit(
       );
     const body = clean(formData.get("response"));
     if (!body) throw new Error("Add a response or progress update.");
-    const comment = await db()
-      .from("ops_station_audit_comments")
-      .insert({
-        company_id: companyId,
-        audit_id: audit.id,
-        body,
-        audience: "managers",
-        requests_station_response: false,
-        created_by: authorization.userId,
-        author_name: authorization.fullName,
-        author_email: authorization.email,
-      });
+    const comment = await db().from("ops_station_audit_comments").insert({
+      company_id: companyId,
+      audit_id: audit.id,
+      body,
+      audience: "managers",
+      requests_station_response: false,
+      created_by: authorization.userId,
+      author_name: authorization.fullName,
+      author_email: authorization.email,
+    });
     if (comment.error) throw new Error(comment.error.message);
     const actionId = clean(formData.get("action_id"));
     if (actionId) {
@@ -721,7 +746,8 @@ export async function respondToStationAudit(
         station_summary: body,
       })
       .eq("company_id", companyId)
-      .eq("id", audit.id);
+      .eq("id", audit.id)
+      .is("deleted_at", null);
     if (update.error) throw new Error(update.error.message);
     await writeStationAuditEvent({
       companyId,
@@ -754,31 +780,33 @@ export async function addAuditManagerComment(
       throw new Error("Complete the audit before sending a station follow-up.");
     const askResponse =
       clean(formData.get("request_station_response")) === "yes";
-    const inserted = await db()
-      .from("ops_station_audit_comments")
-      .insert({
-        company_id: companyId,
-        audit_id: audit.id,
-        body,
-        audience: "station",
-        requests_station_response: askResponse,
-        created_by: authorization.userId,
-        author_name: authorization.fullName,
-        author_email: authorization.email,
-      });
+    const inserted = await db().from("ops_station_audit_comments").insert({
+      company_id: companyId,
+      audit_id: audit.id,
+      body,
+      audience: "station",
+      requests_station_response: askResponse,
+      created_by: authorization.userId,
+      author_name: authorization.fullName,
+      author_email: authorization.email,
+    });
     if (inserted.error) throw new Error(inserted.error.message);
+    const due =
+      localDeadline(clean(formData.get("response_due_at"))) ||
+      new Date(
+        Date.now() + audit.ops_audit_types.default_response_hours * 3600000,
+      ).toISOString();
     if (askResponse) {
       const update = await db()
         .from("ops_station_audits")
         .update({
           status_code: "awaiting_station_response",
           station_response_status: "requested",
-          response_due_at:
-            localDeadline(clean(formData.get("response_due_at"))) ||
-            audit.response_due_at,
+          response_due_at: due,
         })
         .eq("company_id", companyId)
-        .eq("id", audit.id);
+        .eq("id", audit.id)
+        .is("deleted_at", null);
       if (update.error) throw new Error(update.error.message);
     }
     await writeStationAuditEvent({
@@ -788,11 +816,34 @@ export async function addAuditManagerComment(
       authorization,
       after: { requestsStationResponse: askResponse },
     });
+    const openActions = askResponse
+      ? await db()
+          .from("ops_station_audit_actions")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("audit_id", audit.id)
+          .neq("status_code", "completed")
+      : null;
+    if (openActions?.error) throw new Error(openActions.error.message);
+    const mailNotice = askResponse
+      ? await sendAndRecordAuditEmail(
+          companyId,
+          {
+            ...audit,
+            station_response_status: "requested",
+            response_due_at: due,
+          },
+          audit.ops_audit_types,
+          audit.stations,
+          openActions?.data?.length || 0,
+          authorization,
+        )
+      : "";
     refreshAudits();
     return {
       ok: true,
       message: askResponse
-        ? "Follow-up sent; station response requested."
+        ? `Follow-up saved; station response requested.${mailNotice}`
         : "Manager note added.",
     };
   } catch (error) {
@@ -824,7 +875,8 @@ export async function closeStationAudit(
       .from("ops_station_audits")
       .update({ status_code: "closed", station_response_status: "accepted" })
       .eq("company_id", companyId)
-      .eq("id", audit.id);
+      .eq("id", audit.id)
+      .is("deleted_at", null);
     if (update.error) throw new Error(update.error.message);
     await writeStationAuditEvent({
       companyId,
@@ -836,6 +888,148 @@ export async function closeStationAudit(
     });
     refreshAudits();
     return { ok: true, message: "Audit closed." };
+  } catch (error) {
+    return message(error);
+  }
+}
+
+export async function manageAuditAssignment(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const { authorization, companyId, master } = await assertManager("edit");
+    const audit = await readAudit(
+      companyId,
+      clean(formData.get("audit_id")),
+      authorization,
+    );
+    const operation = clean(formData.get("operation"));
+    if (operation === "delete") {
+      if (!canDeleteStationAudit(authorization))
+        throw new Error(
+          "Only Business Head, Last Mile Head, SLP Manager, National Head and the owner can delete audits.",
+        );
+    } else if (operation === "reassign") {
+      const choices = await loadAuditAssignees(
+        companyId,
+        master.programmeSettings.scheduler_role_ids,
+        [audit.location_id],
+      );
+      if (!choices.some((p) => p.id === clean(formData.get("assigned_to"))))
+        throw new Error(
+          "Choose an active auditor authorized for this station.",
+        );
+    } else throw new Error("Invalid audit action.");
+    const result = await db().rpc("manage_station_audit", {
+      p_company_id: companyId,
+      p_audit_id: audit.id,
+      p_operation: operation,
+      p_expected_updated_at: clean(formData.get("updated_at")),
+      p_assigned_to:
+        operation === "reassign" ? clean(formData.get("assigned_to")) : null,
+      p_reason: clean(formData.get("reason")),
+      p_actor_id: authorization.userId,
+      p_actor_name: authorization.fullName,
+      p_actor_email: authorization.email,
+      p_actor_role: authorization.roleCode,
+    });
+    if (result.error) throw new Error(result.error.message);
+    refreshAudits();
+    return {
+      ok: true,
+      message:
+        operation === "delete"
+          ? "Audit deleted from the queue. Its history and evidence are retained."
+          : "Audit reassigned. It now appears in the selected auditor’s queue.",
+    };
+  } catch (error) {
+    return message(error);
+  }
+}
+
+async function sendAndRecordAuditEmail(
+  companyId: string,
+  audit: StationAudit,
+  type: AuditType,
+  station: AuditStation,
+  openActions: number,
+  authorization: AuthorizationContext,
+) {
+  try {
+    const sent = await sendStationAuditCompletedEmail({
+      companyId,
+      audit,
+      type,
+      station,
+      openActions,
+    });
+    const saved = await db()
+      .from("ops_station_audits")
+      .update({
+        email_status: "sent",
+        email_error: null,
+        email_sent_at: new Date().toISOString(),
+        email_recipients: [...sent.to, ...sent.cc],
+      })
+      .eq("company_id", companyId)
+      .eq("id", audit.id)
+      .is("deleted_at", null);
+    if (saved.error) throw new Error(saved.error.message);
+    await writeStationAuditEvent({
+      companyId,
+      auditId: audit.id,
+      eventType: "email_sent",
+      authorization,
+      after: { to: sent.to, cc: sent.cc },
+    });
+    return " Email sent to the station and configured managers.";
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Delivery failed";
+    const saved = await db()
+      .from("ops_station_audits")
+      .update({ email_status: "failed", email_error: detail })
+      .eq("company_id", companyId)
+      .eq("id", audit.id)
+      .is("deleted_at", null);
+    if (saved.error)
+      return " Audit saved, but email status could not be recorded. Check the report before retrying.";
+    await writeStationAuditEvent({
+      companyId,
+      auditId: audit.id,
+      eventType: "email_failed",
+      authorization,
+      after: { error: detail },
+    });
+    return ` Audit saved; email needs attention: ${detail}`;
+  }
+}
+export async function retryStationAuditEmail(
+  auditId: string,
+): Promise<ActionResult> {
+  try {
+    const { authorization, companyId } = await assertManager("edit");
+    const audit = await readAudit(companyId, auditId, authorization);
+    if (!audit.completed_at || audit.email_status === "sent")
+      throw new Error(
+        "Retry is available only for an unsent completed audit report.",
+      );
+    const actions = await db()
+      .from("ops_station_audit_actions")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("audit_id", audit.id)
+      .neq("status_code", "completed");
+    if (actions.error) throw new Error(actions.error.message);
+    const notice = await sendAndRecordAuditEmail(
+      companyId,
+      audit,
+      audit.ops_audit_types,
+      audit.stations,
+      actions.data?.length || 0,
+      authorization,
+    );
+    refreshAudits();
+    return { ok: true, message: notice };
   } catch (error) {
     return message(error);
   }
