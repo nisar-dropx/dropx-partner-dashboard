@@ -343,11 +343,12 @@ export async function renderAuditPdf(data: AuditReportData) {
       }
     }
   }
-  heading("Review in OpsPulse");
+  ensure(60);
+  text("Review & respond in OpsPulse", 11, true, teal);
   text(`https://ops.dropxlogistics.com/audits`, 10, false, teal);
   text(
-    "Respond through OpsPulse so findings, responsibility decisions and evidence remain traceable. Open the original evidence in OpsPulse for full resolution.",
-    9,
+    "Open OpsPulse to respond and view the original evidence at full resolution.",
+    8,
     false,
     gray,
   );
