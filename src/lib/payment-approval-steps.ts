@@ -18,7 +18,7 @@ export type ApproverTarget = { userId: string; roleId: string } | null;
  * payment_approvals - the same guard as the legacy flat-array routing, now
  * applied once per step instead of duplicated per call site.
  */
-export async function loadApprovalSteps(companyId: string, paymentHeadId: string): Promise<ApprovalStepRow[]> {
+export async function loadApprovalSteps(companyId: string, paymentHeadId: string, requestId?: string): Promise<ApprovalStepRow[]> {
   if (!supabaseAdmin) return [];
   const result = await supabaseAdmin
     .from("payment_head_approval_steps")
@@ -28,7 +28,12 @@ export async function loadApprovalSteps(companyId: string, paymentHeadId: string
     .order("step_order", { ascending: true });
   if (result.error) throw new Error(result.error.message);
 
-  const rows = (result.data ?? []) as ApprovalStepRow[];
+  let rows = (result.data ?? []) as ApprovalStepRow[];
+  if (requestId) {
+    const request = await supabaseAdmin.from("payment_requests").select("adhoc_approval_steps").eq("company_id",companyId).eq("id",requestId).single();
+    if(request.error) throw new Error(request.error.message);
+    if(Array.isArray(request.data.adhoc_approval_steps)) rows = request.data.adhoc_approval_steps as ApprovalStepRow[];
+  }
   const allRoleIds = Array.from(new Set(rows.flatMap((row) => row.candidates.map((candidate) => candidate.role_id))));
   const editableRoleIds = await roleIdsWithPageEditAccess(companyId, allRoleIds, "payment_approvals");
 

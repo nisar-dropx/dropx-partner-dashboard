@@ -104,6 +104,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
 
   return (
     <AppShell active="Payment Heads" pageCode="master_payment_heads">
+      <a className="button secondary compact" href="/master/payment-heads/adhoc-reasons">Ad hoc van reasons &amp; vehicle rules</a>
       <PageHead
         eyebrow="Master Data"
         title="Payment Heads"

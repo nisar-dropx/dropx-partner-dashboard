@@ -395,7 +395,7 @@ export async function approvePaymentRequest(formData: FormData) {
   const roleCode = String(role?.code ?? authorization.roleCode ?? "USER").trim().toUpperCase();
   const ownerCanFinalize = authorization.isMasterOwner || roleCode === "OWNER";
 
-  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id, request.id) : [];
   const storedStepOrder = Number(request.current_step_order) || 1;
   const approvalStepOrder = steps.length
     ? effectiveApprovalStepOrder(steps, storedStepOrder, request.current_approver_role_id)

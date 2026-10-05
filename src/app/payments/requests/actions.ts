@@ -1,4 +1,5 @@
 "use server";
+import { prepareAdhocRequest, validateAdhocResubmission } from "@/lib/adhoc-vehicle-server";
 
 import { randomInt } from "crypto";
 import { revalidatePath } from "next/cache";
@@ -346,7 +347,8 @@ export async function createExpenseRequest(formData: FormData) {
 
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
-    const approvalSteps = await loadApprovalSteps(companyId, paymentHeadId);
+    const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
+    const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
     const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
     validateQuestionDates(formData, expenseQuestions);
@@ -404,6 +406,7 @@ export async function createExpenseRequest(formData: FormData) {
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
       .insert(withCompany({
+        ...adhocRequest.fields,
         request_no: requestNo,
         location_id: locationResult.data.id,
         location_code: locationResult.data.station_code,
@@ -424,8 +427,8 @@ export async function createExpenseRequest(formData: FormData) {
         contact_no: null,
         email: null,
         remarks,
-        status: "pending",
-        approval_status: approvalStatus,
+        status: adhocRequest.fields.adhoc_reason_key ? "draft" : "pending",
+        approval_status: adhocRequest.fields.adhoc_reason_key ? "DRAFT" : approvalStatus,
         current_step_order: currentStepOrder,
         total_steps: totalSteps,
         current_approver_user_id: approver.userId,
@@ -482,6 +485,10 @@ export async function createExpenseRequest(formData: FormData) {
       if (answersError) throw new Error(answersError.message);
     }
 
+    if (adhocRequest.fields.adhoc_reason_key) {
+      const ready = await admin.from("payment_requests").update({status:"pending",approval_status:approvalStatus}).eq("company_id",companyId).eq("id",request.id).eq("status","draft").select("id").single();
+      if(ready.error) throw new Error(ready.error.message);
+    }
     revalidatePath("/payments/expense-request");
     revalidatePath("/payments/requests");
     revalidatePath("/payments/approvals");
@@ -588,7 +595,8 @@ export async function createPaymentRequest(formData: FormData) {
     }
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
-    const approvalSteps = await loadApprovalSteps(companyId, paymentHeadId);
+    const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
+    const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
     const requestNo = await nextPaymentRequestNo(companyId);
     const isAdhocDa = headResult.data.code === "ADHOC_DA";
@@ -649,7 +657,8 @@ export async function createPaymentRequest(formData: FormData) {
 
     const requestPayload = withCompany({
       ...adhocFields,
-      request_no: requestNo,
+      ...adhocRequest.fields,
+        request_no: requestNo,
       location_id: locationResult.data.id,
       location_code: locationResult.data.station_code,
       station_code: locationResult.data.station_code,
@@ -813,6 +822,10 @@ export async function createPaymentRequest(formData: FormData) {
       if (answersError) throw new Error(answersError.message);
     }
 
+    if (adhocRequest.fields.adhoc_reason_key) {
+      const ready = await admin.from("payment_requests").update({status:"pending",approval_status:approvalStatus}).eq("company_id",companyId).eq("id",request.id).eq("status","draft").select("id").single();
+      if(ready.error) throw new Error(ready.error.message);
+    }
     revalidatePath("/payments/requests");
     revalidatePath("/payments/approvals");
     revalidatePath("/payments/report");
@@ -1109,7 +1122,8 @@ export async function resubmitExpenseRequest(formData: FormData) {
       throw new Error("Only returned requests can be resubmitted.");
     }
 
-    const approvalSteps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+    await validateAdhocResubmission(companyId, request.id, formData);
+    const approvalSteps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id, request.id) : [];
 
     let approver: ApproverTarget;
     let currentApprovalRoleIds: string[];
@@ -1351,7 +1365,8 @@ export async function resubmitPaymentRequest(formData: FormData) {
     let currentApprovalRoleIds: string[] = [];
     let currentApprovalStep = 1;
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
-    const approvalSteps: ApprovalStepRow[] = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+    await validateAdhocResubmission(companyId, request.id, formData);
+    const approvalSteps: ApprovalStepRow[] = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id, request.id) : [];
 
     const returnedRoleId = latestReturnedApproval?.approver_role_id ?? null;
     const returnedByProcessor = String(latestReturnedApproval?.role_code ?? "").toUpperCase() === "BANK" ||

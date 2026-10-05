@@ -1,7 +1,7 @@
 import { PaymentCostSummary } from "@/components/payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { PaymentVolumeContext } from "@/components/payment-volume-context";
-import { highVolumeContext } from "@/lib/payment-volume";
+import { adhocApprovalContext } from "@/lib/payment-volume";
 import { loadPaymentVolume, paymentVolumeToday } from "@/lib/payment-volume-data";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -372,8 +372,10 @@ export default async function PaymentApprovalsPage({
     ...answer,
     payment_head_questions: firstRelation(answer.payment_head_questions)
   }));
+  const replacementResult = selectedRequest && supabaseAdmin ? await supabaseAdmin.from("payment_requests").select("adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date").eq("company_id",companyId).eq("id",selectedRequest.id).single() : null;
+  const replacement = replacementResult?.data?.adhoc_vehicle_snapshot as {number:string;model:string;partner:string|null;source:string;status:string;reason:string;date:string}|null;
   const shipmentCount = paymentShipmentCount(answers);
-  const volumeDate = highVolumeContext(selectedRequest?.payment_heads?.code, answers);
+  const volumeDate = adhocApprovalContext(selectedRequest?.payment_heads?.code, answers);
   const volumeEvidence = volumeDate && selectedRequest
     ? await loadPaymentVolume(companyId, selectedRequest.location_code, volumeDate, paymentVolumeToday())
         .then(data => ({ data, error: "" })).catch(() => ({ data: null, error: "Volume evidence is unavailable. Reload to retry." }))
@@ -551,6 +553,7 @@ export default async function PaymentApprovalsPage({
                 <article><small>Approval status</small><StatusPill status={paymentStatusLabel(selectedRequest)} tone={paymentApprovalStatusTone(selectedRequest)} /></article>
                 <article><small>Location</small><strong>{selectedLocationLabel}</strong>{shipmentCount !== null ? <span>{shipmentCount.toLocaleString("en-IN")} shipments</span> : null}</article>
               </div>
+              {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason} · {replacement.partner || "Name pending"}</strong><p style={{margin:"4px 0 0"}}>{replacement.number} · {replacement.model} · {replacement.source} · Fleet status at request: {replacement.status} · Replacement date: {replacement.date}</p></div> : null}
               <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />
               {volumeDate && volumeEvidence ? <PaymentVolumeContext date={volumeDate} initialData={volumeEvidence.data} initialError={volumeEvidence.error} /> : null}
               <details className="payment-review-additional-details">

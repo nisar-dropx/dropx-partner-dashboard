@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PaymentCostSummary } from "./payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
+import { AdhocReasonSelector } from "./adhoc-reason-selector";
 import { PaymentVolumeContext } from "./payment-volume-context";
 import { AdhocDaFields } from "./adhoc-da-fields";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
@@ -397,7 +398,7 @@ export function PaymentRequestForm({
                 <label key={question.id} className={isWideField ? "span-3" : undefined}>
                   {question.question_text}{question.is_required ? " *" : ""}
                   <input type="hidden" name="question_ids" value={question.id} />
-                  {inputForQuestion(question, blockedByExpenseApproval, (value) => {
+                  {selectedHead.code === "VAN_ADHOC" && /reason.*(?:adhoc|ad hoc).*deployment/i.test(question.question_text) ? <AdhocReasonSelector name={`answers[${question.id}]`} location={selectedLocationId} date={volumeDate} onChange={setVolumeReason} /> : inputForQuestion(question, blockedByExpenseApproval, (value) => {
                     setCostAnswers(old => ({ ...old, [question.id]: value }));
                     if (/^deployment date$/i.test(question.question_text.trim())) setVolumeDate(value);
                     if (/reason.*(?:adhoc|ad hoc).*deployment/i.test(question.question_text)) setVolumeReason(value);

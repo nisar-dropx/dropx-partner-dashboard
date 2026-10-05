@@ -40,8 +40,8 @@ export function PaymentVolumeContext({ locationId, date, initialData, initialErr
   const history = data?.days.slice(-historyDays).reverse() ?? [];
   const max = Math.max(1, ...history.flatMap(day => [day.inbound ?? 0, day.delivered ?? 0]));
   const stale = data?.snapshotAt ? data.snapshotAt.slice(0, 10) < shiftDay(date, -1) : true;
-  return <section className={styles.context} aria-label="High volume evidence">
-    <div className={styles.top}><strong><ChartNoAxesCombined size={16} aria-hidden="true" /> Volume check {data ? <span>· {data.station}</span> : null}</strong><span className={styles.tag}>High Volume</span></div>
+  return <section className={styles.context} aria-label="Station volume and vehicle evidence">
+    <div className={styles.top}><strong><ChartNoAxesCombined size={16} aria-hidden="true" /> Volume check {data ? <span>· {data.station}</span> : null}</strong><span className={styles.tag}>Station evidence</span></div>
     {loading ? <p role="status">Loading station volume…</p> : error ? <p role="alert">{error} {initialData === undefined ? <button type="button" className="button secondary compact" onClick={() => setRetry(retry + 1)}>Retry</button> : <span>Reload this page to retry.</span>}</p> : !data ? <p>Select a station and deployment date to see the volume check.</p> : <>
       <div className={styles.summary}>
         <div><span>{date === data.today ? "Today's inbound" : `${dayLabel(date)} inbound`}</span><b>{number(requested?.inbound)}</b></div>
@@ -51,6 +51,7 @@ export function PaymentVolumeContext({ locationId, date, initialData, initialErr
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={styles.expand}>{open ? 'Hide history' : 'View history'}<ChevronDown size={14} aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : undefined }} /></button>
       </div>
       <p className={styles.caution}>{requested?.inboundUnverified ? 'Serving station unverified · inbound and spike withheld' : requested?.inbound == null ? 'No inbound import for this date' : stale ? 'Old snapshot · spike unverified' : 'Expected arrivals · approx.'} {data.baseline == null ? `· BAU incomplete (${data.baselineDays}/4)` : null}</p>
+      {(data.groupStations?.length??0)>1?<p><strong>{data.groupStations?.join(' + ')}</strong> · combined parent volume. {data.breakup?.map(b=>`${b.station} ${number(b.inbound)}`).join(' · ')}{data.unallocated?` · Station split unavailable for ${number(data.unallocated)} packages`:''}</p>:null}
       <div className={styles.quickRow}>
         <span>{requested?.inbound == null ? 'Package size split unavailable' : <>Approx. <b>Small / bike {number(data.classified - (data.bulky ?? 0))}</b> · <b>Volumetric / van {number(data.bulky)}</b> · Unclassified {number(data.packages - data.classified)}</>}</span>
         <button type="button" className={styles.expand} aria-expanded={fleetOpen} onClick={() => setFleetOpen(!fleetOpen)}>Vehicles at station · {data.fleetError ? 'Unavailable' : `${data.vehicles.filter(v => v.operational).length} operational today`} <ChevronDown size={14} aria-hidden="true" /></button>
@@ -64,7 +65,7 @@ export function PaymentVolumeContext({ locationId, date, initialData, initialErr
         </>}
       </div> : null}
       {open ? <div className={styles.details}>
-        <div className={styles.detailHead}><div><strong>Inbound vs delivered</strong><p>Verified {data.station} destinations only · unverified history withheld</p></div><label>History<select aria-label="Volume history period" value={historyDays} onChange={e => setHistoryDays(Number(e.target.value))}><option value={7}>7 days</option><option value={14}>14 days</option><option value={28}>28 days</option></select></label></div>
+        <div className={styles.detailHead}><div><strong>Inbound vs delivered</strong><p>{(data.groupStations?.length??0)>1?`${data.groupStations?.join(" + ")} · unique packages across the parent group`:`Verified ${data.station} destinations only · unverified history withheld`}</p></div><label>History<select aria-label="Volume history period" value={historyDays} onChange={e => setHistoryDays(Number(e.target.value))}><option value={7}>7 days</option><option value={14}>14 days</option><option value={28}>28 days</option></select></label></div>
         {date !== data.today ? <p><strong>Today, {dayLabel(data.today)}:</strong> {number(data.todayInbound)} expected inbound shipments. Request comparison stays on {dayLabel(date)}.</p> : null}
         <div className={styles.legend}><span><i className={styles.inbound} />Expected inbound</span><span><i className={styles.delivered} />Delivered</span></div>
         <div className={styles.tableWrap}><table><thead><tr><th>Date</th><th>Inbound</th><th>Delivered</th><th>Trend</th></tr></thead><tbody>{history.map(day => <tr key={day.date}><th>{dayLabel(day.date)}{day.date === date ? <small>Request day</small> : null}</th><td>{number(day.inbound)}{day.inboundUnverified ? <small>Routing unverified</small> : null}</td><td>{number(day.delivered)}</td><td><div className={styles.bars} aria-label={`${dayLabel(day.date)}: ${number(day.inbound)} inbound, ${number(day.delivered)} delivered`}><i className={styles.inbound} style={{ width: `${(day.inbound ?? 0) / max * 100}%` }} /><i className={styles.delivered} style={{ width: `${(day.delivered ?? 0) / max * 100}%` }} /></div></td></tr>)}</tbody></table></div>
