@@ -68,6 +68,7 @@ const snapshot = cache(
       monthSourceFacts,
       vehicleCosts,
       peoplePolicies,
+      componentPolicies,
       stationFlags,
       peopleAssignments,
       advertising,
@@ -134,6 +135,12 @@ const snapshot = cache(
         .lte("effective_from", to)
         .limit(1000),
       supabaseAdmin
+        .from("ops_cps_component_policies")
+        .select("component_code,label,mode,effective_from")
+        .eq("company_id", company)
+        .lte("effective_from", to)
+        .limit(1000),
+      supabaseAdmin
         .from("stations")
         .select("id,is_ho")
         .eq("company_id", company)
@@ -177,6 +184,7 @@ const snapshot = cache(
     if (
       stationFlags.error ||
       stationFlags.data?.length === 1000 ||
+      componentPolicies.error || componentPolicies.data?.length === 1000 ||
       peoplePolicies.error ||
       peoplePolicies.data?.length === 1000
     )
@@ -292,6 +300,7 @@ const snapshot = cache(
       ...s,
       is_ho: stationFlags.data?.find((f) => f.id === s.id)?.is_ho ?? s.is_ho,
     }));
+    sourceFacts.component_policies = componentPolicies.data ?? [];
     sourceFacts.people_policies =
       peoplePolicies.data as CpsFacts["people_policies"];
     const attendanceFacts = productionThresholdFacts;
@@ -316,7 +325,9 @@ const snapshot = cache(
     return rebuildCps(
       {
         ...costBase,
-        breakup: [...costBase.breakup, ...vehicleCosts.data.breakup, ...advertising.breakup],
+        // The base RPC also contains Fleet rent. Replace that source wholesale
+        // with its canonical detail feed, including zero/rent-blocked days.
+        breakup: [...costBase.breakup.filter(line => line.source !== "Fleet Vehicle Master"), ...vehicleCosts.data.breakup, ...advertising.breakup],
         expense_periods: costBase.expense_periods ?? [],
         vehicles: vehicleCosts.data.vehicles,
         gaps: [...vehicleCosts.data.gaps, ...advertising.gaps],
