@@ -13,7 +13,7 @@ import { PendingLink } from "@/components/pending-link";
 export function EddSectionTabs({ active }: { active: "flash" | "ageing" | "performance" | "edds" }) {
   const pathname = usePathname();
   const sections = [
-    { href: "/edd/flash", key: "flash" as const, label: "Load" },
+    { href: "/edd/flash", key: "flash" as const, label: "Ops Live" },
     { href: "/edd", key: "ageing" as const, label: "Ageing" },
     { href: "/edd/performance", key: "performance" as const, label: "Performance" },
     { href: "/edd/edds", key: "edds" as const, label: "EDDs" }
