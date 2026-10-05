@@ -20,7 +20,7 @@ const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/c
 // designations, ...) is a real top-level route under src/app/master/* already, so this list
 // must stay a narrow allowlist, not the whole /master root — otherwise every other Master page
 // would get double-rewritten to a path that doesn't exist under ops-pulse and 404 instead.
-const CLEAN_OPS_MASTER_SUBPATHS = ["/master/service-network", "/master/audits"];
+const CLEAN_OPS_MASTER_SUBPATHS = ["/master/service-network", "/master/audits", "/master/loss-recovery"];
 const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/advance-request",
   "/payments/expense-request",
