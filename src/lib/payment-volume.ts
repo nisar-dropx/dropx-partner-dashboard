@@ -60,10 +60,13 @@ export function adhocApprovalContext(head:string|null|undefined,answers:Array<{a
  return dateKey(date)?date:null;
 }
 
-export type RoutedInbound = { tracking_id: string; station_code: string; snapshot_at: string; package_count: number | string | null; raw_payload: {serving_station_code?:string}|null };
-export function groupedInbound(rows:RoutedInbound[],stations:string[],requireDestination=true) {
+export type RoutedInbound = { tracking_id: string; station_code: string; snapshot_at: string; package_count: number | string | null; raw_payload: {serving_station_code?:string;dock_arrival_date?:string}|null };
+export function groupedInbound(rows:RoutedInbound[],stations:string[],requireDestination=true,requireDockArrival=false) {
+ // Once manifest dates exist, delivery-promise rows cannot inflate the same day.
+ const dockRows=rows.filter(row=>Boolean(row.raw_payload?.dock_arrival_date));
+ const arrivalRows=requireDockArrival||dockRows.length?dockRows:rows;
  const latest=new Map<string,RoutedInbound>();
- for(const row of rows){const old=latest.get(row.tracking_id);if(!old||row.snapshot_at>old.snapshot_at||(row.snapshot_at===old.snapshot_at&&!old.raw_payload?.serving_station_code&&row.raw_payload?.serving_station_code))latest.set(row.tracking_id,row);}
+ for(const row of arrivalRows){const old=latest.get(row.tracking_id);if(!old||row.snapshot_at>old.snapshot_at||(row.snapshot_at===old.snapshot_at&&!old.raw_payload?.serving_station_code&&row.raw_payload?.serving_station_code))latest.set(row.tracking_id,row);}
  const unique=[...latest.values()];
  if(stations.length===1 && requireDestination){const result=verifiedInbound(unique,stations[0]);return {...result,breakup:[{station:stations[0],inbound:result.inbound??0}],unallocated:0,accepted:unique.filter(r=>r.raw_payload?.serving_station_code===stations[0])};}
  const counts=new Map(stations.map(s=>[s,0]));let unallocated=0;const accepted:RoutedInbound[]=[];

@@ -61,3 +61,13 @@ test('normal stations count dock packages while mixed hubs withhold ambiguous ro
  assert.equal(groupedInbound([row,{...row}],['KGQA','KGQC'],false).inbound,1);
  assert.equal(groupedInbound([{...row,raw_payload:{serving_station_code:'NLRK'}}],['NLRE'],true).inbound,0);
 });
+
+test('fresh manifest totals exclude old delivery-promise rows and today requires dock evidence', async () => {
+ const {groupedInbound}=await import('./payment-volume.ts');
+ const old={tracking_id:'old',station_code:'KTUO',snapshot_at:'2026-10-05',package_count:385,raw_payload:{}};
+ const dock={...old,tracking_id:'new',package_count:93,raw_payload:{dock_arrival_date:'2026-10-06'}};
+ assert.equal(groupedInbound([old,dock],['KTUO'],false,true).inbound,93);
+ assert.equal(groupedInbound([old],['KTUO'],false,true).inbound,null);
+ assert.equal(groupedInbound([old,dock],['KTUO'],false).inbound,93);
+ assert.equal(groupedInbound([old],['KTUO'],false).inbound,385);
+});
