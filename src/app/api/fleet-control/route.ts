@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     if (action === "audit.schedule") return await scheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.reschedule") return await rescheduleAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.swap") return await swapAudits(context.companyId, context.authorization.userId, context.canManageFleet, body);
-    if (action === "audit.auto-schedule") return context.canManageFleet ? NextResponse.json({ ok: true, ...await generateFleetAuditProgramme(context.companyId, required(body.month, "Audit month"), context.authorization.userId) }) : NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+    if (action === "audit.auto-schedule") return context.canManageFleet ? NextResponse.json({ ok: true, ...await generateFleetAuditProgramme(context.companyId, required(body.month, "Audit month"), context.authorization.userId, true) }) : NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
     if (action === "audit.cancel") return await cancelAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.start") return await startAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.draft") return await saveAuditDraft(context.companyId, context.canManageFleet, body);

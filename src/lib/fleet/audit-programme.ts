@@ -1,48 +1,9 @@
 import "server-only";
-
-import { createHash } from "node:crypto";
-import { auditProgrammeFromRiskWeights, type FleetAuditProgrammeConfig } from "@/lib/fleet/audit-programme-config";
+import { auditProgrammeFromRiskWeights } from "@/lib/fleet/audit-programme-config";
+import { planAuditMonth, type PlanAudit, type PlanVehicle, type PlanStation } from "@/lib/fleet/audit-month-planner";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-
-type Vehicle = { id: string; vehicle_no: string; station_code: string; status: string | null };
-type Station = { station_code: string; latitude: number | string | null; longitude: number | string | null };
-type ExistingAudit = { id: string; vehicle_id: string; scheduled_for: string; scheduled_reason: string | null; status: string; assigned_to: string | null };
-
-const clean = (value: unknown) => String(value ?? "").trim();
-const modeOf = (reason: unknown) => /^\[mode:video\]/i.test(clean(reason)) ? "video" as const : "physical" as const;
-const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
-const dateString = (year: number, month: number, day: number) => `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-
-function stableAuditId(companyId: string, month: string, vehicleId: string, mode: "video" | "physical") {
-  const bytes = createHash("sha256").update(`${companyId}:${month}:${vehicleId}:${mode}`).digest().subarray(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const value = bytes.toString("hex");
-  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
-}
-
-function distance(a?: Station, b?: Station) {
-  const values = [a?.latitude, a?.longitude, b?.latitude, b?.longitude].map(Number);
-  if (values.some((value) => !Number.isFinite(value))) return a?.station_code === b?.station_code ? 0 : 1;
-  const [lat1, lon1, lat2, lon2] = values.map((value) => value * Math.PI / 180);
-  const h = Math.sin((lat2 - lat1) / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function eligibleDates(month: string, config: FleetAuditProgrammeConfig, leaveDates: Set<string>) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  const days = new Date(year, monthNumber, 0).getDate();
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const startDay = today.startsWith(month) ? Math.min(days, Number(today.slice(8, 10))) : 1;
-  const result: string[] = [];
-  for (let day = startDay; day <= days; day += 1) {
-    const value = dateString(year, monthNumber, day);
-    const weekday = new Date(`${value}T12:00:00+05:30`).getDay();
-    if (!config.excludedWeekdays.includes(weekday) && !leaveDates.has(value)) result.push(value);
-  }
-  return result;
-}
-
+const clean=(value:unknown)=>String(value??'').trim();
+const dateString=(year:number,month:number,day:number)=>`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 async function inspectorContext(companyId: string, month: string, enabled: boolean) {
   const membership = await supabaseAdmin!.from("fleet_portal_memberships").select("user_id,access_level,profiles:user_id(email)").eq("company_id", companyId).eq("is_active", true).in("access_level", ["administrator", "approver"]).order("created_at").limit(1).maybeSingle();
   const userId = membership.data?.user_id ?? null;
@@ -63,16 +24,16 @@ async function inspectorContext(companyId: string, month: string, enabled: boole
   return { userId, leaveDates: dates };
 }
 
-export async function generateFleetAuditProgramme(companyId: string, month: string, actorUserId?: string | null) {
+export async function generateFleetAuditProgramme(companyId: string, month: string, actorUserId?: string | null, rebalance = false) {
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
-  if (!monthPattern.test(month)) throw new Error("Audit month must be YYYY-MM.");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Audit month must be YYYY-MM.");
   const [year, monthNumber] = month.split("-").map(Number);
   const nextMonthDate = new Date(year, monthNumber, 1);
   const nextMonth = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, "0")}-01`;
   const [settings, vehiclesResult, auditsResult, stationsResult, templateResult] = await Promise.all([
     supabaseAdmin.from("fleet_control_settings").select("risk_weights").eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("fleet_vehicles").select("id,vehicle_no,station_code,status").eq("company_id", companyId).order("station_code").order("vehicle_no"),
-    supabaseAdmin.from("fleet_audits").select("id,vehicle_id,scheduled_for,scheduled_reason,status,assigned_to").eq("company_id", companyId).gte("scheduled_for", `${month}-01`).lt("scheduled_for", nextMonth),
+    supabaseAdmin.from("fleet_audits").select("id,vehicle_id,scheduled_for,scheduled_reason,status,assigned_to,updated_at").eq("company_id", companyId).gte("scheduled_for", `${month}-01`).lt("scheduled_for", nextMonth),
     supabaseAdmin.from("stations").select("station_code,latitude,longitude").eq("company_id", companyId),
     supabaseAdmin.from("fleet_audit_templates").select("id").eq("company_id", companyId).eq("is_default", true).eq("is_active", true).maybeSingle()
   ]);
@@ -80,65 +41,13 @@ export async function generateFleetAuditProgramme(companyId: string, month: stri
   if (firstError) throw new Error(firstError.message);
   const config = auditProgrammeFromRiskWeights(settings.data?.risk_weights);
   if (!config.enabled) return { created: 0, moved: 0, vehicles: 0, message: "Automatic audit scheduling is on hold in Settings." };
-  const vehicles = (vehiclesResult.data ?? []).filter((vehicle: Vehicle) => !["sold", "disposed", "returned"].includes(clean(vehicle.status).toLowerCase())) as Vehicle[];
-  const existing = (auditsResult.data ?? []) as ExistingAudit[];
   const inspector = await inspectorContext(companyId, month, config.autoMoveForLeave);
-  const dates = eligibleDates(month, config, inspector.leaveDates);
-  if (!dates.length) throw new Error("No eligible audit date remains in this month after Sunday and approved-leave exclusions.");
-  const stations = new Map((stationsResult.data ?? []).map((station: Station) => [clean(station.station_code).toUpperCase(), station]));
-  const byStation = new Map<string, Vehicle[]>();
-  for (const vehicle of vehicles) { const code = clean(vehicle.station_code).toUpperCase() || "UNASSIGNED"; const list = byStation.get(code) ?? []; list.push(vehicle); byStation.set(code, list); }
-  const stationCodes = [...byStation.keys()].sort();
-  const rows: Record<string, unknown>[] = [];
-  const physicalAssignments = new Map<string, string>();
-  let physicalCursor = 0;
-  for (const stationCode of stationCodes) {
-    const stationVehicles = byStation.get(stationCode) ?? [];
-    for (let index = 0; index < stationVehicles.length; index += 1) {
-      const vehicle = stationVehicles[index];
-      if (existing.some((audit) => audit.vehicle_id === vehicle.id && modeOf(audit.scheduled_reason) === "physical" && audit.status !== "cancelled")) continue;
-      const slot = Math.floor(index / config.maxPhysicalPerDay);
-      const scheduledFor = dates[(physicalCursor + slot) % dates.length];
-      physicalAssignments.set(vehicle.id, scheduledFor);
-      rows.push({ id: stableAuditId(companyId, month, vehicle.id, "physical"), company_id: companyId, vehicle_id: vehicle.id, template_id: templateResult.data?.id ?? null, scheduled_for: scheduledFor, scheduled_reason: `[mode:physical] Auto programme · station visit ${stationCode}`, risk_score: 0, status: "scheduled", assigned_to: inspector.userId, created_by: actorUserId || inspector.userId });
-    }
-    physicalCursor += Math.max(1, Math.ceil(stationVehicles.length / config.maxPhysicalPerDay));
-  }
-  const physicalDays = [...new Set([...existing.filter((audit) => modeOf(audit.scheduled_reason) === "physical" && audit.status !== "cancelled").map((audit) => audit.scheduled_for), ...physicalAssignments.values()])];
-  let virtualCursor = 0;
-  const virtualByDate = new Map<string, number>();
-  existing.filter((audit) => modeOf(audit.scheduled_reason) === "video" && audit.status !== "cancelled").forEach((audit) => virtualByDate.set(audit.scheduled_for, (virtualByDate.get(audit.scheduled_for) ?? 0) + 1));
-  const physicalStationForDate = (value: string) => vehicles.find((vehicle) => physicalAssignments.get(vehicle.id) === value)?.station_code;
-  for (const vehicle of vehicles) {
-    if (existing.some((audit) => audit.vehicle_id === vehicle.id && modeOf(audit.scheduled_reason) === "video" && audit.status !== "cancelled")) continue;
-    const origin = stations.get(clean(vehicle.station_code).toUpperCase());
-    const ranked = (physicalDays.length ? physicalDays : dates).map((scheduledFor) => ({ scheduledFor, physicalStation: physicalStationForDate(scheduledFor) })).sort((left, right) => {
-      const leftDistance = distance(origin, stations.get(clean(left.physicalStation).toUpperCase()));
-      const rightDistance = distance(origin, stations.get(clean(right.physicalStation).toUpperCase()));
-      return rightDistance - leftDistance;
-    });
-    const available = ranked.filter((candidate) => (virtualByDate.get(candidate.scheduledFor) ?? 0) < config.maxVirtualPerDay);
-    const scheduledFor = (available.length ? available : ranked)[virtualCursor % (available.length || ranked.length)]?.scheduledFor ?? dates[virtualCursor % dates.length];
-    virtualCursor += 1;
-    virtualByDate.set(scheduledFor, (virtualByDate.get(scheduledFor) ?? 0) + 1);
-    rows.push({ id: stableAuditId(companyId, month, vehicle.id, "video"), company_id: companyId, vehicle_id: vehicle.id, template_id: templateResult.data?.id ?? null, scheduled_for: scheduledFor, scheduled_reason: `[mode:video] Auto programme · remote review paired with physical route`, risk_score: 0, status: "scheduled", assigned_to: inspector.userId, created_by: actorUserId || inspector.userId });
-  }
-  let created = 0;
-  if (rows.length) {
-    const inserted = await supabaseAdmin.from("fleet_audits").upsert(rows, { onConflict: "id", ignoreDuplicates: true }).select("id");
-    if (inserted.error) throw new Error(inserted.error.message);
-    created = inserted.data?.length ?? 0;
-  }
-  let moved = 0;
-  if (config.autoMoveForLeave) {
-    for (const audit of existing.filter((item) => item.status === "scheduled" && (config.excludedWeekdays.includes(new Date(`${item.scheduled_for}T12:00:00+05:30`).getDay()) || inspector.leaveDates.has(item.scheduled_for)))) {
-      const next = dates.find((date) => date > audit.scheduled_for) ?? dates[0];
-      if (next && next !== audit.scheduled_for) {
-        const update = await supabaseAdmin.from("fleet_audits").update({ scheduled_for: next, scheduled_reason: `${clean(audit.scheduled_reason).replace(/\s*\[auto-moved:[^\]]+\]/g, "")} [auto-moved:${audit.scheduled_for}]`, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", audit.id).eq("status", "scheduled").select("id");
-        if (update.error) throw new Error(update.error.message);
-        moved += update.data?.length ?? 0;
-      }
-    }
-  }
-  return { created, moved, vehicles: vehicles.length, message: `${created} missing audit slot${created === 1 ? "" : "s"} scheduled for ${vehicles.length} vehicles${moved ? `; ${moved} moved around Sunday or approved leave` : ""}.` };
+  const today = new Date(Date.now()+19800000).toISOString().slice(0,10);
+  const existing=(auditsResult.data||[]) as PlanAudit[];
+  const plan=planAuditMonth({month,today,config,vehicles:(vehiclesResult.data||[]) as PlanVehicle[],audits:existing,stations:(stationsResult.data||[]) as PlanStation[],leaveDates:[...inspector.leaveDates],inspectorId:inspector.userId,rebalance});
+  if(!plan.changes.length)return {created:0,moved:0,vehicles:plan.vehicles,message:'Monthly programme is already balanced. No duplicate slots were added.'};
+  const result=await supabaseAdmin.rpc('fleet_apply_audit_month_plan',{p_company:companyId,p_month:month+'-01',p_expected:existing.filter(a=>a.status!=='cancelled').map(a=>({id:a.id,status:a.status,updated_at:a.updated_at})),p_changes:plan.changes,p_template:templateResult.data?.id||null,p_actor:actorUserId||inspector.userId});
+  if(result.error)throw new Error(result.error.message);
+  const saved=result.data as {created:number;moved:number};
+  return {...saved,vehicles:plan.vehicles,message:`${saved.created} missing slots added; ${saved.moved} unstarted audits spread across the month. Started and completed audits retained.`};
 }

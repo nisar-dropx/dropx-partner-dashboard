@@ -5,6 +5,8 @@ export type FleetAuditProgrammeConfig = {
   excludedWeekdays: number[];
   maxPhysicalPerDay: number;
   maxVirtualPerDay: number;
+  minGapDays: number;
+  maxPhysicalStationsPerDay: number;
   autoMoveForLeave: boolean;
   emailTitle: string;
   emailSubjectPrefix: string;
@@ -21,6 +23,8 @@ export const defaultFleetAuditProgrammeConfig: FleetAuditProgrammeConfig = {
   excludedWeekdays: [0],
   maxPhysicalPerDay: 4,
   maxVirtualPerDay: 6,
+  minGapDays: 7,
+  maxPhysicalStationsPerDay: 1,
   autoMoveForLeave: true,
   emailTitle: "DropX Vehicle Audit Report",
   emailSubjectPrefix: "DropX Vehicle Audit",
@@ -49,6 +53,8 @@ export function normalizeFleetAuditProgrammeConfig(value: unknown): FleetAuditPr
     excludedWeekdays: excluded.length ? excluded : [0],
     maxPhysicalPerDay: integer(input.maxPhysicalPerDay, 4, 1, 20),
     maxVirtualPerDay: integer(input.maxVirtualPerDay, 6, 1, 30),
+    minGapDays: integer(input.minGapDays, 7, 1, 21),
+    maxPhysicalStationsPerDay: integer(input.maxPhysicalStationsPerDay, 1, 1, 5),
     autoMoveForLeave: input.autoMoveForLeave !== false,
     emailTitle: text(input.emailTitle) || defaultFleetAuditProgrammeConfig.emailTitle,
     emailSubjectPrefix: text(input.emailSubjectPrefix) || defaultFleetAuditProgrammeConfig.emailSubjectPrefix,
