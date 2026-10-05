@@ -1,4 +1,5 @@
 "use client";
+import {adhocVehicleLabel} from '@/lib/adhoc-vehicle-policy';
 import {FleetBreakdownRequest} from "@/components/fleet-breakdown-request";
 import { OwnerPreviewSwitcher } from "@/components/owner-preview-switcher";
 import { FleetSystemLogs } from "@/components/fleet-system-logs";
@@ -759,7 +760,7 @@ export function FleetControlDashboard({
                 {selectedPayment ? <>
                   <div className="fc-detail-top"><span className="fc-request-icon"><CircleDollarSign size={19} /></span><div><small>{selectedPayment.requestNo}</small><h2>{selectedPayment.head}</h2><p>{selectedPayment.stationCode} · requested by {selectedPayment.requestedBy}</p></div><strong>{money(selectedPayment.amount)}</strong></div>
                   <div className="fc-detail-grid"><div><small>Request date</small><strong>{date(selectedPayment.requestedAt)}</strong></div><div><small>Work date</small><strong>{date(selectedPayment.workDate)}</strong></div><div><small>Approval status</small><span className={`fc-status ${statusTone(selectedPayment.statusLabel.toLowerCase())}`}><i />{selectedPayment.statusLabel}</span></div><div><small>Station</small><strong>{selectedPayment.stationCode}</strong></div></div>
-                  {paymentDetail?.replacement?<section className="fc-remarks"><strong>{paymentDetail.replacement.reason}</strong><p>{paymentDetail.replacement.partner||'Name pending'} · {paymentDetail.replacement.number} ({paymentDetail.replacement.model}) · {paymentDetail.replacement.source} · Fleet status at request: {paymentDetail.replacement.status} · {paymentDetail.replacement.date}</p></section>:null}
+                  {paymentDetail?.replacement?<section className="fc-remarks"><strong>{paymentDetail.replacement.reason}</strong><p>{adhocVehicleLabel(paymentDetail.replacement)} · {paymentDetail.replacement.date}</p></section>:null}
                   {paymentDetail?.cost?<PaymentCostSummary {...paymentDetail.cost}/>:null}
                   {paymentDetail?.volumeDate?<PaymentVolumeContext date={paymentDetail.volumeDate} initialData={paymentDetail.volume??null} initialError={paymentDetail.volumeError}/>:null}
                   <section className="fc-remarks"><small>Station remarks</small><p>{selectedPayment.remarks}</p></section>
