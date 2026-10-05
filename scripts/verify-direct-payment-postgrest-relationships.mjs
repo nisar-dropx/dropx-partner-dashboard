@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const [page, allocationPage, migration] = await Promise.all([
-  readFile(new URL("../src/app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../src/lib/workforce-payout-loader.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/app/provider-mapping/direct-pay/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../supabase/migrations/20260928100000_workforce_payment_allocations.sql", import.meta.url), "utf8")
 ]);
