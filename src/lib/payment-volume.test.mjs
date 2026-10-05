@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { volumeBaseline, shiftDay, dateKey, shipmentSize, highVolumeContext } from './payment-volume.ts';
+import { verifiedInbound, volumeBaseline, shiftDay, dateKey, shipmentSize, highVolumeContext } from './payment-volume.ts';
 import { inboundServingStation } from './inbound-serving-station.ts';
 
 test('BAU uses only four prior matching weekdays and never substitutes missing days with zero', () => {
@@ -38,4 +38,16 @@ test('CP-node destinations never collapse into their receiving hub', () => {
   assert.equal(inboundServingStation({'Station':'JGBA'},'JGBA').stationCode,'JGBA');
   assert.equal(inboundServingStation({},'NLRE').explicit,false);
   assert.equal(inboundServingStation({'Destination Station':'UNKNOWN'},'NLRE').stationCode,'UNKNOWN');
+});
+
+test('historical hub totals cannot become verified inbound or BAU', () => {
+ const row = (destination, count=1) => ({package_count: count,raw_payload: destination ? {serving_station_code:destination} : {}});
+ assert.deepEqual(verifiedInbound([row('NLRE',10),row('NLRK',9)],'NLRE'),{inbound:10,unverified:0});
+ assert.deepEqual(verifiedInbound([row('JGBA',3),row('RPRN',8)],'JGBA'),{inbound:3,unverified:0});
+ assert.deepEqual(verifiedInbound([row('NLRE',10),row(null,9)],'NLRE'),{inbound:null,unverified:9});
+ assert.deepEqual(verifiedInbound([],'KOZA'),{inbound:null,unverified:0});
+ assert.deepEqual(verifiedInbound([row('NLRK')],'NLRE'),{inbound:0,unverified:0});
+ const date='2026-10-06';
+ const days=[7,14,21,28].map(n=>({date:shiftDay(date,-n),inbound:verifiedInbound([row(null,100)],'NLRE').inbound,delivered:20,deliverySource:''}));
+ assert.equal(volumeBaseline(days,date).baseline,null);
 });

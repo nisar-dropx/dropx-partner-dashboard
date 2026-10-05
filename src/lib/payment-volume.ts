@@ -1,8 +1,8 @@
-export type VolumeDay = { date: string; inbound: number | null; delivered: number | null; deliverySource: string };
+export type VolumeDay = { date: string; inbound: number | null; delivered: number | null; deliverySource: string; inboundUnverified?: number };
 export type PaymentVolume = {
   station: string; date: string; today: string; todayInbound: number | null;
   days: VolumeDay[]; baseline: number | null; baselineDays: number; difference: number | null;
-  snapshotAt: string | null; refreshedAt: string;
+  snapshotAt: string | null; refreshedAt: string; latestInboundSnapshot?: string | null;
   bulky: number | null; classified: number; packages: number; routingVerified: number;
   vehicles: Array<{ id: string; number: string; model: string; source: string; partner: string; status: string; operational: boolean; deployed: boolean; location: string }>;
   fleetError: string | null; sizeRule: SizeRule | null;
@@ -39,4 +39,16 @@ export function shipmentSize(fact: SizeFact, rule: SizeRule | null): 'bulky' | '
   const limits = [rule.maxWeightKg, rule.maxLengthCm, rule.maxWidthCm, rule.maxHeightCm, rule.maxDimensionalWeightKg];
   if (values.some((n, i) => n != null && n > limits[i])) return 'bulky';
   return values.every(n => n != null && Number(n) > 0) ? 'small' : 'unknown';
+}
+
+// Recorded receiving-hub totals are not evidence of the serving station.
+export function verifiedInbound(rows: Array<{ package_count: number | string | null; raw_payload: { serving_station_code?: string } | null }>, station: string) {
+  let matched = 0, unverified = 0;
+  for (const row of rows) {
+    const count = Math.max(1, Number(row.package_count) || 1);
+    const destination = row.raw_payload?.serving_station_code?.trim().toUpperCase();
+    if (!destination) unverified += count;
+    else if (destination === station) matched += count;
+  }
+  return { inbound: rows.length && !unverified ? matched : null, unverified };
 }
