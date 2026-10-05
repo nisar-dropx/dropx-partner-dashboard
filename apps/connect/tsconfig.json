@@ -22,6 +22,7 @@
       "@/lib/attendance-regularization-workflow": ["../../src/lib/attendance-regularization-workflow.ts"],
       "@/lib/attendance-pay-day": ["../../src/lib/attendance-pay-day.ts"],
       "@/lib/connect-attendance-notifications": ["../../src/lib/connect-attendance-notifications.ts"],
+      "@/lib/vehicle-fuel": ["../../src/lib/vehicle-fuel.ts"],
       "@/lib/roster-plan-preference": ["../../src/lib/roster-plan-preference.ts"],
       "@/lib/roster-change-deadline": ["../../src/lib/roster-change-deadline.ts"],
       "@/*": ["./src/*"]

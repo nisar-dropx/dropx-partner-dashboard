@@ -6,6 +6,7 @@ import { matchNames } from "@/lib/name-match";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { callVerificationProvider } from "@/lib/verification-api-audit";
+import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 import { isWorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
 const IDSPAY_BASE_URL = "https://javabackend.idspay.in/api/v1/prod";
@@ -101,11 +102,6 @@ function idspayDob(value: unknown) {
   const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoMatch) return `${isoMatch[3]}-${isoMatch[2]}-${isoMatch[1]}`;
   return raw.replace(/\//g, "-");
-}
-
-function isElectricFuel(value: unknown) {
-  const fuel = text(value).toLowerCase();
-  return fuel.includes("electric") || fuel === "ev";
 }
 
 function ok(data: Record<string, unknown>) {
@@ -224,17 +220,23 @@ export async function GET(request: NextRequest) {
       throw new Error(result.error.message);
     }
     return ok({
-      verifications: (result.data ?? []).map((row) => ({
-        kind: row.kind,
-        inputKey: row.input_key,
-        verified: row.verified,
-        manualReview: row.manual_review,
-        blockSubmit: row.block_submit,
-        name: row.display_name,
-        message: row.message,
-        details: row.details,
-        verifiedAt: row.verified_at
-      }))
+      verifications: (result.data ?? []).map((row) => {
+        const details = row.details && typeof row.details === "object" && !Array.isArray(row.details)
+          ? row.details as Record<string, unknown>
+          : {};
+        return {
+          kind: row.kind,
+          inputKey: row.input_key,
+          verified: row.verified,
+          manualReview: row.manual_review,
+          blockSubmit: row.block_submit,
+          name: row.display_name,
+          message: row.message,
+          fuelType: compact(details.fuelType),
+          details: row.details,
+          verifiedAt: row.verified_at
+        };
+      })
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load verification status.";
@@ -400,7 +402,7 @@ export async function POST(request: NextRequest) {
         warning: verified ? "" : text(body?.message) || "Vehicle details could not be verified.",
         registrationExpiryDate: normalizeDate(data?.rc_expiry_date),
         insuranceExpiryDate: normalizeDate(data?.vehicle_insurance_upto ?? data?.insurance_upto),
-        pollutionExpiryDate: isElectricFuel(fuelType) ? "" : normalizeDate(data?.pucc_upto)
+        pollutionExpiryDate: isPureElectricFuel(fuelType) ? "" : normalizeDate(data?.pucc_upto)
       };
       return verifiedResponse(result);
     }
