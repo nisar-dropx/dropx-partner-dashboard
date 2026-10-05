@@ -13,6 +13,8 @@ import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { loadWorkforceCategoryRules } from "../../../../src/lib/workforce-category-rules";
 import { assertMinimumProfileAge } from "../../../../src/lib/profile-age";
 import { createProfileSubmittedNotification } from "../../../../src/lib/app-notifications";
+import { loadTrustedVehicleFuel } from "../../../../src/lib/trusted-vehicle-verification";
+import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 
 type EmployeeProfileRow = {
   id: string;
@@ -334,6 +336,34 @@ export async function POST(request: Request) {
     const manualReviewRequired = String(formData.get("manual_review_required") ?? "") === "true";
     const dateOfBirth = normalizeDate(formData.get("date_of_birth"));
     assertMinimumProfileAge(dateOfBirth);
+    const vehicleRegistrationNumber = normalizeAlphaNumLength(
+      formData.get("vehicle_reg_no"),
+      "Vehicle registration number",
+      4,
+      30
+    );
+    const trustedVehicleFuel = vehicleRegistrationNumber
+      ? await loadTrustedVehicleFuel({
+        accountId: account.id,
+        companyId: account.companyId,
+        profileType: "employee",
+        registrationNumber: vehicleRegistrationNumber
+      })
+      : "";
+    const pollutionExpiryExempt = isPureElectricFuel(trustedVehicleFuel);
+    const pollutionExpiry = pollutionExpiryExempt
+      ? null
+      : normalizeDate(formData.get("vehicle_pollution_exp_date"));
+    const designation = firstRelation(currentEmployee.designations);
+    const fieldRules = (await loadWorkforceCategoryRules(
+      account.companyId,
+      "employees",
+      designation?.profile_field_rules,
+      "employees"
+    )).dropx_one;
+    if (fieldRules.required.includes("vehicle_pollution_exp_date") && !pollutionExpiryExempt && !pollutionExpiry) {
+      throw new Error("Pollution expiry date is required.");
+    }
 
     const uploads = await Promise.all([
       uploadProfileFile(formData.get("aadhaar_front"), account.companyId, account.id, "aadhaar-front"),
@@ -364,10 +394,10 @@ export async function POST(request: Request) {
       emergency_contact_relation: cleanText(formData.get("emergency_contact_relation")),
       driving_license_no: normalizeAlphaNumLength(formData.get("driving_license_no"), "Driving license number", 4, 30),
       driving_license_exp_date: normalizeDate(formData.get("driving_license_exp_date")),
-      vehicle_reg_no: normalizeAlphaNumLength(formData.get("vehicle_reg_no"), "Vehicle registration number", 4, 30),
+      vehicle_reg_no: vehicleRegistrationNumber,
       vehicle_reg_exp_date: normalizeDate(formData.get("vehicle_reg_exp_date")),
       vehicle_insurance_exp_date: normalizeDate(formData.get("vehicle_insurance_exp_date")),
-      vehicle_pollution_exp_date: normalizeDate(formData.get("vehicle_pollution_exp_date")),
+      vehicle_pollution_exp_date: pollutionExpiry,
       profile_completion_status: manualReviewRequired ? "under_review" : "active",
       profile_return_remarks: null,
       profile_returned_at: null,
