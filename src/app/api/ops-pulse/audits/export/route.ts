@@ -1,3 +1,4 @@
+import { allAuditRows } from "@/lib/ops-pulse/station-audit-query";
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -45,6 +46,7 @@ export async function GET(request: Request) {
     return Response.json({ error: "Audit access denied." }, { status: 403 });
   if (!supabaseAdmin)
     return Response.json({ error: "Database unavailable." }, { status: 500 });
+  const client = supabaseAdmin;
   const url = new URL(request.url);
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to") ?? "";
@@ -84,7 +86,8 @@ export async function GET(request: Request) {
     .select(
       "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,assigned_to,assigned_name,started_at,completed_at,completed_by,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
     )
-    .eq("company_id", companyId).is("deleted_at", null)
+    .eq("company_id", companyId)
+    .is("deleted_at", null)
     .in("location_id", stationIds)
     .gte("scheduled_for", `${from}T00:00:00+05:30`)
     .lte("scheduled_for", `${to}T23:59:59.999+05:30`)
@@ -122,49 +125,73 @@ export async function GET(request: Request) {
   );
   const [cash, responses, shipments, actions, comments, events] = ids.length
     ? await Promise.all([
-        supabaseAdmin
-          .from("ops_station_audit_cash_counts")
-          .select(
-            "audit_id,cash_side,denomination_value,note_count,computed_amount,notes",
-          )
-          .eq("company_id", companyId)
-          .in("audit_id", ids),
-        supabaseAdmin
-          .from("ops_station_audit_check_responses")
-          .select(
-            "audit_id,checklist_item_id,response_value,is_compliant,remarks,ops_audit_checklist_items(label,code)",
-          )
-          .eq("company_id", companyId)
-          .in("audit_id", ids),
-        supabaseAdmin
-          .from("ops_station_audit_shipments")
-          .select(
-            "audit_id,tracking_id,system_status_code,physical_status_code,discrepancy_code,remarks,required_action,due_at,is_resolved",
-          )
-          .eq("company_id", companyId)
-          .in("audit_id", ids),
-        supabaseAdmin
-          .from("ops_station_audit_actions")
-          .select(
-            "audit_id,title,corrective_action,preventive_action,severity_code,status_code,owner_name,owner_email,due_at,completed_at,completion_note",
-          )
-          .eq("company_id", companyId)
-          .in("audit_id", ids),
-        supabaseAdmin
-          .from("ops_station_audit_comments")
-          .select(
-            "audit_id,body,audience,requests_station_response,author_name,author_email,created_at",
-          )
-          .eq("company_id", companyId)
-          .in("audit_id", ids),
-        supabaseAdmin
-          .from("ops_station_audit_events")
-          .select(
-            "audit_id,event_type,actor_name,actor_email,created_at,before_data,after_data",
-          )
-          .eq("company_id", companyId)
-          .in("audit_id", ids)
-          .order("created_at"),
+        allAuditRows((from, to) =>
+          client
+            .from("ops_station_audit_cash_counts")
+            .select(
+              "audit_id,cash_side,denomination_value,note_count,computed_amount,notes",
+            )
+            .eq("company_id", companyId)
+            .in("audit_id", ids)
+            .order("id")
+            .range(from, to),
+        ),
+        allAuditRows((from, to) =>
+          client
+            .from("ops_station_audit_check_responses")
+            .select(
+              "audit_id,checklist_item_id,response_value,is_compliant,remarks,ops_audit_checklist_items(label,code)",
+            )
+            .eq("company_id", companyId)
+            .in("audit_id", ids)
+            .order("id")
+            .range(from, to),
+        ),
+        allAuditRows((from, to) =>
+          client
+            .from("ops_station_audit_shipments")
+            .select(
+              "audit_id,tracking_id,system_status_code,physical_status_code,discrepancy_code,remarks,required_action,due_at,is_resolved,station_response",
+            )
+            .eq("company_id", companyId)
+            .in("audit_id", ids)
+            .order("id")
+            .range(from, to),
+        ),
+        allAuditRows((from, to) =>
+          client
+            .from("ops_station_audit_actions")
+            .select(
+              "audit_id,title,corrective_action,preventive_action,severity_code,status_code,owner_name,owner_email,due_at,completed_at,completion_note",
+            )
+            .eq("company_id", companyId)
+            .in("audit_id", ids)
+            .order("id")
+            .range(from, to),
+        ),
+        allAuditRows((from, to) =>
+          client
+            .from("ops_station_audit_comments")
+            .select(
+              "audit_id,body,audience,requests_station_response,author_name,author_email,created_at",
+            )
+            .eq("company_id", companyId)
+            .in("audit_id", ids)
+            .order("id")
+            .range(from, to),
+        ),
+        allAuditRows((from, to) =>
+          client
+            .from("ops_station_audit_events")
+            .select(
+              "audit_id,event_type,actor_name,actor_email,created_at,before_data,after_data",
+            )
+            .eq("company_id", companyId)
+            .in("audit_id", ids)
+            .order("created_at")
+            .order("id")
+            .range(from, to),
+        ),
       ])
     : [
         { data: [], error: null },
@@ -272,6 +299,9 @@ export async function GET(request: Request) {
           row.ops_audit_checklist_items?.code,
         Response:
           row.response_value?.value ?? JSON.stringify(row.response_value ?? {}),
+        "Employee / key custodians": (row.response_value?.employees || [])
+          .map((p: any) => `${p.employee_code} · ${p.full_name}`)
+          .join("; "),
         Compliant: row.is_compliant,
         Remarks: row.remarks,
       })),
@@ -290,6 +320,12 @@ export async function GET(request: Request) {
         "Required action": row.required_action,
         Due: row.due_at,
         Resolved: row.is_resolved,
+        "Station status": row.station_response?.label || "Response pending",
+        "Station remarks": row.station_response?.remarks || "",
+        "Employee ID": row.station_response?.employee?.employee_code || "",
+        "Employee name": row.station_response?.employee?.full_name || "",
+        "Responded by": row.station_response?.responded_name || "",
+        "Response date": row.station_response?.responded_at || "",
         Remarks: row.remarks,
       })),
     ),
