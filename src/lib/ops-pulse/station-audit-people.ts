@@ -34,7 +34,7 @@ export async function loadAuditAssignees(
   visibleStationIds: string[],
 ) {
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
-  const [profiles, memberships, roles, pages, grants] = await Promise.all([
+  const [profiles, memberships, roles, pages] = await Promise.all([
     supabaseAdmin
       .from("profiles")
       .select("id,full_name,email,is_master_owner")
@@ -57,15 +57,21 @@ export async function loadAuditAssignees(
       .eq("company_id", companyId)
       .eq("code", "station_audits")
       .eq("is_active", true),
-    supabaseAdmin
-      .from("role_page_permissions")
-      .select("role_id,page_id,can_edit")
-      .eq("company_id", companyId)
-      .eq("can_edit", true),
   ]);
-  for (const result of [profiles, memberships, roles, pages, grants])
+  for (const result of [profiles, memberships, roles, pages])
     if (result.error) throw new Error(result.error.message);
   const pageIds = new Set((pages.data || []).map((p) => p.id));
+  const grants =
+    pageIds.size && schedulerRoleIds.length
+      ? await supabaseAdmin
+          .from("role_page_permissions")
+          .select("role_id,page_id,can_edit")
+          .eq("company_id", companyId)
+          .eq("can_edit", true)
+          .in("page_id", Array.from(pageIds))
+          .in("role_id", schedulerRoleIds)
+      : { data: [], error: null };
+  if (grants.error) throw new Error(grants.error.message);
   const editorRoles = new Set(
     (grants.data || [])
       .filter((g) => pageIds.has(g.page_id))

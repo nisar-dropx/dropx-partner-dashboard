@@ -75,6 +75,8 @@ function responseBehaviour(item: AuditChecklistItem, value: string) {
   const selected = item.response_options.find(
     (option) => option.value === value,
   );
+  if (item.response_options.length && !selected)
+    throw new Error(`Choose a valid outcome for: ${item.label}`);
   return {
     isCompliant: selected?.is_compliant ?? null,
     requiresAction: selected?.requires_action === true,
@@ -471,9 +473,16 @@ export async function submitStationAudit(
         .filter((option) => option.option_group === "shipment_discrepancy")
         .map((option) => [option.code, option]),
     );
-    const defaultResponseDueAt = new Date(
-      Date.now() + type.default_response_hours * 3600000,
-    ).toISOString();
+    const explicitDueAt = localDeadline(clean(formData.get("action_due_at")));
+    if (explicitDueAt && Date.parse(explicitDueAt) <= Date.now())
+      throw new Error(
+        "Choose a future station-response deadline or leave it blank for the default.",
+      );
+    const defaultResponseDueAt =
+      explicitDueAt ||
+      new Date(
+        Date.now() + type.default_response_hours * 3600000,
+      ).toISOString();
     const allActions = [
       ...requiredActions.map((row) => ({
         company_id: companyId,
@@ -527,16 +536,10 @@ export async function submitStationAudit(
         owner_user_id: null,
         owner_name: null,
         owner_email: null,
-        due_at: new Date(
-          Date.now() + type.default_response_hours * 3600000,
-        ).toISOString(),
+        due_at: defaultResponseDueAt,
         created_by: authorization.userId,
       });
-    const responseDueAt = allActions.length
-      ? new Date(
-          Date.now() + type.default_response_hours * 3600000,
-        ).toISOString()
-      : null;
+    const responseDueAt = allActions.length ? defaultResponseDueAt : null;
     const nextStatus = allActions.length
       ? "awaiting_station_response"
       : "under_review";
