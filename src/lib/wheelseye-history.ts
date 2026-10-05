@@ -12,6 +12,10 @@ export type WheelseyeMovementSummary = {
   rawKm: number;
   maxSpeed: number;
   movingMinutes: number;
+  idleMinutes?: number;
+  stoppedMinutes?: number;
+  unknownMinutes?: number;
+  stopUnknownMinutes?: number;
   pointCount: number;
   acceptedPointCount: number;
   rejectedPointCount: number;
@@ -27,7 +31,8 @@ export type WheelseyeMovementSummary = {
   qualityReason: string;
   algorithmVersion: string;
 };
-type Point = { lat: number; lng: number; speed: number | null; epoch: number };
+type Point = { lat: number; lng: number; speed: number | null; epoch: number; ignition: boolean | null };
+export type MovementEvent = { kind: "moving" | "idle" | "stopped" | "stop_unknown" | "gap"; from: string; to: string; minutes: number; lat: number; lng: number; endLat: number; endLng: number };
 const MAX_SPEED = 160;
 const POSITION_TOLERANCE_KM = 0.03;
 const ALGORITHM = 'gps-moving-fixes-v2';
@@ -61,7 +66,7 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
       rejectedPointCount++; continue;
     }
     const speed = point.speed == null || !Number.isFinite(Number(point.speed)) || Number(point.speed) < 0 || Number(point.speed) > MAX_SPEED ? null : Number(point.speed);
-    normalized.push({ lat, lng, speed, epoch });
+    normalized.push({ lat, lng, speed, epoch, ignition: point.ignition === true || point.ignition === 1 ? true : point.ignition === false || point.ignition === 0 ? false : null });
   }
   normalized.sort((a, b) => a.epoch - b.epoch);
   const rawKm = routeKm(normalized);
@@ -118,19 +123,51 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
   let qualityReason = 'Distance calculated from timestamped moving GPS fixes; stopped readings do not add kilometres.';
   if (parked) qualityReason = 'Stationary GPS history: no movement recorded.';
   if (!distanceReliable) qualityReason = unique.length < 2 ? 'Not enough valid GPS samples.' : rejectedSegments ? 'The remaining moving track has conflicting timestamps, impossible jumps or a recording gap. Distance is incomplete.' : 'There are not enough consistent moving fixes or speed readings to calculate this day reliably.';
-  let movingSeconds = 0;
-  for (let index = 1; index < unique.length; index++) {
-    const a = unique[index - 1], b = unique[index], gap = b.epoch - a.epoch;
-    if (gap > 0 && gap <= 300 && ((a.speed ?? 0) > 0 || (b.speed ?? 0) > 0)) movingSeconds += gap;
+  // Invalid jumps and recording gaps never become driving or idle time.
+  const events: MovementEvent[] = [];
+  const secondsByKind = { moving: 0, idle: 0, stopped: 0, stop_unknown: 0, gap: 0 };
+  const validMoving = new Set(moving);
+  // Some devices interleave cached stopped coordinates with current moving fixes.
+  // Remove only a stationary fix with impossible legs to BOTH nearby moving neighbours.
+  let nextMoving: Point | null = null;
+  const nextByIndex: Array<Point|null> = [];
+  for(let i=unique.length-1;i>=0;i--){nextByIndex[i]=nextMoving;if(validMoving.has(unique[i]))nextMoving=unique[i];}
+  let previousMoving: Point | null = null;
+  const timelinePoints=unique.filter((point,index)=>{
+    if((point.speed??0)>0){if(!validMoving.has(point))return false;previousMoving=point;return true;}
+    const next=nextByIndex[index];
+    return !(point.speed===0&&previousMoving&&next&&point.epoch-previousMoving.epoch<=300&&next.epoch-point.epoch<=300&&!plausible(previousMoving,point)&&!plausible(point,next));
+  });
+  const routeSegments: Array<Array<{lat:number;lng:number}>> = [];
+  let segment: Array<{lat:number;lng:number}> = [];
+  for (let index = 1; index < timelinePoints.length; index++) {
+    const a = timelinePoints[index - 1], b = timelinePoints[index], seconds = b.epoch - a.epoch;
+    const stopped = a.speed === 0 && b.speed === 0 && haversineKm(a,b) <= 0.05;
+    const invalid = seconds > 300 || !plausible(a,b) || a.speed === null || b.speed === null ||
+      ((a.speed ?? 0) > 0 && !validMoving.has(a)) || ((b.speed ?? 0) > 0 && !validMoving.has(b)) ||
+      (a.speed === 0 && b.speed === 0 && !stopped);
+    const kind: MovementEvent['kind'] = invalid ? 'gap' : stopped ?
+      a.ignition === true && b.ignition === true ? 'idle' : a.ignition === false && b.ignition === false ? 'stopped' : 'stop_unknown' : 'moving';
+    secondsByKind[kind] += seconds;
+    const previous = events.at(-1);
+    if (previous && previous.kind === kind && (kind === 'moving' || kind === 'gap' || haversineKm(previous,a) <= 0.05)) {
+      previous.to = new Date(b.epoch*1000).toISOString(); previous.minutes += seconds/60;
+      previous.endLat = b.lat; previous.endLng = b.lng;
+    } else events.push({kind,from:new Date(a.epoch*1000).toISOString(),to:new Date(b.epoch*1000).toISOString(),minutes:seconds/60,lat:a.lat,lng:a.lng,endLat:b.lat,endLng:b.lng});
+    if (kind === 'gap') { if (segment.length) routeSegments.push(segment); segment = []; }
+    else { if (!segment.length) segment.push({lat:a.lat,lng:a.lng}); segment.push({lat:b.lat,lng:b.lng}); }
   }
+  if (segment.length) routeSegments.push(segment);
   // The same cleaned coordinates feed Tracking and the report, avoiding the old back-and-forth map spikes.
   const displayPoints = parked ? unique.slice(0, 1) : moving;
   return {
+    timeline: events.map(event=>({...event,minutes:rounded(event.minutes)})),
+    routeSegments,
     points: displayPoints.map(({ lat, lng }) => ({ lat, lng })),
     afterHours: moving.filter(point=>{const hour=Math.floor((point.epoch+19800)/3600)%24;return hour>=22||hour<5;}).map(point=>({lat:point.lat,lng:point.lng,speed:point.speed,at:new Date(point.epoch*1000).toISOString()})),
     summary: {
       km: rounded(km), rawKm: rounded(rawKm), maxSpeed: unique.reduce((max, point) => Math.max(max, point.speed ?? 0), 0),
-      movingMinutes: Math.round(movingSeconds / 60), pointCount: unique.length,
+      movingMinutes: Math.round(secondsByKind.moving / 60), idleMinutes: Math.round(secondsByKind.idle / 60), stoppedMinutes: Math.round(secondsByKind.stopped / 60), stopUnknownMinutes: Math.round(secondsByKind.stop_unknown / 60), unknownMinutes: Math.round(secondsByKind.gap / 60), pointCount: unique.length,
       acceptedPointCount: parked ? unique.length : moving.length, rejectedPointCount, stationaryPointCount,
       lateNight: moving.some(point => { const hour = Math.floor((point.epoch + 19800) / 3600) % 24; return hour >= 22 || hour < 5; }),
       firstMovingAt: moving.length ? new Date(moving[0].epoch * 1000).toISOString() : null,

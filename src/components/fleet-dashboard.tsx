@@ -1819,10 +1819,11 @@ function getRouteZoom(points: { lat: number; lng: number }[]) {
 
 export function RouteMap({
   currentPoint,
-  points
+  points, segments
 }: {
   currentPoint?: { lat: number; lng: number } | null;
   points: { lat: number; lng: number }[];
+  segments?: Array<Array<{lat:number;lng:number}>>;
 }) {
   const [zoomOffset, setZoomOffset] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -1941,7 +1942,7 @@ export function RouteMap({
         ))}
       </div>
       <svg className="fleet-map-route" viewBox={`0 0 ${ROUTE_MAP_WIDTH} ${ROUTE_MAP_HEIGHT}`} preserveAspectRatio="none">
-        {routePoints ? <polyline points={routePoints} fill="none" stroke="#cf3f5f" strokeLinecap="round" strokeLinejoin="round" strokeWidth="5" /> : null}
+        {segments ? segments.map((segment,index)=><polyline key={index} points={sampleRoutePoints(segment).map(toScreenPoint).map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="none" stroke="#cf3f5f" strokeLinecap="round" strokeLinejoin="round" strokeWidth="5" />) : routePoints ? <polyline points={routePoints} fill="none" stroke="#cf3f5f" strokeLinecap="round" strokeLinejoin="round" strokeWidth="5" /> : null}
         {start ? <circle cx={start.x} cy={start.y} r="8" fill="#12845c" stroke="#ffffff" strokeWidth="3" /> : null}
         {end ? <circle cx={end.x} cy={end.y} r="8" fill="#cf3f5f" stroke="#ffffff" strokeWidth="3" /> : null}
         {live ? (

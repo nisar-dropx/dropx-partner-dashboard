@@ -8,7 +8,7 @@ export function withFleetSystemLog<T extends Request>(handler:(request:T)=>Promi
  return async(request:T)=>{
   const auth=await getAuthorization();
   let body:Record<string,unknown>={};
-  if(request.headers.get('content-type')?.includes('application/json'))body=await request.clone().json().catch(()=>({}));
+  if(request.headers.get('content-type')?.includes('application/json')){const parsed=await request.clone().json().catch(()=>null);if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))body=parsed;}
   const action=String(body.action??request.method.toLowerCase()).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,100);
   const context={actorId:auth?.viewerUserId??auth?.userId??null,actorLabel:auth?.isPreview?`Administrator preview (${auth.fullName||'user'})`:auth?.fullName||auth?.email||'Unsigned request',viewerId:auth?.viewerUserId??null,requestId:randomUUID(),action,route:new URL(request.url).pathname,companyId:auth?.companyId??null};
   return fleetAuditContext.run(context,async()=>{

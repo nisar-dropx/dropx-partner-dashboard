@@ -8,7 +8,7 @@ export class FleetReportError extends Error { constructor(message: string, publi
 export async function reportScope(auth: AuthorizationContext) {
   if (!supabaseAdmin) throw new FleetReportError('Fleet data is temporarily unavailable.', 503);
   const companyId = requireCompanyId(auth);
-  const hasFleetPage = hasPermission(auth, 'fleet_reports', 'access') || hasPermission(auth, 'fleet', 'access') || hasPermission(auth, 'fleet_action_center', 'access') || hasPermission(auth, 'fleet_vehicle_view', 'access');
+  const hasFleetPage = hasPermission(auth, 'fleet_tracking', 'access') || hasPermission(auth, 'fleet_reports', 'access') || hasPermission(auth, 'fleet', 'access') || hasPermission(auth, 'fleet_action_center', 'access') || hasPermission(auth, 'fleet_vehicle_view', 'access');
   if (!hasFleetPage) throw new FleetReportError('You do not have access to DropX Fleet. Contact HR or your department administrator.', 403);
   const membership = auth.isMasterOwner ? null : await supabaseAdmin.from('company_product_memberships').select('id,role_id').eq('company_id', companyId).eq('product_code', 'fleet').eq('user_id', auth.userId).eq('is_active', true).maybeSingle();
   const hasMembership = auth.isMasterOwner || Boolean(membership?.data?.id && membership.data.role_id);
@@ -34,10 +34,15 @@ export async function loadDailyReport(auth: AuthorizationContext, from: string, 
   const vehicleNos = vehicles.map(v => v.vehicle_no);
   const [km, fuel, latestKm, latestFuel] = await Promise.all([
     readAllRows(supabaseAdmin.from('fleet_daily_km').select('vehicle_no,movement_date,km,source,point_count,calculated_at,review_status,raw_km,accepted_point_count,rejected_point_count,stationary_point_count,algorithm_version').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('movement_date', from).lte('movement_date', to).order('movement_date').order('id')),
-    readAllRows(supabaseAdmin.from('fleet_fuel_transactions').select('vehicle_no,transaction_date,fuel_quantity,fuel_amount,provider').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('transaction_date', from).lte('transaction_date', to).order('transaction_date').order('id')),
+    readAllRows(supabaseAdmin.from('fleet_fuel_transactions').select('vehicle_no,transaction_date,fuel_quantity,fuel_amount,rate,provider').eq('company_id', companyId).in('vehicle_no', vehicleNos).gte('transaction_date', from).lte('transaction_date', to).order('transaction_date').order('id')),
     supabaseAdmin.from('fleet_daily_km').select('movement_date').eq('company_id', companyId).in('vehicle_no', vehicleNos).order('movement_date', { ascending: false }).limit(1),
     supabaseAdmin.from('fleet_fuel_transactions').select('transaction_date').eq('company_id', companyId).in('vehicle_no', vehicleNos).order('transaction_date', { ascending: false }).limit(1)
   ]);
   if (km.error || fuel.error || latestKm.error || latestFuel.error) throw new FleetReportError('Unable to load the complete distance and fuel report. Please try again.');
   return { ...empty, rows: buildDailyFleetRows(vehicles, km.data ?? [], fuel.data ?? [], from, to), latestKmDate: latestKm.data?.[0]?.movement_date ?? null, latestFuelDate: latestFuel.data?.[0]?.transaction_date ?? null };
+}
+
+export async function trackingScope(auth: AuthorizationContext) {
+ if (!(hasPermission(auth,'fleet_tracking','access') || hasPermission(auth,'fleet_live_gps','access') || hasPermission(auth,'fleet_reports','access'))) throw new FleetReportError('Tracking or Fleet Reports access is required.',403);
+ return reportScope(auth);
 }

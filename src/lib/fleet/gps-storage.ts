@@ -11,6 +11,7 @@ export async function saveDailyWheelseyeKm(companyId: string, vehicle: string, d
     km: summary.km, raw_km: summary.rawKm, point_count: summary.pointCount,
     accepted_point_count: summary.acceptedPointCount, rejected_point_count: summary.rejectedPointCount,
     stationary_point_count: summary.stationaryPointCount, algorithm_version: summary.algorithmVersion,
+    idle_minutes: summary.idleMinutes ?? null, stopped_minutes: summary.stoppedMinutes ?? null, stop_unknown_minutes: summary.stopUnknownMinutes ?? null, unknown_minutes: summary.unknownMinutes ?? null,
     max_speed: summary.maxSpeed, moving_minutes: summary.movingMinutes, late_night: summary.lateNight,
     first_moving_at: summary.firstMovingAt, last_moving_at: summary.lastMovingAt,
     first_moving_latitude: summary.firstMovingLatitude, first_moving_longitude: summary.firstMovingLongitude,

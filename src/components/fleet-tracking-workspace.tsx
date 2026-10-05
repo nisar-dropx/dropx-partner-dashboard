@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, ArrowDownUp, Clock3, Fuel, Gauge, MapPin, Refr
 import { useEffect, useMemo, useState } from "react";
 import { FleetGpsExceptions, type ExceptionTarget } from '@/components/fleet-gps-exceptions';
 import type { GpsExceptionReview } from '@/lib/fleet/gps-exceptions';
+import { FleetDayTracking } from "@/components/fleet-day-tracking";
 import { DailyFleetReportView } from "@/components/fleet-daily-report";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { RouteMap } from "@/components/fleet-dashboard";
@@ -57,7 +58,7 @@ const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T0
 
 export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { data: FleetControlData; exceptionEntry?: {target?:ExceptionTarget; key:number}|null; onReviewed?:(review:GpsExceptionReview)=>void }) {
   const stationOptions = data.stationOptions;
-  const [view, setView] = useState<"live" | "mileage" | "fuel" | "exceptions">(exceptionEntry ? "exceptions" : "live");
+  const [view, setView] = useState<"live" | "day" | "mileage" | "fuel" | "exceptions">(exceptionEntry ? "exceptions" : "live");
   useEffect(() => { if(exceptionEntry) setView("exceptions"); }, [exceptionEntry]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,12 +144,13 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
   return <div className="fc-tracking-workspace">
     <nav className="fc-view-switch" aria-label="Vehicle tracking views">
       <button className={view === "live" ? "active" : ""} onClick={() => setView("live")} type="button"><MapPin size={16} /> Live tracking</button>
+      <button className={view === "day" ? "active" : ""} onClick={() => setView("day")} type="button"><Clock3 size={16} /> Day tracking</button>
       <button className={view === "mileage" ? "active" : ""} onClick={() => setView("mileage")} type="button"><Gauge size={16} /> Mileage</button>
       <button className={view === "fuel" ? "active" : ""} onClick={() => setView("fuel")} type="button"><Fuel size={16} /> Fuel log</button>
       <button className={view === "exceptions" ? "active" : ""} onClick={() => setView("exceptions")} type="button"><ShieldAlert size={16} /> Exceptions</button>
     </nav>
 
-    {view === "exceptions" ? <FleetGpsExceptions data={data} initialException={exceptionEntry?.target} onReviewed={onReviewed} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
+    {view === "day" ? <FleetDayTracking data={data} gpsVehicles={(summary?.gpsLive??[]).map(row=>row.vehicle_no)} /> : view === "exceptions" ? <FleetGpsExceptions data={data} initialException={exceptionEntry?.target} onReviewed={onReviewed} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
       <div className="fc-section-head fc-tracking-heading"><div><span className="fc-eyebrow">WheelsEye live feed</span><h1>Vehicle tracking</h1><p>Current GPS position and historical movement for vehicles that have tracking configured.</p></div><button className="fc-button secondary" disabled={refreshing} onClick={() => loadLive(true)} type="button"><RefreshCw className={refreshing ? "spin" : ""} size={16} /> Refresh live</button></div>
       {summary?.error ? <div className="fc-flash error"><span>{summary.error}</span></div> : null}
       <section className="fc-tracking-kpis">

@@ -1,6 +1,6 @@
 export type ReportVehicle = { vehicle_no: string; station_code: string; model: string; fuel_type: string; status?: string | null };
 export type KmRecord = { vehicle_no: string; movement_date: string; km: number | string | null; source: string; point_count: number | null; calculated_at: string; review_status?: string; raw_km?: number | string | null; accepted_point_count?: number; rejected_point_count?: number; stationary_point_count?: number; algorithm_version?: string };
-export type FuelRecord = { vehicle_no: string; transaction_date: string; fuel_quantity: number | string; fuel_amount: number | string; provider: string };
+export type FuelRecord = { vehicle_no: string; transaction_date: string; fuel_quantity: number | string; fuel_amount: number | string; rate?: number | string | null; provider: string };
 export type DailyFleetRow = ReportVehicle & {
   date: string; km: number | null; litres: number | null; fuelAmount: number | null;
   mileage: number | null; costPerKm: number | null; fuelTransactions: number;
@@ -48,12 +48,15 @@ export function buildDailyFleetRows(vehicles: ReportVehicle[], kmRows: KmRecord[
     const rank = (item: KmRecord) => (recordedKm(item) !== null ? 2 : 0) + (item.source.toLowerCase() === 'manual' ? 1 : 0);
     if (!previous || rank(row) > rank(previous) || (rank(row) === rank(previous) && row.calculated_at > previous.calculated_at)) kmByDay.set(key, row);
   }
-  const fuelByDay = new Map<string, { litres: number; amount: number; count: number; providers: Set<string>; breakdown: Map<string, { litres: number; amount: number; transactions: number }> }>();
+  const fuelByDay = new Map<string, { litres: number; amount: number; count: number; quantityComplete: boolean; providers: Set<string>; breakdown: Map<string, { litres: number; amount: number; transactions: number }> }>();
   for (const row of fuelRows) {
     const key = `${vehicleKey(row.vehicle_no)}|${row.transaction_date}`;
-    const fuel = fuelByDay.get(key) ?? { litres: 0, amount: 0, count: 0, providers: new Set<string>(), breakdown: new Map<string, { litres: number; amount: number; transactions: number }>() };
-    fuel.litres += Math.max(0, Number(row.fuel_quantity) || 0);
-    fuel.amount += Math.max(0, Number(row.fuel_amount) || 0); const provider = row.provider || 'Unmapped'; const source = fuel.breakdown.get(provider) ?? { litres: 0, amount: 0, transactions: 0 }; source.litres += Math.max(0, Number(row.fuel_quantity) || 0); source.amount += Math.max(0, Number(row.fuel_amount) || 0); source.transactions += 1; fuel.breakdown.set(provider, source);
+    const fuel = fuelByDay.get(key) ?? { litres: 0, amount: 0, count: 0, quantityComplete: true, providers: new Set<string>(), breakdown: new Map<string, { litres: number; amount: number; transactions: number }>() };
+    const amount = Math.max(0, Number(row.fuel_amount) || 0), rate = Number(row.rate);
+    const quantity = Number(row.fuel_quantity) > 0 ? Number(row.fuel_quantity) : rate > 0 && amount > 0 ? amount / rate : 0;
+    if (amount > 0 && quantity <= 0) fuel.quantityComplete = false;
+    fuel.litres += quantity;
+    fuel.amount += Math.max(0, Number(row.fuel_amount) || 0); const provider = row.provider || 'Unmapped'; const source = fuel.breakdown.get(provider) ?? { litres: 0, amount: 0, transactions: 0 }; source.litres += quantity; source.amount += Math.max(0, Number(row.fuel_amount) || 0); source.transactions += 1; fuel.breakdown.set(provider, source);
     fuel.count++; fuel.providers.add(row.provider); fuelByDay.set(key, fuel);
   }
   return dateDays(from, to).flatMap(date => vehicles.flatMap(vehicle => {
@@ -63,15 +66,15 @@ export function buildDailyFleetRows(vehicles: ReportVehicle[], kmRows: KmRecord[
     if (vehicle.status && vehicle.status.toLowerCase() !== 'active' && !distance && !fuel) return [];
     const km = distance ? recordedKm(distance) : null;
     const liquidFuel = /^(diesel|petrol)$/i.test(vehicle.fuel_type.trim());
-    return [{ ...vehicle, date, km, litres: liquidFuel ? fuel?.litres ?? null : null, fuelAmount: fuel?.amount ?? null,
-      mileage: liquidFuel && km !== null && fuel && fuel.litres > 0 ? km / fuel.litres : null,
+    return [{ ...vehicle, date, km, litres: liquidFuel && fuel?.quantityComplete ? fuel.litres : null, fuelAmount: fuel?.amount ?? null,
+      mileage: liquidFuel && km !== null && fuel && fuel.quantityComplete && fuel.litres > 0 ? km / fuel.litres : null,
       costPerKm: km !== null && km > 0 && fuel ? fuel.amount / km : null,
       fuelTransactions: fuel?.count ?? 0, distanceSource: distance?.source ?? null,
       pointCount: distance?.point_count ?? null, refreshedAt: distance?.calculated_at ?? null,
       fuelBreakdown: [...(fuel?.breakdown ?? new Map())].map(([provider, values]) => ({ provider, ...values })),
       fuelSources: [...(fuel?.providers ?? [])].sort(), rawKm: distance?.raw_km == null ? null : Number(distance.raw_km),
       gpsQuality: distance?.review_status ?? null, acceptedPoints: distance?.accepted_point_count ?? null, rejectedPoints: distance?.rejected_point_count ?? null, stationaryPoints: distance?.stationary_point_count ?? null,
-      dataStatus: distance?.review_status === 'needs_review' ? 'gps_review' as const : km === null ? 'gps_missing' as const : !liquidFuel ? 'not_applicable' as const : !fuel || fuel.litres <= 0 ? 'fuel_missing' as const : 'ready' as const,
+      dataStatus: distance?.review_status === 'needs_review' ? 'gps_review' as const : km === null ? 'gps_missing' as const : !liquidFuel ? 'not_applicable' as const : !fuel || !fuel.quantityComplete || fuel.litres <= 0 ? 'fuel_missing' as const : 'ready' as const,
       provisional: date === today }];
   }));
 }

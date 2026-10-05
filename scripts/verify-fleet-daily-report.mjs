@@ -36,6 +36,8 @@ assert.equal(build([{ ...km, km: 0 }]).km, 0, 'A stationary day with GPS samples
 assert.equal(build([{ ...km, km: -5 }]).km, null);
 assert.equal(build([{ ...km, km: null }]).km, null);
 assert.equal(build([km], [{ ...fuel, fuel_quantity: 0 }]).mileage, null);
+assert.equal(build([km], [{...fuel,fuel_quantity:0,rate:100}]).mileage,10, 'Use recorded transaction rate when quantity is missing');
+assert.equal(build([km], [fuel,{...fuel,fuel_quantity:0}]).mileage,null, 'Do not calculate mileage with partially missing litres');
 assert.equal(build([km], []).dataStatus, 'fuel_missing');
 assert.equal(build([km, { ...km, km: 120, source: 'manual', point_count: 0 }]).km, 120, 'Alternative distance sources must not be summed');
 assert.equal(build([km, { ...km, km: 0, point_count: 0, calculated_at: '2026-09-23T01:00:00Z' }]).km, 100, 'Missing refresh must not hide recorded GPS');

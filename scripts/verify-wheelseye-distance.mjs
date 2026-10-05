@@ -20,6 +20,8 @@ assert.equal(corrected.summary.distanceReliable, true);
 assert.equal(corrected.summary.quality, 'filtered');
 assert.equal(corrected.summary.stationaryPointCount, 100);
 assert.ok(corrected.summary.rawKm > corrected.summary.km * 10);
+assert.equal(corrected.summary.movingMinutes, expected.summary.movingMinutes,'Cached stopped fixes must not destroy driving duration');
+assert.equal(corrected.routeSegments.length,1,'Cached stopped fixes must not destroy the route');
 assert.deepEqual(corrected.points, expected.points, 'Tracking must use the same corrected trajectory');
 assert.equal(calc([...cached].reverse()).summary.km, expected.summary.km, 'Ordering cannot change distance');
 assert.equal(calc(clean.map(p => ({ ...p, dttimeInEpoch: p.dttimeInEpoch * 1000 }))).summary.km, expected.summary.km);
