@@ -17,6 +17,7 @@ export type AuditReportData = {
   actualCash: number | null;
   missing: number;
   excess: number;
+  cashCounts?: { denomination: number; count: number; amount: number }[];
   snapshot?: AuditScoreSnapshot | null;
   checks: {
     id: string;
@@ -214,6 +215,8 @@ export async function renderAuditPdf(data: AuditReportData) {
     `ERP cash: ${data.expectedCash == null ? "Not recorded" : `Rs. ${data.expectedCash}`} | Counted: ${data.actualCash == null ? "Not recorded" : `Rs. ${data.actualCash}`} | Difference: ${data.expectedCash == null || data.actualCash == null ? "Not recorded" : `Rs. ${Math.round((data.actualCash - data.expectedCash) * 100) / 100}`}`,
   );
   text(`Missing TIDs: ${data.missing} | Excess TIDs: ${data.excess}`);
+  for (const row of data.cashCounts || [])
+    text(`Rs. ${row.denomination} x ${row.count} = Rs. ${row.amount}`, 9);
   for (const row of data.shipments) {
     text(`${row.tid} - ${row.discrepancy}`, 10, true);
     text(row.remarks, 9);
@@ -284,6 +287,33 @@ export async function renderAuditPdf(data: AuditReportData) {
   for (const a of data.actions) {
     text(`${a.title} - ${a.status}`, 10, true);
     text(a.action, 9);
+  }
+  if (s?.inputs) {
+    heading("Reconciliation source lists");
+    text(
+      "Unique tracking IDs saved with this audit; duplicates count once.",
+      9,
+      false,
+      gray,
+    );
+    text(
+      `ERP ageing list - ${new Set(s.inputs.expectedTids).size} TIDs`,
+      11,
+      true,
+    );
+    text(
+      [...new Set(s.inputs.expectedTids)].join(" | ") || "No TIDs recorded.",
+      8,
+    );
+    text(
+      `Physically scanned - ${new Set(s.inputs.scannedTids).size} TIDs`,
+      11,
+      true,
+    );
+    text(
+      [...new Set(s.inputs.scannedTids)].join(" | ") || "No TIDs recorded.",
+      8,
+    );
   }
   if (data.photos.length) {
     heading("Evidence gallery - actual submitted evidence");
