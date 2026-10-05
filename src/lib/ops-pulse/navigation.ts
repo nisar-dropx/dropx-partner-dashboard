@@ -150,7 +150,7 @@ function modelOperations(mode: OperatingMode): NavItem {
   };
 }
 
-const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd", icon: "E" };
+const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash", icon: "E" };
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
