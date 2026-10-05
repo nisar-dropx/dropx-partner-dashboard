@@ -1,4 +1,6 @@
 import "server-only";
+import { excludeAdvertisingSettlements } from "./advertising";
+import { loadAdvertising } from "./advertising-data";
 import { rebuildCps, type CpsFacts } from "./cps-engine";
 import { cache } from "react";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -68,7 +70,9 @@ const snapshot = cache(
       peoplePolicies,
       stationFlags,
       peopleAssignments,
+      advertising,
     ] = await Promise.all([
+
       supabaseAdmin.rpc("ops_cps_base_v2", {
         p_company: company,
         p_from: from,
@@ -139,6 +143,7 @@ const snapshot = cache(
         p_from: from,
         p_through: to,
       }),
+      loadAdvertising(company, from, to, codes),
     ]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
@@ -307,13 +312,15 @@ const snapshot = cache(
       providers: productionThresholdFacts.providers ?? [],
       stations: productionThresholdFacts.stations ?? [],
     };
+    const costBase = excludeAdvertisingSettlements(result.data as CpsSnapshot, advertising.settlements);
     return rebuildCps(
       {
-        ...result.data,
-        breakup: [...result.data.breakup, ...vehicleCosts.data.breakup],
-        expense_periods: result.data.expense_periods ?? [],
+        ...costBase,
+        breakup: [...costBase.breakup, ...vehicleCosts.data.breakup, ...advertising.breakup],
+        expense_periods: costBase.expense_periods ?? [],
         vehicles: vehicleCosts.data.vehicles,
-        gaps: vehicleCosts.data.gaps,
+        gaps: [...vehicleCosts.data.gaps, ...advertising.gaps],
+        advertising: advertising.rows,
       } as CpsSnapshot,
       sourceFacts,
     );
