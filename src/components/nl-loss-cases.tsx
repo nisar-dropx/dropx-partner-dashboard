@@ -10,6 +10,9 @@ import {
   splitRecovery,
   recoveryNeedsReview,
   recoveryCsv,
+  allocationError,
+  monthLabel,
+  type RecoveryDetails,
 } from "@/lib/ops-pulse/nl-loss-policy";
 import styles from "./nl-loss.module.css";
 const money = (n: number) =>
@@ -66,6 +69,10 @@ export function NlLossCases({
       "Amazon decision",
       "Recoverable value",
       "Recovery outcome",
+      "Deduction month",
+      "Re-dispute reason",
+      "Detailing",
+      "CCTV link",
       "Employee ID",
       "Employee name",
       "Individual amount",
@@ -84,6 +91,10 @@ export function NlLossCases({
         c.source_status,
         c.amount,
         r?.outcome_label || "Pending update",
+        r?.deduction_month,
+        r?.recovery_details?.reason,
+        r?.recovery_details?.details,
+        r?.recovery_details?.cctv_url,
         p?.employee_code,
         p?.full_name,
         p?.amount,
@@ -240,6 +251,14 @@ function RecoveryForm({
           : "custom",
     ),
     [remarks, setRemarks] = useState(old?.remarks || "");
+  const [details, setDetails] = useState<RecoveryDetails>(
+    old?.recovery_details || {},
+  );
+  const [caseKey, setCaseKey] = useState(row.case_key);
+  const [deductionMonths, setDeductionMonths] = useState<
+    Record<string, string>
+  >({});
+  const [uploading, setUploading] = useState(false);
   const [people, setPeople] = useState<RecoveryPerson[]>([]),
     [history, setHistory] = useState<History[]>([]),
     [loading, setLoading] = useState(true),
@@ -271,6 +290,12 @@ function RecoveryForm({
         );
         const j = await res.json();
         if (!res.ok) throw Error(j.error);
+        if (Number(j.amount) !== Number(row.amount))
+          throw Error(
+            "The loss amount changed. Refresh the case list before allocating recovery.",
+          );
+        setCaseKey(j.case_key);
+        setDeductionMonths(j.deduction_months);
         setPeople(j.people);
         setHistory(j.history);
         setDirectoryReady(true);
@@ -300,8 +325,80 @@ function RecoveryForm({
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
+  const deductionPeriod =
+    recovery &&
+    !recovery.is_deleted &&
+    recovery.deduction_timing === option?.deduction_timing &&
+    recovery.deduction_month
+      ? recovery.deduction_month
+      : deductionMonths[option?.deduction_timing || "none"];
+  const validation = !option?.is_active
+    ? "Select an active recovery action."
+    : option.allocation_required
+      ? allocationError(
+          row.amount,
+          splits,
+          people,
+          settings?.recovery_policy.salary_cap_enabled,
+        )
+      : "";
+  const reasonError =
+    option?.dispute_fields_enabled &&
+    ((option.reason_required && (details.reason || "").trim().length < 5) ||
+      (option.details_required && (details.details || "").trim().length < 5) ||
+      (details.cctv_url &&
+        settings?.recovery_policy.cctv_public_confirmation &&
+        !details.cctv_public_confirmed));
+  const cannotSave =
+    !!validation ||
+    !!reasonError ||
+    (option?.remarks_required && remarks.trim().length < 5) ||
+    !directoryReady;
+  async function upload(files: FileList | null) {
+    if (!files || !settings) return;
+    if (
+      (details.attachments?.length || 0) + files.length >
+      settings.recovery_policy.attachment_max_count
+    ) {
+      setError(
+        `Maximum ${settings.recovery_policy.attachment_max_count} attachments.`,
+      );
+      return;
+    }
+    setUploading(true);
+    setError("");
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.set("file", file);
+        form.set("month", row.month);
+        form.set("case", caseKey);
+        form.set("outcome", outcome);
+        const response = await fetch(
+          "/api/ops-pulse/losses/recovery/attachments",
+          { method: "POST", body: form },
+        );
+        const value = await response.json();
+        if (!response.ok) throw Error(value.error);
+        setDetails((d) => ({
+          ...d,
+          attachments: [...(d.attachments || []), value.attachment],
+        }));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Attachment upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+  const attachmentUrl = (id: string) =>
+    `/api/ops-pulse/losses/recovery/attachments?month=${encodeURIComponent(row.month)}&case=${encodeURIComponent(caseKey)}&id=${encodeURIComponent(id)}`;
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (cannotSave || uploading) {
+      setError(validation || "Complete all required details before saving.");
+      return;
+    }
     setError("");
     setSuccess("");
     setBusy(true);
@@ -311,12 +408,13 @@ function RecoveryForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           month: row.month,
-          case_key: row.case_key,
+          case_key: caseKey,
           version: recovery?.version || 0,
           outcome,
           split_mode: option?.allocation_required ? mode : "none",
           allocations: option?.allocation_required ? splits : [],
           remarks,
+          recovery_details: option?.dispute_fields_enabled ? details : {},
         }),
       });
       const j = await res.json();
@@ -354,7 +452,7 @@ function RecoveryForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           month: row.month,
-          case_key: row.case_key,
+          case_key: caseKey,
           version: recovery?.version,
         }),
       });
@@ -365,6 +463,7 @@ function RecoveryForm({
       setSelected([]);
       setAmounts({});
       setRemarks("");
+      setDetails({});
       setHistory((h) => [
         {
           id: String(Date.now()),
@@ -390,7 +489,7 @@ function RecoveryForm({
           <strong>{row.source_status}</strong>
         </div>
         <div>
-          <small>Recovery month</small>
+          <small>Loss file month</small>
           <strong>{row.month}</strong>
         </div>
         <div>
@@ -435,7 +534,7 @@ function RecoveryForm({
       ) : (
         <form onSubmit={save}>
           <fieldset
-            disabled={!canEdit || busy || !directoryReady}
+            disabled={!canEdit || busy || uploading || !directoryReady}
             className={styles.fieldset}
           >
             <label>
@@ -459,6 +558,15 @@ function RecoveryForm({
                   ))}
               </select>
             </label>
+            {option?.allocation_required && deductionPeriod ? (
+              <p className={styles.notice}>
+                <strong>Deduction month: {monthLabel(deductionPeriod)}</strong>
+                <br />
+                {option.deduction_timing === "next_month"
+                  ? "Next-month exception: record employee IDs, the full amount and the reason now."
+                  : "Allocate the full loss amount to the responsible employee IDs."}
+              </p>
+            ) : null}
             {option?.allocation_required ? (
               <div className={styles.allocation}>
                 <div className={styles.toolbar}>
@@ -488,8 +596,11 @@ function RecoveryForm({
                   </label>
                 </div>
                 <p className={styles.hint}>
-                  Station DAs, People staff and mapped managers. Select everyone
-                  sharing this recovery.
+                  Eligible station DAs, People staff and mapped managers, using
+                  the rules in Master.
+                  {settings?.recovery_policy.salary_cap_enabled
+                    ? " Each employee is limited to their available previous-month salary payable."
+                    : ""}
                 </p>
                 <div className={styles.people}>
                   {available.map((p) => (
@@ -497,6 +608,11 @@ function RecoveryForm({
                       <label>
                         <input
                           type="checkbox"
+                          disabled={
+                            !selected.includes(p.ref) &&
+                            settings?.recovery_policy.salary_cap_enabled &&
+                            (p.recovery_limit == null || p.recovery_limit <= 0)
+                          }
                           checked={selected.includes(p.ref)}
                           onChange={(e) =>
                             setSelected((ids) =>
@@ -512,6 +628,19 @@ function RecoveryForm({
                             {p.employee_code} · {p.designation}
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
+                          {settings?.recovery_policy.salary_cap_enabled ? (
+                            <small
+                              className={
+                                p.recovery_limit == null
+                                  ? styles.pending
+                                  : undefined
+                              }
+                            >
+                              {p.recovery_limit == null
+                                ? "Salary payable unavailable · review payroll / mapping"
+                                : `Available recovery limit ${money(p.recovery_limit)} · ${p.salary_month ? monthLabel(p.salary_month) : ""}`}
+                            </small>
+                          ) : null}
                         </span>
                       </label>
                       {selected.includes(p.ref) ? (
@@ -521,6 +650,11 @@ function RecoveryForm({
                             inputMode="decimal"
                             type="number"
                             min="0.01"
+                            max={
+                              settings?.recovery_policy.salary_cap_enabled
+                                ? (p.recovery_limit ?? 0)
+                                : undefined
+                            }
                             step="0.01"
                             value={amounts[p.ref] || ""}
                             onChange={(e) =>
@@ -548,6 +682,11 @@ function RecoveryForm({
                     People or Workforce mapping first.
                   </p>
                 ) : null}
+                {validation && selected.length ? (
+                  <p role="alert" className={styles.error}>
+                    {validation}
+                  </p>
+                ) : null}
                 <div className={styles.splitTotal}>
                   <span>{selected.length} people selected</span>
                   <strong>
@@ -560,6 +699,128 @@ function RecoveryForm({
                   ) : null}
                 </div>
               </div>
+            ) : null}
+            {option?.dispute_fields_enabled ? (
+              <section className={styles.allocation}>
+                <h3>Re-dispute details</h3>
+                <label>
+                  Reason for re-dispute{" "}
+                  {option.reason_required ? "(required)" : "(optional)"}
+                  <textarea
+                    rows={2}
+                    maxLength={2000}
+                    minLength={option.reason_required ? 5 : undefined}
+                    required={option.reason_required}
+                    value={details.reason || ""}
+                    onChange={(e) =>
+                      setDetails({ ...details, reason: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Detailing{" "}
+                  {option.details_required ? "(required)" : "(optional)"}
+                  <textarea
+                    rows={4}
+                    maxLength={10000}
+                    minLength={option.details_required ? 5 : undefined}
+                    required={option.details_required}
+                    value={details.details || ""}
+                    onChange={(e) =>
+                      setDetails({ ...details, details: e.target.value })
+                    }
+                  />
+                </label>
+                {option.attachments_enabled ? (
+                  <label>
+                    Attachments (optional)
+                    <input
+                      type="file"
+                      multiple
+                      accept={settings?.recovery_policy.attachment_types.join(
+                        ",",
+                      )}
+                      onChange={(e) => {
+                        void upload(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                    <small>
+                      Up to {settings?.recovery_policy.attachment_max_count}{" "}
+                      files · {settings?.recovery_policy.attachment_max_mb} MB
+                      each
+                    </small>
+                  </label>
+                ) : null}
+                {uploading ? <p role="status">Uploading evidence…</p> : null}
+                {details.attachments?.map((a) => (
+                  <div className={styles.toolbar} key={a.id}>
+                    <a
+                      href={attachmentUrl(a.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {a.file_name}
+                    </a>
+                    <button
+                      type="button"
+                      className={styles.button}
+                      onClick={() =>
+                        setDetails({
+                          ...details,
+                          attachments: details.attachments?.filter(
+                            (f) => f.id !== a.id,
+                          ),
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                {option.cctv_enabled ? (
+                  <>
+                    <label>
+                      CCTV link (optional)
+                      <input
+                        type="url"
+                        pattern="https://.*"
+                        value={details.cctv_url || ""}
+                        onChange={(e) =>
+                          setDetails({
+                            ...details,
+                            cctv_url: e.target.value,
+                            cctv_public_confirmed: false,
+                          })
+                        }
+                        placeholder="https://drive.google.com/…"
+                      />
+                    </label>
+                    <p className={styles.hint}>
+                      Set link sharing to “Anyone with the link can view” before
+                      adding it.
+                    </p>
+                    {details.cctv_url &&
+                    settings?.recovery_policy.cctv_public_confirmation ? (
+                      <label className={styles.check}>
+                        <input
+                          type="checkbox"
+                          required
+                          checked={!!details.cctv_public_confirmed}
+                          onChange={(e) =>
+                            setDetails({
+                              ...details,
+                              cctv_public_confirmed: e.target.checked,
+                            })
+                          }
+                        />
+                        I confirmed anyone with the link can view this CCTV
+                        recording.
+                      </label>
+                    ) : null}
+                  </>
+                ) : null}
+              </section>
             ) : null}
             <label>
               Remarks {option?.remarks_required ? "(required)" : "(optional)"}
@@ -575,7 +836,7 @@ function RecoveryForm({
             {canEdit ? (
               <button
                 className={styles.primary}
-                disabled={busy || !option?.is_active}
+                disabled={busy || uploading || cannotSave}
               >
                 {busy
                   ? "Saving…"
@@ -621,7 +882,38 @@ function RecoveryForm({
                   timeZone: "Asia/Kolkata",
                 })}
               </small>
+              {h.after_value.deduction_month ? (
+                <p>Deduction: {monthLabel(h.after_value.deduction_month)}</p>
+              ) : null}
               <p>{h.after_value.remarks}</p>
+              {h.after_value.recovery_details?.reason ? (
+                <p>
+                  <strong>Reason:</strong>{" "}
+                  {h.after_value.recovery_details.reason}
+                </p>
+              ) : null}
+              {h.after_value.recovery_details?.details ? (
+                <p>
+                  <strong>Detailing:</strong>{" "}
+                  {h.after_value.recovery_details.details}
+                </p>
+              ) : null}
+              {h.after_value.recovery_details?.attachments?.map((a) => (
+                <p key={a.id}>
+                  <a href={attachmentUrl(a.id)}>{a.file_name}</a>
+                </p>
+              ))}
+              {h.after_value.recovery_details?.cctv_url ? (
+                <p>
+                  <a
+                    href={h.after_value.recovery_details.cctv_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    CCTV recording
+                  </a>
+                </p>
+              ) : null}
               {h.after_value.allocations.map((p) => (
                 <span key={p.ref}>
                   {p.full_name} ({p.employee_code}) — {money(p.amount)}

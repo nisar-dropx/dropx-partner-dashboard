@@ -5,6 +5,7 @@ import Link from "next/link";
 import type {
   RecoveryOutcome,
   LossSettings,
+  DeductionTiming,
 } from "@/lib/ops-pulse/nl-loss-policy";
 import styles from "./nl-loss.module.css";
 export function NlRecoveryMaster({
@@ -77,7 +78,42 @@ export function NlRecoveryMaster({
                 recoverable_statuses: String(f.get("statuses")).split("\n"),
                 allow_equal_split: f.has("equal"),
                 allow_custom_split: f.has("custom"),
-                include_inactive_people: f.has("inactive"),
+                include_inactive_people: !f.has("active_only"),
+                recovery_policy: {
+                  ...settings.recovery_policy,
+                  ...Object.fromEntries(
+                    [
+                      "active_only",
+                      "previous_month_active_only",
+                      "salary_cap_enabled",
+                      "reserve_other_recoveries",
+                      "cctv_public_confirmation",
+                    ].map((k) => [k, f.has(k)]),
+                  ),
+                  ...Object.fromEntries(
+                    [
+                      "salary_month_offset",
+                      "salary_cap_percent",
+                      "attachment_max_count",
+                      "attachment_max_mb",
+                    ].map((k) => [k, Number(f.get(k))]),
+                  ),
+                  ...Object.fromEntries(
+                    [
+                      "people_run_statuses",
+                      "people_calculation_statuses",
+                      "workforce_payout_statuses",
+                      "eligible_designations",
+                      "attachment_types",
+                    ].map((k) => [
+                      k,
+                      String(f.get(k) || "")
+                        .split("\n")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    ]),
+                  ),
+                },
                 history_months: Number(f.get("history_months")),
               });
             }}
@@ -128,14 +164,116 @@ export function NlRecoveryMaster({
                 />
                 Enable individual amounts
               </label>
-              <label className={styles.check}>
-                <input
-                  name="inactive"
-                  type="checkbox"
-                  defaultChecked={settings.include_inactive_people}
-                />
-                Include inactive / left people linked to the station
-              </label>
+              <h3>Employee eligibility & salary cap</h3>
+              {(
+                [
+                  ["active_only", "Show only currently active employees"],
+                  [
+                    "previous_month_active_only",
+                    "Require employment during the reference salary month",
+                  ],
+                  ["salary_cap_enabled", "Cap recovery at salary payable"],
+                  [
+                    "reserve_other_recoveries",
+                    "Subtract recovery already allocated to other cases",
+                  ],
+                  [
+                    "cctv_public_confirmation",
+                    "Require anyone-with-link viewing confirmation for CCTV",
+                  ],
+                ] as const
+              ).map(([key, label]) => (
+                <label className={styles.check} key={key}>
+                  <input
+                    type="checkbox"
+                    name={key}
+                    defaultChecked={settings.recovery_policy[key]}
+                  />
+                  {label}
+                </label>
+              ))}
+              <div className={styles.formGrid}>
+                {(
+                  [
+                    [
+                      "salary_month_offset",
+                      "Salary reference: months before current month",
+                      1,
+                      12,
+                    ],
+                    [
+                      "salary_cap_percent",
+                      "Maximum recovery as % of payable salary",
+                      1,
+                      100,
+                    ],
+                    [
+                      "attachment_max_count",
+                      "Maximum optional attachments",
+                      1,
+                      10,
+                    ],
+                    [
+                      "attachment_max_mb",
+                      "Maximum size per attachment (MB)",
+                      1,
+                      20,
+                    ],
+                  ] as const
+                ).map(([key, label, min, max]) => (
+                  <label key={key}>
+                    {label}
+                    <input
+                      type="number"
+                      name={key}
+                      min={min}
+                      max={max}
+                      required
+                      defaultValue={settings.recovery_policy[key]}
+                    />
+                  </label>
+                ))}
+              </div>
+              <details>
+                <summary>
+                  Pay sources, eligible designations & file types
+                </summary>
+                <p className={styles.hint}>
+                  One exact value per line. An empty designation list allows all
+                  station-linked roles. Missing payable salary blocks allocation
+                  while the cap is enabled.
+                </p>
+                {(
+                  [
+                    [
+                      "people_run_statuses",
+                      "Accepted People payroll run statuses",
+                    ],
+                    [
+                      "people_calculation_statuses",
+                      "Accepted People payroll calculation statuses",
+                    ],
+                    [
+                      "workforce_payout_statuses",
+                      "Accepted DA payout worksheet statuses",
+                    ],
+                    [
+                      "eligible_designations",
+                      "Eligible designation names (optional restriction)",
+                    ],
+                    ["attachment_types", "Allowed attachment MIME types"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <textarea
+                      name={key}
+                      rows={3}
+                      defaultValue={settings.recovery_policy[key].join("\n")}
+                    />
+                  </label>
+                ))}
+              </details>
               <button className={styles.primary}>Save rules</button>
             </fieldset>
           </form>
@@ -161,7 +299,13 @@ export function NlRecoveryMaster({
                 setEditing({
                   code: "",
                   label: "",
+                  dispute_fields_enabled: false,
+                  reason_required: false,
+                  details_required: false,
+                  attachments_enabled: false,
+                  cctv_enabled: false,
                   allocation_required: false,
+                  deduction_timing: "none",
                   remarks_required: true,
                   is_active: true,
                   sort_order: (outcomes.length + 1) * 10,
@@ -177,6 +321,7 @@ export function NlRecoveryMaster({
             <thead>
               <tr>
                 <th>Outcome</th>
+                <th>Deduction period</th>
                 <th>Employee allocation</th>
                 <th>Remarks</th>
                 <th>Status</th>
@@ -189,6 +334,13 @@ export function NlRecoveryMaster({
                   <td>
                     <strong>{o.label}</strong>
                     <small>{o.code}</small>
+                  </td>
+                  <td>
+                    {o.deduction_timing === "next_month"
+                      ? "Next month · exception"
+                      : o.deduction_timing === "current_month"
+                        ? "Current month"
+                        : "Not applicable"}
                   </td>
                   <td>{o.allocation_required ? "Required" : "Not required"}</td>
                   <td>{o.remarks_required ? "Required" : "Optional"}</td>
@@ -270,9 +422,40 @@ export function NlRecoveryMaster({
                   />
                 </label>
               </div>
+              <label>
+                Deduction period
+                <select
+                  value={editing.deduction_timing || "none"}
+                  onChange={(e) => {
+                    const timing = e.target.value as DeductionTiming;
+                    setEditing({
+                      ...editing,
+                      deduction_timing: timing,
+                      allocation_required: timing !== "none",
+                      remarks_required:
+                        timing === "next_month"
+                          ? true
+                          : editing.remarks_required,
+                    });
+                  }}
+                >
+                  <option value="none">
+                    Not applicable — no employee deduction
+                  </option>
+                  <option value="current_month">Current month</option>
+                  <option value="next_month">
+                    Next month — exception with reason
+                  </option>
+                </select>
+              </label>
+              <p className={styles.hint}>
+                Both deduction periods require the full loss amount and employee
+                IDs now. Partial allocation is never allowed.
+              </p>
               <label className={styles.check}>
                 <input
                   type="checkbox"
+                  disabled
                   checked={editing.allocation_required}
                   onChange={(e) =>
                     setEditing({
@@ -286,6 +469,7 @@ export function NlRecoveryMaster({
               <label className={styles.check}>
                 <input
                   type="checkbox"
+                  disabled={editing.deduction_timing === "next_month"}
                   checked={editing.remarks_required}
                   onChange={(e) =>
                     setEditing({
@@ -297,6 +481,30 @@ export function NlRecoveryMaster({
                 Require remarks
               </label>
               <div className={styles.toolbar}>
+                <h3>Re-dispute fields</h3>
+                {(
+                  [
+                    [
+                      "dispute_fields_enabled",
+                      "Show structured re-dispute form",
+                    ],
+                    ["reason_required", "Require reason for re-dispute"],
+                    ["details_required", "Require detailing"],
+                    ["attachments_enabled", "Allow optional attachments"],
+                    ["cctv_enabled", "Allow optional CCTV link"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label className={styles.check} key={key}>
+                    <input
+                      type="checkbox"
+                      checked={!!editing[key]}
+                      onChange={(e) =>
+                        setEditing({ ...editing, [key]: e.target.checked })
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
                 <button className={styles.primary}>Save outcome</button>
                 <button
                   className={styles.button}

@@ -1,85 +1,52 @@
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
+import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { nlStationScope } from "@/lib/ops-pulse/nl-loss";
-import { isRecoverable } from "@/lib/ops-pulse/nl-loss-policy";
+import { deductionMonth } from "@/lib/ops-pulse/nl-loss-policy";
 import { readAllRows } from "@/lib/supabase-pagination";
+export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {
     status,
     headers: { "Cache-Control": "private, no-store" },
   });
-async function context(month: string, key: string, edit: boolean) {
-  const auth = await getAuthorization();
-  if (
-    !auth ||
-    !hasPermission(auth, "ops_losses", edit ? "edit" : "access") ||
-    (edit && auth.readOnly)
-  )
-    throw Error("Access denied.");
-  if (
-    !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) ||
-    !key ||
-    key.length > 300 ||
-    !supabaseAdmin
-  )
-    throw Error("Invalid recovery case.");
-  const scope = await nlStationScope(auth);
-  const settings = await supabaseAdmin
-    .from("nl_loss_sources")
-    .select("recoverable_statuses,include_inactive_people")
-    .eq("company_id", scope.company)
-    .maybeSingle();
-  const row = await supabaseAdmin
-    .from("nl_loss_month_cases")
-    .select("station_code,source_status,source_present")
-    .eq("company_id", scope.company)
-    .eq("month", month)
-    .eq("case_key", key)
-    .maybeSingle();
-  const station = scope.stations.find(
-    (s) => s.source_code === row.data?.station_code,
-  );
-  if (
-    row.error ||
-    !station ||
-    !row.data?.source_present ||
-    !isRecoverable(
-      row.data.source_status,
-      settings.data?.recoverable_statuses ?? [],
-    )
-  )
-    throw Error("Case is unavailable or outside your station access.");
-  return { auth, scope, station, settings: settings.data };
-}
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url),
       month = url.searchParams.get("month") || "",
       key = url.searchParams.get("case") || "";
-    const { scope, station, settings } = await context(month, key, false);
+    const { auth, scope, station, settings, caseKey, amount } =
+      await recoveryContext(month, key, false);
     const [people, history] = await Promise.all([
-      supabaseAdmin!.rpc("station_audit_employee_directory", {
-        p_company: scope.company,
-        p_station: station.id,
-      }),
+      loadRecoveryPayables(
+        auth,
+        scope.company,
+        station.id,
+        month,
+        caseKey,
+        settings!.recovery_policy,
+        settings!.updated_at,
+      ),
       readAllRows(
         supabaseAdmin!
           .from("nl_loss_recovery_events")
           .select("id,after_value,actor_name,created_at")
           .eq("company_id", scope.company)
           .eq("month", month)
-          .eq("case_key", key)
+          .eq("case_key", caseKey)
           .order("created_at", { ascending: false }),
       ),
     ]);
-    if (people.error || history.error)
+    if (history.error)
       throw Error("Recovery people and history could not be loaded.");
     return reply({
-      people: (people.data ?? []).filter(
-        (p: { is_active: boolean }) =>
-          settings?.include_inactive_people || p.is_active,
-      ),
+      case_key: caseKey,
+      amount,
+      deduction_months: {
+        current_month: deductionMonth("current_month"),
+        next_month: deductionMonth("next_month"),
+      },
+      people,
       history: history.data ?? [],
     });
   } catch (e) {
@@ -97,7 +64,7 @@ export async function POST(request: Request) {
     )
       return reply({ error: "Invalid request origin." }, 403);
     const body = await request.json();
-    const { auth, scope } = await context(
+    const { auth, scope, station, settings, caseKey } = await recoveryContext(
       String(body.month || ""),
       String(body.case_key || ""),
       true,
@@ -112,10 +79,29 @@ export async function POST(request: Request) {
       body.remarks.length > 2000
     )
       return reply({ error: "Invalid recovery values." }, 400);
+    const outcome = await supabaseAdmin!
+      .from("nl_recovery_outcomes")
+      .select("allocation_required")
+      .eq("company_id", scope.company)
+      .eq("code", body.outcome)
+      .maybeSingle();
+    if (outcome.error) throw Error("Recovery outcome could not be loaded.");
+    if (outcome.data?.allocation_required)
+      await loadRecoveryPayables(
+        auth,
+        scope.company,
+        station.id,
+        body.month,
+        caseKey,
+        settings!.recovery_policy,
+        settings!.updated_at,
+      );
+    if (JSON.stringify(body.recovery_details || {}).length > 20000)
+      return reply({ error: "Re-dispute details are too long." }, 400);
     const result = await supabaseAdmin!.rpc("save_nl_recovery", {
       p_company: scope.company,
       p_month: body.month,
-      p_case: body.case_key,
+      p_case: caseKey,
       p_version: body.version,
       p_outcome: body.outcome,
       p_mode: body.split_mode,
@@ -123,6 +109,7 @@ export async function POST(request: Request) {
       p_remarks: body.remarks,
       p_actor: auth.userId,
       p_name: auth.fullName || auth.email || "OpsPulse user",
+      p_details: body.recovery_details || {},
     });
     if (result.error)
       return reply(
@@ -153,7 +140,7 @@ export async function DELETE(request: Request) {
     )
       return reply({ error: "Invalid request origin." }, 403);
     const b = await request.json();
-    const { auth, scope } = await context(
+    const { auth, scope, caseKey } = await recoveryContext(
       String(b.month || ""),
       String(b.case_key || ""),
       true,
@@ -163,7 +150,7 @@ export async function DELETE(request: Request) {
     const r = await supabaseAdmin!.rpc("clear_nl_recovery", {
       p_company: scope.company,
       p_month: b.month,
-      p_case: b.case_key,
+      p_case: caseKey,
       p_version: b.version,
       p_actor: auth.userId,
       p_name: auth.fullName || auth.email || "OpsPulse user",

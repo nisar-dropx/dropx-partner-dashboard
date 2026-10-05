@@ -60,6 +60,57 @@ export async function POST(request: Request) {
           },
           400,
         );
+      const policy = b.recovery_policy;
+      if (
+        !policy ||
+        [
+          "active_only",
+          "previous_month_active_only",
+          "salary_cap_enabled",
+          "reserve_other_recoveries",
+          "cctv_public_confirmation",
+        ].some((k) => typeof policy[k] !== "boolean") ||
+        !Number.isInteger(policy.salary_month_offset) ||
+        policy.salary_month_offset < 1 ||
+        policy.salary_month_offset > 12 ||
+        !Number.isFinite(policy.salary_cap_percent) ||
+        policy.salary_cap_percent <= 0 ||
+        policy.salary_cap_percent > 100 ||
+        !Number.isInteger(policy.attachment_max_count) ||
+        policy.attachment_max_count < 1 ||
+        policy.attachment_max_count > 10 ||
+        !Number.isInteger(policy.attachment_max_mb) ||
+        policy.attachment_max_mb < 1 ||
+        policy.attachment_max_mb > 20 ||
+        [
+          "people_run_statuses",
+          "people_calculation_statuses",
+          "workforce_payout_statuses",
+          "eligible_designations",
+          "attachment_types",
+        ].some(
+          (k) =>
+            !Array.isArray(policy[k]) ||
+            policy[k].length > 100 ||
+            policy[k].some(
+              (v: unknown) =>
+                typeof v !== "string" || !v.trim() || v.length > 120,
+            ),
+        ) ||
+        policy.attachment_types.some(
+          (v: string) =>
+            ![
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "application/pdf",
+            ].includes(v),
+        )
+      )
+        return reply(
+          { error: "Enter valid employee, salary cap and evidence rules." },
+          400,
+        );
       result = await supabaseAdmin
         .from("nl_loss_sources")
         .update({
@@ -67,13 +118,29 @@ export async function POST(request: Request) {
           history_months: b.history_months,
           allow_equal_split: b.allow_equal_split,
           allow_custom_split: b.allow_custom_split,
-          include_inactive_people: b.include_inactive_people,
+          include_inactive_people: !policy.active_only,
+          recovery_policy: policy,
           ...stamp,
         })
         .eq("company_id", company)
         .eq("updated_at", b.updated_at)
         .select("account_key");
     } else {
+      const timing =
+        b.deduction_timing ??
+        (b.allocation_required ? "current_month" : "none");
+      if (
+        !["none", "current_month", "next_month"].includes(timing) ||
+        b.allocation_required !== (timing !== "none") ||
+        (timing === "next_month" && !b.remarks_required)
+      )
+        return reply(
+          {
+            error:
+              "A deduction requires full employee allocation. Next-month exceptions also require a reason.",
+          },
+          400,
+        );
       if (
         !/^[a-z][a-z0-9_]{1,49}$/.test(b.code) ||
         typeof b.label !== "string" ||
@@ -81,6 +148,13 @@ export async function POST(request: Request) {
         b.label.length > 80 ||
         typeof b.allocation_required !== "boolean" ||
         typeof b.remarks_required !== "boolean" ||
+        [
+          "dispute_fields_enabled",
+          "reason_required",
+          "details_required",
+          "attachments_enabled",
+          "cctv_enabled",
+        ].some((k) => typeof b[k] !== "boolean") ||
         typeof b.is_active !== "boolean" ||
         !Number.isInteger(b.sort_order)
       )
@@ -90,6 +164,12 @@ export async function POST(request: Request) {
         );
       const value = {
         label: b.label.trim(),
+        deduction_timing: timing,
+        dispute_fields_enabled: b.dispute_fields_enabled,
+        reason_required: b.reason_required,
+        details_required: b.details_required,
+        attachments_enabled: b.attachments_enabled,
+        cctv_enabled: b.cctv_enabled,
         allocation_required: b.allocation_required,
         remarks_required: b.remarks_required,
         is_active: b.is_active,
