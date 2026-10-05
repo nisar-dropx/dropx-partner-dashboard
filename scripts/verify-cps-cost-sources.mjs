@@ -133,5 +133,7 @@ assert.equal((await query("select rowsecurity from pg_tables where tablename='op
 await assert.rejects(query("update ops_cps_component_policies set mode='ignore' where company_id=$1",[company]),/check constraint/);
 await query("insert into ops_cps_component_policies(company_id,component_code,label,mode,effective_from) values($1,'VAN_RENT_PER_DAY','Rental','workforce','2027-01-01')",[company]);
 assert.equal((await query('select count(*) n from ops_cps_component_policies where company_id=$1',[company]))[0].n,3,'effective revisions preserve earlier rule');
+await db.exec(readFileSync(new URL('../supabase/migrations/20261005232006_cps_rental_source_effective_date.sql',import.meta.url),'utf8'));
+assert.equal((await query("select effective_from::text d from ops_cps_component_policies where company_id=$1 and mode='fleet' limit 1",[company]))[0].d,'2026-09-01','source handover begins at Fleet coverage, preserving earlier Workforce rent');
 await db.close();
 console.log('CPS sources verified: rates, revisions, transfers, permissions, missing rates, approval milestones, rent and cashbook dedupe, scoped totals.');
