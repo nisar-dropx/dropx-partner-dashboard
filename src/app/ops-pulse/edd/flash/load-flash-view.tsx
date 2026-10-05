@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Download, Loader2, RefreshCw } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashNetworkPayload, LoadFlashStation } from "@/lib/ops-pulse/edd-worker";
+import type { LoadFlashReportKind } from "@/lib/ops-pulse/load-flash-report";
 
 const POLL_MS = 15000;
 
@@ -21,12 +22,31 @@ function sum(rows: LoadFlashStation[], key: keyof LoadFlashStation) {
   return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
 }
 
+async function downloadReport(date: string, kind: LoadFlashReportKind) {
+  const response = await fetch(`/api/ops-pulse/edd/flash/report?date=${encodeURIComponent(date)}&report=${kind}`, { cache: "no-store" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(String((body as { error?: string }).error ?? "Unable to download the report."));
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const named = response.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1];
+  anchor.href = url;
+  anchor.download = named || `ops-live-${date}-${kind}.xlsx`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 export function LoadFlashView({ initial }: { initial: LoadFlashNetworkPayload }) {
   const [payload, setPayload] = useState(initial);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initial.run);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [downloading, setDownloading] = useState<LoadFlashReportKind | null>(null);
 
   useEffect(() => {
     setPayload(initial);
@@ -63,6 +83,14 @@ export function LoadFlashView({ initial }: { initial: LoadFlashNetworkPayload })
   const maxHour = Math.max(1, ...payload.hourly.map((point) => Math.max(point.totalLoad, point.delivered)));
   const sweepPct = run && run.stationsTotal ? Math.round((run.stationsDone / run.stationsTotal) * 100) : 0;
 
+  function saveReport(kind: LoadFlashReportKind) {
+    setDownloading(kind);
+    setError(null);
+    void downloadReport(payload.businessDate, kind)
+      .catch((err) => setError(err instanceof Error ? err.message : "Unable to download the report."))
+      .finally(() => setDownloading(null));
+  }
+
   function refreshAll() {
     setStarting(true);
     setError(null);
@@ -78,7 +106,7 @@ export function LoadFlashView({ initial }: { initial: LoadFlashNetworkPayload })
 
   return (
     <>
-      <form action="/edd/flash" className="panel" style={{ marginBottom: 16 }}>
+      <form action="/edd/flash" className="panel" style={{ marginBottom: 8 }}>
         <div className="panel-body" style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
           <label>Report date
             <input className="field" name="date" type="date" defaultValue={payload.businessDate} />
@@ -105,13 +133,26 @@ export function LoadFlashView({ initial }: { initial: LoadFlashNetworkPayload })
         </small>
       </section>
 
-      <section className="edd-bucket-grid">
-        <div className="edd-bucket-card static"><span>Total load</span><strong>{count(liveLoad)}</strong><small>{count(sum(reporting, "inducted"))} inducted · {count(sum(reporting, "retained"))} retained</small></div>
-        <div className="edd-bucket-card static dueToday"><span>EDD today</span><strong>{count(sum(reporting, "eddToday"))}</strong><small>{count(sum(reporting, "eddPast"))} past · {count(sum(reporting, "eddFuture"))} future</small></div>
-        <div className="edd-bucket-card static"><span>Out on road</span><strong>{count(sum(reporting, "outOnRoad"))}</strong><small>Inducted and in transit to the customer</small></div>
-        <div className="edd-bucket-card static future"><span>Delivered</span><strong>{count(delivered)}</strong><small>{count(sum(reporting, "deliveredLive"))} currently in a delivered status</small></div>
-        <div className="edd-bucket-card static overdue"><span>Customer returns</span><strong>{count(sum(reporting, "returnsToday"))}</strong><small>Scheduled back to the station today</small></div>
-        <div className="edd-bucket-card static unknown"><span>Pickup success</span><strong>{count(sum(reporting, "pickupsSuccess"))}</strong><small>of {count(sum(reporting, "pickupsAssigned"))} first-day pickups</small></div>
+      <section className="ops-live-metrics" aria-label="Ops Live totals">
+        {([
+          ["load", "load", "Total load", count(liveLoad), `${count(sum(reporting, "inducted"))} inducted · ${count(sum(reporting, "retained"))} retained`],
+          ["edd", "edd", "EDD today", count(sum(reporting, "eddToday")), `${count(sum(reporting, "eddPast"))} past · ${count(sum(reporting, "eddFuture"))} future`],
+          ["road", "road", "Out on road", count(sum(reporting, "outOnRoad")), "In transit to the customer"],
+          ["delivered", "delivered", "Delivered", count(delivered), `${count(sum(reporting, "deliveredLive"))} in a delivered status`],
+          ["returns", "returns", "Customer returns", count(sum(reporting, "returnsToday")), "Due back at the station today"],
+          ["pickups", "pickups", "Pickup success", count(sum(reporting, "pickupsSuccess")), `of ${count(sum(reporting, "pickupsAssigned"))} assigned`]
+        ] as const).map(([kind, tone, label, value, detail]) => (
+          <article className={`ops-live-metric ${tone}`} key={kind}>
+            <div className="ops-live-metric-top">
+              <span>{label}</span>
+              <button type="button" aria-label={`Download ${label}`} disabled={downloading !== null} onClick={() => saveReport(kind)}>
+                {downloading === kind ? <Loader2 size={12} className="edd-spin" /> : <Download size={12} />}
+              </button>
+            </div>
+            <strong>{value}</strong>
+            <small>{detail}</small>
+          </article>
+        ))}
       </section>
 
       {payload.hourly.length ? (
@@ -137,10 +178,16 @@ export function LoadFlashView({ initial }: { initial: LoadFlashNetworkPayload })
             <h3>Stations</h3>
             <p className="subtle">Load is inducted plus retained. Delivered is the morning tracking-ID list, locked once history shows Delivered.</p>
           </div>
+          <div style={{ display: "inline-flex", gap: 8 }}>
+          <button type="button" className="button secondary" onClick={() => saveReport("full")} disabled={downloading !== null} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {downloading === "full" ? <Loader2 size={16} className="edd-spin" /> : <Download size={16} />}
+            Full data
+          </button>
           <button type="button" className="button secondary" onClick={refreshAll} disabled={starting || run?.status === "running"} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             {starting || run?.status === "running" ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
             {run?.status === "running" ? "Refreshing…" : "Refresh all"}
           </button>
+          </div>
         </div>
         {run ? (
           <div className="panel-body edd-sweep-status">

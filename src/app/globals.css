@@ -20363,6 +20363,67 @@ td strong,
 .edd-bucket-card.future strong { color: var(--green); }
 .edd-bucket-card.unknown { border-left-color: var(--muted); }
 
+.ops-live-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.ops-live-metric {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.ops-live-metric-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.ops-live-metric-top span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.ops-live-metric-top button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ops-live-metric-top button:hover { color: var(--ink); border-color: var(--ink); }
+.ops-live-metric strong { font-size: 18px; line-height: 1.15; color: var(--ink); }
+.ops-live-metric small { color: var(--muted); font-size: 11px; line-height: 1.3; }
+.ops-live-metric.load { border-left-color: var(--ink); }
+.ops-live-metric.edd { border-left-color: var(--amber); }
+.ops-live-metric.edd strong { color: var(--amber); }
+.ops-live-metric.road { border-left-color: #64748b; }
+.ops-live-metric.delivered { border-left-color: var(--green); }
+.ops-live-metric.delivered strong { color: var(--green); }
+.ops-live-metric.returns { border-left-color: var(--red); }
+.ops-live-metric.returns strong { color: var(--red); }
+.ops-live-metric.pickups { border-left-color: var(--brand-dark); }
+@media (max-width: 1100px) {
+  .ops-live-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .ops-live-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .edd-chart-legend {
   display: flex;
   flex-wrap: wrap;
