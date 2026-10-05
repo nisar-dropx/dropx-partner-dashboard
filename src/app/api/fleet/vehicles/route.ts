@@ -1,3 +1,4 @@
+import { parseVehicleRent } from "@/lib/fleet/vehicle-rent";
 import { NextResponse } from "next/server";
 import { type AuthorizationContext, getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -37,7 +38,9 @@ export async function POST(request: Request) {
   const access = await requireFleetMutationPermission("add");
   if ("error" in access) return access.error;
   const body = await request.json();
-  const payload: Record<string, string | null> = { ...sanitizePayload(body), company_id: access.companyId };
+  const rent = parseVehicleRent(body);
+  if (rent.error) return NextResponse.json({ error: rent.error }, { status: 400 });
+  const payload: Record<string, string | null> = { ...sanitizePayload(body), ...rent.values, company_id: access.companyId };
   if (!payload.status) payload.status = "active";
   if (!payload.ownership_type) payload.ownership_type = "own";
   if (!payload.vehicle_no) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
@@ -67,10 +70,12 @@ export async function PATCH(request: Request) {
   const access = await requireFleetMutationPermission("edit");
   if ("error" in access) return access.error;
   const body = await request.json();
+  const rent = parseVehicleRent(body);
+  if (rent.error) return NextResponse.json({ error: rent.error }, { status: 400 });
   const vehicleNo = normalizeText(body.vehicle_no).toUpperCase();
   if (!vehicleNo) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
 
-  const payload = sanitizePayload(body);
+  const payload = { ...sanitizePayload(body), ...rent.values };
   delete payload.vehicle_no;
   const guard = await requireVehicleScope(access.companyId, vehicleNo, access.stationCodes);
   if ("error" in guard) return guard.error;
