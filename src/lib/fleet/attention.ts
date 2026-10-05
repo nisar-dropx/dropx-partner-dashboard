@@ -1,4 +1,4 @@
-import {gpsExceptions,isOwnedVehicle} from './gps-exceptions';
+import {gpsExceptions,isOwnedVehicle} from './gps-exceptions.ts';
 import type { FleetControlData } from '../fleet-control';
 export type AttentionItem={id:string;title:string;detail:string;station:string;vehicle:string;vehicleId:string;due:string|null;priority:number;category:string;section:string;findingId?:string;auditId?:string;resolved?:boolean};
 export function fleetAttention(data:FleetControlData):AttentionItem[]{
