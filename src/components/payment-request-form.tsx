@@ -46,7 +46,8 @@ type PaymentRequestFormProps = {
   submitLabel?: string;
 };
 
-function inputForQuestion(question: PaymentQuestion, disabled = false) {
+function inputForQuestion(question: PaymentQuestion, disabled = false, onValueChange?: (value: string) => void) {
+  const syncValue = (event: { currentTarget: { value: string } }) => onValueChange?.(event.currentTarget.value);
   const name = `answers[${question.id}]`;
   if (question.answer_type === "dropdown") {
     const options = (question.dropdown_options ?? "")
@@ -54,18 +55,18 @@ function inputForQuestion(question: PaymentQuestion, disabled = false) {
       .map((option) => option.trim())
       .filter(Boolean);
     return (
-      <select className="field" disabled={disabled} name={name} required={question.is_required}>
+      <select className="field" disabled={disabled} name={name} required={question.is_required} onChange={syncValue}>
         <option value="">Select</option>
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
     );
   }
   if (question.answer_type === "textarea") {
-    return <AutoGrowTextarea disabled={disabled} name={name} required={question.is_required} rows={3} />;
+    return <AutoGrowTextarea disabled={disabled} name={name} required={question.is_required} rows={3} onChange={syncValue} />;
   }
   if (question.answer_type === "yes_no") {
     return (
-      <select className="field" disabled={disabled} name={name} required={question.is_required}>
+      <select className="field" disabled={disabled} name={name} required={question.is_required} onChange={syncValue}>
         <option value="">Select</option>
         <option value="Yes">Yes</option>
         <option value="No">No</option>
@@ -95,6 +96,8 @@ function inputForQuestion(question: PaymentQuestion, disabled = false) {
       className="field"
       disabled={disabled}
       name={name}
+      onChange={syncValue}
+      onInput={syncValue}
       required={question.is_required}
       step={question.answer_type === "number" ? (/^estimated shipments$/i.test(question.question_text.trim()) ? "1" : "0.01") : undefined}
       type={question.answer_type === "number" ? "number" : question.answer_type === "date" ? "date" : "text"}
@@ -266,11 +269,11 @@ export function PaymentRequestForm({
       <div className="form-grid three">
         <label>
           Location
-          <SearchableSelect name="location_id" options={locationOptions} placeholder="Select location" required onValueChange={setSelectedLocationId} />
+          <SearchableSelect value={selectedLocationId} name="location_id" options={locationOptions} placeholder="Select location" required onValueChange={setSelectedLocationId} />
         </label>
         <label>
           Payment Head
-          <SearchableSelect name="payment_head_id" options={headOptions} placeholder="Select payment head" required onValueChange={(id) => { setSelectedHeadId(id); setVolumeDate(""); setVolumeReason(""); setCostAnswers({}); }} />
+          <SearchableSelect value={selectedHeadId} name="payment_head_id" options={headOptions} placeholder="Select payment head" required onValueChange={(id) => { setSelectedHeadId(id); setVolumeDate(""); setVolumeReason(""); setCostAnswers({}); }} />
         </label>
         <label>
           {amountLabel}
@@ -386,13 +389,7 @@ export function PaymentRequestForm({
       {selectedHead?.payment_head_questions.length ? (
         <>
           <div className="section-divider" />
-          <div className="form-grid three" key={selectedHead.id} onChange={(event) => {
-            const input = event.target as HTMLInputElement | HTMLSelectElement;
-            const question = selectedHead.payment_head_questions.find(q => `answers[${q.id}]` === input.name);
-            if (question) setCostAnswers(old => ({...old, [question.id]: input.value}));
-            if (/^deployment date$/i.test(question?.question_text.trim() ?? "")) setVolumeDate(input.value);
-            if (/reason.*(?:adhoc|ad hoc).*deployment/i.test(question?.question_text ?? "")) setVolumeReason(input.value);
-          }}>
+          <div className="form-grid three" key={selectedHead.id}>
             {selectedHead.payment_head_questions.map((question) => {
               const questionLabel = question.question_text.toLowerCase();
               const isWideField = question.answer_type === "textarea" || questionLabel.includes("mail subject") || questionLabel.includes("subject");
@@ -400,7 +397,11 @@ export function PaymentRequestForm({
                 <label key={question.id} className={isWideField ? "span-3" : undefined}>
                   {question.question_text}{question.is_required ? " *" : ""}
                   <input type="hidden" name="question_ids" value={question.id} />
-                  {inputForQuestion(question, blockedByExpenseApproval)}
+                  {inputForQuestion(question, blockedByExpenseApproval, (value) => {
+                    setCostAnswers(old => ({ ...old, [question.id]: value }));
+                    if (/^deployment date$/i.test(question.question_text.trim())) setVolumeDate(value);
+                    if (/reason.*(?:adhoc|ad hoc).*deployment/i.test(question.question_text)) setVolumeReason(value);
+                  })}
                 </label>
               );
             })}
