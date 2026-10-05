@@ -1,77 +1,1076 @@
 "use client";
 
-import { FormEvent, useMemo, useState, useTransition } from "react";
-import { addAuditManagerComment, beginStationAudit, closeStationAudit, respondToStationAudit, scheduleStationAudit, submitStationAudit } from "./actions";
-import type { AuditChecklistItem, AuditOption, AuditSection, AuditStation, AuditType, StationAudit, StationAuditWorkspace } from "@/lib/ops-pulse/station-audits";
+import Link from "next/link";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Search,
+  X,
+} from "lucide-react";
+import { SearchableSelect } from "@/components/searchable-select";
+import type {
+  AuditStation,
+  AuditType,
+  StationAudit,
+  StationAuditWorkspace,
+} from "@/lib/ops-pulse/station-audits";
+import {
+  addAuditDays,
+  auditDay,
+  auditLocalTime,
+  auditMonthRange,
+  auditPlanColumns,
+  auditSlots,
+  auditStatusLabel,
+  auditTone,
+  isFastAudit,
+} from "@/lib/ops-pulse/station-audit-planning";
+import { scheduleStationAudit } from "./actions";
+import { AuditDetail, auditActor } from "./audit-detail";
 import styles from "./audit-workspace.module.css";
 
-type Result = { ok: boolean; message: string };
-const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-const formatDateTime = (value: string) => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date(value));
-const value = (input: unknown) => String(input ?? "");
-const statusClass = (status: string) => `${styles.status} ${styles[status] ?? ""}`;
-const responseValue = (raw: unknown) => raw && typeof raw === "object" && "value" in raw ? value((raw as { value?: unknown }).value) : value(raw);
-function config(type: AuditType) { return type.scheduling_config && typeof type.scheduling_config === "object" ? type.scheduling_config : {}; }
-function periodSlots(type: AuditType) { const slots = config(type).period_slots; return Array.isArray(slots) ? slots.map((slot) => slot && typeof slot === "object" ? slot as Record<string, unknown> : { code: String(slot) }).filter((slot) => value(slot.code)) : [{ code: "standard", label: "Standard" }]; }
-function scheduleTime(type: AuditType) { const time = value(config(type).schedule_time); return /^\d{2}:\d{2}$/.test(time) ? time : "09:00"; }
+const dateLabel = (date: string) =>
+  new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(new Date(`${date}T12:00:00+05:30`));
+const monthLabel = (month: string) =>
+  new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(
+    new Date(`${month}-01T12:00:00Z`),
+  );
+type Choice = { value: string; label: string };
+type ScheduleSeed = {
+  typeId?: string;
+  stationId?: string;
+  date?: string;
+  slot?: string;
+};
 
-function useAction() {
-  const [pending, startTransition] = useTransition(); const [notice, setNotice] = useState("");
-  const run = (action: () => Promise<Result>) => startTransition(async () => { const result = await action(); setNotice(result.message); });
-  return { pending, notice, run, clear: () => setNotice("") };
+function MultiFilter({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  options: Choice[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const id = useId();
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+  const matches = options.filter((option) =>
+    option.label.toLowerCase().includes(query.toLowerCase()),
+  );
+  return (
+    <div
+      className={styles.multiFilter}
+      ref={ref}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+          event.stopPropagation();
+        }
+      }}
+    >
+      <button
+        type="button"
+        className={styles.filterButton}
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen(!open)}
+      >
+        <span>{label}</span>
+        <strong>
+          {selected.length ? `${selected.length} selected` : "All"} ▾
+        </strong>
+      </button>
+      {open && (
+        <div className={styles.filterMenu} id={id}>
+          <input
+            autoFocus
+            aria-label={`Search ${label.toLowerCase()}`}
+            placeholder={`Search ${label.toLowerCase()}`}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <button
+            type="button"
+            className={styles.textButton}
+            onClick={() => onChange([])}
+          >
+            Clear selection
+          </button>
+          <div className={styles.filterOptions}>
+            {matches.map((option) => (
+              <label key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(option.value)}
+                  onChange={(event) =>
+                    onChange(
+                      event.target.checked
+                        ? [...selected, option.value]
+                        : selected.filter((item) => item !== option.value),
+                    )
+                  }
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+            {!matches.length && <p>No matches</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function Modal({
+  title,
+  close,
+  children,
+}: {
+  title: string;
+  close: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const id = useId();
+  useEffect(() => {
+    const dialog = ref.current!;
+    const previous = document.body.style.overflow;
+    dialog.showModal();
+    document.body.style.overflow = "hidden";
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previous;
+    };
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className={styles.dialog}
+      aria-labelledby={id}
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
+      onClick={(event) => {
+        if (event.target === ref.current) {
+          const box = ref.current!.getBoundingClientRect();
+          if (
+            event.clientX < box.left ||
+            event.clientX > box.right ||
+            event.clientY < box.top ||
+            event.clientY > box.bottom
+          )
+            close();
+        }
+      }}
+    >
+      <header className={styles.modalHead}>
+        <h2 id={id}>{title}</h2>
+        <button
+          aria-label="Close audit window"
+          className={styles.iconButton}
+          onClick={close}
+        >
+          <X size={20} />
+        </button>
+      </header>
+      <div className={styles.modalBody}>{children}</div>
+    </dialog>
+  );
+}
+function Schedule({
+  workspace,
+  seed,
+  onSaved,
+}: {
+  workspace: StationAuditWorkspace;
+  seed: ScheduleSeed;
+  onSaved: () => void;
+}) {
+  const types = workspace.auditTypes.filter((type) => type.is_active);
+  const [typeId, setTypeId] = useState(seed.typeId || types[0]?.id || "");
+  const type = types.find((row) => row.id === typeId);
+  const [stationId, setStationId] = useState(seed.stationId || "");
+  const [pending, start] = useTransition();
+  const [notice, setNotice] = useState("");
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        start(async () => {
+          try {
+            const result = await scheduleStationAudit(data);
+            setNotice(result.message);
+            if (result.ok) onSaved();
+          } catch {
+            setNotice("Unable to schedule. Please try again.");
+          }
+        });
+      }}
+    >
+      <p className={styles.muted}>
+        Choose a date and time for this programme slot. Times are in India
+        Standard Time.
+      </p>
+      <div className={styles.compactForm}>
+        <label className={styles.inputLabel}>
+          Audit type
+          <select
+            name="audit_type_id"
+            value={typeId}
+            onChange={(event) => setTypeId(event.target.value)}
+          >
+            {types.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className={styles.inputLabel}>
+          Station
+          <SearchableSelect
+            name="location_id"
+            required
+            value={stationId}
+            onValueChange={setStationId}
+            placeholder="Search station"
+            maxOptions={500}
+            options={workspace.stations.map((station) => ({
+              value: station.id,
+              label: `${station.station_code} · ${station.station_name || station.city || ""}`,
+            }))}
+          />
+        </div>
+        <label className={styles.inputLabel}>
+          Date
+          <input
+            name="scheduled_date"
+            type="date"
+            min={auditDay()}
+            defaultValue={
+              seed.date && seed.date >= auditDay() ? seed.date : auditDay()
+            }
+            required
+          />
+        </label>
+        <label className={styles.inputLabel}>
+          Time (IST)
+          <input
+            key={typeId}
+            name="scheduled_time"
+            type="time"
+            defaultValue={String(
+              type?.scheduling_config.schedule_time || "09:00",
+            )}
+            required
+          />
+        </label>
+        <label className={styles.inputLabel}>
+          Programme slot
+          <select key={typeId} name="period_slot" defaultValue={seed.slot}>
+            {type &&
+              auditSlots(type).map((slot) => (
+                <option key={slot.code} value={slot.code}>
+                  {slot.label}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className={styles.inputLabel}>
+          Assigned auditor
+          <input
+            name="assigned_name"
+            placeholder="Defaults to you"
+            maxLength={150}
+          />
+        </label>
+        <label className={styles.inputLabel}>
+          Purpose / context
+          <input
+            name="reason"
+            placeholder="Routine coverage or follow-up"
+            maxLength={500}
+          />
+        </label>
+      </div>
+      <div className={styles.actions}>
+        <button className="button" disabled={pending || !stationId || !typeId}>
+          {pending ? "Scheduling…" : "Schedule audit"}
+        </button>
+        <p role="status">{notice}</p>
+      </div>
+    </form>
+  );
+}
+function Badge({ audit }: { audit: StationAudit }) {
+  return (
+    <span className={`${styles.status} ${styles[auditTone(audit)]}`}>
+      {auditStatusLabel(audit.status_code)}
+    </span>
+  );
 }
 
-function AuditSchedule({ types, stations, canManage }: { types: AuditType[]; stations: AuditStation[]; canManage: boolean }) {
-  const active = types.filter((type) => type.is_active); const [typeId, setTypeId] = useState(active[0]?.id ?? ""); const type = active.find((row) => row.id === typeId) ?? active[0]; const { pending, notice, run } = useAction();
-  if (!canManage) return null;
-  return <section className={styles.scheduleForm}><h2>Schedule station audit</h2><p>Programme slots come from Audit Master. Manual scheduling still respects the audit’s cycle and period slot.</p><form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); run(() => scheduleStationAudit(form)); }}><div className={styles.compactForm}><label className={styles.inputLabel}>Audit type<select name="audit_type_id" value={typeId} onChange={(event) => setTypeId(event.target.value)}>{active.map((row) => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label><label className={styles.inputLabel}>Station<select name="location_id" required defaultValue=""><option value="" disabled>Select station</option>{stations.map((station) => <option key={station.id} value={station.id}>{station.station_code} · {station.station_name || station.city || "Station"}</option>)}</select></label><label className={styles.inputLabel}>Date<input name="scheduled_date" type="date" defaultValue={today} required /></label><label className={styles.inputLabel}>Local time<input name="scheduled_time" type="time" defaultValue={type ? scheduleTime(type) : ""} required /></label><label className={styles.inputLabel}>Programme slot<select name="period_slot">{(type ? periodSlots(type) : []).map((slot) => <option key={value(slot.code)} value={value(slot.code)}>{value(slot.label || slot.code)}</option>)}</select></label><label className={styles.inputLabel}>Auditor name<input name="assigned_name" placeholder="Defaults to you" /></label><label className={styles.inputLabel} style={{ gridColumn: "span 2" }}>Purpose / context<input name="reason" placeholder="Routine coverage, follow-up, investigation…" /></label></div><div className={styles.actions} style={{ marginTop: 12 }}><button className="button compact" disabled={pending}>{pending ? "Scheduling…" : "Schedule audit"}</button>{notice ? <span className={styles.notice}>{notice}</span> : null}</div></form></section>;
+export function AuditWorkspace({
+  workspace,
+  canManage,
+  canSchedule,
+  canEdit,
+  canRespond,
+  stationOnly,
+  viewerName,
+  viewerRole,
+  month,
+  focusAuditId,
+  canViewMaster,
+  readOnly,
+}: {
+  workspace: StationAuditWorkspace;
+  canManage: boolean;
+  canSchedule: boolean;
+  canEdit: boolean;
+  canRespond: boolean;
+  stationOnly: boolean;
+  viewerName: string;
+  viewerRole: string;
+  month: string;
+  focusAuditId?: string;
+  canViewMaster: boolean;
+  readOnly: boolean;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState("queue");
+  const [typeId, setTypeId] = useState("all");
+  const [stations, setStations] = useState<string[]>([]);
+  const [clusters, setClusters] = useState<string[]>([]);
+  const [airways, setAirways] = useState<string[]>([]);
+  const [auditors, setAuditors] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [fastOnly, setFastOnly] = useState(false);
+  const [day, setDay] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState(focusAuditId || "");
+  const [seed, setSeed] = useState<ScheduleSeed | null>(null);
+  const [today, setToday] = useState(auditDay());
+  const [navigationPending, navigate] = useTransition();
+  useEffect(() => {
+    const timer = window.setInterval(() => setToday(auditDay()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+  const range = auditMonthRange(month);
+  const unique = (values: string[]) =>
+    [...new Set(values.filter(Boolean))]
+      .sort()
+      .map((value) => ({ value, label: value }));
+  const airwayOptions = workspace.options.filter(
+    (option) => option.option_group === "airways",
+  );
+  const stationAirways = (stationId: string) =>
+    airwayOptions
+      .filter(
+        (option) =>
+          Array.isArray(option.metadata.station_ids) &&
+          option.metadata.station_ids.includes(stationId),
+      )
+      .map((option) => option.id);
+  const filteredStations = useMemo(
+    () =>
+      workspace.stations.filter(
+        (station) =>
+          (!stations.length || stations.includes(station.id)) &&
+          (!clusters.length ||
+            clusters.includes(
+              station.cluster_name || station.cluster || "Unassigned",
+            )) &&
+          (!airways.length ||
+            (stationAirways(station.id).length
+              ? stationAirways(station.id).some((id) => airways.includes(id))
+              : airways.includes("unassigned"))),
+      ),
+    [workspace.stations, workspace.options, stations, clusters, airways],
+  );
+  const stationIds = new Set(filteredStations.map((station) => station.id));
+  const scopeAudits = workspace.audits.filter(
+    (audit) =>
+      stationIds.has(audit.location_id) &&
+      (typeId === "all" || audit.audit_type_id === typeId) &&
+      (!auditors.length ||
+        auditors.includes(audit.assigned_name || "Unassigned")) &&
+      (!query ||
+        `${audit.audit_number} ${audit.stations?.station_code} ${audit.assigned_name} ${audit.stations?.station_name}`
+          .toLowerCase()
+          .includes(query.toLowerCase())),
+  );
+  const visibleAudits = scopeAudits.filter(
+    (audit) =>
+      (status === "all" || auditTone(audit) === status) &&
+      (!fastOnly || isFastAudit(audit)),
+  );
+  const monthAudits = visibleAudits.filter(
+    (audit) =>
+      auditDay(audit.scheduled_for) >= range.from &&
+      auditDay(audit.scheduled_for) <= range.to,
+  );
+  const queue = (stationOnly ? visibleAudits : monthAudits).filter(
+    (audit) => !["closed", "completed"].includes(audit.status_code),
+  );
+  const history = (stationOnly ? visibleAudits : monthAudits).filter(
+    (audit) => audit.completed_at,
+  );
+  const modalAudits = day
+    ? visibleAudits.filter((audit) => auditDay(audit.scheduled_for) === day)
+    : visibleAudits.filter((audit) => audit.id === selectedId);
+  const selected =
+    modalAudits.find((audit) => audit.id === selectedId) || modalAudits[0];
+  const showAudit = (audit: StationAudit) => {
+    setDay(null);
+    setSelectedId(audit.id);
+  };
+  const close = () => {
+    setDay(null);
+    setSelectedId("");
+    setSeed(null);
+  };
+  const changeMonth = (value: string) => {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return;
+    close();
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("month", value);
+    params.delete("audit");
+    navigate(() => router.push(`${pathname}?${params}`));
+  };
+  const shiftMonth = (amount: number) => {
+    const date = new Date(`${month}-15T12:00:00Z`);
+    date.setUTCMonth(date.getUTCMonth() + amount);
+    changeMonth(date.toISOString().slice(0, 7));
+  };
+  const exportParams = new URLSearchParams({
+    from: range.from,
+    to: range.to,
+    stations: filteredStations.map((s) => s.id).join(","),
+    type: typeId,
+    auditors: auditors.join("|"),
+    status,
+    fast: String(fastOnly),
+    q: query,
+  });
+  const renderCard = (audit: StationAudit) => (
+    <button
+      key={audit.id}
+      className={`${styles.auditCard} ${styles[`${auditTone(audit)}Border`]}`}
+      onClick={() => showAudit(audit)}
+    >
+      <div>
+        <h3>
+          {audit.stations?.station_code} ·{" "}
+          {workspace.auditTypes.find((t) => t.id === audit.audit_type_id)?.name}
+        </h3>
+        <p>{audit.audit_number}</p>
+      </div>
+      <div className={styles.auditMeta}>
+        <strong>
+          {dateLabel(auditDay(audit.scheduled_for))} ·{" "}
+          {auditLocalTime(audit.scheduled_for)}
+        </strong>
+        <span>
+          {audit.completed_at
+            ? `Completed by ${auditActor(audit, workspace, "submitted")}`
+            : `${audit.started_at ? "Auditing now" : "Assigned to"}: ${audit.assigned_name || "Unassigned"}`}
+        </span>
+      </div>
+      <div className={styles.actions}>
+        <Badge audit={audit} />
+        {isFastAudit(audit) && <mark className={styles.fast}>≤10 min</mark>}
+        <ChevronRight size={18} />
+      </div>
+    </button>
+  );
+  return (
+    <div className={styles.workspace} aria-busy={navigationPending}>
+      <div className={styles.topBar}>
+        <div>
+          <span className={styles.eyebrow}>Audit workspace</span>
+          <h1>{stationOnly ? "Station audit responses" : "Station audits"}</h1>
+          <p>
+            {stationOnly
+              ? "Surprise audits are never shown before completion. Open responses and completed history stay in your station scope."
+              : "Plan the month, follow live audits and review the evidence."}
+          </p>
+        </div>
+        <div className={styles.actions}>
+          {canManage && (
+            <>
+              <MultiFilter
+                label="Cluster"
+                options={unique(
+                  workspace.stations.map(
+                    (s) => s.cluster_name || s.cluster || "Unassigned",
+                  ),
+                )}
+                selected={clusters}
+                onChange={setClusters}
+              />
+              <MultiFilter
+                label="Airways"
+                options={[
+                  ...airwayOptions.map((option) => ({
+                    value: option.id,
+                    label: option.label,
+                  })),
+                  { value: "unassigned", label: "Unassigned" },
+                ]}
+                selected={airways}
+                onChange={setAirways}
+              />
+            </>
+          )}
+          {canViewMaster && (
+            <Link className="button secondary compact" href="/master/audits">
+              Audit Master
+            </Link>
+          )}
+          {canSchedule && (
+            <button
+              className="button compact"
+              onClick={() =>
+                setSeed({ typeId: typeId === "all" ? undefined : typeId })
+              }
+            >
+              <Plus size={15} /> Schedule audit
+            </button>
+          )}
+        </div>
+      </div>
+      <div className={styles.context}>
+        <span>
+          <strong>{viewerName}</strong>’s{" "}
+          {tab === "calendar" ? "calendar" : "audit view"}{" "}
+          <span className={styles.muted}>
+            · {viewerRole}
+            {readOnly ? " · Read-only preview" : ""}
+          </span>
+        </span>
+        <span>
+          {filteredStations.length} authorized{" "}
+          {filteredStations.length === 1 ? "station" : "stations"} · All times
+          IST
+        </span>
+      </div>
+      <div className={styles.controlPanel}>
+        <div className={styles.toolbar}>
+          <MultiFilter
+            label="Stations"
+            options={workspace.stations.map((s) => ({
+              value: s.id,
+              label: `${s.station_code} · ${s.station_name || s.city || ""}`,
+            }))}
+            selected={stations}
+            onChange={setStations}
+          />
+          {canManage && (
+            <MultiFilter
+              label="Auditor"
+              options={unique(
+                workspace.audits.map((a) => a.assigned_name || "Unassigned"),
+              )}
+              selected={auditors}
+              onChange={setAuditors}
+            />
+          )}
+          <label className={styles.search}>
+            <Search size={16} />
+            <input
+              aria-label="Search audits"
+              placeholder="Search station, auditor or audit ID"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          <select
+            aria-label="Audit status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="all">All statuses</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="pending">Pending / in progress</option>
+            <option value="complete">Completed</option>
+          </select>
+          <button
+            className={styles.textButton}
+            onClick={() => {
+              setStations([]);
+              setClusters([]);
+              setAirways([]);
+              setAuditors([]);
+              setQuery("");
+              setStatus("all");
+              setFastOnly(false);
+            }}
+          >
+            Reset filters
+          </button>
+        </div>
+        <div className={styles.viewBar}>
+          <div className={styles.typeSwitch} aria-label="Audit type">
+            <button
+              aria-pressed={typeId === "all"}
+              onClick={() => setTypeId("all")}
+            >
+              All audits
+            </button>
+            {workspace.auditTypes
+              .filter((t) => t.is_active)
+              .map((type) => (
+                <button
+                  key={type.id}
+                  aria-pressed={typeId === type.id}
+                  onClick={() => setTypeId(type.id)}
+                >
+                  {type.code === "virtual_cod"
+                    ? "COD audit"
+                    : type.code === "physical_station"
+                      ? "Physical audit"
+                      : type.name}
+                </button>
+              ))}
+          </div>
+          {canManage && (
+            <div className={styles.monthPicker}>
+              <button
+                aria-label="Previous month"
+                onClick={() => shiftMonth(-1)}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <input
+                aria-label="Audit month"
+                type="month"
+                value={month}
+                onChange={(e) => changeMonth(e.target.value)}
+              />
+              <button aria-label="Next month" onClick={() => shiftMonth(1)}>
+                <ChevronRight size={16} />
+              </button>
+              <button onClick={() => changeMonth(today.slice(0, 7))}>
+                Today
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className={styles.summary}>
+        <div className={styles.metric}>
+          <span>Scheduled</span>
+          <strong>
+            {monthAudits.filter((a) => a.status_code === "scheduled").length}
+          </strong>
+          <small>Planned for {monthLabel(month)}</small>
+        </div>
+        <div className={styles.metric}>
+          <span>In progress / pending</span>
+          <strong>
+            {
+              (stationOnly ? visibleAudits : monthAudits).filter(
+                (a) => auditTone(a) === "pending",
+              ).length
+            }
+          </strong>
+          <small>Live work and follow-up</small>
+        </div>
+        <div className={styles.metric}>
+          <span>Completed</span>
+          <strong>
+            {
+              (stationOnly ? visibleAudits : monthAudits).filter(
+                (a) => auditTone(a) === "complete",
+              ).length
+            }
+          </strong>
+          <small>Closed audit records</small>
+        </div>
+        <div className={styles.metric}>
+          <span>Quick audit checks</span>
+          <strong>{history.filter(isFastAudit).length}</strong>
+          <small>Completed in 10 minutes or less</small>
+        </div>
+      </div>
+      <div className={styles.viewBar}>
+        <div className={styles.tabs}>
+          {(stationOnly
+            ? [
+                ["queue", "Open responses"],
+                ["log", "Audit history"],
+              ]
+            : [
+                ["queue", "Audit queue"],
+                ["plan", "Monthly plan"],
+                ["calendar", "Calendar"],
+                ["log", "Audit history"],
+              ]
+          ).map(([key, name]) => (
+            <button
+              key={key}
+              className={tab === key ? styles.active : ""}
+              aria-pressed={tab === key}
+              onClick={() => {
+                setTab(key);
+                setFastOnly(false);
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+        {canManage && (
+          <Link
+            className="button secondary compact"
+            href={`/api/ops-pulse/audits/export?${exportParams}`}
+          >
+            Download Excel
+          </Link>
+        )}
+      </div>
+      <div className={styles.legend}>
+        <span className={styles.complete}>● Completed</span>
+        <span className={styles.pending}>● Pending / in progress</span>
+        <span className={styles.scheduled}>● Scheduled</span>
+        {tab === "log" && (
+          <label>
+            <input
+              type="checkbox"
+              checked={fastOnly}
+              onChange={(e) => setFastOnly(e.target.checked)}
+            />{" "}
+            Only audits ≤10 minutes
+          </label>
+        )}
+      </div>
+      {workspace.truncated && (
+        <p role="alert" className={styles.notice}>
+          The first 1,500 audits are shown. Choose a narrower month to see all
+          records.
+        </p>
+      )}
+      {navigationPending && <p role="status">Loading {monthLabel(month)}…</p>}
+      {tab === "queue" && (
+        <div className={styles.list}>
+          {queue.map(renderCard)}
+          {!queue.length && (
+            <div className={styles.empty}>No open audits match this view.</div>
+          )}
+        </div>
+      )}
+      {tab === "log" && (
+        <div className={styles.list}>
+          {[...history]
+            .sort((a, b) =>
+              String(b.completed_at).localeCompare(String(a.completed_at)),
+            )
+            .map(renderCard)}
+          {!history.length && (
+            <div className={styles.empty}>
+              No completed audits match this view.
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "calendar" && (
+        <section className={styles.calendarPanel}>
+          <div className={styles.calendarHead}>
+            <h2>
+              <CalendarDays size={20} /> {monthLabel(month)}
+            </h2>
+            <strong className={styles.todayLabel}>
+              Today · {dateLabel(today)}
+            </strong>
+          </div>
+          <div className={styles.calendar}>
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((name) => (
+              <div key={name} className={styles.weekday}>
+                {name}
+              </div>
+            ))}
+            {Array.from({ length: 42 }, (_, index) => {
+              const date = addAuditDays(range.calendarFrom, index);
+              const audits = visibleAudits.filter(
+                (a) => auditDay(a.scheduled_for) === date,
+              );
+              return (
+                <button
+                  key={date}
+                  className={`${styles.day} ${date === today ? styles.today : ""} ${date.slice(0, 7) !== month ? styles.outside : ""}`}
+                  aria-current={date === today ? "date" : undefined}
+                  aria-label={`${dateLabel(date)}${date === today ? ", today" : ""}, ${audits.length} audits`}
+                  onClick={() => {
+                    setDay(date);
+                    setSelectedId("");
+                  }}
+                >
+                  <strong>
+                    {Number(date.slice(-2))}
+                    {date === today && <span>Today</span>}
+                  </strong>
+                  {audits.slice(0, 3).map((a) => (
+                    <span
+                      key={a.id}
+                      className={`${styles.dayEntry} ${styles[`${auditTone(a)}Border`]}`}
+                    >
+                      <b>{a.stations?.station_code}</b>
+                      <span>
+                        {auditLocalTime(a.scheduled_for)} ·{" "}
+                        {auditStatusLabel(a.status_code)}
+                      </span>
+                    </span>
+                  ))}
+                  {audits.length > 3 && (
+                    <small>+{audits.length - 3} more</small>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {tab === "plan" &&
+        workspace.auditTypes
+          .filter(
+            (type) =>
+              type.is_active && (typeId === "all" || type.id === typeId),
+          )
+          .map((type) => (
+            <MonthlyPlan
+              key={type.id}
+              type={type}
+              month={month}
+              stations={filteredStations.filter(
+                (station) =>
+                  !query ||
+                  `${station.station_code} ${station.station_name}`
+                    .toLowerCase()
+                    .includes(query.toLowerCase()),
+              )}
+              allAudits={workspace.audits}
+              visibleAudits={visibleAudits}
+              canSchedule={canSchedule && !auditors.length && status === "all"}
+              onOpen={showAudit}
+              onSchedule={setSeed}
+            />
+          ))}
+      {(day || selectedId || seed) && (
+        <Modal
+          title={
+            seed
+              ? "Schedule station audit"
+              : day
+                ? `Audits · ${dateLabel(day)}`
+                : "Audit details"
+          }
+          close={close}
+        >
+          {seed ? (
+            <Schedule workspace={workspace} seed={seed} onSaved={close} />
+          ) : (
+            <>
+              {day && (
+                <div className={styles.daySelector}>
+                  {modalAudits.map((audit) => (
+                    <button
+                      key={audit.id}
+                      aria-pressed={selected?.id === audit.id}
+                      onClick={() => setSelectedId(audit.id)}
+                    >
+                      <b>{audit.stations?.station_code}</b> ·{" "}
+                      {auditLocalTime(audit.scheduled_for)}
+                      <span>
+                        {
+                          workspace.auditTypes.find(
+                            (t) => t.id === audit.audit_type_id,
+                          )?.name
+                        }
+                      </span>
+                      <Badge audit={audit} />
+                    </button>
+                  ))}
+                  {!modalAudits.length && (
+                    <p>No audits match the current filters for this day.</p>
+                  )}
+                  {canSchedule && day >= today && (
+                    <button
+                      onClick={() =>
+                        setSeed({
+                          date: day,
+                          typeId: typeId === "all" ? undefined : typeId,
+                        })
+                      }
+                    >
+                      + Schedule for this day
+                    </button>
+                  )}
+                </div>
+              )}
+              {selected ? (
+                <AuditDetail
+                  key={selected.id}
+                  audit={selected}
+                  workspace={workspace}
+                  canManage={canEdit}
+                  canRespond={canRespond}
+                />
+              ) : (
+                !day && (
+                  <p>
+                    This audit is not available in the current view or your
+                    authorized scope.
+                  </p>
+                )
+              )}
+            </>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
 }
-
-function ProgrammeSummary({ workspace }: { workspace: StationAuditWorkspace }) {
-  const current = workspace.audits.filter((audit) => audit.status_code !== "closed");
-  const overdue = workspace.audits.filter((audit) => audit.response_due_at && audit.response_due_at < new Date().toISOString() && !["closed", "under_review"].includes(audit.status_code));
-  const openActions = workspace.actions.filter((action) => action.status_code !== "completed");
-  return <section className={styles.summary}>{workspace.auditTypes.filter((type) => type.is_active).map((type) => { const audits = workspace.audits.filter((audit) => audit.audit_type_id === type.id); return <div className={styles.metric} key={type.id}><span>{type.name}</span><strong>{audits.length}</strong><small>{audits.filter((audit) => audit.status_code === "scheduled").length} scheduled · {audits.filter((audit) => audit.status_code === "closed").length} closed</small></div>; })}<div className={styles.metric}><span>Attention needed</span><strong>{overdue.length + openActions.length}</strong><small>{overdue.length} overdue · {openActions.length} CAPA open · {current.length} active</small></div></section>;
-}
-
-type ShipmentDraft = { trackingId: string; systemStatusCode: string; physicalStatusCode: string; discrepancyCode: string; requiredAction: string; remarks: string; dueAt: string };
-function AuditDetail({ audit, workspace, canManage, canRespond }: { audit: StationAudit; workspace: StationAuditWorkspace; canManage: boolean; canRespond: boolean }) {
-  const type = workspace.auditTypes.find((row) => row.id === audit.audit_type_id); const station = workspace.stations.find((row) => row.id === audit.location_id);
-  const items = workspace.checklistItems.filter((item) => item.audit_type_id === audit.audit_type_id); const sections = workspace.sections.filter((section) => section.audit_type_id === audit.audit_type_id); const responses = new Map(workspace.responses.filter((row) => row.audit_id === audit.id).map((row) => [row.checklist_item_id, row]));
-  const cash = new Map(workspace.cashCounts.filter((row) => row.audit_id === audit.id && row.cash_side === "physical").map((row) => [row.denomination_option_id, row])); const existingShipments = workspace.shipments.filter((row) => row.audit_id === audit.id);
-  const [shipments, setShipments] = useState<ShipmentDraft[]>(existingShipments.map((row) => ({ trackingId: row.tracking_id, systemStatusCode: row.system_status_code || "", physicalStatusCode: row.physical_status_code || "", discrepancyCode: row.discrepancy_code || "", requiredAction: row.required_action || "", remarks: row.remarks || "", dueAt: row.due_at?.slice(0, 10) || "" }))); const submit = useAction(); const lifecycle = useAction();
-  const denominations = workspace.options.filter((option) => option.option_group === "cash_denomination"); const physicalStatuses = workspace.options.filter((option) => option.option_group === "shipment_physical_status"); const discrepancies = workspace.options.filter((option) => option.option_group === "shipment_discrepancy"); const actions = workspace.actions.filter((row) => row.audit_id === audit.id); const comments = workspace.comments.filter((row) => row.audit_id === audit.id); const evidence = workspace.evidence.filter((row) => row.audit_id === audit.id);
-  const addShipment = () => setShipments((rows) => [...rows, { trackingId: "", systemStatusCode: "", physicalStatusCode: "", discrepancyCode: "", requiredAction: "", remarks: "", dueAt: "" }]);
-  const changeShipment = (index: number, field: keyof ShipmentDraft, next: string) => setShipments((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: next } : row));
-  if (!type || !station) return null;
-  return <section className={styles.detail} id={`audit-${audit.id}`}><div className={styles.detailHead}><div><h2>{station.station_code} · {type.name}</h2><p>{audit.audit_number} · Scheduled {formatDateTime(audit.scheduled_for)} {audit.assigned_name ? `· ${audit.assigned_name}` : ""}</p></div><div className={styles.actions}><span className={statusClass(audit.status_code)}>{audit.status_code.replaceAll("_", " ")}</span>{canManage && audit.status_code === "scheduled" ? <button className="button compact" disabled={lifecycle.pending} onClick={() => lifecycle.run(() => beginStationAudit(audit.id))}>Start audit</button> : null}{canManage && audit.status_code === "under_review" ? <button className="button compact" disabled={lifecycle.pending} onClick={() => lifecycle.run(() => closeStationAudit(audit.id))}>Close audit</button> : null}</div></div>{lifecycle.notice ? <div className={styles.notice} style={{ margin: "12px 18px 0" }}>{lifecycle.notice}</div> : null}<div className={styles.detailGrid}>{canManage ? <form onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); data.set("shipments_json", JSON.stringify(shipments)); submit.run(() => submitStationAudit(data)); }}><input type="hidden" name="audit_id" value={audit.id} /><details className={styles.section} open><summary>Reconciliation snapshot <span>cash, shipment and video evidence</span></summary><div className={styles.sectionBody}><div className={styles.twoCol}><label className={styles.inputLabel}>Cash as per system<input name="system_cash_amount" type="number" min="0" step="0.01" defaultValue={audit.system_cash_amount ?? ""} /></label><label className={styles.inputLabel}>Physical cash total <small>Must equal denominations below</small><input name="physical_cash_amount" type="number" min="0" step="0.01" defaultValue={audit.physical_cash_amount ?? ""} /></label><label className={styles.inputLabel}>Shipments as per system<input name="system_shipment_count" type="number" min="0" defaultValue={audit.system_shipment_count ?? ""} /></label><label className={styles.inputLabel}>Physical shipment count<input name="physical_shipment_count" type="number" min="0" defaultValue={audit.physical_shipment_count ?? ""} /></label></div><div style={{ marginTop: 12 }}><div className={styles.checkTitle}>Physical cash denomination count</div><div className={styles.denoms}>{denominations.map((option) => <label className={styles.denom} key={option.id}><span>{option.label}</span><input name={`denomination_${option.id}`} type="number" min="0" step="1" defaultValue={cash.get(option.id)?.note_count ?? 0} /></label>)}</div></div>{type.requires_video_link ? <div className={styles.twoCol} style={{ marginTop: 12 }}><label className={styles.inputLabel}>Google Drive recording link <small>{type.video_link_help}</small><input name="video_call_url" type="url" defaultValue={audit.video_call_url ?? ""} placeholder="https://drive.google.com/..." required /></label><label className={styles.inputLabel}>Viewing access<select name="video_access_confirmed" defaultValue=""><option value="" disabled>Confirm access</option><option value="yes">Anyone with the link can view</option></select></label></div> : null}</div></details><details className={styles.section} open style={{ marginTop: 12 }}><summary>Shipment exceptions <span>{shipments.length} recorded</span></summary><div className={styles.sectionBody}>{shipments.map((row, index) => <div className={styles.shipment} key={index}><input value={row.trackingId} onChange={(event) => changeShipment(index, "trackingId", event.target.value)} placeholder="Tracking ID" /><input value={row.systemStatusCode} onChange={(event) => changeShipment(index, "systemStatusCode", event.target.value)} placeholder="System status" /><select value={row.physicalStatusCode} onChange={(event) => changeShipment(index, "physicalStatusCode", event.target.value)}><option value="">Physical status</option>{physicalStatuses.map((option) => <option value={option.code} key={option.id}>{option.label}</option>)}</select><select value={row.discrepancyCode} onChange={(event) => changeShipment(index, "discrepancyCode", event.target.value)}><option value="">Discrepancy</option>{discrepancies.map((option) => <option value={option.code} key={option.id}>{option.label}</option>)}</select><button type="button" className={styles.miniButton} onClick={() => setShipments((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>Remove</button><input value={row.requiredAction} onChange={(event) => changeShipment(index, "requiredAction", event.target.value)} placeholder="Corrective action" /><input value={row.dueAt} onChange={(event) => changeShipment(index, "dueAt", event.target.value)} type="date" /><input value={row.remarks} onChange={(event) => changeShipment(index, "remarks", event.target.value)} placeholder="Observation" /></div>)}<button type="button" className={styles.miniButton} onClick={addShipment}>+ Add shipment exception</button></div></details>{sections.map((section) => <details className={styles.section} open key={section.id} style={{ marginTop: 12 }}><summary>{section.name}<span>{items.filter((item) => item.section_id === section.id).length} checks</span></summary><div className={styles.sectionBody}>{section.guidance ? <p className={styles.checkHelp}>{section.guidance}</p> : null}{items.filter((item) => item.section_id === section.id).map((item) => <AuditCheck key={item.id} item={item} response={responses.get(item.id)} />)}</div></details>)}<details className={styles.section} open style={{ marginTop: 12 }}><summary>Evidence and submission <span>files, summary and CAPA date</span></summary><div className={styles.sectionBody}><div className={styles.twoCol}><label className={styles.inputLabel}>Evidence files<input type="file" name="evidence_files" multiple /></label><label className={styles.inputLabel}>Evidence caption<input name="evidence_caption" placeholder="What does this evidence show?" /></label><label className={styles.inputLabel}>CAPA response due<input name="action_due_at" type="datetime-local" defaultValue={audit.response_due_at ? audit.response_due_at.slice(0, 16) : ""} /></label></div><label className={styles.inputLabel} style={{ marginTop: 10 }}>Audit summary<textarea name="overall_summary" defaultValue={audit.overall_summary ?? ""} placeholder="Key reconciliation result, exceptions and operational findings" required /></label><label className={styles.inputLabel} style={{ marginTop: 10 }}>Manager note<textarea name="manager_summary" defaultValue={audit.manager_summary ?? ""} placeholder="Instructions for station and leadership" /></label><div className={styles.actions} style={{ marginTop: 12 }}><button className="button" disabled={submit.pending}>{submit.pending ? "Submitting…" : "Submit audit for review"}</button>{submit.notice ? <span className={styles.notice}>{submit.notice}</span> : null}</div></div></details></form> : <section className={styles.section}><div className={styles.sectionHeader}>Audit summary<span className={statusClass(audit.status_code)}>{audit.status_code.replaceAll("_", " ")}</span></div><div className={styles.sectionBody}><div className={styles.twoCol}><div><small>System cash</small><strong>₹{Number(audit.system_cash_amount || 0).toLocaleString("en-IN")}</strong></div><div><small>Physical cash</small><strong>₹{Number(audit.physical_cash_amount || 0).toLocaleString("en-IN")}</strong></div><div><small>Shipment exceptions</small><strong>{audit.shipment_unresolved_count}</strong></div><div><small>Response due</small><strong>{audit.response_due_at ? formatDateTime(audit.response_due_at) : "—"}</strong></div></div>{audit.overall_summary ? <p>{audit.overall_summary}</p> : <p className={styles.checkHelp}>The manager has not submitted this audit yet.</p>}</div></section>}<aside className={styles.timeline}><section className={styles.section}><div className={styles.sectionHeader}>Corrective actions <span>{actions.filter((action) => action.status_code !== "completed").length} open</span></div><div className={styles.sectionBody}>{actions.length ? actions.map((action) => <div className={styles.timelineItem} key={action.id}><strong>{action.title}</strong><span>{action.corrective_action}</span><span>{action.due_at ? ` · due ${formatDateTime(action.due_at)}` : ""} · {action.status_code.replaceAll("_", " ")}</span></div>) : <p className={styles.checkHelp}>No corrective action has been raised.</p>}</div></section>{canRespond && audit.status_code === "awaiting_station_response" ? <StationResponse audit={audit} actions={actions} run={submit.run} pending={submit.pending} notice={submit.notice} /> : null}{canManage ? <ManagerFollowUp audit={audit} run={lifecycle.run} pending={lifecycle.pending} notice={lifecycle.notice} /> : null}<section className={styles.section}><div className={styles.sectionHeader}>Conversation <span>{comments.length}</span></div><div className={styles.sectionBody}>{comments.length ? comments.map((comment) => <div className={styles.timelineItem} key={comment.id}><strong>{comment.author_name || comment.author_email || "System"}</strong><span>{comment.body}</span><span>{formatDateTime(comment.created_at)}{comment.requests_station_response ? " · station response requested" : ""}</span></div>) : <p className={styles.checkHelp}>No follow-up messages yet.</p>}</div></section><section className={styles.section}><div className={styles.sectionHeader}>Evidence <span>{evidence.length}</span></div><div className={`${styles.sectionBody} ${styles.evidence}`}>{evidence.length ? evidence.map((item) => <a href={item.media_url.startsWith("storage://") ? `/api/ops-pulse/audits/evidence/${item.id}` : item.media_url} key={item.id} target="_blank">{item.file_name || item.evidence_kind_code || "Evidence"}</a>) : <p className={styles.checkHelp}>No files attached yet.</p>}</div></section></aside></div></section>;
-}
-
-function AuditCheck({ item, response }: { item: AuditChecklistItem; response?: { response_value: unknown; remarks: string | null } }) {
-  const options = item.response_options; const defaultValue = responseValue(response?.response_value);
-  return <div className={styles.check}><div className={styles.checkTitle}>{item.label}{item.is_required ? <span className="fin-negative"> *</span> : null}</div>{item.guidance ? <div className={styles.checkHelp}>{item.guidance}</div> : null}<div className={styles.twoCol}>{options.length ? <label className={styles.inputLabel}>Outcome<select name={`check_${item.id}`} defaultValue={defaultValue} required={item.is_required}><option value="">Select outcome</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label> : <label className={styles.inputLabel}>Response<input name={`check_${item.id}`} defaultValue={defaultValue} required={item.is_required} /></label>}<label className={styles.inputLabel}>Observation<input name={`check_note_${item.id}`} defaultValue={response?.remarks ?? ""} placeholder="Optional when the selected outcome is compliant" /></label></div><div className={styles.twoCol}><label className={styles.inputLabel}>Corrective action <small>Required only when the selected master outcome requires CAPA.</small><input name={`check_action_${item.id}`} placeholder="Owner action / resolution" /></label><label className={styles.inputLabel}>Preventive action<input name={`check_preventive_${item.id}`} placeholder="Avoid recurrence" /></label></div></div>;
-}
-
-function StationResponse({ audit, actions, run, pending, notice }: { audit: StationAudit; actions: Array<{ id: string; title: string; status_code: string }>; run: (action: () => Promise<Result>) => void; pending: boolean; notice: string }) {
-  return <section className={styles.section}><div className={styles.sectionHeader}>Station response <span>action required</span></div><div className={styles.sectionBody}><form onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); run(() => respondToStationAudit(data)); }}><input type="hidden" name="audit_id" value={audit.id} /><label className={styles.inputLabel}>Action completed<select name="action_id"><option value="">General response / no action closed</option>{actions.filter((action) => action.status_code !== "completed").map((action) => <option value={action.id} key={action.id}>{action.title}</option>)}</select></label><label className={styles.inputLabel} style={{ marginTop: 8 }}>Response / proof<textarea name="response" required placeholder="What was corrected? Include the operational status and evidence reference." /></label><label className={styles.inputLabel} style={{ marginTop: 8 }}>Attachments<input type="file" name="response_evidence" multiple /></label><div className={styles.actions} style={{ marginTop: 10 }}><button className="button compact" disabled={pending}>{pending ? "Sending…" : "Submit response"}</button>{notice ? <span className={styles.notice}>{notice}</span> : null}</div></form></div></section>;
-}
-
-function ManagerFollowUp({ audit, run, pending, notice }: { audit: StationAudit; run: (action: () => Promise<Result>) => void; pending: boolean; notice: string }) {
-  return <section className={styles.section}><div className={styles.sectionHeader}>Manager follow-up <span>request another reply</span></div><div className={styles.sectionBody}><form onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); run(() => addAuditManagerComment(data)); }}><input type="hidden" name="audit_id" value={audit.id} /><label className={styles.inputLabel}>Note<textarea name="comment" required placeholder="Ask for a clarification or record a manager note" /></label><div className={styles.twoCol} style={{ marginTop: 8 }}><label className={styles.inputLabel}>Station reply required<select name="request_station_response" defaultValue="no"><option value="no">No</option><option value="yes">Yes</option></select></label><label className={styles.inputLabel}>Reply due<input name="response_due_at" type="datetime-local" defaultValue={audit.response_due_at?.slice(0, 16) ?? ""} /></label></div><div className={styles.actions} style={{ marginTop: 10 }}><button className="button secondary compact" disabled={pending}>{pending ? "Sending…" : "Add follow-up"}</button>{notice ? <span className={styles.notice}>{notice}</span> : null}</div></form></div></section>;
-}
-
-function Calendar({ audits }: { audits: StationAudit[] }) {
-  const start = new Date(`${today.slice(0, 7)}-01T12:00:00Z`); const offset = start.getUTCDay(); start.setUTCDate(start.getUTCDate() - offset); const cells = Array.from({ length: 42 }, (_, index) => { const date = new Date(start); date.setUTCDate(start.getUTCDate() + index); return date.toISOString().slice(0, 10); });
-  const byDay = new Map<string, StationAudit[]>(); audits.forEach((audit) => { const day = audit.scheduled_for.slice(0, 10); byDay.set(day, [...(byDay.get(day) ?? []), audit]); });
-  return <div className={styles.calendar}>{cells.map((day) => <div className={styles.day} key={day}><strong>{day.slice(-2)}</strong>{(byDay.get(day) ?? []).map((audit) => <div className={styles.dayEntry} key={audit.id}>{audit.stations?.station_code} · {audit.ops_audit_types?.name}</div>)}</div>)}</div>;
-}
-
-export function AuditWorkspace({ workspace, canManage, canRespond, stationOnly = false, focusAuditId }: { workspace: StationAuditWorkspace; canManage: boolean; canRespond: boolean; stationOnly?: boolean; focusAuditId?: string }) {
-  const [tab, setTab] = useState<"programme" | "calendar" | "log">("programme");
-  const [selected, setSelected] = useState(focusAuditId || workspace.audits[0]?.id || "");
-  const ordered = useMemo(() => [...workspace.audits].sort((a, b) => Date.parse(a.scheduled_for) - Date.parse(b.scheduled_for)), [workspace.audits]);
-  const active = selected ? ordered.find((audit) => audit.id === selected) : null;
-  const cards = <section className={styles.list}>{ordered.length ? ordered.map((audit) => <button className={styles.auditCard} key={audit.id} style={{ textAlign: "left", cursor: "pointer" }} onClick={() => setSelected(audit.id)}><div><h3>{audit.stations?.station_code || "Station"} · {audit.ops_audit_types?.name || "Audit"}</h3><p>{audit.audit_number} · {audit.stations?.station_name || audit.stations?.city || ""}</p></div><div className={styles.auditMeta}><span>{stationOnly ? "Response due" : "Scheduled"}</span><strong>{stationOnly && audit.response_due_at ? formatDateTime(audit.response_due_at) : formatDateTime(audit.scheduled_for)}</strong></div><span className={statusClass(audit.status_code)}>{audit.status_code.replaceAll("_", " ")}</span><span className={styles.miniButton}>{stationOnly ? "Respond" : "Open"}</span></button>) : <div className={styles.empty}>{stationOnly ? "No completed audit currently needs a response from this station." : "No audits have been scheduled in this period. Use the manager scheduling form when a surprise audit is required."}</div>}</section>;
-  if (stationOnly) return <><section className={styles.section}><div className={styles.sectionHeader}>Open station responses <span>{ordered.length} action required</span></div><div className={styles.sectionBody}><p className={styles.checkHelp}>Surprise audits are never shown before completion. This page only contains completed audits that have an open corrective action or a manager follow-up.</p></div></section>{cards}{active ? <AuditDetail key={active.id} audit={active} workspace={workspace} canManage={false} canRespond={canRespond} /> : null}</>;
-  return <><div className={styles.tabs}><button className={tab === "programme" ? styles.active : ""} onClick={() => setTab("programme")}>Audit queue</button><button className={tab === "calendar" ? styles.active : ""} onClick={() => setTab("calendar")}>Calendar</button><button className={tab === "log" ? styles.active : ""} onClick={() => setTab("log")}>Audit history</button></div><ProgrammeSummary workspace={workspace} />{tab === "programme" ? <><AuditSchedule types={workspace.auditTypes} stations={workspace.stations} canManage={canManage} />{cards}{active ? <AuditDetail key={active.id} audit={active} workspace={workspace} canManage={canManage} canRespond={canRespond} /> : null}</> : null}{tab === "calendar" ? <Calendar audits={ordered} /> : null}{tab === "log" ? <section className="panel"><div className="panel-head"><div><strong>Audit history</strong><p className="subtle">Each audit keeps its evidence, station response, decisions and timestamps.</p></div></div><div className="fin-table-wrap"><table className="fin-table"><thead><tr><th>Audit</th><th>Station</th><th>Scheduled</th><th>Status</th><th>Cash variance</th><th>Shipment exceptions</th><th>Email</th></tr></thead><tbody>{ordered.map((audit) => <tr key={audit.id}><td><strong>{audit.ops_audit_types?.name}</strong><small>{audit.audit_number}</small></td><td>{audit.stations?.station_code}</td><td>{formatDateTime(audit.scheduled_for)}</td><td><span className={statusClass(audit.status_code)}>{audit.status_code.replaceAll("_", " ")}</span></td><td>{audit.cash_variance_amount == null ? "—" : `₹${Number(audit.cash_variance_amount).toLocaleString("en-IN")}`}</td><td>{audit.shipment_unresolved_count}</td><td>{audit.email_status.replaceAll("_", " ")}</td></tr>)}{!ordered.length ? <tr><td colSpan={7} className="fin-empty">No audit activity in this period.</td></tr> : null}</tbody></table></div></section> : null}</>;
+function MonthlyPlan({
+  type,
+  month,
+  stations,
+  allAudits,
+  visibleAudits,
+  canSchedule,
+  onOpen,
+  onSchedule,
+}: {
+  type: AuditType;
+  month: string;
+  stations: AuditStation[];
+  allAudits: StationAudit[];
+  visibleAudits: StationAudit[];
+  canSchedule: boolean;
+  onOpen: (audit: StationAudit) => void;
+  onSchedule: (seed: ScheduleSeed) => void;
+}) {
+  const columns = auditPlanColumns(type, month);
+  const visible = new Set(visibleAudits.map((a) => a.id));
+  return (
+    <section className={styles.plan}>
+      <div className={styles.calendarHead}>
+        <div>
+          <h2>{type.name}</h2>
+          <p>
+            {type.required_count}{" "}
+            {type.required_count === 1 ? "audit" : "audits"} required{" "}
+            {type.cadence_unit === "weekly" ? "each week" : "each month"} ·
+            frequency from Audit Master
+          </p>
+        </div>
+      </div>
+      <div className={styles.tableScroll}>
+        <table>
+          <thead>
+            <tr>
+              <th>Station</th>
+              {columns.map((column) => (
+                <th key={column.key}>
+                  {column.label}
+                  <small>{column.hint}</small>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {stations.map((station) => (
+              <tr key={station.id}>
+                <th>
+                  {station.station_code}
+                  <small>{station.station_name || station.city}</small>
+                </th>
+                {columns.map((column) => {
+                  const audit = allAudits.find(
+                    (a) =>
+                      a.location_id === station.id &&
+                      a.audit_type_id === type.id &&
+                      a.cycle_key === column.cycleKey &&
+                      a.period_slot === column.code,
+                  );
+                  return (
+                    <td key={column.key}>
+                      {audit ? (
+                        visible.has(audit.id) ? (
+                          <button
+                            className={`${styles.slot} ${styles[`${auditTone(audit)}Border`]}`}
+                            onClick={() => onOpen(audit)}
+                          >
+                            <Badge audit={audit} />
+                            <strong>
+                              {dateLabel(auditDay(audit.scheduled_for))} ·{" "}
+                              {auditLocalTime(audit.scheduled_for)}
+                            </strong>
+                            <small>{audit.assigned_name || "Unassigned"}</small>
+                          </button>
+                        ) : (
+                          <span className={styles.muted}>Hidden by filter</span>
+                        )
+                      ) : (
+                        <button
+                          className={`${styles.slot} ${styles.emptySlot}`}
+                          disabled={!canSchedule || column.endDate < auditDay()}
+                          onClick={() =>
+                            onSchedule({
+                              typeId: type.id,
+                              stationId: station.id,
+                              date: column.date,
+                              slot: column.code,
+                            })
+                          }
+                        >
+                          <Plus size={15} />
+                          {column.endDate < auditDay()
+                            ? "Not scheduled · period ended"
+                            : `Schedule ${column.label.toLowerCase()}`}
+                        </button>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!stations.length && (
+          <p className={styles.empty}>No stations match your selection.</p>
+        )}
+      </div>
+    </section>
+  );
 }

@@ -9,7 +9,7 @@ type Result = { ok: true; message: string } | { ok: false; message: string };
 const clean = (value: FormDataEntryValue | null | undefined) => String(value ?? "").trim();
 function db() { if (!supabaseAdmin) throw new Error("Database service is unavailable."); return supabaseAdmin; }
 function result(error: unknown): Result { return { ok: false, message: error instanceof Error ? error.message : "Unable to update Audit Master." }; }
-function refresh() { revalidatePath("/ops-pulse/master/audits"); revalidatePath("/ops-pulse/audits"); revalidatePath("/audits"); }
+function refresh() { revalidatePath("/ops-pulse/master/audits"); revalidatePath("/master/audits"); revalidatePath("/ops-pulse/audits"); revalidatePath("/audits"); }
 function jsonObject(value: string, label: string) {
   if (!value) return {};
   try { const parsed = JSON.parse(value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(); return parsed; }
@@ -104,5 +104,25 @@ export async function createAuditOption(formData: FormData): Promise<Result> {
     const { companyId } = await access(); const optionGroup = clean(formData.get("option_group")).toLowerCase().replace(/[^a-z0-9_]+/g, "_"); const code = clean(formData.get("code")).toLowerCase().replace(/[^a-z0-9_]+/g, "_"); const label = clean(formData.get("label"));
     if (!optionGroup || !code || !label) throw new Error("Enter option group, code and label."); const saved = await db().from("ops_audit_reference_options").insert({ company_id: companyId, option_group: optionGroup, code, label, description: clean(formData.get("description")) || null, metadata: jsonObject(clean(formData.get("metadata")), "Option metadata"), sort_order: Number(clean(formData.get("sort_order"))) || 0 });
     if (saved.error) throw new Error(saved.error.message); refresh(); return { ok: true, message: "Reference value added." };
+  } catch (error) { return result(error); }
+}
+
+export async function saveAuditAirways(formData: FormData): Promise<Result> {
+  try {
+    const { authorization, companyId } = await access();
+    const label = clean(formData.get('label')); const id = clean(formData.get('id')); const stationIds = selectedValues(formData, 'station_ids');
+    if (!label || label.length > 80) throw new Error('Enter an Airways name of up to 80 characters.');
+    const { loadAuditStations, loadStationAuditMaster } = await import('@/lib/ops-pulse/station-audits');
+    const master = await loadStationAuditMaster(companyId); const stations = await loadAuditStations(companyId, authorization, master.programmeSettings);
+    const authorized = new Set(stations.map((station) => station.id));
+    if (stationIds.some((stationId) => !authorized.has(stationId))) throw new Error('One or more stations are outside your audit scope.');
+    const existing = master.options.find((option) => option.id === id && option.option_group === 'airways');
+    if (id && !existing) throw new Error('Airways entry unavailable. Refresh and try again.');
+    // Preserve assignments outside a scoped editor's locations.
+    const preserved = Array.isArray(existing?.metadata.station_ids) ? existing.metadata.station_ids.filter((stationId) => typeof stationId === 'string' && !authorized.has(stationId)) : [];
+    const payload = { label, metadata: { ...existing?.metadata, station_ids: [...preserved, ...stationIds] } };
+    const saved = id ? await db().from('ops_audit_reference_options').update(payload).eq('company_id', companyId).eq('option_group', 'airways').eq('id', id) : await db().from('ops_audit_reference_options').insert({ ...payload, company_id: companyId, option_group: 'airways', code: crypto.randomUUID(), is_active: true });
+    if (saved.error) throw new Error(saved.error.message);
+    refresh(); return { ok: true, message: 'Airways and station mappings saved.' };
   } catch (error) { return result(error); }
 }
