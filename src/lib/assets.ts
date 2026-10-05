@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { FinanceContext } from "@/lib/finance/data";
+import type { AssetTrackingMode } from "@/lib/asset-quantity";
 
 export type AssetOwnership = "owned" | "rented" | "leased";
 export type AssetCondition = "good" | "fair" | "damaged" | "unusable";
@@ -42,6 +43,10 @@ export type AssetRow = {
   ownership_type: AssetOwnership;
   status: string;
   condition: AssetCondition;
+  tracking_mode: AssetTrackingMode;
+  quantity_total: number;
+  quantity_working: number;
+  quantity_faulty: number;
   notes: string | null;
   created_at: string;
   type_name: string;
@@ -78,7 +83,7 @@ export async function loadAssetRegister(context: FinanceContext) {
   const assets: Array<Record<string, unknown>> = [];
   for (let offset = 0; ; offset += 1000) {
     let query = context.db.from("assets")
-      .select("id,asset_type_id,asset_code,barcode_value,location_id,manufacturer,model,serial_number,purchase_order_number,invoice_number,purchase_date,purchase_value,gst_rate,gst_amount,total_value,warranty_expiry_date,vendor_name,ownership_type,status,condition,notes,created_at")
+      .select("id,asset_type_id,asset_code,barcode_value,location_id,manufacturer,model,serial_number,purchase_order_number,invoice_number,purchase_date,purchase_value,gst_rate,gst_amount,total_value,warranty_expiry_date,vendor_name,ownership_type,status,condition,tracking_mode,quantity_total,quantity_working,quantity_faulty,notes,created_at")
       .eq("company_id", context.companyId).eq("is_active", true)
       .order("created_at", { ascending: false }).order("id").range(offset, offset + 999);
     if (!context.authorization.hasAllLocationAccess)
@@ -159,6 +164,10 @@ export async function loadAssetRegister(context: FinanceContext) {
         asset_type_id: String(asset.asset_type_id), location_id: asset.location_id ? String(asset.location_id) : null,
         ownership_type: (asset.ownership_type === "rented" || asset.ownership_type === "leased" ? asset.ownership_type : "owned") as AssetOwnership,
         condition: (asset.condition === "fair" || asset.condition === "damaged" || asset.condition === "unusable" ? asset.condition : "good") as AssetCondition,
+        tracking_mode: asset.tracking_mode === "quantity" ? "quantity" : "individual",
+        quantity_total: Math.max(1, Number(asset.quantity_total) || 1),
+        quantity_working: Math.max(0, Number(asset.quantity_working) || 0),
+        quantity_faulty: Math.max(0, Number(asset.quantity_faulty) || 0),
         status: String(asset.status || "available"), created_at: String(asset.created_at),
         type_name: type?.name ?? "Unknown type", type_code: type?.code ?? "—", category_name: type?.category_name ?? "Uncategorized",
         attachments: attachmentsByAsset.get(String(asset.id)) ?? [], history: historyByAsset.get(String(asset.id)) ?? [], rental_term: termsByAsset.get(String(asset.id)) ?? null,

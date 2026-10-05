@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import * as XLSX from "xlsx";
 import { hasPermission } from "@/lib/authorization";
+import { conditionForAssetQuantity, resolveAssetQuantities } from "@/lib/asset-quantity";
 import { assetPrefix } from "@/lib/assets";
 import { financeContext } from "@/lib/finance/data";
 
@@ -76,7 +77,16 @@ export async function registerAsset(input: unknown) {
     const typeName = text(item.type_name, 100);
     const locationId = nullable(item.location_id, 36);
     const ownershipType = text(item.ownership_type, 16).toLowerCase();
-    const condition = text(item.condition, 16).toLowerCase();
+    const requestedCondition = text(item.condition, 16).toLowerCase();
+    const quantities = resolveAssetQuantities({
+      trackingMode: item.tracking_mode,
+      total: item.quantity_total,
+      faulty: item.quantity_faulty,
+      individualCondition: requestedCondition,
+    });
+    const condition = quantities.trackingMode === "quantity"
+      ? conditionForAssetQuantity(quantities.total, quantities.faulty)
+      : requestedCondition;
     const gstRate = amount(item.gst_rate, "GST rate");
     if (!categoryName || !typeName) throw new Error("Category and asset type are required.");
     if (!ownership.has(ownershipType)) throw new Error("Choose owned, rented or leased.");
@@ -96,7 +106,9 @@ export async function registerAsset(input: unknown) {
       location_id: locationId, manufacturer: nullable(item.manufacturer), model: nullable(item.model), serial_number: nullable(item.serial_number),
       purchase_order_number: nullable(item.purchase_order_number), invoice_number: nullable(item.invoice_number), purchase_date: date(item.purchase_date),
       purchase_value: amount(item.purchase_value, "Taxable/base value"), gst_rate: gstRate, gst_amount: amount(item.gst_amount, "GST amount"), total_value: amount(item.total_value, "Total landed value"), warranty_expiry_date: date(item.warranty_expiry_date), vendor_name: nullable(item.vendor_name),
-      ownership_type: ownershipType, status: "available", condition, notes: nullable(item.notes, 1000), created_by: context.authorization.userId, updated_by: context.authorization.userId,
+      ownership_type: ownershipType, status: "available", condition,
+      tracking_mode: quantities.trackingMode, quantity_total: quantities.total, quantity_working: quantities.working, quantity_faulty: quantities.faulty,
+      notes: nullable(item.notes, 1000), created_by: context.authorization.userId, updated_by: context.authorization.userId,
     }).select("id").single();
     if (created.error) throw new Error("Unable to save this asset.");
     if (ownershipType !== "owned") {
@@ -108,7 +120,12 @@ export async function registerAsset(input: unknown) {
       });
       if (rental.error) throw new Error("Asset was added, but rental terms could not be saved. Please refresh and complete them before use.");
     }
-    await context.db.from("asset_events").insert({ company_id: context.companyId, asset_id: created.data.id, event_type: "registered", to_status: "available", to_condition: condition, to_location_id: locationId, actor_user_id: context.authorization.userId, actor_name: context.authorization.fullName || context.authorization.email || "Finance" });
+    await context.db.from("asset_events").insert({
+      company_id: context.companyId, asset_id: created.data.id, event_type: "registered", to_status: "available", to_condition: condition, to_location_id: locationId,
+      notes: quantities.trackingMode === "quantity" ? `${quantities.total} units registered · ${quantities.working} working · ${quantities.faulty} faulty / not working` : null,
+      metadata: { tracking_mode: quantities.trackingMode, quantity_total: quantities.total, quantity_working: quantities.working, quantity_faulty: quantities.faulty },
+      actor_user_id: context.authorization.userId, actor_name: context.authorization.fullName || context.authorization.email || "Finance",
+    });
     revalidatePath("/master/assets"); revalidatePath("/finance"); revalidatePath("/people/assets");
     return { ok: true as const, id: created.data.id, code: assetCode };
   } catch (error) {
@@ -139,6 +156,8 @@ export async function bulkRegisterAssets(form: FormData) {
       if (locationCode && !locationId) { results.push(`Row ${rowNumber}: Location ${locationCode} is not in your Finance scope.`); continue; }
       const input = {
         category_name: cell(row, ["Category"]), type_name: cell(row, ["Asset type", "Type"]), location_id: locationId || "",
+        tracking_mode: String(cell(row, ["Tracking mode", "Record method"]) || "individual").trim().toLowerCase(),
+        quantity_total: cell(row, ["Total quantity", "Quantity"]), quantity_faulty: cell(row, ["Faulty / not working quantity", "Faulty quantity", "Not working quantity"]),
         ownership_type: String(cell(row, ["Ownership", "Ownership type"]) || "owned").toLowerCase(), condition: String(cell(row, ["Condition"]) || "good").toLowerCase(),
         manufacturer: cell(row, ["Manufacturer", "Make"]), model: cell(row, ["Model"]), serial_number: cell(row, ["Serial number", "Serial", "Chassis number"]),
         invoice_number: cell(row, ["Invoice number", "Invoice"]), purchase_order_number: cell(row, ["Purchase order number", "PO number"]), purchase_date: spreadsheetDate(cell(row, ["Purchase date"])), purchase_value: cell(row, ["Taxable base value", "Purchase value", "Purchase value inr"]), gst_rate: cell(row, ["GST rate", "GST rate percent"]), gst_amount: cell(row, ["GST amount"]), total_value: cell(row, ["Total landed value", "Total value"]), vendor_name: cell(row, ["Vendor", "Supplier"]), notes: cell(row, ["Notes"]),
@@ -150,6 +169,49 @@ export async function bulkRegisterAssets(form: FormData) {
     revalidatePath("/master/assets");
     return { ok: imported > 0, imported, errors: results.slice(0, 12), error: imported ? undefined : results[0] || "No assets were imported." };
   } catch (error) { return { ok: false as const, imported: 0, errors: [], error: error instanceof Error ? error.message : "Unable to bulk upload assets." }; }
+}
+
+export async function updateAssetQuantity(form: FormData) {
+  try {
+    const context = await financeContext("finance_assets");
+    if (!hasPermission(context.authorization, "finance_assets", "edit")) throw new Error("Your Finance role cannot update asset quantities.");
+    const assetId = text(form.get("asset_id"), 36);
+    if (!/^[0-9a-f-]{36}$/i.test(assetId)) throw new Error("Choose a valid asset group.");
+    const quantities = resolveAssetQuantities({ trackingMode: "quantity", total: form.get("quantity_total"), faulty: form.get("quantity_faulty") });
+    const asset = await context.db.from("assets")
+      .select("id,location_id,tracking_mode,quantity_total,quantity_working,quantity_faulty,condition")
+      .eq("company_id", context.companyId).eq("id", assetId).maybeSingle();
+    if (asset.error || !asset.data) throw new Error("This asset group could not be found.");
+    if (!context.authorization.hasAllLocationAccess && asset.data.location_id && !context.authorization.locationScopeIds.includes(asset.data.location_id)) throw new Error("This asset group is outside your Finance scope.");
+    if (asset.data.tracking_mode !== "quantity") throw new Error("Quantity status is available only for quantity-group assets.");
+    const condition = conditionForAssetQuantity(quantities.total, quantities.faulty);
+    const updated = await context.db.from("assets").update({
+      quantity_total: quantities.total,
+      quantity_working: quantities.working,
+      quantity_faulty: quantities.faulty,
+      condition,
+      updated_by: context.authorization.userId,
+    }).eq("company_id", context.companyId).eq("id", assetId);
+    if (updated.error) throw new Error("Unable to update this asset quantity.");
+    await context.db.from("asset_events").insert({
+      company_id: context.companyId,
+      asset_id: assetId,
+      event_type: "quantity_updated",
+      from_condition: asset.data.condition,
+      to_condition: condition,
+      notes: `${asset.data.quantity_total} total / ${asset.data.quantity_faulty} faulty → ${quantities.total} total / ${quantities.faulty} faulty`,
+      metadata: {
+        previous: { total: asset.data.quantity_total, working: asset.data.quantity_working, faulty: asset.data.quantity_faulty },
+        current: { total: quantities.total, working: quantities.working, faulty: quantities.faulty },
+      },
+      actor_user_id: context.authorization.userId,
+      actor_name: context.authorization.fullName || context.authorization.email || "Finance",
+    });
+    revalidatePath("/master/assets"); revalidatePath("/finance"); revalidatePath("/people/assets");
+    return { ok: true as const, quantities };
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : "Unable to update this asset quantity." };
+  }
 }
 
 export async function uploadAssetAttachment(form: FormData) {
