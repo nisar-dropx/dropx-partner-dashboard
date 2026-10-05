@@ -14,6 +14,23 @@ const started={...existing[0],status:'in_progress'};const manual={...existing[1]
 assert.ok(planAuditMonth({...input,audits:[started,manual,...existing.slice(2)],rebalance:true}).changes.every(a=>a.id!==started.id&&a.id!==manual.id));
 assert.throws(()=>planAuditMonth({...input,today:'2026-10-31'}),/No dates were changed/);
 assert.throws(()=>planAuditMonth({...input,audits:[existing[0],{...existing[0],id:'dup'}]}),/Duplicate/);
+// Whole stations, geographic grouping and fixed visits are independent of vehicle numbering.
+const geoStations=[{station_code:'KOZA',latitude:11.265875,longitude:75.825172},{station_code:'TLPA',latitude:11.9102417,longitude:75.4914798},{station_code:'TLPB',latitude:11.98757,longitude:75.646713},{station_code:'KTUB',latitude:11.2718155,longitude:76.2491261},{station_code:'KTUR',latitude:11.195707,longitude:76.261065}];
+const geoVehicles=geoStations.flatMap((s,i)=>Array.from({length:i===0?6:i<3?3:i===3?2:1},(_,j)=>({id:`g${i}-${j}`,vehicle_no:`G${i}${j}`,station_code:s.station_code,status:'active'})));
+const geoInput={...input,vehicles:geoVehicles,stations:geoStations};
+const geo=planAuditMonth(geoInput),stationDay=code=>geo.changes.filter(a=>a.mode==='physical'&&geoVehicles.find(v=>v.id===a.vehicle_id).station_code===code).map(a=>a.scheduled_for);
+for(const s of geoStations)assert.equal(new Set(stationDay(s.station_code)).size,1,'Never split station vehicles');
+assert.equal(stationDay('TLPA')[0],stationDay('TLPB')[0]);assert.equal(stationDay('KTUB')[0],stationDay('KTUR')[0]);assert.notEqual(stationDay('KOZA')[0],stationDay('KTUB')[0]);
+assert.throws(()=>planAuditMonth({...geoInput,config:{...config,maxPhysicalPerDay:4}}),/No dates were changed/,'Fail without splitting a station when capacity is too small');
+const pinned={id:'pinned',vehicle_id:geoVehicles[0].id,scheduled_for:'2026-10-14',scheduled_reason:'[mode:physical] Auto programme',status:'in_progress',assigned_to:null,updated_at:'2026-10-05T00:00:00Z'};
+const anchored=planAuditMonth({...geoInput,audits:[pinned],rebalance:true});assert.ok(anchored.changes.filter(a=>a.mode==='physical'&&a.vehicle_id.startsWith('g0-')).every(a=>a.scheduled_for==='2026-10-14'));assert.ok(!anchored.changes.some(a=>a.id==='pinned'));
+const manualRoutine={...pinned,status:'scheduled',scheduled_reason:'[mode:physical] Routine twice-monthly vehicle audit'};assert.ok(planAuditMonth({...geoInput,audits:[manualRoutine],rebalance:true}).changes.every(a=>a.id!==manualRoutine.id),'Manually scheduled routine audit is retained');
+const narrow=planAuditMonth({...geoInput,config:{...config,nearbyStationKm:5}});assert.ok(narrow.days.every(d=>d.stations.length<=1),'Distance setting controls grouping');
+const missingGps=planAuditMonth({...geoInput,stations:geoStations.map(s=>({...s,latitude:null}))});assert.ok(missingGps.days.every(d=>d.stations.length<=1),'Missing coordinates do not imply nearby');
+const geoExisting=geo.changes.map((a,i)=>({...a,id:`geo${i}`,status:'scheduled',assigned_to:null,updated_at:'2026-10-05T00:00:00Z'}));
+assert.equal(planAuditMonth({...geoInput,audits:geoExisting}).changes.length,0);assert.equal(planAuditMonth({...geoInput,audits:geoExisting,rebalance:true}).changes.length,0);
+const geoLeave=stationDay('TLPA')[0];const movedForLeave=planAuditMonth({...geoInput,audits:geoExisting,leaveDates:[geoLeave]});assert.ok(movedForLeave.changes.every(a=>a.scheduled_for!==geoLeave));assert.equal(new Set(movedForLeave.changes.filter(a=>a.mode==='physical'&&/^g[12]-/.test(a.vehicle_id)).map(a=>a.scheduled_for)).size,1);
+console.log('Geographic planner: KOZA together, TLPA/TLPB and KTUB/KTUR paired, capacity guard, fixed work, distance setting, missing coordinates and leave grouping passed.');
 const db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role;
 create table fleet_vehicles(id uuid primary key,company_id uuid,vehicle_no text,station_code text,status text);
 create table fleet_audit_templates(id uuid primary key,company_id uuid);

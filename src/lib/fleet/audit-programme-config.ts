@@ -7,6 +7,7 @@ export type FleetAuditProgrammeConfig = {
   maxVirtualPerDay: number;
   minGapDays: number;
   maxPhysicalStationsPerDay: number;
+  nearbyStationKm: number;
   autoMoveForLeave: boolean;
   emailTitle: string;
   emailSubjectPrefix: string;
@@ -21,10 +22,11 @@ export const defaultFleetAuditProgrammeConfig: FleetAuditProgrammeConfig = {
   physicalPerMonth: 1,
   virtualPerMonth: 1,
   excludedWeekdays: [0],
-  maxPhysicalPerDay: 4,
+  maxPhysicalPerDay: 8,
   maxVirtualPerDay: 6,
   minGapDays: 7,
-  maxPhysicalStationsPerDay: 1,
+  maxPhysicalStationsPerDay: 3,
+  nearbyStationKm: 25,
   autoMoveForLeave: true,
   emailTitle: "DropX Vehicle Audit Report",
   emailSubjectPrefix: "DropX Vehicle Audit",
@@ -51,10 +53,11 @@ export function normalizeFleetAuditProgrammeConfig(value: unknown): FleetAuditPr
     physicalPerMonth: integer(input.physicalPerMonth, 1, 1, 1),
     virtualPerMonth: integer(input.virtualPerMonth, 1, 1, 1),
     excludedWeekdays: excluded.length ? excluded : [0],
-    maxPhysicalPerDay: integer(input.maxPhysicalPerDay, 4, 1, 20),
+    maxPhysicalPerDay: integer(input.maxPhysicalPerDay, 8, 1, 20),
     maxVirtualPerDay: integer(input.maxVirtualPerDay, 6, 1, 30),
     minGapDays: integer(input.minGapDays, 7, 1, 21),
-    maxPhysicalStationsPerDay: integer(input.maxPhysicalStationsPerDay, 1, 1, 5),
+    maxPhysicalStationsPerDay: integer(input.maxPhysicalStationsPerDay, 3, 1, 5),
+    nearbyStationKm: integer(input.nearbyStationKm, 25, 1, 100),
     autoMoveForLeave: input.autoMoveForLeave !== false,
     emailTitle: text(input.emailTitle) || defaultFleetAuditProgrammeConfig.emailTitle,
     emailSubjectPrefix: text(input.emailSubjectPrefix) || defaultFleetAuditProgrammeConfig.emailSubjectPrefix,

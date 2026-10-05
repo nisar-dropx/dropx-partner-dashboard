@@ -10,7 +10,8 @@ const gap=(a:string,b:string)=>Math.abs(Date.parse(a)-Date.parse(b))/86400000;
 const weekday=(date:string)=>new Date(`${date}T12:00:00Z`).getUTCDay();
 function distance(a?:PlanStation,b?:PlanStation){
  const raw=[a?.latitude,a?.longitude,b?.latitude,b?.longitude];
- if(raw.some(n=>n==null||n===''||!Number.isFinite(Number(n))))return null;
+ if(raw.some(n=>n==null||String(n).trim()===''||!Number.isFinite(Number(n))))return null;
+ if(Math.abs(Number(raw[0]))>90||Math.abs(Number(raw[2]))>90||Math.abs(Number(raw[1]))>180||Math.abs(Number(raw[3]))>180)return null;
  const [x,y,u,v]=raw.map(n=>Number(n)*Math.PI/180),h=Math.sin((u-x)/2)**2+Math.cos(x)*Math.cos(u)*Math.sin((v-y)/2)**2;
  return 12742*Math.asin(Math.sqrt(Math.min(1,h)));
 }
@@ -25,7 +26,8 @@ export function planAuditMonth({month,today,config,vehicles,audits,stations,leav
  const fleet=vehicles.filter(v=>!['sold','returned','disposed'].includes((v.status||'').toLowerCase()));
  const vehicleMap=new Map(vehicles.map(v=>[v.id,v])),stationMap=new Map(stations.map(s=>[s.station_code.toUpperCase(),s]));
  const stationOf=(id:string)=>vehicleMap.get(id)?.station_code.toUpperCase()||'UNASSIGNED';
- const fixed=active.filter(a=>a.status!=='scheduled'||(!rebalance&&!forbidden(a.scheduled_for))||((!String(a.scheduled_reason).includes('Auto programme')||/\[(moved|swapped):/.test(a.scheduled_reason||''))&&!forbidden(a.scheduled_for)));
+ const leaveAffected=new Set(active.filter(a=>a.status==='scheduled'&&forbidden(a.scheduled_for)).map(a=>a.vehicle_id));
+ const fixed=active.filter(a=>a.status!=='scheduled'||(!rebalance&&!forbidden(a.scheduled_for)&&!leaveAffected.has(a.vehicle_id))||((!/Auto programme|\[auto-moved:/.test(String(a.scheduled_reason))||/\[(moved|swapped):/.test(a.scheduled_reason||''))&&!forbidden(a.scheduled_for)));
  const movable=active.filter(a=>!fixed.includes(a));
  const physicalLoad=new Map<string,number>(),virtualLoad=new Map<string,number>(),visits=new Map<string,Set<string>>(),pairDates=new Map<string,string>();
  function reserve(vehicle:string,mode:AuditMode,date:string){const loads=mode==='physical'?physicalLoad:virtualLoad;loads.set(date,(loads.get(date)||0)+1);pairDates.set(key(vehicle,mode),date);if(mode==='physical'){const codes=visits.get(date)||new Set();codes.add(stationOf(vehicle));visits.set(date,codes);}}
@@ -37,15 +39,34 @@ export function planAuditMonth({month,today,config,vehicles,audits,stations,leav
  const fitsPair=(vehicle:string,mode:AuditMode,date:string)=>{const other=pairDates.get(key(vehicle,mode==='physical'?'video':'physical'));return !other||gap(date,other)>=minGap;};
  function assign(task:typeof tasks[number],date:string){reserve(task.vehicle_id,task.mode,date);const reason=task.existing?.scheduled_reason||`[mode:${task.mode}] Auto programme · ${task.mode==='physical'?`station visit ${stationOf(task.vehicle_id)}`:'monthly virtual review'}`;if(!task.existing||task.existing.scheduled_for!==date)changes.push({id:task.existing?.id||null,vehicle_id:task.vehicle_id,mode:task.mode,scheduled_for:date,scheduled_reason:reason,assigned_to:task.existing?.assigned_to||inspectorId});}
  const groups=new Map<string,typeof tasks>();for(const task of tasks.filter(t=>t.mode==='physical')){const code=stationOf(task.vehicle_id);groups.set(code,[...(groups.get(code)||[]),task]);}
- // Nearest next station makes adjacent visit days geographically coherent when coordinates exist.
- const remaining=[...groups.keys()].sort(),route:string[]=[];while(remaining.length){const previous=route.at(-1);if(previous)remaining.sort((a,b)=>(distance(stationMap.get(previous),stationMap.get(a))??Infinity)-(distance(stationMap.get(previous),stationMap.get(b))??Infinity)||a.localeCompare(b));route.push(remaining.shift()!);}
- const batches=route.flatMap(code=>{const list=groups.get(code)!.sort((a,b)=>(vehicleMap.get(a.vehicle_id)?.vehicle_no||'').localeCompare(vehicleMap.get(b.vehicle_id)?.vehicle_no||''));return Array.from({length:Math.ceil(list.length/config.maxPhysicalPerDay)},(_,i)=>list.slice(i*config.maxPhysicalPerDay,(i+1)*config.maxPhysicalPerDay));});
- batches.forEach((batch,index)=>{
-  const target=batches.length===1?Math.floor((dates.length-1)/2):Math.round(index*(dates.length-1)/(batches.length-1));
-  const candidates=dates.filter(d=>(physicalLoad.get(d)||0)+batch.length<=config.maxPhysicalPerDay&&((visits.get(d)?.has(stationOf(batch[0].vehicle_id)))||(visits.get(d)?.size||0)<config.maxPhysicalStationsPerDay)&&batch.every(t=>fitsPair(t.vehicle_id,'physical',d)));
+ // Keep a station's pending physical work together. Never split a station to fill capacity.
+ type Visit={codes:string[];tasks:typeof tasks;anchor:string|null};
+ const compatible=(codes:string[])=>codes.length<=config.maxPhysicalStationsPerDay&&codes.every((a,i)=>codes.slice(i+1).every(b=>{const km=distance(stationMap.get(a),stationMap.get(b));return km!==null&&km<=config.nearbyStationKm;}));
+ const anchorFor=(code:string)=>{const existing=[...visits].filter(([date,codes])=>dates.includes(date)&&codes.has(code)).map(([date])=>date);return existing.length===1?existing[0]:null;};
+ const pending=[...groups.keys()].sort().map(code=>({codes:[code],tasks:groups.get(code)!,anchor:anchorFor(code)}));
+ function fitsVisit(visit:Visit,date:string){
+  const codes=[...new Set([...(visits.get(date)||[]),...visit.codes])];
+  return (!visit.anchor||visit.anchor===date)&&(physicalLoad.get(date)||0)+visit.tasks.length<=config.maxPhysicalPerDay&&compatible(codes)&&visit.tasks.every(t=>fitsPair(t.vehicle_id,'physical',date));
+ }
+ // Greedy complete-link grouping prevents chains of individually nearby but collectively distant stations.
+ const batches:Visit[]=[];
+ while(pending.length){
+  const visit=pending.shift()!;
+  pending.sort((a,b)=>Math.min(...a.codes.flatMap(c=>visit.codes.map(v=>distance(stationMap.get(c),stationMap.get(v))??Infinity)))-Math.min(...b.codes.flatMap(c=>visit.codes.map(v=>distance(stationMap.get(c),stationMap.get(v))??Infinity)))||a.codes[0].localeCompare(b.codes[0]));
+  for(let i=0;i<pending.length;){const next=pending[i];const joined:Visit={codes:[...visit.codes,...next.codes],tasks:[...visit.tasks,...next.tasks],anchor:visit.anchor||next.anchor};
+   if((!visit.anchor||!next.anchor||visit.anchor===next.anchor)&&compatible(joined.codes)&&dates.some(d=>fitsVisit(joined,d))){Object.assign(visit,joined);pending.splice(i,1);}else i++;
+  }
+  batches.push(visit);
+ }
+ // Place anchored visits first; spread remaining visits across all available working days.
+ batches.sort((a,b)=>Number(Boolean(b.anchor))-Number(Boolean(a.anchor))||a.codes[0].localeCompare(b.codes[0]));
+ const freeCount=batches.filter(b=>!b.anchor).length;let freeIndex=0;
+ for(const batch of batches){
+  const target=batch.anchor?dates.indexOf(batch.anchor):freeCount===1?Math.floor((dates.length-1)/2):Math.round(freeIndex++*(dates.length-1)/(freeCount-1));
+  const candidates=dates.filter(d=>fitsVisit(batch,d));
   candidates.sort((a,b)=>Math.abs(dates.indexOf(a)-target)-Math.abs(dates.indexOf(b)-target)||(physicalLoad.get(a)||0)-(physicalLoad.get(b)||0)||a.localeCompare(b));
-  if(candidates[0])batch.forEach(t=>assign(t,candidates[0]));else batch.forEach(t=>unplaced.push({vehicleNo:vehicleMap.get(t.vehicle_id)?.vehicle_no||t.vehicle_id,mode:t.mode,reason:'No station visit slot satisfies capacity, leave and spacing rules.'}));
- });
+  if(candidates[0])batch.tasks.forEach(t=>assign(t,candidates[0]));else batch.tasks.forEach(t=>unplaced.push({vehicleNo:vehicleMap.get(t.vehicle_id)?.vehicle_no||t.vehicle_id,mode:t.mode,reason:`Whole-station visit ${batch.codes.join(', ')} does not fit capacity, leave or spacing rules.`}));
+ }
  // Virtual reviews use all working days, balancing the combined daily workload.
  for(const task of tasks.filter(t=>t.mode==='video').sort((a,b)=>(pairDates.get(key(a.vehicle_id,'physical'))||'').localeCompare(pairDates.get(key(b.vehicle_id,'physical'))||'')||a.vehicle_id.localeCompare(b.vehicle_id))){
   const physicalDate=pairDates.get(key(task.vehicle_id,'physical'));
