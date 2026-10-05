@@ -293,6 +293,7 @@ export function buildPnl(
             86400000,
         ) + (cutoffs.has(l.station_code) ? 0 : 1),
     })),
+    advertising: (cps.advertising ?? []).filter(c => inCoverage(c.station_code, c.spend_date)),
     staffGroups: (cps.staff ?? []).map((s) => ({
       station: s.station_code,
       group: s.group,

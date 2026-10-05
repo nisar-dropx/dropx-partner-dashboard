@@ -402,3 +402,9 @@ test("station without any delivery data never contributes unmatched fixed costs 
  const r=p.buildPnl([{station:'A',daily:[{...day,shipmentReported:false,deliveries:null}]}],{...snapshot,daily:[{...cday,shipment_present:false,deliveries:0}]},[place],'2026-09-01','2026-09-03');
  assert.equal(r.total.revenue,null);assert.equal(r.total.cost,null);assert.equal(r.total.profit,null);assert.equal(r.coverage[0].through,null);
 });
+
+ test("Meta advertising evidence follows the same station delivery cutoff as costs and revenue",()=>{
+ const advertising=[{station_code:"A",spend_date:"2026-09-01",spend:12},{station_code:"A",spend_date:"2026-09-02",spend:25},{station_code:"B",spend_date:"2026-09-01",spend:50}];
+ const r=p.buildPnl([{station:"A",daily:[day]}],{...snapshot,advertising},[place],"2026-09-01","2026-09-05");
+ assert.deepEqual(r.advertising,[advertising[0]]);
+ });
