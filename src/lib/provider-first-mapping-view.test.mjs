@@ -412,3 +412,24 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(correctionMigration, /person\.location_id is distinct from new_station_id/);
   assert.match(correctionMigration, /policy\.station_id is distinct from p_new_station/);
 });
+
+test("locks provider mappings only across the associate's finalized payout dates", async () => {
+  const migration = await readFile(
+    new URL("../../supabase/migrations/20261005160446_provider_mapping_finalized_payout_period_guard.sql", import.meta.url),
+    "utf8"
+  );
+  const guardStart = migration.indexOf("create or replace function public.workforce_joining_mapping_guard");
+  const guardEnd = migration.indexOf("comment on function public.workforce_joining_mapping_guard", guardStart);
+  const guard = migration.slice(guardStart, guardEnd);
+
+  assert.match(guard, /lower\(coalesce\(payroll_run\.status, ''\)\) in \('approved', 'paid'\)/);
+  assert.match(guard, /coalesce\(payroll_item\.status, ''\) <> 'excluded'/);
+  assert.match(guard, /daterange\(payroll_run\.period_start, payroll_run\.period_end, '\[\]'\)[\s\S]*\* old_range/);
+  assert.match(guard, /\* old_range[\s\S]*is distinct from[\s\S]*\* new_range/);
+  assert.doesNotMatch(guard, /in \('review', 'approved', 'paid'\)/);
+  assert.match(migration, /create trigger field_executive_provider_mappings_01_finalized_payout_guard/);
+  assert.match(migration, /create or replace function public\.workforce_provider_mapping_person/);
+  assert.match(migration, /workforce\.source_profile_type = 'employee'/);
+  assert.doesNotMatch(migration, /daterange\(least\(new_start, old_mapping\.effective_from\)/);
+  assert.doesNotMatch(migration, /Finalized Workforce payroll uses this mapping period/);
+});
