@@ -339,6 +339,7 @@ export type CpsVehicleCost = {
   model: string;
   station_code: string;
   monthly_rent: number | null;
+  daily_rent?: number | null;
   from_date: string;
   through_date: string;
   days: number;

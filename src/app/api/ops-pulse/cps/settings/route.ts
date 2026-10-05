@@ -9,14 +9,16 @@ export async function GET() {
   if(!auth||!hasPermission(auth,'cps_inputs','access'))return reply({error:'CPS setup access required.'},403);
   const scope=await cpsScope(auth,{});
   if(!supabaseAdmin)return reply({error:'Database unavailable.'},503);
-  const [people,expenses,designations]=await Promise.all([
+  const [people,expenses,components,fields,designations]=await Promise.all([
     supabaseAdmin.from('ops_cps_people_policies').select('id,designation_code,designation_name,mode,head,label,allocation,effective_from,updated_at').eq('company_id',scope.companyId).order('designation_name').order('effective_from',{ascending:false}).limit(1000),
     supabaseAdmin.from('ops_cps_expense_policies').select('id,cost_label,mode,effective_from,updated_at').eq('company_id',scope.companyId).order('cost_label').order('effective_from',{ascending:false}).limit(1000),
+    supabaseAdmin.from('ops_cps_component_policies').select('id,component_code,label,mode,effective_from,updated_at').eq('company_id',scope.companyId).order('component_code').order('effective_from',{ascending:false}).limit(1000),
+    supabaseAdmin.from('payment_fields').select('code,label,calculation_type').eq('company_id',scope.companyId).order('label').limit(1000),
     supabaseAdmin.from('designations').select('code,name').eq('company_id',scope.companyId).order('name').limit(1000),
   ]);
-  if(people.error||expenses.error||designations.error||people.data?.length===1000||expenses.data?.length===1000||designations.data?.length===1000)return reply({error:'Settings could not be loaded completely.'},503);
+  if(components.error||fields.error||components.data?.length===1000||fields.data?.length===1000||people.error||expenses.error||designations.error||people.data?.length===1000||expenses.data?.length===1000||designations.data?.length===1000)return reply({error:'Settings could not be loaded completely.'},503);
   const newRoles=(designations.data??[]).filter(d=>!people.data?.some(p=>p.designation_code===d.code)).map(d=>({designation_code:d.code,designation_name:d.name,mode:'excluded',head:'UTR',label:'Station staff CTC',allocation:'equal',effective_from:''}));
-  return reply({people:[...(people.data??[]),...newRoles],expenses:expenses.data,canEdit:!auth.readOnly&&auth.hasAllLocationAccess&&hasPermission(auth,'cps_inputs','edit')});
+  return reply({people:[...(people.data??[]),...newRoles],expenses:expenses.data,components:components.data,fields:fields.data,canEdit:!auth.readOnly&&auth.hasAllLocationAccess&&hasPermission(auth,'cps_inputs','edit')});
 }
 export async function POST(request:Request) {
   try {
@@ -44,6 +46,12 @@ export async function POST(request:Request) {
       const label=String(body.label||'').trim();
       if(label.length<3||label.length>80)return reply({error:'Use a group label of 3–80 characters, without employee names.'},400);
       table='ops_cps_people_policies';values={designation_code:designation.data.code,designation_name:designation.data.name,mode:body.mode,head:body.head,label,allocation:body.allocation};
+    } else if(body.kind==='component') {
+      if(!['fleet','workforce'].includes(body.mode))return reply({error:'Choose a valid cost source.'},400);
+      const field=await supabaseAdmin.from('payment_fields').select('code,label,calculation_type').eq('company_id',scope.companyId).eq('code',String(body.component_code)).maybeSingle();
+      if(field.error||!field.data)return reply({error:'Payment field not found in this company.'},400);
+      if(body.mode==='fleet' && !['fixed_daily','fixed_monthly'].includes(field.data.calculation_type))return reply({error:'Only fixed rental fields can use Fleet. Per-package and production payments remain included.'},400);
+      table='ops_cps_component_policies';values={component_code:field.data.code.trim().toUpperCase(),label:field.data.label,mode:body.mode};
     } else if(body.kind==='expense') {
       const label=String(body.cost_label||'').trim().toLowerCase();
       if(label.length<3||label.length>120||!['monthly','transaction'].includes(body.mode))return reply({error:'Choose a cost label and recognition method.'},400);

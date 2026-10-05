@@ -357,3 +357,13 @@ test('cross-month reads split RPC boundaries and reuse bill snapshot without ano
  assert.ok(base.every(([,a])=>a.p_company==='company-a'&&a.p_stations.join(',')==='A,B'));
  assert.equal(calls.some(([n])=>n==='ops_cps_period_expenses'),false);assert.equal(result.expense_periods.length,1);
 });
+
+test('Fleet rent replaces base-RPC rent exactly once while genuine ad hoc costs survive',async()=>{
+ const rent={station_code:'A',work_date:'2026-09-01',head:'Van',sub_head:'Vehicle rent · V1',source:'Fleet Vehicle Master',amount:500};
+ const adhoc={...rent,source:'Approved payment requests',sub_head:'Adhoc Van',amount:250};
+ const db={rpc:async(name)=>({error:null,data:name==='ops_cps_source_facts'?{shipments:[],stations:[]}:name==='ops_cps_people_assignments'?{employees:[],salaries:[],stations:[],volumes:[],assignments:[]}:name==='ops_cps_vehicle_costs'?{breakup:[{...rent,amount:0}],gaps:[],vehicles:[]}:{daily:[],breakup:[rent,adhoc]}})};
+ const result=await dataModule(db).loadCpsSnapshot('company-a','2026-09-01','2026-09-01',[all[0]]);
+ assert.equal(result.breakup.filter(l=>l.source==='Fleet Vehicle Master').length,1);
+ assert.equal(result.breakup.find(l=>l.source==='Fleet Vehicle Master').amount,0,'canonical rent-blocked day wins over stale base rent');
+ assert.equal(result.breakup.find(l=>l.source==='Approved payment requests').amount,250);
+});

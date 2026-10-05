@@ -115,5 +115,23 @@ assert.equal((await query("select before_values->>'chassis_number' old,after_val
 await assert.rejects(query('update fleet_vehicles set purchase_value=-1 where id=$1',[vehicle]),/check constraint/);
 assert.equal((await query("select count(*) n from document_types where code='VEHICLE_INVOICE' and not requires_expiry"))[0].n,2);
 assert.equal((await query("select has_table_privilege('authenticated','fleet_vehicle_master_changes','select') allowed"))[0].allowed,false);
+await db.exec(`create table payment_fields(company_id uuid,code text,label text,calculation_type text);
+insert into payment_fields values
+('${company}','VAN_RENT_PER_DAY','Van rental per day','fixed_daily'),
+('${company}','VAN_RENT_PER_MONTH','Van rental per month','fixed_monthly'),
+('${company}','VAN_PER_PACKAGE','Van per package','count_x_rate'),
+('${company}','BASIC','Base salary','fixed_monthly'),
+('${other}','VAN_RENT_PER_DAY','Van rental per day','fixed_daily');
+insert into cps_shipment_daily(company_id,work_date) values('${company}','2026-07-01');`);
+await db.exec(readFileSync(new URL('../supabase/migrations/20261005231019_cps_workforce_cost_sources.sql',import.meta.url),'utf8'));
+const rentalRules=await query('select *,effective_from::text as effective_from from ops_cps_component_policies where company_id=$1',[company]);
+assert.equal(rentalRules.length,2,'seed fixed vehicle rentals only, never package pay or salary');
+assert.ok(rentalRules.every(p=>p.mode==='fleet' && String(p.effective_from).startsWith('2026-07-01')));
+assert.equal((await query("select count(*) n from ops_cps_configuration_changes where configuration_table='ops_cps_component_policies'"))[0].n,3,'source rules retain audit history');
+assert.equal((await query("select has_table_privilege('authenticated','ops_cps_component_policies','select') allowed"))[0].allowed,false);
+assert.equal((await query("select rowsecurity from pg_tables where tablename='ops_cps_component_policies'"))[0].rowsecurity,true);
+await assert.rejects(query("update ops_cps_component_policies set mode='ignore' where company_id=$1",[company]),/check constraint/);
+await query("insert into ops_cps_component_policies(company_id,component_code,label,mode,effective_from) values($1,'VAN_RENT_PER_DAY','Rental','workforce','2027-01-01')",[company]);
+assert.equal((await query('select count(*) n from ops_cps_component_policies where company_id=$1',[company]))[0].n,3,'effective revisions preserve earlier rule');
 await db.close();
 console.log('CPS sources verified: rates, revisions, transfers, permissions, missing rates, approval milestones, rent and cashbook dedupe, scoped totals.');
