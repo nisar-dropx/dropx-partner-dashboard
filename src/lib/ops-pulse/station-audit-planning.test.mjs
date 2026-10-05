@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { auditTimestamp, auditDay, auditMonthRange, auditPlanColumns, auditCycle, auditDuration, isFastAudit, stationCanSeeAudit, validAuditDate, auditTone } from './station-audit-planning.ts';
+import { auditTimestamp, auditDay, auditMonthRange, auditPlanColumns, auditCycle, auditDuration, isFastAudit, stationCanSeeAudit, validAuditDate, auditTone, isMyAudit, auditQueueBucket, auditResponseLabel } from './station-audit-planning.ts';
 const physical = { cadence_unit: 'monthly', required_count: 2, scheduling_config: { period_slots: [{ code: 'first_half', label: 'First half', start_day: 1 }, { code: 'second_half', label: 'Second half', start_day: 16 }] } };
 const cod = { cadence_unit: 'weekly', required_count: 1, scheduling_config: { period_slots: [{ code: 'weekly', label: 'Weekly coverage' }] } };
 test('India calendar groups midnight correctly and validates real dates', () => {
@@ -36,4 +36,24 @@ test('station views cannot expose scheduled/in-progress surprise audits even wit
   for (const status_code of ['closed', 'under_review']) assert.equal(stationCanSeeAudit({ status_code, completed_at: '2026-10-05' }), true);
   assert.equal(stationCanSeeAudit({ status_code: 'awaiting_station_response', completed_at: '2026-10-05', station_response_status: 'requested' }), true);
   assert.equal(auditTone({ status_code: 'under_review' }), 'pending');
+});
+
+test('three COD windows and physical half-month boundaries are enforced',()=>{
+ const cod3={cadence_unit:'monthly',required_count:3,scheduling_config:{period_slots:[{code:'cod_1',start_day:1,end_day:10},{code:'cod_2',start_day:11,end_day:20},{code:'cod_3',start_day:21,end_day:31}]}};
+ assert.equal(auditPlanColumns(cod3,'2026-10').length,3);
+ assert.equal(auditCycle(cod3,'2026-10-11').periodSlot,'cod_2');
+ assert.throws(()=>auditCycle(cod3,'2026-10-21','cod_2'),/choose a date/);
+ const physical2={...physical,scheduling_config:{period_slots:[{code:'first_half',start_day:1,end_day:15},{code:'second_half',start_day:16,end_day:31}]}};
+ assert.throws(()=>auditCycle(physical2,'2026-10-15','second_half'),/choose a date/);
+ assert.equal(auditCycle(physical2,'2026-10-16').periodSlot,'second_half');
+});
+test('personal queue uses verified identity, India date windows, and explicit station responses',()=>{
+ assert.equal(isMyAudit({assigned_to:'me',assignment_verified:true},'me'),true);
+ assert.equal(isMyAudit({assigned_to:'me',assignment_verified:false},'me'),false);
+ const a={status_code:'scheduled',scheduled_for:'2026-10-05T04:30Z'};
+ assert.equal(auditQueueBucket(a,'2026-10-05'),'today');
+ assert.equal(auditQueueBucket({...a,scheduled_for:'2026-10-07T04:30Z'},'2026-10-05'),'next2');
+ assert.equal(auditQueueBucket({...a,scheduled_for:'2026-10-12T04:30Z'},'2026-10-05'),'week');
+ assert.equal(auditQueueBucket({...a,scheduled_for:'2026-09-30T04:30Z'},'2026-10-05'),'overdue');
+ assert.equal(auditResponseLabel({completed_at:'2026-10-05',station_response_status:'requested',response_due_at:'2026-10-06'},Date.parse('2026-10-07')),'Overdue response');
 });

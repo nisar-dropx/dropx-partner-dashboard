@@ -84,10 +84,9 @@
   border-radius: 14px;
   padding: 14px;
   display: grid;
-  grid-template-columns: minmax(190px, 1.4fr) minmax(110px, 0.8fr) minmax(
-      130px,
-      0.9fr
-    ) minmax(100px, 0.7fr) auto;
+  grid-template-columns:
+    minmax(190px, 1.4fr) minmax(110px, 0.8fr) minmax(130px, 0.9fr)
+    minmax(100px, 0.7fr) auto;
   gap: 12px;
   align-items: center;
 }
@@ -1187,4 +1186,107 @@
 }
 .section > summary > span {
   margin-left: auto;
+}
+
+.personal {
+  border: 1px solid #e0e7f0;
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.personalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 20px;
+}
+.personalGrid section {
+  min-width: 0;
+}
+.personalGrid h3 {
+  display: flex;
+  justify-content: space-between;
+  color: #253d60;
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+.personalGrid h3 span {
+  border-radius: 20px;
+  background: #edf2f8;
+  padding: 2px 9px;
+}
+.personalGrid .auditCard {
+  display: flex;
+  flex-wrap: wrap;
+  text-align: left;
+  gap: 8px;
+}
+.tracker td,
+.tracker th {
+  padding: 12px;
+  font-size: 12px;
+  text-align: left;
+}
+.tracker small,
+.tracker strong {
+  display: block;
+  margin-top: 4px;
+}
+.controlRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 16px;
+}
+.controlRow > details {
+  flex: 1;
+  min-width: 230px;
+}
+@media (max-width: 760px) {
+  .personalGrid {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+  .personalGrid .auditCard {
+    width: 100%;
+  }
+  .controlRow {
+    display: block;
+  }
+  .tracker {
+    min-width: 740px;
+  }
+}
+
+.editingAudit {
+  grid-template-columns: 1fr;
+}
+.editingAudit aside {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.cashTotals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  border-radius: 12px;
+  background: #f1f6fb;
+}
+.cashTotals span,
+.cashTotals strong {
+  display: block;
+}
+.cashTotals strong {
+  font-size: 24px;
+  margin-top: 4px;
+}
+.varianceBox {
+  padding: 16px;
+  background: #fff5e8;
+  border: 1px solid #f2c17e;
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
 }

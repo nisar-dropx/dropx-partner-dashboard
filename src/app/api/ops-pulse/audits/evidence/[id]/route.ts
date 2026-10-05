@@ -32,7 +32,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   const evidence = await supabaseAdmin
     .from("ops_station_audit_evidence")
     .select(
-      "id,file_name,media_url,ops_station_audits!inner(location_id,status_code,completed_at,station_response_status,stations(location_model_id,is_ho))",
+      "id,file_name,media_url,ops_station_audits!inner(deleted_at,location_id,status_code,completed_at,station_response_status,stations(location_model_id,is_ho))",
     )
     .eq("company_id", companyId)
     .eq("id", params.id)
@@ -48,7 +48,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
     : audit?.stations;
   if (
     !row ||
-    !audit ||
+    !audit || audit.deleted_at ||
     !station ||
     !canUseStationAuditLocation(authorization, audit.location_id) ||
     !isStationAuditEligible(

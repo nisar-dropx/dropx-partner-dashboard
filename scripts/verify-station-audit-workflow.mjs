@@ -10,6 +10,7 @@ const planning = { exports: {} };
 new Function("module", "exports", ts.transpileModule(planningSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(planning, planning.exports);
 const mocks = {
   "./station-audit-planning": planning.exports,
+  "./station-audit-people": {},
   "server-only": {},
   "node:crypto": { randomUUID: () => "test-id" },
   "@/lib/supabase-admin": { supabaseAdmin: {} }
