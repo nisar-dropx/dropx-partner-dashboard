@@ -440,7 +440,7 @@ async function createExpenseRequestCore(formData: FormData, fleetBreakdown = fal
       remarks,
       requestId: request.id
     });
-    return { requestId: request.id, notice: paymentEmailNotice("Ad hoc van request submitted for approval.", emailResult.sent ? undefined : emailResult.reason) };
+    return { requestId: request.id, notice: paymentEmailNotice(fleetBreakdown ? "Ad hoc van request submitted for approval." : "Expense request submitted for approval.", emailResult.sent ? undefined : emailResult.reason) };
 }
 
 export async function createFleetBreakdownRequest(formData: FormData): Promise<{requestId?:string;notice?:string;error?:string}> {
