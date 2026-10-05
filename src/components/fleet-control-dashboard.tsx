@@ -198,6 +198,7 @@ export function FleetControlDashboard({
   const [vehicleSort, setVehicleSort] = useState("vehicle");
   const [vehicleView, setVehicleView] = useState<"live" | "registry">("live");
   const [paymentSort, setPaymentSort] = useState("date_desc");
+  const [attentionTarget,setAttentionTarget]=useState<{vehicle:string;documentType?:string}|null>(null);
   const [vehicles, setVehicles] = useState(data.vehicles);
   const [payments, setPayments] = useState(data.payments);
   const [movements, setMovements] = useState(data.movements);
@@ -281,6 +282,7 @@ export function FleetControlDashboard({
     setOwnershipDraft(selectedVehicle.ownershipType);
   }, [selectedVehicle?.vehicleNo]);
 
+  useEffect(() => setVehicles(data.vehicles), [data.vehicles]);
   useEffect(() => setMovements(data.movements), [data.movements]);
   useEffect(() => setPayments(data.payments), [data.payments]);
 
@@ -630,9 +632,9 @@ export function FleetControlDashboard({
           {flash ? <div className={`fc-flash ${flash.type}`}><span>{flash.type === "notice" ? <Check size={17} /> : <AlertTriangle size={17} />}{flash.text}</span><button aria-label="Dismiss" onClick={() => setFlash(null)} type="button"><X size={16} /></button></div> : null}
           {data.errors.length ? <div className="fc-flash error"><span><AlertTriangle size={17} />Some live data is unavailable: {data.errors[0]}</span></div> : null}
 
-          {section === "attention" ? <FleetAttentionWorkspace data={data} onChanged={() => router.refresh()} onNavigate={(item) => { if(item.section === "vehicles") setSelectedVehicle(vehicles.find(v=>v.id===item.vehicleId) || null); else if(item.section === "tracking") openExceptions({vehicleNo:item.vehicle,date:item.due||data.today}); else { if(item.auditId) setAuditToOpen(item.auditId); changeSection(item.section as Section); } }} /> : null}
+          {section === "attention" ? <FleetAttentionWorkspace data={{...data,vehicles}} onRentSaved={(id,values)=>setVehicles(current=>current.map(v=>v.id===id?{...v,...values}:v))} onChanged={() => router.refresh()} onNavigate={(item) => { setAttentionTarget({vehicle:item.vehicle,documentType:item.documentType}); if(item.section === "vehicles") setSelectedVehicle(vehicles.find(v=>v.id===item.vehicleId) || null); else if(item.section === "tracking") openExceptions({vehicleNo:item.vehicle,date:item.due||data.today}); else { if(item.auditId) setAuditToOpen(item.auditId); changeSection(item.section as Section); } }} /> : null}
           {section === "overview" ? <>
-            {visibleSectionSet.has("attention") ? <button type="button" className="fc-attention-banner" onClick={() => changeSection("attention")}><AlertTriangle size={22}/><span><strong>{fleetAttention(data).filter(r=>!r.resolved).length} actions need attention</strong><small>Repair follow-ups, overdue returns, documents and audits</small></span><ArrowRight size={20}/></button> : null}
+            {visibleSectionSet.has("attention") ? <button type="button" className="fc-attention-banner" onClick={() => changeSection("attention")}><AlertTriangle size={22}/><span><strong>{fleetAttention({...data,vehicles}).filter(r=>!r.resolved).length} actions need attention</strong><small>Repair follow-ups, overdue returns, documents and audits</small></span><ArrowRight size={20}/></button> : null}
             <section className="fc-hero">
               <div>
                 <span className="fc-eyebrow"><ShieldCheck size={14} /> Fleet operations · {date(data.today)}</span>
@@ -709,9 +711,9 @@ export function FleetControlDashboard({
             </>}
           </section> : null}
 
-          {section === "documents" ? <FleetDocumentsWorkspace data={data} vehicles={vehicles} /> : null}
+          {section === "documents" ? <FleetDocumentsWorkspace data={data} vehicles={vehicles} initialVehicle={attentionTarget?.vehicle} initialDocumentType={attentionTarget?.documentType} /> : null}
 
-          {section === "service" ? <FleetServiceWorkspace data={data} onChanged={() => router.refresh()} vehicles={vehicles} /> : null}
+          {section === "service" ? <FleetServiceWorkspace data={data} initialVehicle={attentionTarget?.vehicle} onChanged={() => router.refresh()} vehicles={vehicles} /> : null}
 
           {section === "audits" ? <section className="fc-section">
             <FleetScopeFilters {...scopeProps} />

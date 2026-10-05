@@ -21,14 +21,14 @@ const closedStatus = (status: string) => ["sold", "disposed", "returned"].includ
 
 function DueState({ date, today }: { date: string | null; today: string }) { const days = daysFrom(date, today); if (days == null) return <span className="fc-due-pill neutral">Not planned</span>; if (days < 0) return <span className="fc-due-pill bad">Overdue {Math.abs(days)}d</span>; if (days === 0) return <span className="fc-due-pill bad">Due today</span>; if (days <= 14) return <span className="fc-due-pill warn">Due in {days}d</span>; return <span className="fc-due-pill good">Planned · {days}d</span>; }
 
-export function FleetServiceWorkspace({ data, vehicles, onChanged }: { data: FleetControlData; vehicles: FleetControlVehicle[]; onChanged: () => void }) {
+export function FleetServiceWorkspace({ data, vehicles, onChanged, initialVehicle }: { data: FleetControlData; vehicles: FleetControlVehicle[]; onChanged: () => void; initialVehicle?:string }) {
   const [view, setView] = useState<View>("schedule");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialVehicle||"");
   const [stations, setStations] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [ownership, setOwnership] = useState<string[]>([]);
   const [reportDate, setReportDate] = useState(data.today);
-  const [draftSearch, setDraftSearch] = useState("");
+  const [draftSearch, setDraftSearch] = useState(initialVehicle||"");
   const [draftStations, setDraftStations] = useState<string[]>([]);
   const [draftStatuses, setDraftStatuses] = useState<string[]>([]);
   const [draftOwnership, setDraftOwnership] = useState<string[]>([]);

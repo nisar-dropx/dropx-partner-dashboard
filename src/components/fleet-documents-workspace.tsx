@@ -48,15 +48,15 @@ function validityText(row: DocumentRow) {
 }
 
 
-export function FleetDocumentsWorkspace({ data, vehicles }: { data: FleetControlData; vehicles: FleetControlVehicle[] }) {
+export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initialDocumentType }: { data: FleetControlData; vehicles: FleetControlVehicle[]; initialVehicle?:string; initialDocumentType?:string }) {
   const router = useRouter();
   const [documents, setDocuments] = useState(data.documents);
   const [query, setQuery] = useState("");
   const [stations, setStations] = useState<string[]>([]);
   const [clusters, setClusters] = useState<string[]>([]);
   const [regions, setRegions] = useState<string[]>([]);
-  const [vehicleNos, setVehicleNos] = useState<string[]>([]);
-  const [documentTypes, setDocumentTypes] = useState<string[]>([]);
+  const [vehicleNos, setVehicleNos] = useState<string[]>(initialVehicle?[initialVehicle]:[]);
+  const [documentTypes, setDocumentTypes] = useState<string[]>(initialDocumentType?[initialDocumentType]:[]);
   const [states, setStates] = useState<string[]>([]);
   const [workspaceMode, setWorkspaceMode] = useState<"action" | "register">("action");
   const [sort, setSort] = useState("urgency");
