@@ -19,7 +19,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:request-tracker": "node scripts/verify-request-tracker.mjs && node scripts/verify-request-tracker-api.mjs",
-    "test:station-audits": "node --experimental-strip-types --test src/lib/ops-pulse/station-audit-planning.test.mjs && node scripts/test-station-audit-reschedule.mjs && node scripts/test-station-audit-access.mjs && node scripts/verify-station-audit-workflow.mjs && node scripts/test-station-audit-tracker.mjs && node scripts/test-station-audit-mail.mjs && node scripts/test-station-audit-upload.mjs && node scripts/test-station-audit-directory.mjs"
+    "test:station-audits": "node --experimental-strip-types --test src/lib/ops-pulse/station-audit-planning.test.mjs && node scripts/test-station-audit-reschedule.mjs && node scripts/test-station-audit-access.mjs && node scripts/verify-station-audit-workflow.mjs && node scripts/test-station-audit-tracker.mjs && node scripts/test-station-audit-mail.mjs && node scripts/test-station-audit-upload.mjs && node scripts/test-station-audit-directory.mjs && node scripts/test-station-audit-inspection.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

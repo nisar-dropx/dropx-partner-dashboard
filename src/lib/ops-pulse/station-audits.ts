@@ -1,3 +1,4 @@
+import { allAuditRows } from "@/lib/ops-pulse/station-audit-query";
 import "server-only";
 import { loadAuditAssignees, type AuditAssignee } from "./station-audit-people";
 
@@ -21,6 +22,7 @@ export type AuditType = {
   default_response_hours: number;
   expected_duration_minutes: number | null;
   requires_video_link: boolean;
+  shipment_reconciliation_enabled?: boolean;
   video_link_help: string | null;
   email_subject_template: string | null;
   email_body_template: string | null;
@@ -56,6 +58,10 @@ export type AuditChecklistItem = {
   }>;
   is_required: boolean;
   evidence_rule: string;
+  photo_required?: boolean;
+  photo_on_non_compliance?: boolean;
+  remarks_required?: boolean;
+  employee_selection?: "none" | "single" | "multiple";
   action_rule: string;
   default_severity_code: string | null;
   sort_order: number;
@@ -186,6 +192,8 @@ type AuditEvidence = {
   media_url: string;
   caption: string | null;
   evidence_kind_code: string | null;
+  checklist_item_id?: string | null;
+  content_type?: string | null;
   uploaded_at: string;
 };
 type AuditResponse = {
@@ -217,6 +225,15 @@ type AuditShipment = {
   required_action: string | null;
   due_at: string | null;
   is_resolved: boolean;
+  station_response?: {
+    status: string;
+    label: string;
+    remarks: string;
+    employee: import("./station-audit-reconciliation").AuditEmployee | null;
+    responded_by: string;
+    responded_name: string;
+    responded_at: string;
+  } | null;
 };
 
 export type AuditEvent = {
@@ -286,6 +303,7 @@ export function canRespondToStationAudits(
 ) {
   const permission = authorization.permissions.station_audits;
   return Boolean(
+    !authorization.readOnly &&
     (permission?.canAdd || permission?.canEdit) &&
     authorization.effectiveRoleIds.some((roleId) =>
       settings.responder_role_ids.includes(roleId),
@@ -612,79 +630,107 @@ export async function loadStationAuditWorkspace(
     shipments,
     events,
   ] = await Promise.all([
-    db()
-      .from("ops_station_audit_actions")
-      .select(
-        "id,audit_id,title,corrective_action,preventive_action,severity_code,status_code,owner_name,owner_email,due_at,completion_note",
-      )
-      .eq("company_id", companyId)
-      .in("audit_id", auditIds)
-      .order("due_at", { ascending: true }),
-    db()
-      .from("ops_station_audit_comments")
-      .select(
-        "id,audit_id,body,audience,requests_station_response,author_name,author_email,created_at",
-      )
-      .eq("company_id", companyId)
-      .in("audit_id", auditIds)
-      .order("created_at", { ascending: true }),
-    db()
-      .from("ops_station_audit_evidence")
-      .select(
-        "id,audit_id,file_name,media_url,caption,evidence_kind_code,uploaded_at",
-      )
-      .eq("company_id", companyId)
-      .in("audit_id", auditIds)
-      .order("uploaded_at", { ascending: false }),
-    db()
-      .from("ops_station_audit_check_responses")
-      .select(
-        "id,audit_id,checklist_item_id,response_value,is_compliant,remarks",
-      )
-      .eq("company_id", companyId)
-      .in("audit_id", auditIds),
-    db()
-      .from("ops_station_audit_cash_counts")
-      .select(
-        "id,audit_id,cash_side,denomination_option_id,denomination_value,note_count,computed_amount,notes",
-      )
-      .eq("company_id", companyId)
-      .in("audit_id", auditIds)
-      .order("denomination_value", { ascending: false }),
-    db()
-      .from("ops_station_audit_shipments")
-      .select(
-        "id,audit_id,tracking_id,system_status_code,physical_status_code,discrepancy_code,remarks,required_action,due_at,is_resolved",
-      )
-      .eq("company_id", companyId)
-      .in("audit_id", auditIds)
-      .order("created_at"),
-    db()
-      .from("ops_station_audit_events")
-      .select(
-        "id,audit_id,event_type,actor_user_id,actor_name,actor_email,created_at,before_data,after_data",
-      )
-      .eq("company_id", companyId)
-      .in("audit_id", auditIds)
-      .in(
-        "event_type",
-        stationOnly
-          ? ["submitted", "amended", "closed", "station_responded"]
-          : [
-              "scheduled",
-              "rescheduled",
-              "reassigned",
-              "email_sent",
-              "email_failed",
-              "started",
-              "submitted",
-              "amended",
-              "closed",
-              "station_responded",
-              "manager_comment",
-            ],
-      )
-      .order("created_at"),
+    allAuditRows((from, to) =>
+      db()
+        .from("ops_station_audit_actions")
+        .select(
+          "id,audit_id,title,corrective_action,preventive_action,severity_code,status_code,owner_name,owner_email,due_at,completion_note",
+        )
+        .eq("company_id", companyId)
+        .in("audit_id", auditIds)
+        .order("due_at", { ascending: true })
+        .order("id")
+        .range(from, to),
+    ),
+    allAuditRows((from, to) =>
+      db()
+        .from("ops_station_audit_comments")
+        .select(
+          "id,audit_id,body,audience,requests_station_response,author_name,author_email,created_at",
+        )
+        .eq("company_id", companyId)
+        .in("audit_id", auditIds)
+        .order("created_at", { ascending: true })
+        .order("id")
+        .range(from, to),
+    ),
+    allAuditRows((from, to) =>
+      db()
+        .from("ops_station_audit_evidence")
+        .select(
+          "id,audit_id,file_name,media_url,caption,evidence_kind_code,checklist_item_id,content_type,uploaded_at",
+        )
+        .eq("company_id", companyId)
+        .in("audit_id", auditIds)
+        .order("uploaded_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    allAuditRows((from, to) =>
+      db()
+        .from("ops_station_audit_check_responses")
+        .select(
+          "id,audit_id,checklist_item_id,response_value,is_compliant,remarks",
+        )
+        .eq("company_id", companyId)
+        .in("audit_id", auditIds)
+        .order("id")
+        .range(from, to),
+    ),
+    allAuditRows((from, to) =>
+      db()
+        .from("ops_station_audit_cash_counts")
+        .select(
+          "id,audit_id,cash_side,denomination_option_id,denomination_value,note_count,computed_amount,notes",
+        )
+        .eq("company_id", companyId)
+        .in("audit_id", auditIds)
+        .order("denomination_value", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    allAuditRows((from, to) =>
+      db()
+        .from("ops_station_audit_shipments")
+        .select(
+          "id,audit_id,tracking_id,system_status_code,physical_status_code,discrepancy_code,remarks,required_action,due_at,is_resolved,station_response",
+        )
+        .eq("company_id", companyId)
+        .in("audit_id", auditIds)
+        .order("created_at")
+        .order("id")
+        .range(from, to),
+    ),
+    allAuditRows((from, to) =>
+      db()
+        .from("ops_station_audit_events")
+        .select(
+          "id,audit_id,event_type,actor_user_id,actor_name,actor_email,created_at,before_data,after_data",
+        )
+        .eq("company_id", companyId)
+        .in("audit_id", auditIds)
+        .in(
+          "event_type",
+          stationOnly
+            ? ["submitted", "amended", "closed", "station_responded"]
+            : [
+                "scheduled",
+                "rescheduled",
+                "reassigned",
+                "email_sent",
+                "email_failed",
+                "started",
+                "submitted",
+                "amended",
+                "closed",
+                "station_responded",
+                "manager_comment",
+              ],
+        )
+        .order("created_at")
+        .order("id")
+        .range(from, to),
+    ),
   ]);
   const error =
     actions.error ||

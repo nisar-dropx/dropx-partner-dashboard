@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
 const uid='10000000-0000-4000-8000-000000000001';
 let auth={companyId:'c',userId:'u',locationScopeIds:['s'],permissions:{station_audits:{canEdit:true}},readOnly:false};
-let audit={id:'a',location_id:'s',assigned_to:'u',assignment_verified:true,started_at:'2026-10-01',status_code:'in_progress',stations:{location_model_id:null,is_ho:false}};
+let audit={audit_type_id:'physical',id:'a',location_id:'s',assigned_to:'u',assignment_verified:true,started_at:'2026-10-01',status_code:'in_progress',stations:{location_model_id:null,is_ho:false}};
 let exists=true,saved=null,signedPaths=[];
 const storage={createSignedUploadUrl:async path=>{signedPaths.push(path);return {data:{token:'fixture-token'},error:null}},list:async()=>({data:exists?[{name:`${uid}-proof.png`,metadata:{size:1024,mimetype:'image/png'}}]:[],error:null})};
 const db={storage:{from(){return storage}},from(table){const q={select(){return q},eq(){return q},is(){return q},maybeSingle(){return q},upsert(v){saved=v;return q},then(r){return Promise.resolve({data:table==='ops_station_audits'?audit:null,error:null}).then(r)}};return q}};
-const mocks={'node:crypto':{randomUUID:()=>uid},'@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>true},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/ops-pulse/station-audit-planning':{isMyAudit:(a,id)=>a.assignment_verified&&a.assigned_to===id},'@/lib/ops-pulse/station-audits':{loadStationAuditMaster:async()=>({programmeSettings:{}}),canManageStationAudits:()=>true,canRespondToStationAudits:()=>true,canUseStationAuditLocation:(a,id)=>a.locationScopeIds.includes(id),isStationAuditEligible:()=>true}};
+const mocks={'@/lib/ops-pulse/station-audit-photos':{auditPhotoTypes:new Set(['image/png','image/jpeg'])},'node:crypto':{randomUUID:()=>uid},'@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>true},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/ops-pulse/station-audit-planning':{isMyAudit:(a,id)=>a.assignment_verified&&a.assigned_to===id},'@/lib/ops-pulse/station-audits':{loadStationAuditMaster:async()=>({programmeSettings:{},checklistItems:[{id:'check',audit_type_id:'physical',is_active:true,label:'Clean floor'}]}),canManageStationAudits:()=>true,canRespondToStationAudits:()=>true,canUseStationAuditLocation:(a,id)=>a.locationScopeIds.includes(id),isStationAuditEligible:()=>true}};
 const mod={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync('src/app/api/ops-pulse/audits/upload/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{assert.ok(id in mocks,id);return mocks[id]},mod,mod.exports);
 const post=body=>mod.exports.POST(new Request('https://example.test/api/ops-pulse/audits/upload',{method:'POST',body:JSON.stringify({auditId:'a',...body})}));
 const prepare={phase:'prepare',fileName:'proof.png',contentType:'image/png',size:10*1024*1024};
@@ -18,5 +18,9 @@ assert.equal((await post(prepare)).status,200);assert.equal(signedPaths[0],`c/st
 assert.equal((await post({phase:'complete',path:`other/station-audits/a/proof/u/${uid}-proof.png`})).status,400);
 exists=false;assert.equal((await post({phase:'complete',path:signedPaths[0]})).status,400);assert.equal(saved,null);exists=true;
 assert.equal((await post({phase:'complete',path:signedPaths[0],kind:'erp_screenshot'})).status,200);assert.equal(saved.evidence_kind_code,'erp_screenshot');assert.equal(saved.audit_id,'a');
+assert.equal((await post({...prepare,checklistItemId:'wrong'})).status,400);
+assert.equal((await post({...prepare,checklistItemId:'check',contentType:'application/pdf'})).status,400);
+assert.equal((await post({...prepare,checklistItemId:'check'})).status,200);
+assert.equal((await post({phase:'complete',checklistItemId:'check',path:signedPaths.at(-1)})).status,200);assert.equal(saved.checklist_item_id,'check');assert.equal(saved.evidence_kind_code,'checklist_photo');
 audit={...audit,status_code:'scheduled',started_at:null};assert.equal((await post(prepare)).status,403);
 console.log('Audit proof tests passed: 10 MB direct uploads, actor/station/preview guards, file size/type limits, prefix isolation and completed-object verification.');

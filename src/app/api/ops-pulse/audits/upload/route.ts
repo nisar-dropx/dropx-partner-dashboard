@@ -1,3 +1,4 @@
+import { auditPhotoTypes } from "@/lib/ops-pulse/station-audit-photos";
 import { randomUUID } from "node:crypto";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
     const result = await supabaseAdmin
       .from("ops_station_audits")
       .select(
-        "id,location_id,assigned_to,assignment_verified,status_code,started_at,completed_at,station_response_status,stations(location_model_id,is_ho)",
+        "id,location_id,audit_type_id,assigned_to,assignment_verified,status_code,started_at,completed_at,station_response_status,stations(location_model_id,is_ho)",
       )
       .eq("company_id", auth.companyId)
       .eq("id", String(input.auditId))
@@ -86,7 +87,26 @@ export async function POST(request: Request) {
         },
         { status: 403 },
       );
-    const prefix = `${auth.companyId}/station-audits/${audit.id}/proof/${auth.userId}/`;
+    const checkId = String(input.checklistItemId || "");
+    const check = checkId
+      ? master.checklistItems.find(
+          (i) =>
+            i.id === checkId &&
+            i.audit_type_id === audit.audit_type_id &&
+            i.is_active,
+        )
+      : null;
+    if (checkId && (!performer || !check))
+      throw new Error("Checklist photo is not available for this audit.");
+    if (
+      checkId &&
+      input.phase === "prepare" &&
+      !auditPhotoTypes.has(String(input.contentType))
+    )
+      throw new Error(
+        "Attach an image for this check. PDF files do not count as photos.",
+      );
+    const prefix = `${auth.companyId}/station-audits/${audit.id}/proof/${auth.userId}/${checkId ? `${checkId}/` : ""}`;
     if (input.phase === "prepare") {
       if (!proofTypes.has(String(input.contentType)))
         throw new Error("Use a JPG, PNG, WEBP, HEIC or PDF proof.");
@@ -137,8 +157,11 @@ export async function POST(request: Request) {
       throw new Error("The proof upload is incomplete. Please try again.");
     if (!proofTypes.has(String(file.metadata.mimetype)))
       throw new Error("Use a JPG, PNG, WEBP, HEIC or PDF proof.");
-    const kind =
-      performer && ["erp_screenshot", "cash_variance"].includes(input.kind)
+    if (checkId && !auditPhotoTypes.has(String(file.metadata.mimetype)))
+      throw new Error("Attach an image for this check.");
+    const kind = checkId
+      ? "checklist_photo"
+      : performer && ["erp_screenshot", "cash_variance"].includes(input.kind)
         ? input.kind
         : "document";
     const saved = await supabaseAdmin.from("ops_station_audit_evidence").upsert(
@@ -147,10 +170,13 @@ export async function POST(request: Request) {
         company_id: auth.companyId,
         audit_id: audit.id,
         evidence_kind_code: kind,
+        checklist_item_id: checkId || null,
+        content_type: file.metadata.mimetype,
         file_name: name.slice(37),
         media_url: `storage://${bucket}/${path}`,
-        caption:
-          kind === "erp_screenshot"
+        caption: check
+          ? check.label
+          : kind === "erp_screenshot"
             ? "ERP expected cash balance"
             : responder
               ? "Station response"

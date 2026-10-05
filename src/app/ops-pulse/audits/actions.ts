@@ -1,4 +1,11 @@
 "use server";
+import {
+  parseAuditTids,
+  compareAuditTids,
+  selectedAuditEmployees,
+  type AuditEmployee,
+} from "@/lib/ops-pulse/station-audit-reconciliation";
+import { missingAuditPhotos } from "@/lib/ops-pulse/station-audit-photos";
 
 import {
   canDeleteStationAudit,
@@ -142,6 +149,43 @@ async function assertManager(action: "add" | "edit") {
       "Only roles selected in Audit Master can schedule and manage audits.",
     );
   return { authorization, companyId, master };
+}
+
+async function auditEmployees(
+  companyId: string,
+  stationId: string,
+): Promise<AuditEmployee[]> {
+  const result = await db().rpc("station_audit_employee_directory", {
+    p_company: companyId,
+    p_station: stationId,
+  });
+  if (result.error) throw new Error(result.error.message);
+  return result.data || [];
+}
+export async function loadAuditInspectionContext(auditId: string) {
+  const auth = await requirePagePermission("station_audits", "access");
+  const company = requireCompanyId(auth);
+  const audit = await readAudit(company, auditId, auth);
+  const master = await loadStationAuditMaster(company);
+  if (
+    !canManageStationAudits(auth, master.programmeSettings) &&
+    !audit.completed_at
+  )
+    throw new Error("Audit findings are not available yet.");
+  const [people, lists] = await Promise.all([
+    auditEmployees(company, audit.location_id),
+    db()
+      .from("ops_audit_shipment_lists")
+      .select("expected,scanned")
+      .eq("company_id", company)
+      .eq("audit_id", audit.id)
+      .maybeSingle(),
+  ]);
+  if (lists.error) throw new Error(lists.error.message);
+  return {
+    people,
+    lists: lists.data as { expected: string[]; scanned: string[] } | null,
+  };
 }
 
 export async function scheduleStationAudit(
@@ -312,11 +356,16 @@ export async function submitStationAudit(
     const typeItems = master.checklistItems.filter(
       (item) => item.audit_type_id === type.id,
     );
+    const people = typeItems.some(
+      (i) => i.employee_selection && i.employee_selection !== "none",
+    )
+      ? await auditEmployees(companyId, audit.location_id)
+      : [];
     const responses: Array<{
       company_id: string;
       audit_id: string;
       checklist_item_id: string;
-      response_value: { value: string };
+      response_value: { value: string; employees: AuditEmployee[] };
       is_compliant: boolean | null;
       remarks: string | null;
       response_source: string;
@@ -335,11 +384,34 @@ export async function submitStationAudit(
         throw new Error(`Complete required check: ${item.label}`);
       if (!value) continue;
       const behaviour = responseBehaviour(item, value);
+      if (
+        (item.remarks_required ||
+          behaviour.isCompliant === false ||
+          value === "na") &&
+        !remarks
+      )
+        throw new Error(`Add an observation for: ${item.label}`);
+      const employees =
+        item.employee_selection && item.employee_selection !== "none"
+          ? selectedAuditEmployees(
+              formData.getAll(`check_employee_${item.id}`).map(String),
+              people,
+            )
+          : [];
+      if (item.employee_selection === "single" && employees.length > 1)
+        throw new Error(`Select one employee for: ${item.label}`);
+      if (
+        item.employee_selection &&
+        item.employee_selection !== "none" &&
+        behaviour.isCompliant === true &&
+        !employees.length
+      )
+        throw new Error(`Select a key custodian / employee for: ${item.label}`);
       responses.push({
         company_id: companyId,
         audit_id: audit.id,
         checklist_item_id: item.id,
-        response_value: { value },
+        response_value: { value, employees },
         is_compliant: behaviour.isCompliant,
         remarks,
         response_source: "auditor",
@@ -369,10 +441,25 @@ export async function submitStationAudit(
       throw new Error("Attach up to 8 audit evidence files at one time.");
     const existingProofs = await db()
       .from("ops_station_audit_evidence")
-      .select("id,evidence_kind_code")
+      .select("id,evidence_kind_code,checklist_item_id,content_type")
       .eq("company_id", companyId)
       .eq("audit_id", audit.id);
     if (existingProofs.error) throw new Error(existingProofs.error.message);
+    const missingPhotos = missingAuditPhotos(
+      typeItems.map((item) => ({
+        ...item,
+        photo_required:
+          item.photo_required ||
+          (item.photo_on_non_compliance &&
+            responseBehaviour(item, clean(formData.get(`check_${item.id}`)))
+              .isCompliant === false),
+      })),
+      existingProofs.data || [],
+    );
+    if (missingPhotos.length)
+      throw new Error(
+        `Photo required: ${missingPhotos.map((i) => i.label).join("; ")}`,
+      );
     if (requiresEvidence && !files.length && !existingProofs.data?.length)
       throw new Error("Attach evidence for the selected checklist outcome.");
     const erp = formData.get("erp_evidence");
@@ -442,7 +529,48 @@ export async function submitStationAudit(
       throw new Error(
         "Confirm that anyone with the video link can view the recording.",
       );
-    const shipments = parseShipments(clean(formData.get("shipments_json")));
+    let shipments = parseShipments(clean(formData.get("shipments_json")));
+    let reconciliation: { expected: string[]; scanned: string[] } | null = null;
+    if (type.shipment_reconciliation_enabled) {
+      if (clean(formData.get("shipment_scan_confirmed")) !== "yes")
+        throw new Error(
+          "Confirm that the ERP list and physical scan are complete (including zero shipments).",
+        );
+      const expected = parseAuditTids(clean(formData.get("expected_tids"))).ids;
+      const scanned = parseAuditTids(clean(formData.get("scanned_tids"))).ids;
+      const comparison = compareAuditTids(expected, scanned);
+      let notes: Record<string, string>;
+      try {
+        notes = JSON.parse(clean(formData.get("tid_remarks")) || "{}");
+      } catch {
+        throw new Error("Invalid shipment remarks.");
+      }
+      reconciliation = { expected, scanned };
+      shipments = [
+        ...comparison.missing.map((trackingId) => ({
+          trackingId,
+          discrepancyCode: "missing",
+          physicalStatusCode: "not_found",
+          systemStatusCode: "in_ageing",
+          remarks: String(notes[trackingId] || ""),
+          requiredAction:
+            "Station to investigate and respond with shipment status and remarks.",
+          dueAt: "",
+        })),
+        ...comparison.excess.map((trackingId) => ({
+          trackingId,
+          discrepancyCode: "excess",
+          physicalStatusCode: "found",
+          systemStatusCode: "not_in_ageing",
+          remarks: String(notes[trackingId] || ""),
+          requiredAction:
+            "Station to identify the excess shipment and confirm its system connection.",
+          dueAt: "",
+        })),
+      ];
+      if (shipments.some((row) => !String(row.remarks).trim()))
+        throw new Error("Add an observation for each missing or excess TID.");
+    }
     const shipmentRows = shipments.map((shipment) => {
       const trackingId = clean(String(shipment.trackingId ?? ""));
       if (!trackingId)
@@ -553,17 +681,24 @@ export async function submitStationAudit(
       system_cash_amount: systemCash,
       physical_cash_amount: countedCash,
       cash_variance_amount: cashVariance,
-      system_shipment_count: number(formData.get("system_shipment_count")),
-      physical_shipment_count: number(formData.get("physical_shipment_count")),
+      shipment_reconciliation: reconciliation,
+      system_shipment_count: reconciliation
+        ? reconciliation.expected.length
+        : number(formData.get("system_shipment_count")),
+      physical_shipment_count: reconciliation
+        ? reconciliation.scanned.length
+        : number(formData.get("physical_shipment_count")),
       shipment_missing_count: shipmentRows.filter(
         (row) =>
+          row.discrepancy_code === "missing" ||
           discrepancyOptions.get(row.discrepancy_code)?.metadata.count_as ===
-          "missing",
+            "missing",
       ).length,
       shipment_excess_count: shipmentRows.filter(
         (row) =>
+          row.discrepancy_code === "excess" ||
           discrepancyOptions.get(row.discrepancy_code)?.metadata.count_as ===
-          "excess",
+            "excess",
       ).length,
       shipment_unresolved_count: unresolvedShipments.length,
       video_call_url: videoUrl || null,
@@ -686,31 +821,19 @@ export async function respondToStationAudit(
       );
     const body = clean(formData.get("response"));
     if (!body) throw new Error("Add a response or progress update.");
-    const comment = await db().from("ops_station_audit_comments").insert({
-      company_id: companyId,
-      audit_id: audit.id,
-      body,
-      audience: "managers",
-      requests_station_response: false,
-      created_by: authorization.userId,
-      author_name: authorization.fullName,
-      author_email: authorization.email,
-    });
-    if (comment.error) throw new Error(comment.error.message);
-    const actionId = clean(formData.get("action_id"));
-    if (actionId) {
-      const action = await db()
-        .from("ops_station_audit_actions")
-        .update({
-          status_code: "completed",
-          completed_at: new Date().toISOString(),
-          completion_note: body,
-        })
-        .eq("company_id", companyId)
-        .eq("audit_id", audit.id)
-        .eq("id", actionId);
-      if (action.error) throw new Error(action.error.message);
+    if (!audit.completed_at)
+      throw new Error("Wait for the auditor to submit the report.");
+    let shipmentResponses: unknown;
+    try {
+      shipmentResponses = JSON.parse(
+        clean(formData.get("shipment_responses")) || "[]",
+      );
+    } catch {
+      throw new Error("Invalid shipment responses.");
     }
+    if (!Array.isArray(shipmentResponses) || shipmentResponses.length > 20000)
+      throw new Error("Invalid shipment responses.");
+    const actionId = clean(formData.get("action_id"));
     const files = formData
       .getAll("response_evidence")
       .filter(
@@ -741,25 +864,19 @@ export async function respondToStationAudit(
         });
       if (saved.error) throw new Error(saved.error.message);
     }
-    const update = await db()
-      .from("ops_station_audits")
-      .update({
-        status_code: "under_review",
-        station_response_status: "submitted",
-        station_summary: body,
-      })
-      .eq("company_id", companyId)
-      .eq("id", audit.id)
-      .is("deleted_at", null);
-    if (update.error) throw new Error(update.error.message);
-    await writeStationAuditEvent({
-      companyId,
-      auditId: audit.id,
-      eventType: "station_responded",
-      authorization,
-      before: { status: audit.status_code },
-      after: { status: "under_review" },
+    const update = await db().rpc("respond_station_audit_report", {
+      p_company: companyId,
+      p_audit: audit.id,
+      p_expected: clean(formData.get("updated_at")),
+      p_body: body,
+      p_shipments: shipmentResponses,
+      p_action: actionId || null,
+      p_actor: authorization.userId,
+      p_name: authorization.fullName,
+      p_email: authorization.email,
+      p_role: authorization.roleCode,
     });
+    if (update.error) throw new Error(update.error.message);
     refreshAudits();
     return { ok: true, message: "Response submitted to the audit manager." };
   } catch (error) {

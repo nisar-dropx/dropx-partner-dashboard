@@ -1290,3 +1290,135 @@
   display: grid;
   gap: 10px;
 }
+
+.deleteButton {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.deleteButton:hover {
+  background: #ffe4e6;
+}
+.deletePanel {
+  margin: 12px 18px;
+  padding: 16px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff7f7;
+}
+.checkPhotos {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f7f9fc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.checkPhotos input {
+  max-width: 100%;
+  width: 100%;
+}
+.photoLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.photoLinks a {
+  font-size: 12px;
+  color: #1d4ed8;
+  overflow-wrap: anywhere;
+}
+.photoBadge {
+  display: inline-block;
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.reconciliationGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.reconciliationGrid h3 {
+  font-size: 14px;
+  margin: 4px 0 10px;
+}
+.reconciliationGrid textarea {
+  width: 100%;
+  resize: vertical;
+}
+.scanInput {
+  display: flex;
+  gap: 6px;
+}
+.scanInput input {
+  min-width: 0;
+  flex: 1;
+}
+.tidDifferences {
+  max-height: 360px;
+  overflow: auto;
+}
+.tidRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e4eaf2;
+}
+.tidRow strong {
+  overflow-wrap: anywhere;
+}
+.confirmLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 13px;
+}
+.confirmLine input {
+  width: auto;
+}
+.employeeChips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.employeeChips span {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #eef3fb;
+  font-size: 12px;
+}
+.employeeChips button {
+  border: 0;
+  background: transparent;
+  margin-left: 6px;
+}
+.shipmentResponse {
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+}
+.shipmentResponse legend {
+  font-size: 13px;
+  font-weight: 700;
+}
+.shipmentResponse textarea {
+  min-height: 64px;
+}
+@media (max-width: 1100px) {
+  .reconciliationGrid {
+    grid-template-columns: 1fr;
+  }
+}
