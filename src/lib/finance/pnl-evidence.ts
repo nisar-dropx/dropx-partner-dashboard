@@ -197,10 +197,12 @@ export function buildPnlEvidence(
     .map((v) => {
       const start = [from, v.from_date].sort().at(-1)!,
         end = [to, v.through_date, cutoffs.get(v.station_code)!].sort()[0];
+      const rentLedger = snapshot.breakup.filter(l=>l.source==='Fleet Vehicle Master' && l.station_code===v.station_code && l.sub_head===`Vehicle rent · ${v.vehicle_no}` && l.work_date>=start && l.work_date<=end);
       const complete = start === v.from_date && end === v.through_date;
       const contiguous = v.days === daysBetween(v.from_date, v.through_date);
       return {
         ...v,
+        daily_rent: v.daily_rent == null ? null : Number(v.daily_rent),
         monthly_rent: v.monthly_rent == null ? null : Number(v.monthly_rent),
         considered_from: start,
         considered_to: end,
@@ -210,10 +212,15 @@ export function buildPnlEvidence(
           : contiguous
             ? daysBetween(start, end)
             : null,
-        considered_amount: complete
+        rent_blocked_days: new Set(rentLedger.filter(l=>Number(l.amount)===0).map(l=>l.work_date)).size,
+        considered_amount: rentLedger.length
+          ? rentLedger.reduce((sum,l)=>sum+Number(l.amount),0)
+          : complete
           ? v.amount == null
             ? null
             : Number(v.amount)
+          : contiguous && v.daily_rent != null
+            ? Number(v.daily_rent)*daysBetween(start,end)
           : contiguous && v.monthly_rent != null
             ? dates(start, end).reduce(
                 (sum, date) =>

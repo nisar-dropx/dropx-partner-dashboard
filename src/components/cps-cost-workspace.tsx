@@ -573,7 +573,7 @@ export function CpsCostWorkspace({
             </div>
             <p className="cps-footnote">
               Spot DA requests appear in the cost breakdown above. Vehicle
-              components are included under Van.
+              per-package components are included under Van. Fixed rental comes from Fleet once; its source rules are configurable in CPS setup.
             </p>
           </details>
         )}
@@ -592,7 +592,7 @@ export function CpsCostWorkspace({
                   <tr>
                     <th>Vehicle</th>
                     <th>Allocated station</th>
-                    <th>Monthly rent</th>
+                    <th>Fleet rental rate</th>
                     <th>Deployed days</th>
                     <th>Period cost</th>
                   </tr>
@@ -606,10 +606,10 @@ export function CpsCostWorkspace({
                       </td>
                       <td>{v.station_code}</td>
                       <td>
-                        {v.monthly_rent == null ? (
+                        {v.daily_rent != null ? <>{money(v.daily_rent)} / day</> : v.monthly_rent == null ? (
                           <span className="cps-missing">Setup required</span>
                         ) : (
-                          money(v.monthly_rent)
+                          `${money(v.monthly_rent)} / month`
                         )}
                       </td>
                       <td>
