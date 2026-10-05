@@ -11,7 +11,7 @@ const [form, actions, providerMappingActions, providerFirstPage, directAllocatio
   read("src/app/provider-id-mapping/page.tsx"),
   read("src/app/provider-mapping/direct-pay/actions.ts"),
   read("src/lib/direct-workforce-pay.ts"),
-  read("src/app/payments/workforce-payouts/page.tsx"),
+  read("src/lib/workforce-payout-loader.ts"),
   read("apps/connect/src/lib/direct-workforce-payment.ts"),
   read("apps/connect/src/lib/direct-workforce-payment-data.ts"),
   read("src/app/api/report-imports/route.ts"),

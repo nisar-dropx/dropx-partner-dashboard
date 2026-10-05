@@ -5,7 +5,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 
 const oneRoute = read("apps/connect/app/api/connect/workforce-payments/route.ts");
 const oneBreakup = read("apps/connect/src/components/connect-daily-payment-breakdown.tsx");
-const workforcePage = read("src/app/payments/workforce-payouts/page.tsx");
+const workforcePage = read("src/app/payments/workforce-payouts/page.tsx") + read("src/lib/workforce-payout-loader.ts");
 const workforceTable = read("src/components/workforce-payout-table.tsx");
 const workforceExport = read("src/lib/workforce-payout-export.ts");
 const workforcePopulation = read("src/lib/workforce-payout-population.ts");
