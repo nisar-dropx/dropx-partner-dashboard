@@ -222,6 +222,8 @@ export async function loadNlLoss(
     failure,
     canEdit: !auth.readOnly && hasPermission(auth, "ops_losses", "edit"),
     canMaster: hasPermission(auth, "ops_loss_master", "access"),
+    canRefresh:
+      !auth.readOnly && hasPermission(auth, "ops_loss_master", "edit"),
     monthLastSeen:
       all
         .filter((r) => r.month === month)
