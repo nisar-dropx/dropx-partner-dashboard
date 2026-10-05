@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAdHocPaymentHead, isFleetManagerPaymentHead } from "./fleet-control-payment-scope.ts";
+import { isAdHocPaymentHead, isFleetManagerPaymentHead, isFleetManagerPaymentRequest } from "./fleet-control-payment-scope.ts";
 
 test("Fleet Manager payment scope includes owned vehicle expenses", () => {
   for (const name of [
@@ -31,4 +31,10 @@ test("unrelated operational expenses do not enter the Fleet queue", () => {
   for (const name of ["Pantry", "Station Visits", "Adhoc DA", "Vendor Payment"]) {
     assert.equal(isFleetManagerPaymentHead({ name }), false, name);
   }
+});
+
+test("Company-breakdown requests enter Vehicle Payments; other ad hoc reasons stay in Operations",()=>{
+ const head={code:'VAN_ADHOC',name:'Adhoc Van'};
+ assert.equal(isFleetManagerPaymentRequest(head,'company_breakdown'),true);
+ for(const reason of ['high_volume','vendor_absent','vendor_breakdown','odcd_absent','odcd_breakdown',null]) assert.equal(isFleetManagerPaymentRequest(head,reason),false);
 });

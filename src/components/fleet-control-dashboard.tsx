@@ -1,4 +1,5 @@
 "use client";
+import {FleetBreakdownRequest} from "@/components/fleet-breakdown-request";
 import { OwnerPreviewSwitcher } from "@/components/owner-preview-switcher";
 import { FleetSystemLogs } from "@/components/fleet-system-logs";
 import { FleetStatusMaster } from "@/components/fleet-status-master";
@@ -746,7 +747,7 @@ export function FleetControlDashboard({
           </section> : null}
 
           {section === "approvals" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Fleet-owned payments</span><h1>Approval desk</h1><p>Approve maintenance, service, repair, tyre and compliance expenses routed to the Fleet Manager.</p></div><FleetExportButtons report={{ title: "Vehicle payment report", subtitle: `As at ${data.today} · active filters applied`, fileName: `fleet-payments-${data.today}`, headers: ["Request", "Placement", "Head", "Amount", "Requested by", "Created", "Status"], rows: filteredPayments.map((payment) => [payment.requestNo, payment.stationCode, payment.head, payment.amount, payment.requestedBy, payment.requestedAt, payment.statusLabel]) }} /></div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Fleet-owned payments</span><h1>Vehicle payments</h1><p>Request replacement vans for company breakdowns and review vehicle expenses.</p></div>{data.capabilities.canRequestAdhoc ? <FleetBreakdownRequest today={data.today}/> : null}<FleetExportButtons report={{ title: "Vehicle payment report", subtitle: `As at ${data.today} · active filters applied`, fileName: `fleet-payments-${data.today}`, headers: ["Request", "Placement", "Head", "Amount", "Requested by", "Created", "Status"], rows: filteredPayments.map((payment) => [payment.requestNo, payment.stationCode, payment.head, payment.amount, payment.requestedBy, payment.requestedAt, payment.statusLabel]) }} /></div>
             <div className="fc-scope-filters fc-payment-filters"><FleetScopeFilters {...scopeProps} onStatuses={setPaymentStatuses} statusOptions={uniqueOptions(payments.map((item) => item.statusLabel))} statuses={paymentStatuses} /><FleetMultiSelect allLabel="All payment heads" label="Payment head" onChange={setPaymentHeads} options={uniqueOptions(payments.map((item) => item.head))} values={paymentHeads} /></div>
             <div className="fc-approval-layout">
               <div className="fc-panel fc-queue">

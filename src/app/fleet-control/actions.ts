@@ -9,7 +9,7 @@ import {
 } from "@/app/payments/approvals/actions";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { isFleetManagerPaymentHead } from "@/lib/fleet-control-payment-scope";
+import { isFleetManagerPaymentRequest } from "@/lib/fleet-control-payment-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
@@ -36,7 +36,7 @@ async function requireFleetManagerPayment(formData: FormData) {
 
   const request = await supabaseAdmin
     .from("payment_requests")
-    .select("payment_head_id")
+    .select("payment_head_id,adhoc_reason_key")
     .eq("company_id", companyId)
     .eq("id", requestId)
     .maybeSingle();
@@ -50,8 +50,8 @@ async function requireFleetManagerPayment(formData: FormData) {
     .eq("id", request.data.payment_head_id)
     .maybeSingle();
   if (head.error) throw new Error(head.error.message);
-  if (!head.data || !isFleetManagerPaymentHead(head.data)) {
-    throw new Error("This payment is outside Fleet Manager approval. Ad-hoc van activity is visibility-only in Fleet.");
+  if (!head.data || !isFleetManagerPaymentRequest(head.data,request.data.adhoc_reason_key)) {
+    throw new Error("This payment is outside Fleet Manager approval. Only company-breakdown ad hoc replacements are handled in Fleet.");
   }
 }
 

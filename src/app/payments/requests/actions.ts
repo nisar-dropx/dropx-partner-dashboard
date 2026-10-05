@@ -1,4 +1,6 @@
 "use server";
+import { prepareAdhocRequest } from "@/lib/adhoc-vehicle-server";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 import { randomInt } from "crypto";
 import { revalidatePath } from "next/cache";
@@ -226,10 +228,11 @@ function configuredRoleIds(roleIds: string[] | null | undefined, legacyRoleId: s
   return legacyRoleId ? [legacyRoleId] : [];
 }
 
-export async function createExpenseRequest(formData: FormData) {
+async function createExpenseRequestCore(formData: FormData, fleetBreakdown = false) {
   const authorization = await requirePagePermission("expense_requests", "add");
   const companyId = requireCompanyId(authorization);
-  try {
+  if (fleetBreakdown && !authorization.isMasterOwner && !await hasActiveFleetMembership(companyId, authorization.userId)) throw new Error("Fleet access is required.");
+  if (authorization.readOnly) throw new Error("Exit user preview before submitting a request.");
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     const admin = supabaseAdmin;
 
@@ -237,6 +240,7 @@ export async function createExpenseRequest(formData: FormData) {
     const paymentHeadId = required(formData.get("payment_head_id"), "Payment Head");
     const amountText = required(formData.get("amount"), "Estimated Amount");
     const remarks = clean(formData.get("remarks"));
+    if (!Number.isFinite(Number(amountText)) || Number(amountText) <= 0 || Number(amountText) > 99999999) throw new Error("Enter a valid estimated amount greater than zero.");
 
     const [locationResult, headResult] = await Promise.all([
       admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
@@ -262,10 +266,19 @@ export async function createExpenseRequest(formData: FormData) {
 
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
-    const approvalSteps = await loadApprovalSteps(companyId, paymentHeadId);
+    const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
+    if (fleetBreakdown && (headResult.data.code !== 'VAN_ADHOC' || adhocRequest.fields.adhoc_reason_key !== 'company_breakdown')) throw new Error('Select Company Vehicle Breakdown for this Fleet request.');
+    const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
 
     const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
     validateQuestionDates(formData, expenseQuestions);
+    for (const question of expenseQuestions) {
+      if (question.answer_type === 'file') continue;
+      const answer = clean(formData.get(`answers[${question.id}]`));
+      if (question.is_required && !answer) throw new Error(`${question.question_text} is required.`);
+      if (answer && question.answer_type === 'number' && (!Number.isFinite(Number(answer)) || Number(answer) < 0)) throw new Error(`${question.question_text}: enter a valid number.`);
+      if (answer && question.answer_type === 'dropdown' && !/reason.*deployment/i.test(question.question_text) && !(question.dropdown_options || '').split(',').map((v:string)=>v.trim()).includes(answer)) throw new Error(`${question.question_text}: select a valid option.`);
+    }
     const fileQuestions = expenseQuestions.filter((question) => question.answer_type === "file");
     for (const question of fileQuestions) {
       const file = formData.get(`files[${question.id}]`);
@@ -320,6 +333,7 @@ export async function createExpenseRequest(formData: FormData) {
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
       .insert(withCompany({
+        ...adhocRequest.fields,
         request_no: requestNo,
         location_id: locationResult.data.id,
         location_code: locationResult.data.station_code,
@@ -340,8 +354,8 @@ export async function createExpenseRequest(formData: FormData) {
         contact_no: null,
         email: null,
         remarks,
-        status: "pending",
-        approval_status: approvalStatus,
+        status: adhocRequest.fields.adhoc_reason_key ? "draft" : "pending",
+        approval_status: adhocRequest.fields.adhoc_reason_key ? "DRAFT" : approvalStatus,
         current_step_order: currentStepOrder,
         total_steps: totalSteps,
         current_approver_user_id: approver.userId,
@@ -366,7 +380,7 @@ export async function createExpenseRequest(formData: FormData) {
       comments: remarks || "Expense request created."
     }, companyId), companyId);
 
-    const questionIds = formData.getAll("question_ids").map((value) => String(value));
+    const questionIds = expenseQuestions.map(question => question.id);
     if (questionIds.length) {
       const questionById = new Map(expenseQuestions.map((question) => [question.id, question]));
       const answers = await Promise.all(questionIds.map(async (questionId) => {
@@ -410,6 +424,11 @@ export async function createExpenseRequest(formData: FormData) {
       if (answersError) throw new Error(answersError.message);
     }
 
+    if (adhocRequest.fields.adhoc_reason_key) {
+      const ready = await admin.from('payment_requests').update({status:'pending',approval_status:approvalStatus}).eq('company_id',companyId).eq('id',request.id).eq('status','draft').select('id').single();
+      if (ready.error) throw new Error(ready.error.message);
+    }
+    revalidatePath('/fleet-control');
     revalidatePath("/payments/expense-request");
     revalidatePath("/payments/requests");
     revalidatePath("/payments/approvals");
@@ -421,18 +440,19 @@ export async function createExpenseRequest(formData: FormData) {
       remarks,
       requestId: request.id
     });
-    if (!emailResult.sent) {
-      expenseRequestsRedirect({
-        expenseNotice: paymentEmailNotice("Expense request submitted for approval.", emailResult.reason)
-      });
-    }
-  } catch (error) {
-    expenseRequestsRedirect({
-      expenseError: paymentRequestErrorMessage(error)
-    });
-  }
+    return { requestId: request.id, notice: paymentEmailNotice("Ad hoc van request submitted for approval.", emailResult.sent ? undefined : emailResult.reason) };
+}
 
-  expenseRequestsRedirect({ expenseNotice: "Expense request submitted for approval." });
+export async function createFleetBreakdownRequest(formData: FormData): Promise<{requestId?:string;notice?:string;error?:string}> {
+  try { return await createExpenseRequestCore(formData, true); }
+  catch (error) { return {error:paymentRequestErrorMessage(error)}; }
+}
+
+export async function createExpenseRequest(formData: FormData) {
+  let outcome: {expenseNotice?:string;expenseError?:string};
+  try { const result = await createExpenseRequestCore(formData); outcome = {expenseNotice:result.notice}; }
+  catch(error) { outcome = {expenseError:paymentRequestErrorMessage(error)}; }
+  expenseRequestsRedirect(outcome as Record<string,string>);
 }
 
 export async function createPaymentRequest(formData: FormData) {
