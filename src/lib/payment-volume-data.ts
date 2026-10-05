@@ -1,7 +1,7 @@
 import { unstable_cache } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { loadShipmentSizeRule } from '@/lib/ops-pulse/capacity';
-import { shiftDay, shipmentSize, groupedInbound, type RoutedInbound, type SizeFact, volumeBaseline, type PaymentVolume, type VolumeDay } from '@/lib/payment-volume';
+import { shiftDay, shipmentSize, groupedInbound, groupedDeliveries, type RoutedInbound, type SizeFact, volumeBaseline, type PaymentVolume, type VolumeDay } from '@/lib/payment-volume';
 
 // Call only after checking the company's payment permission and station scope.
 export const loadPaymentVolume = unstable_cache(async (company: string, station: string, date: string, today: string): Promise<PaymentVolume> => {
@@ -37,8 +37,7 @@ export const loadPaymentVolume = unstable_cache(async (company: string, station:
   }
   const days:VolumeDay[]=Array.from({length:29},(_,i)=>{
    const workDate=shiftDay(from,i),verified=groupedInbound(evidence.get(workDate)??[],groupStations,requireDestination,workDate>=today);
-   const delivered=rows.filter(r=>r.work_date===workDate&&/Delivered detail|Daily shipment count/i.test(r.volume_source));
-   return {date:workDate,inbound:verified.inbound,inboundUnverified:verified.unverified,delivered:delivered.length?delivered.reduce((sum,r)=>sum+Number(r.delivered),0):null,deliverySource:delivered.length?'Imported deliveries':'No source'};
+   return {date:workDate,inbound:verified.inbound,inboundUnverified:verified.unverified,...groupedDeliveries(rows,groupStations,workDate)};
   });
   const requestedGroup=groupedInbound(evidence.get(date)??[],groupStations,requireDestination,date>=today);
   let snapshotAt:string|null=null,bulky=0,classified=0,packages=0,routingVerified=0;
@@ -67,7 +66,7 @@ export const loadPaymentVolume = unstable_cache(async (company: string, station:
     vehicles, fleetError: fleetResult.error || statusResult.error || availability.error || sources.error || designations.error ? 'Fleet availability could not be verified.' : null,
     sizeRule: ruleResult.error ? null : ruleResult.rule,
     refreshedAt: new Date().toISOString() };
-}, ['payment-volume-dock-arrivals-v6'], { revalidate: 60 });
+}, ['payment-volume-dock-arrivals-v7'], { revalidate: 60 });
 
 export function paymentVolumeToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());

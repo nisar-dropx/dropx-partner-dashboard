@@ -1,9 +1,9 @@
 import {adhocVehicleLabel} from '@/lib/adhoc-vehicle-policy';
 import { PaymentCostSummary } from "@/components/payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
-import { PaymentVolumeContext } from "@/components/payment-volume-context";
+import { Suspense } from "react";
+import { PaymentApprovalVolume } from "@/components/payment-approval-volume";
 import { adhocApprovalContext } from "@/lib/payment-volume";
-import { loadPaymentVolume, paymentVolumeToday } from "@/lib/payment-volume-data";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentApprovalFilters, type PaymentApprovalFilterOption } from "@/components/payment-approval-filters";
@@ -377,10 +377,6 @@ export default async function PaymentApprovalsPage({
   const replacement = replacementResult?.data?.adhoc_vehicle_snapshot as {number:string;model:string;partner:string|null;source:string;status:string;reason:string;date:string}|null;
   const shipmentCount = paymentShipmentCount(answers);
   const volumeDate = adhocApprovalContext(selectedRequest?.payment_heads?.code, answers);
-  const volumeEvidence = volumeDate && selectedRequest
-    ? await loadPaymentVolume(companyId, selectedRequest.location_code, volumeDate, paymentVolumeToday())
-        .then(data => ({ data, error: "" })).catch(() => ({ data: null, error: "Volume evidence is unavailable. Reload to retry." }))
-    : null;
 
   const logs = selectedDetailData?.[2].logs ?? [];
   const currentApprovalCycle = Number(selectedRequest?.approval_cycle) || 1;
@@ -556,7 +552,7 @@ export default async function PaymentApprovalsPage({
               </div>
               {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason}</strong><p style={{margin:"4px 0 0"}}>{adhocVehicleLabel(replacement)} · Replacement date: {replacement.date}</p></div> : null}
               <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />
-              {volumeDate && volumeEvidence ? <PaymentVolumeContext date={volumeDate} initialData={volumeEvidence.data} initialError={volumeEvidence.error} /> : null}
+              {volumeDate ? <Suspense key={`${selectedRequest.id}:${volumeDate}`} fallback={<p className="subtle" role="status">Loading volume evidence… You can continue reviewing this request.</p>}><PaymentApprovalVolume company={companyId} station={selectedRequest.location_code} date={volumeDate} /></Suspense> : null}
               <details className="payment-review-additional-details">
                 <summary><span>Payment and beneficiary details</span><small>Open only when needed</small></summary>
                 <div className="form-grid three">

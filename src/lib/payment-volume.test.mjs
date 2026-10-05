@@ -71,3 +71,17 @@ test('fresh manifest totals exclude old delivery-promise rows and today requires
  assert.equal(groupedInbound([old,dock],['KTUO'],false).inbound,93);
  assert.equal(groupedInbound([old],['KTUO'],false).inbound,385);
 });
+
+
+test('parent delivery total includes only its mapped XPTs, with per-station evidence', async () => {
+ const {groupedDeliveries}=await import('./payment-volume.ts');
+ const row=(station,delivered,volume_source='Delivered detail')=>({station_code:station,delivered,volume_source,work_date:'2026-10-05'});
+ const result=groupedDeliveries([row('KGQA',702),row('KGQC',197),row('OTHER',999)],['KGQA','KGQC'],'2026-10-05');
+ assert.equal(result.delivered,899);
+ assert.deepEqual(result.deliveryBreakup,[{station:'KGQA',delivered:702},{station:'KGQC',delivered:197}]);
+ const partial=groupedDeliveries([row('KGQA',0),row('KGQC',0,'No source')],['KGQA','KGQC'],'2026-10-05');
+ assert.equal(partial.delivered,0);
+ assert.equal(partial.deliveryBreakup[1].delivered,null);
+ assert.equal(groupedDeliveries([],['KGQA','KGQC'],'2026-10-05').delivered,null);
+ assert.equal(groupedDeliveries([row('KGQA',702)],['KGQA','KGQA'],'2026-10-05').delivered,702);
+});

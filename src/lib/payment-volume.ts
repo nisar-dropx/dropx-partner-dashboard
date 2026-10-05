@@ -1,4 +1,4 @@
-export type VolumeDay = { date: string; inbound: number | null; delivered: number | null; deliverySource: string; inboundUnverified?: number };
+export type VolumeDay = { date: string; inbound: number | null; delivered: number | null; deliverySource: string; deliveryBreakup?: Array<{ station: string; delivered: number | null }>; inboundUnverified?: number };
 export type PaymentVolume = {
   station: string; date: string; today: string; todayInbound: number | null;
   requireDestination?: boolean; groupStations?: string[]; breakup?: Array<{station:string;inbound:number}>; unallocated?: number;
@@ -76,4 +76,16 @@ export function groupedInbound(rows:RoutedInbound[],stations:string[],requireDes
  accepted.push(row);
  }
  return {inbound:unique.length?[...counts.values()].reduce((a,b)=>a+b,0)+unallocated:null,unverified:0,breakup:[...counts].map(([station,inbound])=>({station,inbound})),unallocated,accepted};
+}
+
+export type DeliveryVolumeRow = { station_code: string; work_date: string; delivered: number | string; volume_source: string };
+export function groupedDeliveries(rows: DeliveryVolumeRow[], stations: string[], date: string) {
+  const deliveryBreakup = [...new Set(stations)].map(station => {
+    const source = rows.find(row => row.station_code === station && row.work_date === date && /Delivered detail|Daily shipment count/i.test(row.volume_source));
+    const count = source ? Number(source.delivered) : NaN;
+    return { station, delivered: Number.isFinite(count) && count >= 0 ? count : null };
+  });
+  const available = deliveryBreakup.filter(part => part.delivered != null);
+  return { delivered: available.length ? available.reduce((sum, part) => sum + (part.delivered ?? 0), 0) : null, deliveryBreakup,
+    deliverySource: available.length ? 'Imported deliveries' : 'No source' };
 }
