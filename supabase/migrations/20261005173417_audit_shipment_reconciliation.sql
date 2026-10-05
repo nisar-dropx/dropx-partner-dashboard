@@ -62,7 +62,7 @@ where e.company_id=p_company and e.deleted_at is null and nullif(e.employee_code
   and (a.location_id=p_station or exists(select 1 from station_responsibility_assignments r where r.company_id=p_company and r.station_id=p_station and r.effective_from<=now() and coalesce(r.effective_to,now())>=now()
    and (r.assignment_id=a.id or exists(select 1 from hr_user_person_links l where l.company_id=p_company and l.person_id=g.person_id and l.user_id=r.assignee_user_id and l.status='active'))))
  ) or exists(select 1 from profiles p join station_responsibility_assignments r on r.assignee_user_id=p.id and r.company_id=p_company
-   where p.company_id=p_company and p.employee_id=e.id and r.station_id=p_station and r.effective_from<=now() and coalesce(r.effective_to,now())>=now())
+   where p.company_id=p_company and (p.employee_id=e.id::text or p.employee_id=e.employee_code) and r.station_id=p_station and r.effective_from<=now() and coalesce(r.effective_to,now())>=now())
 )
 union all
 select 'workforce:'||w.id,w.dropx_id,w.full_name,coalesce(w.designation,'Workforce'),w.is_active

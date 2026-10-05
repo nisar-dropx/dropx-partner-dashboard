@@ -18,7 +18,7 @@ const db=new PGlite();const id=n=>`10000000-0000-4000-8000-${String(n).padStart(
 const [company,station,type,actor,audit,emp,otherStation,workforce,manager]=[1,2,3,4,5,6,7,8,9].map(id);
 await db.exec(`create role anon;create role authenticated;create role service_role;
  create table stations(id uuid primary key);insert into stations values('${station}'),('${otherStation}');
- create table profiles(id uuid,company_id uuid,employee_id uuid,full_name text,email text,is_active boolean,is_master_owner boolean);
+ create table profiles(id uuid,company_id uuid,employee_id text,full_name text,email text,is_active boolean,is_master_owner boolean);
  create table user_roles(id uuid,company_id uuid,code text,is_active boolean,location_access_mode text);
  create table company_product_memberships(company_id uuid,user_id uuid,role_id uuid,is_active boolean,product_code text,has_all_location_access boolean,location_scope_ids uuid[]);
  create table employees(id uuid,company_id uuid,employee_code text,full_name text,location_id uuid,designation_id uuid,is_active boolean,deleted_at timestamptz);
@@ -30,7 +30,7 @@ await db.exec(`create role anon;create role authenticated;create role service_ro
  create table hr_user_person_links(company_id uuid,person_id uuid,user_id uuid,status text);
  insert into employees values('${emp}','${company}','E001','Station TL','${station}',null,true,null),('${manager}','${company}','E002','Cluster manager','${otherStation}',null,true,null);
  insert into workforce values('${workforce}','${company}','DA001','Associate','${station}','DA',true,null);
- insert into profiles values('${actor}','${company}','${manager}','Manager','manager@example.test',true,true);
+ insert into profiles values('${actor}','${company}','E002','Manager','manager@example.test',true,true);
  insert into station_responsibility_assignments values('${company}','${station}',null,'${actor}',now()-interval '1 day',null);`);
 const initial=fs.readFileSync('supabase/migrations/20261001010000_ops_station_audits.sql','utf8');await db.exec(initial.slice(0,initial.indexOf('create index')));
 await db.exec(`insert into ops_audit_types(id,company_id,code,name,cadence_unit,required_count,scheduling_config) values('${type}','${company}','physical_station','Physical','monthly',2,'{"period_slots":[{"code":"first_half","start_day":1,"end_day":15},{"code":"second_half","start_day":16,"end_day":31}]}');
