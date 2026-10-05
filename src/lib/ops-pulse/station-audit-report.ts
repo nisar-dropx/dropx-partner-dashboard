@@ -44,7 +44,7 @@ export type AuditReportData = {
 const ascii = (s: unknown) =>
   String(s ?? "")
     .replace(/₹/g, "Rs. ")
-    .replace(/[–—→·]/g, " - ")
+    .replace(/[–—→·−]/g, " - ")
     .replace(/[\u0000-\u0008\u000B-\u001F]/g, "");
 export async function renderAuditPdf(data: AuditReportData) {
   const doc = await PDFDocument.create();
