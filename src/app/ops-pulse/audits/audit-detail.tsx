@@ -1,4 +1,5 @@
 "use client";
+import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
   auditMonthRange,
@@ -56,8 +57,12 @@ function useAction() {
       try {
         const result = await action();
         setNotice(result.message);
-      } catch {
-        setNotice("Unable to save. Please try again.");
+      } catch (error) {
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : "Unable to save. Please try again.",
+        );
       } finally {
         setPending(false);
       }
@@ -301,7 +306,10 @@ export function AuditDetail({
               event.preventDefault();
               const data = new FormData(event.currentTarget);
               data.set("shipments_json", JSON.stringify(shipments));
-              submit.run(() => submitStationAudit(data));
+              submit.run(async () => {
+                await uploadAuditFiles(data);
+                return submitStationAudit(data);
+              });
             }}
           >
             <input type="hidden" name="audit_id" value={audit.id} />
@@ -627,7 +635,9 @@ export function AuditDetail({
                       name="action_due_at"
                       type="datetime-local"
                       defaultValue={
-                        audit.response_due_at
+                        audit.completed_at &&
+                        audit.response_due_at &&
+                        Date.parse(audit.response_due_at) > Date.now()
                           ? `${auditDay(audit.response_due_at)}T${auditLocalTime(audit.response_due_at)}`
                           : ""
                       }
@@ -883,7 +893,10 @@ function StationResponse({
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
-            run(() => respondToStationAudit(data));
+            run(async () => {
+              await uploadAuditFiles(data);
+              return respondToStationAudit(data);
+            });
           }}
         >
           <input type="hidden" name="audit_id" value={audit.id} />
