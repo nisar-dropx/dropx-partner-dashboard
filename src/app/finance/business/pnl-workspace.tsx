@@ -1,4 +1,5 @@
 "use client";
+import { AdvertisingBreakdown } from "@/components/advertising-breakdown";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -276,6 +277,7 @@ function Statement({
                   </strong>
                 </summary>
                 <div className="pnl-expense-detail">
+                  {head === "Other" && <details><summary>Meta advertising — actual daily spend</summary><AdvertisingBreakdown rows={report.advertising.filter(r=>dayKeys.has(`${r.station_code}/${r.spend_date}`))}/></details>}
                   {lines.length ? (
                     lines.map((l, i) => (
                       <div className="pnl-line" key={i}>
