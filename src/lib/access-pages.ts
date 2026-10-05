@@ -61,6 +61,7 @@ export const accessPages = [
   { code: "cod_portal_checks", name: "COD Portal Checks", sort_order: 91 },
   { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 94 },
   { code: "station_audits", name: "Station Audits", sort_order: 94 },
+  { code: "ops_loss_master", name: "Loss Recovery Master", sort_order: 94 },
   { code: "station_audit_master", name: "Audit Master", sort_order: 94 },
   { code: "edd_dashboard", name: "Delivery Performance", sort_order: 95 },
   { code: "station_edd", name: "EDD", sort_order: 96 },
