@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { isPeopleHostName } from "@/lib/people/surface";
-import { isFinanceHostName } from "@/lib/finance/surface";
+import { financeAccessPageCodes, isFinanceHostName } from "@/lib/finance/surface";
 
 export type AccessSurface = "dashboard" | "ops";
 export type AdminAccessSurface = AccessSurface | "people" | "finance";
@@ -153,25 +153,7 @@ const peoplePageCodes = new Set([
   "app_settings"
 ]);
 
-const financePageCodes = new Set([
-  "finance_pricing",
-  "finance_revenue",
-  "finance_pnl",
-  "users",
-  "payments",
-  "advance_requests",
-  "expense_requests",
-  "payment_requests",
-  "payment_approvals",
-  "payment_process",
-  "workforce_payouts",
-  "payment_reports",
-  "payment_methods",
-  "master_payment_banks",
-  "master_payment_heads",
-  "master_contacts",
-  "payment_settings"
-]);
+const financePageCodes = new Set<string>(financeAccessPageCodes);
 
 export function currentAccessSurface(): AccessSurface {
   const host = (
