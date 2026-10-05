@@ -85,3 +85,12 @@ test('parent delivery total includes only its mapped XPTs, with per-station evid
  assert.equal(groupedDeliveries([],['KGQA','KGQC'],'2026-10-05').delivered,null);
  assert.equal(groupedDeliveries([row('KGQA',702)],['KGQA','KGQA'],'2026-10-05').delivered,702);
 });
+
+test('package share uses all inbound, including unknowns, without imposing a target', async () => {
+ const { packageShare } = await import('./payment-volume.ts');
+ assert.equal(packageShare(136,818),'16.6%');
+ assert.equal(packageShare(681,818),'83.3%');
+ assert.equal(packageShare(1,818),'0.1%');
+ assert.equal(packageShare(371,818),'45.4%');
+ assert.equal(packageShare(null,818),'—');assert.equal(packageShare(0,0),'—');
+});

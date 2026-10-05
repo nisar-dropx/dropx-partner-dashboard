@@ -66,7 +66,7 @@ export const loadPaymentVolume = unstable_cache(async (company: string, station:
     vehicles, fleetError: fleetResult.error || statusResult.error || availability.error || sources.error || designations.error ? 'Fleet availability could not be verified.' : null,
     sizeRule: ruleResult.error ? null : ruleResult.rule,
     refreshedAt: new Date().toISOString() };
-}, ['payment-volume-dock-arrivals-v7'], { revalidate: 60 });
+}, ['payment-volume-dock-arrivals-v8'], { revalidate: 60 });
 
 export function paymentVolumeToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());

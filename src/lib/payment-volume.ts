@@ -89,3 +89,7 @@ export function groupedDeliveries(rows: DeliveryVolumeRow[], stations: string[],
   return { delivered: available.length ? available.reduce((sum, part) => sum + (part.delivered ?? 0), 0) : null, deliveryBreakup,
     deliverySource: available.length ? 'Imported deliveries' : 'No source' };
 }
+
+export function packageShare(count: number | null, total: number): string {
+  return count == null || !Number.isFinite(count) || !Number.isFinite(total) || total <= 0 ? '—' : `${(Math.max(0, count) / total * 100).toFixed(1)}%`;
+}
