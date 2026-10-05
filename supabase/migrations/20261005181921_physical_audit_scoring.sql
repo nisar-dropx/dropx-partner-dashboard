@@ -44,7 +44,7 @@ from public.ops_audit_types t cross join definitions d join public.ops_audit_che
 on conflict(audit_type_id,code) do nothing;
 
 -- Keep objective / safety controls binary; use a quality scale for inspectable cleanliness.
-update public.ops_audit_checklist_items i set response_options=(select jsonb_agg(o || jsonb_build_object('score',case when o->>'value'='na' then null when (o->>'is_compliant')::boolean then 100 else 0 end)) from jsonb_array_elements(i.response_options) o)
+update public.ops_audit_checklist_items i set response_options=(select coalesce(jsonb_agg(o || jsonb_build_object('score',case when o->>'value'='na' then null when (o->>'is_compliant')::boolean then 100 else 0 end)), '[]'::jsonb) from jsonb_array_elements(i.response_options) o)
 from public.ops_audit_types t where i.audit_type_id=t.id and t.code='physical_station';
 update public.ops_audit_checklist_items i set response_options='[{"value":"fantastic","label":"Fantastic · clean, complete, consistently maintained","is_compliant":true,"requires_action":false,"score":100},{"value":"great","label":"Great · clean, minor improvement possible","is_compliant":true,"requires_action":false,"score":80},{"value":"fair","label":"Fair · visible gaps; action required","is_compliant":false,"requires_action":true,"score":50},{"value":"poor","label":"Poor · unacceptable condition; action required","is_compliant":false,"requires_action":true,"score":0},{"value":"na","label":"Not applicable (explain with photo)","is_compliant":null,"requires_action":false,"score":null}]'::jsonb
 from public.ops_audit_types t where i.audit_type_id=t.id and t.code='physical_station' and i.code in ('wet_mopping','station_dust','it_assets_clean','fans_clean','waste_control','washroom_toilet_clean');
