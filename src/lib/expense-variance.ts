@@ -1,3 +1,4 @@
+import { parsePaymentTrackingIds } from './payment-shipment-count.ts';
 export type CostInput = { amount_requested: unknown; amount: unknown; amount_approved?: unknown; status?: string | null; approval_status?: string | null };
 export function costNumber(value: unknown): number | null {
   if (value == null || value === '') return null;
@@ -20,6 +21,6 @@ export function estimatedShipments(answers: Array<{ answer_value: string | null;
   const value = costNumber(estimate?.answer_value);
   if (value != null && Number.isInteger(value) && value > 0) return value;
   const tracking = answers.filter(a => /^(?:shipment )?tracking (?:ids?|numbers?)\s*[:*]?$/i.test(a.payment_head_questions?.question_text.trim() ?? ''));
-  const ids = new Set(tracking.flatMap(a => (a.answer_value ?? '').split(/[\s,;]+/).filter(Boolean)));
+  const ids = new Set(tracking.flatMap(a => parsePaymentTrackingIds(a.answer_value ?? '')));
   return ids.size || null;
 }

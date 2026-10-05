@@ -36,8 +36,9 @@ test('shipment enrichment is isolated from all payment mutations and loaded only
 });
 test('evidence endpoint authorizes saved request and derives IDs server-side', () => {
  const api=readFileSync(new URL('../app/api/payments/shipment-evidence/route.ts',import.meta.url),'utf8');
- assert.match(api,/hasPermission\(auth, 'payment_approvals', 'access'\)/);
- assert.match(api,/canAccessPaymentLocation/);assert.match(api,/getPaymentApprovalEligibility/);
+ const auth=readFileSync(new URL('./payment-evidence-authorization.ts',import.meta.url),'utf8');
+ assert.match(auth,/hasPermission\(auth, 'payment_approvals', 'access'\)/);
+ assert.match(auth,/canAccessPaymentLocation/);assert.match(auth,/getPaymentApprovalEligibility/);
  assert.match(api,/eq\('company_id', company\)/);assert.match(api,/payment_request_answers/);
  assert.doesNotMatch(api,/searchParams.get\('(?:ids|station|company)'\)/);
 });

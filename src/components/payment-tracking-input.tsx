@@ -11,6 +11,13 @@ export function PaymentTrackingInput({ name, required, disabled, defaultValue = 
       placeholder="Paste tracking IDs or scan here — one ID per line"
       autoCapitalize="off" autoCorrect="off" spellCheck={false}
       onChange={event => update(event.currentTarget.value)}
+      onKeyDown={event => {
+        if (event.nativeEvent.isComposing || !['Enter', ' '].includes(event.key)) return;
+        const input = event.currentTarget;
+        if (input.selectionStart !== value.length || input.selectionEnd !== value.length) return;
+        event.preventDefault();
+        update(ids.length ? ids.join('\n') + '\n' : '');
+      }}
       onBlur={() => update(ids.length ? ids.join('\n') + '\n' : '')}
       onPaste={event => {
         event.preventDefault();

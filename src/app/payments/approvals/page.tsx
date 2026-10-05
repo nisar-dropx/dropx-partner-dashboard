@@ -3,6 +3,7 @@ import { PaymentCostSummary } from "@/components/payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { Suspense } from "react";
 import { PaymentApprovalVolume } from "@/components/payment-approval-volume";
+import { PaymentApprovalAdhocHistory } from "@/components/payment-approval-adhoc-history";
 import { PaymentApprovalShipments } from "@/components/payment-approval-shipments";
 import { adhocApprovalContext } from "@/lib/payment-volume";
 import { AppShell } from "@/components/app-shell";
@@ -555,6 +556,7 @@ export default async function PaymentApprovalsPage({
               {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason}</strong><p style={{margin:"4px 0 0"}}>{adhocVehicleLabel(replacement)} · Replacement date: {replacement.date}</p></div> : null}
               <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />
               {volumeDate ? <Suspense key={`${selectedRequest.id}:${volumeDate}`} fallback={<p className="subtle" role="status">Loading volume evidence… You can continue reviewing this request.</p>}><PaymentApprovalVolume company={companyId} station={selectedRequest.location_code} date={volumeDate} /></Suspense> : null}
+              {selectedRequest.payment_heads?.code === 'VAN_ADHOC' ? <PaymentApprovalAdhocHistory key={`history-${selectedRequest.id}`} requestId={selectedRequest.id} /> : null}
               {trackingIds.length && selectedRequest.payment_heads?.code === 'VAN_ADHOC' ? <PaymentApprovalShipments key={selectedRequest.id} requestId={selectedRequest.id} count={trackingIds.length} /> : null}
               <details className="payment-review-additional-details">
                 <summary><span>Payment and beneficiary details</span><small>Open only when needed</small></summary>
