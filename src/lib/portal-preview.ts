@@ -9,6 +9,7 @@ export const previewNoStoreHeaders = { "Cache-Control": "private, no-store, max-
 
 export function previewProductCode(): string | null {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
+  if (host === "fleet.dropxlogistics.com" || host.startsWith("dropx-fleet")) return "fleet";
   if (host.includes("workforce")) return "workforce";
   if (host === "ops.dropxlogistics.com" || host.startsWith("ops-") || host.startsWith("dropx-ops-pulse")) return "operations";
   if (host === "fin.dropxlogistics.com" || host === "finance.dropxlogistics.com") return "finance";
@@ -49,7 +50,8 @@ export const getPreviewViewer = cache(async () => {
     loadPeopleDesignations(profile.company_id, [profile.id])
   ]);
   if (!company.data?.is_active) return null;
-  const eligible = canPreviewPortalUsers(Boolean(profile.is_master_owner), role.data?.is_active ? role.data.code : null, designations.get(profile.id));
+  const designation=designations.get(profile.id);
+  const eligible = canPreviewPortalUsers(Boolean(profile.is_master_owner), role.data?.is_active ? role.data.code : null, designation) || (previewProductCode()==="fleet" && Boolean(designation?.active && ["NH","FINMGR"].includes(designation.code)));
   return eligible && await hasPreviewProductAccess(profile.company_id, profile.id, Boolean(profile.is_master_owner)) ? profile : null;
 });
 

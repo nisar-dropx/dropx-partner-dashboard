@@ -1,4 +1,5 @@
 "use client";
+import { vehicleSourceTitle } from "@/lib/fleet/vehicle-sources";
 
 import { Activity, CalendarDays, CircleDollarSign, Fuel, Gauge, History, Route, Truck, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -71,7 +72,7 @@ export function FleetVehicleLifecycle({ data, vehicle, onClose }: { data: FleetC
   const setPreset = (preset: "30d" | "mtd" | "ytd" | "all") => { const nextFrom = preset === "30d" ? shift(data.today, -29) : preset === "mtd" ? `${data.today.slice(0, 7)}-01` : preset === "ytd" ? `${data.today.slice(0, 4)}-01-01` : (vehicle.createdAt?.slice(0, 10) ?? `${data.today.slice(0, 4)}-01-01`); setFrom(nextFrom); setTo(data.today); setCalendarMonth(data.today.slice(0, 7)); };
 
   return <div className="fc-lifecycle-backdrop"><section aria-label={`${vehicle.vehicleNo} lifecycle`} className="fc-lifecycle-shell">
-    <header className="fc-lifecycle-header"><span><Truck size={23} /></span><div><small>{vehicle.stationCode} · {vehicle.fuelType} · {title(vehicle.ownershipType)}</small><h2>{vehicle.vehicleNo} lifecycle</h2><p>{vehicle.model} · availability, distance, fuel, service, costs and inspections</p></div><FleetExportButtons compact report={report} /><button aria-label="Close vehicle lifecycle" onClick={onClose} type="button"><X size={19} /></button></header>
+    <header className="fc-lifecycle-header"><span><Truck size={23} /></span><div><small>{vehicle.stationCode} · {vehicle.fuelType} · {vehicleSourceTitle(vehicle)}</small><h2>{vehicle.vehicleNo} lifecycle</h2><p>{vehicle.model} · availability, distance, fuel, service, costs and inspections</p></div><FleetExportButtons compact report={report} /><button aria-label="Close vehicle lifecycle" onClick={onClose} type="button"><X size={19} /></button></header>
     <div className="fc-lifecycle-controls"><div className="fc-lifecycle-presets"><button onClick={() => setPreset("30d")} type="button">30 days</button><button onClick={() => setPreset("mtd")} type="button">MTD</button><button onClick={() => setPreset("ytd")} type="button">YTD</button><button onClick={() => setPreset("all")} type="button">All history</button></div><label><span>From</span><input max={to} onChange={(event) => setFrom(event.target.value)} type="date" value={from} /></label><label><span>To</span><input max={data.today} min={from} onChange={(event) => setTo(event.target.value)} type="date" value={to} /></label></div>
     {error ? <div className="fc-lifecycle-error">{error}</div> : null}{loading ? <div className="fc-lifecycle-loading"><Activity className="spin" size={24} /> Loading the complete vehicle lifecycle…</div> : null}
     {!loading && payload ? <div className="fc-lifecycle-body">

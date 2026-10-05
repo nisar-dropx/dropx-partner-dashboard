@@ -17,6 +17,7 @@ const records={fleet_vehicles:{id:'vehicle',vehicle_no:'KL01',station_code:'KOZA
 const queries=[];
 const db={from(table){const builder=new Proxy({}, {get(_,key){if(key==='then')return(resolve)=>resolve({data:records[table]||[],error:dbError?{message:'Write failed'}:null});return(...args)=>{queries.push([table,key,...args]);if(key==='upsert'||key==='insert')saved=args[0];return builder;};}});return builder;}};
 const api=load('src/app/api/fleet/gps-exceptions/route.ts',name=>({
+ '@/lib/fleet/system-log':{withFleetSystemLog:fn=>fn},
  '@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:(_,code,action)=>action==='access'?access:edit},'@/lib/company-scope':{requireCompanyId:()=> 'company'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/fleet-control':{hasActiveFleetMembership:async()=>member},'@/lib/fleet/gps-exceptions':helpers,'@/lib/wheelseye':{getWheelseyeAccessToken:async()=> 'token'},'@/lib/wheelseye-history':{loadWheelseyeMovement:async()=>({points:[],afterHours:[]})}
 }[name]||{}));
 const post=async(body={})=>{saved=undefined;return api.POST(new Request('https://fleet.test/api/fleet/gps-exceptions',{method:'POST',body:JSON.stringify({vehicleNo:'KL01',date:'2026-10-04',reason:'authorised_work',remarks:'Late delivery confirmed',reviewedBy:'Forged',...body})}));};
@@ -29,6 +30,7 @@ records.fleet_daily_km=[];assert.equal((await post()).status,400);records.fleet_
 dbError=true;assert.notEqual((await post()).status,200);dbError=false;
 const savedAuth=auth;auth=null;assert.equal((await post()).status,401);auth=savedAuth;
 const service=load('src/app/api/fleet-control/route.ts',name=>({
+ '@/lib/fleet/system-log':{withFleetSystemLog:fn=>fn},
  'next/server':{NextResponse:{json:(body,options)=>Response.json(body,options)}},'@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=> 'company'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/access-surface':{fleetAccessPageCodes:['fleet_maintenance']},'@/lib/fleet-control':{hasActiveFleetMembership:async()=>true}
 }[name]||{}));
 for(const ownership of ['rented','odcd'])for(const action of ['service.create','service.schedule']){records.fleet_vehicles.ownership_type=ownership;saved=undefined;const result=await service.POST(new Request('https://fleet.test/api/fleet-control',{method:'POST',body:JSON.stringify({action,vehicleId:'vehicle',serviceDate:'2026-10-06',serviceType:'Repair'})}));assert.equal(result.status,400);assert.match((await result.json()).error,/owned vehicles/);assert.equal(saved,undefined,'Partner vehicle cannot create service record');}

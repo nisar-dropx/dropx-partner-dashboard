@@ -1,3 +1,4 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { auditApplies, evaluateAuditResponse, normalizeAuditConfig } from "@/lib/fleet/audit-rules";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { NextResponse } from "next/server";
@@ -58,7 +59,7 @@ async function access() {
   return { authorization, companyId, canManageFleet, canManageSettings };
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   if (!supabaseAdmin) return NextResponse.json({ error: "Database service is unavailable." }, { status: 500 });
   const context = await access();
   if ("error" in context) return context.error;
@@ -105,6 +106,7 @@ export async function POST(request: Request) {
     if (action === "audit-template.remove") return await removeAuditTemplate(context.companyId, context.canManageSettings, body);
     if (action === "document-type.upsert") return await upsertDocumentType(context.companyId, context.canManageSettings, body);
     if (action === "document-type.remove") return await removeDocumentType(context.companyId, context.canManageSettings, body);
+    if (action === "vehicle-source.save") return await saveVehicleSource(context.companyId,context.canManageSettings,body);
     if (action === "vehicle-status.upsert") return await upsertVehicleStatus(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status.remove") return await removeVehicleStatus(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status-reason.upsert") return await upsertVehicleStatusReason(context.companyId, context.canManageSettings, body);
@@ -657,3 +659,27 @@ async function updateFinding(companyId:string,allowed:boolean,body:Payload) {
  if(result.error || !result.data) throw new Error(result.error?.message || 'Finding not found.');
  return NextResponse.json({ok:true,message:status==='resolved'?'Finding resolved.':'Follow-up updated.'});
 }
+
+async function saveVehicleSource(companyId:string,allowed:boolean,body:Payload) {
+ if(!allowed)return NextResponse.json({error:"Fleet Masters permission denied."},{status:403});
+ const id=clean(body.id);const values:Record<string,unknown>={updated_at:new Date().toISOString()};
+ if(body.isActive!==undefined)values.is_active=body.isActive===true;
+ if(body.ownershipType!==undefined){
+  if(!["own","odcd","rented"].includes(clean(body.ownershipType)))throw new Error("Choose a valid vehicle policy.");
+  values.ownership_type=clean(body.ownershipType);
+ }
+ if(body.sortOrder!==undefined){const order=Number(body.sortOrder);if(!Number.isInteger(order)||order<0||order>10000)throw new Error("Display order must be between 0 and 10000.");values.sort_order=order;}
+ if(!id){
+  const designationId=required(body.designationId,"Designation");
+  const d=await supabaseAdmin!.from("designations").select("id").eq("company_id",companyId).eq("id",designationId).eq("is_active",true).in("profile_destination",["workforce","vendors"]).maybeSingle();
+  if(d.error||!d.data)throw new Error("Choose an active Workforce or Vendor designation.");
+  values.designation_id=designationId;values.company_id=companyId;
+  values.ownership_type ||= "rented";
+ }
+ const result=id?await supabaseAdmin!.from("fleet_vehicle_sources").update(values).eq("company_id",companyId).eq("id",id).select("id").maybeSingle():await supabaseAdmin!.from("fleet_vehicle_sources").insert(values).select("id").single();
+ if(result.error)throw new Error(result.error.code==="23505"?"This designation is already linked. Enable its existing source instead.":result.error.message);
+ if(!result.data)throw new Error("Vehicle source was not found.");
+ return NextResponse.json({ok:true,message:"Vehicle source saved."});
+}
+
+export const POST = withFleetSystemLog(handlePOST);

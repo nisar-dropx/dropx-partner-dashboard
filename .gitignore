@@ -21,3 +21,5 @@ supabase/.temp/
 */node_modules
 .next/*
 .cursor/*
+
+/output/

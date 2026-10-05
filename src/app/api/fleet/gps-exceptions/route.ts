@@ -1,3 +1,4 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import {getAuthorization,hasPermission} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
 import {hasActiveFleetMembership} from '@/lib/fleet-control';
@@ -27,7 +28,7 @@ export async function GET(request:Request){try{
  const token=await getWheelseyeAccessToken(company);if(!token)throw new Error('GPS history is currently unavailable. The saved daily summary is shown below.');
  return Response.json(await loadWheelseyeMovement(token,vehicle,date),{headers:{'Cache-Control':'private, no-store'}});
  }catch(error){return failure(error);}}
-export async function POST(request:Request){try{
+async function handlePOST(request: Request){try{
  const body=await request.json(),vehicleNo=String(body.vehicleNo||'').trim().toUpperCase(),date=String(body.date||'');
  const {auth,company,vehicle}=await access(vehicleNo,date,true);
  const reason=String(body.reason||''),remarks=String(body.remarks||'').trim();
@@ -37,3 +38,5 @@ export async function POST(request:Request){try{
  if(result.error)throw new Error(result.error.message);
  return Response.json({ok:true,review:{vehicleNo,date,reason,remarks,reviewedBy:review.reviewed_by_name,reviewedAt:review.reviewed_at}});
  }catch(error){return failure(error);}}
+
+export const POST = withFleetSystemLog(handlePOST);

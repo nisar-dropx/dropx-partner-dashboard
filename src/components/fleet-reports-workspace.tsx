@@ -1,4 +1,5 @@
 "use client";
+import { vehicleSourceTitle } from "@/lib/fleet/vehicle-sources";
 
 import { Activity, CalendarDays, CircleDollarSign, ClipboardCheck, FileCheck2, Gauge, History, Search, Truck, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -36,7 +37,7 @@ export function FleetReportsWorkspace({ data }: { data: FleetControlData }) {
 
   const report = useMemo<FleetReportTable>(() => {
     const subtitle = `${from} to ${to} · ${stations.length ? stations.join(", ") : clusters.length ? clusters.join(", ") : regions.length ? regions.join(", ") : "All vehicle placements"}`;
-    if (reportKey === "vehicles") return { title: "Fleet availability report", subtitle, fileName: `fleet-availability-${data.today}`, headers: ["Vehicle", "Station", "Source", "Model", "Fuel", "Status", "Reason", "Non-operational since", "Expected operational", "Latest comment"], rows: data.vehicles.filter((row) => inScope(row.stationCode) && includes(`${row.vehicleNo} ${row.model} ${row.stationCode} ${row.statusLabel} ${row.statusReasonLabel}`)).map((row) => [row.vehicleNo, row.stationCode, label(row.ownershipType), row.model, row.fuelType, row.statusLabel, row.statusReasonLabel, row.nonOperationalSince, row.expectedOperationalDate, row.statusComment]) };
+    if (reportKey === "vehicles") return { title: "Fleet availability report", subtitle, fileName: `fleet-availability-${data.today}`, headers: ["Vehicle", "Station", "Source", "Model", "Fuel", "Status", "Reason", "Non-operational since", "Expected operational", "Latest comment"], rows: data.vehicles.filter((row) => inScope(row.stationCode) && includes(`${row.vehicleNo} ${row.model} ${row.stationCode} ${row.statusLabel} ${row.statusReasonLabel}`)).map((row) => [row.vehicleNo, row.stationCode, vehicleSourceTitle(row), row.model, row.fuelType, row.statusLabel, row.statusReasonLabel, row.nonOperationalSince, row.expectedOperationalDate, row.statusComment]) };
     if (reportKey === "lifecycle") {
       const range: string[] = []; for (let value = from; value <= to; value = new Date(Date.parse(`${value}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) range.push(value);
       const km = new Map(data.dailyKm.map((row) => [`${row.vehicleNo}|${row.date}`, row.km]));

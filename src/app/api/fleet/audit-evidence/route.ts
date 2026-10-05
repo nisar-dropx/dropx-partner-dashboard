@@ -1,3 +1,4 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
@@ -5,7 +6,7 @@ import { auditAccess } from '@/lib/fleet/audit-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
-export async function POST(request:Request) {
+async function handlePOST(request: Request) {
  try {
   const form=await request.formData();
   const auditId=String(form.get('auditId')||'');
@@ -36,3 +37,5 @@ export async function GET(request:Request) {
   return NextResponse.redirect(result.data.signedUrl,{headers:{'Cache-Control':'private, no-store'}});
  } catch { return NextResponse.json({error:'Sign in with access to this vehicle to view its evidence.'},{status:403}); }
 }
+
+export const POST = withFleetSystemLog(handlePOST);

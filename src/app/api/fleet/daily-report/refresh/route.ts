@@ -1,3 +1,4 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { getAuthorization } from '@/lib/authorization';
 import { saveDailyWheelseyeKm } from '@/lib/fleet/gps-storage';
 import { getWheelseyeAccessToken } from '@/lib/wheelseye';
@@ -6,7 +7,7 @@ import { validDate, istDate, shiftDay } from '@/lib/fleet/daily-report';
 import { FleetReportError, reportScope } from '@/lib/fleet/report-data';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const auth = await getAuthorization();
   if (!auth) return Response.json({ error: 'Login required.' }, { status: 401 });
   const origin = request.headers.get('origin');
@@ -36,3 +37,5 @@ export async function POST(request: Request) {
     return Response.json({ results }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return Response.json({ error: error instanceof FleetReportError ? error.message : 'Unable to refresh GPS. Please try again.' }, { status: error instanceof FleetReportError ? error.status : 500 }); }
 }
+
+export const POST = withFleetSystemLog(handlePOST);

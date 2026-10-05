@@ -112,13 +112,13 @@ const shell = fs.readFileSync("src/components/app-shell.tsx", "utf8");
 assert.match(shell, /authorization.designationName \?\? authorization.roleName/);
 assert.doesNotMatch(shell, /!isWorkforceHost && authorization.canPreviewUsers/);
 console.log("Portal preview tests passed: designation display, unchanged owner privileges, target permission and location parity, read-only, company/active/actor boundaries.");
-let previewCookie = null;
+let previewCookie = null, previewHost = "ops.dropxlogistics.com", designationCode = "CLM";
 const realPreview = moduleAt("src/lib/portal-preview.ts", {
   react: { cache: fn => fn },
-  "next/headers": { cookies: () => ({ get: () => previewCookie ? { value: previewCookie } : undefined }), headers: () => ({ get: () => "ops.dropxlogistics.com" }) },
+  "next/headers": { cookies: () => ({ get: () => previewCookie ? { value: previewCookie } : undefined }), headers: () => ({ get: () => previewHost }) },
   "@/lib/supabase-admin": { supabaseAdmin: admin },
   "@/lib/supabase-server": mocks["@/lib/supabase-server"],
-  "@/lib/people-designation": { ...mocks["@/lib/people-designation"], canPreviewPortalUsers: people.canPreviewPortalUsers }
+  "@/lib/people-designation": { loadPeopleDesignations: async (_, ids) => new Map(ids.map(id => [id, {code:designationCode,active:true,name:designationCode}])), canPreviewPortalUsers: people.canPreviewPortalUsers }
 });
 actor = "owner";
 assert.equal((await realPreview.getPreviewViewer()).id, "owner");
@@ -134,3 +134,11 @@ assert.equal(realPreview.selectedPreviewUserId("different-viewer"), null);
 previewCookie = "owner:malformed";
 assert.equal(realPreview.selectedPreviewUserId("owner"), null);
 console.log("Live helper tests passed: eligible viewer, portal membership, scoped candidates and actor-bound cookie.");
+
+previewHost="fleet.dropxlogistics.com";actor="station";
+tables.company_product_memberships.push({...tables.company_product_memberships[0],product_code:"fleet"});
+for(const code of ["FSD","NH","FINMGR"]){designationCode=code;assert.equal((await realPreview.getPreviewViewer())?.id,"station",`${code} can preview Fleet`);}
+designationCode="CLM";assert.equal(await realPreview.getPreviewViewer(),null);
+for(const host of ["ops.dropxlogistics.com","workforce.dropxlogistics.com"]){previewHost=host;for(const code of ["NH","FINMGR"]){designationCode=code;assert.equal(await realPreview.getPreviewViewer(),null,"Fleet entitlement must not widen other portals");}}
+previewHost="fleet.dropxlogistics.com";designationCode="FINMGR";tables.company_product_memberships=tables.company_product_memberships.filter(m=>m.product_code!=="fleet");assert.equal(await realPreview.getPreviewViewer(),null,"Revoked Fleet membership blocks Finance Manager preview");
+console.log("Fleet preview roles passed: Owner, FSD, National Head and Finance Manager; membership required; other portals unchanged.");

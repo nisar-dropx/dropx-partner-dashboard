@@ -1,3 +1,4 @@
+import { fleetAuditFetch } from "./fleet/audit-fetch";
 import { createClient } from "@supabase/supabase-js";
 import { timeoutFetch } from "./timeout-fetch";
 
@@ -13,7 +14,7 @@ export const supabaseAdmin = isSupabaseAdminConfigured
         persistSession: false
       },
       global: {
-        fetch: timeoutFetch()
+        fetch: fleetAuditFetch(timeoutFetch())
       }
     })
   : null;

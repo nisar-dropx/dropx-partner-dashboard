@@ -1,3 +1,4 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { documentApplies } from "@/lib/fleet/source-policy";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ documents });
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
   const access = await requireDocumentPermission("edit");
   if ("error" in access) return access.error;
@@ -147,7 +148,7 @@ export async function POST(request: Request) {
   return NextResponse.json({ document: { ...data, signed_url: fileUrl, download_url: `${fileUrl}&download=1` } });
 }
 
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
   if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
   const access = await requireDocumentPermission("edit");
   if ("error" in access) return access.error;
@@ -252,3 +253,7 @@ function mutationError(error: string) {
   }
   return NextResponse.json({ error }, { status: 500 });
 }
+
+export const POST = withFleetSystemLog(handlePOST);
+
+export const PATCH = withFleetSystemLog(handlePATCH);

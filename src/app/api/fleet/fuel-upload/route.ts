@@ -1,3 +1,4 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
 export const dynamic = "force-dynamic";
 
 import * as XLSX from "xlsx";
@@ -29,7 +30,7 @@ type ParsedFuelTransaction = {
   raw_payload: Record<string, string>;
 };
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   if (!supabaseAdmin) return Response.json({ error: "Supabase service key is not configured." }, { status: 500 });
   const authorization = await getAuthorization();
   if (!authorization) return Response.json({ error: "Login required." }, { status: 401 });
@@ -317,3 +318,5 @@ function monthNumber(value: string) {
   };
   return months[value.toLowerCase()];
 }
+
+export const POST = withFleetSystemLog(handlePOST);

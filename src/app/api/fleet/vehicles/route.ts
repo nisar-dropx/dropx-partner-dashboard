@@ -1,3 +1,5 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
+import { resolveVehicleSource } from "@/lib/fleet/vehicle-sources-server";
 import { parseVehicleContact } from "@/lib/fleet/vehicle-contact";
 import { deploymentDateError } from "@/lib/fleet/source-policy";
 import { parseVehicleRent } from "@/lib/fleet/vehicle-rent";
@@ -15,6 +17,7 @@ const editableFields = [
   "model",
   "fuel_type",
   "ownership_type",
+  "source_id",
   "registration_expiry",
   "insurance_expiry",
   "puc_expiry",
@@ -36,11 +39,15 @@ const editableFields = [
   "dispose_date"
 ] as const;
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
   const access = await requireFleetMutationPermission("add");
   if ("error" in access) return access.error;
   const body = await request.json();
+  if (body.source_id) {
+    try { body.ownership_type=await resolveVehicleSource(access.companyId,String(body.source_id)); }
+    catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Invalid source."},{status:400});}
+  }
   const contact = parseVehicleContact(body);
   if (contact.error) return NextResponse.json({error:contact.error},{status:400});
   const rent = parseVehicleRent(body);
@@ -83,11 +90,15 @@ export async function POST(request: Request) {
   return NextResponse.json({ vehicle: data });
 }
 
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
   if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
   const access = await requireFleetMutationPermission("edit");
   if ("error" in access) return access.error;
   const body = await request.json();
+  if (body.source_id) {
+    try { body.ownership_type=await resolveVehicleSource(access.companyId,String(body.source_id)); }
+    catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Invalid source."},{status:400});}
+  }
   const contact = parseVehicleContact(body);
   if (contact.error) return NextResponse.json({error:contact.error},{status:400});
   const rent = parseVehicleRent(body);
@@ -242,7 +253,7 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ vehicle: data });
 }
 
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
   if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
   const access = await requireFleetMutationPermission("edit");
   if ("error" in access) return access.error;
@@ -344,3 +355,9 @@ function mutationError(error: string) {
 function isMissingActionDateColumn(error: string) {
   return ["transfer_date", "sale_date", "dispose_date"].some((field) => error.includes(field));
 }
+
+export const POST = withFleetSystemLog(handlePOST);
+
+export const PATCH = withFleetSystemLog(handlePATCH);
+
+export const DELETE = withFleetSystemLog(handleDELETE);

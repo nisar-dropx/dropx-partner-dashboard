@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { previewProductCode } from "@/lib/portal-preview";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { getPreviewViewer, getSignedInPreviewProfile, listPreviewUsers, portalPreviewCookieName, previewNoStoreHeaders, selectedPreviewUserId } from "@/lib/portal-preview";
@@ -26,6 +29,7 @@ export async function POST(request: NextRequest) {
   const signedInProfile = await getSignedInPreviewProfile();
   if (!signedInProfile) return reply({ error: "Sign in to manage your preview." }, 401);
   if (!userId || userId === signedInProfile.id) {
+    await logPreview(signedInProfile,"preview.exit",signedInProfile.id).catch(()=>console.error("Could not record Fleet preview exit."));
     cookies().set(portalPreviewCookieName, "", { ...options, maxAge: 0 });
     return reply({ ok: true, preview: false });
   }
@@ -34,10 +38,17 @@ export async function POST(request: NextRequest) {
   try {
     const users = await listPreviewUsers(viewer);
     if (!users.some(user => user.id === userId)) return reply({ error: "Choose an active user with access to this portal in your company." }, 400);
+    await logPreview(viewer,"preview.start",userId);
     cookies().set(portalPreviewCookieName, `${viewer.id}:${userId}`, options);
     console.info("Portal user preview started", { actorUserId: viewer.id, targetUserId: userId, companyId: viewer.company_id });
     return reply({ ok: true, preview: true });
   } catch {
     return reply({ error: "Unable to verify portal access. Please try again." }, 503);
   }
+}
+
+async function logPreview(viewer:{id:string;company_id:string;full_name:string|null},action:string,target:string){
+ if(previewProductCode()!=="fleet"||!supabaseAdmin)return;
+ const result=await supabaseAdmin.from("fleet_system_logs").insert({company_id:viewer.company_id,request_id:randomUUID(),event_kind:"request",entity:"request",action,outcome:"success",actor_user_id:viewer.id,actor_label:viewer.full_name||"Administrator",subject:target,route:"/api/owner-preview",http_status:200});
+ if(result.error)throw new Error("Could not record preview activity.");
 }

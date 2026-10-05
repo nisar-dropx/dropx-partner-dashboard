@@ -1,3 +1,4 @@
+import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { NextResponse, type NextRequest } from "next/server";
 import { approvePaymentRequest, rejectPaymentRequest, returnPaymentRequest } from "@/app/payments/approvals/actions";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -8,7 +9,7 @@ import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
 function text(value: unknown) { return String(value ?? "").trim(); }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     const authorization = await getAuthorization();
     if (!authorization) return NextResponse.json({ error: "Your session has expired. Sign in again." }, { status: 401 });
@@ -44,3 +45,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "The payment request could not be updated." }, { status: 400 });
   }
 }
+
+export const POST = withFleetSystemLog(handlePOST);
