@@ -11,7 +11,7 @@ export function PaymentTrackingInput({ name, required, disabled, onValueChange }
       placeholder="Paste tracking IDs or scan here — one ID per line"
       autoCapitalize="off" autoCorrect="off" spellCheck={false}
       onChange={event => update(event.currentTarget.value)}
-      onBlur={() => update(ids.join('\n'))}
+      onBlur={() => update(ids.length ? ids.join('\n') + '\n' : '')}
       onPaste={event => {
         event.preventDefault();
         const input = event.currentTarget;
