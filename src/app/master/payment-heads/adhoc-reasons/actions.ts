@@ -1,4 +1,5 @@
 "use server";
+import {roleIdsWithPageEditAccess} from "@/lib/position-access";
 import {requirePagePermission} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
 import {supabaseAdmin} from '@/lib/supabase-admin';
@@ -16,9 +17,16 @@ export async function saveAdhocReason(form:FormData){
  if(form.get('special_route')==='on'){
   const roleIds=['first_role','final_role','fallback_role'].map(k=>String(form.get(k)||''));
   const roles=await db.from('user_roles').select('id').eq('company_id',company).in('id',roleIds);if(roles.error||roleIds.some(id=>!roles.data?.some(r=>r.id===id)))throw new Error('Select valid approval roles.');
+  const allowed=await roleIdsWithPageEditAccess(company,roleIds,'payment_approvals');if(roleIds.some(id=>!allowed.has(id)))throw new Error('Approval roles must have Payment Approvals edit access.');
   steps=[{id:'first',step_order:1,is_required:true,candidates:[{role_id:roleIds[0],scope:'company'}]},{id:'final',step_order:2,is_required:true,candidates:[{role_id:roleIds[1],scope:'company'},{role_id:roleIds[2],scope:'company'}]}];
  }
  const result=await db.from('fleet_adhoc_reason_rules').update({label,source_code:source,required_status:status,effect_status:effect,block_rent:!!effect&&form.get('block_rent')==='on',sort_order:sort,is_active:form.get('is_active')==='on',approval_steps:steps}).eq('company_id',company).eq('reason_key',key);
  if(result.error)throw new Error(result.error.message);
+ const rules=await db.from('fleet_adhoc_reason_rules').select('label').eq('company_id',company).eq('is_active',true).order('sort_order');
+ const head=await db.from('payment_heads').select('id').eq('company_id',company).eq('code','VAN_ADHOC').single();
+ if(rules.error||head.error)throw new Error('Saved rule, but dropdown refresh failed. Please save again.');
+ const questions=await db.from('payment_head_questions').select('id,question_text').eq('payment_head_id',head.data.id);
+ if(questions.error)throw new Error('Saved rule, but dropdown refresh failed. Please save again.');
+ for(const q of questions.data??[])if(/reason.*(?:adhoc|ad hoc).*deployment/i.test(q.question_text)){const update=await db.from('payment_head_questions').update({dropdown_options:rules.data.map(r=>r.label).join(', ')}).eq('id',q.id).eq('payment_head_id',head.data.id);if(update.error)throw new Error('Saved rule, but dropdown refresh failed. Please save again.');}
  revalidatePath('/master/payment-heads/adhoc-reasons');redirect('/master/payment-heads/adhoc-reasons?saved=1');
 }
