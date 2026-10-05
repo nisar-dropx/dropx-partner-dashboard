@@ -670,7 +670,8 @@ export function ExpenseCalculation({
             <div className="pnl-calculation-body">
               <Facts
                 items={[
-                  ["Monthly vehicle rent", money(v.monthly_rent)],
+                  [v.daily_rent != null ? "Daily vehicle rent" : "Monthly vehicle rent", money(v.daily_rent ?? v.monthly_rent)],
+                  ["Rent-blocked days", v.rent_blocked_days],
                   ["Month days", v.calendar_days],
                   [
                     "Deployed cost days",
@@ -679,10 +680,9 @@ export function ExpenseCalculation({
                 ]}
               />
               <p className="pnl-formula">
-                {money(v.monthly_rent)} ÷ {v.calendar_days} ×{" "}
-                {v.considered_days ?? "deployed"} days ={" "}
-                {money(v.considered_amount)}. Own-vehicle rent is an internal
-                operating charge.
+                {v.daily_rent != null ? `${money(v.daily_rent)} per eligible day` : `${money(v.monthly_rent)} ÷ ${v.calendar_days} calendar days`}.
+                {" "}{v.considered_days ?? "Recorded"} deployed days; {v.rent_blocked_days} rent-blocked days.
+                {" "}Fleet ledger cost: {money(v.considered_amount)}, counted once. Dashboard fixed rental is excluded by the configured source rule; per-package pay remains included.
               </p>
             </div>
           </details>
