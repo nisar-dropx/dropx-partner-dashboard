@@ -6,8 +6,7 @@ import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { getAuthorization } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
-import { matchNames } from "@/lib/name-match";
-import { isScientificProviderMemberId, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
+import { isScientificProviderMemberId, providerFirstNamesMatch, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { parseProductionThresholdConfig, type ProductionThresholdConfig } from "@/lib/production-threshold-config";
@@ -120,7 +119,7 @@ async function resolveFieldOperationsDesignationPolicy(
 }
 
 function providerHolderMatches(holderName: string, workerName: string) {
-  return matchNames(holderName, workerName).status !== "none";
+  return providerFirstNamesMatch(holderName, workerName);
 }
 
 function normalizedHeader(value: unknown) {

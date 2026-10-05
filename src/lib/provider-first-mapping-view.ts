@@ -170,8 +170,64 @@ function sameProviderMember(left: string, right: string) {
   return String(left ?? "").trim().toUpperCase() === String(right ?? "").trim().toUpperCase();
 }
 
+function providerHolderName(value: string) {
+  return String(value ?? "").split(/[|/]/, 1)[0].trim().slice(0, 200);
+}
+
+function providerNameTokens(value: string) {
+  return providerHolderName(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function commonPrefixLength(left: string, right: string) {
+  const limit = Math.min(left.length, right.length);
+  let length = 0;
+  while (length < limit && left[length] === right[length]) length += 1;
+  return length;
+}
+
+function editDistance(left: string, right: string) {
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+function providerSpellingVariantMatches(left: string, right: string) {
+  const longest = Math.max(left.length, right.length);
+  if (Math.min(left.length, right.length) < 5 || longest > 40) return false;
+  if (commonPrefixLength(left, right) < 3) return false;
+  const distance = editDistance(left, right);
+  const allowedDistance = Math.max(1, Math.floor(longest * 0.2));
+  return distance <= allowedDistance && 1 - (distance / longest) >= 0.78;
+}
+
 export function providerFirstNamesMatch(providerName: string, dropxName: string) {
-  return matchNames(providerName, dropxName).status !== "none";
+  const providerHolder = providerHolderName(providerName);
+  const dropxHolder = providerHolderName(dropxName);
+  if (matchNames(providerHolder, dropxHolder).status !== "none") return true;
+
+  const providerTokens = providerNameTokens(providerHolder);
+  const dropxTokens = providerNameTokens(dropxHolder);
+  if (providerTokens.length < 2 || providerTokens.length !== dropxTokens.length) return false;
+  return providerTokens.every((token, index) => providerSpellingVariantMatches(token, dropxTokens[index]));
 }
 
 export function providerFirstRowIssue(

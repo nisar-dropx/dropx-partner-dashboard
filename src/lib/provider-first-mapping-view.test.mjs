@@ -7,6 +7,7 @@ import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
   providerFirstPageWindow,
+  providerFirstNamesMatch,
   providerFirstValidationStatus,
   providerMemberIdFromSpreadsheetCells,
   providerMemberKey,
@@ -54,6 +55,17 @@ const row = {
 test("keys provider members by station and normalized member ID", () => {
   assert.equal(providerMemberKey("station-1", " abc "), "station-1|ABC");
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
+});
+
+test("matches controlled provider-report spelling variants without weakening global identity matching", () => {
+  assert.equal(providerFirstNamesMatch(
+    "Bhuwneshwar Bhardwaj / DROP / 205470133",
+    "BHUWANESWAR BHARADWAJ"
+  ), true);
+  assert.equal(providerFirstNamesMatch("Rithesh Kumar / SPVAN_DROP / 1001", "RITESH KUMAR"), true);
+  assert.equal(providerFirstNamesMatch("Asha Devi / DROP / 1002", "ASHA DEVI"), true);
+  assert.equal(providerFirstNamesMatch("Rajesh Sharma / DROP / 1003", "Ramesh Varma"), false);
+  assert.equal(providerFirstNamesMatch("Bhuwneshwar", "Bhuwaneswar"), false);
 });
 
 test("recognizes scientific provider IDs without fabricating missing digits", () => {
@@ -258,6 +270,8 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(actions, /providerMemberIdUnsafeNumber/);
   assert.match(actions, /memberNameByStationAndId\.get\(`\$\{station\.stationCode\}\|\$\{uploadRow\.providerMemberId\}`\)/);
   assert.match(actions, /providerHolderMatches\(holderName, worker\.fullName\)/);
+  assert.match(actions, /providerFirstNamesMatch\(holderName, workerName\)/);
+  assert.doesNotMatch(actions, /import \{ matchNames \} from "@\/lib\/name-match"/);
   assert.match(actions, /production_threshold_config: productionThresholdConfig/);
   assert.match(actions, /Changes to an existing monthly combined minimum must start on the first day of a month/);
   assert.match(actions, /const providerId = String\(station\.provider_id/);
