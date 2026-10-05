@@ -1,3 +1,4 @@
+import { AppShell } from "@/components/app-shell";
 import { requirePagePermission, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -24,10 +25,12 @@ export default async function Page() {
   if (o.error || s.error)
     throw Error("Loss Recovery Master could not be loaded.");
   return (
+    <AppShell active="Ops Masters" pageCode="ops_loss_master">
     <NlRecoveryMaster
       outcomes={o.data ?? []}
       settings={s.data}
-      canEdit={hasPermission(auth, "ops_loss_master", "edit")}
+      canEdit={!auth.readOnly && hasPermission(auth, "ops_loss_master", "edit")}
     />
+    </AppShell>
   );
 }
