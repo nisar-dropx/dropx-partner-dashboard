@@ -127,6 +127,7 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
   const displayPoints = parked ? unique.slice(0, 1) : moving;
   return {
     points: displayPoints.map(({ lat, lng }) => ({ lat, lng })),
+    afterHours: moving.filter(point=>{const hour=Math.floor((point.epoch+19800)/3600)%24;return hour>=22||hour<5;}).map(point=>({lat:point.lat,lng:point.lng,speed:point.speed,at:new Date(point.epoch*1000).toISOString()})),
     summary: {
       km: rounded(km), rawKm: rounded(rawKm), maxSpeed: unique.reduce((max, point) => Math.max(max, point.speed ?? 0), 0),
       movingMinutes: Math.round(movingSeconds / 60), pointCount: unique.length,

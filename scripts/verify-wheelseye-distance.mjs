@@ -56,3 +56,8 @@ try {
  await assert.rejects(exports.loadWheelseyeMovement('test', vehicle, date), /unexpected/);
 } finally { globalThis.fetch=originalFetch; }
 console.log('WheelsEye distance: cached stationary interleaving, recoverable spikes, recording gaps, stationary days, dates, vehicle matching, timestamps and shared map trajectory passed.');
+
+const afterHours = calc([point(21*3600+59*60),point(22*3600,75.0001),point(22*3600+60,75.0002)]);
+assert.equal(afterHours.afterHours.length,2,'Only moving fixes after 22:00 IST appear in exception detail');
+assert.equal(afterHours.afterHours[0].at,`${date}T16:30:00.000Z`);
+assert.equal(calc([point(4*3600),point(5*3600)]).afterHours.length,1,'05:00 IST ends the after-hours window');

@@ -54,6 +54,7 @@ import { FleetDocumentsWorkspace } from "@/components/fleet-documents-workspace"
 import { DailyFleetReportView } from "@/components/fleet-daily-report";
 import { FleetMultiSelect, type FleetFilterOption } from "@/components/fleet-multi-select";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
+import { gpsExceptions, type GpsExceptionReview } from '@/lib/fleet/gps-exceptions';
 import { FleetTrackingWorkspace } from "@/components/fleet-tracking-workspace";
 import { FleetServiceWorkspace } from "@/components/fleet-service-workspace";
 import { FleetReportsWorkspace } from "@/components/fleet-reports-workspace";
@@ -152,7 +153,7 @@ function FleetScopeFilters({ clusters, onClusters, onRegions, onStations, onStat
 
 export function FleetControlDashboard({
   approveAction,
-  data,
+  data: serverData,
   initialRequestId,
   initialMasterTab,
   initialSection,
@@ -172,6 +173,11 @@ export function FleetControlDashboard({
   signOutAction: (formData: FormData) => void | Promise<void>;
 }) {
   const router = useRouter();
+  const [reviewUpdates,setReviewUpdates] = useState<GpsExceptionReview[]>([]);
+  const data = {...serverData,gpsExceptionReviews:[...(serverData.gpsExceptionReviews||[]),...reviewUpdates]};
+  const [exceptionEntry,setExceptionEntry] = useState<{target?:{vehicleNo:string;date:string};key:number}|null>(null);
+  const openGpsAlerts=gpsExceptions(data,data.today.slice(0,7)+"-01",data.today);
+  function openExceptions(target?:{vehicleNo:string;date:string}) { setExceptionEntry({target,key:Date.now()}); changeSection("tracking"); }
   const visibleSectionSet = new Set(data.capabilities.visibleSections as Section[]);
   const firstVisibleSection = sections.find((item) => visibleSectionSet.has(item.key))?.key ?? "overview";
   const requestedSection = validSections.has(initialSection as Section) ? initialSection as Section : firstVisibleSection;
@@ -623,7 +629,7 @@ export function FleetControlDashboard({
           {flash ? <div className={`fc-flash ${flash.type}`}><span>{flash.type === "notice" ? <Check size={17} /> : <AlertTriangle size={17} />}{flash.text}</span><button aria-label="Dismiss" onClick={() => setFlash(null)} type="button"><X size={16} /></button></div> : null}
           {data.errors.length ? <div className="fc-flash error"><span><AlertTriangle size={17} />Some live data is unavailable: {data.errors[0]}</span></div> : null}
 
-          {section === "attention" ? <FleetAttentionWorkspace data={data} onChanged={() => router.refresh()} onNavigate={(item) => { if(item.section === "vehicles") setSelectedVehicle(vehicles.find(v=>v.id===item.vehicleId) || null); else { if(item.auditId) setAuditToOpen(item.auditId); changeSection(item.section as Section); } }} /> : null}
+          {section === "attention" ? <FleetAttentionWorkspace data={data} onChanged={() => router.refresh()} onNavigate={(item) => { if(item.section === "vehicles") setSelectedVehicle(vehicles.find(v=>v.id===item.vehicleId) || null); else if(item.section === "tracking") openExceptions({vehicleNo:item.vehicle,date:item.due||data.today}); else { if(item.auditId) setAuditToOpen(item.auditId); changeSection(item.section as Section); } }} /> : null}
           {section === "overview" ? <>
             {visibleSectionSet.has("attention") ? <button type="button" className="fc-attention-banner" onClick={() => changeSection("attention")}><AlertTriangle size={22}/><span><strong>{fleetAttention(data).filter(r=>!r.resolved).length} actions need attention</strong><small>Repair follow-ups, overdue returns, documents and audits</small></span><ArrowRight size={20}/></button> : null}
             <section className="fc-hero">
@@ -646,7 +652,7 @@ export function FleetControlDashboard({
               <article><span className="purple"><Activity size={19} /></span><div><small>Ad Hoc usage today</small><strong>{todayAdHoc.length}</strong><p>{todayAdHoc.filter((row) => row.requestType === "Van").length} vans · {todayAdHoc.filter((row) => row.requestType === "Driver").length} drivers</p></div><b>View only</b></article>
             </section>
 
-            <button className={`fc-command-exception ${data.dailyKm.some((row) => row.date >= data.today.slice(0, 7) + "-01" && row.lateNight) ? "alert" : "clear"}`} onClick={() => changeSection("tracking")} type="button"><span><ShieldCheck size={18} /></span><div><small>GPS exceptions · month to date</small><strong>{data.dailyKm.filter((row) => row.date >= data.today.slice(0, 7) + "-01" && row.lateNight).length} after-hours movements</strong><p>Movement between 10 p.m. and 5 a.m. · open the Exceptions tab to review operating time, distance and assigned station.</p></div><ArrowRight size={17} /></button>
+            {visibleSectionSet.has("tracking") && openGpsAlerts.length > 0 ? <button className="fc-command-exception alert" onClick={() => openExceptions(openGpsAlerts.length===1 ? {vehicleNo:openGpsAlerts[0].vehicleNo,date:openGpsAlerts[0].date} : undefined)} type="button"><span><ShieldCheck size={18} /></span><div><small>Open GPS exceptions · month to date</small><strong>{openGpsAlerts.length} after-hours {openGpsAlerts.length===1?"movement":"movements"}</strong><p>Review recorded locations and operating times, then acknowledge with remarks.</p></div><ArrowRight size={17} /></button> : null}
 
             <section className="fc-overview-grid">
               <article className="fc-panel fc-today-audit-panel">
@@ -746,7 +752,7 @@ export function FleetControlDashboard({
             </div>
           </section> : null}
 
-          {section === "tracking" ? <section className="fc-section"><FleetTrackingWorkspace data={{ ...data, vehicles }} /></section> : null}
+          {section === "tracking" ? <section className="fc-section"><FleetTrackingWorkspace data={{ ...data, vehicles }} exceptionEntry={exceptionEntry} onReviewed={(review)=>{setReviewUpdates(previous=>[...previous,review]);router.refresh();}} /></section> : null}
           {section === "fuel" ? <section className="fc-section"><DailyFleetReportView focus="fuel" stationOptions={data.stationOptions} /></section> : null}
 
           {section === "adhoc" ? <section className="fc-section"><FleetAdHocCapacity rows={data.adHocRows} stationOptions={data.stationOptions} today={data.today} /></section> : null}

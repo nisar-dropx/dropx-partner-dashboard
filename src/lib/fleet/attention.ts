@@ -1,3 +1,4 @@
+import {gpsExceptions,isOwnedVehicle} from './gps-exceptions';
 import type { FleetControlData } from '../fleet-control';
 export type AttentionItem={id:string;title:string;detail:string;station:string;vehicle:string;vehicleId:string;due:string|null;priority:number;category:string;section:string;findingId?:string;auditId?:string;resolved?:boolean};
 export function fleetAttention(data:FleetControlData):AttentionItem[]{
@@ -6,7 +7,7 @@ export function fleetAttention(data:FleetControlData):AttentionItem[]{
  for(const v of data.vehicles){
   if(['sold','disposed','returned'].includes(v.status))continue;
   if(can('vehicles')&&!(data.vehicleStatuses?.find(s=>s.key===v.status)?.isOperational ?? v.status==='active'))rows.push({id:`return-${v.id}`,title:`${v.statusLabel}${v.expectedOperationalDate&&v.expectedOperationalDate<data.today?' · return overdue':''}`,detail:v.statusComment||'Update the vehicle condition and expected return.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:v.expectedOperationalDate,priority:v.status==='breakdown'?0:1,category:'Availability',section:'vehicles'});
-  if(can('service')&&v.nextServiceDate&&v.nextServiceDate<=new Date(Date.parse(`${data.today}T00:00:00Z`)+data.settings.serviceWarningDays*86400000).toISOString().slice(0,10))rows.push({id:`service-${v.id}`,title:'Scheduled service',detail:'Review service due date and book the workshop.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:v.nextServiceDate,priority:2,category:'Service',section:'service'});
+  if(can('service')&&isOwnedVehicle(v)&&v.nextServiceDate&&v.nextServiceDate<=new Date(Date.parse(`${data.today}T00:00:00Z`)+data.settings.serviceWarningDays*86400000).toISOString().slice(0,10))rows.push({id:`service-${v.id}`,title:'Scheduled service',detail:'Review service due date and book the workshop.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:v.nextServiceDate,priority:2,category:'Service',section:'service'});
   if(can('documents'))for(const d of data.documentTypes){
    if(d.value==='FLEET_PUC'&&v.fuelType.toLowerCase()==='ev')continue;
    const saved=data.documents.find(x=>x.vehicleNo===v.vehicleNo&&x.documentType===d.value);
@@ -15,7 +16,7 @@ export function fleetAttention(data:FleetControlData):AttentionItem[]{
   }
  }
  if(can('audits'))for(const a of data.audits)if(['scheduled','in_progress'].includes(a.status)&&a.scheduledFor<=data.today)rows.push({id:`audit-${a.id}`,title:`${a.auditMode==='physical'?'Physical':'Virtual'} audit ${a.status==='in_progress'?'in progress':'due'}`,detail:'Complete the scheduled checklist.',station:a.stationCode,vehicle:a.vehicleNo,vehicleId:a.vehicleId,due:a.scheduledFor,priority:2,category:'Audits due',section:'audits',auditId:a.id});
- if(can('tracking'))for(const k of data.dailyKm || [])if(k.date===data.today&&k.lateNight){const v=data.vehicles.find(v=>v.vehicleNo===k.vehicleNo);if(v)rows.push({id:`gps-${v.id}`,title:'Movement outside operating hours',detail:'Review the recorded route and operating times.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:k.date,priority:1,category:'Tracking exceptions',section:'tracking'});}
+ if(can('tracking'))for(const k of gpsExceptions(data,data.today.slice(0,7)+'-01',data.today)){const v=data.vehicles.find(v=>v.vehicleNo===k.vehicleNo);if(v)rows.push({id:`gps-${v.id}-${k.date}`,title:'Movement outside operating hours',detail:'Review the recorded route and operating times.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:k.date,priority:1,category:'Tracking exceptions',section:'tracking'});}
  if(can('approvals'))for(const p of data.payments)if(p.canApprove)rows.push({id:`payment-${p.id}`,title:`${p.head} · ₹${p.amount.toLocaleString('en-IN')}`,detail:p.remarks,station:p.stationCode,vehicle:'',vehicleId:'',due:p.workDate||p.requestedAt.slice(0,10),priority:2,category:'Approvals',section:'approvals'});
  return rows.sort((a,b)=>Number(a.resolved)-Number(b.resolved)||a.priority-b.priority||(a.due||'9999').localeCompare(b.due||'9999'));
 }

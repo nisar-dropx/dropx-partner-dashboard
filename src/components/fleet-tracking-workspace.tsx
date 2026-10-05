@@ -2,6 +2,8 @@
 
 import { Activity, AlertTriangle, ArrowDownUp, Clock3, Fuel, Gauge, MapPin, RefreshCw, Route, Search, ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { FleetGpsExceptions, type ExceptionTarget } from '@/components/fleet-gps-exceptions';
+import type { GpsExceptionReview } from '@/lib/fleet/gps-exceptions';
 import { DailyFleetReportView } from "@/components/fleet-daily-report";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { RouteMap } from "@/components/fleet-dashboard";
@@ -53,9 +55,10 @@ const isoToday = () => new Date(Date.now() + 330 * 60_000).toISOString().slice(0
 const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 
-export function FleetTrackingWorkspace({ data }: { data: FleetControlData }) {
+export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { data: FleetControlData; exceptionEntry?: {target?:ExceptionTarget; key:number}|null; onReviewed?:(review:GpsExceptionReview)=>void }) {
   const stationOptions = data.stationOptions;
-  const [view, setView] = useState<"live" | "mileage" | "fuel" | "exceptions">("live");
+  const [view, setView] = useState<"live" | "mileage" | "fuel" | "exceptions">(exceptionEntry ? "exceptions" : "live");
+  useEffect(() => { if(exceptionEntry) setView("exceptions"); }, [exceptionEntry]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -145,7 +148,7 @@ export function FleetTrackingWorkspace({ data }: { data: FleetControlData }) {
       <button className={view === "exceptions" ? "active" : ""} onClick={() => setView("exceptions")} type="button"><ShieldAlert size={16} /> Exceptions</button>
     </nav>
 
-    {view === "exceptions" ? <FleetGpsExceptions data={data} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
+    {view === "exceptions" ? <FleetGpsExceptions data={data} initialException={exceptionEntry?.target} onReviewed={onReviewed} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
       <div className="fc-section-head fc-tracking-heading"><div><span className="fc-eyebrow">WheelsEye live feed</span><h1>Vehicle tracking</h1><p>Current GPS position and historical movement for vehicles that have tracking configured.</p></div><button className="fc-button secondary" disabled={refreshing} onClick={() => loadLive(true)} type="button"><RefreshCw className={refreshing ? "spin" : ""} size={16} /> Refresh live</button></div>
       {summary?.error ? <div className="fc-flash error"><span>{summary.error}</span></div> : null}
       <section className="fc-tracking-kpis">
@@ -176,12 +179,4 @@ export function FleetTrackingWorkspace({ data }: { data: FleetControlData }) {
       </section>
     </>}
   </div>;
-}
-
-function FleetGpsExceptions({ data }: { data: FleetControlData }) {
-  const [from, setFrom] = useState(shiftDate(isoToday(), -30)); const [to, setTo] = useState(isoToday());
-  const rows = data.dailyKm.filter((row) => row.date >= from && row.date <= to && row.lateNight).sort((a, b) => b.date.localeCompare(a.date));
-  const vehicleByNo = new Map(data.vehicles.map((vehicle) => [vehicle.vehicleNo, vehicle]));
-  const report = { title: "Fleet GPS exception report", subtitle: `${from} to ${to} · movement from 10 p.m. to 5 a.m. IST`, fileName: `fleet-gps-exceptions-${from}-${to}`, headers: ["Date", "Vehicle", "Assigned station", "Kilometres", "Moving minutes", "Max speed", "First movement", "Last movement", "Exception"], rows: rows.map((row) => [row.date, row.vehicleNo, vehicleByNo.get(row.vehicleNo)?.stationCode, row.km, row.movingMinutes, row.maxSpeed, row.firstMovingAt, row.lastMovingAt, "After-hours movement"]) };
-  return <section className="fc-gps-exceptions"><div className="fc-section-head"><div><span className="fc-eyebrow">GPS control tower</span><h1>Movement exceptions</h1><p>Review vehicles that operated between 10 p.m. and 5 a.m. The assigned station shown here is KOZA or the vehicle’s current Fleet placement.</p></div><FleetExportButtons report={report} /></div><div className="fc-exception-toolbar"><label><span>From</span><input max={to} onChange={(event) => setFrom(event.target.value)} type="date" value={from} /></label><label><span>To</span><input max={isoToday()} min={from} onChange={(event) => setTo(event.target.value)} type="date" value={to} /></label><article><ShieldAlert size={17} /><span><small>After-hours alerts</small><strong>{rows.length}</strong></span></article></div><div className="fc-panel fc-exception-list">{rows.map((row) => { const vehicle = vehicleByNo.get(row.vehicleNo); return <article key={`${row.vehicleNo}-${row.date}`}><span><AlertTriangle size={16} /></span><div><strong>{row.vehicleNo} · {vehicle?.stationCode ?? "Unmapped"}</strong><small>{row.date} · {row.movingMinutes ?? 0} operating minutes · {row.km.toFixed(1)} km</small><p>{row.firstMovingAt ? `First ${new Date(row.firstMovingAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}` : "Start time unavailable"} · {row.lastMovingAt ? `Last ${new Date(row.lastMovingAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}` : "End time unavailable"}</p></div><b>{row.maxSpeed ?? 0} km/h max</b></article>; })}{!rows.length ? <div className="fc-empty"><ShieldAlert size={31} /><strong>No after-hours movement in this period</strong><p>Refresh GPS history to populate operating-time exceptions.</p></div> : null}</div><p className="fc-exception-note">Off-station start alerts will activate after station coordinates and geofence radii are complete. This prevents false personal-use alerts. WhatsApp delivery remains disabled until a verified Fleet Manager channel is connected in Settings.</p></section>;
 }

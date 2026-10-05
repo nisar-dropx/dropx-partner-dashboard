@@ -124,7 +124,7 @@ export async function POST(request: Request) {
 }
 
 async function assertVehicle(companyId: string, vehicleId: string) {
-  const result = await supabaseAdmin!.from("fleet_vehicles").select("id,vehicle_no,station_code,model").eq("company_id", companyId).eq("id", vehicleId).maybeSingle();
+  const result = await supabaseAdmin!.from("fleet_vehicles").select("id,vehicle_no,station_code,model,ownership_type").eq("company_id", companyId).eq("id", vehicleId).maybeSingle();
   if (result.error) throw new Error(result.error.message);
   if (!result.data) throw new Error("Vehicle was not found in this company.");
   return result.data;
@@ -133,7 +133,8 @@ async function assertVehicle(companyId: string, vehicleId: string) {
 async function createService(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet maintenance permission denied." }, { status: 403 });
   const vehicleId = required(body.vehicleId, "Vehicle");
-  await assertVehicle(companyId, vehicleId);
+  const vehicle = await assertVehicle(companyId, vehicleId);
+  if ((vehicle.ownership_type || "own") !== "own") return NextResponse.json({ error: "Service and maintenance are managed only for owned vehicles." }, { status: 400 });
   const result = await supabaseAdmin!.from("fleet_service_history").insert({
     company_id: companyId, vehicle_id: vehicleId, service_date: required(body.serviceDate, "Service date"), service_type: required(body.serviceType, "Service type"),
     odometer_km: numberOrNull(body.odometerKm), vendor_name: clean(body.vendorName) || null, vendor_contact: clean(body.vendorContact) || null,
@@ -148,7 +149,8 @@ async function createService(companyId: string, userId: string, allowed: boolean
 async function scheduleService(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet maintenance permission denied." }, { status: 403 });
   const vehicleId = required(body.vehicleId, "Vehicle");
-  await assertVehicle(companyId, vehicleId);
+  const vehicle = await assertVehicle(companyId, vehicleId);
+  if ((vehicle.ownership_type || "own") !== "own") return NextResponse.json({ error: "Service and maintenance are managed only for owned vehicles." }, { status: 400 });
   const serviceDate = required(body.serviceDate, "Next service date");
   const values = {
     service_date: serviceDate,
