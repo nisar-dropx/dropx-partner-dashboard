@@ -4,6 +4,7 @@ import { FormEvent, useState, useTransition } from "react";
 import {
   createAuditOption,
   createAuditSection,
+  saveAuditSection,
   createAuditType,
   createChecklistItem,
   saveAuditOption,
@@ -331,6 +332,16 @@ export function AuditMasterClient({
                       </select>
                     </label>
                     <label style={fieldStyle}>
+                      Weighted scoring
+                      <select
+                        name="scoring_enabled"
+                        defaultValue={type.scoring_enabled ? "yes" : "no"}
+                      >
+                        <option value="no">Off</option>
+                        <option value="yes">On</option>
+                      </select>
+                    </label>
+                    <label style={fieldStyle}>
                       Video recording required
                       <select
                         name="requires_video_link"
@@ -505,6 +516,16 @@ export function AuditMasterClient({
                     <input name="code" required />
                   </label>
                   <label style={fieldStyle}>
+                    Area score weight (%)
+                    <input
+                      name="score_weight"
+                      type="number"
+                      min="0"
+                      max="100"
+                      defaultValue="0"
+                    />
+                  </label>
+                  <label style={fieldStyle}>
                     Section name
                     <input name="name" required />
                   </label>
@@ -525,8 +546,8 @@ export function AuditMasterClient({
               <div>
                 <strong>Add checklist item</strong>
                 <p className="subtle">
-                  Response outcome, evidence and CAPA behaviour are defined
-                  here, not in code.
+                  Area weights, outcome scores, evidence and CAPA behaviour are
+                  defined here, not in code.
                 </p>
               </div>
             </div>
@@ -689,6 +710,47 @@ export function AuditMasterClient({
                           checks
                         </span>
                       </summary>
+                      <ActionForm
+                        action={saveAuditSection}
+                        className="ops-audit-master-item"
+                      >
+                        <input name="id" type="hidden" value={section.id} />
+                        <div className="fin-form-grid">
+                          <label style={fieldStyle}>
+                            Section name
+                            <input
+                              name="name"
+                              defaultValue={section.name}
+                              required
+                            />
+                          </label>
+                          <label style={fieldStyle}>
+                            Area score weight (%)
+                            <input
+                              name="score_weight"
+                              type="number"
+                              min="0"
+                              max="100"
+                              defaultValue={section.score_weight || 0}
+                            />
+                          </label>
+                          <label style={fieldStyle}>
+                            Order
+                            <input
+                              name="sort_order"
+                              type="number"
+                              defaultValue={section.sort_order}
+                            />
+                          </label>
+                        </div>
+                        <label className="fin-label">
+                          Guidance
+                          <textarea
+                            name="guidance"
+                            defaultValue={section.guidance || ""}
+                          />
+                        </label>
+                      </ActionForm>
                       {checklistItems
                         .filter((item) => item.section_id === section.id)
                         .map((item) => (
@@ -716,6 +778,36 @@ export function AuditMasterClient({
                                 />
                               </label>
                               <label style={fieldStyle}>
+                                Check weight within area
+                                <input
+                                  name="score_weight"
+                                  type="number"
+                                  min="0.01"
+                                  max="100"
+                                  step="0.01"
+                                  defaultValue={item.score_weight || 1}
+                                />
+                              </label>
+                              <label style={fieldStyle}>
+                                Scoring source
+                                <select
+                                  name="score_source"
+                                  defaultValue={
+                                    item.score_source || "checklist"
+                                  }
+                                >
+                                  <option value="checklist">
+                                    Checklist outcome
+                                  </option>
+                                  <option value="cash_match">
+                                    Calculated cash accuracy
+                                  </option>
+                                  <option value="shipment_match">
+                                    Calculated TID accuracy
+                                  </option>
+                                </select>
+                              </label>
+                              <label style={fieldStyle}>
                                 Severity
                                 <input
                                   name="default_severity_code"
@@ -736,7 +828,8 @@ export function AuditMasterClient({
                             <label className="fin-label">
                               Response options{" "}
                               <span className="subtle">
-                                Edit is_compliant, requires_action and
+                                Set score from 0 to 100 (null for N/A). Edit
+                                is_compliant, requires_action and
                                 requires_evidence for each response.
                               </span>
                               <textarea

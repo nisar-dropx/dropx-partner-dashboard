@@ -10,8 +10,9 @@ export async function uploadAuditFiles(
       "variance_evidence",
       "evidence_files",
       "response_evidence",
-      ...Array.from(data.keys()).filter((key) =>
-        key.startsWith("check_photo_"),
+      ...Array.from(data.keys()).filter(
+        (key) =>
+          key.startsWith("check_photo_") || key.startsWith("assessment_proof_"),
       ),
     ]),
   );
@@ -65,7 +66,7 @@ export async function uploadAuditFiles(
         contentType: file.type || "application/octet-stream",
       });
     if (uploaded.error) throw new Error(uploaded.error.message);
-    await call({
+    const completed = await call({
       phase: "complete",
       path: signed.path,
       kind:
@@ -75,6 +76,11 @@ export async function uploadAuditFiles(
             ? "cash_variance"
             : "document",
     });
+    if (field.startsWith("assessment_proof_"))
+      data.set(
+        `assessment_evidence_${field.slice("assessment_proof_".length)}`,
+        completed.evidenceId,
+      );
     onProgress?.(++done, files.length);
   };
   for (let index = 0; index < files.length; index += 3)
