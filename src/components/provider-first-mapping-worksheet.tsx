@@ -11,9 +11,12 @@ import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
   providerFirstNamesMatch,
+  providerFirstMappingReplacement,
+  providerFirstMappingReplacementMessage,
   providerFirstPageWindow,
   providerFirstRowIssue,
   providerMemberKey,
+  type ProviderFirstMappingReplacement,
   type ProviderFirstMappingRowView,
   type ProviderFirstPageSize,
   type ProviderFirstWorkerView
@@ -30,7 +33,7 @@ function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderF
   return Boolean(worker?.mappedProviderMemberId && providerMemberKey(row.stationId, worker.mappedProviderMemberId) !== providerMemberKey(row.stationId, row.providerMemberId));
 }
 
-function appendRow(formData: FormData, position: number, row: ProviderFirstMappingRow) {
+function appendRow(formData: FormData, position: number, row: ProviderFirstMappingRow, replacementMappingId = "") {
   const prefix = `rows[${position}]`;
   formData.set(`${prefix}[client_key]`, providerMemberKey(row.stationId, row.providerMemberId));
   formData.set(`${prefix}[id]`, row.workforceId);
@@ -41,12 +44,22 @@ function appendRow(formData: FormData, position: number, row: ProviderFirstMappi
   formData.set(`${prefix}[provider_id]`, row.providerId);
   formData.set(`${prefix}[station_id]`, row.stationId);
   formData.set(`${prefix}[provider_member_id]`, row.providerMemberId);
+  formData.set(`${prefix}[provider_member_name]`, row.providerMemberName);
   formData.set(`${prefix}[payment_method_id]`, row.paymentMethodId);
   formData.set(`${prefix}[payment_values_json]`, JSON.stringify(row.paymentValues));
   formData.set(`${prefix}[production_threshold_minimum_units]`, row.productionThresholdMinimumUnits);
   formData.set(`${prefix}[effective_from]`, row.effectiveFrom);
   formData.set(`${prefix}[effective_to]`, row.effectiveTo);
+  formData.set(`${prefix}[replace_mapping_id]`, replacementMappingId);
+  formData.set(`${prefix}[replacement_confirmed]`, replacementMappingId ? "yes" : "");
 }
+
+type ReplacementSaveConfirmation = {
+  indexes: number[];
+  replacements: Array<{ index: number; replacement: ProviderFirstMappingReplacement }>;
+  cursor: number;
+  confirmedMappingIds: Record<number, string>;
+};
 
 function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   busy: boolean;
@@ -81,6 +94,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [savingIndexes, setSavingIndexes] = useState<Set<number>>(() => new Set());
   const [saveNotice, setSaveNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [replacementConfirmation, setReplacementConfirmation] = useState<ReplacementSaveConfirmation | null>(null);
 
   const paymentMethodById = useMemo(() => new Map(paymentMethods.map((method) => [method.id, method])), [paymentMethods]);
   const paymentOptions = useMemo(() => paymentMethods.filter((method) => method.isActive !== false).map((method) => ({ value: method.id, label: method.name, helper: method.code })), [paymentMethods]);
@@ -153,7 +167,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       productionThreshold: buildProductionThresholdSnapshot(next.productionThresholdConfig ?? method?.productionThresholdConfig ?? null, next.productionThresholdMinimumUnits)
     };
     let history = previous.history;
-    if (previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
+    if (previous.mappingId && previous.workforceId !== next.workforceId) {
+      history = history.filter((entry) => entry.id !== previous.mappingId);
+    } else if (previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
       const closingDate = new Date(`${next.effectiveFrom}T00:00:00.000Z`);
       closingDate.setUTCDate(closingDate.getUTCDate() - 1);
       const effectiveTo = closingDate.toISOString().slice(0, 10);
@@ -169,22 +185,23 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       return;
     }
     const row = rows[index];
+    const targetHasMapping = Boolean(worker.mappingId);
     update(index, {
       workforceId: worker.id,
       dropxId: worker.dropxId,
       dropxName: worker.fullName,
-      mappingId: row.mappingId || worker.mappingId,
+      mappingId: worker.mappingId,
       providerId: row.providerId || worker.providerId,
-      paymentMethodId: worker.paymentMethodId,
-      paymentValues: worker.paymentValues,
-      productionThresholdConfig: worker.productionThresholdConfig,
-      productionThresholdMinimumUnits: worker.productionThresholdMinimumUnits,
-      effectiveFrom: worker.effectiveFrom || worker.dateOfJoin,
-      effectiveTo: worker.effectiveTo
+      paymentMethodId: targetHasMapping ? worker.paymentMethodId : row.paymentMethodId,
+      paymentValues: targetHasMapping ? worker.paymentValues : row.paymentValues,
+      productionThresholdConfig: targetHasMapping ? worker.productionThresholdConfig : row.productionThresholdConfig,
+      productionThresholdMinimumUnits: targetHasMapping ? worker.productionThresholdMinimumUnits : row.productionThresholdMinimumUnits,
+      effectiveFrom: targetHasMapping ? worker.effectiveFrom : row.effectiveFrom || worker.dateOfJoin,
+      effectiveTo: targetHasMapping ? worker.effectiveTo : row.effectiveTo
     });
   }
 
-  async function saveIndexes(indexes: number[]) {
+  async function saveIndexes(indexes: number[], confirmedMappingIds: Record<number, string> = {}) {
     if (isSaving) return;
     const selected = Array.from(new Set(indexes)).filter((index) => dirtyRows[index]);
     const nextErrors: Record<number, string> = {};
@@ -199,17 +216,27 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       return;
     }
 
+    const replacements = selected.flatMap((index) => {
+      const replacement = providerFirstMappingReplacement(baselineRows[index], rows[index]);
+      return replacement && !confirmedMappingIds[index] ? [{ index, replacement }] : [];
+    });
+    if (replacements.length) {
+      setReplacementConfirmation({ indexes: selected, replacements, cursor: 0, confirmedMappingIds });
+      return;
+    }
+
     const snapshots = selected.map((index) => ({
       index,
       key: providerMemberKey(rows[index].stationId, rows[index].providerMemberId),
       row: { ...rows[index], paymentValues: { ...rows[index].paymentValues } },
-      previousWorkforceId: baselineRows[index]?.workforceId ?? ""
+      previousWorkforceId: baselineRows[index]?.workforceId ?? "",
+      replacementMappingId: confirmedMappingIds[index] ?? ""
     }));
     const snapshotByKey = new Map(snapshots.map((snapshot) => [snapshot.key, snapshot]));
     const snapshotByIndex = new Map(snapshots.map((snapshot) => [snapshot.index, snapshot]));
     const data = new FormData();
     data.set("row_count", String(snapshots.length));
-    snapshots.forEach((snapshot, position) => appendRow(data, position, snapshot.row));
+    snapshots.forEach((snapshot, position) => appendRow(data, position, snapshot.row, snapshot.replacementMappingId));
     setSavingIndexes(new Set(selected));
     setSaveNotice(null);
 
@@ -270,6 +297,17 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       if (!result.ok && result.failedClientKey) {
         const failed = snapshotByKey.get(result.failedClientKey);
         if (failed) setErrors((current) => ({ ...current, [failed.index]: result.message }));
+      }
+      if (result.replacement) {
+        const failed = snapshotByKey.get(result.replacement.clientKey);
+        if (failed) {
+          setReplacementConfirmation({
+            indexes: [failed.index],
+            replacements: [{ index: failed.index, replacement: result.replacement }],
+            cursor: 0,
+            confirmedMappingIds: {}
+          });
+        }
       }
       setSaveNotice({ kind: result.ok ? "success" : "error", message: result.message });
     } catch (error) {
@@ -341,5 +379,28 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <div className="mapping-pagination-actions"><button className="button secondary compact" disabled={pageWindow.page <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} type="button">Previous</button><span>Page {pageWindow.page} of {pageWindow.totalPages}</span><button className="button secondary compact" disabled={pageWindow.page >= pageWindow.totalPages} onClick={() => setCurrentPage((page) => Math.min(pageWindow.totalPages, page + 1))} type="button">Next</button></div>
       </div>
     </section>
+    {replacementConfirmation ? (() => {
+      const active = replacementConfirmation.replacements[replacementConfirmation.cursor];
+      return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setReplacementConfirmation(null); }}>
+        <section aria-labelledby="provider-replacement-title" aria-modal="true" className="modal-panel confirmation-dialog" role="alertdialog">
+          <div className="modal-head"><div><h2 id="provider-replacement-title">Replace existing mapping?</h2></div></div>
+          <div className="confirmation-body"><p style={{ whiteSpace: "pre-line" }}>{providerFirstMappingReplacementMessage(active.replacement)}</p></div>
+          <div className="form-actions modal-actions confirmation-actions">
+            <button className="button secondary" disabled={isSaving} onClick={() => setReplacementConfirmation(null)} type="button">Cancel</button>
+            <button className="button" disabled={isSaving} onClick={() => {
+              const confirmedMappingIds = { ...replacementConfirmation.confirmedMappingIds, [active.index]: active.replacement.mappingId };
+              const nextCursor = replacementConfirmation.cursor + 1;
+              if (nextCursor < replacementConfirmation.replacements.length) {
+                setReplacementConfirmation({ ...replacementConfirmation, cursor: nextCursor, confirmedMappingIds });
+                return;
+              }
+              const indexes = replacementConfirmation.indexes;
+              setReplacementConfirmation(null);
+              void saveIndexes(indexes, confirmedMappingIds);
+            }} type="button">Replace mapping</button>
+          </div>
+        </section>
+      </div>;
+    })() : null}
   </div>;
 }

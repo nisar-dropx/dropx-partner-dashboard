@@ -7,6 +7,8 @@ import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
   providerFirstPageWindow,
+  providerFirstMappingReplacement,
+  providerFirstMappingReplacementMessage,
   providerFirstNamesMatch,
   providerFirstValidationStatus,
   providerMemberIdFromSpreadsheetCells,
@@ -55,6 +57,29 @@ const row = {
 test("keys provider members by station and normalized member ID", () => {
   assert.equal(providerMemberKey("station-1", " abc "), "station-1|ABC");
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
+});
+
+test("requests an exact confirmation only when an existing provider mapping changes DropX owner", () => {
+  const replacement = providerFirstMappingReplacement(row, {
+    ...row,
+    workforceId: "worker-2",
+    dropxId: "DROPX1234",
+    dropxName: "New Associate",
+    mappingId: ""
+  });
+  assert.deepEqual(replacement, {
+    mappingId: "mapping-1",
+    providerMemberId: "member-1",
+    providerMemberName: "Asha Devi",
+    existingDropxId: "DROPX1",
+    existingDropxName: "Asha Devi"
+  });
+  assert.equal(
+    providerFirstMappingReplacementMessage(replacement),
+    "Provider ID member-1 - Asha Devi already mapped to DROPX1 - Asha Devi.\nDo you want to replace this mapping?"
+  );
+  assert.equal(providerFirstMappingReplacement(row, { ...row, paymentValues: { DELIVERY: "15" } }), null);
+  assert.equal(providerFirstMappingReplacement({ ...row, mappingId: "" }, { ...row, workforceId: "worker-2" }), null);
 });
 
 test("matches controlled provider-report spelling variants without weakening global identity matching", () => {
@@ -247,15 +272,22 @@ test("paginates 1,103 filtered rows with every supported size", () => {
 });
 
 test("provider-first renders only the selected page and saves without navigation", async () => {
-  const [component, actions] = await Promise.all([
+  const [component, actions, replacementMigration] = await Promise.all([
     readFile(new URL("../components/provider-first-mapping-worksheet.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8")
+    readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../supabase/migrations/20261005083434_provider_mapping_confirmed_replacement.sql", import.meta.url), "utf8")
   ]);
   assert.match(component, /paginatedIndexes\.map/);
   assert.match(component, /isScientificProviderMemberId\(row\.providerMemberId\)/);
   assert.match(component, /formData\.set\(`\$\{prefix\}\[provider_member_id\]`, row\.providerMemberId\)/);
   assert.match(component, /Combined minimum \/ \{productionThresholdConfig\.period\}/);
   assert.match(component, /production_threshold_minimum_units/);
+  assert.match(component, /mappingId: worker\.mappingId/);
+  assert.match(component, /Replace existing mapping\?/);
+  assert.match(component, /Replace mapping/);
+  assert.match(component, /\[replace_mapping_id\]/);
+  assert.match(component, /\[replacement_confirmed\]/);
+  assert.match(component, /replacement && !confirmedMappingIds\[index\]/);
   assert.doesNotMatch(component, /<form action=\{saveProviderFirstMappingWorksheet\}/);
   const start = actions.indexOf("export async function saveProviderFirstMappingsInline");
   const end = actions.indexOf("/** Links an imported provider member", start);
@@ -263,6 +295,7 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(inlineAction, /getAuthorization\(\)/);
   assert.match(inlineAction, /canEditProviderMappings\(authorization\)/);
   assert.match(inlineAction, /saveExecutiveMappingRow/);
+  assert.match(inlineAction, /providerFirstReplacementState/);
   assert.doesNotMatch(inlineAction, /redirect\(|revalidatePath\(/);
   assert.match(actions, /isScientificProviderMemberId\(providerMemberId\)/);
   assert.match(actions, /XLSX\.read\(await file\.arrayBuffer\(\), \{ type: "array", raw: true \}\)/);
@@ -276,4 +309,16 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(actions, /Changes to an existing monthly combined minimum must start on the first day of a month/);
   assert.match(actions, /const providerId = String\(station\.provider_id/);
   assert.match(actions, /worker's current location is not allocated to your account/);
+  assert.match(actions, /workforce_replace_joining_mapping/);
+  assert.match(actions, /expectedReplacementId === providerMapping!\.id/);
+  assert.match(replacementMigration, /create or replace function public\.workforce_replace_joining_mapping/);
+  assert.match(replacementMigration, /p_expected_old_mapping uuid/);
+  assert.match(replacementMigration, /old_mapping\.status <> 'active'/);
+  assert.match(replacementMigration, /set status = 'cancelled'/);
+  assert.match(replacementMigration, /A replacement mapping cannot start in the future/);
+  assert.match(replacementMigration, /target\.status <> 'cancelled'/);
+  assert.match(replacementMigration, /daterange\(new_start, 'infinity'::date, '\[\]'\)/);
+  assert.match(replacementMigration, /perform public\.workforce_save_joining_mapping/);
+  assert.match(replacementMigration, /from public, anon, authenticated/);
+  assert.match(replacementMigration, /to service_role/);
 });

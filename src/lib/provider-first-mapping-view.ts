@@ -40,6 +40,32 @@ export type ProviderFirstMappingRowView = {
   history: PaymentAllocationHistoryEntry[];
 };
 
+export type ProviderFirstMappingReplacement = {
+  mappingId: string;
+  providerMemberId: string;
+  providerMemberName: string;
+  existingDropxId: string;
+  existingDropxName: string;
+};
+
+export function providerFirstMappingReplacement(
+  previous: ProviderFirstMappingRowView,
+  next: ProviderFirstMappingRowView
+): ProviderFirstMappingReplacement | null {
+  if (!previous.mappingId || !previous.workforceId || !next.workforceId || previous.workforceId === next.workforceId) return null;
+  return {
+    mappingId: previous.mappingId,
+    providerMemberId: previous.providerMemberId,
+    providerMemberName: previous.providerMemberName,
+    existingDropxId: previous.dropxId,
+    existingDropxName: previous.dropxName
+  };
+}
+
+export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
+  return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}.\nDo you want to replace this mapping?`;
+}
+
 export type ProviderFirstPaymentMethodView = {
   id: string;
   components: Array<{ code: string; label: string }>;
