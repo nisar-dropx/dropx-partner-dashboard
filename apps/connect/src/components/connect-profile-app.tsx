@@ -537,16 +537,19 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       if (value && !rule.pattern.test(value)) return rule.message;
     }
 
-    const mandatory = [
-      ...(enabled.has("pan_number") ? ["pan"] : []),
-      ...(enabled.has("pan_number") && enabled.has("aadhaar_number") ? ["pan_aadhaar"] : []),
-      ...(enabled.has("bank_account_no") && enabled.has("ifsc") ? ["bank"] : []),
-      ...(pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? ["pf_uan"] : []),
-      ...(enabled.has("driving_license_no") ? ["dl"] : []),
-      ...(enabled.has("vehicle_reg_no") ? ["vehicle"] : [])
+    // An optional field left blank has nothing to verify, so it must not block submission.
+    const applies = (field: string, value: string | undefined) => enabled.has(field) && (required.has(field) || Boolean(value?.trim()));
+    const mandatory: Array<[string, string]> = [
+      ...(applies("pan_number", values.panNumber) ? [["pan", "PAN"] as [string, string]] : []),
+      ...(applies("pan_number", values.panNumber) && applies("aadhaar_number", values.aadhaarNumber) ? [["pan_aadhaar", "Aadhaar number"] as [string, string]] : []),
+      ...(applies("bank_account_no", values.bankAccountNo) && applies("ifsc", values.ifsc) ? [["bank", "Bank account"] as [string, string]] : []),
+      ...(pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? [["pf_uan", "PF UAN"] as [string, string]] : []),
+      ...(applies("driving_license_no", values.drivingLicenseNo) ? [["dl", "Driving license no"] as [string, string]] : []),
+      ...(applies("vehicle_reg_no", values.vehicleRegistrationNo) ? [["vehicle", "Vehicle reg no"] as [string, string]] : [])
     ];
-    if (mandatory.some((kind) => !attempted(kind))) {
-      return "Complete every applicable verification before saving.";
+    const pending = mandatory.filter(([kind]) => !attempted(kind)).map(([, label]) => label);
+    if (pending.length) {
+      return `Tap Verify for ${pending.join(", ")} before submitting.`;
     }
 
     const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
