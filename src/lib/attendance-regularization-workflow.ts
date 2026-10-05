@@ -1,7 +1,7 @@
 import "server-only";
 
 import { resolveConfiguredApprovalWorkflow, type ConfiguredApprovalStep } from "@/lib/approval-workflow-routing";
-import { isManagingPartnerDesignation, isStationSupportAttendanceDesignation, isStoreOrStationManagerDesignation, isTeamLeadDesignation } from "@/lib/approval-designation-labels";
+import { isManagingPartnerDesignation, isStationSupportAttendanceDesignation, isStoreOrStationManagerDesignation, isTeamLeadDesignation } from "./approval-designation-labels";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
