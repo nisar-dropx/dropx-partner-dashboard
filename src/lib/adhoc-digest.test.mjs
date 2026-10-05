@@ -153,3 +153,11 @@ test("delivery holds an email when the saved station is removed from the recipie
   assert.equal(result.skipped, 1);
   assert.match(updates[0].error, /scope changed/);
 });
+
+ test("compact table omits empty resources while MTD cards retain monthly-only stations",()=>{
+ const [mail]=digest.buildAdHocMessages({...options,activity:[activity("a",[{date:options.date,entries:[entry("Van",150)]}]),activity("b",[{date:"2026-09-10",entries:[entry("DA",80)]}])]});
+ assert.match(mail.text,/Ad hoc DA \/ WM — previous day: 0 instances, ₹0.00; MTD: 1 instances, ₹80.00/);
+ assert.doesNotMatch(mail.html,/>B<\/td>/);
+ assert.doesNotMatch(mail.html,/>Ad hoc DA \/ WM<\/td>/);
+ assert.deepEqual(mail.scope.stationIds,["a","b"]);
+ });
