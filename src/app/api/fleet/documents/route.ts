@@ -1,3 +1,4 @@
+import { documentApplies } from "@/lib/fleet/source-policy";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
   if (file.type && !allowedContentTypes.has(file.type)) return NextResponse.json({ error: "Upload a PDF, JPG, PNG or WebP file." }, { status: 400 });
   const vehicleResult = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("vehicle_no,station_code")
+    .select("vehicle_no,station_code,ownership_type,fuel_type")
     .eq("company_id", access.companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();
@@ -86,6 +87,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "This vehicle is not allocated to your user." }, { status: 403 });
   }
 
+  if (!documentApplies({value:documentType,ownershipTypes:"ownershipTypes" in documentPolicy ? documentPolicy.ownershipTypes : undefined},{ownershipType:vehicleResult.data.ownership_type || "own",fuelType:vehicleResult.data.fuel_type || ""})) return NextResponse.json({error:"This document is not required for this vehicle source. Update the rule in Fleet Masters if needed."},{status:400});
   await ensureBucket();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const storagePath = `${vehicleNo}/${documentType}/${Date.now()}-${safeName}`;
@@ -182,7 +184,7 @@ async function loadDocumentTypePolicy(companyId: string, documentType: string) {
   if (!supabaseAdmin) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackRequiresExpiry(documentType) };
   const { data, error } = await supabaseAdmin
     .from("document_types")
-    .select("id,requires_expiry")
+    .select("id,requires_expiry,fleet_ownership_types")
     .eq("company_id", companyId)
     .in("code", Array.from(new Set([documentType, documentType.toLowerCase()])))
     .eq("document_module", "fleet")
@@ -190,8 +192,8 @@ async function loadDocumentTypePolicy(companyId: string, documentType: string) {
     .limit(1);
   if (error) return { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackRequiresExpiry(documentType) };
   const configured = data?.[0];
-  if (documentType === "FLEET_REGISTRATION") return { valid: Boolean(configured) || fallbackDocumentTypes.has(documentType), requiresExpiry: false };
-  return configured ? { valid: true, requiresExpiry: configured.requires_expiry !== false } : { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackRequiresExpiry(documentType) };
+  if (documentType === "FLEET_REGISTRATION") return { valid: Boolean(configured) || fallbackDocumentTypes.has(documentType), ownershipTypes: configured?.fleet_ownership_types, requiresExpiry: false };
+  return configured ? { valid: true, ownershipTypes: configured.fleet_ownership_types, requiresExpiry: configured.requires_expiry !== false } : { valid: fallbackDocumentTypes.has(documentType), requiresExpiry: fallbackRequiresExpiry(documentType) };
 }
 
 function fallbackRequiresExpiry(documentType: string) {

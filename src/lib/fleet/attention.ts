@@ -1,3 +1,4 @@
+import { documentApplies } from "./source-policy.ts";
 import {gpsExceptions,isOwnedVehicle} from './gps-exceptions.ts';
 import type { FleetControlData } from '../fleet-control';
 export type AttentionItem={id:string;title:string;detail:string;station:string;vehicle:string;vehicleId:string;due:string|null;priority:number;category:string;section:string;documentType?:string;findingId?:string;auditId?:string;resolved?:boolean};
@@ -10,7 +11,7 @@ export function fleetAttention(data:FleetControlData):AttentionItem[]{
   if(can('vehicles')&&!(data.vehicleStatuses?.find(s=>s.key===v.status)?.isOperational ?? v.status==='active'))rows.push({id:`return-${v.id}`,title:`${v.statusLabel}${v.expectedOperationalDate&&v.expectedOperationalDate<data.today?' · return overdue':''}`,detail:v.statusComment||'Update the vehicle condition and expected return.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:v.expectedOperationalDate,priority:v.status==='breakdown'?0:1,category:'Availability',section:'vehicles'});
   if(can('service')&&isOwnedVehicle(v)&&v.nextServiceDate&&v.nextServiceDate<=new Date(Date.parse(`${data.today}T00:00:00Z`)+data.settings.serviceWarningDays*86400000).toISOString().slice(0,10))rows.push({id:`service-${v.id}`,title:'Scheduled service',detail:'Review service due date and book the workshop.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:v.nextServiceDate,priority:2,category:'Service',section:'service'});
   if(can('documents'))for(const d of data.documentTypes){
-   if(d.value==='FLEET_PUC'&&v.fuelType.toLowerCase()==='ev')continue;
+   if(!documentApplies(d,v))continue;
    const saved=data.documents.find(x=>x.vehicleNo===v.vehicleNo&&x.documentType===d.value);
    const due=saved?.expiryDate||null;
    if(!saved || (d.requiresExpiry && (!due || due<=new Date(Date.parse(`${data.today}T00:00:00Z`)+d.reminderDays*86400000).toISOString().slice(0,10))))rows.push({id:`doc-${v.id}-${d.value}`,title:`${d.label} · ${!saved?'copy missing':!due?'expiry missing':due<data.today?'expired':'due soon'}`,detail:'Review the saved copy and update the document.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due,priority:due&&due<data.today?1:2,category:'Documents',section:'documents',documentType:d.value});

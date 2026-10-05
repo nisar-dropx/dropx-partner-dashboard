@@ -442,6 +442,10 @@ function documentTypeCode(value: unknown, name: unknown) {
   return raw.startsWith("FLEET_") ? raw : `FLEET_${raw}`;
 }
 
+function masterSources(value: unknown) {
+  if (!Array.isArray(value) || !value.length || value.some(v=>!["own","odcd","rented"].includes(String(v)))) throw new Error("Choose at least one valid vehicle source.");
+  return [...new Set(value.map(String))];
+}
 async function upsertDocumentType(companyId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
   const id = clean(body.id);
@@ -453,6 +457,7 @@ async function upsertDocumentType(companyId: string, allowed: boolean, body: Pay
     name: required(body.name, "Document name"),
     description: clean(body.description) || null,
     requires_expiry: expiryMode === "required",
+    ...(body.ownershipTypes !== undefined ? { fleet_ownership_types: masterSources(body.ownershipTypes) } : {}),
     reminder_days: Math.max(0, Math.min(365, Number(body.reminderDays ?? 30) || 0)),
     sort_order: Math.max(0, Number(body.sortOrder ?? 100) || 0),
     document_module: "fleet",
@@ -501,6 +506,7 @@ async function upsertVehicleStatus(companyId: string, allowed: boolean, body: Pa
     is_terminal: Boolean(body.isTerminal),
     requires_reason: Boolean(body.requiresReason),
     requires_expected_date: Boolean(body.requiresExpectedDate),
+    ...(body.ownershipTypes !== undefined ? { ownership_types: masterSources(body.ownershipTypes) } : {}),
     sort_order: Number(body.sortOrder ?? 100),
     is_active: true,
     updated_at: new Date().toISOString()

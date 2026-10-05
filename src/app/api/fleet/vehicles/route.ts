@@ -1,3 +1,4 @@
+import { deploymentDateError } from "@/lib/fleet/source-policy";
 import { parseVehicleRent } from "@/lib/fleet/vehicle-rent";
 import { NextResponse } from "next/server";
 import { type AuthorizationContext, getAuthorization, hasPermission } from "@/lib/authorization";
@@ -25,6 +26,7 @@ const editableFields = [
   "status_reason_id",
   "status_reason_key",
   "deployment_status",
+  "deployment_date",
   "current_location_type",
   "current_location_code",
   "current_location_label",
@@ -41,6 +43,8 @@ export async function POST(request: Request) {
   const rent = parseVehicleRent(body);
   if (rent.error) return NextResponse.json({ error: rent.error }, { status: 400 });
   const payload: Record<string, string | null> = { ...sanitizePayload(body), ...rent.values, company_id: access.companyId };
+  const dateError = deploymentDateError(payload.deployment_date ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()), new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
+  if (dateError) return NextResponse.json({error:dateError},{status:400});
   if (!payload.status) payload.status = "active";
   if (!payload.ownership_type) payload.ownership_type = "own";
   if (!payload.vehicle_no) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
@@ -54,6 +58,17 @@ export async function POST(request: Request) {
   if (!canAccessStation(access.stationCodes, payload.station_code)) {
     return NextResponse.json({ error: "This location is not allocated to your user." }, { status: 403 });
   }
+
+  const statusPolicy = await supabaseAdmin.from("fleet_vehicle_status_master").select("id,is_operational,requires_reason,requires_expected_date").eq("company_id",access.companyId).eq("status_key",payload.status).eq("is_active",true).maybeSingle();
+  if(statusPolicy.error) return mutationError(statusPolicy.error.message);
+  if(!statusPolicy.data) return NextResponse.json({error:"Choose an active status from Fleet Masters."},{status:400});
+  if(statusPolicy.data.requires_expected_date && !payload.expected_operational_date) return NextResponse.json({error:"Expected return date is required."},{status:400});
+  if(statusPolicy.data.requires_reason) {
+    const reason=await supabaseAdmin.from("fleet_vehicle_status_reason_master").select("id,reason_key").eq("company_id",access.companyId).eq("status_id",statusPolicy.data.id).eq("id",payload.status_reason_id || "00000000-0000-0000-0000-000000000000").eq("is_active",true).maybeSingle();
+    if(reason.error || !reason.data) return NextResponse.json({error:"Choose a valid status reason."},{status:400});
+    payload.status_reason_key=reason.data.reason_key;
+  }
+  if(!statusPolicy.data.is_operational) payload.non_operational_since ||= new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata"}).format(new Date());
 
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
@@ -77,6 +92,10 @@ export async function PATCH(request: Request) {
 
   const payload = { ...sanitizePayload(body), ...rent.values };
   delete payload.vehicle_no;
+  if ("deployment_date" in payload) {
+    const dateError=deploymentDateError(payload.deployment_date,new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata"}).format(new Date()));
+    if(dateError)return NextResponse.json({error:dateError},{status:400});
+  }
   const guard = await requireVehicleScope(access.companyId, vehicleNo, access.stationCodes);
   if ("error" in guard) return guard.error;
   if (payload.station_code && !canAccessStation(access.stationCodes, payload.station_code)) {
