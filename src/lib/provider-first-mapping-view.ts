@@ -18,6 +18,8 @@ export type ProviderFirstWorkerView = {
   effectiveTo: string;
   mappedProviderMemberId: string;
   locationLabel: string;
+  profileStationId?: string;
+  profileLocationLabel?: string;
   onboardingStatus: string;
 };
 

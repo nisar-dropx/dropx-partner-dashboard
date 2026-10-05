@@ -35,6 +35,8 @@ const worker = {
   effectiveTo: "",
   mappedProviderMemberId: "member-1",
   locationLabel: "KOZA",
+  profileStationId: "station-1",
+  profileLocationLabel: "KOZA",
   onboardingStatus: "Active"
 };
 const row = {
@@ -113,6 +115,36 @@ test("permits only an exact same-provider, same-member location remap", () => {
   assert.equal(providerFirstLocationRemap({ ...destination, providerMemberId: "member-2" }, sourceWorker), null);
   assert.equal(providerFirstLocationRemap({ ...destination, mappingId: "stale-mapping" }, sourceWorker), null);
   assert.equal(providerFirstValidationStatus({ ...destination, providerId: "provider-2" }, sourceWorker, method), "needs_attention");
+});
+
+test("uses the effective mapping station when the Workforce profile already moved", () => {
+  const driftedWorker = {
+    ...worker,
+    stationId: "station-1",
+    locationLabel: "JUGD",
+    profileStationId: "station-2",
+    profileLocationLabel: "JUGF"
+  };
+  assert.equal(providerFirstLocationRemap({ ...row, stationId: "station-1" }, driftedWorker), null);
+  assert.deepEqual(
+    providerFirstLocationRemap({
+      ...row,
+      stationId: "station-2",
+      stationLabel: "JUGF",
+      effectiveFrom: "2026-10-04"
+    }, driftedWorker),
+    {
+      kind: "location",
+      mappingId: "mapping-1",
+      providerMemberId: "member-1",
+      providerMemberName: "Asha Devi",
+      existingDropxId: "DROPX1",
+      existingDropxName: "Asha Devi",
+      existingLocationLabel: "JUGD",
+      newLocationLabel: "JUGF",
+      effectiveFrom: "2026-10-04"
+    }
+  );
 });
 
 test("matches controlled provider-report spelling variants without weakening global identity matching", () => {
@@ -305,11 +337,13 @@ test("paginates 1,103 filtered rows with every supported size", () => {
 });
 
 test("provider-first renders only the selected page and saves without navigation", async () => {
-  const [component, actions, replacementMigration, locationRemapMigration] = await Promise.all([
+  const [component, page, actions, replacementMigration, locationRemapMigration, correctionMigration] = await Promise.all([
     readFile(new URL("../components/provider-first-mapping-worksheet.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/provider-id-mapping/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8"),
     readFile(new URL("../../supabase/migrations/20261005083434_provider_mapping_confirmed_replacement.sql", import.meta.url), "utf8"),
-    readFile(new URL("../../supabase/migrations/20261005102002_provider_mapping_location_remap.sql", import.meta.url), "utf8")
+    readFile(new URL("../../supabase/migrations/20261005102002_provider_mapping_location_remap.sql", import.meta.url), "utf8"),
+    readFile(new URL("../../supabase/migrations/20261005124958_provider_mapping_drift_and_period_corrections.sql", import.meta.url), "utf8")
   ]);
   assert.match(component, /paginatedIndexes\.map/);
   assert.match(component, /isScientificProviderMemberId\(row\.providerMemberId\)/);
@@ -321,6 +355,9 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /Move mapping to new location\?/);
   assert.match(component, /Replace mapping/);
   assert.match(component, /providerFirstLocationRemap/);
+  assert.match(component, /Mapped: \$\{worker\.locationLabel\} · Profile:/);
+  assert.match(component, /saved\?\.profileStationId/);
+  assert.match(page, /mapping\?\.station_id \?\? profileStationId/);
   assert.match(component, /\[replace_mapping_id\]/);
   assert.match(component, /\[replacement_confirmed\]/);
   assert.match(component, /replacement && !confirmedMappingIds\[index\]/);
@@ -345,6 +382,8 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(actions, /Changes to an existing monthly combined minimum must start on the first day of a month/);
   assert.match(actions, /const providerId = String\(station\.provider_id/);
   assert.match(actions, /worker's current location is not allocated to your account/);
+  assert.match(actions, /currentMappingLocationDriftEdit/);
+  assert.match(actions, /profileStationId/);
   assert.match(actions, /workforce_replace_joining_mapping/);
   assert.match(actions, /expectedReplacementId === existingMapping!\.id/);
   assert.match(replacementMigration, /create or replace function public\.workforce_replace_joining_mapping/);
@@ -364,4 +403,12 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(locationRemapMigration, /Payment-policy history contains a later location change/);
   assert.match(locationRemapMigration, /from public, anon, authenticated/);
   assert.match(locationRemapMigration, /to service_role/);
+  assert.match(correctionMigration, /provider_mapping_start_corrected/);
+  assert.match(correctionMigration, /effective_from = m\.effective_from/);
+  assert.match(correctionMigration, /Finalized Workforce payroll uses this mapping period/);
+  assert.match(correctionMigration, /coalesce\(payroll_item\.status, ''\) <> 'excluded'/);
+  assert.match(correctionMigration, /least\(new_start, old_mapping\.effective_from\)/);
+  assert.match(correctionMigration, /w\.location_id is distinct from v_old\.station_id/);
+  assert.match(correctionMigration, /person\.location_id is distinct from new_station_id/);
+  assert.match(correctionMigration, /policy\.station_id is distinct from p_new_station/);
 });

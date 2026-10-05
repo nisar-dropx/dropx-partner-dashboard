@@ -103,7 +103,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const workerOptions = useMemo(() => workerRows.map((worker) => ({
     value: worker.id,
     label: `${worker.dropxId} — ${worker.fullName}`,
-    helper: `${worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
+    helper: `${worker.profileStationId && worker.profileStationId !== worker.stationId
+      ? `Mapped: ${worker.locationLabel} · Profile: ${worker.profileLocationLabel ?? "No location"}`
+      : worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
   })), [workerRows]);
   const stations = useMemo(() => Array.from(new Map(rows.map((row) => [row.stationId, row.stationLabel])).entries()), [rows]);
   const dirtyRows = useMemo(() => rows.map((row, index) => {
@@ -336,7 +338,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           if (snapshot.previousWorkforceId && snapshot.previousWorkforceId !== canonical.workforceId) {
             workerClears.set(snapshot.previousWorkforceId, snapshot.row.providerMemberId);
           }
-          workerUpdates.set(canonical.workforceId, { stationId: canonical.stationId, locationLabel: canonical.stationLabel, providerId: canonical.providerId, mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
+          const saved = result.savedRows.find((candidate) => candidate.clientKey === snapshot.key);
+          workerUpdates.set(canonical.workforceId, { stationId: canonical.stationId, locationLabel: canonical.stationLabel, profileStationId: saved?.profileStationId ?? canonical.stationId, profileLocationLabel: saved?.profileLocationLabel ?? canonical.stationLabel, providerId: canonical.providerId, mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
         }
         setWorkerRows((current) => current.map((worker) => {
           const update = workerUpdates.get(worker.id);
@@ -400,6 +403,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
         const locationRemap = providerFirstLocationRemap(row, selectedWorker);
         const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId && !locationRemap);
+        const profileLocationDrift = Boolean(selectedWorker?.profileStationId && selectedWorker.profileStationId !== selectedWorker.stationId);
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
         const productionThresholdConfig = row.productionThresholdConfig ?? selectedPaymentMethod?.productionThresholdConfig ?? null;
         const rowPaymentOptions = selectedPaymentMethod?.isActive === false
@@ -429,6 +433,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Confirmation is required when saving.</div> : null}
+            {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}

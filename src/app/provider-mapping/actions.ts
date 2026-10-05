@@ -495,7 +495,7 @@ async function saveExecutiveMappingRow(
   createdBy: string,
   companyId: string,
   allowedLocationIds: Set<string> | null,
-  options: { allowWorkforceLocationRemap?: boolean } = {}
+  options: { allowWorkforceLocationRemap?: boolean; allowWorkforceLocationDriftEdit?: boolean } = {}
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const admin = supabaseAdmin;
@@ -625,7 +625,8 @@ async function saveExecutiveMappingRow(
   }
   if (sourceType === "workforce"
     && String((worker as { location_id?: string | null }).location_id ?? "") !== stationId
-    && !options.allowWorkforceLocationRemap) {
+    && !options.allowWorkforceLocationRemap
+    && !options.allowWorkforceLocationDriftEdit) {
     throw new Error(`Row ${index + 1}: Location mismatch.`);
   }
   if (!station) throw new Error(`Row ${index + 1}: Location was not found for this company.`);
@@ -981,7 +982,8 @@ async function assertProviderFirstRowScope(
   sourceType: string,
   allowedLocationIds: Set<string> | null,
   rowNumber: number,
-  locationRemapFromStationId: string | null = null
+  locationRemapFromStationId: string | null = null,
+  allowCurrentMappingLocationDrift = false
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   if (sourceType !== "workforce") {
@@ -1005,7 +1007,9 @@ async function assertProviderFirstRowScope(
   if (allowedLocationIds && (!currentStationId || !allowedLocationIds.has(currentStationId))) {
     throw new Error(`Row ${rowNumber}: The worker's current location is not allocated to your account.`);
   }
-  if (currentStationId !== stationId && currentStationId !== locationRemapFromStationId) {
+  if (currentStationId !== stationId
+    && currentStationId !== locationRemapFromStationId
+    && !allowCurrentMappingLocationDrift) {
     throw new Error(`Row ${rowNumber}: The selected DropX workforce ID is not available at this location.`);
   }
 }
@@ -1021,6 +1025,7 @@ type ProviderFirstActiveMapping = {
 type ProviderFirstReplacementState = {
   confirmation: ProviderFirstReplacementConfirmation | null;
   locationRemap: { mappingId: string; stationId: string } | null;
+  currentMappingLocationDriftEdit: boolean;
 };
 
 async function providerFirstReplacementState({
@@ -1112,7 +1117,14 @@ async function providerFirstReplacementState({
     if (expectedReplacementId) {
       throw new Error(`Row ${index + 1}: The active mapping changed after confirmation. Review it and try again.`);
     }
-    return { confirmation: null, locationRemap: null };
+    return {
+      confirmation: null,
+      locationRemap: null,
+      currentMappingLocationDriftEdit: Boolean(existingMapping
+        && existingMapping.id === submittedMappingId
+        && existingMapping.workforce_id === workforceId
+        && existingMapping.station_id === stationId)
+    };
   }
   if (allowedLocationIds && (!existingMapping!.station_id || !allowedLocationIds.has(existingMapping!.station_id))) {
     throw new Error(`Row ${index + 1}: The existing provider mapping is outside your allocated locations.`);
@@ -1170,10 +1182,11 @@ async function providerFirstReplacementState({
       confirmation: null,
       locationRemap: changeKind === "location"
         ? { mappingId: existingMapping!.id, stationId: String(existingMapping!.station_id) }
-        : null
+        : null,
+      currentMappingLocationDriftEdit: false
     };
   }
-  return { confirmation: replacement, locationRemap: null };
+  return { confirmation: replacement, locationRemap: null, currentMappingLocationDriftEdit: false };
 }
 
 /** Saves the full provider-member-first worksheet.  It deliberately reuses the
@@ -1211,11 +1224,14 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
       const sourceType = rowRequired(formData, index, "source_type", "Worker source");
       const submittedMappingId = rowValue(formData, index, "mapping_id");
       const replacementState = await providerFirstReplacementState({ formData, index, clientKey: rowValue(formData, index, "client_key") ?? String(index), companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
-      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null);
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null, replacementState.currentMappingLocationDriftEdit);
       if (replacementState.confirmation) {
         throw new Error(`Row ${index + 1}: Confirm the ${replacementState.confirmation.kind === "location" ? "location move" : "replacement"} before saving.`);
       }
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, { allowWorkforceLocationRemap: Boolean(replacementState.locationRemap) });
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, {
+        allowWorkforceLocationRemap: Boolean(replacementState.locationRemap),
+        allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit
+      });
       savedRows += 1;
     }
     revalidateTag("ops-cps");
@@ -1232,6 +1248,8 @@ export type ProviderFirstInlineSavedRow = {
   clientKey: string;
   mappingId: string;
   workforceId: string;
+  profileStationId: string;
+  profileLocationLabel: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
   productionThresholdConfig: ProductionThresholdConfig | null;
@@ -1285,7 +1303,7 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
       const sourceType = rowRequired(formData, index, "source_type", "Worker source");
       const submittedMappingId = rowValue(formData, index, "mapping_id");
       const replacementState = await providerFirstReplacementState({ formData, index, clientKey: currentClientKey, companyId, workforceId, providerMemberId, stationId, submittedMappingId, allowedLocationIds });
-      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null);
+      await assertProviderFirstRowScope(companyId, workforceId, stationId, sourceType, allowedLocationIds, index + 1, replacementState.locationRemap?.stationId ?? null, replacementState.currentMappingLocationDriftEdit);
       if (replacementState.confirmation) {
         return {
           ok: false,
@@ -1298,7 +1316,10 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         };
       }
 
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, { allowWorkforceLocationRemap: Boolean(replacementState.locationRemap) });
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds, {
+        allowWorkforceLocationRemap: Boolean(replacementState.locationRemap),
+        allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit
+      });
 
       const { data: savedMapping, error: savedMappingError } = await supabaseAdmin
         .from("field_executive_provider_mappings")
@@ -1314,6 +1335,24 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         .maybeSingle();
       if (savedMappingError) throw new Error(savedMappingError.message);
       if (!savedMapping) throw new Error(`Row ${index + 1}: The saved mapping could not be reloaded.`);
+
+      const { data: savedWorkforce, error: savedWorkforceError } = await supabaseAdmin
+        .from("workforce")
+        .select("location_id")
+        .eq("company_id", companyId)
+        .eq("id", workforceId)
+        .single();
+      if (savedWorkforceError) throw new Error(savedWorkforceError.message);
+      const profileStationId = String(savedWorkforce.location_id ?? "");
+      const { data: profileStation, error: profileStationError } = profileStationId
+        ? await supabaseAdmin
+          .from("stations")
+          .select("station_code")
+          .eq("company_id", companyId)
+          .eq("id", profileStationId)
+          .maybeSingle()
+        : { data: null, error: null };
+      if (profileStationError) throw new Error(profileStationError.message);
 
       const { data: relocatedMapping, error: relocatedMappingError } = replacementState.locationRemap
         ? await supabaseAdmin
@@ -1334,6 +1373,8 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         clientKey: currentClientKey,
         mappingId: String(savedMapping.id),
         workforceId: String(savedMapping.workforce_id ?? workforceId),
+        profileStationId,
+        profileLocationLabel: String(profileStation?.station_code ?? "No location"),
         paymentMethodId: String(savedMapping.payment_method_id ?? ""),
         paymentValues: Object.fromEntries(Object.entries((savedMapping.payment_values ?? {}) as Record<string, string | number>).map(([key, value]) => [key, String(value)])),
         productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null,
