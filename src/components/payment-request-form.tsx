@@ -5,6 +5,8 @@ import { PaymentCostSummary } from "./payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { AdhocReasonSelector } from "./adhoc-reason-selector";
 import { PaymentVolumeContext } from "./payment-volume-context";
+import { PaymentTrackingInput } from "./payment-tracking-input";
+import { isPaymentTrackingQuestion } from "@/lib/payment-shipment-count";
 import { AdhocDaFields } from "./adhoc-da-fields";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PaymentContactPicker } from "@/components/payment-contact-picker";
@@ -50,6 +52,7 @@ type PaymentRequestFormProps = {
 function inputForQuestion(question: PaymentQuestion, disabled = false, onValueChange?: (value: string) => void) {
   const syncValue = (event: { currentTarget: { value: string } }) => onValueChange?.(event.currentTarget.value);
   const name = `answers[${question.id}]`;
+  if (isPaymentTrackingQuestion(question)) return <PaymentTrackingInput name={name} required={question.is_required} disabled={disabled} onValueChange={onValueChange} />;
   if (question.answer_type === "dropdown") {
     const options = (question.dropdown_options ?? "")
       .split(",")

@@ -3,6 +3,7 @@ import { PaymentCostSummary } from "@/components/payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { Suspense } from "react";
 import { PaymentApprovalVolume } from "@/components/payment-approval-volume";
+import { PaymentApprovalShipments } from "@/components/payment-approval-shipments";
 import { adhocApprovalContext } from "@/lib/payment-volume";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -16,7 +17,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
 import { paymentApprovalAmount } from "@/lib/payment-approval-amount";
-import { paymentShipmentCount } from "@/lib/payment-shipment-count";
+import { paymentShipmentCount, isPaymentTrackingQuestion, parsePaymentTrackingIds } from "@/lib/payment-shipment-count";
 import { paymentRequestAttachments } from "@/lib/payment-request-attachments";
 import {
   matchesPaymentApprovalFacets,
@@ -376,6 +377,7 @@ export default async function PaymentApprovalsPage({
   const replacementResult = selectedRequest && supabaseAdmin ? await supabaseAdmin.from("payment_requests").select("adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date").eq("company_id",companyId).eq("id",selectedRequest.id).single() : null;
   const replacement = replacementResult?.data?.adhoc_vehicle_snapshot as {number:string;model:string;partner:string|null;source:string;status:string;reason:string;date:string}|null;
   const shipmentCount = paymentShipmentCount(answers);
+  const trackingIds = [...new Set(answers.filter(answer => isPaymentTrackingQuestion(answer.payment_head_questions)).flatMap(answer => parsePaymentTrackingIds(answer.answer_value ?? "")))];
   const volumeDate = adhocApprovalContext(selectedRequest?.payment_heads?.code, answers);
 
   const logs = selectedDetailData?.[2].logs ?? [];
@@ -553,6 +555,7 @@ export default async function PaymentApprovalsPage({
               {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason}</strong><p style={{margin:"4px 0 0"}}>{adhocVehicleLabel(replacement)} · Replacement date: {replacement.date}</p></div> : null}
               <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />
               {volumeDate ? <Suspense key={`${selectedRequest.id}:${volumeDate}`} fallback={<p className="subtle" role="status">Loading volume evidence… You can continue reviewing this request.</p>}><PaymentApprovalVolume company={companyId} station={selectedRequest.location_code} date={volumeDate} /></Suspense> : null}
+              {trackingIds.length && selectedRequest.payment_heads?.code === 'VAN_ADHOC' ? <PaymentApprovalShipments key={selectedRequest.id} requestId={selectedRequest.id} count={trackingIds.length} /> : null}
               <details className="payment-review-additional-details">
                 <summary><span>Payment and beneficiary details</span><small>Open only when needed</small></summary>
                 <div className="form-grid three">
@@ -601,7 +604,7 @@ export default async function PaymentApprovalsPage({
                                       </span>
                                     ))}
                                   </span>
-                                ) : answer.answer_value || "-"}
+                                ) : isPaymentTrackingQuestion(answer.payment_head_questions) ? <div style={{whiteSpace:"pre-line",maxHeight:180,overflowY:"auto",fontVariantNumeric:"tabular-nums"}}>{parsePaymentTrackingIds(answer.answer_value ?? "").join("\n") || "-"}</div> : answer.answer_value || "-"}
                               </td>
                             </tr>
                           );
