@@ -188,6 +188,69 @@ const snapshot = cache(
         "People station assignments could not be loaded. Please retry.",
       );
     const sourceFacts = facts.data as CpsFacts;
+    const productionThresholdFacts = (monthSourceFacts.data ?? sourceFacts) as CpsFacts;
+    const productionThresholdMappings = productionThresholdFacts.mappings ?? [];
+    const providerMappingIds = [...new Set([...(sourceFacts.mappings ?? []), ...productionThresholdMappings]
+      .map((mapping) => String(mapping.id ?? "").trim())
+      .filter(Boolean))];
+    const providerMethodIds = [...new Set([...(sourceFacts.mappings ?? []), ...productionThresholdMappings]
+      .map((mapping) => String(mapping.payment_method_id ?? "").trim())
+      .filter(Boolean))];
+    const [thresholdMappings, thresholdMethods, thresholdComponentOrder] = await Promise.all([
+      providerMappingIds.length
+        ? readAllRows(supabaseAdmin
+          .from("field_executive_provider_mappings")
+          .select("id,production_threshold_config")
+          .eq("company_id", company)
+          .order("id"))
+        : Promise.resolve({ data: [], error: null }),
+      providerMethodIds.length
+        ? readAllRows(supabaseAdmin
+          .from("payment_methods")
+          .select("id,production_threshold_config")
+          .eq("company_id", company)
+          .in("id", providerMethodIds)
+          .order("id"))
+        : Promise.resolve({ data: [], error: null }),
+      providerMethodIds.length
+        ? readAllRows(supabaseAdmin
+          .from("payment_method_components")
+          .select("payment_method_id,component_code,sort_order")
+          .eq("company_id", company)
+          .in("payment_method_id", providerMethodIds)
+          .eq("is_active", true)
+          .order("payment_method_id")
+          .order("sort_order")
+          .order("id"))
+        : Promise.resolve({ data: [], error: null })
+    ]);
+    if (thresholdMappings.error || thresholdMethods.error || thresholdComponentOrder.error) {
+      throw Error("Combined production minimum settings could not be loaded. Please retry.");
+    }
+    const thresholdByMappingId = new Map((thresholdMappings.data ?? [])
+      .map((mapping) => [String(mapping.id), mapping.production_threshold_config]));
+    const thresholdByMethodId = new Map((thresholdMethods.data ?? [])
+      .map((method) => [String(method.id), method.production_threshold_config]));
+    const orderByMethodComponent = new Map((thresholdComponentOrder.data ?? [])
+      .map((component) => [
+        `${String(component.payment_method_id)}|${String(component.component_code).trim().toUpperCase()}`,
+        Number(component.sort_order)
+      ]));
+    const enrichThresholdMapping = (mapping: Record<string, any>) => ({
+      ...mapping,
+      production_threshold_config: thresholdByMappingId.get(String(mapping.id)) ?? null,
+      method_production_threshold_config: thresholdByMethodId.get(String(mapping.payment_method_id)) ?? null
+    });
+    const enrichThresholdComponent = (component: Record<string, any>) => ({
+      ...component,
+      sort_order: orderByMethodComponent.get(
+        `${String(component.payment_method_id)}|${String(component.component_code).trim().toUpperCase()}`
+      ) ?? component.sort_order ?? null
+    });
+    sourceFacts.mappings = (sourceFacts.mappings ?? []).map(enrichThresholdMapping);
+    sourceFacts.components = (sourceFacts.components ?? []).map(enrichThresholdComponent);
+    productionThresholdFacts.mappings = productionThresholdMappings.map(enrichThresholdMapping);
+    productionThresholdFacts.components = (productionThresholdFacts.components ?? []).map(enrichThresholdComponent);
     // Company-private facts stay on the server. Merge current People assignments
     // before calculation, retaining the whole share denominator outside the filter.
     const mergeFacts = (
@@ -226,7 +289,7 @@ const snapshot = cache(
     }));
     sourceFacts.people_policies =
       peoplePolicies.data as CpsFacts["people_policies"];
-    const attendanceFacts = (monthSourceFacts.data ?? sourceFacts) as CpsFacts;
+    const attendanceFacts = productionThresholdFacts;
     sourceFacts.payment_policy_history = paymentPolicy.data ?? [];
     sourceFacts.attendance_capture_history = (attendanceCapture.data ??
       []) as WorkforceAttendanceCaptureSetting[];
@@ -236,6 +299,14 @@ const snapshot = cache(
     sourceFacts.attendance_workforce = attendanceFacts.workforce ?? [];
     sourceFacts.attendance_providers = attendanceFacts.providers ?? [];
     sourceFacts.attendance_stations = attendanceFacts.stations ?? [];
+    sourceFacts.production_threshold_context = {
+      shipments: productionThresholdFacts.shipments ?? [],
+      mappings: productionThresholdFacts.mappings ?? [],
+      workforce: productionThresholdFacts.workforce ?? [],
+      components: productionThresholdFacts.components ?? [],
+      providers: productionThresholdFacts.providers ?? [],
+      stations: productionThresholdFacts.stations ?? [],
+    };
     return rebuildCps(
       {
         ...result.data,

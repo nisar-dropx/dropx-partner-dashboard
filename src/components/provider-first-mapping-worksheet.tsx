@@ -6,6 +6,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
+import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import {
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
@@ -22,7 +23,7 @@ export type ProviderFirstWorker = ProviderFirstWorkerView;
 export type ProviderFirstMappingRow = ProviderFirstMappingRowView;
 
 function signature(row: ProviderFirstMappingRow) {
-  return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), row.effectiveFrom, row.effectiveTo].join("|");
+  return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), JSON.stringify(row.productionThresholdConfig), row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo].join("|");
 }
 
 function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderFirstWorker | undefined) {
@@ -42,6 +43,7 @@ function appendRow(formData: FormData, position: number, row: ProviderFirstMappi
   formData.set(`${prefix}[provider_member_id]`, row.providerMemberId);
   formData.set(`${prefix}[payment_method_id]`, row.paymentMethodId);
   formData.set(`${prefix}[payment_values_json]`, JSON.stringify(row.paymentValues));
+  formData.set(`${prefix}[production_threshold_minimum_units]`, row.productionThresholdMinimumUnits);
   formData.set(`${prefix}[effective_from]`, row.effectiveFrom);
   formData.set(`${prefix}[effective_to]`, row.effectiveTo);
 }
@@ -89,7 +91,12 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     helper: `${worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
   })), [workerRows]);
   const stations = useMemo(() => Array.from(new Map(rows.map((row) => [row.stationId, row.stationLabel])).entries()), [rows]);
-  const dirtyRows = useMemo(() => rows.map((row, index) => signature(row) !== signature(baselineRows[index])), [rows, baselineRows]);
+  const dirtyRows = useMemo(() => rows.map((row, index) => {
+    const thresholdConfig = row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig ?? null;
+    const minimumUnits = Number(row.productionThresholdMinimumUnits);
+    const thresholdIncomplete = Boolean(thresholdConfig && (!row.productionThresholdMinimumUnits.trim() || !Number.isInteger(minimumUnits) || minimumUnits <= 0));
+    return thresholdIncomplete || signature(row) !== signature(baselineRows[index]);
+  }), [rows, baselineRows, paymentMethodById]);
   const dirtyIndexes = useMemo(() => dirtyRows.flatMap((dirty, index) => dirty ? [index] : []), [dirtyRows]);
   const hasDirty = dirtyIndexes.length > 0;
   const hasDirtyNameMismatch = dirtyIndexes.some((index) => Boolean(rows[index].workforceId) && !providerFirstNamesMatch(rows[index].providerMemberName, rows[index].dropxName));
@@ -142,7 +149,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       sourceLabel: `Provider ID ${next.providerMemberId}`,
       subjectLabel: `${next.dropxId} · ${next.dropxName}`.replace(/^ · | · $/g, ""),
       locationLabel: next.stationLabel,
-      rates: paymentAllocationHistoryRates(next.paymentValues, (method?.components ?? []).map((component, index) => ({ code: component.code, label: component.label, sortOrder: index })))
+      rates: paymentAllocationHistoryRates(next.paymentValues, (method?.components ?? []).map((component, index) => ({ code: component.code, label: component.label, sortOrder: index }))),
+      productionThreshold: buildProductionThresholdSnapshot(next.productionThresholdConfig ?? method?.productionThresholdConfig ?? null, next.productionThresholdMinimumUnits)
     };
     let history = previous.history;
     if (previous.mappingId && previous.mappingId !== next.mappingId && next.effectiveFrom > previous.effectiveFrom) {
@@ -157,7 +165,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   function chooseWorker(index: number, workerId: string) {
     const worker = workerById.get(workerId);
     if (!worker) {
-      update(index, { workforceId: "", dropxId: "", dropxName: "", mappingId: "", paymentMethodId: "", paymentValues: {}, effectiveFrom: "", effectiveTo: "" });
+      update(index, { workforceId: "", dropxId: "", dropxName: "", mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "" });
       return;
     }
     const row = rows[index];
@@ -169,6 +177,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       providerId: row.providerId || worker.providerId,
       paymentMethodId: worker.paymentMethodId,
       paymentValues: worker.paymentValues,
+      productionThresholdConfig: worker.productionThresholdConfig,
+      productionThresholdMinimumUnits: worker.productionThresholdMinimumUnits,
       effectiveFrom: worker.effectiveFrom || worker.dateOfJoin,
       effectiveTo: worker.effectiveTo
     });
@@ -215,6 +225,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           workforceId: saved.workforceId,
           paymentMethodId: saved.paymentMethodId,
           paymentValues: saved.paymentValues,
+          productionThresholdConfig: saved.productionThresholdConfig,
+          productionThresholdMinimumUnits: saved.productionThresholdMinimumUnits,
           effectiveFrom: saved.effectiveFrom,
           effectiveTo: saved.effectiveTo
         };
@@ -238,14 +250,14 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           if (snapshot.previousWorkforceId && snapshot.previousWorkforceId !== canonical.workforceId) {
             workerClears.set(snapshot.previousWorkforceId, snapshot.row.providerMemberId);
           }
-          workerUpdates.set(canonical.workforceId, { mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
+          workerUpdates.set(canonical.workforceId, { mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
         }
         setWorkerRows((current) => current.map((worker) => {
           const update = workerUpdates.get(worker.id);
           if (update) return { ...worker, ...update };
           const expectedMember = workerClears.get(worker.id);
           return expectedMember && providerMemberKey(worker.stationId, worker.mappedProviderMemberId) === providerMemberKey(worker.stationId, expectedMember)
-            ? { ...worker, mappingId: "", paymentMethodId: "", paymentValues: {}, effectiveFrom: "", effectiveTo: "", mappedProviderMemberId: "" }
+            ? { ...worker, mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "", mappedProviderMemberId: "" }
             : worker;
         }));
         setErrors((current) => {
@@ -290,6 +302,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
         const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId);
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
+        const productionThresholdConfig = row.productionThresholdConfig ?? selectedPaymentMethod?.productionThresholdConfig ?? null;
         const rowPaymentOptions = selectedPaymentMethod?.isActive === false
           ? [{ value: selectedPaymentMethod.id, label: `${selectedPaymentMethod.name} (Inactive)`, helper: selectedPaymentMethod.code }, ...paymentOptions]
           : paymentOptions;
@@ -307,8 +320,13 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           </div>
           <div className="mapping-edit-grid">
             <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Select DropX workforce" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : null}</div>
-            <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {} })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
+            {productionThresholdConfig ? <label>
+              Combined minimum / {productionThresholdConfig.period}
+              <input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="1" onChange={(event) => update(index, { productionThresholdMinimumUnits: event.target.value })} placeholder="Enter minimum units" step="1" type="number" value={row.productionThresholdMinimumUnits} />
+              <span className="provider-first-selected-detail">Combined across {productionThresholdConfig.component_codes.map((code) => components.find((component) => component.code === code)?.label ?? code).join(" + ")}</span>
+            </label> : null}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}

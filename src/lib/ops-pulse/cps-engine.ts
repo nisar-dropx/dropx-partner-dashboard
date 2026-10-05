@@ -19,6 +19,11 @@ import {
   workforceAttendanceCaptureSettingForDate,
   type WorkforceAttendanceCaptureSetting,
 } from '../workforce-attendance-capture';
+import {
+  allocateCombinedProductionThresholds,
+  type WorkforceProductionThresholdAllocation,
+  type WorkforceProductionThresholdInput,
+} from '../workforce-production-threshold';
 
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
@@ -36,6 +41,14 @@ export type CpsFacts = {
   attendance_workforce?: RecordRow[];
   attendance_providers?: RecordRow[];
   attendance_stations?: RecordRow[];
+  production_threshold_context?: {
+    shipments: RecordRow[];
+    mappings: RecordRow[];
+    workforce: RecordRow[];
+    components: RecordRow[];
+    providers: RecordRow[];
+    stations: RecordRow[];
+  };
   payment_policy_history?: WorkforcePaymentPolicy[];
   attendance_capture_history?: WorkforceAttendanceCaptureSetting[];
   policy_history?: RecordRow[];
@@ -100,6 +113,8 @@ function configured(r: RecordRow) {
 }
 function rateSignature(r: RecordRow) {
   return JSON.stringify([r.payment_method_id, Object.entries(r.payment_values ?? {}).sort(([a],[b])=>a.localeCompare(b)),
+    r.production_threshold_config ?? null,
+    r.method_production_threshold_config ?? null,
     Array.isArray(r.payment_components) ? r.payment_components : null,
     ...['delivery_rate','pickup_rate','mfn_rate','mfn_return_rate','guarantee_amount','guarantee_schedule','fuel_rate'].map(k=>r[k] ?? null)]);
 }
@@ -112,7 +127,8 @@ export function calculateRateCard(
   attendance?: DirectPayAttendance | null,
   paymentPolicyHistory?: WorkforcePaymentPolicy[] | null,
   cumulativeAttendanceUnitsBefore = 0,
-  attendanceSource: 'biometric' | 'shipment_data' = 'biometric'
+  attendanceSource: 'biometric' | 'shipment_data' = 'biometric',
+  productionAllocations?: ReadonlyMap<string, WorkforceProductionThresholdAllocation>
 ) {
   const cost={salary:0,variable:0,fuel:0,van:0,missing:false};
   if (r.payment_method_id && !components.length) cost.missing=true;
@@ -125,6 +141,9 @@ export function calculateRateCard(
     const source=c.provider_calculation_sources?.[String(shipment.client ?? 'Amazon').toLowerCase()] || c.calculation_source || code;
     const count=production(shipment,source);
     if(isProduction && count==null) {cost.missing=true;continue;}
+    const thresholdAllocation=isProduction ? productionAllocations?.get(code) : undefined;
+    if(isProduction && productionAllocations && !thresholdAllocation) {cost.missing=true;continue;}
+    if(thresholdAllocation?.thresholdConfigurationMissing) cost.missing=true;
     if(!isProduction && !includeFixed) continue;
     const monthly= /month/i.test(String(c.pay_schedule)) || c.calculation_type==='fixed_monthly';
     const hourly=/hour/i.test(String(c.pay_schedule));
@@ -143,7 +162,9 @@ export function calculateRateCard(
         policy: workforcePaymentPolicyForDate(paymentPolicyHistory,date)
       }).amount
       : hourly ? rate*workedHours : rate*attendanceUnit;
-    const amount=isProduction ? rate*count! : attendanceBased ? Math.round(attendanceAmount*100)/100 : monthly ? monthlyAccrual(rate,date) : rate;
+    const amount=isProduction
+      ? thresholdAllocation?.amount ?? rate*count!
+      : attendanceBased ? Math.round(attendanceAmount*100)/100 : monthly ? monthlyAccrual(rate,date) : rate;
     const bucket=/VAN|VEHICLE|DOCK/.test(label) ? 'van' : /FUEL|KILOMET|\bKM\b/.test(label) ? 'fuel' : !isProduction ? 'salary' : 'variable';
     cost[bucket]+=amount;
   }
@@ -195,6 +216,8 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const mappings=facts.mappings.map((m):RecordRow=>({...m,worker:canonical(m)})).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
   const components=new Map<string,RecordRow[]>();
   facts.components.forEach(c=>components.set(c.payment_method_id,[...(components.get(c.payment_method_id)??[]),c]));
+  for(const [methodId,methodComponents] of components) components.set(methodId,methodComponents.sort((a,b)=>
+    num(a.sort_order)-num(b.sort_order) || key(a.component_code).localeCompare(key(b.component_code))));
   const providers=new Map(facts.providers.map(p=>[p.id,compact(`${p.code} ${p.name}`)]));
   const attendanceWorkforceRows=facts.attendance_workforce??facts.workforce;
   const attendanceWorkforce=new Map(attendanceWorkforceRows.map(w=>[w.id,w]));
@@ -304,6 +327,100 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       associates.push(row); groups.set(k,{worker:m.worker,date,rows:[row],maps:[m]});
     }
   }
+  const thresholdInputs:WorkforceProductionThresholdInput[]=[];
+  const thresholdInputTargets=new Map<string,{rowKey:string;groupKey:string}>();
+  // A day/custom CPS view still needs production from the start of the calendar
+  // month to determine how much of a monthly combined minimum was already used.
+  // Keep that calculation context separate from `groups`: only requested rows
+  // may become associates, detail lines, gaps or daily totals.
+  const thresholdContext=facts.production_threshold_context;
+  const thresholdWorkforceRows=thresholdContext?.workforce??facts.workforce;
+  const thresholdWorkforce=new Map(thresholdWorkforceRows.map(worker=>[worker.id,worker]));
+  const thresholdCanonical=(mapping:RecordRow):RecordRow|undefined=>thresholdWorkforce.get(mapping.workforce_id)??thresholdWorkforceRows.find(worker=>
+    (worker.source_profile_type==='employee'&&worker.source_profile_id===mapping.employee_id&&mapping.employee_id)||
+    (worker.source_profile_type==='contractor'&&worker.source_profile_id===mapping.contractor_id&&mapping.contractor_id)||
+    (worker.source_profile_type==='field_executive'&&worker.source_profile_id===mapping.field_executive_id&&mapping.field_executive_id));
+  const thresholdMappings=(thresholdContext?.mappings??facts.mappings)
+    .map((mapping):RecordRow=>({...mapping,worker:thresholdCanonical(mapping)}))
+    .sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
+  const thresholdComponents=new Map<string,RecordRow[]>();
+  (thresholdContext?.components??facts.components).forEach(component=>thresholdComponents.set(
+    component.payment_method_id,
+    [...(thresholdComponents.get(component.payment_method_id)??[]),component]
+  ));
+  for(const [methodId,methodComponents] of thresholdComponents) thresholdComponents.set(methodId,methodComponents.sort((a,b)=>
+    num(a.sort_order)-num(b.sort_order)||key(a.component_code).localeCompare(key(b.component_code))));
+  const thresholdProviders=new Map((thresholdContext?.providers??facts.providers).map(provider=>[provider.id,compact(`${provider.code} ${provider.name}`)]));
+  const thresholdStationById=new Map((thresholdContext?.stations??facts.stations).map(station=>[station.id,station]));
+  const thresholdGroups=new Map<string,{worker:RecordRow;date:string;rows:RecordRow[]}>();
+  for(const row of thresholdContext?.shipments??facts.shipments) {
+    const matches=thresholdMappings.filter(mapping=>key(mapping.provider_member_id)===key(row.provider_employee_id)&&activeOn(mapping,row.work_date)&&
+      (!mapping.station_id||thresholdStationById.get(mapping.station_id)?.station_code===row.station_code)&&
+      (thresholdProviders.get(mapping.provider_id)??'').includes(compact(row.client)));
+    const identities=new Set(matches.map(mapping=>mapping.worker?.id).filter(Boolean));
+    if(identities.size!==1||matches.some(mapping=>!mapping.worker)) continue;
+    const worker=matches[0].worker!;
+    const groupKey=`${worker.id}|${row.work_date}`;
+    const group=thresholdGroups.get(groupKey)??{worker,date:row.work_date,rows:[] as RecordRow[]};
+    group.rows.push(row);thresholdGroups.set(groupKey,group);
+  }
+  const requestedThresholdRows=new Set([...groups.values()].flatMap(group=>group.rows.map(row=>`${group.date}|${String(row.id)}`)));
+  for(const g of [...thresholdGroups.values()].sort((a,b)=>a.date.localeCompare(b.date)||String(a.worker.id).localeCompare(String(b.worker.id)))) {
+    const candidates=thresholdMappings.filter(m=>m.worker?.id===g.worker.id && activeOn(m,g.date) && configured(m));
+    const latest=candidates.sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
+    const current=latest ? candidates.filter(m=>m.effective_from===latest.effective_from) : [];
+    if(!latest || new Set(current.map(rateSignature)).size>1) continue;
+    const card=latest,cs=thresholdComponents.get(card.payment_method_id)??[];
+    const values=Object.fromEntries(Object.entries(card.payment_values??{}).map(([k,v])=>[key(k),v]));
+    const orderedRows=[...g.rows].sort((a,b)=>String(a.station_code).localeCompare(String(b.station_code))||String(a.id).localeCompare(String(b.id)));
+    for(const [rowIndex,row] of orderedRows.entries()) for(const [componentIndex,c] of cs.entries()) {
+      const code=key(c.component_code),isProduction=c.component_type==='production'||c.calculation_type==='count_x_rate';
+      if(!isProduction) continue;
+      const source=c.provider_calculation_sources?.[String(row.client??'Amazon').toLowerCase()]||c.calculation_source||code;
+      const count=production(row,source);
+      if(count==null) continue;
+      const inputId=`${card.id}|${g.date}|${String(row.id)}|${code}|${rowIndex}|${componentIndex}`;
+      thresholdInputs.push({
+        id:inputId,
+        workforceId:String(g.worker.id),
+        mappingId:String(card.id),
+        date:g.date,
+        effectiveFrom:String(card.effective_from),
+        effectiveTo:card.effective_to?String(card.effective_to):null,
+        componentCode:code,
+        componentOrder:Number.isFinite(Number(c.sort_order))?Number(c.sort_order):componentIndex,
+        reportedUnits:count,
+        rate:num(values[code]),
+        thresholdConfig:card.production_threshold_config,
+        methodThresholdConfig:card.method_production_threshold_config
+      });
+      if(requestedThresholdRows.has(`${g.date}|${String(row.id)}`)) thresholdInputTargets.set(inputId,{
+          rowKey:`${card.id}|${g.date}|${String(row.id)}`,
+          groupKey:`${card.id}|${g.worker.id}|${g.date}`
+        });
+    }
+  }
+  const thresholdAllocationsByRow=new Map<string,Map<string,WorkforceProductionThresholdAllocation>>();
+  const thresholdAllocationsByGroup=new Map<string,Map<string,WorkforceProductionThresholdAllocation>>();
+  const mergeThresholdAllocation=(target:Map<string,Map<string,WorkforceProductionThresholdAllocation>>,targetKey:string,allocation:WorkforceProductionThresholdAllocation)=>{
+    const byCode=target.get(targetKey)??new Map<string,WorkforceProductionThresholdAllocation>();
+    const current=byCode.get(allocation.componentCode);
+    byCode.set(allocation.componentCode,current?{
+      ...current,
+      reportedUnits:current.reportedUnits+allocation.reportedUnits,
+      thresholdDeducted:current.thresholdDeducted+allocation.thresholdDeducted,
+      payableUnits:current.payableUnits+allocation.payableUnits,
+      amount:Math.round((current.amount+allocation.amount)*100)/100,
+      thresholdConfigurationMissing:current.thresholdConfigurationMissing||allocation.thresholdConfigurationMissing
+    }:allocation);
+    target.set(targetKey,byCode);
+  };
+  for(const allocation of allocateCombinedProductionThresholds(thresholdInputs)) {
+    const target=thresholdInputTargets.get(allocation.id);
+    if(!target) continue;
+    mergeThresholdAllocation(thresholdAllocationsByRow,target.rowKey,allocation);
+    mergeThresholdAllocation(thresholdAllocationsByGroup,target.groupKey,allocation);
+  }
   const people=new Map<string,CpsPersonCost>();
   const detailDays:CpsDaDay[]=[];
   const employeeCostDays=new Set<string>();
@@ -329,9 +446,20 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined,
       facts.payment_policy_history,
       cumulativeAttendanceUnitsBefore.get(workerDateKey)??0,
-      workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,g.date).capture_method
+      workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,g.date).capture_method,
+      thresholdAllocationsByGroup.get(`${card.id}|${g.worker.id}|${g.date}`)
     ) : {salary:0,variable:0,fuel:0,van:0,missing:true};
-    const issue=conflict ? 'Conflicting rate cards' : !card ? 'Payment setup missing' : costs.missing ? 'Rate values or production source missing' : '';
+    const thresholdConfigurationMissing=card
+      ? [...(thresholdAllocationsByGroup.get(`${card.id}|${g.worker.id}|${g.date}`)?.values()??[])]
+        .some((allocation)=>allocation.thresholdConfigurationMissing)
+      : false;
+    const issue=conflict
+      ? 'Conflicting rate cards'
+      : !card
+        ? 'Payment setup missing'
+        : thresholdConfigurationMissing
+          ? 'Combined production minimum missing'
+          : costs.missing ? 'Rate values or production source missing' : '';
     if(issue) {
       for(const row of g.rows) {row.mapping_status=issue;gap(issue,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery));}
       continue;
@@ -340,11 +468,17 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const volumes=new Map<string,number>();g.rows.forEach(r=>volumes.set(r.station_code,(volumes.get(r.station_code)??0)+num(r.total_delivery)));
     const salaryByStation=allocateCost(costs.salary,[...volumes.keys()],volumes);
     const vanByStation=allocateCost(costs.van,[...volumes.keys()],volumes);
-    const fuelFixed=costs.fuel-g.rows.reduce((n,r)=>n+(card?calculateRateCard(card,cs,r,g.date,false).fuel:0),0);
+    const fuelFixed=costs.fuel-g.rows.reduce((n,r)=>n+(card?calculateRateCard(
+      card,cs,r,g.date,false,undefined,undefined,0,'biometric',
+      thresholdAllocationsByRow.get(`${card.id}|${g.date}|${String(r.id)}`)
+    ).fuel:0),0);
     const fuelByStation=allocateCost(fuelFixed,[...volumes.keys()],volumes);
     const seenStations=new Set<string>();
     for(const row of g.rows) {
-      const variable=calculateRateCard(card!,cs,row,g.date,false);
+      const variable=calculateRateCard(
+        card!,cs,row,g.date,false,undefined,undefined,0,'biometric',
+        thresholdAllocationsByRow.get(`${card!.id}|${g.date}|${String(row.id)}`)
+      );
       const first=!seenStations.has(row.station_code);seenStations.add(row.station_code);
       row.variable_pay=variable.variable;row.mg_pay=first?salaryByStation.get(row.station_code)??0:0;
       row.fuel_pay=variable.fuel+(first?fuelByStation.get(row.station_code)??0:0);

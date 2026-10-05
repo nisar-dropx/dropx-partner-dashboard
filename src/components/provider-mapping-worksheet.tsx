@@ -6,6 +6,7 @@ import { useFormStatus } from "react-dom";
 import { bulkUploadProviderIds, saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
+import type { ProductionThresholdConfig } from "@/lib/production-threshold-config";
 
 export type LocationOption = {
   id: string;
@@ -26,6 +27,8 @@ export type MappingWorksheetRow = {
   effectiveTo: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
   deliveryRate: string;
   pickupRate: string;
   mfnRate: string;
@@ -48,6 +51,7 @@ export type PaymentMethodOption = {
   name: string;
   isActive?: boolean;
   components: PaymentMethodComponentOption[];
+  productionThresholdConfig?: ProductionThresholdConfig | null;
 };
 
 function rowSignature(row: MappingWorksheetRow) {
@@ -64,6 +68,8 @@ function rowSignature(row: MappingWorksheetRow) {
     row.effectiveTo,
     row.paymentMethodId,
     JSON.stringify(row.paymentValues),
+    JSON.stringify(row.productionThresholdConfig),
+    row.productionThresholdMinimumUnits,
     row.deliveryRate,
     row.pickupRate,
     row.mfnRate,
@@ -135,13 +141,15 @@ function BulkIdUpload({ canEdit, paymentMethods }: { canEdit: boolean; paymentMe
 
   function downloadTemplate() {
     const rateColumns = Array.from(new Set(paymentMethods.flatMap((method) => method.components.map((component) => component.code))));
+    const usesCombinedMinimum = paymentMethods.some((method) => method.productionThresholdConfig);
     const headers = [
       "DROPX_ID",
       "PROVIDER_MEMBER_ID",
       "PAYMENT_METHOD_CODE",
       "EFFECTIVE_FROM",
       "EFFECTIVE_TO",
-      ...rateColumns
+      ...rateColumns,
+      ...(usesCombinedMinimum ? ["COMBINED_MINIMUM_UNITS"] : [])
     ];
     const csv = `${headers.map(csvCell).join(",")}\r\n`;
     const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
@@ -409,7 +417,7 @@ export function ProviderMappingWorksheet({
       }
 
       if (field === "paymentMethodId") {
-        return { ...row, paymentMethodId: value, paymentValues: {} };
+        return { ...row, paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" };
       }
 
       return { ...row, [field]: value };
@@ -456,6 +464,13 @@ export function ProviderMappingWorksheet({
       const value = Number(rawValue);
       if (!rawValue) return `Row ${index + 1}: ${component.label} is required.`;
       if (!Number.isFinite(value) || value < 0) return `Row ${index + 1}: ${component.label} must be a valid amount.`;
+    }
+    const productionThresholdConfig = row.productionThresholdConfig ?? method.productionThresholdConfig ?? null;
+    if (productionThresholdConfig) {
+      const minimumUnits = Number(row.productionThresholdMinimumUnits);
+      if (!row.productionThresholdMinimumUnits.trim() || !Number.isInteger(minimumUnits) || minimumUnits <= 0) {
+        return `Row ${index + 1}: Combined minimum per ${productionThresholdConfig.period} must be a positive whole number.`;
+      }
     }
 
     return null;
@@ -620,6 +635,7 @@ export function ProviderMappingWorksheet({
               <input type="hidden" name={`rows[${index}][provider_id]`} value={row.providerId} />
               <input type="hidden" name={`rows[${index}][station_id]`} value={row.stationId} />
               <input type="hidden" name={`rows[${index}][payment_values_json]`} value={JSON.stringify(row.paymentValues)} />
+              <input type="hidden" name={`rows[${index}][production_threshold_minimum_units]`} value={row.productionThresholdMinimumUnits} />
 
               {dirtyRows[index] ? <span className="unsaved-badge mapping-unsaved-badge">Unsaved</span> : null}
 
@@ -675,6 +691,19 @@ export function ProviderMappingWorksheet({
                     />
                   </label>
                 ))}
+                {(row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig) ? <label>
+                  Combined minimum / {(row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig)?.period}
+                  <input
+                    className="worksheet-input"
+                    disabled={!canEdit}
+                    min="1"
+                    onChange={(event) => updateRow(index, "productionThresholdMinimumUnits", event.target.value)}
+                    placeholder="Enter minimum units"
+                    step="1"
+                    type="number"
+                    value={row.productionThresholdMinimumUnits}
+                  />
+                </label> : null}
                 <div className="mapping-period-row">
                   <label>Effective from
                     <input

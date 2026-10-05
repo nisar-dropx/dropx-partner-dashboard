@@ -14,6 +14,7 @@ import {
   shipmentAttendanceRecord,
   workforceAttendanceCaptureSettingForDate
 } from '../../../../../../src/lib/workforce-attendance-capture.ts';
+import {allocateCombinedProductionThresholds} from '../../../../../../src/lib/workforce-production-threshold.ts';
 export const dynamic='force-dynamic';
 
 type Mapping = {
@@ -25,10 +26,11 @@ type Mapping = {
   effective_from: string | null;
   effective_to: string | null;
   payment_values: Record<string, unknown> | null;
+  production_threshold_config?: unknown;
   status?: string | null;
   providers?: { name?: string | null; code?:string|null } | Array<{ name?: string | null;code?:string|null }> | null;
   stations?: {station_code?:string|null} | Array<{station_code?:string|null}> | null;
-  payment_methods?: (ProviderAttendanceMethod & { name?: string | null }) | Array<ProviderAttendanceMethod & { name?: string | null }> | null;
+  payment_methods?: (ProviderAttendanceMethod & { name?: string | null; production_threshold_config?: unknown }) | Array<ProviderAttendanceMethod & { name?: string | null; production_threshold_config?: unknown }> | null;
 };
 
 function relationName(value: Mapping["providers"] | Mapping["payment_methods"]) {
@@ -62,19 +64,39 @@ function productionMetric(row: Record<string, unknown>, source: string) {
   return 0;
 }
 
-function mappedProductionAmount(mapping: Mapping, row: Record<string, unknown>) {
+function mappingMethod(mapping: Mapping) {
+  return Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
+}
+
+function productionComponents(mapping: Mapping) {
+  const method = mappingMethod(mapping);
+  return (method?.payment_method_components ?? []).filter((component) => {
+    const field = componentField(component);
+    return component.is_active !== false && (component.component_type === "production" || field?.field_type === "production" || field?.calculation_type === "count_x_rate");
+  });
+}
+
+function mappedProductionRules(mapping: Mapping) {
   const method = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
   const values = mapping.payment_values ?? {};
-  const total = (method?.payment_method_components ?? []).reduce((sum, component) => {
+  return (method?.payment_method_components ?? []).flatMap((component, index) => {
     const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
-    if (component.component_type !== "production" && field?.field_type !== "production" && field?.calculation_type !== "count_x_rate") return sum;
+    if (component.is_active === false || (component.component_type !== "production" && field?.field_type !== "production" && field?.calculation_type !== "count_x_rate")) return [];
     const code = String(component.component_code || field?.code || "").trim();
     const rawRate = values[code] ?? Object.entries(values).find(([key]) => key.trim().toUpperCase() === code.toUpperCase())?.[1];
     const rate = Number(rawRate ?? 0);
     if (!Number.isFinite(rate) || rate < 0) throw new Error("Your provider production rate is invalid. Contact Workforce.");
-    return sum + productionMetric(row, String(field?.calculation_source ?? code)) * rate;
-  }, 0);
-  return Math.round(total * 100) / 100;
+    return [{ code, label: String(component.label || field?.label || code), source: String(field?.calculation_source ?? code), rate, order: Number(component.sort_order ?? index) }];
+  });
+}
+
+function connectProductionCode(code: string, source: string) {
+  const normalized = `${code} ${source}`.trim().toUpperCase();
+  if (normalized.includes("CUSTOMER_RETURN") || normalized.includes("C_RETURN") || normalized.includes("CRETURN")) return "c_return";
+  if (normalized.includes("SELLER_RETURN") || normalized.includes("MFN_RETURN") || normalized.includes("SLLLER_RETURN")) return "mfn_return";
+  if (normalized.includes("SELLER_PICKUP") || normalized.includes("MFN")) return "mfn";
+  if (normalized.includes("DELIVERY")) return "delivery";
+  return code.trim().toLowerCase();
 }
 
 export async function GET(request: NextRequest) {
@@ -99,7 +121,7 @@ export async function GET(request: NextRequest) {
     const period = workforcePaymentReadPeriod(month, today);
     const currentPeriod = workforcePaymentReadPeriod(currentMonth, today);
     const loadMappings = (target: { from: string; to: string }) => admin.from("field_executive_provider_mappings")
-      .select("id,provider_member_id,effective_from,effective_to,status,payment_method_id,payment_values,pay_type,providers(name,code),stations(station_code),payment_methods(id,name,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source))),workforce_id,field_executive_id,contractor_id,employee_id")
+      .select("id,provider_member_id,effective_from,effective_to,status,payment_method_id,payment_values,production_threshold_config,pay_type,providers(name,code),stations(station_code),payment_methods(id,name,production_threshold_config,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source))),workforce_id,field_executive_id,contractor_id,employee_id")
       .eq("company_id", account.companyId)
       .neq("status", "cancelled").lt("effective_from",target.to).or(`effective_to.is.null,effective_to.gte.${target.from}`)
       .or(identityFilters.length ? identityFilters.join(","):"id.eq.00000000-0000-0000-0000-000000000000").order("effective_from",{ascending:false}).limit(1000);
@@ -179,6 +201,38 @@ export async function GET(request: NextRequest) {
     const providerAttendanceByMappingDate=new Map(providerAttendanceDays.map(day=>[`${day.mappingId}|${day.date}`,day]));
     const consumedProviderAttendance=new Set<string>();
     const personalAmounts=allocateOwnDailyCards((dailyResult.data||[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row),card=m?personalPaymentCard(m):null;return card?[{row,card}]:[];}));
+    const productionMetaById=new Map<string,{mappingId:string;sourceId:string;code:string;label:string;source:string}>();
+    const productionInputs=(dailyResult.data??[]).flatMap(row=>{
+      const mapping=paymentMappingForDay(mappings,row) as Mapping|null;
+      if(!mapping)return [];
+      const method=mappingMethod(mapping);
+      return mappedProductionRules(mapping).map((rule,index)=>{
+        const id=`${mapping.id}:${row.id}:${rule.code}:${index}`;
+        productionMetaById.set(id,{mappingId:mapping.id,sourceId:String(row.id),code:rule.code,label:rule.label,source:rule.source});
+        return {
+          id,
+          workforceId:String(workforce?.id??account.id),
+          mappingId:mapping.id,
+          date:String(row.work_date),
+          effectiveFrom:String(mapping.effective_from??period.from),
+          effectiveTo:mapping.effective_to,
+          componentCode:rule.code,
+          componentOrder:rule.order,
+          reportedUnits:productionMetric(row as Record<string,unknown>,rule.source),
+          rate:rule.rate,
+          thresholdConfig:mapping.production_threshold_config,
+          methodThresholdConfig:method?.production_threshold_config
+        };
+      });
+    });
+    const allocatedProductionBySource=new Map<string,RateLine[]>();
+    for(const allocated of allocateCombinedProductionThresholds(productionInputs)){
+      const meta=productionMetaById.get(allocated.id);
+      if(!meta)throw new Error("Your provider production could not be reconciled. Contact Workforce.");
+      const key=`${meta.mappingId}:${meta.sourceId}`;
+      const line={code:connectProductionCode(meta.code,meta.source),label:meta.label,count:allocated.payableUnits,rate:allocated.rate,amount:allocated.amount};
+      allocatedProductionBySource.set(key,[...(allocatedProductionBySource.get(key)??[]),line]);
+    }
     for (const row of dailyResult.data ?? []) {
       const mapping=paymentMappingForDay(mappings,row);
       if(!mapping) continue;
@@ -189,15 +243,21 @@ export async function GET(request: NextRequest) {
       const mfn = Number(row.mfn ?? 0);
       const mfnReturns = Number(row.mfn_return ?? 0);
       const attendanceDay=providerAttendanceByMappingDate.get(`${mapping.id}|${date}`);
+      const productionConfigured=productionComponents(mapping as Mapping).length>0;
+      const mappedProductionLines=allocatedProductionBySource.get(`${mapping.id}:${String(row.id)}`)??[];
+      const mappedProductionAmount=Math.round(mappedProductionLines.reduce((sum,line)=>sum+line.amount,0)*100)/100;
       const earnings = hasProviderAttendanceComponents(mapping as unknown as ProviderAttendanceMapping)
-        ? Math.round((mappedProductionAmount(mapping,row as Record<string,unknown>)+consumeProviderAttendanceAmount(attendanceDay,consumedProviderAttendance))*100)/100
-        : personalAmounts.get(row.id) ?? Number(row.da_total_pay ?? 0);
-      const lines: RateLine[] = [
+        ? Math.round((mappedProductionAmount+consumeProviderAttendanceAmount(attendanceDay,consumedProviderAttendance))*100)/100
+        : productionConfigured
+          ? mappedProductionAmount
+          : personalAmounts.get(row.id) ?? Number(row.da_total_pay ?? 0);
+      const legacyLines: RateLine[] = [
         { code: "delivery", label: "Delivery", count: deliveries, rate: mappedRate(mapping, row.del_rate, ["DELIVERY", "AMAZON_DELIVERY"]), amount: 0 },
         { code: "c_return", label: "C-return", count: cReturns, rate: mappedRate(mapping, row.c_return_rate, ["CRETURN", "C_RETURN", "CUSTOMER_RETURN"]), amount: 0 },
         { code: "mfn", label: "MFN", count: mfn, rate: mappedRate(mapping, row.mfn_rate, ["MFN", "SELLER_PICKUP"]), amount: 0 },
         { code: "mfn_return", label: "MFN return", count: mfnReturns, rate: mappedRate(mapping, row.mfn_return_rate, ["MFN_RETURN", "SELLER_RETURN", "SLLLER_RETURN"]), amount: 0 }
       ].map((line) => ({ ...line, amount: line.count * line.rate }));
+      const lines=productionConfigured?mappedProductionLines:legacyLines;
       const current = dailyByDate.get(date) ?? { date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>(), providers: new Map<string, ProviderDay>() };
       current.deliveries += deliveries;
       current.amazonDeliveries += Number(row.amazon_delivery ?? 0);

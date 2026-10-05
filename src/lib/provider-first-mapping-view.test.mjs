@@ -14,7 +14,7 @@ import {
   scientificProviderIdCouldRepresent
 } from "./provider-first-mapping-view.ts";
 
-const method = { id: "method-1", components: [{ code: "DELIVERY", label: "Delivery rate" }] };
+const method = { id: "method-1", components: [{ code: "DELIVERY", label: "Delivery rate" }], productionThresholdConfig: null };
 const worker = {
   id: "worker-1",
   dropxId: "DROPX1",
@@ -25,6 +25,8 @@ const worker = {
   mappingId: "mapping-1",
   paymentMethodId: method.id,
   paymentValues: { DELIVERY: "12" },
+  productionThresholdConfig: null,
+  productionThresholdMinimumUnits: "",
   effectiveFrom: "2026-09-01",
   effectiveTo: "",
   mappedProviderMemberId: "member-1",
@@ -43,6 +45,8 @@ const row = {
   mappingId: worker.mappingId,
   paymentMethodId: method.id,
   paymentValues: { DELIVERY: "12" },
+  productionThresholdConfig: null,
+  productionThresholdMinimumUnits: "",
   effectiveFrom: "2026-09-01",
   effectiveTo: ""
 };
@@ -176,6 +180,26 @@ test("classifies every required mapped-row field consistently", () => {
   ]) assert.equal(providerFirstValidationStatus(invalid, worker, method), "needs_attention");
 });
 
+test("requires one positive whole-number combined minimum for a threshold method", () => {
+  const thresholdMethod = {
+    ...method,
+    components: [
+      { code: "DELIVERY", label: "Delivery rate" },
+      { code: "CUSTOMER_RETURN", label: "Customer return rate" }
+    ],
+    productionThresholdConfig: { period: "month", component_codes: ["DELIVERY", "CUSTOMER_RETURN"] }
+  };
+  const thresholdRow = {
+    ...row,
+    paymentValues: { DELIVERY: "12", CUSTOMER_RETURN: "8" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: ""
+  };
+  assert.match(providerFirstValidationStatus(thresholdRow, worker, thresholdMethod), /needs_attention/);
+  assert.equal(providerFirstValidationStatus({ ...thresholdRow, productionThresholdMinimumUnits: "1000" }, worker, thresholdMethod), "ready");
+  assert.equal(providerFirstValidationStatus({ ...thresholdRow, productionThresholdMinimumUnits: "10.5" }, worker, thresholdMethod), "needs_attention");
+});
+
 test("combines filter groups with AND and selections within a group with OR", () => {
   const second = { ...row, providerMemberId: "member-2", providerMemberName: "Ravi Kumar", workforceId: "", dropxId: "", dropxName: "", paymentMethodId: "", mappingId: "", paymentValues: {} };
   const indexes = filterProviderFirstRowIndexes({
@@ -218,6 +242,8 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /paginatedIndexes\.map/);
   assert.match(component, /isScientificProviderMemberId\(row\.providerMemberId\)/);
   assert.match(component, /formData\.set\(`\$\{prefix\}\[provider_member_id\]`, row\.providerMemberId\)/);
+  assert.match(component, /Combined minimum \/ \{productionThresholdConfig\.period\}/);
+  assert.match(component, /production_threshold_minimum_units/);
   assert.doesNotMatch(component, /<form action=\{saveProviderFirstMappingWorksheet\}/);
   const start = actions.indexOf("export async function saveProviderFirstMappingsInline");
   const end = actions.indexOf("/** Links an imported provider member", start);
@@ -232,6 +258,8 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(actions, /providerMemberIdUnsafeNumber/);
   assert.match(actions, /memberNameByStationAndId\.get\(`\$\{station\.stationCode\}\|\$\{uploadRow\.providerMemberId\}`\)/);
   assert.match(actions, /providerHolderMatches\(holderName, worker\.fullName\)/);
+  assert.match(actions, /production_threshold_config: productionThresholdConfig/);
+  assert.match(actions, /Changes to an existing monthly combined minimum must start on the first day of a month/);
   assert.match(actions, /const providerId = String\(station\.provider_id/);
   assert.match(actions, /worker's current location is not allocated to your account/);
 });

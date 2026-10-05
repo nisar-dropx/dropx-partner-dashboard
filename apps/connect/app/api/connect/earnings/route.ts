@@ -15,6 +15,7 @@ import {
   shipmentAttendanceRecord,
   workforceAttendanceCaptureSettingForDate
 } from '../../../../../../src/lib/workforce-attendance-capture.ts';
+import {allocateCombinedProductionThresholds} from '../../../../../../src/lib/workforce-production-threshold.ts';
 
 export const dynamic='force-dynamic';
 
@@ -29,6 +30,34 @@ function metricValue(row: Record<string, unknown>, source: string) {
   if (source === "seller_pickup") return number("mfn");
   if (source === "seller_return") return number("mfn_return");
   return 0;
+}
+function mappingMethod(mapping: any) { return first(mapping?.payment_methods); }
+function componentField(component: any) { return first(component?.payment_fields); }
+function productionComponents(mapping: any) {
+  const method: any = mappingMethod(mapping);
+  return (method?.payment_method_components ?? []).filter((component: any) => {
+    const field: any = componentField(component);
+    return component.is_active !== false && (component.component_type === "production" || field?.field_type === "production" || field?.calculation_type === "count_x_rate");
+  });
+}
+function productionRulesFor(mapping: any, station: any, allocations: any[]) {
+  return productionComponents(mapping).flatMap((component: any, index: number) => {
+    const field: any = componentField(component);
+    const code = String(component.component_code || field?.code || "").trim();
+    if (!code) return [];
+    const matching = allocations.filter((allocation: any) => {
+      const allocatedField: any = first(allocation.payment_fields);
+      return allocation.provider_id === mapping.provider_id
+        && (!allocation.provider_model_id || allocation.provider_model_id === station?.location_model_id)
+        && String(allocatedField?.code ?? "").trim().toUpperCase() === code.toUpperCase();
+    }).sort((left: any, right: any) => Number(Boolean(right.provider_model_id)) - Number(Boolean(left.provider_model_id)));
+    const metric: any = first(matching[0]?.provider_production_metrics);
+    const source = String(metric?.source_key ?? field?.calculation_source ?? "").trim();
+    if (!source) return [];
+    const rate = Number(mapping.payment_values?.[code] ?? Object.entries(mapping.payment_values ?? {}).find(([key]) => key.trim().toUpperCase() === code.toUpperCase())?.[1] ?? 0);
+    if (!Number.isFinite(rate) || rate < 0) throw new Error("Your provider production rate is invalid. Contact Workforce.");
+    return [{ code, label: String(component.label || field?.label || code), source, rate, order: Number(component.sort_order ?? index) }];
+  });
 }
 function validMonth(value: string | null) {
   const current = workforcePaymentMonth().from.slice(0, 7);
@@ -52,7 +81,7 @@ export async function GET(request: Request) {
     const filters=account.profileType==="workforce" ? [`workforce_id.eq.${account.id}`] : columns[account.profileType] ? [`and(workforce_id.is.null,${columns[account.profileType]}.eq.${account.id})`] : [];
     if(account.profileType==="workforce"&&workforce?.source_profile_id&&workforce.source_profile_type&&columns[workforce.source_profile_type])filters.push(`and(workforce_id.is.null,${columns[workforce.source_profile_type]}.eq.${workforce.source_profile_id})`);
     const identityFilter=filters.length ? filters.join(","):"id.eq.00000000-0000-0000-0000-000000000000";
-    const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,pay_type,effective_from,effective_to,status,providers(name,code),stations(station_code),payment_methods(id,name,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source)))").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
+    const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,production_threshold_config,pay_type,effective_from,effective_to,status,providers(name,code),stations(station_code),payment_methods(id,name,production_threshold_config,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source)))").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
     if (mappingResult.error) throw new Error(mappingResult.error.message);
     const mappings = mappingResult.data ?? []; const stationIds = [...new Set(mappings.map((row) => row.station_id).filter(Boolean))]; const memberIds = [...new Set(mappings.map((row) => row.provider_member_id).filter(Boolean))];
     const direct = await loadDirectPaymentContext({companyId:account.companyId,workforceId:workforce?.id??null,from,to,employmentFrom:workforce?.date_of_join,employmentTo:workforce?.last_working_date,sourceProfileId:workforce?.source_profile_id,sourceProfileType:workforce?.source_profile_type});
@@ -84,6 +113,39 @@ export async function GET(request: Request) {
       const mapping=paymentMappingForDay(mappings,row),card=mapping?cardFor(mapping,String(row.work_date)):null;
       return card?[{row:row as DailyCardSource,card}]:[];
     }));
+    const productionMetaById=new Map<string,{mappingId:string;sourceId:string;label:string}>();
+    const productionInputs=(metricsResult.data??[]).flatMap((row:any)=>{
+      const mapping:any=paymentMappingForDay(mappings,row);
+      if(!mapping)return [];
+      const station:any=stationById.get(mapping.station_id);
+      const method:any=mappingMethod(mapping);
+      return productionRulesFor(mapping,station,allocationsResult.data??[]).map((rule:any,index:number)=>{
+        const id=`${mapping.id}:${row.id}:${rule.code}:${index}`;
+        productionMetaById.set(id,{mappingId:String(mapping.id),sourceId:String(row.id),label:rule.label});
+        return {
+          id,
+          workforceId:String(workforce?.id??account.id),
+          mappingId:String(mapping.id),
+          date:String(row.work_date),
+          effectiveFrom:String(mapping.effective_from??from),
+          effectiveTo:mapping.effective_to?String(mapping.effective_to):null,
+          componentCode:rule.code,
+          componentOrder:rule.order,
+          reportedUnits:metricValue(row as Record<string,unknown>,rule.source),
+          rate:rule.rate,
+          thresholdConfig:mapping.production_threshold_config,
+          methodThresholdConfig:method?.production_threshold_config
+        };
+      });
+    });
+    const allocatedProductionBySource=new Map<string,Array<{label:string;count:number;reportedCount:number;rate:number;amount:number;thresholdApplied:boolean;thresholdDeducted:number;thresholdPeriod:"day"|"month"|null;thresholdMinimum:number|null;thresholdConfigurationMissing:boolean}>>();
+    for(const allocated of allocateCombinedProductionThresholds(productionInputs)){
+      const meta=productionMetaById.get(allocated.id);
+      if(!meta)throw new Error("Your provider production could not be reconciled. Contact Workforce.");
+      const key=`${meta.mappingId}:${meta.sourceId}`;
+      const line={label:meta.label,count:allocated.payableUnits,reportedCount:allocated.reportedUnits,rate:allocated.rate,amount:allocated.amount,thresholdApplied:allocated.thresholdApplied,thresholdDeducted:allocated.thresholdDeducted,thresholdPeriod:allocated.thresholdPeriod,thresholdMinimum:allocated.thresholdMinimum,thresholdConfigurationMissing:allocated.thresholdConfigurationMissing};
+      allocatedProductionBySource.set(key,[...(allocatedProductionBySource.get(key)??[]),line]);
+    }
     const shipmentAttendanceByDay=aggregateShipmentDeliveriesByWorkforceDay((metricsResult.data??[]).flatMap(row=>{
       const date=String(row.work_date??'');
       return workforce?.id && paymentMappingForDay(mappings,row)
@@ -103,30 +165,28 @@ export async function GET(request: Request) {
     for(const day of providerAttendanceDays)providerAttendanceByMapping.set(day.mappingId,[...(providerAttendanceByMapping.get(day.mappingId)??[]),day]);
     const providerEarnings = mappings.map((mapping: any) => {
       const station: any = stationById.get(mapping.station_id); const daily = (dailyByMember.get(String(mapping.provider_member_id)) ?? []).filter((row) => paymentMappingForDay(mappings,row as {work_date:string;provider_employee_id:string;station_code:string;client:string})?.id === mapping.id);
-      const productionRules = (allocationsResult.data ?? []).filter((allocation: any) => allocation.provider_id === mapping.provider_id && (!allocation.provider_model_id || allocation.provider_model_id === station?.location_model_id)).flatMap((allocation: any) => {
-        const field: any = first(allocation.payment_fields); const metric: any = first(allocation.provider_production_metrics); if (!field?.code || field.field_type !== "production" || !metric?.source_key) return [];
-        const rate = Number(mapping.payment_values?.[field.code] ?? 0); return [{ label: field.label || field.code, source: metric.source_key, rate }];
-      });
-      const production = productionRules.map((rule: any) => { const count = daily.reduce((sum, row) => sum + metricValue(row, rule.source), 0); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
+      const productionConfigured=productionComponents(mapping).length>0;
       const attendanceDays=providerAttendanceByMapping.get(String(mapping.id))??[];
       const remainingAttendance=new Map(attendanceDays.map(day=>[day.date,day]));
       const attendanceConfigured=hasProviderAttendanceComponents(mapping as ProviderAttendanceMapping);
       const dailyEarnings = daily.map((row) => {
         const date=String(row.work_date),attendanceDay=remainingAttendance.get(date);remainingAttendance.delete(date);
-        const production = productionRules.map((rule: any) => { const count = metricValue(row, rule.source); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
+        const production=allocatedProductionBySource.get(`${mapping.id}:${String(row.id)}`)??[];
         const attendanceLines=(attendanceDay?.lines??[]).map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount}));
         const card = cardFor(mapping,date);
         const productionAmount=Math.round(production.reduce((sum:number,line:any)=>sum+line.amount,0)*100)/100;
-        const baseAmount=attendanceConfigured?Math.round((productionAmount+(attendanceDay?.amount??0))*100)/100:card?dailyCardAmounts.get(String(row.id))!:productionAmount;
+        const baseAmount=attendanceConfigured?Math.round((productionAmount+(attendanceDay?.amount??0))*100)/100:productionConfigured?productionAmount:card?dailyCardAmounts.get(String(row.id))!:productionAmount;
         const incentiveAmount=incentives.bySource.get(String(row.id))??0;
-        return { id:String(row.id),date,production:[...production,...attendanceLines],baseAmount,incentiveAmount,amount:Math.round((baseAmount+incentiveAmount)*100)/100,deliveries:metricValue(row,'total_delivery'),calculationSource:attendanceConfigured?'provider_attendance':card?'workforce_rate_card':'provider_mapping',payType:attendanceConfigured?'attendance_eligibility':card?.pay_type??'provider_mapping' };
+        return { id:String(row.id),date,production:[...production,...attendanceLines],baseAmount,incentiveAmount,amount:Math.round((baseAmount+incentiveAmount)*100)/100,deliveries:metricValue(row,'total_delivery'),calculationSource:attendanceConfigured?'provider_attendance':productionConfigured?'provider_mapping':card?'workforce_rate_card':'provider_mapping',payType:attendanceConfigured?'attendance_eligibility':productionConfigured?'provider_mapping':card?.pay_type??'provider_mapping' };
       });
       for(const attendanceDay of remainingAttendance.values())dailyEarnings.push({id:attendanceDay.id,date:attendanceDay.date,production:attendanceDay.lines.map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount})),baseAmount:attendanceDay.amount,incentiveAmount:0,amount:attendanceDay.amount,deliveries:0,calculationSource:'provider_attendance',payType:'attendance_eligibility'});
       dailyEarnings.sort((left,right)=>right.date.localeCompare(left.date)||left.id.localeCompare(right.id));
       const attendanceProduction=new Map<string,{label:string;count:number;rate:number;amount:number}>();
       for(const day of attendanceDays)for(const line of day.lines){const key=`${line.code}:${line.rate}`,current=attendanceProduction.get(key)??{label:line.label,count:0,rate:line.rate,amount:0};current.count+=line.count;current.amount=Math.round((current.amount+line.amount)*100)/100;attendanceProduction.set(key,current);}
+      const productionByKey=new Map<string,{label:string;count:number;rate:number;amount:number}>();
+      for(const row of daily)for(const line of allocatedProductionBySource.get(`${mapping.id}:${String(row.id)}`)??[]){const key=`${line.label}:${line.rate}`,current=productionByKey.get(key)??{label:line.label,count:0,rate:line.rate,amount:0};current.count+=line.count;current.amount=Math.round((current.amount+line.amount)*100)/100;productionByKey.set(key,current);}
       const baseAmount = Math.round(dailyEarnings.reduce((sum: number, line) => sum + line.baseAmount, 0)*100)/100; const additions = Math.round(dailyEarnings.reduce((sum,line)=>sum+line.incentiveAmount,0)*100)/100;
-      return { id: mapping.id, location: station?.station_code ?? "-", provider: first(mapping.providers)?.name ?? "-", model: station?.location_model_id ? "Mapped model" : "All models", paymentMethod: first(mapping.payment_methods)?.name ?? "-", workDays: new Set(dailyEarnings.map((row) => row.date)).size, production:[...production,...attendanceProduction.values()], daily: dailyEarnings, baseAmount, additions, grossAmount: baseAmount + additions };
+      return { id: mapping.id, location: station?.station_code ?? "-", provider: first(mapping.providers)?.name ?? "-", model: station?.location_model_id ? "Mapped model" : "All models", paymentMethod: first(mapping.payment_methods)?.name ?? "-", workDays: new Set(dailyEarnings.map((row) => row.date)).size, production:[...productionByKey.values(),...attendanceProduction.values()], daily: dailyEarnings, baseAmount, additions, grossAmount: baseAmount + additions };
     });
     const directMethods=paymentMethodById(direct.methods);
     const directEarnings=direct.allocations.flatMap(allocation=>{

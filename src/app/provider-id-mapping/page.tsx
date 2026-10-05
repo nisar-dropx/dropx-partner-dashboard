@@ -8,12 +8,14 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canonicalizeProviderFirstMembers, providerMemberKey, providerSourceMemberKey } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
+import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
+import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 
-type PaymentMethodRow = { id: string; code: string; name: string; is_active: boolean; payment_method_components: Array<{ component_code: string; component_type: "amount" | "production"; label: string; sort_order: number; payment_fields: { calculation_source: string | null; calculation_type: string | null } | Array<{ calculation_source: string | null; calculation_type: string | null }> | null }> | null };
-type Mapping = { id: string; workforce_id: string | null; provider_member_id: string; station_id: string | null; provider_id: string | null; payment_method_id: string | null; payment_values: Record<string, string | number> | null; effective_from: string; effective_to: string | null; status: string; reason: string | null };
+type PaymentMethodRow = { id: string; code: string; name: string; is_active: boolean; production_threshold_config: unknown; payment_method_components: Array<{ component_code: string; component_type: "amount" | "production"; label: string; sort_order: number; payment_fields: { calculation_source: string | null; calculation_type: string | null } | Array<{ calculation_source: string | null; calculation_type: string | null }> | null }> | null };
+type Mapping = { id: string; workforce_id: string | null; provider_member_id: string; station_id: string | null; provider_id: string | null; payment_method_id: string | null; payment_values: Record<string, string | number> | null; production_threshold_config: unknown; effective_from: string; effective_to: string | null; status: string; reason: string | null };
 type ProviderMemberSource = { provider_employee_id: unknown; provider_employee_name: unknown; station_code: unknown; work_date: unknown };
 
 function flash() {
@@ -38,8 +40,8 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
-    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status, reason").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
-    supabaseAdmin.from("payment_methods").select("id, code, name, is_active, payment_method_components(component_code, component_type, label, sort_order, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).order("code"),
+    readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    supabaseAdmin.from("payment_methods").select("id, code, name, is_active, production_threshold_config, payment_method_components(component_code, component_type, label, sort_order, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("designations").select("id, code, name, is_field_operations, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
   const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error;
@@ -66,7 +68,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const designationByName = new Map((designationsResult.data ?? []).flatMap((designation) => [designation.name, designation.code].map((value) => [String(value ?? "").trim().toLowerCase(), designation] as const)));
   const stationLabelById = new Map(stations.map((station) => [station.id, station.station_code]));
   const paymentMethods: PaymentMethodOption[] = ((methodsResult.data ?? []) as PaymentMethodRow[])
-    .map((method) => ({ id: method.id, code: method.code, name: method.name, isActive: method.is_active, components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
+    .map((method) => ({ id: method.id, code: method.code, name: method.name, isActive: method.is_active, productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config), components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
   const rawMethodById = new Map(((methodsResult.data ?? []) as PaymentMethodRow[]).map((method) => [method.id, method]));
   const historyByMember = new Map<string, PaymentAllocationHistoryEntry[]>();
   const historyByWorkforce = new Map<string, PaymentAllocationHistoryEntry[]>();
@@ -85,6 +87,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
       subjectLabel: worker ? `${worker.dropx_id ?? ""} · ${worker.full_name ?? ""}`.replace(/^ · | · $/g, "") : "",
       locationLabel: stationLabelById.get(String(mapping.station_id ?? "")) ?? "",
       reason: mapping.reason ?? "",
+      productionThreshold: parseProductionThresholdSnapshot(mapping.production_threshold_config),
       rates: paymentAllocationHistoryRates(mapping.payment_values, (method?.payment_method_components ?? []).map((component) => ({ code: component.component_code, label: component.label, sortOrder: component.sort_order })))
     };
     historyByMember.set(key, [...(historyByMember.get(key) ?? []), entry]);
@@ -98,7 +101,8 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
   }).map((worker) => {
     const mapping = mappingByWorkforce.get(worker.id);
-    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: String(worker.location_id ?? ""), providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(String(worker.location_id ?? "")) ?? "No location", onboardingStatus: String(worker.onboarding_status ?? "") };
+    const thresholdSnapshot = parseProductionThresholdSnapshot(mapping?.production_threshold_config);
+    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: String(worker.location_id ?? ""), providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(String(worker.location_id ?? "")) ?? "No location", onboardingStatus: String(worker.onboarding_status ?? "") };
   });
   const providerMembers = canonicalizeProviderFirstMembers(((providerResult.data ?? []) as ProviderMemberSource[]).map((provider) => ({
     providerMemberId: String(provider.provider_employee_id ?? "").trim(),
@@ -120,7 +124,8 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     const history = link?.workforce_id
       ? historyByWorkforce.get(link.workforce_id) ?? []
       : historyByMember.get(providerMemberKey(member.stationId, member.id)) ?? [];
-    return { providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
+    const thresholdSnapshot = parseProductionThresholdSnapshot(link?.production_threshold_config);
+    return { providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
   });
   const requestedStation = String(searchParams?.station ?? "").trim();
   const initialStationId = stations.find((station) => station.id === requestedStation || String(station.station_code ?? "").trim().toUpperCase() === requestedStation.toUpperCase())?.id ?? "";

@@ -1,3 +1,5 @@
+import type { ProductionThresholdSnapshot } from "./production-threshold-snapshot.ts";
+
 export type PaymentAllocationHistoryRate = {
   code: string;
   label: string;
@@ -15,6 +17,7 @@ export type PaymentAllocationHistoryEntry = {
   subjectLabel?: string;
   locationLabel?: string;
   reason?: string;
+  productionThreshold?: ProductionThresholdSnapshot | null;
   rates: PaymentAllocationHistoryRate[];
 };
 

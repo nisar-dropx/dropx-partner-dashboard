@@ -5,6 +5,7 @@ export type ProviderPayoutSegment = {
   workforceId: string;
   categoryCode: string;
   panNumber: string | null;
+  paymentSetupKey?: string;
   row: WorkforcePayoutRow;
 };
 
@@ -34,15 +35,30 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
   for (const [workforceId, workerSegments] of grouped) {
     const first = workerSegments[0];
     if (!first) continue;
-    const dailyByDate = new Map<string, WorkforcePayoutRow["dailyBreakdown"][number]>();
+    const dailyByDate = new Map<string, { day: WorkforcePayoutRow["dailyBreakdown"][number]; paymentSetupKey: string }>();
     let overlap = false;
     for (const segment of workerSegments) {
       for (const day of segment.row.dailyBreakdown) {
-        if (dailyByDate.has(day.date)) {
+        const current = dailyByDate.get(day.date);
+        if (!current) {
+          dailyByDate.set(day.date, { day, paymentSetupKey: segment.paymentSetupKey ?? "" });
+          continue;
+        }
+        if (!segment.paymentSetupKey || current.paymentSetupKey !== segment.paymentSetupKey) {
           overlap = true;
           break;
         }
-        dailyByDate.set(day.date, day);
+        current.day = {
+          date: day.date,
+          workDayUnits: Math.max(current.day.workDayUnits, day.workDayUnits),
+          attendanceSource: current.day.attendanceSource === day.attendanceSource ? day.attendanceSource : "Mixed",
+          methodAmounts: summarizePaymentMethodAmounts([
+            ...current.day.methodAmounts.map((method) => ({ methodId: method.id, label: method.label, amount: method.amount })),
+            ...day.methodAmounts.map((method) => ({ methodId: method.id, label: method.label, amount: method.amount }))
+          ]),
+          baseAmount: rounded(current.day.baseAmount + day.baseAmount),
+          lines: [...current.day.lines, ...day.lines]
+        };
       }
       if (overlap) break;
     }
@@ -51,7 +67,7 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
       continue;
     }
 
-    const dailyBreakdown = [...dailyByDate.values()].sort((left, right) => right.date.localeCompare(left.date));
+    const dailyBreakdown = [...dailyByDate.values()].map(({ day }) => day).sort((left, right) => right.date.localeCompare(left.date));
     const productionBreakdown = summarizePayoutBreakdownLines(dailyBreakdown.flatMap((day) => day.lines))
       .sort((left, right) => (left.sortOrder ?? Number.MAX_SAFE_INTEGER) - (right.sortOrder ?? Number.MAX_SAFE_INTEGER)
         || left.label.localeCompare(right.label)

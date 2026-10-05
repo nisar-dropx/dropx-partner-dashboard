@@ -1,5 +1,6 @@
 import { matchNames } from "./name-match.ts";
 import type { PaymentAllocationHistoryEntry } from "./payment-allocation-history.ts";
+import type { ProductionThresholdConfig } from "./production-threshold-config.ts";
 
 export type ProviderFirstWorkerView = {
   id: string;
@@ -11,6 +12,8 @@ export type ProviderFirstWorkerView = {
   mappingId: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
   effectiveFrom: string;
   effectiveTo: string;
   mappedProviderMemberId: string;
@@ -30,6 +33,8 @@ export type ProviderFirstMappingRowView = {
   mappingId: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
   effectiveFrom: string;
   effectiveTo: string;
   history: PaymentAllocationHistoryEntry[];
@@ -38,6 +43,7 @@ export type ProviderFirstMappingRowView = {
 export type ProviderFirstPaymentMethodView = {
   id: string;
   components: Array<{ code: string; label: string }>;
+  productionThresholdConfig?: ProductionThresholdConfig | null;
 };
 
 export type ProviderFirstFilters = {
@@ -193,6 +199,14 @@ export function providerFirstRowIssue(
     const amount = Number(raw);
     if (!raw) return `${component.label} is required.`;
     if (!Number.isFinite(amount) || amount < 0) return `${component.label} must be a valid amount.`;
+  }
+  const productionThresholdConfig = row.productionThresholdConfig ?? method.productionThresholdConfig;
+  if (productionThresholdConfig) {
+    const raw = row.productionThresholdMinimumUnits.trim();
+    const minimumUnits = Number(raw);
+    if (!raw || !Number.isInteger(minimumUnits) || minimumUnits <= 0) {
+      return `Combined minimum per ${productionThresholdConfig.period} must be a positive whole number.`;
+    }
   }
   return null;
 }

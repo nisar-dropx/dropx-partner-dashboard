@@ -125,6 +125,11 @@ export function PaymentAllocationHistoryButton({
                       ? entry.rates.map((rate) => <span key={`${entry.id}-${rate.code}`}><b>{rate.label}</b>{money(rate.value)}</span>)
                       : <span className="subtle">No configured rate values</span>}
                   </div>
+                  {entry.productionThreshold ? <p className="payment-history-reason">
+                    <b>Combined minimum / {entry.productionThreshold.period}:</b>{" "}
+                    {entry.productionThreshold.minimum_units.toLocaleString("en-IN")} units across{" "}
+                    {entry.productionThreshold.component_codes.map((code) => entry.rates.find((rate) => rate.code === code)?.label ?? code).join(" + ")}
+                  </p> : null}
                   {entry.reason ? <p className="payment-history-reason"><b>Reason:</b> {entry.reason}</p> : null}
                 </article>;
               })}

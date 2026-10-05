@@ -7,6 +7,11 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { attendanceCalculationType, type PaymentCalculationType } from "@/lib/payment-calculation";
+import {
+  assertMappedPaymentMethodComponentsUnchanged,
+  assertPaymentCalculationMetadataEditable
+} from "@/lib/payment-history-immutability";
+import { buildProductionThresholdConfig } from "@/lib/production-threshold-config";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -55,10 +60,16 @@ export async function createPaymentMethod(formData: FormData) {
   const code = required(formData.get("code"), "Method ID").toUpperCase();
   const name = required(formData.get("name"), "Method name");
   const components = await selectedPaymentFields(formData, companyId);
+  const productionThresholdConfig = buildProductionThresholdConfig({
+    enabled: checked(formData, "production_threshold_enabled"),
+    period: clean(formData.get("production_threshold_period")),
+    selectedComponentCodes: formData.getAll("production_threshold_component_codes"),
+    components
+  });
 
   const { data: method, error } = await supabaseAdmin
     .from("payment_methods")
-    .insert(withCompany({ code, name, is_active: true }, companyId))
+    .insert(withCompany({ code, name, is_active: true, production_threshold_config: productionThresholdConfig }, companyId))
     .select("id")
     .single();
 
@@ -106,6 +117,31 @@ async function selectedPaymentFields(formData: FormData, companyId: string) {
   });
 }
 
+async function assignedMappingCountForMethods(companyId: string, methodIds: readonly string[]) {
+  if (!supabaseAdmin || !methodIds.length) return 0;
+  const usage = await supabaseAdmin
+    .from("field_executive_provider_mappings")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .in("payment_method_id", [...new Set(methodIds)]);
+  if (usage.error) throw new Error(usage.error.message);
+  return usage.count ?? 0;
+}
+
+async function assignedMappingCountForPaymentField(companyId: string, paymentFieldId: string) {
+  if (!supabaseAdmin) return 0;
+  const components = await supabaseAdmin
+    .from("payment_method_components")
+    .select("payment_method_id")
+    .eq("company_id", companyId)
+    .eq("payment_field_id", paymentFieldId);
+  if (components.error) throw new Error(components.error.message);
+  return assignedMappingCountForMethods(
+    companyId,
+    (components.data ?? []).map((component) => String(component.payment_method_id)).filter(Boolean)
+  );
+}
+
 export async function updatePaymentMethod(formData: FormData) {
   const authorization = await requirePagePermission("payment_methods", "edit");
   const companyId = requireCompanyId(authorization);
@@ -116,6 +152,12 @@ export async function updatePaymentMethod(formData: FormData) {
   const code = required(formData.get("code"), "Method ID").toUpperCase();
   const name = required(formData.get("name"), "Method name");
   const components = await selectedPaymentFields(formData, companyId);
+  const productionThresholdConfig = buildProductionThresholdConfig({
+    enabled: checked(formData, "production_threshold_enabled"),
+    period: clean(formData.get("production_threshold_period")),
+    selectedComponentCodes: formData.getAll("production_threshold_component_codes"),
+    components
+  });
 
   const existingMethod = await admin
     .from("payment_methods")
@@ -125,16 +167,29 @@ export async function updatePaymentMethod(formData: FormData) {
     .single();
   if (existingMethod.error) throw new Error("Payment method not found for this company.");
 
+  const existingComponents = await admin.from("payment_method_components")
+    .select("id, payment_field_id, sort_order, is_active")
+    .eq("payment_method_id", id)
+    .eq("company_id", companyId)
+    .order("sort_order")
+    .order("id");
+  if (existingComponents.error) throw new Error(existingComponents.error.message);
+  const mappingCount = await assignedMappingCountForMethods(companyId, [id]);
+  assertMappedPaymentMethodComponentsUnchanged({
+    mappingCount,
+    existingPaymentFieldIds: (existingComponents.data ?? [])
+      .filter((component) => component.is_active !== false)
+      .map((component) => component.payment_field_id),
+    nextPaymentFieldIds: components.map((component) => component.payment_field_id)
+  });
+
   const { error: methodError } = await admin
     .from("payment_methods")
-    .update({ code, name, updated_at: new Date().toISOString() })
+    .update({ code, name, production_threshold_config: productionThresholdConfig, updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("company_id", companyId);
   if (methodError) throw new Error(methodError.message);
 
-  const existingComponents = await admin.from("payment_method_components")
-    .select("id, payment_field_id").eq("payment_method_id", id).eq("company_id", companyId);
-  if (existingComponents.error) throw new Error(existingComponents.error.message);
   const existingByField = new Map((existingComponents.data ?? []).map((component) => [String(component.payment_field_id), component.id]));
   for (const component of components) {
     const existingId = existingByField.get(String(component.payment_field_id));
@@ -256,6 +311,10 @@ export async function updatePaymentField(formData: FormData) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     const id = required(formData.get("field_id"), "Payment field");
     const payload = parsePaymentField(formData);
+    assertPaymentCalculationMetadataEditable({
+      mappingCount: await assignedMappingCountForPaymentField(companyId, id),
+      subject: "payment field"
+    });
     const update = await supabaseAdmin.from("payment_fields").update({ ...payload, updated_at: new Date().toISOString() })
       .eq("id", id).eq("company_id", companyId);
     if (update.error) throw new Error(update.error.message);

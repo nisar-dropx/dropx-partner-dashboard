@@ -10,6 +10,14 @@ import { matchNames } from "@/lib/name-match";
 import { isScientificProviderMemberId, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { parseProductionThresholdConfig, type ProductionThresholdConfig } from "@/lib/production-threshold-config";
+import {
+  isFirstDayOfMonth,
+  monthlyThresholdChangeRequiresMonthStart,
+  parseProductionThresholdSnapshot,
+  resolveMappingProductionThresholdSnapshot,
+  type MappingProductionThresholdSnapshot
+} from "@/lib/production-threshold-snapshot";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -60,6 +68,7 @@ function nonEmptyRow(formData: FormData, index: number) {
     "effective_to",
     "payment_method_id",
     "payment_values_json",
+    "production_threshold_minimum_units",
     "delivery_rate",
     "pickup_rate",
     "mfn_rate",
@@ -198,6 +207,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
         paymentMethodCode: bulkCell(row, ["PAYMENT_METHOD_CODE", "PAYMENT_METHOD", "METHOD_CODE"]).toUpperCase(),
         effectiveFromRaw: bulkCell(row, ["EFFECTIVE_FROM", "FROM_DATE"]),
         effectiveToRaw: bulkCell(row, ["EFFECTIVE_TO", "TO_DATE"]),
+        productionThresholdMinimumUnitsRaw: bulkCell(row, ["COMBINED_MINIMUM_UNITS", "PRODUCTION_MINIMUM_UNITS", "MINIMUM_UNITS"]),
         cells: Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizedHeader(key), String(value ?? "").trim()]))
       };
     }).filter((row) => row.dropxId || row.providerMemberId || row.paymentMethodCode);
@@ -209,7 +219,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, designation_id, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true).eq("provider_mapping_required", true),
-      supabaseAdmin.from("payment_methods").select("id, code, payment_method_components(component_code, label, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
+      supabaseAdmin.from("payment_methods").select("id, code, production_threshold_config, payment_method_components(component_code, label, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
     ]);
     if (employeeError) throw new Error(employeeError.message);
     if (contractorError) throw new Error(contractorError.message);
@@ -220,6 +230,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     const paymentMethodByCode = new Map((paymentMethods ?? []).map((method) => [String(method.code ?? "").trim().toUpperCase(), {
       id: String(method.id),
       code: String(method.code ?? "").trim(),
+      productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config),
       components: (method.payment_method_components ?? []) as ProviderPaymentComponent[]
     }]));
     const allPaymentFieldCodes = new Set(Array.from(paymentMethodByCode.values()).flatMap((method) => method.components.map((component) => normalizedHeader(component.component_code))));
@@ -289,7 +300,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data for the worker's location."); continue; }
       if (!providerHolderMatches(holderName, worker.fullName)) { skipped("Provider Member ID holder name does not match the DropX worker."); continue; }
       const suppliedPaymentValues = Array.from(allPaymentFieldCodes).some((code) => String(uploadRow.cells[code] ?? "").trim() !== "");
-      const hasAllocationData = Boolean(uploadRow.paymentMethodCode || uploadRow.effectiveFromRaw || uploadRow.effectiveToRaw || suppliedPaymentValues);
+      const hasAllocationData = Boolean(uploadRow.paymentMethodCode || uploadRow.effectiveFromRaw || uploadRow.effectiveToRaw || uploadRow.productionThresholdMinimumUnitsRaw || suppliedPaymentValues);
       const paymentMethod = uploadRow.paymentMethodCode ? paymentMethodByCode.get(uploadRow.paymentMethodCode) : null;
       if (hasAllocationData && !uploadRow.paymentMethodCode) { skipped("Payment Method Code is required when payment allocation data is supplied."); continue; }
       if (uploadRow.paymentMethodCode && !paymentMethod) { skipped("Payment Method Code is not active or does not exist."); continue; }
@@ -313,7 +324,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (invalidPaymentValue) { skipped(invalidPaymentValue); continue; }
       const workerColumn = worker.sourceType === "workforce" ? "workforce_id" : worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
-        .select("id, effective_from, effective_to, station_id")
+        .select("id, effective_from, effective_to, station_id, payment_method_id, production_threshold_config")
         .eq("company_id", companyId)
         .eq(workerColumn, worker.id)
         .is("effective_to", null)
@@ -327,12 +338,41 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       }
 
       const fallbackEffectiveFrom = /^\d{4}-\d{2}-\d{2}$/.test(worker.effectiveFrom) ? worker.effectiveFrom : new Date().toISOString().slice(0, 10);
+      const requestedEffectiveFrom = effectiveFrom || String(existing?.effective_from ?? fallbackEffectiveFrom);
+      const storedThresholdSnapshot = parseProductionThresholdSnapshot(existing?.production_threshold_config);
+      const editsExistingVersion = Boolean(existing)
+        && String(existing?.effective_from ?? "") === requestedEffectiveFrom;
+      const paymentMethodChanged = editsExistingVersion
+        && String(existing?.payment_method_id ?? "") !== String(paymentMethod?.id ?? "");
+      let productionThresholdConfig: MappingProductionThresholdSnapshot;
+      try {
+        productionThresholdConfig = resolveMappingProductionThresholdSnapshot({
+          existingValue: existing?.production_threshold_config,
+          editsExistingVersion,
+          paymentMethodChanged,
+          methodConfig: paymentMethod?.productionThresholdConfig ?? null,
+          minimumUnits: uploadRow.productionThresholdMinimumUnitsRaw,
+          inheritedMinimumUnits: storedThresholdSnapshot?.minimum_units
+        });
+        if (!paymentMethod?.productionThresholdConfig
+          && uploadRow.productionThresholdMinimumUnitsRaw
+          && !(editsExistingVersion && storedThresholdSnapshot)) {
+          throw new Error("The selected payment method does not use a combined production minimum.");
+        }
+      } catch (error) {
+        skipped(error instanceof Error ? error.message : "Combined minimum is invalid.");
+        continue;
+      }
       const allocationPayload = paymentMethod ? {
         payment_method_id: paymentMethod.id,
         payment_values: paymentValues,
+        production_threshold_config: productionThresholdConfig,
         pay_type: paymentMethod.code
       } : {};
-      const requestedEffectiveFrom = effectiveFrom || String(existing?.effective_from ?? fallbackEffectiveFrom);
+      if (monthlyThresholdChangeRequiresMonthStart(storedThresholdSnapshot, parseProductionThresholdSnapshot(productionThresholdConfig)) && !isFirstDayOfMonth(requestedEffectiveFrom)) {
+        skipped("Changes to an existing monthly combined minimum must start on the first day of a month.");
+        continue;
+      }
       const closureError = existing ? ongoingMappingClosureError({
         existingEffectiveFrom: String(existing.effective_from),
         existingEffectiveTo: existing.effective_to,
@@ -357,6 +397,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
               effective_to: effectiveTo || null,
               payment_method_id: paymentMethod.id,
               payment_values: paymentValues,
+              production_threshold_config: productionThresholdConfig,
               pay_type: paymentMethod.code,
               status: effectiveTo ? "closed" : "active"
             },
@@ -383,6 +424,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
           effective_to: effectiveTo || null,
           payment_method_id: paymentMethod.id,
           payment_values: paymentValues,
+          production_threshold_config: productionThresholdConfig,
           pay_type: paymentMethod.code,
           status: effectiveTo ? "closed" : "active",
           created_by: authorization.userId,
@@ -413,6 +455,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
           effective_to: effectiveTo || null,
           payment_method_id: paymentMethod?.id ?? null,
           payment_values: paymentMethod ? paymentValues : {},
+          production_threshold_config: paymentMethod ? productionThresholdConfig : null,
           pay_type: paymentMethod?.code ?? "UNALLOCATED",
           status: effectiveTo ? "closed" : "active",
           created_by: authorization.userId,
@@ -464,9 +507,10 @@ async function saveExecutiveMappingRow(
   const effectiveTo = rowValue(formData, index, "effective_to");
   const paymentMethodId = rowRequired(formData, index, "payment_method_id", "Payment method");
   const rawPaymentValues = rowValue(formData, index, "payment_values_json") ?? "{}";
+  const productionThresholdMinimumUnits = rowValue(formData, index, "production_threshold_minimum_units");
   const { data: paymentMethod, error: methodError } = await supabaseAdmin
     .from("payment_methods")
-    .select("id, code, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
+    .select("id, code, production_threshold_config, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
     .eq("id", paymentMethodId)
     .eq("company_id", companyId)
     .eq("is_active", true)
@@ -474,6 +518,39 @@ async function saveExecutiveMappingRow(
 
   if (methodError) throw new Error(methodError.message);
   const methodComponents = (paymentMethod.payment_method_components ?? []) as ProviderPaymentComponent[];
+  const { data: existingThresholdMapping, error: existingThresholdMappingError } = mappingId
+    ? await supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("payment_method_id, production_threshold_config, effective_from")
+      .eq("id", mappingId)
+      .eq("company_id", companyId)
+      .maybeSingle()
+    : { data: null, error: null };
+  if (existingThresholdMappingError) throw new Error(existingThresholdMappingError.message);
+  const storedThresholdSnapshot = parseProductionThresholdSnapshot(existingThresholdMapping?.production_threshold_config);
+  const methodThresholdConfig = parseProductionThresholdConfig(paymentMethod.production_threshold_config);
+  const editsExistingVersion = Boolean(existingThresholdMapping)
+    && String(existingThresholdMapping?.effective_from ?? "") === effectiveFrom;
+  const paymentMethodChanged = editsExistingVersion
+    && String(existingThresholdMapping?.payment_method_id ?? "") !== paymentMethodId;
+  let productionThresholdConfig: MappingProductionThresholdSnapshot;
+  try {
+    productionThresholdConfig = resolveMappingProductionThresholdSnapshot({
+      existingValue: existingThresholdMapping?.production_threshold_config,
+      editsExistingVersion,
+      paymentMethodChanged,
+      methodConfig: methodThresholdConfig,
+      minimumUnits: productionThresholdMinimumUnits,
+      inheritedMinimumUnits: storedThresholdSnapshot?.minimum_units
+    });
+    if (!methodThresholdConfig
+      && productionThresholdMinimumUnits
+      && !(editsExistingVersion && storedThresholdSnapshot)) {
+      throw new Error("The selected payment method does not use a combined production minimum.");
+    }
+  } catch (error) {
+    throw new Error(`Row ${index + 1}: ${error instanceof Error ? error.message : "Combined minimum is invalid."}`);
+  }
 
   const [{ data: legacyWorker }, { data: station }] = await Promise.all([
     sourceType === "employee"
@@ -644,6 +721,9 @@ async function saveExecutiveMappingRow(
   if (effectiveTo && effectiveTo < effectiveFrom) {
     throw new Error(`Row ${index + 1}: Effective to cannot be before effective from.`);
   }
+  if (monthlyThresholdChangeRequiresMonthStart(storedThresholdSnapshot, parseProductionThresholdSnapshot(productionThresholdConfig)) && !isFirstDayOfMonth(effectiveFrom)) {
+    throw new Error(`Row ${index + 1}: Changes to an existing monthly combined minimum must start on the first day of a month.`);
+  }
 
   const mappingPayload = withCompany({
     workforce_id: sourceType === "workforce" ? id : null,
@@ -657,6 +737,7 @@ async function saveExecutiveMappingRow(
     effective_to: effectiveTo,
     payment_method_id: paymentMethodId,
     payment_values: paymentValues,
+    production_threshold_config: productionThresholdConfig,
     pay_type: paymentMethod.code,
     delivery_rate: null,
     pickup_rate: null,
@@ -960,6 +1041,8 @@ export type ProviderFirstInlineSavedRow = {
   workforceId: string;
   paymentMethodId: string;
   paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
   effectiveFrom: string;
   effectiveTo: string;
 };
@@ -1025,7 +1108,7 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
 
       const { data: savedMapping, error: savedMappingError } = await supabaseAdmin
         .from("field_executive_provider_mappings")
-        .select("id, workforce_id, payment_method_id, payment_values, effective_from, effective_to")
+        .select("id, workforce_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to")
         .eq("company_id", companyId)
         .eq("workforce_id", workforceId)
         .eq("provider_member_id", providerMemberId)
@@ -1038,12 +1121,15 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
       if (savedMappingError) throw new Error(savedMappingError.message);
       if (!savedMapping) throw new Error(`Row ${index + 1}: The saved mapping could not be reloaded.`);
 
+      const thresholdSnapshot = parseProductionThresholdSnapshot(savedMapping.production_threshold_config);
       savedRows.push({
         clientKey: currentClientKey,
         mappingId: String(savedMapping.id),
         workforceId: String(savedMapping.workforce_id ?? workforceId),
         paymentMethodId: String(savedMapping.payment_method_id ?? ""),
         paymentValues: Object.fromEntries(Object.entries((savedMapping.payment_values ?? {}) as Record<string, string | number>).map(([key, value]) => [key, String(value)])),
+        productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null,
+        productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "",
         effectiveFrom: String(savedMapping.effective_from ?? ""),
         effectiveTo: String(savedMapping.effective_to ?? "")
       });

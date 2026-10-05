@@ -51,3 +51,33 @@ test("summarizePaymentMethodAmounts keeps each mapped method in its own total", 
     { id: "mg", label: "Minimum Guarantee", amount: 250 }
   ]);
 });
+
+test("payout breakup totals preserve reported, excluded and payable threshold units", () => {
+  assert.deepEqual(summarizePayoutBreakdownLines([
+    { code: "DELIVERY", label: "Delivery", componentType: "production", reportedCount: 80, thresholdDeducted: 80, count: 0, rate: 10, amount: 0, thresholdPeriod: "month", thresholdMinimum: 100 },
+    { code: "DELIVERY", label: "Delivery", componentType: "production", reportedCount: 50, thresholdDeducted: 20, count: 30, rate: 10, amount: 300, thresholdPeriod: "month", thresholdMinimum: 100 }
+  ]), [{
+    code: "DELIVERY",
+    label: "Delivery",
+    componentType: "production",
+    reportedCount: 130,
+    thresholdDeducted: 100,
+    count: 30,
+    rate: 10,
+    amount: 300,
+    thresholdPeriod: "month",
+    thresholdMinimum: 100,
+    thresholdConfigurationMissing: false
+  }]);
+});
+
+test("thresholded and standard production lines do not collapse into one audit line", () => {
+  const lines = summarizePayoutBreakdownLines([
+    { code: "DELIVERY", label: "Delivery", componentType: "production", reportedCount: 120, thresholdDeducted: 100, count: 20, rate: 10, amount: 200, thresholdPeriod: "day", thresholdMinimum: 100 },
+    { code: "DELIVERY", label: "Delivery", componentType: "production", count: 30, rate: 10, amount: 300 }
+  ]);
+
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].reportedCount, 120);
+  assert.equal(lines[1].reportedCount, undefined);
+});

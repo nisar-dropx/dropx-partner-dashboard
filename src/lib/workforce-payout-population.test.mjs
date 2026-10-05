@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  mappingsForAuthorizedWorkforce,
   payoutMappingMatchesShipment,
   resolveShipmentPayoutMapping,
   shipmentIdentityKey,
@@ -47,6 +48,20 @@ test("mapping resolution distinguishes unmapped, mapped and conflicting identiti
 test("report identity grouping keeps the same provider ID separate by station and client", () => {
   assert.notEqual(shipmentIdentityKey(shipment), shipmentIdentityKey({ ...shipment, station_code: "KLZH" }));
   assert.notEqual(shipmentIdentityKey(shipment), shipmentIdentityKey({ ...shipment, client: "Flipkart" }));
+});
+
+test("monthly threshold carry-in includes prior-station mappings only for authorized workers", () => {
+  const mappings = [
+    { id: "old-a", workforce_id: "worker-1", station_id: "station-a" },
+    { id: "current-b", workforce_id: "worker-1", station_id: "station-b" },
+    { id: "other-a", workforce_id: "worker-2", station_id: "station-a" },
+    { id: "legacy-b", contractor_id: "contractor-1", station_id: "station-b" }
+  ];
+
+  assert.deepEqual(
+    mappingsForAuthorizedWorkforce(mappings, [{ id: "worker-1", source_profile_id: "contractor-1" }]).map((row) => row.id),
+    ["old-a", "current-b", "legacy-b"]
+  );
 });
 
 test("DropX status exposes onboarding, lifecycle and inactive states", () => {

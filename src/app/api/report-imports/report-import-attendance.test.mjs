@@ -11,6 +11,49 @@ import {
   reportImportMappingStatus,
   selectReportImportMapping
 } from "./report-import-attendance.ts";
+import {
+  allocateReportImportProductionThresholds,
+  mergeReportImportShipmentMonthRows,
+  reportImportCalendarMonthEnd,
+  reportImportShipmentMonthKey
+} from "./report-import-production-threshold.ts";
+
+function thresholdShipment(overrides = {}) {
+  return {
+    client: "Amazon",
+    provider_employee_id: "provider-1",
+    station_code: "BLR1",
+    work_date: "2026-09-01",
+    total_delivery: 80,
+    source_batch_id: "existing",
+    ...overrides
+  };
+}
+
+function thresholdProduction(overrides = {}) {
+  return {
+    id: "existing-day",
+    workforceId: "worker-1",
+    mappingId: "mapping-1",
+    date: "2026-09-01",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: null,
+    componentCode: "DELIVERY",
+    componentOrder: 1,
+    reportedUnits: 80,
+    rate: 10,
+    thresholdConfig: {
+      period: "month",
+      component_codes: ["DELIVERY", "CRETURN"],
+      minimum_units: 100
+    },
+    methodThresholdConfig: {
+      period: "month",
+      component_codes: ["DELIVERY", "CRETURN"]
+    },
+    ...overrides
+  };
+}
 
 test("report imports resolve legacy attendance identities through canonical Workforce profiles", () => {
   const index = createReportImportWorkforceIndex([
@@ -62,6 +105,11 @@ test("report-import components retain nested calculations and historical mapping
   assert.match(route, /\.eq\("company_id", companyId\)\.in\("status", \["active", "closed"\]\)/);
   assert.match(route, /\.in\(group\.column, group\.ids\.slice/);
   assert.match(route, /\.or\(`effective_to\.is\.null,effective_to\.gte\.\$\{historyFrom\}`\)/);
+  assert.match(route, /payment_values,production_threshold_config/);
+  assert.match(route, /mergeReportImportShipmentMonthRows/);
+  assert.match(route, /allocateReportImportProductionThresholds/);
+  assert.match(route, /Combined production minimum missing/);
+  assert.match(route, /cpsRecalculationRows = payload\.map/);
 });
 
 test("shipment identity matching scopes reused provider IDs by station and provider", () => {
@@ -127,4 +175,53 @@ test("shipment hourly attendance is visibly unavailable instead of mapped at zer
   assert.equal(calculation.total, 0);
   assert.equal(calculation.missing, true);
   assert.equal(reportImportMappingStatus(true, calculation.missing), "Attendance calculation unavailable");
+});
+
+test("report import keeps the complete month while incoming rows replace their stored versions", () => {
+  const merged = mergeReportImportShipmentMonthRows([
+    thresholdShipment(),
+    thresholdShipment({ work_date: "2026-09-02", total_delivery: 20 })
+  ], [thresholdShipment({ total_delivery: 90, source_batch_id: "incoming" })]);
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].total_delivery, 90);
+  assert.equal(merged[0].source_batch_id, "incoming");
+  assert.equal(merged[1].work_date, "2026-09-02");
+  assert.equal(reportImportShipmentMonthKey(merged[0]), "2026-09-01|AMAZON|BLR1|PROVIDER-1");
+  assert.equal(reportImportCalendarMonthEnd("2028-02-10"), "2028-02-29");
+});
+
+test("monthly report-import threshold includes stored earlier rows instead of only the upload slice", () => {
+  const allocations = allocateReportImportProductionThresholds([
+    thresholdProduction(),
+    thresholdProduction({
+      id: "uploaded-day",
+      date: "2026-09-02",
+      componentCode: "CRETURN",
+      componentOrder: 2,
+      reportedUnits: 30,
+      rate: 20
+    })
+  ]);
+
+  assert.equal(allocations.get("existing-day")?.thresholdDeducted, 80);
+  assert.equal(allocations.get("uploaded-day")?.thresholdDeducted, 20);
+  assert.equal(allocations.get("uploaded-day")?.payableUnits, 10);
+  assert.equal(allocations.get("uploaded-day")?.amount, 200);
+});
+
+test("report import fails closed when a threshold method has no person-specific minimum snapshot", () => {
+  const allocations = allocateReportImportProductionThresholds([
+    thresholdProduction({
+      id: "missing-minimum",
+      reportedUnits: 25,
+      thresholdConfig: null,
+      methodThresholdConfig: { period: "day", component_codes: ["DELIVERY"] }
+    })
+  ]);
+  const allocation = allocations.get("missing-minimum");
+
+  assert.equal(allocation?.thresholdConfigurationMissing, true);
+  assert.equal(allocation?.payableUnits, 0);
+  assert.equal(allocation?.amount, 0);
 });

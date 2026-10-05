@@ -167,3 +167,29 @@ test("the same production head at two dated rates exports both segment totals", 
   assert.equal(table.rows[0][rate15Count], 50);
   assert.equal(table.rows[0][table.headers.indexOf("Delivery @ INR 15 Amount (INR)")], 750);
 });
+
+test("thresholded production exports reported, excluded and payable units while standard production keeps Count", () => {
+  const row = {
+    ...combinedMethodRow,
+    productionBreakdown: [
+      { code: "DELIVERY", label: "Delivery", componentType: "production", reportedCount: 130, thresholdDeducted: 100, count: 30, rate: 13, amount: 390, thresholdPeriod: "month", thresholdMinimum: 100 },
+      { code: "SELLER_PICKUP", label: "MFN", componentType: "production", count: 12, rate: 5, amount: 60 }
+    ]
+  };
+  const table = buildWorkforcePayoutExportTable([row], "Workforce");
+
+  assert.ok(table.headers.includes("Delivery Threshold Period"));
+  assert.ok(table.headers.includes("Delivery Minimum Units"));
+  assert.ok(table.headers.includes("Delivery Reported Units"));
+  assert.ok(table.headers.includes("Delivery Threshold / Excluded Units"));
+  assert.ok(table.headers.includes("Delivery Payable Units"));
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Threshold Period")], "month");
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Minimum Units")], 100);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Reported Units")], 130);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Threshold / Excluded Units")], 100);
+  assert.equal(table.rows[0][table.headers.indexOf("Delivery Payable Units")], 30);
+  assert.deepEqual(
+    table.headers.filter((header) => header.startsWith("MFN ")),
+    ["MFN Count", "MFN Rate (INR)", "MFN Amount (INR)"]
+  );
+});

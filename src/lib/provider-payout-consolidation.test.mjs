@@ -3,7 +3,7 @@ import test from "node:test";
 import { consolidateProviderPayoutSegments } from "./provider-payout-consolidation.ts";
 import { directPayForDay } from "./direct-workforce-pay.ts";
 
-function segment({ id, methodId, method, from, to, rate, units, amount }) {
+function segment({ id, methodId, method, from, to, rate, units, amount, paymentSetupKey }) {
   const days = [];
   for (let day = from; day <= to; day += 1) {
     const date = `2026-09-${String(day).padStart(2, "0")}`;
@@ -14,6 +14,7 @@ function segment({ id, methodId, method, from, to, rate, units, amount }) {
     workforceId: "worker-1",
     categoryCode: "workforce",
     panNumber: null,
+    paymentSetupKey,
     row: {
       id, dropxId: "DROPX1", dropxStatus: "Active", name: "Worker", designation: "DA", providerMemberId: "P1", providerMemberName: "Provider worker", locationId: "station", location: "ABC", provider: "Amazon", model: "EDSP", paymentMethod: method, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays: days.length, workDaysSource: "Biometric", history: [], paymentMethodBreakdown: [{ id: methodId, label: method, amount }], production: units, productionBreakdown: [], dailyBreakdown: days, baseAmount: amount, additions: 0, grossPayment: amount, deductions: 0, deductionBreakdown: [], panAadhaarStatus: "NOT LINKED", netAmount: amount, status: "Ready for review"
     }
@@ -66,4 +67,19 @@ test("overlapping mapping periods are rejected instead of double-paid", () => {
   const result = consolidateProviderPayoutSegments([first, second]);
   assert.deepEqual(result.conflicts, ["worker-1"]);
   assert.equal(result.rows.length, 0);
+});
+
+test("simultaneous provider IDs with the same payment setup merge without double-counting work days", () => {
+  const first = segment({ id: "provider-a", methodId: "packets", method: "Per packet", from: 1, to: 1, rate: 10, units: 7, amount: 70, paymentSetupKey: "same-setup" });
+  const second = segment({ id: "provider-b", methodId: "packets", method: "Per packet", from: 1, to: 1, rate: 10, units: 5, amount: 50, paymentSetupKey: "same-setup" });
+  first.row.providerMemberId = "P1";
+  second.row.providerMemberId = "P2";
+
+  const result = consolidateProviderPayoutSegments([first, second]);
+
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(result.rows[0].row.dailyBreakdown.length, 1);
+  assert.equal(result.rows[0].row.workDays, 1);
+  assert.equal(result.rows[0].row.grossPayment, 120);
+  assert.equal(result.rows[0].row.providerMemberId, "P1 / P2");
 });

@@ -20,6 +20,11 @@ export type PayoutBreakdownLine = {
   rate: number;
   amount: number;
   sortOrder?: number;
+  reportedCount?: number;
+  thresholdDeducted?: number;
+  thresholdPeriod?: "day" | "month" | null;
+  thresholdMinimum?: number | null;
+  thresholdConfigurationMissing?: boolean;
 };
 
 const rounded = (value: number) => Math.round(value * 100) / 100;
@@ -76,15 +81,35 @@ export function summarizePaymentMethodAmounts(inputs: PaymentMethodAmountInput[]
 export function summarizePayoutBreakdownLines(lines: PayoutBreakdownLine[]) {
   const values = new Map<string, PayoutBreakdownLine>();
   for (const line of lines) {
-    const key = `${line.code.trim().toUpperCase()}|${line.componentType}|${Number(line.rate)}`;
-    const current = values.get(key) ?? { ...line, count: 0, amount: 0 };
+    const thresholdIdentity = line.reportedCount === undefined
+      ? "standard"
+      : `threshold|${line.thresholdPeriod ?? "unknown"}|${line.thresholdMinimum ?? "missing"}|${line.thresholdConfigurationMissing === true}`;
+    const key = `${line.code.trim().toUpperCase()}|${line.componentType}|${Number(line.rate)}|${thresholdIdentity}`;
+    const current = values.get(key) ?? {
+      ...line,
+      count: 0,
+      amount: 0,
+      ...(line.reportedCount === undefined ? {} : {
+        reportedCount: 0,
+        thresholdDeducted: 0
+      })
+    };
     current.count += Number.isFinite(line.count) ? line.count : 0;
     current.amount += Number.isFinite(line.amount) ? line.amount : 0;
+    if (line.reportedCount !== undefined) {
+      current.reportedCount = (current.reportedCount ?? 0) + (Number.isFinite(line.reportedCount) ? line.reportedCount : 0);
+      current.thresholdDeducted = (current.thresholdDeducted ?? 0) + (Number.isFinite(line.thresholdDeducted) ? Number(line.thresholdDeducted) : 0);
+      current.thresholdConfigurationMissing ||= line.thresholdConfigurationMissing === true;
+    }
     values.set(key, current);
   }
   return [...values.values()].map((line) => ({
     ...line,
     count: rounded(line.count),
-    amount: rounded(line.amount)
+    amount: rounded(line.amount),
+    ...(line.reportedCount === undefined ? {} : {
+      reportedCount: rounded(line.reportedCount),
+      thresholdDeducted: rounded(line.thresholdDeducted ?? 0)
+    })
   }));
 }
