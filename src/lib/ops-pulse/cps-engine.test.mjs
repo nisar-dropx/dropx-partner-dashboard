@@ -432,3 +432,37 @@ test('shipment activity remains work evidence when the attendance record is abse
  const r=rebuildCps(base(),f);assert.equal(r.da_details[0].work_dates.length,1);assert.deepEqual(r.da_details[0].work_bases,['shipment activity']);
  assert.equal(r.daily[0].da,1000,'displayed work evidence does not change payroll rules');
 });
+
+test('Fleet source rule excludes fixed rental without changing per-package, salary or fuel costs',()=>{
+ const f=facts();
+ f.mappings[0].payment_values={DELIVERY:10,VAN_RENT_PER_DAY:900,VAN_PACKAGE:2,FUEL:1,SALARY:300};
+ f.components.push(
+ {payment_method_id:'per-packet',component_code:'VAN_RENT_PER_DAY',label:'Van Rent Per Day',component_type:'amount',calculation_type:'fixed_daily',pay_schedule:'per_day'},
+ {payment_method_id:'per-packet',component_code:'VAN_PACKAGE',label:'Van per package',component_type:'production',calculation_type:'count_x_rate',calculation_source:'total_delivery'},
+ {payment_method_id:'per-packet',component_code:'FUEL',component_type:'production',calculation_type:'count_x_rate',calculation_source:'total_delivery'},
+ {payment_method_id:'per-packet',component_code:'SALARY',component_type:'amount',calculation_type:'fixed_daily',pay_schedule:'per_day'});
+ f.component_policies=[{component_code:'VAN_RENT_PER_DAY',mode:'fleet',effective_from:'2026-09-01'}];
+ let r=rebuildCps(base(),f);
+ assert.equal(r.daily[0].van,200);assert.equal(r.daily[0].da,1400);
+ assert.ok(!r.da_details[0].periods[0].rates.some(rate=>rate.label==='Van Rent Per Day'));
+ // No rental value is needed in Workforce when Fleet owns that cost.
+ delete f.mappings[0].payment_values.VAN_RENT_PER_DAY;
+ r=rebuildCps(base(),f);assert.equal(r.associates[0].mapping_status,'Mapped');assert.equal(r.daily[0].van,200);
+ // Production cannot accidentally be excluded even by a malformed policy.
+ f.component_policies.push({component_code:'VAN_PACKAGE',mode:'fleet',effective_from:'2026-09-01'});
+ assert.equal(rebuildCps(base(),f).daily[0].van,200);
+});
+
+test('rental source revisions apply by cost date and rental-only direct cards do not create false pay gaps',()=>{
+ const f=facts();
+ f.component_policies=[{component_code:'VAN_RENT_PER_DAY',mode:'workforce',effective_from:'2026-08-01'},{component_code:'VAN_RENT_PER_DAY',mode:'fleet',effective_from:'2026-09-02'}];
+ f.components=[{payment_method_id:'per-packet',component_code:'VAN_RENT_PER_DAY',component_type:'amount',calculation_type:'fixed_daily',pay_schedule:'per_day'}];
+ f.mappings[0].payment_values={VAN_RENT_PER_DAY:900};
+ assert.equal(rebuildCps(base(),f).daily[0].van,900);
+ f.shipments[0].work_date='2026-09-02';
+ assert.equal(rebuildCps(base([day('A','2026-09-02')]),f).daily[0].van,0);
+ f.mappings=[];f.shipments=[];
+ f.allocations=[{workforce_id:'w1',station_id:'station-a',payment_method_id:'per-packet',effective_from:'2026-01-01',payment_values:{},payment_components:f.components}];
+ const r=rebuildCps(base([day('A','2026-09-02',0)]),f);
+ assert.equal(r.daily[0].van,0);assert.ok(!r.gaps.some(g=>g.kind==='Direct payment allocation incomplete'));
+});

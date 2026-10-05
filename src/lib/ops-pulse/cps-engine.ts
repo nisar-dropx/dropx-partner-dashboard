@@ -33,6 +33,7 @@ export type CpsFacts = {
   stations: RecordRow[]; employees: RecordRow[]; salaries: RecordRow[];
   people_rules: CpsCostInput[];
   people_policies?: CpsPeoplePolicy[];
+  component_policies?: {component_code:string;mode:string;effective_from:string}[];
   people_assignments?: {employee_id:string;station_code:string;effective_from:string;effective_to:string|null;kind?:string}[];
   allocations?: RecordRow[];
   attendance?: RecordRow[];
@@ -135,6 +136,8 @@ export function calculateRateCard(
   const values = Object.fromEntries(Object.entries(r.payment_values ?? {}).map(([k,v])=>[key(k),v]));
   for(const c of components) {
     const code=key(c.component_code), label=key(`${code} ${c.label}`);
+    // Fleet owns fixed rental accrual; payroll settlement keeps its original card.
+    if(c.cps_cost_source==='fleet' && c.component_type!=='production' && c.calculation_type!=='count_x_rate') continue;
     const raw=values[code];
     if(raw==null || String(raw).trim()==='' || !Number.isFinite(Number(raw)) || Number(raw)<0) { cost.missing=true; continue; }
     const rate=Number(raw), isProduction=c.component_type==='production' || c.calculation_type==='count_x_rate';
@@ -178,7 +181,7 @@ export function calculateRateCard(
 }
 function detailRates(card: RecordRow, components: RecordRow[], client: string): CpsRate[] {
   const values=Object.fromEntries(Object.entries(card.payment_values??{}).map(([k,v])=>[key(k),v]));
-  if(components.length) return components.filter(c=>values[key(c.component_code)]!=null).map(c=>({
+  if(components.length) return components.filter(c=>values[key(c.component_code)]!=null && (c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate')).map(c=>({
     label:c.label||c.component_code, rate:num(values[key(c.component_code)]),
     basis:(c.component_type==='production'||c.calculation_type==='count_x_rate')
       ? String(c.provider_calculation_sources?.[client.toLowerCase()]||c.calculation_source||c.component_code).replaceAll('_',' ').toLowerCase()
@@ -200,6 +203,9 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const policyFor = (e: RecordRow, date: string) => (facts.people_policies ?? [])
     .filter(p=>p.designation_code===e.designation && p.effective_from<=date)
     .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
+  const sourceComponents = <T extends RecordRow>(rows: T[], date: string) => rows.map(c=>({...c,cps_cost_source:
+    (facts.component_policies??[]).filter(p=>key(p.component_code)===key(c.component_code) && p.effective_from<=date)
+      .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode??'workforce'}));
   const stationById=new Map(facts.stations.map(s=>[s.id,s]));
   const selected=new Set(base.daily.map(d=>d.station_code));
   const dates=[...new Set(base.daily.map(d=>d.work_date))].sort();
@@ -437,7 +443,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const current=latest ? candidates.filter(m=>m.effective_from===latest.effective_from) : [];
     const conflict=new Set(current.map(rateSignature)).size>1;
     const card=latest;
-    const cs=card ? components.get(card.payment_method_id)??[] : [];
+    const cs=sourceComponents(card ? components.get(card.payment_method_id)??[] : [],g.date);
     const aggregate:RecordRow={client:g.rows[0].client};
     for(const field of ['amazon_delivery','swa_delivery','total_delivery','total_activity','c_return','mfn','mfn_return']) aggregate[field]=g.rows.reduce((n,r)=>n+num(r[field]),0);
     const workerDateKey=`${g.worker.id}|${g.date}`;
@@ -497,7 +503,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       add(row.station_code,g.date,'DA','Salary / minimum guarantee',row.mg_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','Variable delivery pay',row.variable_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','DA fuel',row.fuel_pay,'Workforce rate card');
-      add(row.station_code,g.date,'Van','Vehicle rent in rate card',row.van_pay,'Workforce rate card');
+      add(row.station_code,g.date,'Van','Vehicle pay from rate card',row.van_pay,'Workforce rate card');
       const k=`${g.worker.id}|${row.station_code}`,p=people.get(k)??{id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,station_code:row.station_code,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
       p.salary+=row.mg_pay;p.variable+=row.variable_pay;p.fuel+=row.fuel_pay;p.van+=row.van_pay;p.deliveries+=num(row.total_delivery);
       if(first){p.paid_days++;if((volumes.get(row.station_code)??0)===0 && costs.salary>0)p.zero_delivery_days++;}people.set(k,p);
@@ -563,7 +569,10 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         continue;
       }
       const snapshotComponents=Array.isArray(latest.payment_components) ? latest.payment_components.filter((component:unknown)=>component&&typeof component==='object') as DirectPayComponent[] : [];
-      const directComponents=snapshotComponents.length ? snapshotComponents : (components.get(latest.payment_method_id)??[]) as DirectPayComponent[];
+      const allDirectComponents=snapshotComponents.length ? snapshotComponents : (components.get(latest.payment_method_id)??[]) as DirectPayComponent[];
+      const directComponents=sourceComponents(allDirectComponents,date).filter(c=>c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate');
+      // A rental-only card is covered by Fleet and is not a missing pay setup.
+      if(allDirectComponents.length && !directComponents.length) continue;
       const workerDateKey=`${w.id}|${date}`;
       const captureSetting=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
       const needsAttendanceSource=directComponents.some(component=>component.component_type!=='production' && component.calculation_source==='attendance_eligibility');
