@@ -1,3 +1,5 @@
+import {withFleetSystemLog} from "@/lib/fleet/system-log";
+import {hasActiveFleetMembership} from "@/lib/fleet-control";
 import { NextResponse } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -11,10 +13,11 @@ async function access(edit = false) {
   if (!auth) return { error: reply({ error: "Login required." }, 401) };
   if (edit && auth.readOnly) return { error: reply({ error: "Exit user preview before changing vehicle rent." }, 403) };
   const action = edit ? "edit" : "access";
-  if (!["fleet_masters", "fleet_settings", "app_settings"].some(code => hasPermission(auth, code, action)) && !hasPermission(auth, "users", "edit"))
+  if (!["fleet_masters", "fleet_settings"].some(code => hasPermission(auth, code, action)))
     return { error: reply({ error: "Vehicle Master permission required." }, 403) };
   if (!supabaseAdmin) return { error: reply({ error: "Database unavailable." }, 503) };
   const companyId = requireCompanyId(auth);
+  if (!auth.isMasterOwner && !await hasActiveFleetMembership(companyId,auth.userId)) return {error:reply({error:"Fleet access is required."},403)};
   const all = auth.isMasterOwner || auth.hasAllLocationAccess;
   const locations = await loadCodLocations(companyId, auth.locationScopeIds, all);
   if (locations.error) return { error: reply({ error: "Unable to verify location access." }, 503) };
@@ -37,7 +40,7 @@ export async function GET() {
   if (result.error || (result.data?.length ?? 0) >= 1000) return reply({ error: "Unable to load the complete rent history. Please retry or contact support." }, 503);
   return reply({ rates: result.data ?? [], vehicles:identity.data??[] });
 }
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const context = await access(true);
   if ("error" in context) return context.error;
   let body: Record<string, unknown>;
@@ -82,3 +85,5 @@ export async function POST(request: Request) {
   if (saved.error) { console.error("Vehicle rent save", saved.error.code); return reply({ error: "Vehicle rent could not be saved. Please retry." }, 500); }
   return reply({ ok: true, id: saved.data });
 }
+
+export const POST=withFleetSystemLog(handlePOST);

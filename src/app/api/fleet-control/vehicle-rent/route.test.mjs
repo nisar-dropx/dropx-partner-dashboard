@@ -6,6 +6,8 @@ const compile=(auth,allowed=true)=>{
  let calls=[];
  const query={update(value){calls.push(["identity",value]);return this},select(){return this},eq(){return this},in(){return this},order(){return this},limit(){return this},then(resolve){return Promise.resolve(resolve({data:[{id:'vehicle-a'}],error:null}))}};
  const mocks={
+ "@/lib/fleet/system-log":{withFleetSystemLog:fn=>fn},
+ "@/lib/fleet-control":{hasActiveFleetMembership:async()=>true},
  'next/server':{NextResponse:{json:(body,options={})=>new Response(JSON.stringify(body),{...options,headers:{'Content-Type':'application/json',...options.headers}})}},
  '@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>allowed},
  '@/lib/company-scope':{requireCompanyId:()=> 'company-a'},
