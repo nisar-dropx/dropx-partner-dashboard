@@ -25,6 +25,8 @@ export const opsAccessPageCodes = [
   "ops_workforce_losses",
   "ops_workforce_mileage",
   "ops_losses",
+  "ops_loss_master",
+
   "ops_provider_mapping",
   "ops_rostering",
   "daily_submission",
