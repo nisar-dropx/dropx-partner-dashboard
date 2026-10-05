@@ -1,8 +1,11 @@
+import {loadPaymentVolume,paymentVolumeToday} from '@/lib/payment-volume-data';
+import {adhocApprovalContext} from '@/lib/payment-volume';
+import {estimatedShipments} from '@/lib/expense-variance';
 import { NextResponse, type NextRequest } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { hasActiveFleetMembership } from "@/lib/fleet-control";
-import { isFleetManagerPaymentHead } from "@/lib/fleet-control-payment-scope";
+import { isFleetManagerPaymentRequest } from "@/lib/fleet-control-payment-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function firstRelation<T>(value: T | T[] | null | undefined) {
@@ -30,7 +33,7 @@ export async function GET(request: NextRequest) {
 
     const paymentResult = await supabaseAdmin
       .from("payment_requests")
-      .select("id,request_no,location_id,payment_head_id,requested_by,remarks,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,created_at,processed_at")
+      .select("adhoc_reason_key,adhoc_vehicle_snapshot,adhoc_deployment_date,location_code,amount_requested,amount,id,request_no,location_id,payment_head_id,requested_by,remarks,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,created_at,processed_at")
       .eq("company_id", companyId)
       .eq("id", requestId)
       .maybeSingle();
@@ -43,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     const headResult = await supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId).eq("id", payment.payment_head_id).maybeSingle();
     if (headResult.error) throw new Error(headResult.error.message);
-    if (!headResult.data || !isFleetManagerPaymentHead(headResult.data)) {
+    if (!headResult.data || !isFleetManagerPaymentRequest(headResult.data,payment.adhoc_reason_key)) {
       return NextResponse.json({ error: "This request is not owned by Fleet." }, { status: 403 });
     }
 
@@ -106,7 +109,12 @@ export async function GET(request: NextRequest) {
     const currentProfile = profiles.get(payment.current_approver_user_id) as any;
     const currentStage = text(currentProfile?.full_name || currentProfile?.email) || currentRoleNames.join(", ") || null;
 
+    const rawAnswers=(answersResult.data??[]).map((a:any)=>({...a,payment_head_questions:firstRelation(a.payment_head_questions)}));
+    const volumeDate=adhocApprovalContext(headResult.data.code,rawAnswers);
+    const evidence=volumeDate?await loadPaymentVolume(companyId,payment.location_code,volumeDate,paymentVolumeToday()).then(data=>({data,error:''})).catch(()=>({data:null,error:'Station evidence unavailable. Retry before deciding.'})):null;
     return NextResponse.json({
+      volume:evidence?.data??null,volumeError:evidence?.error??'',volumeDate,replacement:payment.adhoc_vehicle_snapshot??null,
+      cost:{estimate:payment.amount_requested,actual:payment.amount,shipments:estimatedShipments(rawAnswers)},
       answers: answers.filter((item) => item.value && !item.hasFile),
       attachments: answers.filter((item) => item.hasFile).map((item) => ({ id: item.id, label: item.label, fileName: item.fileName || "Attachment" })),
       history,

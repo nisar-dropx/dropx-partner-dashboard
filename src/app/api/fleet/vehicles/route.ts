@@ -114,6 +114,12 @@ async function handlePATCH(request: Request) {
   }
   const guard = await requireVehicleScope(access.companyId, vehicleNo, access.stationCodes);
   if ("error" in guard) return guard.error;
+  if (normalizeText(body.registration_number)) {
+    if(!vehicleNo.startsWith("PENDING-"))return NextResponse.json({error:"Registration can be completed here only for a pending entry."},{status:400});
+    const registration=normalizeText(body.registration_number).replace(/\s/g,"").toUpperCase();
+    if(!/^[A-Z0-9]{6,20}$/.test(registration))return NextResponse.json({error:"Enter the actual vehicle registration number."},{status:400});
+    payload.vehicle_no=registration;
+  }
   if (payload.station_code && !canAccessStation(access.stationCodes, payload.station_code)) {
     return NextResponse.json({ error: "This location is not allocated to your user." }, { status: 403 });
   }

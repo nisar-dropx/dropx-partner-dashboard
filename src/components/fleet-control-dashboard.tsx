@@ -4,6 +4,9 @@ import { FleetSystemLogs } from "@/components/fleet-system-logs";
 import { FleetStatusMaster } from "@/components/fleet-status-master";
 import { FleetSourceMaster } from "@/components/fleet-source-master";
 import { sourceTitle, vehicleSourceTitle } from "@/lib/fleet/vehicle-sources";
+import {PaymentVolumeContext} from "@/components/payment-volume-context";
+import {PaymentCostSummary} from "@/components/payment-cost-summary";
+import type {PaymentVolume} from "@/lib/payment-volume";
 import { FleetVehicleContactFields, FleetVehicleContactEditor } from "@/components/fleet-vehicle-contact";
 import { documentApplies, sourceApplies, vehicleSources } from "@/lib/fleet/source-policy";
 
@@ -124,6 +127,9 @@ function actionLabel(value: string) {
 }
 
 type FleetPaymentDetail = {
+  volume?:PaymentVolume|null;volumeError?:string;volumeDate?:string|null;
+  replacement?:{reason:string;number:string;model:string;partner:string|null;source:string;status:string;date:string}|null;
+  cost?:{estimate:number|null;actual:number|null;shipments:number|null};
   answers: Array<{ id: string; label: string; value: string }>;
   attachments: Array<{ id: string; label: string; fileName: string }>;
   history: Array<{ id: string; action: string; actor: string; role: string; comments: string; createdAt: string }>;
@@ -752,6 +758,9 @@ export function FleetControlDashboard({
                 {selectedPayment ? <>
                   <div className="fc-detail-top"><span className="fc-request-icon"><CircleDollarSign size={19} /></span><div><small>{selectedPayment.requestNo}</small><h2>{selectedPayment.head}</h2><p>{selectedPayment.stationCode} · requested by {selectedPayment.requestedBy}</p></div><strong>{money(selectedPayment.amount)}</strong></div>
                   <div className="fc-detail-grid"><div><small>Request date</small><strong>{date(selectedPayment.requestedAt)}</strong></div><div><small>Work date</small><strong>{date(selectedPayment.workDate)}</strong></div><div><small>Approval status</small><span className={`fc-status ${statusTone(selectedPayment.statusLabel.toLowerCase())}`}><i />{selectedPayment.statusLabel}</span></div><div><small>Station</small><strong>{selectedPayment.stationCode}</strong></div></div>
+                  {paymentDetail?.replacement?<section className="fc-remarks"><strong>{paymentDetail.replacement.reason}</strong><p>{paymentDetail.replacement.partner||'Name pending'} · {paymentDetail.replacement.number} ({paymentDetail.replacement.model}) · {paymentDetail.replacement.source} · Fleet status at request: {paymentDetail.replacement.status} · {paymentDetail.replacement.date}</p></section>:null}
+                  {paymentDetail?.cost?<PaymentCostSummary {...paymentDetail.cost}/>:null}
+                  {paymentDetail?.volumeDate?<PaymentVolumeContext date={paymentDetail.volumeDate} initialData={paymentDetail.volume??null} initialError={paymentDetail.volumeError}/>:null}
                   <section className="fc-remarks"><small>Station remarks</small><p>{selectedPayment.remarks}</p></section>
                   {paymentDetailError ? <div className="fc-detail-load-error">{paymentDetailError}</div> : null}
                   <div className="fc-payment-support-grid">

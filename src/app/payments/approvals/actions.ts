@@ -403,7 +403,7 @@ export async function approvePaymentRequest(formData: FormData) {
     comments
   }, companyId);
 
-  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id, request.id) : [];
   const storedStepOrder = Number(request.current_step_order) || 1;
 
   if (steps.length) {

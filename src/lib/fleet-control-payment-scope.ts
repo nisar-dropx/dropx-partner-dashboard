@@ -22,3 +22,5 @@ export function isFleetManagerPaymentHead(head: FleetPaymentHead) {
     || /(VEHICLE|VAN|FLEET).*(FUEL|RENT|DRIVER|MAINTENANCE|REPAIR|SERVICE|INSURANCE|PERMIT|TAX)/.test(candidate)
     || /(FUEL|RENT|DRIVER|MAINTENANCE|REPAIR|SERVICE|INSURANCE|PERMIT|TAX).*(VEHICLE|VAN|FLEET)/.test(candidate);
 }
+
+export function isFleetManagerPaymentRequest(head:FleetPaymentHead,reason?:string|null){return (head.code==='VAN_ADHOC'&&reason==='company_breakdown')||isFleetManagerPaymentHead(head);}

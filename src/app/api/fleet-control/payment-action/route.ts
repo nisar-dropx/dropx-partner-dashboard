@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { approvePaymentRequest, rejectPaymentRequest, returnPaymentRequest } from "@/app/payments/approvals/actions";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { isFleetManagerPaymentHead } from "@/lib/fleet-control-payment-scope";
+import { isFleetManagerPaymentRequest } from "@/lib/fleet-control-payment-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
@@ -22,12 +22,12 @@ async function handlePOST(request: NextRequest) {
     const requestId = text(body.requestId);
     if (!requestId || !["approve", "return", "reject"].includes(action)) return NextResponse.json({ error: "A valid payment action is required." }, { status: 400 });
 
-    const payment = await supabaseAdmin.from("payment_requests").select("id,payment_head_id").eq("company_id", companyId).eq("id", requestId).maybeSingle();
+    const payment = await supabaseAdmin.from("payment_requests").select("id,payment_head_id,adhoc_reason_key").eq("company_id", companyId).eq("id", requestId).maybeSingle();
     if (payment.error) throw new Error(payment.error.message);
     if (!payment.data?.payment_head_id) return NextResponse.json({ error: "Payment request was not found." }, { status: 404 });
     const head = await supabaseAdmin.from("payment_heads").select("code,name").eq("company_id", companyId).eq("id", payment.data.payment_head_id).maybeSingle();
     if (head.error) throw new Error(head.error.message);
-    if (!head.data || !isFleetManagerPaymentHead(head.data)) return NextResponse.json({ error: "This payment is outside Fleet Manager approval. Ad Hoc activity is visibility-only in Fleet." }, { status: 403 });
+    if (!head.data || !isFleetManagerPaymentRequest(head.data,payment.data.adhoc_reason_key)) return NextResponse.json({ error: "This payment is outside Fleet Manager approval. Ad Hoc activity is visibility-only in Fleet." }, { status: 403 });
 
     const form = new FormData();
     form.set("request_id", requestId);
