@@ -199,6 +199,7 @@ export async function POST(request: NextRequest) {
         await supabaseAdmin.from("payment_advance_requests").delete().eq("id", result.data.id);
         throw chainError;
       }
+      await supabaseAdmin.from("payment_advance_requests").update({ status: "in_review", updated_at: new Date().toISOString() }).eq("id", result.data.id);
     }
     await createAppNotification({
       accountId: account.accountId,

@@ -37,15 +37,14 @@ export async function decideConnectPayAdvanceApproval(account: ConnectAccount, r
     parentColumn: "request_id",
     parentId: requestId
   });
-  // Resolve the actor from the authenticated account and its exact pending step.
-  // Never trust a caller-supplied approver ID or a company-wide role alone.
-  const step = await db().from("hr_pay_advance_steps").select("id,approver_user_id,step_type")
+  const pending = await db().from("hr_pay_advance_steps").select("step_type,approver_user_id")
     .eq("company_id", account.companyId).eq("request_id", requestId).eq("status", "pending")
-    .in("approver_user_id", actorIds).limit(1).maybeSingle();
-  if (step.error) throw new Error(step.error.message);
-  if (!step.data) throw new Error("This pay advance is no longer assigned to your account.");
+    .in("approver_user_id", actorIds).order("step_order").limit(1).maybeSingle();
+  if (pending.error) throw new Error(pending.error.message);
+  const step = pending.data;
+  if (!step) throw new Error("This pay advance is not assigned to you or is no longer pending.");
   let terms: ReturnType<typeof payAdvanceFinanceTerms> | null = null;
-  if (step.data.step_type === "finance" && decision.decision === "approved") {
+  if (step.step_type === "finance" && decision.decision === "approved") {
     const request = await db().from("hr_pay_advance_requests").select("requested_amount")
       .eq("company_id", account.companyId).eq("id", requestId).eq("status", "pending").maybeSingle();
     if (request.error) throw new Error(request.error.message);
@@ -53,7 +52,7 @@ export async function decideConnectPayAdvanceApproval(account: ConnectAccount, r
     terms = payAdvanceFinanceTerms(amount, installments, Number(request.data.requested_amount));
   }
   const result = await db().rpc("hr_decide_pay_advance_step", {
-    p_company_id: account.companyId, p_request_id: requestId, p_actor_user_id: step.data.approver_user_id,
+    p_company_id: account.companyId, p_request_id: requestId, p_actor_user_id: step.approver_user_id,
     p_decision: decision.decision, p_note: decision.note, p_approved_amount: terms?.approvedAmount ?? null, p_approved_installments: terms?.approvedInstallments ?? null
   });
   if (result.error) throw new Error(result.error.message);

@@ -118,7 +118,7 @@ export default async function AdvanceRequestPage({
       <PageHead
         eyebrow="Payments"
         title="Advance Request"
-        subtitle="Review workforce advance requests and approve or reject them."
+        subtitle="Review workforce advance requests. After finance approval they appear in Payment Process, and paid ones are in Reports — the same pages on the dashboard and fin.dropxlogistics.com."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
