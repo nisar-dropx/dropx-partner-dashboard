@@ -18,6 +18,6 @@ export function PaymentTrackingInput({ name, required, disabled, defaultValue = 
         const text = [value.slice(0, input.selectionStart), event.clipboardData.getData('text'), value.slice(input.selectionEnd)].join('\n');
         update(parsePaymentTrackingIds(text).join('\n') + '\n');
       }} />
-    <span className="helper-text" aria-live="polite"><strong>{ids.length} unique tracking IDs</strong> · Paste multiple IDs or scan with Enter. Duplicates removed.</span>
+    <span className="helper-text" aria-live="polite"><strong>{ids.length} unique tracking IDs</strong> · Paste multiple IDs or scan with Enter. Duplicates and pasted headings removed.</span>
   </>;
 }

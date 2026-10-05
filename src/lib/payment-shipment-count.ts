@@ -20,6 +20,7 @@ export function isPaymentTrackingQuestion(question?: { question_text: string; an
   return /^(?:shipment )?tracking (?:ids?|numbers?)$/.test(label);
 }
 export function parsePaymentTrackingIds(value: string): string[] {
-  // Preserve identifiers, including leading zeros and mixed carrier formats. Never guess fixed lengths.
-  return [...new Set(value.split(/[\s,;|]+/).map(id => id.trim()).filter(Boolean))];
+  // Preserve numeric/alphanumeric carrier IDs and leading zeros without guessing fixed lengths.
+  // Excel headings, names and standalone punctuation are not tracking IDs.
+  return [...new Set(value.split(/[\s,;|]+/).map(id => id.trim()).filter(id => /^(?=.*\d)[a-z0-9][a-z0-9._/-]*$/i.test(id)))];
 }

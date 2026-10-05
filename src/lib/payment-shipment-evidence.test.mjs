@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { dimensionalWeight, positiveMeasurement, shipmentPincodeBreakup } from './payment-shipment-evidence.ts';
+import { dimensionalWeight, positiveMeasurement, shipmentPincodeBreakup, shipmentDestinationAllowed } from './payment-shipment-evidence.ts';
 import { parsePaymentTrackingIds } from './payment-shipment-count.ts';
 
 test('tracking parsing keeps carrier IDs intact and deduplicates paste/scan separators', () => {
@@ -40,4 +40,17 @@ test('evidence endpoint authorizes saved request and derives IDs server-side', (
  assert.match(api,/canAccessPaymentLocation/);assert.match(api,/getPaymentApprovalEligibility/);
  assert.match(api,/eq\('company_id', company\)/);assert.match(api,/payment_request_answers/);
  assert.doesNotMatch(api,/searchParams.get\('(?:ids|station|company)'\)/);
+});
+
+test('pasted report headings and DA names are excluded from tracking count', () => {
+ assert.deepEqual(parsePaymentTrackingIds('Details for Count of Tracking ID - Last Scan By: GOVINDU G PAVAN KUMAR Station: GDRD\n372952359018\n372944216961'),['372952359018','372944216961']);
+});
+
+test('shipment detail respects serving-station exclusions and parent XPT scope', () => {
+ assert.equal(shipmentDestinationAllowed('NLRK',['NLRE'],true),false);
+ assert.equal(shipmentDestinationAllowed(null,['NLRE'],true),false);
+ assert.equal(shipmentDestinationAllowed('NLRE',['NLRE'],true),true);
+ assert.equal(shipmentDestinationAllowed('KGQC',['KGQA','KGQC'],false),true);
+ assert.equal(shipmentDestinationAllowed(null,['KGQA','KGQC'],false),true);
+ assert.equal(shipmentDestinationAllowed('RPRN',['JGBA'],true),false);
 });

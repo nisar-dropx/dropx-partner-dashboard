@@ -19,3 +19,8 @@ export function shipmentPincodeBreakup(rows: ShipmentEvidence[]) {
   for (const row of rows) { const pin = row.pincode || 'Pincode unavailable'; counts.set(pin, (counts.get(pin) ?? 0) + 1); }
   return [...counts].map(([pincode, count]) => ({ pincode, count })).sort((a, b) => b.count - a.count || a.pincode.localeCompare(b.pincode));
 }
+
+export function shipmentDestinationAllowed(destination: unknown, stations: string[], requireDestination: boolean) {
+ const code = typeof destination === 'string' ? destination.trim().toUpperCase() : '';
+ return code ? stations.includes(code) : !requireDestination;
+}
