@@ -1,4 +1,5 @@
 "use client";
+import { AdvertisingBreakdown } from "./advertising-breakdown";
 import { CpsAssociateTable, CpsDaCohorts } from "./cps-associate-breakdown";
 import { CpsFuelInsights } from "./cps-fuel-insights";
 import { CpsBillPeriods } from "./cps-bill-periods";
@@ -57,7 +58,7 @@ const categories: {
   {
     head: "Other",
     label: "Other CPS",
-    note: "Station rent, utilities & other costs",
+    note: "Rent, utilities, advertising & other costs",
     icon: Fuel,
   },
 ];
@@ -484,6 +485,7 @@ export function CpsCostWorkspace({
             source issues above for missing setup.
           </p>
         )}
+        {head === "Other" && <details className="cps-drilldown"><summary>Meta advertising — daily, monthly & ad details</summary><AdvertisingBreakdown rows={snapshot.advertising ?? []}/></details>}
         {staff.length > 0 && (
           <details className="cps-drilldown" open={head === "UTR"}>
             <summary>

@@ -45,6 +45,10 @@
     {
       "path": "/api/cron/payment-approval-reminders",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/advertising-spend",
+      "schedule": "*/30 * * * *"
     }
   ]
 }
