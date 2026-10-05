@@ -94,3 +94,9 @@ assert.match(migration, /daily_status_send_time = '20:00:00'/);
 assert.match(migration, /'\{monthlyThread\}'/);
 
 console.log('Fleet daily status email: station-scoped recipient delivery, one recipient/month thread, 8:00 PM schedule, station-level T/A/P counts, and compact Van/Driver amount detail.');
+const external = exports.buildFleetDailyStatusEmail({date:'2026-10-06',region:'AP',rows:[{station:'GDRD',ownTotal:0,ownOperational:0,ownNonOperational:0,partnerTotal:3,partnerOperational:2,partnerNonOperational:1,totalNonOperational:1,adHocVans:0}],exceptions:[{vehicle_no:'PRIVATE-PARTNER',ownership_type:'rented'}]});
+assert.match(external.html,/ODCD \/ Rented \/ Van Vendor/);
+assert.match(external.html,/fleet position · AP/);
+assert.doesNotMatch(external.html,/>DropX owned<|PRIVATE-PARTNER|Non-operational vehicle actions|DropX-owned non-operational vehicles/);
+const mixed = exports.buildFleetDailyStatusEmail({date:'2026-10-06',rows,exceptions:[{vehicle_no:'PARTNER-HIDDEN',ownership_type:'odcd'},{vehicle_no:'OWN-SHOWN',ownership_type:'own',station_code:'KOZA'}]});
+assert.match(mixed.html,/OWN-SHOWN/);assert.doesNotMatch(mixed.html,/PARTNER-HIDDEN/);
