@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import { parsePaymentTrackingIds } from '@/lib/payment-shipment-count';
 
-export function PaymentTrackingInput({ name, required, disabled, onValueChange }: { name: string; required: boolean; disabled: boolean; onValueChange?: (value: string) => void }) {
-  const [value, setValue] = useState('');
+export function PaymentTrackingInput({ name, required, disabled, defaultValue = '', onValueChange }: { name: string; required: boolean; disabled: boolean; defaultValue?: string; onValueChange?: (value: string) => void }) {
+  const [value, setValue] = useState(() => { const initial = parsePaymentTrackingIds(defaultValue); return initial.length ? initial.join('\n') + '\n' : ''; });
   const ids = parsePaymentTrackingIds(value);
   const update = (next: string) => { setValue(next); onValueChange?.(next); };
   return <>

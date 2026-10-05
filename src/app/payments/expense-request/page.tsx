@@ -1,3 +1,5 @@
+import { PaymentTrackingInput } from "@/components/payment-tracking-input";
+import { isPaymentTrackingQuestion } from "@/lib/payment-shipment-count";
 import { AppShell } from "@/components/app-shell";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PageHead } from "@/components/page-head";
@@ -136,6 +138,7 @@ function optionsFromText(text: string | null) {
 
 function paymentDetailInputForQuestion(question: QuestionRow) {
   const name = `answers[${question.id}]`;
+  if (isPaymentTrackingQuestion(question)) return <PaymentTrackingInput name={name} required={question.is_required} disabled={false} />;
   if (question.answer_type === "dropdown") {
     return (
       <select className="field" name={name} required={question.is_required} defaultValue="">
@@ -185,6 +188,7 @@ function paymentDetailInputForQuestion(question: QuestionRow) {
 function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
   const name = `answers[${question.id}]`;
   const attachments = paymentRequestAttachments(answer);
+  if (isPaymentTrackingQuestion(question)) return <PaymentTrackingInput key={answer?.id ?? question.id} name={name} required={question.is_required} disabled={false} defaultValue={answer?.answer_value ?? ""} />;
   if (question.answer_type === "dropdown") {
     return (
       <select className="field" name={name} required={question.is_required} defaultValue={answer?.answer_value ?? ""}>
