@@ -100,7 +100,7 @@ export async function loadNlLoss(
       supabaseAdmin
         .from("nl_loss_sources")
         .select(
-          "recoverable_statuses,allow_equal_split,allow_custom_split,include_inactive_people,history_months,updated_at",
+          "recoverable_statuses,allow_equal_split,allow_custom_split,include_inactive_people,history_months,updated_at,recovery_policy",
         )
         .eq("company_id", company)
         .maybeSingle(),

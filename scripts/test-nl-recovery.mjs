@@ -5,6 +5,10 @@ import {
   isRecoverable,
   splitRecovery,
   recoveryCsv,
+  eligibleRecoveryEmployment,
+  allocationError,
+  canonicalNlCaseKey,
+  deductionMonth,
 } from "../src/lib/ops-pulse/nl-loss-policy.ts";
 const db = new PGlite();
 const id = (n) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -31,6 +35,25 @@ await db.exec(
     "supabase/migrations/20261005194905_nl_monthly_recovery.sql",
     "utf8",
   ),
+);
+await db.exec(
+  fs.readFileSync(
+    "supabase/migrations/20261005205405_nl_full_recovery_deduction_month.sql",
+    "utf8",
+  ),
+);
+const masterBaseline = (
+  await db.query("select count(*)::int n from nl_recovery_master_events")
+).rows[0].n;
+// Older split tests intentionally include an inactive employee; eligibility is tested separately below.
+await db.query(
+  "update nl_loss_sources set include_inactive_people=true where company_id=$1",
+  [co],
+);
+await db.query(
+  `insert into nl_recovery_payables(company_id,employee_ref,salary_month,eligible,payable,source,policy_updated_at)
+ select $1,'employee:'||n,to_char(date_trunc('month',now() at time zone 'Asia/Kolkata')-interval '1 month','YYYY-MM'),true,10000,'Test payroll',updated_at from nl_loss_sources,generate_series(1,3)n where company_id=$1`,
+  [co],
 );
 const row = (key, month = "2026-8", amount = 1000, status = "Recoverable") => ({
   case_key: key,
@@ -75,10 +98,14 @@ const save = async ({
   amounts = [],
   outcome = "recover",
   remarks = "Verified responsibility",
+  details = {
+    reason: "Provider decision is incorrect",
+    details: "Shipment evidence supports this dispute",
+  },
 } = {}) =>
   (
     await db.query(
-      "select save_nl_recovery($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) r",
+      "select save_nl_recovery($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) r",
       [
         company,
         month,
@@ -93,6 +120,7 @@ const save = async ({
         remarks,
         actor,
         "Test manager",
+        details,
       ],
     )
   ).rows[0].r;
@@ -170,7 +198,127 @@ await assert.rejects(
 assert.equal(
   (await db.query("select count(*)::int n from nl_recovery_master_events"))
     .rows[0].n,
-  2,
+  masterBaseline + 3,
+);
+// New outcome rules, whole-value allocation, pay cap and cross-case reservation.
+await db.query(
+  "update nl_recovery_payables set policy_updated_at=(select updated_at from nl_loss_sources where company_id=$1) where company_id=$1",
+  [co],
+);
+await assert.rejects(
+  save({
+    version: 4,
+    outcome: "deduct_next_month",
+    mode: "custom",
+    people: ["employee:1"],
+    amounts: [900],
+  }),
+  /Partial recovery/,
+);
+await assert.rejects(
+  save({
+    version: 4,
+    outcome: "deduct_next_month",
+    mode: "custom",
+    people: ["employee:1"],
+    amounts: [1000],
+    remarks: "",
+  }),
+  /remark/,
+);
+saved = await save({
+  version: 4,
+  outcome: "deduct_next_month",
+  mode: "custom",
+  people: ["employee:1"],
+  amounts: [1000],
+});
+assert.equal(saved.deduction_month, deductionMonth("next_month"));
+assert.equal(saved.allocations[0].employee_code, "1");
+assert.ok(saved.allocations[0].salary_month);
+await db.query(
+  "update nl_recovery_payables set payable=1000 where company_id=$1 and employee_ref='employee:1'",
+  [co],
+);
+await assert.rejects(
+  save({ key: "C", mode: "custom", people: ["employee:1"], amounts: [10] }),
+  /exceeds.*salary payable/,
+);
+// Own prior allocation is excluded from the capacity check when editing.
+saved = await save({
+  version: 5,
+  outcome: "deduct_next_month",
+  mode: "custom",
+  people: ["employee:1"],
+  amounts: [1000],
+});
+assert.equal(saved.version, 6);
+await db.query(
+  "update nl_recovery_payables set eligible=false where company_id=$1 and employee_ref='employee:2'",
+  [co],
+);
+await assert.rejects(
+  save({ key: "C", mode: "custom", people: ["employee:2"], amounts: [10] }),
+  /active-period/,
+);
+await db.query(
+  "update nl_recovery_outcomes set is_active=true where company_id=$1 and code='post_dispute'",
+  [co],
+);
+await assert.rejects(
+  save({
+    key: "C",
+    outcome: "post_dispute",
+    mode: "none",
+    people: [],
+    details: {},
+  }),
+  /Reason/,
+);
+await assert.rejects(
+  save({
+    key: "C",
+    outcome: "post_dispute",
+    mode: "none",
+    people: [],
+    details: {
+      reason: "Valid reason",
+      details: "Valid detail",
+      cctv_url: "https://example.com/video",
+    },
+  }),
+  /anyone with the link/,
+);
+await assert.rejects(
+  save({
+    key: "C",
+    outcome: "post_dispute",
+    mode: "none",
+    people: [],
+    details: {
+      reason: "Valid reason",
+      details: "Valid detail",
+      attachments: [{ id: id(98) }],
+    },
+  }),
+  /not linked to this case/,
+);
+const dispute = await save({
+  key: "C",
+  outcome: "post_dispute",
+  mode: "none",
+  people: [],
+  details: { reason: "Valid reason", details: "Valid detail" },
+});
+assert.equal(dispute.outcome_label, "Re-dispute");
+assert.equal(dispute.recovery_details.details, "Valid detail");
+assert.equal(dispute.deduction_month, null);
+await assert.rejects(
+  db.query(
+    "update nl_recovery_outcomes set allocation_required=false where company_id=$1 and code='deduct_next_month'",
+    [co],
+  ),
+  /nl_outcome_deduction_policy/,
 );
 await pull([row("A", "2026-9", 20)]);
 assert.equal(
@@ -204,7 +352,7 @@ assert.equal(
   "failed imports are atomic",
 );
 for (const name of [
-  "save_nl_recovery(uuid,text,text,int,text,text,jsonb,text,uuid,text)",
+  "save_nl_recovery(uuid,text,text,int,text,text,jsonb,text,uuid,text,jsonb)",
   "clear_nl_recovery(uuid,text,text,int,uuid,text)",
   "nl_archive_pull(uuid,jsonb)",
 ])
@@ -232,6 +380,30 @@ assert.deepEqual(
   [333.34, 333.33, 333.33],
 );
 assert.equal(recoveryCsv("=SUM(A1)"), '"\'=SUM(A1)"');
+assert.equal(canonicalNlCaseKey('="001234"#2'), "001234#2");
+assert.equal(canonicalNlCaseKey("=SUM(A1)"), "=SUM(A1)");
+assert.equal(
+  deductionMonth("next_month", new Date("2026-12-31T15:00:00Z")),
+  "2027-01",
+);
+const pp = [{ ref: "p1", employee_code: "EMP1", recovery_limit: 900 }];
+assert.match(
+  allocationError(1000, [{ employee_ref: "p1", amount: 900 }], pp, true),
+  /Partial recovery/,
+);
+assert.match(
+  allocationError(1000, [{ employee_ref: "p1", amount: 1000 }], pp, true),
+  /exceeds salary payable/,
+);
+assert.equal(
+  allocationError(900, [{ employee_ref: "p1", amount: 900 }], pp, true),
+  "",
+);
+const eligibility={active_only:true,previous_month_active_only:true};
+assert.equal(eligibleRecoveryEmployment({is_active:false,date_of_join:"2025-01-01"},"2026-09-01","2026-09-30",eligibility),false);
+assert.equal(eligibleRecoveryEmployment({is_active:true,date_of_join:"2026-10-01"},"2026-09-01","2026-09-30",eligibility),false);
+assert.equal(eligibleRecoveryEmployment({is_active:true,date_of_join:"2026-09-20"},"2026-09-01","2026-09-30",eligibility),true);
+assert.equal(eligibleRecoveryEmployment({is_active:true,date_of_join:"2025-01-01",last_working_date:"2026-08-31"},"2026-09-01","2026-09-30",eligibility),false);
 await db.close();
 console.log(
   "PASS: monthly retention, source status, tenant isolation, employee scope, splits, version conflicts, removal history, Master controls and RPC privileges",
