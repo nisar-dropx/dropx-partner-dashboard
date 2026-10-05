@@ -39,8 +39,8 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead
-          eyebrow="Ops Pulse · Manager flash"
-          title="Load vs delivered"
+          eyebrow="Ops Pulse · Ops Live"
+          title="Ops Live"
           subtitle="Live station load, today's EDD, out on road, customer returns, and first-day pickups. Refreshed every hour from 6:00am to 11:00pm IST."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
