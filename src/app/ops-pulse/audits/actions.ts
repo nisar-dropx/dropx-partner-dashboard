@@ -1,5 +1,9 @@
 "use server";
 import {
+  calculateAuditScore,
+  type AuditAssessment,
+} from "@/lib/ops-pulse/station-audit-scoring";
+import {
   parseAuditTids,
   compareAuditTids,
   selectedAuditEmployees,
@@ -46,7 +50,8 @@ import {
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type ActionResult =
-  { ok: true; message: string } | { ok: false; message: string };
+  | { ok: true; message: string }
+  | { ok: false; message: string };
 const message = (error: unknown): ActionResult => ({
   ok: false,
   message: error instanceof Error ? error.message : "Unable to save the audit.",
@@ -378,6 +383,7 @@ export async function submitStationAudit(
     }> = [];
     let requiresEvidence = false;
     for (const item of typeItems) {
+      if (item.score_source && item.score_source !== "checklist") continue;
       const value = clean(formData.get(`check_${item.id}`));
       const remarks = clean(formData.get(`check_note_${item.id}`)) || null;
       if (item.is_required && !value)
@@ -671,7 +677,41 @@ export async function submitStationAudit(
     const nextStatus = allActions.length
       ? "awaiting_station_response"
       : "under_review";
+    let assessments: Record<string, AuditAssessment> = {};
+    try {
+      assessments = JSON.parse(
+        clean(formData.get("score_assessments")) || "{}",
+      );
+    } catch {
+      throw new Error("Invalid responsibility assessment.");
+    }
+    for (const [key, assessment] of Object.entries(assessments)) {
+      const uploadedId = clean(formData.get(`assessment_evidence_${key}`));
+      if (uploadedId) assessment.evidenceId = uploadedId;
+    }
+    const scoreSnapshot = type.scoring_enabled
+      ? calculateAuditScore({
+          sections: master.sections.filter((s) => s.audit_type_id === type.id),
+          items: typeItems,
+          responses: Object.fromEntries(
+            responses.map((r) => [r.checklist_item_id, r.response_value.value]),
+          ),
+          options: master.options.filter((o) =>
+            ["audit_responsibility", "audit_rating_band"].includes(
+              o.option_group,
+            ),
+          ),
+          expectedCash: systemCash,
+          actualCash: countedCash,
+          expectedTids: reconciliation?.expected || [],
+          scannedTids: reconciliation?.scanned || [],
+          assessments,
+          evidenceIds: (existingProofs.data || []).map((p) => p.id),
+        })
+      : null;
     const patch = {
+      score: scoreSnapshot?.percentage ?? null,
+      score_snapshot: scoreSnapshot,
       status_code: nextStatus,
       response_due_at: responseDueAt,
       cash_variance_reason: clean(formData.get("cash_variance_reason")) || null,
@@ -769,6 +809,7 @@ export async function submitStationAudit(
     if (saved.error) throw new Error(saved.error.message);
     const refreshed = {
       ...audit,
+      ...patch,
       status_code: nextStatus,
       system_cash_amount: systemCash,
       physical_cash_amount: countedCash,
@@ -979,6 +1020,10 @@ export async function closeStationAudit(
     const audit = await readAudit(companyId, auditId, authorization);
     if (!audit.completed_at || audit.status_code !== "under_review")
       throw new Error("Only a completed audit under review can be closed.");
+    if (audit.score_snapshot?.provisional)
+      throw new Error(
+        "Resolve the score responsibility review before closing this audit.",
+      );
     const open = await db()
       .from("ops_station_audit_actions")
       .select("id")
@@ -1150,6 +1195,86 @@ export async function retryStationAuditEmail(
     );
     refreshAudits();
     return { ok: true, message: notice };
+  } catch (error) {
+    return message(error);
+  }
+}
+
+export async function reviewStationAuditScore(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const { authorization, companyId } = await assertManager("edit");
+    const audit = await readAudit(
+      companyId,
+      clean(formData.get("audit_id")),
+      authorization,
+    );
+    if (
+      !audit.completed_at ||
+      audit.status_code === "closed" ||
+      !audit.score_snapshot?.inputs
+    )
+      throw new Error(
+        "Only an open, scored audit can have responsibility reviewed.",
+      );
+    const input = audit.score_snapshot.inputs;
+    const submitted = JSON.parse(
+      clean(formData.get("score_assessments")) || "{}",
+    );
+    const assessments = { ...input.assessments };
+    for (const key of Object.keys(audit.score_snapshot.assessments)) {
+      const value = submitted[key] || audit.score_snapshot.assessments[key];
+      assessments[key] = {
+        code: String(value.code || "pending"),
+        reason: String(value.reason || ""),
+        evidenceId:
+          clean(formData.get(`assessment_evidence_${key}`)) ||
+          String(value.evidenceId || ""),
+      };
+    }
+    const proofs = await db()
+      .from("ops_station_audit_evidence")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("audit_id", audit.id);
+    if (proofs.error) throw new Error(proofs.error.message);
+    const snapshot = calculateAuditScore({
+      ...input,
+      assessments,
+      evidenceIds: (proofs.data || []).map((p) => p.id),
+    });
+    const saved = await db().rpc("review_station_audit_score", {
+      p_company: companyId,
+      p_audit: audit.id,
+      p_updated_at: clean(formData.get("updated_at")),
+      p_snapshot: snapshot,
+      p_actor: authorization.userId,
+      p_name: authorization.fullName,
+      p_email: authorization.email,
+      p_role: authorization.roleCode,
+    });
+    if (saved.error) throw new Error(saved.error.message);
+    const actions = await db()
+      .from("ops_station_audit_actions")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("audit_id", audit.id)
+      .neq("status_code", "completed");
+    if (actions.error) throw new Error(actions.error.message);
+    const mail = await sendAndRecordAuditEmail(
+      companyId,
+      { ...audit, score: snapshot.percentage, score_snapshot: snapshot },
+      audit.ops_audit_types,
+      audit.stations,
+      actions.data?.length || 0,
+      authorization,
+    );
+    refreshAudits();
+    return {
+      ok: true,
+      message: `Responsibility reviewed. Original weights and score rules retained.${mail}`,
+    };
   } catch (error) {
     return message(error);
   }

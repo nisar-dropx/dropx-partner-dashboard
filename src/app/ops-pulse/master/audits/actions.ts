@@ -46,6 +46,41 @@ function jsonArray(value: string, label: string) {
     throw new Error(`${label} must be a JSON array.`);
   }
 }
+function scoreWeight(value: FormDataEntryValue | null, fallback = 1) {
+  const n = value == null || value === "" ? fallback : Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 100)
+    throw new Error("Score weight must be from 0 to 100.");
+  return n;
+}
+function scoredOptions(value: string) {
+  const options = jsonArray(value, "Response options");
+  const keys = new Set<string>();
+  for (const o of options) {
+    if (
+      !o ||
+      typeof o !== "object" ||
+      !String(o.value || "").trim() ||
+      keys.has(o.value)
+    )
+      throw new Error("Each response needs a unique value and label.");
+    keys.add(o.value);
+    if (
+      o.score != null &&
+      (typeof o.score !== "number" ||
+        !Number.isFinite(o.score) ||
+        o.score < 0 ||
+        o.score > 100)
+    )
+      throw new Error("Outcome scores must be from 0 to 100, or null for N/A.");
+  }
+  return options;
+}
+function scoreSource(value: FormDataEntryValue | null) {
+  const source = clean(value) || "checklist";
+  if (!["checklist", "cash_match", "shipment_match"].includes(source))
+    throw new Error("Invalid scoring source.");
+  return source;
+}
 function selectedValues(formData: FormData, key: string) {
   return Array.from(
     new Set(
@@ -145,6 +180,7 @@ export async function saveAuditType(formData: FormData): Promise<Result> {
       ),
       expected_duration_minutes:
         Number(clean(formData.get("expected_duration_minutes"))) || null,
+      scoring_enabled: clean(formData.get("scoring_enabled")) === "yes",
       requires_video_link: clean(formData.get("requires_video_link")) === "yes",
       shipment_reconciliation_enabled:
         clean(formData.get("shipment_reconciliation_enabled")) === "yes",
@@ -238,11 +274,40 @@ export async function createAuditSection(formData: FormData): Promise<Result> {
         code,
         name,
         guidance: clean(formData.get("guidance")) || null,
+        score_weight: scoreWeight(formData.get("score_weight"), 0),
         sort_order: Number(clean(formData.get("sort_order"))) || 0,
       });
     if (saved.error) throw new Error(saved.error.message);
     refresh();
     return { ok: true, message: "Checklist section added." };
+  } catch (error) {
+    return result(error);
+  }
+}
+
+export async function saveAuditSection(formData: FormData): Promise<Result> {
+  try {
+    const { companyId } = await access();
+    const id = clean(formData.get("id")),
+      name = clean(formData.get("name"));
+    if (!name) throw new Error("Enter the section name.");
+    const saved = await db()
+      .from("ops_audit_checklist_sections")
+      .update({
+        name,
+        guidance: clean(formData.get("guidance")),
+        score_weight: scoreWeight(formData.get("score_weight"), 0),
+        sort_order: Number(formData.get("sort_order")) || 0,
+      })
+      .eq("company_id", companyId)
+      .eq("id", id);
+    if (saved.error) throw new Error(saved.error.message);
+    refresh();
+    return {
+      ok: true,
+      message:
+        "Section and score weight updated. Saved reports retain their original scoring.",
+    };
   } catch (error) {
     return result(error);
   }
@@ -255,11 +320,10 @@ export async function saveChecklistItem(formData: FormData): Promise<Result> {
     const payload = {
       label: clean(formData.get("label")),
       guidance: clean(formData.get("guidance")) || null,
+      score_weight: scoreWeight(formData.get("score_weight")),
+      score_source: scoreSource(formData.get("score_source")),
       response_type: clean(formData.get("response_type")),
-      response_options: jsonArray(
-        clean(formData.get("response_options")),
-        "Response options",
-      ),
+      response_options: scoredOptions(clean(formData.get("response_options"))),
       is_required: clean(formData.get("is_required")) === "yes",
       photo_required: clean(formData.get("photo_required")) === "yes",
       photo_on_non_compliance:
@@ -325,10 +389,11 @@ export async function createChecklistItem(formData: FormData): Promise<Result> {
         code,
         label,
         guidance: clean(formData.get("guidance")) || null,
+        score_weight: scoreWeight(formData.get("score_weight")),
+        score_source: scoreSource(formData.get("score_source")),
         response_type: clean(formData.get("response_type")) || "pass_fail_na",
-        response_options: jsonArray(
+        response_options: scoredOptions(
           clean(formData.get("response_options")),
-          "Response options",
         ),
         is_required: clean(formData.get("is_required")) === "yes",
         photo_required: clean(formData.get("photo_required")) === "yes",
@@ -422,8 +487,9 @@ export async function saveAuditAirways(formData: FormData): Promise<Result> {
     const stationIds = selectedValues(formData, "station_ids");
     if (!label || label.length > 80)
       throw new Error("Enter an Airways name of up to 80 characters.");
-    const { loadAuditStations, loadStationAuditMaster } =
-      await import("@/lib/ops-pulse/station-audits");
+    const { loadAuditStations, loadStationAuditMaster } = await import(
+      "@/lib/ops-pulse/station-audits"
+    );
     const master = await loadStationAuditMaster(companyId);
     const stations = await loadAuditStations(
       companyId,

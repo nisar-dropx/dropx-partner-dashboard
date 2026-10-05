@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
   compareAuditTids,
@@ -82,7 +82,9 @@ export function EmployeePicker({
 export function ShipmentInspection({
   lists,
   exceptions,
+  onDifferences,
 }: {
+  onDifferences?: (keys: string[]) => void;
   lists: { expected: string[]; scanned: string[] } | null;
   exceptions: StationAuditWorkspace["shipments"];
 }) {
@@ -110,6 +112,9 @@ export function ShipmentInspection({
       };
     }
   }, [expected, scanned]);
+  useEffect(() => {
+    onDifferences?.([...result.missing, ...result.excess]);
+  }, [result, onDifferences]);
   const rows = [
     ...result.missing.map((tid) => ({ tid, kind: "Missing" })),
     ...result.excess.map((tid) => ({ tid, kind: "Excess" })),

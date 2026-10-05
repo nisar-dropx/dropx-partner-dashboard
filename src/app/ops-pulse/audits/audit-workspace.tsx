@@ -555,6 +555,7 @@ export function AuditWorkspace({
         </span>
       </div>
       <div className={styles.actions}>
+        {audit.score_snapshot && <span className={styles.photoBadge}>{audit.score_snapshot.percentage ?? "—"}% · {audit.score_snapshot.rating}{audit.score_snapshot.provisional ? " · provisional" : ""}</span>}
         <Badge audit={audit} />
         {isFastAudit(audit) && <mark className={styles.fast}>≤10 min</mark>}
         <ChevronRight size={18} />

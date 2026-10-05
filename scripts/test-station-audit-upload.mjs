@@ -23,4 +23,5 @@ assert.equal((await post({...prepare,checklistItemId:'check',contentType:'applic
 assert.equal((await post({...prepare,checklistItemId:'check'})).status,200);
 assert.equal((await post({phase:'complete',checklistItemId:'check',path:signedPaths.at(-1)})).status,200);assert.equal(saved.checklist_item_id,'check');assert.equal(saved.evidence_kind_code,'checklist_photo');
 audit={...audit,status_code:'scheduled',started_at:null};assert.equal((await post(prepare)).status,403);
+audit={...audit,assigned_to:'another',completed_at:'2026-10-05',status_code:'under_review'};assert.equal((await post(prepare)).status,200,'scoped manager can add review proof');assert.equal((await post({...prepare,checklistItemId:'check'})).status,400,'reviewer cannot replace original checklist photos');audit.status_code='closed';assert.equal((await post(prepare)).status,403);
 console.log('Audit proof tests passed: 10 MB direct uploads, actor/station/preview guards, file size/type limits, prefix isolation and completed-object verification.');

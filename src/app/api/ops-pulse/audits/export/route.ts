@@ -84,7 +84,7 @@ export async function GET(request: Request) {
   const auditsResult = await supabaseAdmin
     .from("ops_station_audits")
     .select(
-      "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,assigned_to,assigned_name,started_at,completed_at,completed_by,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
+      "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,started_at,completed_at,completed_by,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
     )
     .eq("company_id", companyId)
     .is("deleted_at", null)
@@ -258,6 +258,9 @@ export async function GET(request: Request) {
         Missing: audit.shipment_missing_count,
         Excess: audit.shipment_excess_count,
         "Unresolved shipments": audit.shipment_unresolved_count,
+        "Physical audit score (%)": audit.score,
+        "Score rating": (audit.score_snapshot as any)?.rating || "Not scored",
+        "Score review": (audit.score_snapshot as any)?.provisional ? "Provisional" : audit.score == null ? "Not scored" : "Assessed",
         Summary: audit.overall_summary,
         "Station response": audit.station_summary,
         "Manager note": audit.manager_summary,

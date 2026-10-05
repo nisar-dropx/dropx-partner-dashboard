@@ -11,6 +11,8 @@ import { randomUUID } from "node:crypto";
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+import type { AuditScoreSnapshot } from "./station-audit-scoring";
+
 export type AuditType = {
   id: string;
   code: string;
@@ -23,6 +25,7 @@ export type AuditType = {
   expected_duration_minutes: number | null;
   requires_video_link: boolean;
   shipment_reconciliation_enabled?: boolean;
+  scoring_enabled?: boolean;
   video_link_help: string | null;
   email_subject_template: string | null;
   email_body_template: string | null;
@@ -33,6 +36,7 @@ export type AuditType = {
 };
 
 export type AuditSection = {
+  score_weight?: number;
   id: string;
   audit_type_id: string;
   code: string;
@@ -42,6 +46,8 @@ export type AuditSection = {
   is_active: boolean;
 };
 export type AuditChecklistItem = {
+  score_weight?: number;
+  score_source?: string;
   id: string;
   audit_type_id: string;
   section_id: string | null;
@@ -55,6 +61,7 @@ export type AuditChecklistItem = {
     is_compliant: boolean | null;
     requires_action: boolean;
     requires_evidence: boolean;
+    score?: number | null;
   }>;
   is_required: boolean;
   evidence_rule: string;
@@ -147,6 +154,7 @@ export type StationAudit = {
   station_summary: string | null;
   manager_summary: string | null;
   score: number | null;
+  score_snapshot?: AuditScoreSnapshot | null;
   email_status: string;
   ops_audit_types?: Pick<
     AuditType,
@@ -304,10 +312,10 @@ export function canRespondToStationAudits(
   const permission = authorization.permissions.station_audits;
   return Boolean(
     !authorization.readOnly &&
-    (permission?.canAdd || permission?.canEdit) &&
-    authorization.effectiveRoleIds.some((roleId) =>
-      settings.responder_role_ids.includes(roleId),
-    ),
+      (permission?.canAdd || permission?.canEdit) &&
+      authorization.effectiveRoleIds.some((roleId) =>
+        settings.responder_role_ids.includes(roleId),
+      ),
   );
 }
 
@@ -350,6 +358,7 @@ function responseOptions(value: unknown) {
               typeof row.is_compliant === "boolean" ? row.is_compliant : null,
             requires_action: row.requires_action === true,
             requires_evidence: row.requires_evidence === true,
+            score: typeof row.score === "number" ? row.score : null,
           }
         : null;
     })
@@ -362,6 +371,7 @@ function responseOptions(value: unknown) {
         is_compliant: boolean | null;
         requires_action: boolean;
         requires_evidence: boolean;
+        score: number | null;
       } => Boolean(item),
     );
 }

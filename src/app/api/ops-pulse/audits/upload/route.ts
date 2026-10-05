@@ -79,11 +79,12 @@ export async function POST(request: Request) {
       Boolean(audit.completed_at) &&
       audit.status_code === "awaiting_station_response" &&
       audit.station_response_status === "requested";
-    if (!performer && !responder)
+    const reviewer = hasPermission(auth,"station_audits","edit") && canManageStationAudits(auth,master.programmeSettings) && Boolean(audit.completed_at) && ["under_review","awaiting_station_response"].includes(audit.status_code);
+    if (!performer && !responder && !reviewer)
       return Response.json(
         {
           error:
-            "Only the assigned auditor or the station responding to findings may attach proof.",
+            "Only the assigned auditor, authorized reviewer or responding station may attach proof.",
         },
         { status: 403 },
       );
@@ -186,7 +187,7 @@ export async function POST(request: Request) {
       { onConflict: "id", ignoreDuplicates: true },
     );
     if (saved.error) throw new Error(saved.error.message);
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, evidenceId: name.slice(0, 36) });
   } catch (error) {
     return Response.json(
       {

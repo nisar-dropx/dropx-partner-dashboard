@@ -1,4 +1,9 @@
 "use client";
+import {
+  AuditScore,
+  ResponsibilityAssessment,
+  ScoreReview,
+} from "./audit-score";
 import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
@@ -125,6 +130,12 @@ export function AuditDetail({
     };
   }, [audit.id]);
   const [editing, setEditing] = useState(false);
+  const [differenceKeys, setDifferenceKeys] = useState<string[]>([]);
+  const [checkDifferenceKeys, setCheckDifferenceKeys] = useState<string[]>(() =>
+    workspace.responses
+      .filter((r) => r.audit_id === audit.id && r.is_compliant === false)
+      .map((r) => `check:${r.checklist_item_id}`),
+  );
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const editable =
@@ -349,6 +360,21 @@ export function AuditDetail({
       >
         {canPerform && (audit.status_code === "in_progress" || editing) ? (
           <form
+            onChange={(event) => {
+              const target = event.target as HTMLInputElement;
+              if (!target.name?.startsWith("check_")) return;
+              const data = new FormData(event.currentTarget);
+              setCheckDifferenceKeys(
+                items
+                  .filter(
+                    (i) =>
+                      i.response_options.find(
+                        (o) => o.value === data.get(`check_${i.id}`),
+                      )?.is_compliant === false,
+                  )
+                  .map((i) => `check:${i.id}`),
+              );
+            }}
             onSubmit={(event) => {
               event.preventDefault();
               const data = new FormData(event.currentTarget);
@@ -523,6 +549,7 @@ export function AuditDetail({
             {type?.shipment_reconciliation_enabled ? (
               inspection ? (
                 <ShipmentInspection
+                  onDifferences={setDifferenceKeys}
                   lists={inspection.lists}
                   exceptions={existingShipments}
                 />
@@ -646,6 +673,23 @@ export function AuditDetail({
                 </details>
               </>
             )}
+            {type?.scoring_enabled && (
+              <ResponsibilityAssessment
+                keys={[
+                  ...(variance ? ["cash"] : []),
+                  ...differenceKeys,
+                  ...checkDifferenceKeys,
+                ]}
+                labels={Object.fromEntries(
+                  items.map((i) => [`check:${i.id}`, i.label]),
+                )}
+                initial={audit.score_snapshot?.assessments}
+                options={workspace.options.filter(
+                  (o) => o.option_group === "audit_responsibility",
+                )}
+                evidence={evidence}
+              />
+            )}
             {sections
               .filter((section) =>
                 items.some((item) => item.section_id === section.id),
@@ -665,6 +709,9 @@ export function AuditDetail({
                           .length
                       }{" "}
                       checks
+                      {type?.scoring_enabled
+                        ? ` · ${section.score_weight || 0}% weight`
+                        : ""}
                     </span>
                   </summary>
                   <div className={styles.sectionBody}>
@@ -890,7 +937,17 @@ function AuditCheck({
   const [outcome, setOutcome] = useState(defaultValue);
   const needsAction = options.find((o) => o.value === outcome)?.requires_action;
   const needsNote =
-    item.remarks_required || outcome === "fail" || outcome === "na";
+    item.remarks_required ||
+    options.find((o) => o.value === outcome)?.is_compliant === false ||
+    outcome === "na";
+  if (item.score_source && item.score_source !== "checklist")
+    return (
+      <div className={styles.check}>
+        <strong>{item.label}</strong>
+        <span className={styles.photoBadge}>Calculated automatically</span>
+        <p className={styles.checkHelp}>{item.guidance}</p>
+      </div>
+    );
   return (
     <div className={styles.check}>
       <div className={styles.checkTitle}>
@@ -914,6 +971,7 @@ function AuditCheck({
               {options.map((option) => (
                 <option value={option.value} key={option.value}>
                   {option.label}
+                  {option.score != null ? ` · ${option.score}/100` : ""}
                 </option>
               ))}
             </select>
@@ -1348,6 +1406,32 @@ function SavedAudit({
       : `₹${Number(value).toLocaleString("en-IN")}`;
   return (
     <div className={styles.timeline}>
+      {audit.score_snapshot && (
+        <AuditScore
+          snapshot={audit.score_snapshot}
+          evidence={workspace.evidence.filter((e) => e.audit_id === audit.id)}
+          responses={checks}
+        />
+      )}
+      {canManage && audit.completed_at && audit.status_code !== "closed" && (
+        <ScoreReview
+          audit={audit}
+          options={workspace.options.filter(
+            (o) => o.option_group === "audit_responsibility",
+          )}
+          evidence={workspace.evidence.filter((e) => e.audit_id === audit.id)}
+        />
+      )}
+      {audit.completed_at && (
+        <a
+          className="button secondary"
+          href={`/api/ops-pulse/audits/report/${audit.id}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Download illustrated audit report (PDF)
+        </a>
+      )}
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           {audit.completed_at ? "Audit findings" : "Scheduled audit"}
@@ -1401,11 +1485,80 @@ function SavedAudit({
         </div>
       </section>
       {!audit.completed_at && (
-        <details className={styles.section}>
+        <details className={styles.section} open>
           <summary>
-            Preview audit checklist <span>Prepare before starting</span>
+            Read checklist & entry guide <span>Prepare before starting</span>
           </summary>
           <div className={styles.sectionBody}>
+            <p className={styles.checkHelp}>
+              The assigned auditor selects <b>Start audit</b> to enable data
+              entry. Both COD and shipment reconciliation are part of the
+              physical audit. This preparation view does not change the audit.
+            </p>
+            {workspace.auditTypes.find((t) => t.id === audit.audit_type_id)
+              ?.shipment_reconciliation_enabled && (
+              <div className={styles.preparationGrid}>
+                <div>
+                  <b>1 · ERP ageing TIDs</b>
+                  <p>
+                    Paste the tracking-ID column from the system ageing report.
+                  </p>
+                  <textarea
+                    disabled
+                    rows={3}
+                    placeholder="Paste one system tracking ID per line"
+                  />
+                </div>
+                <div>
+                  <b>2 · Physical scan</b>
+                  <p>
+                    Scan each parcel using a barcode scanner, or paste the scan
+                    export.
+                  </p>
+                  <textarea
+                    disabled
+                    rows={3}
+                    placeholder="Physically scanned tracking IDs"
+                  />
+                </div>
+                <div>
+                  <b>3 · Missing / excess</b>
+                  <p>
+                    Differences appear automatically. Record the finding,
+                    station responsibility and evidence for any exclusion.
+                  </p>
+                  <span className={styles.photoBadge}>
+                    Station investigates and responds after submission
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className={styles.preparationGrid}>
+              <div>
+                <b>COD · System amount</b>
+                <p>Enter the ERP cash balance and attach the ERP screenshot.</p>
+              </div>
+              <div>
+                <b>COD · Available cash</b>
+                <p>
+                  Count ₹500, ₹200, ₹100 and smaller denominations. The total
+                  updates automatically.
+                </p>
+              </div>
+              <div>
+                <b>COD · Difference</b>
+                <p>
+                  Compare expected and counted cash. Record a reason and
+                  responsibility assessment if they differ.
+                </p>
+              </div>
+            </div>
+            <p className={styles.checkHelp}>
+              Expand an area below to read its checks. Weights reflect cash and
+              inventory risk first, then hygiene, security and operational
+              controls. Scores and photos appear together in the submitted
+              report.
+            </p>
             {workspace.sections
               .filter(
                 (section) =>
@@ -1415,29 +1568,38 @@ function SavedAudit({
                   ),
               )
               .map((section) => (
-                <section key={section.id}>
-                  <h3>{section.name}</h3>
-                  <p className={styles.checkHelp}>{section.guidance}</p>
-                  {workspace.checklistItems
-                    .filter((i) => i.section_id === section.id)
-                    .map((item) => (
-                      <div className={styles.check} key={item.id}>
-                        <strong>{item.label}</strong>
-                        <p className={styles.checkHelp}>{item.guidance}</p>
-                        {item.employee_selection &&
-                          item.employee_selection !== "none" && (
+                <details className={styles.section} key={section.id}>
+                  <summary>
+                    {section.name}
+                    <span>
+                      {section.score_weight
+                        ? `${section.score_weight}% weight`
+                        : "Checklist"}
+                    </span>
+                  </summary>
+                  <div className={styles.sectionBody}>
+                    <p className={styles.checkHelp}>{section.guidance}</p>
+                    {workspace.checklistItems
+                      .filter((i) => i.section_id === section.id)
+                      .map((item) => (
+                        <div className={styles.check} key={item.id}>
+                          <strong>{item.label}</strong>
+                          <p className={styles.checkHelp}>{item.guidance}</p>
+                          {item.employee_selection &&
+                            item.employee_selection !== "none" && (
+                              <span className={styles.photoBadge}>
+                                Select station-linked key custodian(s)
+                              </span>
+                            )}
+                          {item.photo_required && (
                             <span className={styles.photoBadge}>
-                              Select station-linked key custodian(s)
+                              Photo required · every outcome
                             </span>
                           )}
-                        {item.photo_required && (
-                          <span className={styles.photoBadge}>
-                            Photo required · every outcome
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                </section>
+                        </div>
+                      ))}
+                  </div>
+                </details>
               ))}
           </div>
         </details>
@@ -1464,7 +1626,7 @@ function SavedAudit({
           </div>
         </details>
       )}
-      {checks.length > 0 && (
+      {checks.length > 0 && !audit.score_snapshot && (
         <details className={styles.section} open>
           <summary>
             Checklist findings <span>{checks.length} checks</span>

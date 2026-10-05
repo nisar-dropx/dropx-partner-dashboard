@@ -1,4 +1,6 @@
 import "server-only";
+import { buildStationAuditReport } from "./station-audit-report-data";
+import type { AuditReportData } from "./station-audit-report";
 import { loadAuditAssignees } from "./station-audit-people";
 import { auditDay } from "./station-audit-planning";
 
@@ -70,6 +72,7 @@ function auditHtml(input: {
   type: AuditType;
   actions: number;
   url: string;
+  report?: AuditReportData;
 }) {
   const type = input.type.name;
   const station = `${input.station.station_code}${input.station.station_name ? ` · ${input.station.station_name}` : ""}`;
@@ -83,7 +86,19 @@ function auditHtml(input: {
     input.audit,
     input.station,
   );
-  return `<!doctype html><html><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#1f2a44"><table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f7fb;padding:28px 12px"><tr><td align="center"><table width="640" cellpadding="0" cellspacing="0" role="presentation" style="max-width:640px;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5eaf2"><tr><td style="background:linear-gradient(135deg,#172e52,#275ba7);padding:24px 28px;color:#fff"><div style="font-size:12px;font-weight:700;letter-spacing:1px;opacity:.78">DROPX · OPS PULSE</div><div style="font-size:25px;font-weight:800;margin-top:7px">${escapeHtml(type)}</div><div style="font-size:14px;margin-top:6px;opacity:.9">${escapeHtml(station)}</div></td></tr><tr><td style="padding:25px 28px"><div style="display:inline-block;border-radius:999px;background:#e9f7ee;color:#197744;padding:6px 10px;font-size:12px;font-weight:700">COMPLETED · ${escapeHtml(input.audit.audit_number)}</div><p style="font-size:15px;line-height:1.55;margin:18px 0">${escapeHtml(body)}</p><table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;border-spacing:8px 0"><tr><td style="width:33%;background:#f7f9fc;border-radius:10px;padding:13px"><div style="font-size:11px;color:#66758f;font-weight:700;text-transform:uppercase">Cash variance</div><div style="font-size:17px;font-weight:800;margin-top:5px">${escapeHtml(variance)}</div></td><td style="width:33%;background:#f7f9fc;border-radius:10px;padding:13px"><div style="font-size:11px;color:#66758f;font-weight:700;text-transform:uppercase">Shipment exceptions</div><div style="font-size:17px;font-weight:800;margin-top:5px">${input.audit.shipment_unresolved_count || 0}</div></td><td style="width:33%;background:#f7f9fc;border-radius:10px;padding:13px"><div style="font-size:11px;color:#66758f;font-weight:700;text-transform:uppercase">Open actions</div><div style="font-size:17px;font-weight:800;margin-top:5px">${input.actions}</div></td></tr></table><p style="font-size:14px;line-height:1.5">${input.audit.station_response_status === "requested" ? `Station response required${input.audit.response_due_at ? ` by ${escapeHtml(new Date(input.audit.response_due_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }))} IST` : ""}. Open OpsPulse, review the findings and submit your response with supporting evidence.` : "Review the saved report and evidence in OpsPulse."} Please record responses in OpsPulse so the tracker stays up to date.</p><p style="margin:24px 0 0"><a href="${escapeHtml(input.url)}" style="background:#e62c70;color:#fff;text-decoration:none;border-radius:8px;padding:12px 16px;font-size:14px;font-weight:700;display:inline-block">${input.audit.station_response_status === "requested" ? "Open OpsPulse &amp; respond" : "View audit report"}</a></p></td></tr><tr><td style="padding:16px 28px;background:#fbfcfe;border-top:1px solid #edf1f6;color:#6d7b91;font-size:12px">This message stays in the same station and month email chain for traceability.</td></tr></table></td></tr></table></body></html>`;
+  const score = input.audit.score_snapshot;
+  const scoreHtml = score
+    ? `<div style="padding:18px;background:#edf8f5;border-radius:12px;margin:18px 0"><div style="font-size:30px;font-weight:800;color:#0c756c">${score.percentage ?? "—"}% · ${escapeHtml(score.rating)}</div><p>${score.provisional ? "Provisional: responsibility / scoring review pending. Not a final R&amp;R score." : "Assessed result. Review open findings separately."}</p><table width="100%" style="font-size:13px;border-collapse:collapse"><tr><th align="left">Area</th><th>Weight</th><th>Score</th></tr>${score.sections.map((s) => `<tr><td style="padding:8px 0;border-top:1px solid #cfe8e2">${escapeHtml(s.name)}</td><td align="center">${s.weight}%</td><td align="center"><b>${s.percentage == null ? "N/A" : `${s.percentage}%`}</b></td></tr>`).join("")}</table></div>`
+    : "";
+  const gallery = (input.report?.photos || [])
+    .filter((p) => p.image)
+    .slice(0, 3)
+    .map(
+      (p) =>
+        `<div style="margin:14px 0"><p style="font-size:12px;font-weight:bold">${escapeHtml(p.label)}</p><img src="cid:audit-${p.id}" alt="${escapeHtml(p.label)}" width="280" style="max-width:100%;border-radius:8px" /></div>`,
+    )
+    .join("");
+  return `<!doctype html><html><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#1f2a44"><table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f7fb;padding:28px 12px"><tr><td align="center"><table width="640" cellpadding="0" cellspacing="0" role="presentation" style="max-width:640px;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5eaf2"><tr><td style="background:linear-gradient(135deg,#172e52,#275ba7);padding:24px 28px;color:#fff"><div style="font-size:12px;font-weight:700;letter-spacing:1px;opacity:.78">DROPX · OPS PULSE</div><div style="font-size:25px;font-weight:800;margin-top:7px">${escapeHtml(type)}</div><div style="font-size:14px;margin-top:6px;opacity:.9">${escapeHtml(station)}</div></td></tr><tr><td style="padding:25px 28px"><div style="display:inline-block;border-radius:999px;background:#e9f7ee;color:#197744;padding:6px 10px;font-size:12px;font-weight:700">SUBMITTED · ${escapeHtml(input.audit.audit_number)}</div><p style="font-size:15px;line-height:1.55;margin:18px 0">${escapeHtml(body)}</p>${scoreHtml}<table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:separate;border-spacing:8px 0"><tr><td style="width:33%;background:#f7f9fc;border-radius:10px;padding:13px"><div style="font-size:11px;color:#66758f;font-weight:700;text-transform:uppercase">Cash variance</div><div style="font-size:17px;font-weight:800;margin-top:5px">${escapeHtml(variance)}</div></td><td style="width:33%;background:#f7f9fc;border-radius:10px;padding:13px"><div style="font-size:11px;color:#66758f;font-weight:700;text-transform:uppercase">Shipment exceptions</div><div style="font-size:17px;font-weight:800;margin-top:5px">${input.audit.shipment_unresolved_count || 0}</div></td><td style="width:33%;background:#f7f9fc;border-radius:10px;padding:13px"><div style="font-size:11px;color:#66758f;font-weight:700;text-transform:uppercase">Open actions</div><div style="font-size:17px;font-weight:800;margin-top:5px">${input.actions}</div></td></tr></table><p style="font-size:14px;line-height:1.5">${input.audit.station_response_status === "requested" ? `Station response required${input.audit.response_due_at ? ` by ${escapeHtml(new Date(input.audit.response_due_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }))} IST` : ""}. Open OpsPulse, review the findings and submit your response with supporting evidence.` : "Review the saved report and evidence in OpsPulse."} Please record responses in OpsPulse so the tracker stays up to date.</p><p style="font-size:13px">The illustrated PDF report is attached, including section scores, observations, responsibility decisions and evidence.</p>${gallery}<p style="margin:24px 0 0"><a href="${escapeHtml(input.url)}" style="background:#e62c70;color:#fff;text-decoration:none;border-radius:8px;padding:12px 16px;font-size:14px;font-weight:700;display:inline-block">${input.audit.station_response_status === "requested" ? "Open OpsPulse &amp; respond" : "View audit report"}</a></p></td></tr><tr><td style="padding:16px 28px;background:#fbfcfe;border-top:1px solid #edf1f6;color:#6d7b91;font-size:12px">This message stays in the same station and month email chain for traceability.</td></tr></table></td></tr></table></body></html>`;
 }
 
 export async function sendStationAuditCompletedEmail(input: {
@@ -148,7 +163,9 @@ export async function sendStationAuditCompletedEmail(input: {
       input.station,
     );
   const url = `https://ops.dropxlogistics.com/audits?audit=${encodeURIComponent(input.audit.id)}`;
+  const report = await buildStationAuditReport(input.companyId, input.audit);
   const html = auditHtml({
+    report: report.data,
     audit: input.audit,
     station: input.station,
     type: input.type,
@@ -162,6 +179,22 @@ export async function sendStationAuditCompletedEmail(input: {
     subject,
     body: `Audit ${input.audit.audit_number} completed for ${input.station.station_code}. Open OpsPulse to review the report and respond: ${url}`,
     html,
+    attachments: [
+      {
+        filename: `${input.audit.audit_number}.pdf`,
+        content: report.pdf,
+        contentType: "application/pdf",
+      },
+      ...report.data.photos
+        .filter((p) => p.image)
+        .slice(0, 3)
+        .map((p) => ({
+          filename: `${p.id}.jpg`,
+          content: Buffer.from(p.image!),
+          contentType: "image/jpeg",
+          cid: `audit-${p.id}`,
+        })),
+    ],
     messageId,
     inReplyTo: found.data?.last_message_id || undefined,
     references: found.data?.last_message_id
