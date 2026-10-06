@@ -52,6 +52,7 @@ function dataModule(db, locations = all, rebuildCps = (base) => base) {
     "server-only": {},
     react: { cache: (fn) => fn },
     "./cps-engine": { rebuildCps },
+    "./cps-targets": compile("./cps-targets.ts"),
     "./advertising": { excludeAdvertisingSettlements: base => base },
     "./advertising-data": { loadAdvertising: async () => ({breakup:[],gaps:[],rows:[],settlements:[]}) },
     "@/lib/company-scope": { requireCompanyId: (a) => a.companyId },
@@ -386,4 +387,26 @@ test("CPS parent selection combines authorized XPTs, applies parent filters and 
  assert.deepEqual((await dataModule(db,[child]).cpsScope(context,{station:"P"},true)).selected.map(l=>l.station_code),["X"]);
  assert.equal((await d.cpsScope(context,{station:"HIDDEN"},true)).selected.length,0);
  assert.equal((await dataModule(db,[child]).cpsScope(context,{station:"HIDDEN"},true)).selected.length,0);
+});
+
+test("CPS target writes enforce permission, station scope, parent grouping and positive amounts", async () => {
+  let auth = {...context, userId:"user-a"}, permitted = true;
+  const writes = [];
+  const actions = compile("../../app/cps/actions.ts", {
+    "next/cache": { revalidateTag() {} },
+    "@/lib/authorization": { getAuthorization:async()=>auth, hasPermission:()=>permitted },
+    "@/lib/ops-pulse/cps-data": { cpsScope:async()=>({companyId:"company-a",all:[all[0],{station_code:"X",is_xpt:true}]}) },
+    "@/lib/ops-pulse/cps": domain,
+    "@/lib/supabase-admin": { supabaseAdmin:{from:()=>({insert:async row=>{writes.push(row);return {error:null}}})} },
+  });
+  const form = new FormData();
+  form.set("station_code","A"); form.set("target_cps","14"); form.set("effective_from","2026-09-01");
+  permitted=false; assert.equal((await actions.saveCpsTarget(form)).ok,false);
+  permitted=true; auth.readOnly=true; assert.equal((await actions.saveCpsTarget(form)).ok,false);
+  auth.readOnly=false;
+  for(const station of ["B","X"]) {form.set("station_code",station);assert.equal((await actions.saveCpsTarget(form)).ok,false)}
+  form.set("station_code","A"); form.set("target_cps","0");assert.equal((await actions.saveCpsTarget(form)).ok,false);
+  assert.equal(writes.length,0);
+  form.set("target_cps","14"); assert.equal((await actions.saveCpsTarget(form)).ok,true);
+  assert.deepEqual(writes,[{company_id:"company-a",station_code:"A",target_cps:14,effective_from:"2026-09-01",is_active:true,created_by:"user-a"}]);
 });

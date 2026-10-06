@@ -11,14 +11,13 @@ export type ConnectCpsStation = {
   target: number | null;
   gap: number | null;
   onTarget: boolean | null;
-  cost: number;
   delivered: number;
   provisional: boolean;
-  breakdown: { label: string; amount: number; cps: number | null }[];
+  breakdown: { label: string; cps: number | null }[];
   issues: { label: string; count: number }[];
 };
 
-// Return aggregates only. People names, CTC, raw facts and payroll evidence
+// Return CPS and volume only. Absolute costs, People names, CTC and payroll evidence
 // must never enter the DropX One performance response.
 export function connectCpsSummary(snapshot: CpsSnapshot, places: CpsPlace[], from: string, through: string) {
   const allowed = new Set(places.map(place => place.code));
@@ -49,9 +48,9 @@ export function connectCpsSummary(snapshot: CpsSnapshot, places: CpsPlace[], fro
       code: group.code, name: group.name, subtitle: group.subtitle, members: group.members,
       date: dates.at(-1)!, earliestDate: dates[0], value: total.cps, target: total.target,
       gap: total.gap, onTarget: total.gap == null ? null : total.gap <= 0,
-      cost: total.total, delivered: total.deliveries,
+      delivered: total.deliveries,
       provisional: total.provisional || issues.size > 0,
-      breakdown: amounts.map(([label, amount]) => ({ label, amount, cps: total.deliveries > 0 ? amount / total.deliveries : null })),
+      breakdown: amounts.map(([label, amount]) => ({ label, cps: total.deliveries > 0 ? amount / total.deliveries : null })),
       issues: [...issues].map(([label, count]) => ({ label, count })),
     }];
   });

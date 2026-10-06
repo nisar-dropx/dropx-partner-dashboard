@@ -132,6 +132,7 @@ export default async function CpsPage({
                 employees={inputs.employees}
                 costs={inputs.costs}
                 targets={inputs.targets}
+                targetStations={all.filter(l => !l.is_xpt).map(l => l.station_code)}
                 stations={all.map((l) => l.station_code)}
                 today={todayKolkata()}
                 canAdd={

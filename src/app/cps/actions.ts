@@ -83,13 +83,13 @@ export async function saveCpsTarget(form: FormData) {
     const target = String(form.get("target_cps") || "");
     const effective = String(form.get("effective_from") || "");
     if (
-      !scope.all.some((l) => l.station_code === station) ||
+      !scope.all.some((l) => l.station_code === station && !l.is_xpt) ||
       !isoDate(effective) ||
       !/^\d{1,5}(\.\d{1,4})?$/.test(target) ||
       Number(target) <= 0
     )
       throw Error(
-        "Choose a permitted location, positive target and effective date.",
+        "Choose a permitted parent or standalone station, positive target and effective date. XPTs use their parent station target.",
       );
     const result = await supabaseAdmin
       .from("cps_station_targets")
