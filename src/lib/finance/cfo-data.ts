@@ -8,6 +8,18 @@ import {loadFinanceCpsEvidence} from '../ops-pulse/cps-data';
 import {nowRevenue,dateRange,effectiveOn,accrueMonthly,contractDaily,roundMoney,type NowRate,type NowStore,type CostContract,type OverheadRule} from './now';
 import {equalShares,type CfoDay,type OverheadLine,type CfoLine} from './cfo';
 import {stationGroupKey} from './pnl-comparison';
+export async function loadHoCosts(c:FinanceContext,from:string,to:string){
+ if(!c.authorization.hasAllLocationAccess)return {data:{breakup:[]},error:null};
+ const codes=c.locations.filter(l=>l.is_ho).map(l=>l.station_code);
+ if(!codes.length)return {data:{breakup:[]},error:null};
+ const breakup:any[]=[];
+ for(const slice of cpsMonthSlices(from,to)){
+  const r=await c.db.rpc('ops_cps_base_v2',{p_company:c.companyId,p_from:slice.from,p_through:slice.to,p_stations:codes});
+  if(r.error)return {data:{breakup:[]},error:r.error};
+  breakup.push(...(r.data?.breakup||[]));
+ }
+ return {data:{breakup},error:null};
+}
 export async function loadCfo(c:FinanceContext,query:PnlQuery){
  const filters=pnlFilters(query),from=filters.from,to=filters.to;
  const operating=c.locations.filter(l=>!l.is_ho&&!l.hide_from_location_list),normal=operating.filter(l=>locationModel(l)!=='NOW'),now=operating.filter(l=>locationModel(l)==='NOW');
@@ -16,7 +28,7 @@ export async function loadCfo(c:FinanceContext,query:PnlQuery){
   loadPnl({...c,locations:normal},{period:'custom',from,to}),
   operating.length?loadFinanceCpsEvidence(c.companyId,from,to,operating.map(l=>l.station_code)):Promise.resolve({report:{daily:[],breakup:[],gaps:[]},evidence:{staff:[],associates:[]}}),
   c.authorization.hasAllLocationAccess?c.db.rpc('finance_ho_people',{p_company:c.companyId,p_from:from,p_through:to}):Promise.resolve({data:{people:[],salaries:[],assignments:[]},error:null}),
-  c.authorization.hasAllLocationAccess?c.db.rpc('ops_cps_base_v2',{p_company:c.companyId,p_from:from,p_through:to,p_stations:c.locations.filter(l=>l.is_ho).map(l=>l.station_code)}):Promise.resolve({data:{breakup:[]},error:null}),
+  loadHoCosts(c,from,to),
  ]);
  if(ho.error||hoCosts.error)throw Error('HO People costs could not be loaded. Please retry.');
  const locationByCode=new Map(operating.map(l=>[l.station_code,l]));
