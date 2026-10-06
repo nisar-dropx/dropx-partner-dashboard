@@ -35,6 +35,7 @@ export const financeAccessPageCodes = [
   "finance_assets",
   "finance_revenue",
   "finance_pnl",
+  "finance_books",
   "users"
 ] as const;
 

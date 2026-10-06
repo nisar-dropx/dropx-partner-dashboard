@@ -41,6 +41,7 @@ export const financeNavItems: NavItem[] = [
     { code: "finance_pnl", label: "Station Calculations", href: "/finance/business?tab=pnl" },
     { code: "finance_revenue", label: "Amazon Now Units", href: "/finance/now-volumes" }
   ] },
+  { code: "finance_books", label: "Accounting, Banks & Loans", href: "/finance/books", icon: "₹" },
   { code: "payment_settings", label: "Finance Settings", href: "/settings/payments", icon: "S" },
   {
     code: "users",
