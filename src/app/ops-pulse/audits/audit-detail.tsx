@@ -1323,6 +1323,18 @@ function Reschedule({
   const end = auditMonthRange(original.slice(0, 7)).to;
   const min = `${original.slice(0, 7)}-${String(slot?.startDay || 1).padStart(2, "0")}`;
   const max = `${original.slice(0, 7)}-${String(Math.min(slot?.endDay || 31, Number(end.slice(-2)))).padStart(2, "0")}`;
+  // A date input whose minimum is after its maximum can never be submitted.
+  if ((min > auditDay() ? min : auditDay()) > max)
+    return (
+      <details className={styles.reschedule}>
+        <summary>Postpone / reschedule audit</summary>
+        <p className={styles.muted}>
+          {slot?.label || "This slot"} ended on {max}, so this audit can no
+          longer be postponed. Start it now or schedule the station’s next
+          audit.
+        </p>
+      </details>
+    );
   return (
     <details className={styles.reschedule}>
       <summary>Postpone / reschedule audit</summary>
@@ -1744,6 +1756,15 @@ function SavedAudit({
                   <p>
                     {formatDateTime(String(row.before_data.scheduled_for))} →{" "}
                     {formatDateTime(String(row.after_data.scheduled_for))}
+                    <br />
+                    {String(row.after_data.reason || "")}
+                  </p>
+                )}
+                {row.event_type === "reassigned" &&
+                  Boolean(row.after_data.assigned_name) && (
+                  <p>
+                    {String(row.before_data.assigned_name || "Unassigned")} →{" "}
+                    {String(row.after_data.assigned_name)}
                     <br />
                     {String(row.after_data.reason || "")}
                   </p>
