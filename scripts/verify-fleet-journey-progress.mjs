@@ -17,6 +17,7 @@ assert.ok(Math.abs(j.progress.reduce((s,p)=>s+(p.addedKm??0),0)-j.progress.at(-1
 assert.ok(Math.abs(j.progress.at(-1).cumulativeKm-j.summary.km)<=.051,'Uses existing trusted distance algorithm');
 assert.equal(j.progress.find(p=>p.at===new Date((start+620*60)*1000).toISOString()).addedKm,null,'No invented travel through GPS gap');
 assert.equal(j.progress.filter(p=>p.speed===0).every(p=>p.addedKm===0),true);
+assert.equal(j.progress.filter(p=>p.speed===0).every(p=>p.kind==='idle'),true,'Point state comes from current speed/ignition, not the preceding moving interval');
 const samples=u.sampleProgress(j.progress,5);
 assert.ok(samples.every(p=>j.progress.some(original=>original.at===p.at&&original.lat===p.lat&&original.lng===p.lng)),'Never interpolate sample positions/times');
 assert.equal(samples.at(-1).cumulativeKm,j.progress.at(-1).cumulativeKm);

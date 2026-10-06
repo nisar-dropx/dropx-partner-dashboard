@@ -145,10 +145,10 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
   let runningKm = 0, eventStartKm = 0;
   const precision=(value:number)=>Math.round(value*1000)/1000;
   const isAfterHours=(epoch:number)=>{const hour=Math.floor((epoch+19800)/3600)%24;return hour>=22||hour<5;};
-  const observation=(point:Point,kind:MovementProgressPoint['kind'])=>{
+  const observation=(point:Point,kind:MovementProgressPoint['kind']):MovementProgressPoint=>{
     const leg=acceptedLegs.get(point.epoch);
     runningKm+=leg?.km??0;
-    return {at:new Date(point.epoch*1000).toISOString(),lat:point.lat,lng:point.lng,speed:point.speed,kind,
+    return {at:new Date(point.epoch*1000).toISOString(),lat:point.lat,lng:point.lng,speed:point.speed,kind:kind==='start'?'start':point.speed===null?'gap':point.speed>0?'moving':point.ignition===true?'idle':point.ignition===false?'stopped':'stop_unknown',
       addedKm:kind==='gap'&&!leg?null:precision(leg?.km??0),cumulativeKm:precision(runningKm),
       distanceFrom:leg?new Date(leg.from*1000).toISOString():null,afterHours:isAfterHours(point.epoch),gapBefore:kind==='gap'};
   };
