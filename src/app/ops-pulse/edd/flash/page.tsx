@@ -21,7 +21,8 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
-  const clusters = workerConfigured ? await loadFlashClusters(companyId, stations) : [];
+  // Started now and awaited after the report, so the People lookup does not delay the worker call.
+  const clustersPending = workerConfigured ? loadFlashClusters(companyId, stations) : Promise.resolve([]);
   const requested = String(searchParams?.date ?? "").trim();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : todayKolkata();
 
@@ -36,6 +37,8 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
       error = err instanceof Error ? err.message : "Unable to load the station load report.";
     }
   }
+
+  const clusters = await clustersPending;
 
   return (
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">

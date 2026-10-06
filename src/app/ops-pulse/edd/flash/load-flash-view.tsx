@@ -225,6 +225,12 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
   const driverParcels = useMemo(() => driver !== null ? parcels.filter((parcel) => parcel.driverId === driver) : parcels, [parcels, driver]);
   const driverView = Boolean(stationRow) && driver !== null && trackingState === "ready";
 
+  // A driver from a shared link, or one who no longer has parcels after a refresh,
+  // would otherwise leave every card at zero with no way to tell why.
+  useEffect(() => {
+    if (trackingState === "ready" && driver !== null && !driverRow) setDriver(null);
+  }, [trackingState, driver, driverRow]);
+
   // The address always describes what is on screen, so a manager can share or reload a view.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
