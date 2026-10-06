@@ -6,6 +6,9 @@ import { hasConnectCompanyOwnerAccess } from "../../../../src/lib/connect-compan
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 type WorkerType = "employee" | "contractor";
 
 function db() {

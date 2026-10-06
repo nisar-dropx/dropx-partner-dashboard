@@ -48,7 +48,7 @@ const emptyQuery = (data = []) => ({
 });
 function dataModule(db, locations = all, rebuildCps = (base) => base) {
   const database = db ? { ...db, from: db.from ?? (() => emptyQuery()) } : db;
-  return compile("./cps-data.ts", {
+  const mocks = {
     "server-only": {},
     react: { cache: (fn) => fn },
     "./cps-engine": { rebuildCps },
@@ -66,7 +66,14 @@ function dataModule(db, locations = all, rebuildCps = (base) => base) {
     "@/lib/supabase-admin": { supabaseAdmin: database },
     "@/lib/supabase-pagination": { readAllRows: async (query) => await query },
     "@/lib/workforce-payment-policy": { workforcePaymentMonthStart: (date) => `${date.slice(0, 7)}-01` },
+  };
+  const snapshot = compile("./cps-snapshot.ts", {
+    ...mocks,
+    "../supabase-admin": mocks["@/lib/supabase-admin"],
+    "../supabase-pagination": mocks["@/lib/supabase-pagination"],
+    "../workforce-payment-policy": mocks["@/lib/workforce-payment-policy"],
   });
+  return compile("./cps-data.ts", { ...mocks, "./cps-snapshot": snapshot });
 }
 test("forged station and intersecting filters cannot widen permitted locations", async () => {
   const d = dataModule(null, [all[0]]);

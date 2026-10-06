@@ -1,4 +1,6 @@
 import "server-only";
+import { loadCpsSnapshot } from "../../../../src/lib/ops-pulse/cps-snapshot";
+import { connectCpsSummary, type ConnectCpsStation } from "./connect-cps-summary";
 
 import type { ConnectAccount } from "./connect-auth";
 import { amazonWeekPeriod, type PerformanceWeekPeriod } from "./performance-periods";
@@ -13,14 +15,6 @@ type MetricFact = {
   raw_text: string | null;
   values_json: unknown;
   created_at: string;
-};
-
-type CpsFact = {
-  work_date: string;
-  station_code: string | null;
-  overall_cps: number | null;
-  target_cps: number | null;
-  target_gap: number | null;
 };
 
 type PerformanceTarget = {
@@ -93,6 +87,8 @@ export type ConnectOperationalPerformance = {
   averageCps: number | null;
   cpsOnTarget: number;
   cpsMeasured: number;
+  cpsStations: ConnectCpsStation[];
+  cpsError: string | null;
   standingCounts: Record<string, number>;
   stations: ConnectStationPerformance[];
 };
@@ -293,7 +289,7 @@ export async function loadConnectOperationalPerformance(input: {
   const cpsPeriodState = selectedCpsMonth === monthKey() ? "mtd" : "closed";
   const scope = await performanceLocationScope(input.account, input.personId, input.engagementId, input.companyOwner === true);
   let stationQuery = db().from("stations")
-    .select("id,station_code,station_name,region,location_models(code,name)")
+    .select("id,station_code,station_name,region,is_ho,parent_station_id,location_models(code,name)")
     .eq("company_id", input.account.companyId)
     .eq("is_active", true)
     .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
@@ -301,7 +297,7 @@ export async function loadConnectOperationalPerformance(input: {
   if (!scope.allLocations) stationQuery = stationQuery.in("id", scope.locationIds.length ? scope.locationIds : ["00000000-0000-0000-0000-000000000000"]);
   const stationsResult = await stationQuery;
   if (stationsResult.error) throw new Error(stationsResult.error.message);
-  const stationRows = stationsResult.data ?? [];
+  const stationRows = (stationsResult.data ?? []).filter(row => !row.is_ho && !/^HO(?:_|$)/i.test(row.station_code));
   const stationCodes = stationRows.map((row) => code(row.station_code)).filter(Boolean);
   if (!stationCodes.length) return {
     configured: true,
@@ -324,6 +320,8 @@ export async function loadConnectOperationalPerformance(input: {
     averageCps: null,
     cpsOnTarget: 0,
     cpsMeasured: 0,
+    cpsStations: [],
+    cpsError: null,
     standingCounts: {},
     stations: []
   };
@@ -338,15 +336,11 @@ export async function loadConnectOperationalPerformance(input: {
       .order("report_week", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(7000),
-    db().from("cps_station_daily")
-      .select("work_date,station_code,overall_cps,target_cps,target_gap")
-      .eq("company_id", input.account.companyId)
-      .in("station_code", stationCodes)
-      .gte("work_date", currentMonthStart(`${selectedCpsMonth}-01`))
-      .lte("work_date", cpsPeriodState === "mtd" ? today() : monthEnd(selectedCpsMonth))
-      .order("work_date", { ascending: false })
-      .limit(5000),
-    db().from("cps_station_daily")
+    loadCpsSnapshot(input.account.companyId, currentMonthStart(`${selectedCpsMonth}-01`),
+      cpsPeriodState === "mtd" ? today() : monthEnd(selectedCpsMonth), stationRows)
+      .then(data => ({ data, error: null as string | null }))
+      .catch(error => ({ data: null, error: error instanceof Error ? error.message : "Live CPS could not be loaded." })),
+    db().from("cps_shipment_daily")
       .select("work_date")
       .eq("company_id", input.account.companyId)
       .in("station_code", stationCodes)
@@ -360,7 +354,7 @@ export async function loadConnectOperationalPerformance(input: {
       .eq("parser_type", "performance_target")
       .eq("is_active", true)
   ]);
-  const loadError = factsResult.error ?? cpsResult.error ?? oldestCpsResult.error ?? targetsResult.error;
+  const loadError = factsResult.error ?? oldestCpsResult.error ?? targetsResult.error;
   if (loadError) throw new Error(loadError.message);
 
   const facts = (factsResult.data ?? []) as MetricFact[];
@@ -389,17 +383,22 @@ export async function loadConnectOperationalPerformance(input: {
   }
 
   const targets = (targetsResult.data ?? []).map(parseTarget).filter((row): row is PerformanceTarget => Boolean(row)).sort((a, b) => a.displayOrder - b.displayOrder);
-  const cpsByStation = new Map<string, CpsFact>();
-  for (const row of (cpsResult.data ?? []) as CpsFact[]) {
-    const stationCode = code(row.station_code);
-    if (stationCode && !cpsByStation.has(stationCode)) cpsByStation.set(stationCode, row);
-  }
+  const parentIds = [...new Set(stationRows.map(row => row.parent_station_id).filter(Boolean))];
+  const parentResult = parentIds.length
+    ? await db().from("stations").select("id,station_code").eq("company_id", input.account.companyId).in("id", parentIds)
+    : { data: [], error: null };
+  if (parentResult.error) throw new Error(parentResult.error.message);
+  const parentById = new Map((parentResult.data ?? []).map(row => [row.id, row.station_code]));
+  const liveCps = connectCpsSummary(cpsResult.data ?? { daily: [], breakup: [], generated_at: "" }, stationRows.map(row => {
+    const model = Array.isArray(row.location_models) ? row.location_models[0] : row.location_models;
+    return { code: row.station_code, name: row.station_name || row.station_code,
+      isXpt: code(model?.code) === "XPT", parent: parentById.get(row.parent_station_id) };
+  }), currentMonthStart(`${selectedCpsMonth}-01`), cpsPeriodState === "mtd" ? today() : monthEnd(selectedCpsMonth));
 
   const cards: ConnectStationPerformance[] = stationRows.flatMap((station) => {
     const stationCode = code(station.station_code);
     const fact = factByStation.get(stationCode) ?? null;
-    const cps = cpsByStation.get(stationCode) ?? null;
-    if (!fact && !cps) return [];
+    if (!fact) return [];
     const factValues = fact ? values(fact) : [];
     const metrics: ConnectPerformanceMetric[] = fact ? targets.map((target) => {
       const value = target.sourceIndex == null ? null : factValues[target.sourceIndex] ?? null;
@@ -417,8 +416,6 @@ export async function loadConnectOperationalPerformance(input: {
     const weightedMetrics = metrics.filter((metric) => metric.target != null && metric.weight > 0);
     const availableWeight = weightedMetrics.reduce((sum, metric) => sum + metric.weight, 0);
     const achievedWeight = weightedMetrics.filter((metric) => metric.status === "achieved").reduce((sum, metric) => sum + metric.weight, 0);
-    const target = cps?.target_cps == null ? null : numeric(cps.target_cps);
-    const cpsValue = cps ? numeric(cps.overall_cps) : null;
     const modelRelation = Array.isArray(station.location_models) ? station.location_models[0] : station.location_models;
     return [{
       id: String(station.id),
@@ -435,18 +432,12 @@ export async function loadConnectOperationalPerformance(input: {
         attainment: availableWeight ? Math.round(achievedWeight / availableWeight * 100) : 0,
         metrics
       } : null,
-      cps: cps && cpsValue != null ? {
-        date: String(cps.work_date),
-        value: cpsValue,
-        target,
-        gap: cps.target_gap == null ? null : numeric(cps.target_gap),
-        onTarget: target == null ? null : cpsValue <= target
-      } : null
+      cps: null
     }];
   }).sort((left, right) => (right.sls?.score ?? -1) - (left.sls?.score ?? -1) || left.code.localeCompare(right.code));
 
   const slsCards = cards.filter((card) => card.sls);
-  const cpsCards = cards.filter((card) => card.cps);
+  const cpsCards = liveCps.stations;
   const standingCounts = slsCards.reduce<Record<string, number>>((counts, card) => {
     const key = card.sls?.standing ?? "Not rated";
     counts[key] = (counts[key] ?? 0) + 1;
@@ -469,10 +460,12 @@ export async function loadConnectOperationalPerformance(input: {
     selectedCpsMonth,
     cpsPeriodState,
     cpsPeriodLabel: `${monthLabel(selectedCpsMonth)}${cpsPeriodState === "mtd" ? " · MTD" : ""}`,
-    cpsLatestDate: cpsCards.map((card) => card.cps?.date ?? "").sort().at(-1) || null,
-    averageCps: cpsCards.length ? cpsCards.reduce((sum, card) => sum + (card.cps?.value ?? 0), 0) / cpsCards.length : null,
-    cpsOnTarget: cpsCards.filter((card) => card.cps?.onTarget).length,
-    cpsMeasured: cpsCards.length,
+    cpsLatestDate: liveCps.latestDate,
+    averageCps: liveCps.value,
+    cpsOnTarget: cpsCards.filter((card) => card.onTarget).length,
+    cpsMeasured: cpsCards.filter(card => card.value != null).length,
+    cpsStations: cpsCards,
+    cpsError: cpsResult.error ? "Live CPS could not be loaded. Please retry." : null,
     standingCounts,
     stations: cards
   };

@@ -1,6 +1,6 @@
 import "server-only";
-import { supabaseAdmin } from "@/lib/supabase-admin";
-import { readAllRows } from "@/lib/supabase-pagination";
+import { supabaseAdmin } from "../supabase-admin";
+import { readAllRows } from "../supabase-pagination";
 import { advertisingCosts, mapAdvertising, type AdvertisingDay, type AdvertisingMapping, type AdvertisingMonth } from "./advertising";
 export async function loadAdvertising(company:string,from:string,to:string,codes:string[]) {
  if(!supabaseAdmin)throw Error("Advertising cost source unavailable.");

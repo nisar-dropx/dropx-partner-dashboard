@@ -21,6 +21,6 @@ test("confirmed Meta cashbook payments are excluded once, with other expenses an
 test("current Recruit routing overrides stale legacy locations; unresolved current ads cannot inherit a stale location",async()=>{
  const tables={recruitment_ads:[{meta_ad_id:"1",location_id:"rA",ad_name:"Current"},{meta_ad_id:"2",location_id:null}],lead_ads:[{meta_ad_id:"1",station_code:"OLD"},{meta_ad_id:"2",station_code:"OLD"},{meta_ad_id:"3",station_code:"B"}],recruitment_locations:[{id:"rA",station_id:"sA",code:"OLD"}],stations:[{id:"sA",station_code:"A"},{id:"sB",station_code:"B"}]};
  const db={from(name){const query={select(){return query},eq(k,v){assert.equal(k,"company_id");assert.equal(v,"company");return query},order(){return query},then(fn){return Promise.resolve(fn({data:tables[name],error:null}));}};return query;}};
- const data=compile("./advertising-data.ts",{"server-only":{},"@/lib/supabase-admin":{supabaseAdmin:db},"@/lib/supabase-pagination":{readAllRows:async q=>await q},"./advertising":{}});
+ const data=compile("./advertising-data.ts",{"server-only":{},"../supabase-admin":{supabaseAdmin:db},"../supabase-pagination":{readAllRows:async q=>await q},"./advertising":{}});
  const result=await data.loadAdvertisingAdMappings("company");assert.equal(result.data.find(a=>a.meta_ad_id==="1").station_code,"A");assert.equal(result.data.find(a=>a.meta_ad_id==="2").station_code,null);assert.equal(result.data.find(a=>a.meta_ad_id==="3").station_code,"B");
 });
