@@ -1,5 +1,16 @@
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
+import { unstable_cache } from "next/cache";
 import { fetchEddAllowedStations } from "@/lib/ops-pulse/edd-worker";
+
+// The worker's station list changes with deployments, not minute to minute;
+// asking it on every page view and every auto-refresh put a 10-second
+// timeout in front of each EDD request. An empty answer is treated as a
+// failure so a worker blip is never remembered as "no stations".
+const cachedEddAllowedStations = unstable_cache(async () => {
+  const allowed = [...(await fetchEddAllowedStations())];
+  if (!allowed.length) throw new Error("EDD worker returned no stations.");
+  return allowed;
+}, ["edd-allowed-stations-v1"], { revalidate: 600 });
 
 export type EddStationOption = {
   code: string;
@@ -44,7 +55,7 @@ export async function loadEddStations(
 
   let allowed: Set<string> | null = null;
   try {
-    allowed = await fetchEddAllowedStations();
+    allowed = new Set(await cachedEddAllowedStations());
   } catch {
     allowed = null;
   }
