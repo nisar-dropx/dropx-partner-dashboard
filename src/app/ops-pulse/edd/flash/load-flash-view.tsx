@@ -268,7 +268,8 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
     </th>
   );
 
-  const metrics: Array<{ kind: Exclude<LoadFlashReportKind, "full">; label: string; value: string; detail: string }> = [
+  const metrics: Array<{ kind?: Exclude<LoadFlashReportKind, "full">; label: string; value: string; detail: string }> = [
+    { label: "Total load", value: count(loadBase), detail: morning ? `Morning load · ${reporting.length} stations` : `Live load · ${reporting.length} stations` },
     { kind: "load", label: "At stations", value: count(liveLoad), detail: `${count(sum(reporting, "inducted"))} inducted · ${count(sum(reporting, "retained"))} retained` },
     { kind: "edd", label: "EDD today", value: count(sum(reporting, "eddToday")), detail: `${count(eddPast)} past · ${count(sum(reporting, "eddFuture"))} future` },
     { kind: "road", label: "Out on road", value: count(onRoad), detail: "In transit to customers" },
@@ -321,12 +322,14 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
           <div className={s.track} role="img" aria-label={`${deliveredPct}% delivered`}><span style={{ width: `${Math.min(100, deliveredPct)}%` }} /></div>
         </div>
         {metrics.map((metric) => (
-          <article className={s.metric} key={metric.kind}>
+          <article className={s.metric} key={metric.label}>
             <header>
               <span className={s.label}>{metric.label}</span>
-              <button type="button" title={`Download ${metric.label} (Excel)`} aria-label={`Download ${metric.label}`} disabled={downloading !== null} onClick={() => saveReport(metric.kind)}>
-                {downloading === metric.kind ? <Loader2 size={12} className="edd-spin" /> : <Download size={12} />}
-              </button>
+              {metric.kind ? (
+                <button type="button" title={`Download ${metric.label} (Excel)`} aria-label={`Download ${metric.label}`} disabled={downloading !== null} onClick={() => saveReport(metric.kind!)}>
+                  {downloading === metric.kind ? <Loader2 size={12} className="edd-spin" /> : <Download size={12} />}
+                </button>
+              ) : null}
             </header>
             <strong>{metric.value}</strong>
             <small>{metric.detail}</small>
