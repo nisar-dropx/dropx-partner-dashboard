@@ -8,6 +8,7 @@ import {
   loadStationAuditMaster,
 } from "@/lib/ops-pulse/station-audits";
 import {
+  auditAssigneeKey,
   auditDuration,
   auditStatusLabel,
   auditTone,
@@ -84,7 +85,7 @@ export async function GET(request: Request) {
   const auditsResult = await supabaseAdmin
     .from("ops_station_audits")
     .select(
-      "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,started_at,completed_at,completed_by,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
+      "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,assignment_verified,started_at,completed_at,completed_by,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
     )
     .eq("company_id", companyId)
     .is("deleted_at", null)
@@ -99,7 +100,7 @@ export async function GET(request: Request) {
       { status: 500 },
     );
   const selectedAuditors = (url.searchParams.get("auditors") || "")
-    .split("|")
+    .split(",")
     .filter(Boolean);
   const requestedType = url.searchParams.get("type") || "all";
   const requestedStatus = url.searchParams.get("status") || "all";
@@ -109,7 +110,7 @@ export async function GET(request: Request) {
       (requestedType === "all" || audit.audit_type_id === requestedType) &&
       (requestedStatus === "all" || auditTone(audit) === requestedStatus) &&
       (!selectedAuditors.length ||
-        selectedAuditors.includes(audit.assigned_name || "Unassigned")) &&
+        selectedAuditors.includes(auditAssigneeKey(audit))) &&
       (url.searchParams.get("fast") !== "true" || isFastAudit(audit)) &&
       (!term ||
         `${audit.audit_number} ${stationById.get(audit.location_id)?.station_code} ${audit.assigned_name} ${stationById.get(audit.location_id)?.station_name}`

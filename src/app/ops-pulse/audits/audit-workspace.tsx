@@ -38,9 +38,11 @@ import {
 } from "@/lib/ops-pulse/station-audit-planning";
 import { AuditMonthTracker } from "./audit-month-tracker";
 import {
+  auditAssigneeKey,
   auditQueueBucket,
   isMyAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
+import type { AuditClusters } from "@/lib/ops-pulse/station-audit-clusters";
 import { scheduleStationAudit } from "./actions";
 import { AuditDetail, auditActor } from "./audit-detail";
 import styles from "./audit-workspace.module.css";
@@ -378,6 +380,7 @@ function Badge({ audit }: { audit: StationAudit }) {
 
 export function AuditWorkspace({
   workspace,
+  clusters: clusterMap,
   canManage,
   canSchedule,
   canEdit,
@@ -393,6 +396,7 @@ export function AuditWorkspace({
   readOnly,
 }: {
   workspace: StationAuditWorkspace;
+  clusters: AuditClusters;
   canManage: boolean;
   canSchedule: boolean;
   canEdit: boolean;
@@ -429,10 +433,42 @@ export function AuditWorkspace({
     return () => clearInterval(timer);
   }, []);
   const range = auditMonthRange(month);
-  const unique = (values: string[]) =>
-    [...new Set(values.filter(Boolean))]
-      .sort()
-      .map((value) => ({ value, label: value }));
+  const assigneeNames = new Map(workspace.assignees.map((p) => [p.id, p.name]));
+  // Verified audits show the linked user's current name, never the stored snapshot.
+  const auditorName = (audit: StationAudit) =>
+    auditAssigneeKey(audit) === "unconfirmed"
+      ? `${audit.assigned_name || "Auditor"} (user to confirm)`
+      : assigneeNames.get(audit.assigned_to || "") ||
+        audit.assigned_name ||
+        "Unassigned";
+  const auditorOptions: Choice[] = [
+    ...workspace.assignees.map((p) => ({
+      value: p.id,
+      label: workspace.assignees.some((o) => o.id !== p.id && o.name === p.name)
+        ? `${p.name} · ${p.email || p.role}`
+        : p.name,
+    })),
+    ...[
+      ...new Map(
+        workspace.audits
+          .filter((a) => !assigneeNames.has(auditAssigneeKey(a)))
+          .map((a) => {
+            const key = auditAssigneeKey(a);
+            return [
+              key,
+              key === "unconfirmed"
+                ? "Assignment to confirm"
+                : key === "unassigned"
+                  ? "Unassigned"
+                  : a.assigned_name || "Former auditor",
+            ] as const;
+          }),
+      ),
+    ].map(([value, label]) => ({ value, label })),
+  ];
+  const selectedAuditorNames = auditorOptions
+    .filter((option) => auditors.includes(option.value))
+    .map((option) => option.label);
   const airwayOptions = workspace.options.filter(
     (option) => option.option_group === "airways",
   );
@@ -450,25 +486,31 @@ export function AuditWorkspace({
         (station) =>
           (!stations.length || stations.includes(station.id)) &&
           (!clusters.length ||
-            clusters.includes(
-              station.cluster_name || station.cluster || "Unassigned",
+            (clusterMap.byStation[station.id] || ["unmapped"]).some((key) =>
+              clusters.includes(key),
             )) &&
           (!airways.length ||
             (stationAirways(station.id).length
               ? stationAirways(station.id).some((id) => airways.includes(id))
               : airways.includes("unassigned"))),
       ),
-    [workspace.stations, workspace.options, stations, clusters, airways],
+    [
+      workspace.stations,
+      workspace.options,
+      clusterMap,
+      stations,
+      clusters,
+      airways,
+    ],
   );
   const stationIds = new Set(filteredStations.map((station) => station.id));
   const scopeAudits = workspace.audits.filter(
     (audit) =>
       stationIds.has(audit.location_id) &&
       (typeId === "all" || audit.audit_type_id === typeId) &&
-      (!auditors.length ||
-        auditors.includes(audit.assigned_name || "Unassigned")) &&
+      (!auditors.length || auditors.includes(auditAssigneeKey(audit))) &&
       (!query ||
-        `${audit.audit_number} ${audit.stations?.station_code} ${audit.assigned_name} ${audit.stations?.station_name}`
+        `${audit.audit_number} ${audit.stations?.station_code} ${auditorName(audit)} ${audit.stations?.station_name}`
           .toLowerCase()
           .includes(query.toLowerCase())),
   );
@@ -520,12 +562,22 @@ export function AuditWorkspace({
     date.setUTCMonth(date.getUTCMonth() + amount);
     changeMonth(date.toISOString().slice(0, 7));
   };
+  const viewing =
+    tab === "mine"
+      ? `${viewerName}’s audits`
+      : stationOnly
+        ? "Station audit view"
+        : selectedAuditorNames.length === 1
+          ? `${selectedAuditorNames[0]}’s ${tab === "calendar" ? "calendar" : "audits"}`
+          : selectedAuditorNames.length
+            ? `${tab === "calendar" ? "Calendar" : "Audits"} of ${selectedAuditorNames.length} auditors`
+            : `Team ${tab === "calendar" ? "calendar" : "audits"} · all auditors`;
   const exportParams = new URLSearchParams({
     from: range.from,
     to: range.to,
     stations: filteredStations.map((s) => s.id).join(","),
     type: typeId,
-    auditors: auditors.join("|"),
+    auditors: auditors.join(","),
     status,
     fast: String(fastOnly),
     q: query,
@@ -551,7 +603,7 @@ export function AuditWorkspace({
         <span>
           {audit.completed_at
             ? `Completed by ${auditActor(audit, workspace, "submitted")}`
-            : `${audit.started_at ? "Auditing now" : "Assigned to"}: ${audit.assigned_name || "Unassigned"}`}
+            : `${audit.started_at ? "Auditing now" : "Assigned to"}: ${auditorName(audit)}`}
         </span>
       </div>
       <div className={styles.actions}>
@@ -579,11 +631,7 @@ export function AuditWorkspace({
             <>
               <MultiFilter
                 label="Cluster"
-                options={unique(
-                  workspace.stations.map(
-                    (s) => s.cluster_name || s.cluster || "Unassigned",
-                  ),
-                )}
+                options={clusterMap.options}
                 selected={clusters}
                 onChange={setClusters}
               />
@@ -620,10 +668,9 @@ export function AuditWorkspace({
       </div>
       <div className={styles.context}>
         <span>
-          <strong>{viewerName}</strong>’s{" "}
-          {tab === "calendar" ? "calendar" : "audit view"}{" "}
+          <strong>{viewing}</strong>{" "}
           <span className={styles.muted}>
-            · {viewerRole}
+            · Signed in as {viewerName} · {viewerRole}
             {readOnly ? " · Read-only preview" : ""}
           </span>
         </span>
@@ -647,9 +694,7 @@ export function AuditWorkspace({
           {canManage && (
             <MultiFilter
               label="Auditor"
-              options={unique(
-                workspace.audits.map((a) => a.assigned_name || "Unassigned"),
-              )}
+              options={auditorOptions}
               selected={auditors}
               onChange={setAuditors}
             />
@@ -877,6 +922,7 @@ export function AuditWorkspace({
           workspace={workspace}
           stations={filteredStations}
           audits={monthAudits}
+          auditorName={auditorName}
           onOpen={showAudit}
         />
       )}
@@ -906,7 +952,7 @@ export function AuditWorkspace({
         <section className={styles.calendarPanel}>
           <div className={styles.calendarHead}>
             <h2>
-              <CalendarDays size={20} /> {monthLabel(month)}
+              <CalendarDays size={20} /> {monthLabel(month)} · {viewing}
             </h2>
             <strong className={styles.todayLabel}>
               Today · {dateLabel(today)}
@@ -948,6 +994,7 @@ export function AuditWorkspace({
                         {auditLocalTime(a.scheduled_for)} ·{" "}
                         {auditStatusLabel(a.status_code)}
                       </span>
+                      <span>{auditorName(a)}</span>
                     </span>
                   ))}
                   {audits.length > 3 && (
@@ -979,6 +1026,7 @@ export function AuditWorkspace({
               )}
               allAudits={workspace.audits}
               visibleAudits={visibleAudits}
+              auditorName={auditorName}
               canSchedule={canSchedule && !auditors.length && status === "all"}
               onOpen={showAudit}
               onSchedule={setSeed}
@@ -1019,7 +1067,8 @@ export function AuditWorkspace({
                           workspace.auditTypes.find(
                             (t) => t.id === audit.audit_type_id,
                           )?.name
-                        }
+                        }{" "}
+                        · {auditorName(audit)}
                       </span>
                       <Badge audit={audit} />
                     </button>
@@ -1073,6 +1122,7 @@ function MonthlyPlan({
   stations,
   allAudits,
   visibleAudits,
+  auditorName,
   canSchedule,
   onOpen,
   onSchedule,
@@ -1082,6 +1132,7 @@ function MonthlyPlan({
   stations: AuditStation[];
   allAudits: StationAudit[];
   visibleAudits: StationAudit[];
+  auditorName: (audit: StationAudit) => string;
   canSchedule: boolean;
   onOpen: (audit: StationAudit) => void;
   onSchedule: (seed: ScheduleSeed) => void;
@@ -1144,9 +1195,7 @@ function MonthlyPlan({
                                 {dateLabel(auditDay(audit.scheduled_for))} ·{" "}
                                 {auditLocalTime(audit.scheduled_for)}
                               </strong>
-                              <small>
-                                {audit.assigned_name || "Unassigned"}
-                              </small>
+                              <small>{auditorName(audit)}</small>
                             </button>
                           ) : (
                             <span key={audit.id} className={styles.muted}>

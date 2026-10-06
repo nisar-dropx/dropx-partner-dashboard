@@ -674,6 +674,12 @@
 .scheduledBorder {
   border-left: 3px solid #8ba2c4 !important;
 }
+.dayEntry.completeBorder {
+  background: #e8f6ee;
+}
+.dayEntry.pendingBorder {
+  background: #fff0dd;
+}
 .auditCard {
   width: 100%;
   text-align: left;

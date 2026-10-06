@@ -188,6 +188,14 @@ export function isMyAudit(
 ) {
   return audit.assignment_verified === true && audit.assigned_to === userId;
 }
+/** Auditors are grouped by linked user; the typed name on an unconfirmed audit is not an identity. */
+export function auditAssigneeKey(audit: {
+  assigned_to: string | null;
+  assignment_verified?: boolean;
+}) {
+  if (!audit.assigned_to) return "unassigned";
+  return audit.assignment_verified === true ? audit.assigned_to : "unconfirmed";
+}
 export function auditQueueBucket(
   audit: AuditTiming & { scheduled_for: string },
   today = auditDay(),

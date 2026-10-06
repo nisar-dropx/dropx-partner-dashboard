@@ -15,6 +15,7 @@ import {
   validAuditDate,
   stationCanSeeAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
+import { loadAuditClusters } from "@/lib/ops-pulse/station-audit-clusters";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AuditWorkspace } from "./audit-workspace";
 
@@ -50,11 +51,15 @@ export default async function StationAuditsPage({
     !canManage,
     master,
   );
+  const clusters = canManage
+    ? await loadAuditClusters(companyId, workspace.stations)
+    : { byStation: {}, options: [] };
   return (
     <AppShell active="Operations" pageCode="station_audits">
       <div className="ops-command-center">
         <AuditWorkspace
           workspace={workspace}
+          clusters={clusters}
           canManage={canManage}
           canSchedule={
             canManage && hasPermission(authorization, "station_audits", "add")

@@ -19,11 +19,13 @@ export function AuditMonthTracker({
   workspace,
   stations,
   audits,
+  auditorName,
   onOpen,
 }: {
   workspace: StationAuditWorkspace;
   stations: AuditStation[];
   audits: StationAudit[];
+  auditorName: (audit: StationAudit) => string;
   onOpen: (audit: StationAudit) => void;
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -138,10 +140,7 @@ export function AuditMonthTracker({
                                     {auditLocalTime(a.scheduled_for)} IST
                                   </small>
                                   <small>
-                                    Assigned: {a.assigned_name || "Unassigned"}
-                                    {!a.assignment_verified
-                                      ? " · confirm user"
-                                      : ""}
+                                    Assigned: {auditorName(a)}
                                   </small>
                                   <small>
                                     Scheduled by:{" "}
