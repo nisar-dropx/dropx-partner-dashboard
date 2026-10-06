@@ -1,3 +1,5 @@
+import {redirect} from "next/navigation";
+import {cookies,headers} from "next/headers";
 import { CpsLink as Link } from "@/components/cps-link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -28,6 +30,7 @@ export default async function CpsPage({
 }: {
   searchParams?: CpsParams;
 }) {
+  if((headers().get("host")||"").startsWith("ops")&&cookies().get("dropx-ops-mode")?.value==='amazon_now')redirect('/cpu');
   const params = Object.fromEntries(
     Object.entries(searchParams).filter(([, v]) => typeof v === "string"),
   ) as CpsParams;

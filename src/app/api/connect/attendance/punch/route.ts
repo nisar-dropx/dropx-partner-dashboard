@@ -1,3 +1,4 @@
+import {distancePilot} from "@/lib/ops-pulse/da-distance-data";
 import { NextRequest, NextResponse } from "next/server";
 import {
   evaluateIntegrity,
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
     if (!accountId) throw new Error("Account is required.");
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
     const stationSettings = await resolveStationAttendanceSettings(worker.locationId ?? null);
+    const pilot=await distancePilot(worker);
     const shift = await loadOpenShift({
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId
@@ -158,7 +160,7 @@ export async function GET(request: NextRequest) {
         // same LOCATION_TRACKING_MS constant that endpoint already enforces, so the client has
         // one source of truth to stop against instead of duplicating that 9-hour number itself.
         trackingWindowElapsed: shift.inTime
-          ? Date.now() - shift.inTime.getTime() > LOCATION_TRACKING_MS
+          ? Date.now() - shift.inTime.getTime() > (pilot?Number(pilot.max_shift_hours)*3600000:LOCATION_TRACKING_MS)
           : true
       },
       station: assignedStation
@@ -181,7 +183,8 @@ export async function GET(request: NextRequest) {
       })),
       openFlags: openFlagsForClient,
       attendanceSettings: {
-        locationTrackingEnabled: stationSettings.locationTrackingEnabled,
+        locationTrackingEnabled: Boolean(pilot)||stationSettings.locationTrackingEnabled,
+        distancePilotEnabled: Boolean(pilot),
         integrityFlagsEnabled: stationSettings.integrityFlagsEnabled
       }
     });

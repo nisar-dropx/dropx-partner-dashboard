@@ -24,6 +24,7 @@ export async function switchOperatingContext(formData: FormData) {
     ? requestedMode
     : "amazon_edsp";
   const permitted = locationsForMode(locations, mode);
+  if(!permitted.length) throw new Error("This workspace has no locations in your access.");
   const requestedLocations = formData.getAll("locations").map(String);
   const selectedLocations = permitted.filter((entry) => requestedLocations.includes(entry.id));
   const scopedLocations = selectedLocations.length ? selectedLocations : permitted;

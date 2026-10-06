@@ -434,7 +434,7 @@ export default async function PaymentApprovalsPage({
       <PageHead
         eyebrow="Payments"
         title="Approvals"
-        subtitle="Review the requests assigned to you, inspect the evidence, and record a clear decision."
+        subtitle="All requests assigned to you across your authorized locations. This queue is shared across Last Mile and Dark Store workspaces."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 

@@ -261,6 +261,7 @@ export async function middleware(request: NextRequest) {
     !isSharedOpsPath &&
     path !== "/settings/notifications" &&
     !path.startsWith("/cps") &&
+    !path.startsWith("/cpu") &&
     !path.startsWith("/master/") &&
     !path.startsWith("/users") &&
     !path.startsWith("/api/") &&

@@ -7,6 +7,7 @@ import { DocumentTitle } from "@/components/document-title";
 import { InboxNotificationListener } from "@/components/inbox-notification-listener";
 import { PaymentNotificationBell } from "@/components/payment-notification-bell";
 import { PaymentNotificationProvider } from "@/components/payment-notification-provider";
+import { OpsWorkspaceSwitcher } from "@/components/ops-workspace-switcher";
 import { OpsContextSwitcher } from "@/components/ops-context-switcher";
 import { OpsAiChat } from "@/components/ops-ai-chat";
 import { SidebarNav } from "@/components/sidebar-nav";
@@ -33,7 +34,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
-  const isOpsHost = host === "ops.dropxlogistics.com" || host.startsWith("ops-");
+  const isOpsHost = host === "ops.dropxlogistics.com" || host.startsWith("ops-") || host.startsWith("dropx-ops-pulse");
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
   const hasCurrentPortalAccess = isOpsHost
@@ -151,6 +152,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
             ) : null}
           </div>
 
+          {isOpsHost&&<OpsWorkspaceSwitcher modes={opsContext.availableModes} mode={opsContext.mode}/>}
           <SidebarNav active={active} items={visibleNavItems} />
 
           <div className="sidebar-footer">

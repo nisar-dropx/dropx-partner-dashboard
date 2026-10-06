@@ -1,3 +1,4 @@
+import { DarkStoreHome } from "./dark-store-home";
 import { Suspense } from "react";
 import { AuditCommandCard } from "./audits/audit-command-card";
 import Link from "next/link";
@@ -146,6 +147,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
     authorization.hasAllLocationAccess
   );
   const context = resolveOperatingContext(locationsResult.locations);
+  if(context.mode==='amazon_now')return <DarkStoreHome authorization={authorization} locations={context.modeLocations}/>;
   const selectedLocations = context.selectedLocations;
   const date = selectedDate(searchParams?.date);
   const dashboardView = searchParams?.view === "manpower" ? "manpower" : "operations";
@@ -238,7 +240,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
   ])).entries()];
   const maxDaily = Math.max(...daily.map(([, value]) => value), 1);
   const accent = modelAccent(context.mode);
-  const isNow = context.mode === "amazon_now";
+  const isNow = false;
   const selectedShift = searchParams?.shift || "current";
   const shiftStartHour = selectedShift === "night" ? 21 : 9;
   const reported = attendance.length;

@@ -1,3 +1,4 @@
+import {resolveOperatingContext,operatingModeForLocation} from "@/lib/ops-pulse/operating-context";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { OpsRosterApprovals } from "@/components/ops-roster-approvals";
@@ -27,7 +28,8 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
   const authorization = await requirePagePermission("ops_rostering", "access");
   const companyId = requireCompanyId(authorization);
   const locationResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
-  const locations = locationResult.locations.filter((location) => !location.hide_from_location_list);
+  const ds=resolveOperatingContext(locationResult.locations).mode==='amazon_now';
+  const locations = locationResult.locations.filter((l)=>!l.hide_from_location_list&&!l.is_ho&&(operatingModeForLocation(l)==='amazon_now')===ds);
   const selected = locations.find((location) => location.station_code === String(searchParams?.station ?? "").toUpperCase()) ?? locations[0] ?? null;
   const view = searchParams?.view === "approvals" ? "approvals" : "roster";
   const [capabilities, approvals, workspace, policy] = await Promise.all([

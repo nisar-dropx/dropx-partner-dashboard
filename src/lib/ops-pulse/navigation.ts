@@ -43,6 +43,7 @@ const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Tea
   { code: "ops_salary_hold", label: "Workforce Payment Holds", href: "/attendance/workforce-holds" },
   { code: "ops_workforce_losses", label: "Station Loss Claims", href: "/attendance/workforce-losses" },
   { code: "ops_workforce_losses", label: "Payout disputes", href: "/attendance/payout-review" },
+  { code: "ops_workforce_mileage", label: "DA distance pilot", href: "/attendance/da-distance" },
   { code: "ops_workforce_mileage", label: "Mileage Claims", href: "/attendance/workforce-mileage" },
   { code: "ops_losses", label: "Losses", href: "/attendance/losses/nl" }
 ] };
@@ -86,6 +87,7 @@ const administration: NavItem[] = [
     icon: "*",
     children: [
       { code: "cps_inputs", label: "CPS Master", href: "/master/cps" },
+      { code: "ops_workforce_mileage", label: "DA distance pilot", href: "/attendance/da-distance" },
       { code: "cps_inputs", label: "Advertising Master", href: "/master/advertising" },
       { code: "cod_master", label: "COD Master", href: "/master/cod-master" },
       { code: "ops_loss_master", label: "Loss Recovery Master", href: "/master/loss-recovery" },
@@ -156,6 +158,19 @@ function modelOperations(mode: OperatingMode): NavItem {
 const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash", icon: "E" };
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
+  if (mode === "amazon_now") return [
+    {code:'ops_pulse',label:'Dark Store',href:'/',icon:'DS'},
+    {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
+    businessDocuments,payments,
+    {code:'cps_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,
+    administration[0],
+    {code:'master_data',label:'Ops Masters',icon:'*',children:[
+      {code:'cps_inputs',label:'CPU Master & units',href:'/cpu/master'},
+      {code:'master_locations',label:'Location Master',href:'/master/location'},
+      {code:'master_providers',label:'Client / Provider Master',href:'/master/providers'},
+      {code:'master_models',label:'Operation Models',href:'/master/models'}
+    ]},administration[2]
+  ];
   const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
   return items.map(item=>item.children?{...item,children:item.children.filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))}:item);
 }
