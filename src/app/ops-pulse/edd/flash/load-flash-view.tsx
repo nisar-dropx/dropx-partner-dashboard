@@ -359,8 +359,10 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
             <div className={s.chart}>
               {hourly.map((point, index) => (
                 <div key={point.hour} className={s.bar} tabIndex={0} aria-label={`${String(point.hour).padStart(2, "0")}:00 — ${count(point.delivered)} delivered of ${count(point.totalLoad)} load`}>
-                  {index === hourly.length - 1 ? <b>{count(point.delivered)}</b> : null}
-                  <span style={{ height: `${Math.max(2, (point.delivered / maxDelivered) * 100)}%` }} />
+                  <div className={s.plot}>
+                    {index === hourly.length - 1 ? <b style={{ bottom: `${Math.max(2, (point.delivered / maxDelivered) * 100)}%` }}>{count(point.delivered)}</b> : null}
+                    <span style={{ height: `${Math.max(2, (point.delivered / maxDelivered) * 100)}%` }} />
+                  </div>
                   <small>{String(point.hour).padStart(2, "0")}</small>
                   <div className={s.tip} role="tooltip">
                     <strong>{String(point.hour).padStart(2, "0")}:00 check</strong>
@@ -373,10 +375,10 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
             </div>
             <details className={s.more}>
               <summary>View as a table</summary>
-              <table>
-                <thead><tr><th scope="col">Hour</th><th scope="col">Load</th><th scope="col">Delivered</th><th scope="col">%</th><th scope="col">On road</th></tr></thead>
+              <div className={s.hourTable}><table>
+                <thead><tr><th scope="col">Hour</th><th scope="col">Load</th><th scope="col">Delivered</th><th scope="col">Delivered %</th><th scope="col">On road</th></tr></thead>
                 <tbody>{hourly.map((point) => <tr key={point.hour}><td>{String(point.hour).padStart(2, "0")}:00</td><td>{count(point.totalLoad)}</td><td>{count(point.delivered)}</td><td>{percent(point.delivered, point.totalLoad)}%</td><td>{count(point.outOnRoad)}</td></tr>)}</tbody>
-              </table>
+              </table></div>
             </details>
           </section>
         ) : null}

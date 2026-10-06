@@ -77,10 +77,12 @@
 
 /* Hourly chart: one series, one axis */
 .chart { display: flex; align-items: flex-end; gap: 4px; height: 132px; padding: 18px 16px 0; }
-.bar { position: relative; display: flex; flex: 1 1 0; min-width: 0; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; }
-.bar > span { display: block; width: 100%; max-width: 26px; border-radius: 4px 4px 0 0; background: var(--accent); }
-.bar:hover > span, .bar:focus-visible > span { background: #1f5288; }
-.bar > b { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bar { position: relative; display: flex; flex: 1 1 0; min-width: 0; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }
+/* The value label floats above its bar so it never shortens the bar or shifts the axis. */
+.plot { position: relative; display: flex; flex: 1; width: 100%; min-height: 0; align-items: flex-end; justify-content: center; }
+.plot > span { display: block; width: 100%; max-width: 26px; border-radius: 4px 4px 0 0; background: var(--accent); }
+.bar:hover .plot > span, .bar:focus-visible .plot > span { background: #1f5288; }
+.plot > b { position: absolute; left: 50%; transform: translateX(-50%); margin-bottom: 3px; white-space: nowrap; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .bar > small { width: 100%; height: 20px; padding-top: 4px; border-top: 1px solid var(--line); text-align: center; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tip { position: absolute; top: -14px; left: 50%; z-index: 3; display: none; transform: translateX(-50%); padding: 8px 10px; border-radius: 8px; background: var(--ink); color: #fff; font-size: 11px; line-height: 1.55; white-space: nowrap; pointer-events: none; box-shadow: 0 6px 18px rgba(16, 24, 40, .25); }
 .bar:first-child .tip { left: 0; transform: none; }
@@ -91,10 +93,14 @@
 .more { padding: 8px 16px 12px; font-size: 12px; color: var(--muted); }
 .more summary { cursor: pointer; font-weight: 600; }
 .more p { max-width: 900px; margin: 8px 0 0; line-height: 1.6; }
-.more table { margin-top: 8px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.more :is(th, td) { padding: 3px 14px 3px 0; text-align: right; font-weight: 400; }
-.more :is(th, td):first-child { text-align: left; }
-.more th { font-weight: 650; color: var(--ink); }
+/* The app's global table rule forces an 880px minimum; this one must fit its panel. */
+.hourTable { max-height: 232px; margin-top: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.hourTable table { width: 100%; min-width: 0; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.hourTable :is(th, td) { padding: 6px 12px; border-bottom: 1px solid #f1f3f6; background: none; text-align: right; text-transform: none; letter-spacing: normal; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--ink); }
+.hourTable :is(th, td):first-child { text-align: left; }
+.hourTable thead th { position: sticky; top: 0; background: var(--surface-soft); font-size: 11px; font-weight: 650; color: var(--muted); }
+.hourTable tbody tr:last-child td { border-bottom: 0; }
+.hourTable tbody tr:hover td { background: #f7fafd; }
 
 /* Stations */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-right: auto; }
@@ -118,8 +124,7 @@
 .table :is(tbody th, tfoot th, thead th:first-child) { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--line); }
 .table thead th:first-child { z-index: 3; background: var(--surface-soft); }
 .table tbody tr:hover :is(td, th) { background: #f7fafd; }
-.table :is(tbody th, tfoot th), .more th { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--ink); }
-.more th { font-size: 12px; }
+.table :is(tbody th, tfoot th) { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--ink); }
 .table tbody th strong { font-size: 13px; font-weight: 700; }
 .table tbody th > span { display: inline-block; max-width: 150px; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-size: 12px; color: var(--muted); }
 .table tbody th i { margin-left: 6px; padding: 1px 6px; border-radius: 5px; background: #fff4e5; color: var(--amber); font-size: 10px; font-style: normal; font-weight: 700; }
