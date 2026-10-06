@@ -735,18 +735,23 @@ async function syncRecurringBaselineFromDatedPlan(
   const complete = [...byWorker.values()].filter((rows) => new Set(rows.map((row) => row.roster_date)).size === 7);
   if (!complete.length) return;
 
-  const newer = await db().from("hr_roster_plans")
+  // Idempotence is per approved source, not per station/week. A same-week
+  // approval must replace the repeating pattern for its included people.
+  const existing = await db().from("hr_roster_plans")
     .select("id")
     .eq("company_id", companyId)
     .eq("location_id", plan.location_id)
     .eq("roster_kind", "recurring_weekly")
     .eq("status", "approved")
-    .is("superseded_at", null)
-    .gte("effective_from", weekStart)
-    .neq("id", plan.id)
+    .eq("supersedes_plan_id", plan.id)
     .limit(1);
-  if (newer.error) throw new Error(newer.error.message);
-  if (newer.data?.length) return;
+  if (existing.error) throw new Error(existing.error.message);
+  if (existing.data?.length) return;
+  const revisions = await db().from("hr_roster_plans")
+    .select("revision_no").eq("company_id", companyId).eq("location_id", plan.location_id)
+    .eq("roster_kind", "recurring_weekly").eq("effective_from", weekStart)
+    .order("revision_no", { ascending: false }).limit(1);
+  if (revisions.error) throw new Error(revisions.error.message);
 
   const station = await authorisedStation(companyId, authorization, plan.location_id);
   const created = await db().from("hr_roster_plans").insert({
@@ -757,8 +762,10 @@ async function syncRecurringBaselineFromDatedPlan(
     period_end: weekEnd,
     roster_kind: "recurring_weekly",
     effective_from: weekStart,
-    revision_no: 1,
-    status: "approved",
+    revision_no: Number(revisions.data?.[0]?.revision_no ?? 0) + 1,
+    supersedes_plan_id: plan.id,
+    // Publish only after all source entries have been copied successfully.
+    status: "draft",
     created_by: authorization.userId,
     updated_by: authorization.userId,
     planning_channel: "ops",
@@ -783,6 +790,9 @@ async function syncRecurringBaselineFromDatedPlan(
     notes: entry.notes
   })));
   if (copied.error) throw new Error(copied.error.message);
+  const published = await db().from("hr_roster_plans").update({ status: "approved" })
+    .eq("company_id", companyId).eq("id", created.data.id).eq("status", "draft").select("id").single();
+  if (published.error || !published.data) throw new Error(published.error?.message ?? "The repeating roster could not be published.");
   await retireFullyReplacedRosterPlans(db(), companyId, created.data.id);
 }
 
