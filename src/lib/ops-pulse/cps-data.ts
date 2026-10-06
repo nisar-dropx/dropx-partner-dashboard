@@ -102,7 +102,7 @@ const snapshot = cache(
         .order("effective_from"),
       supabaseAdmin
         .from("workforce_attendance_capture_settings")
-        .select("id,capture_method,minimum_daily_deliveries,effective_from")
+        .select("id,capture_method,minimum_daily_deliveries,review_below_deliveries,effective_from")
         .eq("company_id", company)
         .lte("effective_from", to)
         .order("effective_from"),
@@ -234,7 +234,7 @@ const snapshot = cache(
       providerMethodIds.length
         ? readAllRows(supabaseAdmin
           .from("payment_method_components")
-          .select("payment_method_id,component_code,sort_order")
+          .select("payment_method_id,payment_field_id,component_code,sort_order,payment_fields(field_type,calculation_type,calculation_source,is_custom_production)")
           .eq("company_id", company)
           .in("payment_method_id", providerMethodIds)
           .eq("is_active", true)
@@ -253,19 +253,35 @@ const snapshot = cache(
     const orderByMethodComponent = new Map((thresholdComponentOrder.data ?? [])
       .map((component) => [
         `${String(component.payment_method_id)}|${String(component.component_code).trim().toUpperCase()}`,
-        Number(component.sort_order)
+        component
       ]));
     const enrichThresholdMapping = (mapping: Record<string, any>) => ({
       ...mapping,
       production_threshold_config: thresholdByMappingId.get(String(mapping.id)) ?? null,
       method_production_threshold_config: thresholdByMethodId.get(String(mapping.payment_method_id)) ?? null
     });
-    const enrichThresholdComponent = (component: Record<string, any>) => ({
-      ...component,
-      sort_order: orderByMethodComponent.get(
-        `${String(component.payment_method_id)}|${String(component.component_code).trim().toUpperCase()}`
-      ) ?? component.sort_order ?? null
-    });
+    const enrichThresholdComponent = (component: Record<string, any>) => {
+      const current = orderByMethodComponent.get(`${String(component.payment_method_id)}|${String(component.component_code).trim().toUpperCase()}`);
+      const field = Array.isArray(current?.payment_fields) ? current.payment_fields[0] : current?.payment_fields;
+      return { ...component, sort_order: current?.sort_order ?? component.sort_order ?? null,
+        payment_field_id: current?.payment_field_id ?? component.payment_field_id,
+        component_type: field?.field_type ?? component.component_type,
+        calculation_type: field?.calculation_type ?? component.calculation_type,
+        calculation_source: field?.calculation_source ?? component.calculation_source,
+        is_custom_production: field?.is_custom_production ?? component.is_custom_production };
+    };
+    // Same entered inputs as Dashboard. These private facts never leave the server.
+    const payoutInputs = await Promise.all([
+      readAllRows(supabaseAdmin.from("workforce_payout_attendance_overrides").select("workforce_id,work_date,attendance_status,work_minutes").eq("company_id", company).gte("work_date", attendanceFrom).lte("work_date", to).order("id")),
+      readAllRows(supabaseAdmin.from("workforce_payout_attendance_values").select("id,workforce_id,station_id,attendance_basis,effective_from,effective_to,quantity").eq("company_id", company).lte("effective_from", to).gte("effective_to", attendanceFrom).order("id")),
+      readAllRows(supabaseAdmin.from("workforce_payment_field_overrides").select("workforce_id,station_id,payment_field_id,field_code_snapshot,effective_from,effective_to,input_value").eq("company_id", company).lte("effective_from", to).gte("effective_to", attendanceFrom).order("id")),
+      readAllRows(supabaseAdmin.from("workforce_custom_production_inputs").select("workforce_id,station_id,payment_field_id,field_code_snapshot,work_date,units").eq("company_id", company).gte("work_date", attendanceFrom).lte("work_date", to).order("id")),
+    ]);
+    if (payoutInputs.some(result => result.error)) throw Error("Dashboard payment inputs could not be loaded. Please retry.");
+    sourceFacts.payout_inputs = {
+      attendanceOverrides: payoutInputs[0].data ?? [], attendancePeriods: payoutInputs[1].data ?? [],
+      paymentFieldOverrides: payoutInputs[2].data ?? [], productionInputs: payoutInputs[3].data ?? []
+    };
     sourceFacts.mappings = (sourceFacts.mappings ?? []).map(enrichThresholdMapping);
     sourceFacts.components = (sourceFacts.components ?? []).map(enrichThresholdComponent);
     productionThresholdFacts.mappings = productionThresholdMappings.map(enrichThresholdMapping);

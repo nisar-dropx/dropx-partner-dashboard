@@ -1,16 +1,19 @@
 import {
+  monthlyAttendanceAmountForAggregateUnits,
   monthlyAttendanceAmountForDay,
   workforcePaymentPolicyForDate,
   type WorkforcePaymentPolicy
 } from "./workforce-payment-policy.ts";
 
 export type DirectPayComponent = {
+  payment_field_id?: string | null;
   component_code: string;
   component_type: string;
   label?: string | null;
   pay_schedule?: string | null;
   calculation_type?: string | null;
   calculation_source?: string | null;
+  is_custom_production?: boolean | null;
   sort_order?: number | string | null;
 };
 
@@ -33,7 +36,34 @@ export type DirectPayLine = {
   sortOrder: number;
 };
 
+export type DirectPayAttendanceBasis = "hours" | "days";
+
+type DirectPaySchedule = DirectPayLine["schedule"];
+
 const rounded = (value: number) => Math.round(value * 100) / 100;
+
+function directPaySchedule(component: DirectPayComponent): DirectPaySchedule | null {
+  if (component.calculation_type === "fixed_monthly" || /month/i.test(String(component.pay_schedule ?? ""))) {
+    return "per_month";
+  }
+  if (/hour/i.test(String(component.pay_schedule ?? ""))) return "per_hour";
+  if (/day/i.test(String(component.pay_schedule ?? ""))) return "per_day";
+  return null;
+}
+
+export function directPayAttendanceBasis(
+  component: DirectPayComponent
+): DirectPayAttendanceBasis | null {
+  if (String(component.calculation_source ?? "").trim().toLowerCase() !== "attendance_eligibility"
+    || String(component.component_type ?? "").trim().toLowerCase() === "production"
+    || String(component.calculation_type ?? "").trim().toLowerCase() === "count_x_rate") {
+    return null;
+  }
+  const schedule = directPaySchedule(component);
+  if (schedule === "per_hour") return "hours";
+  if (schedule === "per_day" || schedule === "per_month") return "days";
+  return null;
+}
 
 export function monthlyDailyAccrual(amount: number, date: string) {
   const [year, month, day] = date.split("-").map(Number);
@@ -60,12 +90,21 @@ export function cumulativeDirectPayAttendanceUnitsBefore(
   effectiveFrom: string,
   attendanceForDate: (candidateDate: string) => DirectPayAttendance | null | undefined
 ) {
+  return cumulativeDirectPayUnitsBefore(date, effectiveFrom, (candidateDate) =>
+    directPayAttendanceUnit(attendanceForDate(candidateDate)));
+}
+
+export function cumulativeDirectPayUnitsBefore(
+  date: string,
+  effectiveFrom: string,
+  unitsForDate: (candidateDate: string) => number
+) {
   const monthStart = `${date.slice(0, 7)}-01`;
   const periodStart = effectiveFrom > monthStart ? effectiveFrom : monthStart;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || periodStart >= date) return 0;
   let total = 0;
   for (let cursor = new Date(`${periodStart}T00:00:00.000Z`); cursor < new Date(`${date}T00:00:00.000Z`); cursor.setUTCDate(cursor.getUTCDate() + 1)) {
-    total += directPayAttendanceUnit(attendanceForDate(cursor.toISOString().slice(0, 10)));
+    total += Math.max(0, Number(unitsForDate(cursor.toISOString().slice(0, 10))) || 0);
   }
   return total;
 }
@@ -93,12 +132,19 @@ export function directPayForDay(
     policyHistory?: Array<Partial<WorkforcePaymentPolicy>> | null;
     cumulativeAttendanceUnitsBefore?: number;
     attendanceSource?: "biometric" | "shipment_data";
+    attendanceInput?: { basis: DirectPayAttendanceBasis; quantity: number } | null;
   }
 ) {
   const values = Object.fromEntries(Object.entries(paymentValues ?? {}).map(([key, value]) => [key.trim().toUpperCase(), value]));
-  const attendanceUnit = directPayAttendanceUnit(attendance);
-  const present = attendanceUnit > 0;
-  const minutes = present ? Math.max(0, Number(attendance?.work_minutes ?? 0)) : 0;
+  const sourceAttendanceUnit = directPayAttendanceUnit(attendance);
+  const sourcePresent = sourceAttendanceUnit > 0;
+  const sourceMinutes = sourcePresent ? Math.max(0, Number(attendance?.work_minutes ?? 0)) : 0;
+  const importedQuantity = options?.attendanceInput
+    ? Math.max(0, Number(options.attendanceInput.quantity) || 0)
+    : null;
+  const attendanceUnit = options?.attendanceInput?.basis === "days" ? importedQuantity ?? 0 : sourceAttendanceUnit;
+  const present = options?.attendanceInput ? (importedQuantity ?? 0) > 0 : sourcePresent;
+  const minutes = options?.attendanceInput?.basis === "hours" ? (importedQuantity ?? 0) * 60 : sourceMinutes;
   let missing = components.length === 0;
   const lines: DirectPayLine[] = [];
 
@@ -123,39 +169,56 @@ export function directPayForDay(
       missing = true;
       continue;
     }
-    const schedule = component.calculation_type === "fixed_monthly" || /month/i.test(String(component.pay_schedule ?? ""))
-      ? "per_month"
-      : /hour/i.test(String(component.pay_schedule ?? ""))
-        ? "per_hour"
-        : /day/i.test(String(component.pay_schedule ?? ""))
-          ? "per_day"
-          : null;
+    const schedule = directPaySchedule(component);
     if (!schedule) {
       missing = true;
       continue;
     }
-    const attendanceBased = component.calculation_source === "attendance_eligibility";
-    if (attendanceBased && schedule === "per_hour" && options?.attendanceSource === "shipment_data") {
+    const attendanceBasis = directPayAttendanceBasis(component);
+    const attendanceBased = attendanceBasis !== null;
+    const usesAggregateAttendance = attendanceBasis !== null
+      && attendanceBasis === options?.attendanceInput?.basis;
+    if (attendanceBased && schedule === "per_hour" && options?.attendanceSource === "shipment_data" && Number(attendance?.work_minutes ?? 0) <= 0 && !usesAggregateAttendance) {
       // Shipment totals prove that the daily threshold was met, but they do
       // not contain worked minutes. Paying an hourly head from this source
       // would silently invent time, so leave the row incomplete for review.
       missing = true;
       continue;
     }
+    if (attendanceBased && schedule === "per_hour" && sourcePresent && attendance?.work_minutes == null && !usesAggregateAttendance) {
+      // A bulk attendance status can establish P/HD without supplying worked
+      // minutes. Hourly pay must remain incomplete until real minutes exist.
+      missing = true;
+      continue;
+    }
+    const componentAttendanceUnit = usesAggregateAttendance && attendanceBasis === "days"
+      ? importedQuantity ?? 0
+      : sourceAttendanceUnit;
+    const componentMinutes = usesAggregateAttendance && attendanceBasis === "hours"
+      ? (importedQuantity ?? 0) * 60
+      : sourceMinutes;
     const monthlyAttendance = schedule === "per_month" && attendanceBased
-      ? monthlyAttendanceAmountForDay({
-        monthlyAmount: rate,
-        date,
-        attendanceUnit,
-        cumulativeAttendanceUnitsBefore: options?.cumulativeAttendanceUnitsBefore,
-        policy: workforcePaymentPolicyForDate(options?.policyHistory, date)
-      })
+      ? usesAggregateAttendance
+        ? monthlyAttendanceAmountForAggregateUnits({
+          monthlyAmount: rate,
+          date,
+          attendanceUnits: componentAttendanceUnit,
+          cumulativeAttendanceUnitsBefore: options?.cumulativeAttendanceUnitsBefore,
+          policy: workforcePaymentPolicyForDate(options?.policyHistory, date)
+        })
+        : monthlyAttendanceAmountForDay({
+          monthlyAmount: rate,
+          date,
+          attendanceUnit: componentAttendanceUnit,
+          cumulativeAttendanceUnitsBefore: options?.cumulativeAttendanceUnitsBefore,
+          policy: workforcePaymentPolicyForDate(options?.policyHistory, date)
+        })
       : null;
     const count = schedule === "per_month"
       ? monthlyAttendance?.count ?? 1 / new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate()
       : schedule === "per_hour"
-        ? minutes / 60
-        : attendanceUnit;
+        ? componentMinutes / 60
+        : componentAttendanceUnit;
     const amount = schedule === "per_month"
       ? monthlyAttendance?.amount ?? rounded(monthlyDailyAccrual(rate, date))
       : rounded(rate * count);

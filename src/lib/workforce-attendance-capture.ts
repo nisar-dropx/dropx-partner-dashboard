@@ -13,6 +13,7 @@ export type WorkforceAttendanceCaptureSetting = {
   capture_method: WorkforceAttendanceCaptureMethod;
   minimum_daily_deliveries: number | null;
   effective_from: string;
+  review_below_deliveries?: number | null;
 };
 
 export type WorkforceShipmentDeliveryRow = {
@@ -51,6 +52,7 @@ export function normalizeWorkforceAttendanceCaptureSetting(
     id: value?.id ?? null,
     capture_method: captureMethod,
     minimum_daily_deliveries: minimumDailyDeliveries,
+    ...(positiveInteger(value?.review_below_deliveries) ? { review_below_deliveries: positiveInteger(value?.review_below_deliveries) } : {}),
     effective_from: /^\d{4}-\d{2}-01$/.test(String(value?.effective_from ?? ""))
       ? String(value!.effective_from)
       : DEFAULT_WORKFORCE_ATTENDANCE_CAPTURE_SETTING.effective_from
@@ -107,12 +109,24 @@ export function shipmentAttendanceUnit(
 export function shipmentAttendanceRecord(
   date: string,
   totalDeliveries: unknown,
-  setting?: Partial<WorkforceAttendanceCaptureSetting> | null
+  setting?: Partial<WorkforceAttendanceCaptureSetting> | null,
+  recorded?: DirectPayAttendance | null
 ): DirectPayAttendance {
+  // Shipment activity fills missing work evidence; it must never erase a
+  // recorded present/half-day or the actual minutes needed by hourly heads.
+  if (recorded && ["P", "HD"].includes(String(recorded.status ?? "").toUpperCase())) return recorded;
   const unit = shipmentAttendanceUnit(totalDeliveries, setting);
   return {
     punch_date: date,
     status: unit === 1 ? "P" : "A",
     work_minutes: 0
   };
+}
+
+/** A review signal only; it never changes attendance eligibility or pay. */
+export function shipmentAttendanceReview(totalDeliveries: unknown, setting?: Partial<WorkforceAttendanceCaptureSetting> | null) {
+  const threshold = positiveInteger(setting?.review_below_deliveries);
+  const deliveries = Number(totalDeliveries);
+  return threshold !== null && Number.isFinite(deliveries) && deliveries >= 0 && deliveries < threshold
+    ? { deliveries, threshold } : null;
 }
