@@ -1,4 +1,4 @@
-﻿import "server-only";
+import "server-only";
 
 // NOTE: This resolver is hand-duplicated in two other places that read the same
 // hr_approval_workflow_routes/designations tables against the shared database:
