@@ -22,6 +22,21 @@ export async function ingestEddObservations(codes?: string[]) {
   const { error } = await supabaseAdmin.rpc("edd_ingest_observations", { p_codes: codes ?? null });
   if (error) throw new Error(`EDD observation sync failed: ${error.message}`);
 }
+/** Wider than the one-minute cron so a skipped or failed run is caught by the next few. */
+const NEW_OBSERVATION_WINDOW_MS = 6 * 60 * 1000;
+/** Stations whose backlog or performance snapshot was refetched recently. Reads only the code column, never the package lists. */
+async function eddStationsWithNewObservations() {
+  if (!supabaseAdmin) throw new Error("EDD database is not configured.");
+  const since = new Date(Date.now() - NEW_OBSERVATION_WINDOW_MS).toISOString();
+  const results = await Promise.all((["edd_station_snapshots", "edd_performance_snapshots"] as const).map(table =>
+    supabaseAdmin!.from(table).select("station_code").gte("fetched_at", since)));
+  const codes = new Set<string>();
+  for (const { data, error } of results) {
+    if (error) throw new Error(`EDD observation lookup failed: ${error.message}`);
+    for (const row of (data ?? []) as Array<{ station_code: string | null }>) if (row.station_code) codes.add(row.station_code);
+  }
+  return [...codes];
+}
 export async function loadEddLedger(codes: string[]) {
   if (!supabaseAdmin) throw new Error("EDD database is not configured.");
   const result = new Map<string, { packages: EddPackage[]; fetchedAt: string }>();
@@ -98,7 +113,16 @@ export async function verifyEddBatch(codes?: string[]) {
   const base = process.env.EDD_WORKER_URL?.trim().replace(/\/$/, "");
   const key = process.env.EDD_WORKER_ADMIN_KEY?.trim();
   if (!base || !key) throw new Error("Tracking connection is not configured.");
-  await ingestEddObservations(codes);
+  // The every-minute cron passes no codes. Ingesting "all stations" there made
+  // Postgres re-scan the whole ~1 GB ledger each minute; overlapping runs then
+  // starved every other query until the project fell over (2026-10-06).
+  // A station whose snapshots have not changed has nothing to ingest, so the
+  // cron only ingests the ones refreshed in the last few minutes.
+  if (codes) await ingestEddObservations(codes);
+  else {
+    const fresh = await eddStationsWithNewObservations();
+    if (fresh.length) await ingestEddObservations(fresh);
+  }
   const token = randomUUID();
   const { data, error } = await supabaseAdmin.rpc("edd_claim_verification", { p_token: token, p_codes: codes ?? null, p_limit: 180 });
   if (error) throw new Error(error.message);
