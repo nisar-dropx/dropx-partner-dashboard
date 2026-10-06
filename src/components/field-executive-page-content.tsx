@@ -67,7 +67,7 @@ type DesignationCategoryFilter = "workforce" | "contractors" | "vendors" | "work
 
 type ExecutiveRow = {
   id: string;
-  /** Dual role: this person's People designation (same DropX ID), e.g. SSA for an SSA who also works as a DA. */
+  /** Legacy cross-register match retained only to make older records understandable. */
   people_designation?: string | null;
   dropx_id: string | null;
   full_name: string;
@@ -310,7 +310,7 @@ function FieldExecutiveDetails({
           <ExecutiveDetail label="ID" value={executive.dropx_id} />
           <ExecutiveDetail label="Full name" value={executive.full_name} />
           <ExecutiveDetail label="Designation" value={executive.designation} />
-          {executive.people_designation ? <ExecutiveDetail label="Also in People as" value={`${executive.people_designation} (same DropX ID and biometric ID)`} /> : null}
+          {executive.people_designation ? <ExecutiveDetail label="Also in People as" value={executive.people_designation} /> : null}
           <ExecutiveDetail label="Date of join" value={formatDashboardDate(executive.date_of_join)} />
           <ExecutiveDetail label="Location" value={location?.station_name || location?.station_code} />
           <ExecutiveDetail label="Status" value={fieldExecutiveStatus(executive, canonicalWorkforce)} />
@@ -795,7 +795,7 @@ async function loadFieldExecutiveData(
   const visibleExecutiveRows = ((executivesResult.data ?? []) as unknown as ExecutiveRow[])
     .filter((executive) => (accessSurface !== "ops" && authorization.hasAllLocationAccess) || allowedLocationIds.has(executive.location_id))
     .filter((executive) => ownerAccess || allowedDesignationNames.has(String(executive.designation ?? "")));
-  // Dual role (e.g. SSA in People + DA in Workforce, same DropX ID): show both designations.
+  // Keep the second designation visible for legacy cross-register records.
   if (targetRegister === "workforce" && supabaseAdmin) {
     const ids = [...new Set(visibleExecutiveRows.map((row) => row.dropx_id).filter((value): value is string => Boolean(value)))];
     if (ids.length) {

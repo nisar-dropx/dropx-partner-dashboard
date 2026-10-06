@@ -63,7 +63,35 @@ export async function syncBiometricEnrolment({
   const now = new Date().toISOString();
   const today = new Date().toISOString().slice(0, 10);
 
-  await supabaseAdmin
+  let existing: EnrolmentRow | null = null;
+  if (cleaned) {
+    // Validate the requested ID before closing the worker's current enrolment.
+    // Otherwise a rejected reassignment could leave the worker unenrolled.
+    const existingResult = await supabaseAdmin
+      .from("biometric_enrolments")
+      .select("id, employee_id, field_executive_id, profile_type, account_id")
+      .eq("company_id", companyId)
+      .eq("enrolment_id", cleaned)
+      .is("effective_to", null);
+    if (existingResult.error) throw new Error(existingResult.error.message);
+
+    const existingRows = (existingResult.data ?? []) as EnrolmentRow[];
+    existing = existingRows.find((row) => row.profile_type === resolvedProfileType && (
+      personColumn === "employee_id"
+        ? row.employee_id === personId
+        : personColumn === "field_executive_id"
+          ? row.field_executive_id === personId
+          : row.account_id === personId
+    )) ?? null;
+
+    // An unchanged grandfathered enrolment remains editable. A new assignment
+    // cannot claim an ID that already has any other active owner.
+    if (!existing && existingRows.length > 0) {
+      throw new Error(`Biometric enrolment ID ${cleaned} is already assigned to another worker.`);
+    }
+  }
+
+  const deactivation = await supabaseAdmin
     .from("biometric_enrolments")
     .update({
       status: "Inactive",
@@ -75,26 +103,9 @@ export async function syncBiometricEnrolment({
     .eq("profile_type", resolvedProfileType)
     .is("effective_to", null)
     .neq("enrolment_id", cleaned ?? "");
+  if (deactivation.error) throw new Error(deactivation.error.message);
 
   if (!cleaned) return;
-
-  const existingResult = await supabaseAdmin
-    .from("biometric_enrolments")
-    .select("id, employee_id, field_executive_id, profile_type, account_id")
-    .eq("company_id", companyId)
-    .eq("profile_type", resolvedProfileType)
-    .eq("enrolment_id", cleaned)
-    .is("effective_to", null)
-    .maybeSingle();
-  if (existingResult.error) throw new Error(existingResult.error.message);
-
-  const existing = existingResult.data as EnrolmentRow | null;
-  const belongsToSameWorker = existing?.account_id === personId ||
-    (resolvedProfileType === "employee" && existing?.employee_id === personId) ||
-    (resolvedProfileType === "field_executive" && existing?.field_executive_id === personId);
-  if (existing && !belongsToSameWorker) {
-    throw new Error("Biometric enrolment ID is already assigned to another worker.");
-  }
 
   const payload = {
     company_id: companyId,

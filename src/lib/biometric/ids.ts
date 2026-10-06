@@ -1,13 +1,13 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function numericId(value: unknown) {
-  const text = String(value ?? "").replace(/\D/g, "");
+  const text = String(value ?? "").trim();
   if (!/^\d{1,20}$/.test(text)) return null;
-  return Number(text);
+  return text.replace(/^0+(?=\d)/, "");
 }
 
 async function loadNumericIds(companyId: string, table: string, column: string) {
-  if (!supabaseAdmin) return [] as number[];
+  if (!supabaseAdmin) return [] as string[];
   const { data, error } = await supabaseAdmin
     .from(table)
     .select(column)
@@ -20,7 +20,7 @@ async function loadNumericIds(companyId: string, table: string, column: string) 
   }
   return (data ?? [])
     .map((row) => numericId((row as unknown as Record<string, unknown>)[column]))
-    .filter((value): value is number => value !== null);
+    .filter((value): value is string => value !== null);
 }
 
 async function loadEnrolmentStartNumber(companyId: string) {
@@ -41,21 +41,27 @@ async function loadEnrolmentStartNumber(companyId: string) {
 }
 
 export async function generateBiometricEnrolmentId(companyId: string) {
-  const [enrolments, employees, fieldExecutives, contractors, vendors, workers, helpers, pickers, startNumber] = await Promise.all([
+  const [enrolments, employees, fieldExecutives, contractors, vendors, workers, helpers, legacyHelpers, pickers, startNumber] = await Promise.all([
     loadNumericIds(companyId, "biometric_enrolments", "enrolment_id"),
     loadNumericIds(companyId, "employees", "biometric_id"),
     loadNumericIds(companyId, "workforce", "biometric_id"),
     loadNumericIds(companyId, "contractors", "biometric_id"),
     loadNumericIds(companyId, "vendors", "biometric_id"),
     loadNumericIds(companyId, "workers", "biometric_id"),
+    loadNumericIds(companyId, "helpers", "biometric_id"),
     loadNumericIds(companyId, "workforce_helpers", "biometric_id"),
     loadNumericIds(companyId, "workforce_pickers", "biometric_id"),
     loadEnrolmentStartNumber(companyId)
   ]);
 
-  const used = new Set([...enrolments, ...employees, ...fieldExecutives, ...contractors, ...vendors, ...workers, ...helpers, ...pickers]);
-  const normalSeries = Array.from(used).filter((value) => value > 0 && value < 9000);
+  const used = new Set([...enrolments, ...employees, ...fieldExecutives, ...contractors, ...vendors, ...workers, ...helpers, ...legacyHelpers, ...pickers]);
+  // Only the small sequential series participates in the next-number calculation.
+  // Larger IDs stay as strings so 20-digit biometric IDs never lose precision.
+  const normalSeries = Array.from(used)
+    .filter((value) => value.length <= 4)
+    .map(Number)
+    .filter((value) => value > 0 && value < 9000);
   let next = Math.max(startNumber - 1, ...normalSeries) + 1;
-  while (used.has(next)) next += 1;
+  while (used.has(String(next))) next += 1;
   return String(next);
 }

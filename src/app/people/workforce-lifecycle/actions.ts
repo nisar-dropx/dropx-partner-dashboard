@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
-import { biometricBelongsToPeople } from "@/lib/workforce-dual-role";
 import { requireCompanyId } from "@/lib/company-scope";
 import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -177,8 +176,7 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
       updated_at: reviewedAt
     }).eq("company_id", companyId).eq("id", id);
     if (approval.error) throw new Error(approval.error.message);
-    // A dual-role DA shares the People biometric ID; the enrolment stays with People.
-    if (!await biometricBelongsToPeople(companyId, applicant.biometric_id)) try {
+    try {
       await syncBiometricEnrolment({
         accountId: id,
         companyId,
