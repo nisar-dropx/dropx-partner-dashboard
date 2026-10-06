@@ -170,6 +170,12 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
   };
 
   const reporting = payload.stations.filter((row) => row.hasSnapshot);
+  // The header shows when the data itself was last fetched (cron or Refresh),
+  // not `asOf`, which is only the moment this page asked for it.
+  const fetchedTimes = reporting.map((row) => Date.parse(row.fetchedAt ?? "")).filter(Number.isFinite);
+  const lastRefreshed = fetchedTimes.length ? new Date(Math.max(...fetchedTimes)).toISOString() : null;
+  const oldestFetch = fetchedTimes.length ? new Date(Math.min(...fetchedTimes)).toISOString() : null;
+  const refreshSpread = fetchedTimes.length ? Math.max(...fetchedTimes) - Math.min(...fetchedTimes) : 0;
   const morning = sum(reporting, "morningLoad");
   const liveLoad = sum(reporting, "totalLoad");
   const delivered = sum(reporting, "cohortDelivered");
@@ -285,7 +291,7 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
       <section className={s.toolbar}>
         <div className={s.title}>
           <h2>{formatDay(payload.businessDate, { weekday: "long", day: "numeric", month: "long" })}</h2>
-          <p><i className={isLatest ? s.live : undefined} />{isLatest ? "Live" : "Past report"} · as of {formatWhen(payload.asOf)} IST · {reporting.length}/{payload.stations.length} stations reporting</p>
+          <p><i className={isLatest ? s.live : undefined} />{isLatest ? "Live" : "Past report"} · {lastRefreshed ? <span title={`Stations were fetched between ${formatWhen(oldestFetch)} and ${formatWhen(lastRefreshed)} IST`}>data last refreshed {formatWhen(lastRefreshed)} IST{refreshSpread > STALE_MS ? ` (oldest station ${formatWhen(oldestFetch)})` : ""}</span> : "no data fetched yet"} · {reporting.length}/{payload.stations.length} stations reporting</p>
         </div>
         <nav className={s.dates} aria-label="Report date">
           {payload.dates.slice(0, 5).map((date) => (
