@@ -6,7 +6,7 @@ import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { calculateAutomaticDeductionLines, type AutomaticDeductionHead } from "@/lib/workforce-deductions";
+import { calculateAutomaticDeductionLines, type AutomaticDeductionHead, type DeductionWorkerContext } from "@/lib/workforce-deductions";
 import { allocationActiveOn, cumulativeDirectPayUnitsBefore, directPayAttendanceBasis, directPayAttendanceUnit, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
@@ -35,6 +35,7 @@ import {
   type WorkforceAdditionalPaymentValue
 } from "@/lib/workforce-additional-payment-overlay";
 import {
+  resolveWorkforcePayoutDeductionContext,
   workforcePayoutDeductionLines,
   workforcePayoutDeductionTotal,
   type WorkforcePayoutDeductionValue
@@ -964,16 +965,20 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
   if (providerAttendanceConflict) return { rows: [] as WorkforcePayoutRow[], error: "Conflicting provider attendance payment setups exist for the same workforce date. Resolve the duplicate rate cards before calculating payroll." };
   const consolidatedProvider = consolidateProviderPayoutSegments(providerSegments);
   if (consolidatedProvider.conflicts.length) return { rows: [] as WorkforcePayoutRow[], error: "Overlapping provider payment methods exist for the same workforce date. Correct the effective dates before calculating payroll." };
+  const payoutDeductionContextByRowId = new Map<string, DeductionWorkerContext>();
   const providerRows: WorkforcePayoutRow[] = consolidatedProvider.rows.map(({ workforceId, categoryCode, panNumber, row }) => {
-    const deductionBreakdown = calculateAutomaticDeductionLines(row.grossPayment, deductionHeads, { categoryCode, panNumber });
+    const deductionContext = { categoryCode, panNumber } satisfies DeductionWorkerContext;
+    const deductionBreakdown = calculateAutomaticDeductionLines(row.grossPayment, deductionHeads, deductionContext);
     const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
-    return {
+    const payoutRow = {
       ...row,
       history: historyByWorkforceId.get(workforceId) ?? [],
       deductions,
       deductionBreakdown,
       netAmount: row.grossPayment - deductions
-    };
+    } satisfies WorkforcePayoutRow;
+    payoutDeductionContextByRowId.set(payoutRow.id, deductionContext);
+    return payoutRow;
   });
   const overlappingPaymentSetup = mappings.some((mapping: any) => {
     const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
@@ -1185,7 +1190,9 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
     const panAadhaarLinked = panAadhaarLinkedByWorkforceId.get(workforceId) === true;
     const location: any = locationId ? locationById.get(locationId) : null;
     const methodNames = paymentMethodBreakdown.map((item) => item.label);
-    return { id: `direct-${workforceId}-${locationId || "unassigned"}`, reviewSubjectType: "workforce", reviewSubjectId: workforceId, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationId || null, location: String(location?.station_code ?? "-"), provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, history: historyByWorkforceId.get(workforceId) ?? [], paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: shipmentWorkDaysUnavailable || dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" };
+    const payoutRow = { id: `direct-${workforceId}-${locationId || "unassigned"}`, reviewSubjectType: "workforce", reviewSubjectId: workforceId, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationId || null, location: String(location?.station_code ?? "-"), provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, history: historyByWorkforceId.get(workforceId) ?? [], paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: shipmentWorkDaysUnavailable || dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" } satisfies WorkforcePayoutRow;
+    payoutDeductionContextByRowId.set(payoutRow.id, { categoryCode: "workforce", panNumber: worker?.pan_number ?? null });
+    return payoutRow;
   });
   const additionalFieldsResult = await readAllRows(supabaseAdmin
     .from("workforce_additional_payment_fields")
@@ -1286,7 +1293,11 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
     const additionalPaymentBreakdown = workforceAdditionalPaymentLines(row.baseAmount, additionalFields, values);
     const additions = workforceAdditionalPaymentTotal(additionalPaymentBreakdown);
     const grossPayment = Math.round((row.baseAmount + additions + Number.EPSILON) * 100) / 100;
-    const context = workforceDeductionContext(workforceId);
+    const context = resolveWorkforcePayoutDeductionContext(
+      row.id,
+      payoutDeductionContextByRowId,
+      workforceDeductionContext(workforceId)
+    );
     const deductionBreakdown = workforcePayoutDeductionLines(
       grossPayment,
       deductionHeads,

@@ -175,7 +175,7 @@ export function AuditDetail({
       discrepancyCode: row.discrepancy_code || "",
       requiredAction: row.required_action || "",
       remarks: row.remarks || "",
-      dueAt: row.due_at?.slice(0, 10) || "",
+      dueAt: row.due_at ? auditDay(row.due_at) : "",
     })),
   );
   const submit = useAction();
@@ -760,9 +760,7 @@ export function AuditDetail({
                       name="action_due_at"
                       type="datetime-local"
                       defaultValue={
-                        audit.completed_at &&
-                        audit.response_due_at &&
-                        Date.parse(audit.response_due_at) > Date.now()
+                        audit.completed_at && audit.response_due_at
                           ? `${auditDay(audit.response_due_at)}T${auditLocalTime(audit.response_due_at)}`
                           : ""
                       }
@@ -1216,7 +1214,11 @@ function ManagerFollowUp({
               <input
                 name="response_due_at"
                 type="datetime-local"
-                defaultValue={audit.response_due_at?.slice(0, 16) ?? ""}
+                defaultValue={
+                  audit.response_due_at
+                    ? `${auditDay(audit.response_due_at)}T${auditLocalTime(audit.response_due_at)}`
+                    : ""
+                }
               />
             </label>
           </div>

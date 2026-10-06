@@ -16,6 +16,8 @@ export type EddStationOption = {
   code: string;
   label: string;
   name: string;
+  /** People/master location behind this Amazon station code, for cluster and AOM lookups. */
+  locationId: string;
 };
 
 /**
@@ -48,7 +50,7 @@ export async function loadEddStations(
       const amazonCode = portalCodeByLocation.get(location.id) || String(location.station_code ?? "").trim().toUpperCase();
       if (!amazonCode) return null;
       const name = location.station_name ? String(location.station_name) : "";
-      return { code: amazonCode, label: name ? `${amazonCode} — ${name}` : amazonCode, name };
+      return { code: amazonCode, label: name ? `${amazonCode} — ${name}` : amazonCode, name, locationId: String(location.id) };
     })
     .filter((row): row is EddStationOption => Boolean(row))
     .sort((a, b) => a.code.localeCompare(b.code));

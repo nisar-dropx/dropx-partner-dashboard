@@ -597,7 +597,7 @@ export async function submitStationAudit(
         discrepancy_code: discrepancy,
         remarks: clean(String(shipment.remarks ?? "")) || null,
         required_action: clean(String(shipment.requiredAction ?? "")) || null,
-        due_at: clean(String(shipment.dueAt ?? "")) || null,
+        due_at: localDeadline(clean(String(shipment.dueAt ?? ""))),
         is_resolved: false,
       };
     });
@@ -608,10 +608,6 @@ export async function submitStationAudit(
         .map((option) => [option.code, option]),
     );
     const explicitDueAt = localDeadline(clean(formData.get("action_due_at")));
-    if (explicitDueAt && Date.parse(explicitDueAt) <= Date.now())
-      throw new Error(
-        "Choose a future station-response deadline or leave it blank for the default.",
-      );
     const defaultResponseDueAt =
       explicitDueAt ||
       new Date(
@@ -630,9 +626,7 @@ export async function submitStationAudit(
         owner_user_id: null,
         owner_name: null,
         owner_email: null,
-        due_at:
-          localDeadline(clean(formData.get("action_due_at"))) ||
-          defaultResponseDueAt,
+        due_at: defaultResponseDueAt,
         created_by: authorization.userId,
       })),
       ...unresolvedShipments

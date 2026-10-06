@@ -711,7 +711,11 @@ export function AuditWorkspace({
               label="Auditor"
               options={auditorOptions}
               selected={auditors}
-              onChange={setAuditors}
+              onChange={(next) => {
+                setAuditors(next);
+                // "My audits" is the viewer's own list; another auditor is a team view.
+                if (next.length && tab === "mine") setTab("calendar");
+              }}
             />
           )}
           <label className={styles.search}>
@@ -855,6 +859,7 @@ export function AuditWorkspace({
               onClick={() => {
                 setTab(key);
                 setFastOnly(false);
+                if (key === "mine") setAuditors([]);
               }}
             >
               {name}
@@ -892,6 +897,14 @@ export function AuditWorkspace({
         </p>
       )}
       {navigationPending && <p role="status">Loading {monthLabel(month)}…</p>}
+      {tab !== "mine" && selectedAuditorNames.length > 0 && !monthAudits.length && (
+        <p role="status" className={styles.notice}>
+          {selectedAuditorNames.join(", ")}{" "}
+          {selectedAuditorNames.length === 1 ? "has" : "have"} no audits in{" "}
+          {monthLabel(month)} that match the current filters. Schedule one, or
+          reassign an existing audit to them.
+        </p>
+      )}
       {tab === "mine" && (
         <section className={styles.personal}>
           <div className={styles.calendarHead}>

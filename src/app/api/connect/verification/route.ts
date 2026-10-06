@@ -7,7 +7,7 @@ import { verifyPanWithFallback } from "@/lib/pan-verification";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { callVerificationProvider } from "@/lib/verification-api-audit";
-import { isPureElectricFuel } from "@/lib/vehicle-fuel";
+import { isPureElectricFuel, vehicleFuelTypeForClient } from "@/lib/vehicle-fuel";
 import { isWorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
 const IDSPAY_BASE_URL = "https://javabackend.idspay.in/api/v1/prod";
@@ -235,7 +235,7 @@ export async function GET(request: NextRequest) {
           blockSubmit: row.block_submit,
           name: row.display_name,
           message: row.message,
-          fuelType: compact(details.fuelType),
+          fuelType: vehicleFuelTypeForClient(details.fuelType),
           details: row.details,
           verifiedAt: row.verified_at
         };
@@ -395,7 +395,8 @@ export async function POST(request: NextRequest) {
       });
       const data = body?.data ?? {};
       const verified = body?.status?.type === "success" || body?.success === true;
-      const fuelType = compact(data?.type ?? data?.fuel_type ?? data?.fuelType);
+      const providerFuelType = compact(data?.type ?? data?.fuel_type ?? data?.fuelType);
+      const fuelType = vehicleFuelTypeForClient(providerFuelType);
       const result = {
         verified,
         inputKey: inputKey([regNo]),
@@ -404,7 +405,7 @@ export async function POST(request: NextRequest) {
         warning: verified ? "" : text(body?.message) || "Vehicle details could not be verified.",
         registrationExpiryDate: normalizeDate(data?.rc_expiry_date),
         insuranceExpiryDate: normalizeDate(data?.vehicle_insurance_upto ?? data?.insurance_upto),
-        pollutionExpiryDate: isPureElectricFuel(fuelType) ? "" : normalizeDate(data?.pucc_upto)
+        pollutionExpiryDate: isPureElectricFuel(providerFuelType) ? "" : normalizeDate(data?.pucc_upto)
       };
       return verifiedResponse(result);
     }

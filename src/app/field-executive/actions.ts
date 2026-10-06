@@ -21,7 +21,6 @@ import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
 import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityExceptionEventMetadata } from "@/lib/onboarding-identity";
-import { biometricBelongsToPeople, peopleIdentityForDualRole } from "@/lib/workforce-dual-role";
 import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
 import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadClientIdMappings, needsClientId, providerMappingFor, type ClientIdWorker } from "@/lib/workforce-client-id-queue";
@@ -418,11 +417,8 @@ export async function createFieldExecutive(formData: FormData) {
       allowDifferentWorkforceDesignation: table === "workforce",
       allowDuplicateMobile: table === "workforce"
     });
-    // Second role for someone already in People (e.g. an SSA who also works as
-    // a DA): the Workforce record reuses their People DropX ID and biometric ID.
-    const peopleIdentity = table === "workforce" ? await peopleIdentityForDualRole(companyId, identityEvaluation) : null;
     const workerCategory = config.category;
-    const biometricId = peopleIdentity?.biometricId ?? await generateConfiguredBiometricId({
+    const biometricId = await generateConfiguredBiometricId({
       category: workerCategory,
       companyId,
       designationName: designation,
@@ -431,7 +427,7 @@ export async function createFieldExecutive(formData: FormData) {
     });
     if (biometricId && !/^\d{1,20}$/.test(biometricId)) throw new Error("Biometric enrolment ID must be numeric.");
 
-    const dropxId = peopleIdentity?.dropxId ?? await generateConfiguredWorkerId({
+    const dropxId = await generateConfiguredWorkerId({
       category: workerCategory,
       companyId,
       designationName: designation,
@@ -515,7 +511,7 @@ export async function createFieldExecutive(formData: FormData) {
       }
     }
 
-    if (config.profileType !== "field_executive" && !(peopleIdentity && await biometricBelongsToPeople(companyId, biometricId))) {
+    if (config.profileType !== "field_executive") {
       await syncBiometricEnrolment({
         companyId,
         createdBy: authorization.userId,
@@ -539,7 +535,7 @@ export async function createFieldExecutive(formData: FormData) {
         to_status: "pending",
         actor_user_id: authorization.userId,
         source_portal: applicationSource,
-        metadata: { designation, location_id: locationId, onboarding_source: selectedOnboardingSource.source, onboarding_source_detail: selectedOnboardingSource.detail, ...identityExceptionEventMetadata(identityEvaluation), ...(peopleIdentity ? { dual_role_people_profile: { source_type: peopleIdentity.sourceType, source_id: peopleIdentity.sourceId, designation: peopleIdentity.designation, shared_dropx_id: peopleIdentity.dropxId, shared_biometric_id: peopleIdentity.biometricId } } : {}) }
+        metadata: { designation, location_id: locationId, onboarding_source: selectedOnboardingSource.source, onboarding_source_detail: selectedOnboardingSource.detail, ...identityExceptionEventMetadata(identityEvaluation) }
       });
       if (reportedOn && table === "workforce") {
         const progressResult = await supabaseAdmin.rpc("workforce_record_partner_progress", {

@@ -5,6 +5,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { fetchLoadFlashNetwork, isEddWorkerConfigured, type LoadFlashNetworkPayload } from "@/lib/ops-pulse/edd-worker";
+import { loadFlashClusters } from "@/lib/ops-pulse/load-flash-access";
 import { EddSectionTabs } from "../edd-section-tabs";
 import { LoadFlashView } from "./load-flash-view";
 
@@ -15,11 +16,13 @@ function todayKolkata() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
-export default async function LoadFlashPage({ searchParams }: { searchParams?: { date?: string } }) {
+export default async function LoadFlashPage({ searchParams }: { searchParams?: { date?: string; cluster?: string; station?: string; driver?: string } }) {
   const authorization = await requireEddAccess();
   const companyId = requireCompanyId(authorization);
   const stations = await loadEddStations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const workerConfigured = isEddWorkerConfigured();
+  // Started now and awaited after the report, so the People lookup does not delay the worker call.
+  const clustersPending = workerConfigured ? loadFlashClusters(companyId, stations) : Promise.resolve([]);
   const requested = String(searchParams?.date ?? "").trim();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : todayKolkata();
 
@@ -34,6 +37,8 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
       error = err instanceof Error ? err.message : "Unable to load the station load report.";
     }
   }
+
+  const clusters = await clustersPending;
 
   return (
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
@@ -63,7 +68,12 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
             <div className="panel-body"><strong>Unable to load the report</strong><p className="subtle" style={{ marginTop: 6 }}>{error}</p></div>
           </section>
         ) : null}
-        {workerConfigured && payload ? <LoadFlashView initial={payload} stationNames={Object.fromEntries(stations.map((station) => [station.code, station.name]))} /> : null}
+        {workerConfigured && payload ? <LoadFlashView
+            initial={payload}
+            stationNames={Object.fromEntries(stations.map((station) => [station.code, station.name]))}
+            clusters={clusters}
+            initialScope={{ cluster: String(searchParams?.cluster ?? ""), station: String(searchParams?.station ?? "").toUpperCase(), driver: searchParams?.driver == null ? null : String(searchParams.driver) }}
+          /> : null}
       </div>
     </AppShell>
   );

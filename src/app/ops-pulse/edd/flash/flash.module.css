@@ -154,3 +154,52 @@
   .chips { margin-right: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .track > span { transition: none; } }
+
+/* Scope bar: whose stations, which station, which driver */
+.scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--soft); scroll-margin-top: 70px; }
+.scopeField { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 650; color: var(--muted); }
+.scopeField select { height: 32px; max-width: 240px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); cursor: pointer; }
+.scopeField select:hover { border-color: #b5c2d3; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 0 0 auto; padding: 0; list-style: none; font-size: 12px; }
+.crumbs li { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); }
+.crumbs :is(button, span) { padding: 4px 8px; border: 0; border-radius: 7px; background: none; font: inherit; font-weight: 650; color: var(--accent); cursor: pointer; }
+.crumbs button:hover:not(:disabled) { background: #eef4fb; }
+.crumbs button:disabled, .crumbs span { color: var(--ink); cursor: default; }
+.clear { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); font: inherit; font-size: 11px; font-weight: 650; color: var(--muted); cursor: pointer; }
+.clear:hover { border-color: var(--ink); color: var(--ink); }
+
+/* Drill-down: stations open, drivers narrow */
+.countTag { margin-left: 4px; padding: 1px 7px; border-radius: 99px; background: var(--surface-soft); font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.clickable { cursor: pointer; }
+.rowButton { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.rowButton > span { min-width: 0; }
+.rowButton strong { font-size: 13px; font-weight: 700; }
+.rowButton em { display: inline-block; max-width: 150px; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-size: 12px; font-style: normal; font-weight: 400; color: var(--muted); }
+.rowButton small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+.rowButton:hover strong { color: var(--accent); }
+.chevron { flex-shrink: 0; margin-left: auto; color: #c3ccd8; }
+.clickable:hover .chevron { color: var(--accent); }
+.avatar { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-soft); color: var(--muted); }
+.table tbody tr.selected :is(td, th) { background: #eef4fb; }
+.selected .avatar { background: var(--accent); color: #fff; }
+.table.fit { min-width: 0; }
+.note { margin: 0 16px 10px; padding: 8px 12px; border-radius: 8px; background: #fff8e8; color: #8a6420; font-size: 12px; line-height: 1.5; }
+.tid { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--ink); background: none; }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 99px; background: var(--surface-soft); font-size: 11px; font-weight: 650; color: var(--muted); white-space: nowrap; }
+.tagGood { background: #e7f5ee; color: var(--green); }
+.tagInfo { background: #eef4fb; color: #1f5288; }
+.muted { color: var(--muted); font-size: 12px; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.pager div { display: flex; align-items: center; gap: 10px; }
+.pager button { height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font: inherit; font-size: 12px; font-weight: 650; color: var(--ink); cursor: pointer; }
+.pager button:hover:not(:disabled) { border-color: #b5c2d3; background: var(--surface-soft); }
+.pager button:disabled { opacity: .45; cursor: default; }
+.skeleton { display: block; height: 16px; border-radius: 6px; background: linear-gradient(90deg, #eef1f5 25%, #f7f9fb 37%, #eef1f5 63%); background-size: 400% 100%; animation: flash-shimmer 1.4s ease infinite; }
+@keyframes flash-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+.skeletonRows { display: grid; gap: 12px; padding: 8px 16px 18px; }
+details.panel.more { padding: 10px 16px; }
+@media (max-width: 960px) { .crumbs { margin-left: 0; flex-basis: 100%; } .scopeField select { max-width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+/* Column headers without a sort button keep the same padding and casing as the sortable ones. */
+.table thead th { text-transform: none; letter-spacing: normal; }
+.table thead th:not(:has(button)) { padding: 8px 12px; }
