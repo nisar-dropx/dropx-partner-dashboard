@@ -255,7 +255,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
   }));
   for(const [workerDate] of attendanceByWorkerDate) {
     const date=workerDate.slice(workerDate.lastIndexOf('|')+1);
-    if(workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date).capture_method==='shipment_data') {
+    if(workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date).capture_method==='shipment_data' && attendanceMappings.some(m=>m.worker?.id===workerDate.slice(0,workerDate.lastIndexOf('|'))&&activeOn(m,date))) {
       attendanceByWorkerDate.delete(workerDate);
     }
   }
@@ -574,12 +574,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       // A rental-only card is covered by Fleet and is not a missing pay setup.
       if(allDirectComponents.length && !directComponents.length) continue;
       const workerDateKey=`${w.id}|${date}`;
-      const captureSetting=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
-      const needsAttendanceSource=directComponents.some(component=>component.component_type!=='production' && component.calculation_source==='attendance_eligibility');
-      if(needsAttendanceSource && captureSetting.capture_method==='shipment_data') {
-        gap('Shipment attendance unavailable without provider mapping',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
-        continue;
-      }
+      const captureSetting={...workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date),capture_method:'biometric' as const};
       const result=directPayForDay(
         latest.payment_values,
         directComponents,

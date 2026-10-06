@@ -477,3 +477,10 @@ test('rental source revisions apply by cost date and rental-only direct cards do
  const r=rebuildCps(base([day('A','2026-09-02',0)]),f);
  assert.equal(r.daily[0].van,0);assert.ok(!r.gaps.some(g=>g.kind==='Direct payment allocation incomplete'));
 });
+
+test('providerless direct employees retain biometric pay when DAs use shipment attendance',()=>{
+ const f=facts();f.mappings=[];f.shipments=[];f.workforce[0].provider_mapping_required=false;
+ f.allocations=[{id:'direct',workforce_id:'w1',station_id:'station-a',effective_from:'2026-09-01',payment_values:{DAILY:600},payment_components:[{component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'}]}];
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,600);
+});
