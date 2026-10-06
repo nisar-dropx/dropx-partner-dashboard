@@ -10,6 +10,10 @@ export type AuditAssignee = {
   roleCodes: string[];
   stationIds: string[];
   allLocations: boolean;
+  /** Total stations in the user's Operations scope; null means every location. */
+  scopeSize: number | null;
+  /** Eligible only as company owner, not through a role chosen in Audit Master. */
+  ownerOnly: boolean;
 };
 export function canDeleteStationAudit(auth: AuthorizationContext) {
   return (
@@ -85,13 +89,10 @@ export async function loadAuditAssignees(
       const effectiveRoles = (roles.data || []).filter((r) =>
         member.some((m) => m.role_id === r.id),
       );
-      if (
-        !profile.is_master_owner &&
-        !effectiveRoles.some(
-          (r) => schedulerRoleIds.includes(r.id) && editorRoles.has(r.id),
-        )
-      )
-        return [];
+      const hasAuditRole = effectiveRoles.some(
+        (r) => schedulerRoleIds.includes(r.id) && editorRoles.has(r.id),
+      );
+      if (!profile.is_master_owner && !hasAuditRole) return [];
       const all =
         profile.is_master_owner ||
         member.some((m) => m.has_all_location_access) ||
@@ -111,6 +112,10 @@ export async function loadAuditAssignees(
           roleCodes: effectiveRoles.map((r) => r.code),
           stationIds: ids,
           allLocations: Boolean(all),
+          scopeSize: all
+            ? null
+            : new Set(member.flatMap((m) => m.location_scope_ids || [])).size,
+          ownerOnly: !hasAuditRole,
         },
       ];
     })

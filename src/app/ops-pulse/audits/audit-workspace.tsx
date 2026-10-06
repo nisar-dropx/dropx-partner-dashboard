@@ -441,17 +441,32 @@ export function AuditWorkspace({
       : assigneeNames.get(audit.assigned_to || "") ||
         audit.assigned_name ||
         "Unassigned";
+  const auditedBy = new Set(workspace.audits.map(auditAssigneeKey));
+  const viewer = workspace.assignees.find((p) => p.id === viewerId);
+  // Seniors and owners also hold access to these stations; list them only when
+  // they actually audit here, so a manager sees their own team.
+  const listedAuditors = workspace.assignees.filter(
+    (p) =>
+      p.id === viewerId ||
+      auditedBy.has(p.id) ||
+      (!p.ownerOnly &&
+        Boolean(viewer) &&
+        (viewer!.scopeSize === null ||
+          (p.scopeSize !== null && p.scopeSize <= viewer!.scopeSize))),
+  );
   const auditorOptions: Choice[] = [
-    ...workspace.assignees.map((p) => ({
+    ...listedAuditors.map((p) => ({
       value: p.id,
-      label: workspace.assignees.some((o) => o.id !== p.id && o.name === p.name)
+      label: listedAuditors.some((o) => o.id !== p.id && o.name === p.name)
         ? `${p.name} · ${p.email || p.role}`
         : p.name,
     })),
     ...[
       ...new Map(
         workspace.audits
-          .filter((a) => !assigneeNames.has(auditAssigneeKey(a)))
+          .filter(
+            (a) => !listedAuditors.some((p) => p.id === auditAssigneeKey(a)),
+          )
           .map((a) => {
             const key = auditAssigneeKey(a);
             return [
