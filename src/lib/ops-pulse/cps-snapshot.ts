@@ -6,6 +6,7 @@ import { workforcePaymentMonthStart } from "../workforce-payment-policy";
 import type { WorkforceAttendanceCaptureSetting } from "../workforce-attendance-capture";
 import { excludeAdvertisingSettlements } from "./advertising";
 import { loadAdvertising } from "./advertising-data";
+import { applyCpsTargets } from "./cps-targets";
 import { rebuildCps, type CpsFacts } from "./cps-engine";
 import { cpsMonthSlices, mergeCpsMonths, type CpsSnapshot } from "./cps";
 
@@ -29,6 +30,7 @@ const snapshot = cache(
       stationFlags,
       peopleAssignments,
       advertising,
+      targets,
     ] = await Promise.all([
 
       supabaseAdmin.rpc("ops_cps_base_v2", {
@@ -99,7 +101,7 @@ const snapshot = cache(
         .limit(1000),
       supabaseAdmin
         .from("stations")
-        .select("id,is_ho")
+        .select("id,is_ho,station_code,parent_station_id,location_models(code)")
         .eq("company_id", company)
         .limit(1000),
       supabaseAdmin.rpc("ops_cps_people_assignments", {
@@ -108,6 +110,10 @@ const snapshot = cache(
         p_through: to,
       }),
       loadAdvertising(company, from, to, codes),
+      readAllRows(supabaseAdmin.from("cps_station_targets")
+        .select("id,station_code,target_cps,effective_from,is_active")
+        .eq("company_id", company).eq("is_active", true)
+        .lte("effective_from", to).order("id")),
     ]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
@@ -139,6 +145,7 @@ const snapshot = cache(
     )
       throw Error("Fleet vehicle costs could not be loaded. Please retry.");
     if (
+      targets.error ||
       stationFlags.error ||
       stationFlags.data?.length === 1000 ||
       componentPolicies.error || componentPolicies.data?.length === 1000 ||
@@ -279,7 +286,7 @@ const snapshot = cache(
       stations: productionThresholdFacts.stations ?? [],
     };
     const costBase = excludeAdvertisingSettlements(result.data as CpsSnapshot, advertising.settlements);
-    return rebuildCps(
+    const rebuilt = rebuildCps(
       {
         ...costBase,
         // The base RPC also contains Fleet rent. Replace that source wholesale
@@ -292,6 +299,7 @@ const snapshot = cache(
       } as CpsSnapshot,
       sourceFacts,
     );
+    return { ...rebuilt, daily: applyCpsTargets(rebuilt.daily, targets.data ?? [], stationFlags.data ?? []) };
   },
 );
 export async function loadCpsSnapshot(

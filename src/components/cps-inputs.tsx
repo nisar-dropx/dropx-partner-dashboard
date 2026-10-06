@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { saveCpsCost, saveCpsTarget } from "@/app/cps/actions";
+import { saveCpsCost } from "@/app/cps/actions";
+import { CpsTargets } from "./cps-targets";
 import { cpsHeads, type CpsCostInput } from "@/lib/ops-pulse/cps";
 
 function CostForm({
@@ -152,6 +153,7 @@ function CostForm({
 export function CpsInputs({
   costs,
   targets,
+  targetStations,
   stations,
   today,
   canAdd,
@@ -160,6 +162,7 @@ export function CpsInputs({
 }: {
   employees: {id:string;label:string}[];
   costs: CpsCostInput[];
+  targetStations: string[];
   targets: {
     id: string;
     station_code: string;
@@ -172,9 +175,6 @@ export function CpsInputs({
   canAdd: boolean;
   canEdit: boolean;
 }) {
-  const router = useRouter();
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
   return (
     <div className="cps-inputs">
       <datalist id="cps-breakups">{['Company vehicle rent','Dock van rent','Van fuel','Van driver pay','Van maintenance','Vehicle insurance / permits','DA salary','DA variable pay','DA fuel','Facility rent','Electricity','Internet','Repairs and supplies','Cluster manager CTC','AOM CTC','Telecaller CTC','Shared overhead'].map(label=><option key={label}>{label}</option>)}</datalist>
@@ -235,95 +235,7 @@ export function CpsInputs({
           )}
         </div>
       </section>
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Station targets</h2>
-        </div>
-        <div className="panel-body">
-          {canAdd && (
-            <form
-              className="cps-input-form"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                if (busy) return;
-                setBusy(true);
-                try {
-                  const result = await saveCpsTarget(
-                    new FormData(event.currentTarget),
-                  );
-                  setMessage(result.message);
-                  if (result.ok) router.refresh();
-                } catch {
-                  setMessage(
-                    "Save could not be confirmed. Refresh before retrying.",
-                  );
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <label>
-                Location
-                <select name="station_code">
-                  {stations.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Target CPS ₹
-                <input
-                  name="target_cps"
-                  type="number"
-                  min="0.0001"
-                  step="0.0001"
-                  required
-                />
-              </label>
-              <label>
-                Effective from
-                <input
-                  name="effective_from"
-                  type="date"
-                  required
-                  defaultValue={today}
-                />
-              </label>
-              <button disabled={busy} className="button primary">
-                {busy ? "Saving…" : "Add target revision"}
-              </button>
-              <p role="status">{message}</p>
-            </form>
-          )}
-          <p>
-            Targets are effective-dated. Add a new revision to change a target
-            without overwriting earlier dates.
-          </p>
-          <div className="cps-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Location</th>
-                  <th>Target CPS</th>
-                  <th>Effective from</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {targets.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.station_code}</td>
-                    <td>₹{Number(t.target_cps).toFixed(2)}</td>
-                    <td>{t.effective_from}</td>
-                    <td>{t.is_active ? "Active" : "Disabled"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!targets.length && <p>No station targets configured.</p>}
-        </div>
-      </section>
+      <CpsTargets targets={targets} stations={targetStations} today={today} canAdd={canAdd} />
     </div>
   );
 }

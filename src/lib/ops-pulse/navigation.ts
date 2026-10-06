@@ -85,6 +85,7 @@ const administration: NavItem[] = [
     label: "Ops Masters",
     icon: "*",
     children: [
+      { code: "cps_inputs", label: "CPS Master", href: "/master/cps" },
       { code: "cps_inputs", label: "Advertising Master", href: "/master/advertising" },
       { code: "cod_master", label: "COD Master", href: "/master/cod-master" },
       { code: "ops_loss_master", label: "Loss Recovery Master", href: "/master/loss-recovery" },
