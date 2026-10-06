@@ -749,6 +749,8 @@ export type LoadFlashStation = {
   deliveredPct: number;
   pickupPct: number;
   historyDone: boolean;
+  /** This station's own hourly checks, so a cluster or station view can chart just its scope. */
+  hourly: LoadFlashHourlyPoint[];
 };
 
 export type LoadFlashNetworkPayload = {
@@ -762,6 +764,24 @@ export type LoadFlashNetworkPayload = {
 
 function num(value: unknown) {
   return Number(value ?? 0) || 0;
+}
+
+function normalizeLoadFlashHourly(value: unknown): LoadFlashHourlyPoint[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => {
+    const point = (row ?? {}) as Record<string, unknown>;
+    return {
+      hour: num(point.hour),
+      at: String(point.at ?? ""),
+      totalLoad: num(point.totalLoad),
+      eddToday: num(point.eddToday),
+      outOnRoad: num(point.outOnRoad),
+      delivered: num(point.delivered),
+      returnsToday: num(point.returnsToday),
+      pickupsAssigned: num(point.pickupsAssigned),
+      pickupsSuccess: num(point.pickupsSuccess)
+    };
+  });
 }
 
 function normalizeLoadFlashStation(raw: Record<string, unknown>): LoadFlashStation {
@@ -785,7 +805,8 @@ function normalizeLoadFlashStation(raw: Record<string, unknown>): LoadFlashStati
     cohortDelivered: num(raw.cohortDelivered),
     deliveredPct: num(raw.deliveredPct),
     pickupPct: num(raw.pickupPct),
-    historyDone: Boolean(raw.historyDone)
+    historyDone: Boolean(raw.historyDone),
+    hourly: normalizeLoadFlashHourly(raw.hourly)
   };
 }
 
@@ -811,22 +832,7 @@ export async function fetchLoadFlashNetwork(date?: string): Promise<LoadFlashNet
   const stations = Array.isArray(raw.stations)
     ? raw.stations.map((row) => normalizeLoadFlashStation((row ?? {}) as Record<string, unknown>))
     : [];
-  const hourly = Array.isArray(raw.hourly)
-    ? raw.hourly.map((row) => {
-        const point = (row ?? {}) as Record<string, unknown>;
-        return {
-          hour: num(point.hour),
-          at: String(point.at ?? ""),
-          totalLoad: num(point.totalLoad),
-          eddToday: num(point.eddToday),
-          outOnRoad: num(point.outOnRoad),
-          delivered: num(point.delivered),
-          returnsToday: num(point.returnsToday),
-          pickupsAssigned: num(point.pickupsAssigned),
-          pickupsSuccess: num(point.pickupsSuccess)
-        };
-      })
-    : [];
+  const hourly = normalizeLoadFlashHourly(raw.hourly);
   return {
     asOf: String(raw.asOf ?? new Date().toISOString()),
     businessDate: String(raw.businessDate ?? date ?? ""),
@@ -886,16 +892,26 @@ export type LoadFlashTrackingRow = {
   edd: string;
   morning: boolean;
   delivered: boolean;
+  /** Amazon driver ID, or the access-point ID for a store/locker delivery. Empty when Amazon recorded neither. */
+  driverId: string;
+  driverName: string;
+  isAccessPoint: boolean;
 };
 
-/** Every tracking ID for the full workbook. Kept off the page payload. */
-export async function fetchLoadFlashTracking(date?: string): Promise<LoadFlashTrackingRow[]> {
+/**
+ * Tracking IDs with their driver, for the workbooks and the station
+ * drill-down. Kept off the page payload. `stations` narrows the worker's
+ * read; callers must still filter the result to the viewer's own stations,
+ * because an older worker ignores the parameter and returns every station.
+ */
+export async function fetchLoadFlashTracking(date?: string, stations?: string[]): Promise<LoadFlashTrackingRow[]> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
   }
   const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/packages`);
   if (date) url.searchParams.set("date", date);
+  if (stations?.length) url.searchParams.set("stations", stations.join(","));
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
@@ -918,7 +934,10 @@ export async function fetchLoadFlashTracking(date?: string): Promise<LoadFlashTr
       state: String(row.state ?? ""),
       edd: String(row.edd ?? ""),
       morning: Boolean(row.morning),
-      delivered: Boolean(row.delivered)
+      delivered: Boolean(row.delivered),
+      driverId: String(row.driverId ?? "").trim(),
+      driverName: String(row.driverName ?? "").trim(),
+      isAccessPoint: Boolean(row.isAccessPoint)
     };
   }).filter((row) => row.trackingId);
 }
