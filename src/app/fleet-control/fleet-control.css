@@ -582,3 +582,6 @@ button, input, select, textarea { font: inherit; }
 }
 .fc-app .fc-calendar-grid button > span { font-size: 11px; }
 .fc-app .fc-audit-calendar .fc-vehicle-meta { font-size: 9px; }
+
+/* Keep operating controls out of the compact three-column legacy form grid. */
+.fc-settings-form.fc-operating-policy-form{display:block}.fc-operating-policy-form fieldset{min-width:0;grid-template-columns:minmax(0,1fr)}.fc-operating-policy-form fieldset label{min-width:0;font-size:12px;color:#5f6674}.fc-settings-form.fc-operating-policy-form .fc-button{grid-column:1;justify-self:end}.fc-settings-form.fc-operating-policy-form input[type="number"]{max-width:180px;border:1px solid var(--fc-line);border-radius:9px}.fc-settings-form>p{grid-column:1/-1;font-size:12px;line-height:1.5;color:var(--fc-muted)}
