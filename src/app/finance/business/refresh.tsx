@@ -9,7 +9,8 @@ export function LiveRefresh({ paused = false }: { paused?: boolean }) {
       if (
         !paused &&
         document.visibilityState === "visible" &&
-        !document.querySelector(".live-pnl details[open]")
+        !document.querySelector('.live-pnl details[open], .live-pnl [aria-expanded="true"], .live-pnl [data-exporting="true"]') &&
+        !document.activeElement?.matches(".live-pnl input, .live-pnl select, .live-pnl textarea")
       )
         startTransition(() => router.refresh());
     };

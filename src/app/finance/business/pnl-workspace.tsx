@@ -7,14 +7,14 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   ChevronDown,
-  Download,
   Info,
-  TrendingUp,
 } from "lucide-react";
 import type { LivePnl } from "@/lib/finance/pnl-data";
 import { pnlGroup, type PnlTotal, type PnlDay } from "@/lib/finance/pnl";
 import { todayIndia } from "@/lib/finance/pricing";
 import { PnlInsights } from "./pnl-insights";
+import { PnlComparison } from "./pnl-comparison";
+import { fixedRevenueBreakdown, pnlResultClass, stationGroupKey } from "@/lib/finance/pnl-comparison";
 import { LiveRefresh } from "./refresh";
 import {
   RevenueCalculation,
@@ -79,6 +79,7 @@ function Statement({
   report: LivePnl;
 }) {
   const evidence = useFinanceEvidence(rows, report.readAt);
+  const fixed = useMemo(() => fixedRevenueBreakdown(rows, report.locations), [rows, report.locations]);
   const [openIncome, setOpenIncome] = useState<Set<string>>(() => new Set());
   const [openCosts, setOpenCosts] = useState<Set<string>>(() => new Set());
   const dayKeys = useMemo(
@@ -120,7 +121,7 @@ function Statement({
           </div>
           <div
             className={
-              (total.profit ?? 0) < 0 ? "pnl-negative" : "pnl-positive"
+              pnlResultClass(total.profit)
             }
           >
             <small>{resultLabel(total.profit)}</small>
@@ -141,7 +142,8 @@ function Statement({
           </div>
           {(
             [
-              ["base", "MG / fixed payout + monthly fee", total.base],
+              ["base", "MG / fixed payout + monthly fee", fixed.base],
+              ...(fixed.hasXpt ? [["xpt", "XPT payouts", fixed.xpt] as const] : []),
               [
                 "variable",
                 "Excess deliveries / delivery slabs",
@@ -318,12 +320,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const router = useRouter(),
     [pending, startTransition] = useTransition();
-  const [filters, setFilters] = useState(report.filters),
-    [view, setView] = useState<"regions" | "stations" | "months" | "daily">(
-      "stations",
-    );
-  const [search, setSearch] = useState(""),
-    [expanded, setExpanded] = useState<string | null>(null);
+  const [filters, setFilters] = useState(report.filters);
   const [stationSearch, setStationSearch] = useState("");
   const total = report.total,
     today = todayIndia();
@@ -360,9 +357,6 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
     startTransition(() => router.push(`/finance/business?${q}`));
   }
   const issueStations = report.stations.filter((s) => s.issueDays).length;
-  const entries = report[view].filter((r) =>
-    r.key.toLowerCase().includes(search.toLowerCase()),
-  );
   const issueGroups = useMemo(() => {
     const map = new Map<
       string,
@@ -383,13 +377,6 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
     return [...map.values()];
   }, [report.days]);
   const available = report.availability.shipments;
-  const trendMax = Math.max(
-    ...report.daily.flatMap((d) => [
-      Math.abs(d.revenue ?? 0),
-      Math.abs(d.cost ?? 0),
-    ]),
-    1,
-  );
   return (
     <div className="live-pnl" aria-busy={pending}>
       <header className="pnl-header">
@@ -407,16 +394,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
               JSON.stringify(filters) !== JSON.stringify(report.filters)
             }
           />
-          <a
-            className="pnl-btn primary"
-            download
-            href={href().replace(
-              "/finance/business?",
-              "/finance/business/export?",
-            )}
-          >
-            <Download size={16} /> Download report
-          </a>
+          <a className="pnl-btn primary" href="#pnl-comparison">Compare & export ↓</a>
         </div>
       </header>
       <nav className="pnl-tabs" aria-label="Business performance">
@@ -620,33 +598,15 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
               }
             >
               <option value="">All permitted stations</option>
-              {report.locations
-                .filter(
-                  (l) =>
-                    (!filters.region || l.region === filters.region) &&
-                    (!filters.cluster || l.cluster === filters.cluster) &&
-                    (`${l.station_code} ${l.station_name}`
-                      .toLowerCase()
-                      .includes(stationSearch.toLowerCase()) ||
-                      l.station_code === filters.location),
-                )
-                .map((l) => (
-                  <option value={l.station_code} key={l.station_code}>
-                    {l.station_code} · {l.station_name}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label>
-            Station scope
-            <select
-              value={filters.includeXpts ? "1" : "0"}
-              onChange={(e) =>
-                setFilters({ ...filters, includeXpts: e.target.value === "1" })
-              }
-            >
-              <option value="1">Station + linked XPTs</option>
-              <option value="0">Selected station only</option>
+              {[...new Set(report.locations.map(stationGroupKey))].map(code => {
+                const members = report.locations.filter(l => stationGroupKey(l) === code);
+                const parent = report.locations.find(l => l.station_code === code) ?? members[0];
+                return { code, parent, members };
+              }).filter(({ code, parent, members }) =>
+                (!filters.region || parent.region === filters.region) &&
+                (!filters.cluster || parent.cluster === filters.cluster) &&
+                (code === filters.location || members.some(l => `${l.station_code} ${l.station_name}`.toLowerCase().includes(stationSearch.toLowerCase())))
+              ).map(({ code, parent, members }) => <option value={code} key={code}>{code} · {parent.station_name}{members.some(l => l.pricing_model === "xpt") ? " + XPT" : ""}</option>)}
             </select>
           </label>
           <button className="pnl-btn primary" disabled={pending}>
@@ -709,7 +669,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
               <small>Same live calculation as OpsPulse CPS</small>
             </div>
             <div
-              className={`pnl-result ${(total.profit ?? 0) < 0 ? "loss" : ""}`}
+              className={`pnl-result ${total.profit === null ? "unavailable" : total.profit < 0 ? "loss" : ""}`}
             >
               <span>{resultLabel(total.profit)} · provisional</span>
               <strong>{money(total.profit)}</strong>
@@ -750,97 +710,9 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
             <span>Review ↓</span>
           </a>
           <PnlInsights daily={report.daily} total={total} />
-          <Statement total={total} rows={report.days} report={report} />
-          <section className="pnl-panel">
-            <div className="pnl-panel-head">
-              <div>
-                <span className="pnl-eyebrow">Compare & investigate</span>
-                <h2>Where profit changes</h2>
-              </div>
-              <input
-                className="pnl-search"
-                aria-label="Search breakdown"
-                placeholder="Search this view"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="pnl-view-tabs">
-              {[
-                ["stations", "By station"],
-                ["regions", "By region"],
-                ["months", "By month"],
-                ["daily", "By day"],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  className={view === key ? "selected" : ""}
-                  onClick={() => {
-                    setView(key as typeof view);
-                    setExpanded(null);
-                    setSearch("");
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="pnl-scroll">
-              <table className="pnl-comparison-table">
-                <thead>
-                  <tr>
-                    <th>
-                      {view === "months"
-                        ? "Month"
-                        : view === "daily"
-                          ? "Date"
-                          : view === "regions"
-                            ? "Region"
-                            : "Station"}
-                    </th>
-                    <th>Delivered</th>
-                    <th>Revenue</th>
-                    <th>Expenses</th>
-                    <th>Profit / Loss</th>
-                    <th>CPS</th>
-                    <th>Margin</th>
-                    <th>Data through</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((row) => {
-                    const rows = report.days.filter((d) =>
-                      view === "stations"
-                        ? d.station === row.key
-                        : view === "regions"
-                          ? d.region === row.key
-                          : view === "months"
-                            ? d.date.startsWith(row.key)
-                            : d.date === row.key,
-                    );
-                    return (
-                      <PnlTableRow
-                        key={row.key}
-                        row={row}
-                        title={
-                          view === "months"
-                            ? monthLabel(row.key)
-                            : view === "daily"
-                              ? dateLabel(row.key)
-                              : row.key
-                        }
-                        through={
-                          rows
-                            .filter((d) => d.deliveries !== null)
-                            .map((d) => d.date)
-                            .sort()
-                            .at(-1) ?? null
-                        }
-                        open={expanded === row.key}
-                        onToggle={() =>
-                          setExpanded(expanded === row.key ? null : row.key)
-                        }
-                      >
+          <PnlComparison report={report} href={href} renderDetails={(row, view) => {
+            const rows = row.days;
+            return <>
                         <p className="pnl-expanded-period">
                           {titleForRows(rows)} · Revenue minus expenses ={" "}
                           {resultLabel(row.profit).toLowerCase()}. Amounts
@@ -877,9 +749,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                                       <td>{money(d.cost, 2)}</td>
                                       <td
                                         className={
-                                          (d.profit ?? 0) < 0
-                                            ? "pnl-negative"
-                                            : "pnl-positive"
+                                          pnlResultClass(d.profit)
                                         }
                                       >
                                         {resultLabel(d.profit)}{" "}
@@ -899,85 +769,14 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
                             </div>
                           </details>
                         )}
-                        {view === "stations" && row.dataThrough && (
-                          <a
-                            className="pnl-btn"
-                            href={opsLink(
-                              `/cps?period=custom&from=${report.filters.from}&to=${row.dataThrough}&station=${encodeURIComponent(row.key)}`,
-                            )}
-                          >
-                            Open full CPS & associate details →
-                          </a>
-                        )}
-                      </PnlTableRow>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <th>Total</th>
-                    <td data-label="Delivered">{count(total.deliveries)}</td>
-                    <td data-label="Revenue">{money(total.revenue)}</td>
-                    <td data-label="Expenses">{money(total.cost)}</td>
-                    <td data-label="Profit / loss">
-                      {resultLabel(total.profit)}{" "}
-                      {money(
-                        total.profit === null ? null : Math.abs(total.profit),
-                      )}
-                    </td>
-                    <td data-label="CPS">{money(total.cps, 2)}</td>
-                    <td data-label="Margin">{total.margin?.toFixed(1) ?? "—"}%</td>
-                    <td data-label="Reported days">
-                      {total.shipmentDays}/{total.stationDays}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-            <p className="pnl-footnote">
-              Click a row to expand. CPS = total operating cost ÷ delivered
-              shipments; region and business totals use weighted totals, never
-              an average of station CPS.
-            </p>
-          </section>
-          <details className="pnl-panel pnl-trend">
-            <summary>
-              <TrendingUp size={18} /> Daily revenue & cost trend{" "}
-              <span>{report.daily.length} days</span>
-            </summary>
-            <div className="pnl-trend-legend">
-              <i />
-              Revenue <i />
-              Cost
-            </div>
-            <div className="pnl-trend-grid">
-              {report.daily.map((d) => (
-                <div key={d.key} className="pnl-trend-row">
-                  <span>{dateLabel(d.key)}</span>
-                  <div>
-                    <b
-                      style={{
-                        width: `${Math.max(0, ((d.revenue ?? 0) / trendMax) * 100)}%`,
-                      }}
-                      title={`Revenue ${money(d.revenue, 2)}`}
-                    />
-                    <i
-                      style={{
-                        width: `${Math.max(0, ((d.cost ?? 0) / trendMax) * 100)}%`,
-                      }}
-                      title={`Cost ${money(d.cost, 2)}`}
-                    />
-                  </div>
-                  <small>
-                    {money(d.revenue)} / {money(d.cost)}
-                  </small>
-                  <strong className={(d.profit ?? 0) < 0 ? "pnl-negative" : ""}>
-                    {money(d.profit)}
-                  </strong>
-                </div>
-              ))}
-            </div>
-          </details>
+
+              {view === "stations" && <div className="pnl-member-links">{row.members.map(station => {
+                const through = report.coverage.find(c => c.station === station)?.through;
+                return through ? <a className="pnl-btn" key={station} href={opsLink(`/cps?period=custom&from=${report.filters.from}&to=${through}&station=${encodeURIComponent(station)}`)}>{station} · CPS & associate details →</a> : null;
+              })}</div>}
+            </>;
+          }} />
+          <div id="pnl-statement"><Statement total={total} rows={report.days} report={report} /></div>
           <section id="pnl-review" className="pnl-panel">
             <div className="pnl-panel-head">
               <div>
@@ -1098,61 +897,5 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
         </div>
       </footer>
     </div>
-  );
-}
-function PnlTableRow({
-  row,
-  title,
-  through,
-  open,
-  onToggle,
-  children,
-}: {
-  row: PnlTotal;
-  title: string;
-  through: string | null;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <>
-      <tr className="pnl-data-row">
-        <th>
-          <button onClick={onToggle} aria-expanded={open}>
-            <ChevronDown
-              size={14}
-              style={{ transform: open ? "rotate(180deg)" : undefined }}
-            />
-            {title}
-          </button>
-        </th>
-        <td data-label="Delivered">{count(row.deliveries)}</td>
-        <td data-label="Revenue">{money(row.revenue)}</td>
-        <td data-label="Expenses">{money(row.cost)}</td>
-        <td data-label="Profit / loss" className={(row.profit ?? 0) < 0 ? "pnl-negative" : "pnl-positive"}>
-          {resultLabel(row.profit)}{" "}
-          {row.profit === null ? "" : money(Math.abs(row.profit))}
-        </td>
-        <td data-label="CPS">{money(row.cps, 2)}</td>
-        <td data-label="Margin">{row.margin === null ? "—" : `${row.margin.toFixed(1)}%`}</td>
-        <td data-label="Data through">
-          <span className={row.issueDays ? "pnl-badge" : "pnl-badge good"}>
-            {dateLabel(through)}
-            <small>
-              {row.shipmentDays}/{row.stationDays} reported days
-            </small>
-            {row.issueDays ? " · provisional" : ""}
-          </span>
-        </td>
-      </tr>
-      {open && (
-        <tr className="pnl-expanded-row">
-          <td colSpan={8} className="pnl-expanded">
-            {children}
-          </td>
-        </tr>
-      )}
-    </>
   );
 }

@@ -484,7 +484,8 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   let seen;
   const route = compile("../../app/finance/business/export/route.ts", {
     "@/lib/finance/pnl-data": { loadPnl: async () => { throw Error("Wrong export branch"); } },
-    "@/lib/finance/pnl": {},
+    "@/lib/finance/pnl-comparison": {},
+    "@/lib/finance/pnl-export": {},
     "next/server": {
       NextResponse: { json: (v, o) => new Response(JSON.stringify(v), o) },
     },
@@ -807,7 +808,8 @@ test("Daily CSV contains only the selected authorized allocation and reconciles 
   const rows = performance.buildBusinessRows(snap, [pc], [location], f);
   const route = compile("../../app/finance/business/export/route.ts", {
     "@/lib/finance/pnl-data": { loadPnl: async () => { throw Error("Wrong export branch"); } },
-    "@/lib/finance/pnl": {},
+    "@/lib/finance/pnl-comparison": {},
+    "@/lib/finance/pnl-export": {},
     "next/server": {
       NextResponse: { json: (v, o) => new Response(JSON.stringify(v), o) },
     },
