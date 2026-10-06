@@ -57,9 +57,12 @@ export function compareRosterPlanPreference(
 ) {
   const datedOrder = Number(right?.roster_kind === "dated") - Number(left?.roster_kind === "dated");
   if (datedOrder) return datedOrder;
+  const effectiveFromOrder = String(right?.effective_from ?? "").localeCompare(String(left?.effective_from ?? ""));
+  // Recurring revisions are numbered per source plan, not globally. A newer
+  // approved pattern wins for covered people while older patterns cover others.
+  if (left?.roster_kind !== "dated" && right?.roster_kind !== "dated" && effectiveFromOrder) return effectiveFromOrder;
   const revisionOrder = Number(right?.revision_no ?? 0) - Number(left?.revision_no ?? 0);
   if (revisionOrder) return revisionOrder;
-  const effectiveFromOrder = String(right?.effective_from ?? "").localeCompare(String(left?.effective_from ?? ""));
   if (effectiveFromOrder) return effectiveFromOrder;
   const updatedAtOrder = String(right?.updated_at ?? "").localeCompare(String(left?.updated_at ?? ""));
   if (updatedAtOrder) return updatedAtOrder;

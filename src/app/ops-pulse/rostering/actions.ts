@@ -29,6 +29,7 @@ import {
 } from "@/lib/ops-pulse/recurring-roster-import";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { retireFullyReplacedRosterPlans } from "@/lib/roster-supersession";
 
 type RosterChange = {
   workerType: "employee" | "contractor";
@@ -782,30 +783,11 @@ async function syncRecurringBaselineFromDatedPlan(
     notes: entry.notes
   })));
   if (copied.error) throw new Error(copied.error.message);
-  const ended = await db().from("hr_roster_plans")
-    .update({ superseded_at: weekStart })
-    .eq("company_id", companyId)
-    .eq("location_id", plan.location_id)
-    .eq("roster_kind", "recurring_weekly")
-    .eq("status", "approved")
-    .is("superseded_at", null)
-    .lt("effective_from", weekStart);
-  if (ended.error) throw new Error(ended.error.message);
+  await retireFullyReplacedRosterPlans(db(), companyId, created.data.id);
 }
 
 async function publishPlan(companyId: string, authorization: AuthorizationContext, plan: Awaited<ReturnType<typeof loadPlan>>, note: string, preserveSubmission = false) {
   const now = new Date().toISOString();
-  if (plan.roster_kind === "recurring_weekly") {
-    const ended = await db().from("hr_roster_plans")
-      .update({ superseded_at: plan.effective_from })
-      .eq("company_id", companyId)
-      .eq("location_id", plan.location_id)
-      .eq("roster_kind", "recurring_weekly")
-      .eq("status", "approved")
-      .is("superseded_at", null)
-      .neq("id", plan.id);
-    if (ended.error) throw new Error(ended.error.message);
-  }
   const approvalUpdate: Record<string, unknown> = {
       status: "approved",
       approver_user_id: null,
@@ -826,6 +808,9 @@ async function publishPlan(companyId: string, authorization: AuthorizationContex
     .select("id")
     .maybeSingle();
   if (approved.error || !approved.data) throw new Error(approved.error?.message ?? "This roster is no longer available.");
+  if (plan.roster_kind === "recurring_weekly") {
+    await retireFullyReplacedRosterPlans(db(), companyId, plan.id);
+  }
   if (plan.roster_kind === "dated" && plan.location_id && plan.period_start && plan.period_end) {
     await syncRecurringBaselineFromDatedPlan(companyId, authorization, {
       id: plan.id,
