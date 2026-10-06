@@ -5,6 +5,7 @@ export const accessPages = [
   {code:'ops_notification_settings',name:'Ops Settings · Notifications',sort_order:133},
   { code: "finance_pricing", name: "Pricing Master", sort_order: 110 },
   { code: "finance_rent", name: "Rent Master", sort_order: 111 },
+  { code: "finance_books", name: "Accounting, Banks & Loans", sort_order: 115 },
   { code: "finance_assets", name: "Asset Master", sort_order: 114 },
   { code: "asset_audits", name: "Asset Audit Register", sort_order: 115 },
   { code: "finance_revenue", name: "Revenue & Billing", sort_order: 112 },

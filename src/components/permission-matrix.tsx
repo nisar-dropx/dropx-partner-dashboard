@@ -90,7 +90,7 @@ const peopleGroups: PermissionGroup[] = [
 ];
 
 const financeGroups: PermissionGroup[] = dashboardGroups.map((group) => group.key === "master_data"
-  ? { ...group, codes: [...group.codes, "finance_assets", "finance_rent"] }
+  ? { ...group, codes: [...group.codes, "finance_assets", "finance_rent", "finance_books"] }
   : group);
 
 function emptyPermissionState(pages: PermissionPage[]) {

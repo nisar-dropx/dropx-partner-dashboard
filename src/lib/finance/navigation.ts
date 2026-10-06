@@ -38,6 +38,7 @@ export const financeNavItems: NavItem[] = [
     { code: "finance_revenue", label: "Revenue & Billing", href: "/finance/business?tab=revenue" },
     { code: "finance_pnl", label: "Profit & Loss", href: "/finance/business?tab=pnl" }
   ] },
+  { code: "finance_books", label: "Accounting, Banks & Loans", href: "/finance/books", icon: "₹" },
   { code: "payment_settings", label: "Finance Settings", href: "/settings/payments", icon: "S" },
   {
     code: "users",
