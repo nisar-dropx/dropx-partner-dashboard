@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   isPureElectricFuel,
   normalizeVehicleRegistration,
-  trustedVehicleFuelFromAudits
+  trustedVehicleFuelFromAudits,
+  vehicleFuelTypeForClient
 } from "./vehicle-fuel.ts";
 
 test("recognizes only pure-electric fuel descriptions", () => {
@@ -18,6 +19,13 @@ test("recognizes only pure-electric fuel descriptions", () => {
 
 test("normalizes vehicle registration numbers for exact audit matching", () => {
   assert.equal(normalizeVehicleRegistration(" kl-14 af 6404 "), "KL14AF6404");
+});
+
+test("returns a legacy-compatible client label only for pure-electric vehicles", () => {
+  assert.equal(vehicleFuelTypeForClient("Pure Ev"), "Electric");
+  assert.equal(vehicleFuelTypeForClient("Electric(Bov)"), "Electric");
+  assert.equal(vehicleFuelTypeForClient("  Petrol / Hybrid  "), "Petrol / Hybrid");
+  assert.equal(vehicleFuelTypeForClient("Diesel"), "Diesel");
 });
 
 test("reads fuel only from a successful matching provider audit", () => {
