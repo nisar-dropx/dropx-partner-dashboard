@@ -24,3 +24,8 @@ export function estimatedShipments(answers: Array<{ answer_value: string | null;
   const ids = new Set(tracking.flatMap(a => parsePaymentTrackingIds(a.answer_value ?? '')));
   return ids.size || null;
 }
+
+/** CPS applies only to heads configured to collect shipment counts or tracking IDs. */
+export function hasShipmentCostBasis(questions: readonly ({ question_text: string } | null | undefined)[]) {
+  return questions.some(question => /^(?:estimated shipments|(?:shipment )?tracking (?:ids?|numbers?)\s*[:*]?)$/i.test(question?.question_text.trim() ?? ''));
+}
