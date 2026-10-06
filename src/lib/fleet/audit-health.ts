@@ -25,9 +25,21 @@ export function compareFindings(previous: ReportFinding[], current: ReportRespon
   return {...f,comparison,previousCount:group.length};
  });
 }
+export type FindingProof = {id:string;url:string;type:string;caption:string;auditId:string};
+export type FindingUpdate = {id:string;at:string;actor:string;status:string;note:string;action:string;owner:string;due:string;severity:string;proofs:FindingProof[];before:{status:string;due:string|null;action:string;owner:string;severity:string}};
+export type FindingAction = ReportFinding & {owner:string;updatedAt:string;updates:FindingUpdate[]};
+export function findingUrgency(f:ReportFinding,today:string) {
+ if(['resolved','accepted'].includes(f.status))return 'Closed';
+ if(f.severity==='critical')return 'Immediate';
+ if(!f.due)return 'Due date needed';
+ if(f.due<today)return 'Overdue';
+ if(f.due===today)return 'Due today';
+ return f.severity==='high'?'High priority':'Planned';
+}
 export type AuditReport = {
  id: string; vehicleId:string; vehicleNo:string; model:string; station:string; mode:string; date:string; completedAt:string|null; inspector:string; status:string; summary:string; odometer:number|null;
  score:number|null; scoreBasis:'Weighted health'|'Original checklist score'; health:ReturnType<typeof summarizeHealth>; responses:ReportResponse[]; findings:ReportFinding[]; continuity:Continuity[];
  previous:{id:string;date:string;score:number|null;status:string}[];
- evidence:{id:string;itemId:string|null;type:string;url:string;caption:string}[]; generatedAt:string;
+ evidence:{id:string;itemId:string|null;type:string;url:string;caption:string;auditId?:string}[]; generatedAt:string;
+ actions?:FindingAction[]; canManageActions?:boolean;
 };

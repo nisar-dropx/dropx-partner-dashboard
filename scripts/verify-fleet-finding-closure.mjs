@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {PGlite} from '@electric-sql/pglite';
+const db=new PGlite();
+await db.exec(`create role anon;create role authenticated;create role service_role;create schema storage;
+create table companies(id uuid primary key);create table profiles(id uuid primary key,company_id uuid,full_name text);
+create table fleet_audits(id uuid primary key);create table fleet_audit_findings(id uuid primary key,company_id uuid,audit_id uuid,checklist_item_id uuid,category text,finding text,severity text,action_required text,owner_user_id uuid,expected_completion_date date,status text,resolved_at timestamptz,created_at timestamptz,updated_at timestamptz,resolution_note text);
+create table storage.objects(bucket_id text,name text);`);
+const migration=fs.readFileSync('supabase/migrations/20261006184858_fleet_audit_action_closure_proof.sql','utf8');await db.exec(migration);
+const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+const [company,actor,finding,audit,otherCompany,otherActor]=[1,2,3,4,5,6].map(id);
+await db.query('insert into companies values($1),($2)',[company,otherCompany]);
+await db.query('insert into profiles values($1,$2,$3),($4,$5,$6)',[actor,company,'Test Fleet Manager',otherActor,otherCompany,'Other company']);
+await db.query('insert into fleet_audits values($1)',[audit]);
+await db.query("insert into fleet_audit_findings(id,company_id,audit_id,category,finding,severity,action_required,status,created_at,updated_at) values($1,$2,$3,'Tyres','Worn tyre','high','Replace tyre','open',now(),now())",[finding,company,audit]);
+async function current(){return (await db.query('select * from fleet_audit_findings where id=$1',[finding])).rows[0];}
+async function save(overrides={}){const f=await current();const a={company,finding,actor,event:id(20),expected:f.updated_at,status:'in_progress',note:'Replacement ordered',action:'Replace worn tyre',owner:'Fleet manager',due:'2026-10-13',severity:'high',uploads:[],...overrides};return db.query('select fleet_save_finding_update($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',Object.values(a));}
+const rejects=(f,re)=>assert.rejects(f,re);
+await rejects(()=>save({status:'resolved'}),/Upload closure proof/);
+assert.equal((await current()).status,'open');
+await rejects(()=>save({company:otherCompany}),/Finding not found/);
+await rejects(()=>save({actor:otherActor}),/outside this company/);
+await rejects(()=>save({owner:''}),/required/);
+await rejects(()=>save({due:null}),/required/);
+await rejects(()=>save({note:''}),/required/);
+await rejects(()=>db.query("update fleet_audit_findings set status='resolved' where id=$1",[finding]),/tracker/);
+await rejects(()=>save({status:'accepted'}),/valid status/);
+const first=(await current()).updated_at;await save();
+await rejects(()=>save({event:id(21),expected:first}),/Reload/);
+await save({expected:first}); // Same idempotency key succeeds after a lost response.
+assert.equal((await db.query('select count(*)::int n from fleet_audit_finding_updates')).rows[0].n,1);
+async function upload(n,opts={}){const u={company,finding,actor,path:`${company}/audits/${audit}/${n}.jpg`,...opts};await db.query("insert into fleet_audit_finding_uploads(id,company_id,finding_id,actor_id,storage_path,media_type,caption) values($1,$2,$3,$4,$5,'photo','Test proof')",[id(n),u.company,u.finding,u.actor,u.path]);await db.query("insert into storage.objects values('fleet-documents',$1)",[u.path]);return id(n);}
+const foreign=await upload(30,{actor:otherActor});await rejects(()=>save({event:id(22),status:'resolved',uploads:[foreign]}),/another action/);
+const wrongPath=await upload(31,{path:`${company}/audits/${id(99)}/bad.jpg`});await rejects(()=>save({event:id(22),status:'resolved',uploads:[wrongPath]}),/another action/);
+const p1=await upload(32),p2=await upload(33);
+await rejects(()=>save({event:id(22),status:'resolved',uploads:[p1,p1]}),/distinct proof/);
+await rejects(()=>save({event:id(22),status:'resolved',uploads:[p1,id(99)]}),/another action/);
+assert.equal((await db.query('select update_id from fleet_audit_finding_uploads where id=$1',[p1])).rows[0].update_id,null);
+await save({event:id(22),status:'resolved',uploads:[p1,p2],note:'Replaced and inspected. Photos attached.'});
+assert.equal((await current()).status,'resolved');assert.ok((await current()).resolved_at);
+await rejects(()=>db.query("update fleet_audit_finding_updates set note='Changed'"),/cannot be changed/);
+await rejects(()=>db.query('delete from fleet_audit_finding_updates'),/cannot be changed/);
+await save({event:id(23),status:'open',note:'Issue recurred. Reopening for verification.'});assert.equal((await current()).resolved_at,null);
+await rejects(()=>save({event:id(24),status:'resolved',uploads:[p1]}),/another action/);
+await rejects(()=>save({event:id(24),status:'resolved'}),/Upload closure proof/);
+const p3=await upload(34);await save({event:id(24),status:'resolved',uploads:[p3]});
+const events=(await db.query('select * from fleet_audit_finding_updates order by created_at')).rows;assert.equal(events.length,4);assert.equal(events[1].proofs.length,2);assert.equal(events[0].before_state.status,'open');
+assert.equal((await db.query("select has_function_privilege('authenticated','public.fleet_save_finding_update(uuid,uuid,uuid,uuid,timestamptz,text,text,text,text,date,text,uuid[])','EXECUTE') ok")).rows[0].ok,false);
+assert.equal((await db.query("select has_table_privilege('authenticated','fleet_audit_finding_updates','INSERT') ok")).rows[0].ok,false);
+await db.close();
+console.log('Finding closure: proof requirement, multiple uploads, tenant/actor isolation, missing files, duplicate files, atomic rollback, stale updates, idempotency, immutable history, reopen/fresh-proof closure and role grants passed.');

@@ -13,9 +13,10 @@ export async function GET(request:Request) {
   if(params.get('format')==='pdf') {
    const {renderAuditPdf}=await import('@/lib/fleet/audit-report-pdf');
    const {loadAuditAttachment}=await import('@/lib/fleet/audit-report-media');
-   const bytes=await renderAuditPdf(report,e=>loadAuditAttachment(companyId,id,e));
+   const bytes=await renderAuditPdf(report,e=>loadAuditAttachment(companyId,e.auditId||id,e));
    return new Response(new Uint8Array(bytes),{headers:{'Content-Type':'application/pdf','Content-Disposition':`attachment; filename="Audit-${report.vehicleNo.replace(/[^A-Za-z0-9-]/g,'')}-${report.date}.pdf"`,'Cache-Control':'private, no-store'}});
   }
+  try { await auditAccess(id,'followup');report.canManageActions=true; } catch {report.canManageActions=false;}
   return Response.json(report,{headers:{'Cache-Control':'private, no-store'}});
  } catch { return Response.json({error:'The audit report could not be prepared. Your audit is saved. Please retry.'},{status:500}); }
 }

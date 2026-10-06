@@ -656,12 +656,8 @@ async function saveAuditDraft(companyId:string,allowed:boolean,body:Payload) {
 }
 async function updateFinding(companyId:string,allowed:boolean,body:Payload) {
  if(!allowed) return NextResponse.json({error:'Maintenance permission denied.'},{status:403});
- const status=clean(body.status);
- if(!['open','in_progress','resolved'].includes(status)) throw new Error('Choose a valid action status.');
- const note=required(body.resolutionNote,'Update / resolution note');
- const result=await supabaseAdmin!.from('fleet_audit_findings').update({status,resolution_note:note,resolved_at:status==='resolved'?new Date().toISOString():null,updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',required(body.findingId,'Finding')).select('id').maybeSingle();
- if(result.error || !result.data) throw new Error(result.error?.message || 'Finding not found.');
- return NextResponse.json({ok:true,message:status==='resolved'?'Finding resolved.':'Follow-up updated.'});
+ const {saveFindingUpdate}=await import('@/lib/fleet/finding-actions');
+ return NextResponse.json(await saveFindingUpdate(body));
 }
 
 async function saveVehicleSource(companyId:string,allowed:boolean,body:Payload) {
