@@ -1,3 +1,5 @@
+import { scoreAuditAnswer } from '@/lib/fleet/audit-rules';
+import { summarizeHealth } from '@/lib/fleet/audit-health';
 import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { auditApplies, evaluateAuditResponse, normalizeAuditConfig } from "@/lib/fleet/audit-rules";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
@@ -333,12 +335,11 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
       if(passed===false) findings.push({itemId:item.id,category:item.category,finding:`${item.label}: ${comments || value}`,severity:item.failure_severity,actionRequired:'Review and rectify',expectedCompletionDate:todayKolkata()});
     }
     if(value && new Set(evidence.filter((e:Payload)=>e.itemId===item.id && (type==='any' || e.type===type)).map((e:Payload)=>clean(e.url))).size < minimum) throw new Error(`${item.label}: attach ${minimum} ${type} evidence.`);
-    responses.push({itemId:item.id,passed,comments,snapshot:{value,label:item.label,config,days:config?.options.find(option=>option.value===value)?.followUp==='planned' ? Number(r.days) : null,action:clean(r.action)}});
+    responses.push({itemId:item.id,passed,comments,snapshot:{value,label:item.label,category:item.category,scoring:scoreAuditAnswer(config,value,passed,item.failure_severity),config,days:config?.options.find(option=>option.value===value)?.followUp==='planned' ? Number(r.days) : null,action:clean(r.action)}});
   }
   if(clean(body.finding)) findings.push({category:clean(body.findingCategory)||'General',finding:clean(body.finding),severity:['low','medium','high','critical'].includes(body.severity)?body.severity:'medium',actionRequired:clean(body.actionRequired),expectedCompletionDate:clean(body.expectedCompletionDate)||null});
-  const failed=responses.some(r=>r.passed===false);
-  const scored=responses.filter(r=>r.passed!==null);
-  const score=scored.length ? Math.round(scored.filter(r=>r.passed).length/scored.length*100) : null;
+  const failed=findings.length>0;
+  const score=summarizeHealth(responses.map(r=>({category:r.snapshot.category,...r.snapshot.scoring}))).score;
   const update = await supabaseAdmin!.rpc('fleet_complete_audit_v2',{p_company:companyId,p_audit:auditId,p_user:userId,p_data:{responses,evidence,findings,status:failed?'failed':'passed',score,summary:clean(body.summary),odometerKm:numberOrNull(body.odometerKm)}});
   if(update.error) throw new Error(update.error.message);
   let emailStatus = "not_sent";

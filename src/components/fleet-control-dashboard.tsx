@@ -178,6 +178,7 @@ export function FleetControlDashboard({
   approveAction,
   data: serverData,
   initialRequestId,
+  initialAuditId,
   initialMasterTab,
   initialSection,
   message,
@@ -188,6 +189,7 @@ export function FleetControlDashboard({
   approveAction: (formData: FormData) => Promise<void>;
   data: FleetControlData;
   initialRequestId?: string;
+  initialAuditId?: string;
   initialMasterTab?: string;
   initialSection?: string;
   message: { type: "notice" | "error"; text: string } | null;
@@ -205,7 +207,7 @@ export function FleetControlDashboard({
   const firstVisibleSection = sections.find((item) => visibleSectionSet.has(item.key))?.key ?? "overview";
   const requestedSection = validSections.has(initialSection as Section) ? initialSection as Section : firstVisibleSection;
   const [section, setSection] = useState<Section>(visibleSectionSet.has(requestedSection) ? requestedSection : firstVisibleSection);
-  const [auditToOpen, setAuditToOpen] = useState<string | null>(null);
+  const [auditToOpen, setAuditToOpen] = useState<string | null>(initialAuditId || null);
   const [mobileNav, setMobileNav] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [query, setQuery] = useState("");

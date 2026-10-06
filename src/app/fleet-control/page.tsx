@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = {
   section?: string;
+  auditId?: string;
   notice?: string;
   error?: string;
   request?: string;
@@ -31,6 +32,7 @@ export default async function FleetControlPage({ searchParams }: { searchParams?
     <FleetControlDashboard
       approveAction={approveFleetPayment}
       data={data}
+      initialAuditId={searchParams?.auditId}
       initialRequestId={searchParams?.request}
       initialMasterTab={searchParams?.master}
       initialSection={searchParams?.section}

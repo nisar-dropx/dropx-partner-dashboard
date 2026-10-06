@@ -1,13 +1,13 @@
 /** Shared by the form and server: never trust a client-supplied pass/fail value. */
-export type AuditOption = { value: string; label: string; issue: boolean; severity: string; photos: number; remarks: boolean; followUp: 'none' | 'planned' | 'immediate'; days: number };
-export type AuditConfig = { kind: 'choice' | 'text' | 'number' | 'date'; options: AuditOption[]; fuels: string[]; documentType: string; unit: string };
+export type AuditOption = { value: string; label: string; issue: boolean; severity: string; photos: number; remarks: boolean; followUp: 'none' | 'planned' | 'immediate'; days: number; score?: number | null };
+export type AuditConfig = { kind: 'choice' | 'text' | 'number' | 'date'; options: AuditOption[]; fuels: string[]; documentType: string; unit: string; weight?: number };
 export function normalizeAuditConfig(value: unknown): AuditConfig | null {
   if (!value || typeof value !== 'object' || !('kind' in value)) return null;
   const raw = value as Record<string, any>;
   if (!['choice','text','number','date'].includes(raw.kind)) throw new Error('Choose a supported response format.');
-  const options: AuditOption[] = (Array.isArray(raw.options) ? raw.options : []).map((o: any) => ({ value: String(o.value ?? '').trim(), label: String(o.label ?? '').trim(), issue: Boolean(o.issue) || ['planned','immediate'].includes(o.followUp), severity: ['low','medium','high','critical'].includes(o.severity) ? o.severity : 'medium', photos: Math.max(0, Math.min(6, Math.floor(Number(o.photos) || 0))), remarks: Boolean(o.remarks), followUp: ['planned','immediate'].includes(o.followUp) ? o.followUp : 'none', days: Math.max(1, Math.min(365, Math.floor(Number(o.days) || 7))) }));
+  const options: AuditOption[] = (Array.isArray(raw.options) ? raw.options : []).map((o: any) => ({ value: String(o.value ?? '').trim(), label: String(o.label ?? '').trim(), issue: Boolean(o.issue) || ['planned','immediate'].includes(o.followUp), severity: ['low','medium','high','critical'].includes(o.severity) ? o.severity : 'medium', photos: Math.max(0, Math.min(6, Math.floor(Number(o.photos) || 0))), remarks: Boolean(o.remarks), followUp: ['planned','immediate'].includes(o.followUp) ? o.followUp : 'none', score: o.score === null ? null : o.score !== undefined && Number.isFinite(Number(o.score)) ? Math.max(0, Math.min(100, Number(o.score))) : defaultAnswerScore(String(o.value || o.label || ''), Boolean(o.issue) || ['planned','immediate'].includes(o.followUp), o.severity), days: Math.max(1, Math.min(365, Math.floor(Number(o.days) || 7))) }));
   if (raw.kind === 'choice' && (options.length < 2 || options.length > 15 || options.some(o => !o.value || !o.label) || new Set(options.map(o=>o.value)).size !== options.length)) throw new Error('Add 2–15 response options with unique values and labels.');
-  return { kind: raw.kind, options, fuels: Array.isArray(raw.fuels) ? raw.fuels.map(String) : [], documentType: String(raw.documentType || ''), unit: String(raw.unit || '') };
+  return { kind: raw.kind, options, fuels: Array.isArray(raw.fuels) ? raw.fuels.map(String) : [], documentType: String(raw.documentType || ''), unit: String(raw.unit || ''), ...(raw.weight !== undefined ? { weight: Math.max(0, Math.min(10, Number(raw.weight) || 0)) } : {}) };
 }
 export function auditApplies(config: AuditConfig | null | undefined, fuel: string) { return !config?.fuels.length || config.fuels.some(f => f.toLowerCase() === fuel.toLowerCase()); }
 export function auditDueDate(today: string, days: number) { const date = new Date(`${today}T00:00:00Z`); date.setUTCDate(date.getUTCDate()+days); return date.toISOString().slice(0,10); }
@@ -36,3 +36,19 @@ export const auditPresets: Record<string, AuditConfig> = {
   driving: { kind: 'choice', fuels: [], documentType: '', unit: '', options: [choice('Satisfactory'),choice('Coaching needed',true,'medium','planned'),choice('Unsafe behaviour observed',true,'critical','immediate'),choice('Not observed',true,'medium','planned')] },
   readiness: { kind: 'choice', fuels: [], documentType: '', unit: '', options: [choice('Ready'),choice('Ready with follow-up',true,'medium','planned'),choice('Not ready for delivery',true,'critical','immediate')] }
 };
+
+/** Defaults remain editable in the master and are frozen with each submitted answer. */
+export function defaultAnswerScore(value: string, issue: boolean, severity: string): number | null {
+ if (/^(na|not_applicable)$|unable.to|not.tested|not.observed/i.test(value)) return null;
+ if (/average/i.test(value) && !issue) return 75;
+ if (!issue) return 100;
+ return severity === 'critical' ? 0 : severity === 'high' ? 25 : severity === 'low' ? 75 : 50;
+}
+export function auditItemWeight(config: AuditConfig | null, severity: string) {
+ return config?.weight ?? ({critical:4,high:3,medium:2,low:1}[severity] ?? 2);
+}
+export function scoreAuditAnswer(config: AuditConfig | null, value: string, passed: boolean | null, severity: string) {
+ const option=config?.options.find(o=>o.value===value);
+ const score=!value ? null : option ? (option.score !== undefined ? option.score : defaultAnswerScore(option.value,option.issue,option.severity)) : passed === null ? null : passed ? 100 : 0;
+ return {version:1 as const,weight:auditItemWeight(config,severity),score,critical:Boolean(option?.issue && option.severity==='critical') || (!config && passed===false && severity==='critical')};
+}
