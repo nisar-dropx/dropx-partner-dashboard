@@ -4,7 +4,7 @@ export function shiftAttendanceWorkbook(people: Array<ShiftAttendance & { design
   const time = (value: string | null) => value ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "";
   const rows = people.filter(p => matchesShift(p, status, search)).filter(p => !shift || (shift === "__week_off__" ? !p.today.shiftName : p.today.shiftName === shift)).sort((a, b) => a.name.localeCompare(b.name)).map(p => ({
     Date: date, Location: locations.get(p.locationId ?? "") ?? "", "People ID": p.code, Name: p.name, Designation: p.designation,
-    Roster: p.today.shiftName ?? p.today.rosterDayType ?? "No approved roster",
+    Roster: p.today.shiftName ?? p.today.rosterDayType ?? p.today.rosterSetupLabel ?? "No approved roster",
     Status: shiftLabel(p), "Work mode": p.today.workMode ?? "Onsite",
     "Approved leave": p.today.approvedLeave ? "Yes" : "No", "WFH credit": p.today.wfhState ?? "",
     "IN (IST)": time(p.today.inTime), "OUT (IST)": time(p.today.outTime), "Recorded / credited minutes": p.today.workMinutes,

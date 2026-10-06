@@ -3,6 +3,7 @@
 import { useState, type CSSProperties } from "react";
 import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, Clock3, Gauge, LogIn, MapPin, UserRoundCheck, Users2 } from "lucide-react";
 import { ShiftAttendanceTools } from "@/components/shift-attendance-tools";
+import { ShiftPunchTimes } from "@/components/shift-punch-times";
 import { matchesShift, shiftCategory, shiftLabel, shiftPunchMinute, isScheduledShift, rosterSetupSummary, type ShiftFilter } from "@/lib/shift-attendance-view";
 import { StationLiveRefresh } from "@/components/station-live-refresh";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
@@ -37,11 +38,6 @@ function rosterDate(value: string) {
   return Number.isNaN(date.getTime())
     ? value
     : new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(date);
-}
-
-function attendanceInterval(person: OpsStationManpowerPerson) {
-  if (!person.today.reported) return "—";
-  return `${clock(person.today.inTime)}–${person.today.outTime ? clock(person.today.outTime) : "OUT pending"}`;
 }
 
 function locationLabel(location: OpsStationManpowerPerson["today"]["inLocation"]) {
@@ -179,7 +175,7 @@ function StationTimetableContent({ people, locationCode, asOf, onShiftChange }: 
       return <article className={open ? "open" : ""} key={personKey}>
         <button type="button" aria-expanded={open} onClick={() => setSelectedPersonId(open ? null : personKey)}>
           <span><span className="station-timetable-person-name"><b>{person.name}</b><PunchLocationBadge person={person} /></span><small>{person.designation} · {stateLabel(person)}</small></span>
-          <span><b>{attendanceInterval(person)}</b><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
+          <span><ShiftPunchTimes inTime={person.today.inTime} outTime={person.today.outTime} /><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
         </button>
         {open ? <AttendanceDetail person={person} /> : null}
       </article>;
@@ -244,7 +240,7 @@ function StationTimetableContent({ people, locationCode, asOf, onShiftChange }: 
                 {arrival !== null && actualEnd !== null ? <span className={`station-timetable-actual ${state}`} style={{ left: `${actualLeft}%`, width: `${actualWidth}%` }} /> : null}
                 {arrival !== null ? <span className={`station-timetable-arrival ${state}`} style={{ left: `${actualLeft}%` }} title={`Reported ${clock(person.today.inTime)}`} /> : null}
               </span>
-              <span className={`station-timetable-status ${state}`}><b>{clock(person.today.inTime)}</b><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
+              <span className={`station-timetable-status ${state}`}><ShiftPunchTimes inTime={person.today.inTime} outTime={person.today.outTime} /><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
             </button>
             {open ? <AttendanceDetail person={person} /> : null}
           </div>;
@@ -264,9 +260,9 @@ function StationTimetableContent({ people, locationCode, asOf, onShiftChange }: 
               <span className="station-timetable-lane">
                 <span className="station-timetable-off-label">{stateLabel(person)}</span>
                 {arrival !== null && actualEnd !== null ? <span className="station-timetable-actual off-worked" style={{ left: `${actualLeft}%`, width: `${actualWidth}%` }} /> : null}
-                {arrival !== null ? <span className="station-timetable-arrival away" style={{ left: `${actualLeft}%` }} title={`Reported ${clock(person.today.inTime)} on week off`} /> : null}
+                {arrival !== null ? <span className="station-timetable-arrival away" style={{ left: `${actualLeft}%` }} title={`Reported ${clock(person.today.inTime)} · ${stateLabel(person)}`} /> : null}
               </span>
-              <span className="station-timetable-status away"><b>{attendanceInterval(person)}</b><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
+              <span className="station-timetable-status away"><ShiftPunchTimes inTime={person.today.inTime} outTime={person.today.outTime} /><small style={{ whiteSpace: "normal", fontSize: 9 }} title={stateLabel(person)}>{stateLabel(person)}</small></span>
             </button>
             {open ? <AttendanceDetail person={person} /> : null}
           </div>;

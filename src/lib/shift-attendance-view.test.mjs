@@ -22,6 +22,20 @@ test("late and early are independent", () => { assert(view.matchesShift(person()
 test("WFH is never missing attendance", () => { const p = person({ reported: false, inTime: null, outTime: null, workMode: "wfh", wfhState: "credited" }); assert(!view.matchesShift(p, "missing")); assert(!view.matchesShift(p, "late")); assert.equal(view.shiftLabel(p), "WFH · credited"); });
 test("approved leave and week off remain visible", () => { assert.equal(view.shiftLabel(person({ approvedLeave: true })), "Approved leave · punched"); assert(view.matchesShift(person({ rosterDayType: "weekly_off" }), "off")); });
 test("unrostered is not absent", () => assert.equal(view.shiftCategory(person({ reported: false, shiftName: null, rosterDayType: null })), "unassigned"));
+test("unapproved roster never hides punch evidence from filters or Excel", () => {
+  const xlsx = require("xlsx");
+  for (const pending of [false, true]) {
+    const row = person({ shiftName: null, rosterDayType: null, rosterSetupStatus: pending ? "pending_approval" : null, rosterSetupLabel: pending ? "Awaiting HR approval" : null });
+    assert(view.matchesShift(row, "present", "", now));
+    assert(!view.isScheduledShift(row));
+    const wb = xlsx.read(exp.shiftAttendanceWorkbook([row], day, new Map([["HO","HO"]]), "present", ""), { type: "array" });
+    const rows = xlsx.utils.sheet_to_json(wb.Sheets["Shift attendance"]);
+    assert.equal(rows.length, 1);
+    assert.match(rows[0]["IN (IST)"], /09:10/);
+    assert.match(rows[0]["OUT (IST)"], /17:30/);
+    assert.equal(rows[0].Roster, pending ? "Awaiting HR approval" : "No approved roster");
+  }
+});
 test("QLDA: five scheduled, four upcoming, one due and two pending HR", () => {
   const morning = Date.parse("2026-10-06T06:00:00+05:30");
   const rows = ["04:00:00","08:00:00","09:00:00","13:30:00","13:30:00"].map(start => person({
