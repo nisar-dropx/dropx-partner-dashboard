@@ -41,7 +41,7 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
         <PageHead
           eyebrow="Ops Pulse · Ops Live"
           title="Ops Live"
-          subtitle="Live station load, today's EDD, out on road, customer returns, and first-day pickups. Refreshed every hour from 6:05am to 11:05pm IST."
+          subtitle="The day's delivery report: how much of the morning load is delivered, what is on the road, and which stations need attention. Refreshed hourly, 6:05am to 11:05pm IST."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />
@@ -63,7 +63,7 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
             <div className="panel-body"><strong>Unable to load the report</strong><p className="subtle" style={{ marginTop: 6 }}>{error}</p></div>
           </section>
         ) : null}
-        {workerConfigured && payload ? <LoadFlashView initial={payload} /> : null}
+        {workerConfigured && payload ? <LoadFlashView initial={payload} stationNames={Object.fromEntries(stations.map((station) => [station.code, station.name]))} /> : null}
       </div>
     </AppShell>
   );
