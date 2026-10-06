@@ -666,7 +666,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
             <div>
               <span>Expenses</span>
               <strong>{money(total.cost)}</strong>
-              <small>Same live calculation as OpsPulse CPS</small>
+              <small>All known payouts, including MFN and seller returns</small>
             </div>
             <div
               className={`pnl-result ${total.profit === null ? "unavailable" : total.profit < 0 ? "loss" : ""}`}
