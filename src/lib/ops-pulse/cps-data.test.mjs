@@ -59,6 +59,7 @@ function dataModule(db, locations = all, rebuildCps = (base) => base) {
     "./cod": {
       loadCodLocations: async () => ({ locations, error: null }),
       todayKolkata: () => "2026-09-11",
+      locationModelName: l => (Array.isArray(l.location_models) ? l.location_models[0]?.code : l.location_models?.code) || "",
     },
     "./adhoc-activity": { adHocClusterLabel: (l) => l.cluster },
     "./cps": domain,
@@ -366,4 +367,16 @@ test('Fleet rent replaces base-RPC rent exactly once while genuine ad hoc costs 
  assert.equal(result.breakup.filter(l=>l.source==='Fleet Vehicle Master').length,1);
  assert.equal(result.breakup.find(l=>l.source==='Fleet Vehicle Master').amount,0,'canonical rent-blocked day wins over stale base rent');
  assert.equal(result.breakup.find(l=>l.source==='Approved payment requests').amount,250);
+});
+
+test("CPS parent selection combines authorized XPTs, applies parent filters and preserves input scope", async()=>{
+ const parent={...all[0],station_code:"P"},child={...all[1],station_code:"X",location_models:{code:"XPT"}};
+ const topology=[{id:"1",station_code:"P",parent_station_id:null},{id:"2",station_code:"X",parent_station_id:"1"},{id:"3",station_code:"HIDDEN",parent_station_id:"1"}];
+ const db={from:()=>emptyQuery(topology)};
+ const d=dataModule(db,[parent,child]);
+ for(const station of ["P","X"]) assert.deepEqual((await d.cpsScope(context,{station,region:"KL"},true)).selected.map(l=>l.station_code),["P","X"]);
+ assert.deepEqual((await d.cpsScope(context,{station:"P"},false)).selected.map(l=>l.station_code),["P"]);
+ assert.deepEqual((await dataModule(db,[child]).cpsScope(context,{station:"P"},true)).selected.map(l=>l.station_code),["X"]);
+ assert.equal((await d.cpsScope(context,{station:"HIDDEN"},true)).selected.length,0);
+ assert.equal((await dataModule(db,[child]).cpsScope(context,{station:"HIDDEN"},true)).selected.length,0);
 });

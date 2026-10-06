@@ -197,3 +197,14 @@ test('review counts each bill once and retains mapping and unmatched bill issues
  assert.equal(items.count,3);assert.equal(items.bills.length,1);
  assert.deepEqual(items.gaps,[mappingGap,otherStation]);
 });
+
+test("parent CPS combines costs and shipments once, without averaging member CPS",()=>{
+ const {cpsStationGroups,cpsForStations}=module.exports;
+ const groups=cpsStationGroups([{code:"P",name:"Parent"},{code:"X",name:"XPT",isXpt:true,parent:"P"},{code:"Y",name:"XPT2",isXpt:true,parent:"P"}]);
+ assert.equal(groups.length,1);assert.deepEqual(groups[0].members,["P","X","Y"]);assert.match(groups[0].subtitle,/Includes XPT X, Y/);
+ const data={daily:[{...day,station_code:"P",total:100,deliveries:10},{...day,station_code:"X",total:100,deliveries:5},{...day,station_code:"Z",total:999,deliveries:1}],breakup:[],gaps:[{station_code:"X"},{station_code:"Z"}],vehicles:[{station_code:"X"},{station_code:"Z"}]};
+ const result=cpsForStations(data,groups[0].members);
+ assert.equal(summarizeCps(result.daily).cps,200/15);assert.equal(result.gaps.length,1);assert.equal(result.vehicles.length,1);
+ const childOnly=cpsStationGroups([{code:"X",name:"XPT",isXpt:true,parent:"P"}]);
+ assert.deepEqual(childOnly[0].members,["X"]);assert.match(childOnly[0].subtitle,/only in your access/);
+});

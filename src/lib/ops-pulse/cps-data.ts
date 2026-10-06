@@ -5,7 +5,7 @@ import { rebuildCps, type CpsFacts } from "./cps-engine";
 import { cache } from "react";
 import { requireCompanyId } from "@/lib/company-scope";
 import type { AuthorizationContext } from "@/lib/authorization";
-import { loadCodLocations, todayKolkata, type CodLocationRow } from "./cod";
+import { loadCodLocations, locationModelName, todayKolkata, type CodLocationRow } from "./cod";
 import { adHocClusterLabel } from "./adhoc-activity";
 import {
   cpsPeriod,
@@ -21,7 +21,7 @@ import { readAllRows } from "@/lib/supabase-pagination";
 import { workforcePaymentMonthStart } from "@/lib/workforce-payment-policy";
 import type { WorkforceAttendanceCaptureSetting } from "@/lib/workforce-attendance-capture";
 
-export async function cpsScope(auth: AuthorizationContext, params: CpsParams) {
+export async function cpsScope(auth: AuthorizationContext, params: CpsParams, groupParents = false) {
   const companyId = requireCompanyId(auth);
   const locations = await loadCodLocations(
     companyId,
@@ -32,18 +32,42 @@ export async function cpsScope(auth: AuthorizationContext, params: CpsParams) {
     throw Error("Location access could not be loaded. Please retry.");
   // The shared owner loader includes hidden masters; CPS's calculation excludes
   // them. Keep pickers, input validation, report counts and the RPC in parity.
-  const all = locations.locations.filter(
+  const permitted = locations.locations.filter(
     (l) =>
       !l.hide_from_location_list &&
       !l.is_ho &&
       !/^HO(?:_|$)/i.test(l.station_code),
   );
-  const requested = selectedCpsStations(params.station);
+  // Relationships are metadata only: never use this company-wide read to widen
+  // the financial scope returned by the authorized location loader.
+  type Topology = { id: string; station_code: string; parent_station_id: string | null };
+  let topology: Topology[] = [];
+  if (groupParents && permitted.some(l => locationModelName(l).toLowerCase() === "xpt")) {
+    if (!supabaseAdmin) throw Error("Station group setup could not be loaded. Please retry.");
+    const result = await readAllRows(supabaseAdmin.from("stations")
+      .select("id,station_code,parent_station_id").eq("company_id", companyId).order("id"));
+    if (result.error) throw Error("Station group setup could not be loaded. Please retry.");
+    topology = (result.data ?? []) as Topology[];
+  }
+  const byId = new Map(topology.map(l => [l.id, l]));
+  const all = permitted.map(l => {
+    const is_xpt = locationModelName(l).toLowerCase() === "xpt";
+    const parentId = byId.get(l.id)?.parent_station_id;
+    return { ...l, is_xpt, parent_station_code: is_xpt && parentId ? byId.get(parentId)?.station_code || "" : "" };
+  });
+  const byCode = new Map(all.map(l => [l.station_code, l]));
+  const groupKey = (l: typeof all[number]) => groupParents && l.parent_station_code ? l.parent_station_code : l.station_code;
+  const requested = selectedCpsStations(params.station).map(code => {
+    const location = byCode.get(code);
+    return location ? groupKey(location) : code;
+  });
   const selected = all.filter(
-    (l) =>
-      (!requested.length || requested.includes(l.station_code)) &&
-      (!params.cluster || adHocClusterLabel(l) === params.cluster) &&
-      (!params.region || (l.region || "Unassigned") === params.region),
+    (l) => {
+      const filterLocation = groupParents ? byCode.get(groupKey(l)) || l : l;
+      return (!requested.length || requested.includes(groupKey(l))) &&
+        (!params.cluster || adHocClusterLabel(filterLocation) === params.cluster) &&
+        (!params.region || (filterLocation.region || "Unassigned") === params.region);
+    },
   );
   return {
     companyId,

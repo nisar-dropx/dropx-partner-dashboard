@@ -10,6 +10,7 @@ import {
   cpsIssues,
   summarizeCps,
   groupCps,
+  cpsStationGroups,
   ratio,
   type CpsParams,
 } from "@/lib/ops-pulse/cps";
@@ -65,7 +66,7 @@ export async function GET(request: Request) {
       { status: 403, headers },
     );
   try {
-    const scope = await cpsScope(auth, params);
+    const scope = await cpsScope(auth, params, true);
     if (!scope.selected.length)
       return Response.json(
         { error: "No permitted locations match these filters." },
@@ -78,6 +79,9 @@ export async function GET(request: Request) {
       scope.selected,
     );
     const places = new Map(scope.selected.map((l) => [l.station_code, l]));
+    const groups = cpsStationGroups(scope.selected.map(l => ({ code: l.station_code, name: l.station_name || l.station_code, parent: l.parent_station_code, isXpt: l.is_xpt })));
+    const byGroup = new Map(groups.map(g => [g.code, g]));
+    const groupByMember = new Map(groups.flatMap(g => g.members.map(code => [code, g.code] as const)));
     const deliveryByDay = new Map(
       result.daily.map((d) => [
         `${d.work_date}|${d.station_code}`,
@@ -108,7 +112,7 @@ export async function GET(request: Request) {
               ...summaryRow(summarizeCps(result.daily)),
               "Allocation notices": (result.allocation_notices??[]).join("; "),
               Calculation:
-                "Total recorded cost divided by delivered shipments. Missing costs and shipment days are flagged. Not an average of CPS.",
+                "EDSP + authorized XPT costs and delivered shipments combined once under their parent. Total recorded cost divided by delivered shipments. Missing costs and shipment days are flagged. Not an average of CPS.",
               Sources:
                 "People CTC, live workforce rate cards, daily shipments, fuel imports, Cashbook, approved operating payments, Finance rent, Fleet vehicle rent and cost setup.",
             },
@@ -116,9 +120,11 @@ export async function GET(request: Request) {
         },
         {
           name: "Station CPS",
-          rows: groupCps(result.daily, (r) => r.station_code).map((s) => ({
+          rows: groupCps(result.daily, r => groupByMember.get(r.station_code) || r.station_code).map((s) => ({
             Location: s.key,
-            Name: places.get(s.key)?.station_name || s.key,
+            Name: byGroup.get(s.key)?.name || s.key,
+            "Included stations": byGroup.get(s.key)?.members.join(", ") || s.key,
+            "Group scope": byGroup.get(s.key)?.subtitle || "Station",
             Region: places.get(s.key)?.region || "Unassigned",
             ...summaryRow(s),
           })),
