@@ -7,6 +7,7 @@ const financePortalRoots = [
   "/master/reimbursements",
   "/master/contacts",
   "/master/pricing",
+  "/master/business",
   "/master/rent",
   "/master/assets",
   "/settings/payments",

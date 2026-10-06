@@ -25,6 +25,7 @@ export const financeNavItems: NavItem[] = [
     icon: "*",
     children: [
       { code: "finance_pricing", label: "Pricing Master", href: "/master/pricing" },
+      { code: "finance_pricing", label: "Business Cost Master", href: "/master/business" },
       { code: "finance_rent", label: "Rent Master", href: "/master/rent" },
       { code: "finance_assets", label: "Asset Register", href: "/master/assets" },
       { code: "payment_methods", label: "Payment Methods", href: "/master/payment-methods" },
@@ -36,7 +37,9 @@ export const financeNavItems: NavItem[] = [
   },
   { code: "finance_revenue", label: "Business Performance", icon: "↗", children: [
     { code: "finance_revenue", label: "Revenue & Billing", href: "/finance/business?tab=revenue" },
-    { code: "finance_pnl", label: "Profit & Loss", href: "/finance/business?tab=pnl" }
+    { code: "finance_pnl", label: "Profit & Loss", href: "/finance/profitability" },
+    { code: "finance_pnl", label: "Station Calculations", href: "/finance/business?tab=pnl" },
+    { code: "finance_revenue", label: "Amazon Now Units", href: "/finance/now-volumes" }
   ] },
   { code: "finance_books", label: "Accounting, Banks & Loans", href: "/finance/books", icon: "₹" },
   { code: "payment_settings", label: "Finance Settings", href: "/settings/payments", icon: "S" },
