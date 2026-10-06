@@ -107,6 +107,7 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
   const [sortKey, setSortKey] = useState<SortKey>("base");
   const [sortDesc, setSortDesc] = useState(true);
   const [downloading, setDownloading] = useState<LoadFlashReportKind | null>(null);
+  const [showAllInsights, setShowAllInsights] = useState(false);
 
   useEffect(() => {
     setPayload(initial);
@@ -268,94 +269,63 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
   );
 
   const metrics: Array<{ kind: Exclude<LoadFlashReportKind, "full">; label: string; value: string; detail: string }> = [
-    { kind: "load", label: "At stations now", value: count(liveLoad), detail: `${count(sum(reporting, "inducted"))} inducted · ${count(sum(reporting, "retained"))} retained` },
-    { kind: "edd", label: "EDD today", value: count(sum(reporting, "eddToday")), detail: `${count(eddPast)} past EDD · ${count(sum(reporting, "eddFuture"))} future` },
-    { kind: "road", label: "Out on road", value: count(onRoad), detail: "In transit to the customer" },
-    { kind: "delivered", label: "Delivered", value: count(delivered), detail: `${count(sum(reporting, "deliveredLive"))} in a delivered status now` },
-    { kind: "returns", label: "Customer returns", value: count(returns), detail: "Due back at the station today" },
+    { kind: "load", label: "At stations", value: count(liveLoad), detail: `${count(sum(reporting, "inducted"))} inducted · ${count(sum(reporting, "retained"))} retained` },
+    { kind: "edd", label: "EDD today", value: count(sum(reporting, "eddToday")), detail: `${count(eddPast)} past · ${count(sum(reporting, "eddFuture"))} future` },
+    { kind: "road", label: "Out on road", value: count(onRoad), detail: "In transit to customers" },
+    { kind: "delivered", label: "Delivered", value: count(delivered), detail: `${count(sum(reporting, "deliveredLive"))} in delivered status` },
+    { kind: "returns", label: "Returns", value: count(returns), detail: "Due back today" },
     { kind: "pickups", label: "Pickups done", value: count(pickupsDone), detail: `of ${count(pickupsAssigned)} assigned · ${percent(pickupsDone, pickupsAssigned)}%` }
   ];
 
+  const shownInsights = showAllInsights ? insights : insights.slice(0, 4);
+
   return (
     <div className={s.report}>
-      <section className={s.masthead}>
-        <div>
-          <span className={s.eyebrow}>{isLatest ? "Live report" : "Past report"}</span>
-          <h2>{formatDay(payload.businessDate, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</h2>
-          <p><Clock size={13} /> Data as of {formatWhen(payload.asOf)} IST · {reporting.length} of {payload.stations.length} stations reporting</p>
+      <section className={s.toolbar}>
+        <div className={s.title}>
+          <h2>{formatDay(payload.businessDate, { weekday: "long", day: "numeric", month: "long" })}</h2>
+          <p><i className={isLatest ? s.live : undefined} />{isLatest ? "Live" : "Past report"} · as of {formatWhen(payload.asOf)} IST · {reporting.length}/{payload.stations.length} stations reporting</p>
         </div>
-        <div className={s.mastheadActions}>
-          <form action="/edd/flash" className={s.dateForm}>
-            <label htmlFor="ops-live-date">Report date</label>
-            <input id="ops-live-date" className="field" name="date" type="date" defaultValue={payload.businessDate} key={payload.businessDate} />
-            <button className="button secondary" type="submit">Show</button>
+        <nav className={s.dates} aria-label="Report date">
+          {payload.dates.slice(0, 5).map((date) => (
+            <a key={date} href={`/edd/flash?date=${date}`} aria-current={date === payload.businessDate ? "page" : undefined}>{formatDay(date, { day: "numeric", month: "short" })}</a>
+          ))}
+          <form action="/edd/flash">
+            <input aria-label="Pick another date" title="Pick another date" name="date" type="date" defaultValue={payload.businessDate} key={payload.businessDate} onChange={(event) => { if (event.currentTarget.value) event.currentTarget.form?.requestSubmit(); }} />
           </form>
-          <button type="button" className="button secondary" onClick={() => saveReport("full")} disabled={downloading !== null}>
-            {downloading === "full" ? <Loader2 size={15} className="edd-spin" /> : <Download size={15} />} Full Excel
+        </nav>
+        <div className={s.actions}>
+          <button type="button" onClick={() => saveReport("full")} disabled={downloading !== null}>
+            {downloading === "full" ? <Loader2 size={14} className="edd-spin" /> : <Download size={14} />} Excel
           </button>
-          <button type="button" className="button secondary" onClick={refreshAll} disabled={starting || refreshing}>
-            {starting || refreshing ? <Loader2 size={15} className="edd-spin" /> : <RefreshCw size={15} />} {refreshing ? "Refreshing…" : "Refresh all"}
+          <button type="button" className={s.primary} onClick={refreshAll} disabled={starting || refreshing}>
+            {starting || refreshing ? <Loader2 size={14} className="edd-spin" /> : <RefreshCw size={14} />} {refreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
-        {payload.dates.length > 1 ? (
-          <nav className={s.dates} aria-label="Recent report dates">
-            {payload.dates.slice(0, 8).map((date) => (
-              <a key={date} href={`/edd/flash?date=${date}`} aria-current={date === payload.businessDate ? "page" : undefined}>{formatDay(date, { weekday: "short", day: "numeric", month: "short" })}</a>
-            ))}
-          </nav>
-        ) : null}
         {run && (refreshing || run.stationsFailed > 0) ? (
           <div className={s.sweep} role="status">
             <div className={s.track}><span style={{ width: `${refreshing ? sweepPct : 100}%` }} /></div>
-            <span>{refreshing ? `Refreshing stations · ${run.stationsDone} of ${run.stationsTotal} done` : `Last refresh: ${run.stationsOk} of ${run.stationsTotal} stations updated`}{run.stationsFailed ? ` · ${run.stationsFailed} failed` : ""}</span>
+            <span>{refreshing ? `Refreshing stations · ${run.stationsDone} of ${run.stationsTotal}` : `Last refresh updated ${run.stationsOk} of ${run.stationsTotal} stations`}{run.stationsFailed ? ` · ${run.stationsFailed} failed` : ""}</span>
           </div>
         ) : null}
         {error ? <p className={s.error} role="alert"><AlertTriangle size={14} /> {error}</p> : null}
       </section>
 
-      <div className={s.lead}>
-        <section className={s.hero} aria-label="Delivery progress">
-          <span className={s.eyebrow}>Delivery progress</span>
-          <div className={s.heroFigure}><strong>{deliveredPct}%</strong><span>of the morning load delivered</span></div>
+      <section className={s.summary} aria-label="Network summary">
+        <div className={s.hero}>
+          <span className={s.label}>Delivered of morning load</span>
+          <div className={s.heroFigure}>
+            <strong>{deliveredPct}%</strong>
+            <span><b>{count(delivered)}</b> of {count(loadBase)}{hourGain !== null && hourGain > 0 ? <em>+{count(hourGain)} last hour</em> : null}</span>
+          </div>
           <div className={s.track} role="img" aria-label={`${deliveredPct}% delivered`}><span style={{ width: `${Math.min(100, deliveredPct)}%` }} /></div>
-          <p><b>{count(delivered)}</b> of <b>{count(loadBase)}</b> parcels{hourGain !== null && hourGain > 0 ? <> · <b>+{count(hourGain)}</b> in the last hour</> : null}</p>
-          <dl className={s.heroFacts}>
-            <div><dt>Out on road</dt><dd>{count(onRoad)}</dd></div>
-            <div><dt>Still at stations</dt><dd>{count(liveLoad)}</dd></div>
-            <div><dt>Past EDD</dt><dd>{count(eddPast)}</dd></div>
-          </dl>
-          <small>Delivered counts the morning tracking-ID list, including parcels whose history shows Delivered even if Amazon later moved them back to Received.</small>
-        </section>
-
-        <section className={s.insights} aria-label="What needs attention">
-          <span className={s.eyebrow}>What needs attention</span>
-          {insights.length ? (
-            <ol>
-              {insights.map((insight) => {
-                const Icon = TONE_ICON[insight.tone];
-                return (
-                  <li key={insight.title} className={s[insight.tone]}>
-                    <span className={s.tone}><Icon size={13} /> {TONE_LABEL[insight.tone]}</span>
-                    <div>
-                      <strong>{insight.title}</strong>
-                      <p>{insight.detail}</p>
-                    </div>
-                    {insight.filter ? <button type="button" onClick={() => showFilter(insight.filter!)}>Show stations</button> : null}
-                  </li>
-                );
-              })}
-            </ol>
-          ) : <p className={s.empty}>{reporting.length ? "Nothing stands out right now." : "No station has reported for this date yet."}</p>}
-        </section>
-      </div>
-
-      <section className={s.metrics} aria-label="Network totals">
+        </div>
         {metrics.map((metric) => (
           <article className={s.metric} key={metric.kind}>
             <header>
-              <span>{metric.label}</span>
+              <span className={s.label}>{metric.label}</span>
               <button type="button" title={`Download ${metric.label} (Excel)`} aria-label={`Download ${metric.label}`} disabled={downloading !== null} onClick={() => saveReport(metric.kind)}>
-                {downloading === metric.kind ? <Loader2 size={13} className="edd-spin" /> : <Download size={13} />}
+                {downloading === metric.kind ? <Loader2 size={12} className="edd-spin" /> : <Download size={12} />}
               </button>
             </header>
             <strong>{metric.value}</strong>
@@ -364,46 +334,64 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
         ))}
       </section>
 
-      {hourly.length ? (
-        <section className={s.panel}>
-          <header className={s.panelHead}>
-            <div><h3>Delivered through the day</h3><p>Morning-load parcels delivered by each hourly check. Hover a bar for that hour’s numbers.</p></div>
-          </header>
-          <div className={s.chart}>
-            {hourly.map((point, index) => (
-              <div key={point.hour} className={s.bar} tabIndex={0} aria-label={`${String(point.hour).padStart(2, "0")}:00 — ${count(point.delivered)} delivered of ${count(point.totalLoad)} load`}>
-                {index === hourly.length - 1 ? <b>{count(point.delivered)}</b> : null}
-                <span style={{ height: `${Math.max(2, (point.delivered / maxDelivered) * 100)}%` }} />
-                <small>{String(point.hour).padStart(2, "0")}</small>
-                <div className={s.tip} role="tooltip">
-                  <strong>{String(point.hour).padStart(2, "0")}:00 check</strong>
-                  <span>Delivered <b>{count(point.delivered)}</b> · {percent(point.delivered, point.totalLoad)}%</span>
-                  <span>Load <b>{count(point.totalLoad)}</b></span>
-                  <span>Out on road <b>{count(point.outOnRoad)}</b></span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <details className={s.chartTable}>
-            <summary>View as a table</summary>
-            <table>
-              <thead><tr><th scope="col">Hour</th><th scope="col">Load</th><th scope="col">Delivered</th><th scope="col">Delivered %</th><th scope="col">Out on road</th></tr></thead>
-              <tbody>{hourly.map((point) => <tr key={point.hour}><td>{String(point.hour).padStart(2, "0")}:00</td><td>{count(point.totalLoad)}</td><td>{count(point.delivered)}</td><td>{percent(point.delivered, point.totalLoad)}%</td><td>{count(point.outOnRoad)}</td></tr>)}</tbody>
-            </table>
-          </details>
+      <div className={s.split}>
+        <section className={s.panel} aria-label="What needs attention">
+          <header className={s.panelHead}><h3>What needs attention</h3>{insights.length > 4 ? <button type="button" className={s.link} onClick={() => setShowAllInsights((current) => !current)}>{showAllInsights ? "Show fewer" : `Show all ${insights.length}`}</button> : null}</header>
+          {insights.length ? (
+            <ol className={s.insights}>
+              {shownInsights.map((insight) => {
+                const Icon = TONE_ICON[insight.tone];
+                return (
+                  <li key={insight.title} className={s[insight.tone]}>
+                    <span className={s.tone} title={TONE_LABEL[insight.tone]}><Icon size={14} /><span className={s.srOnly}>{TONE_LABEL[insight.tone]}:</span></span>
+                    <div><strong>{insight.title}</strong><p>{insight.detail}</p></div>
+                    {insight.filter ? <button type="button" className={s.link} onClick={() => showFilter(insight.filter!)}>View</button> : null}
+                  </li>
+                );
+              })}
+            </ol>
+          ) : <p className={s.empty}>{reporting.length ? "Nothing stands out right now." : "No station has reported for this date yet."}</p>}
         </section>
-      ) : null}
+
+        {hourly.length ? (
+          <section className={s.panel}>
+            <header className={s.panelHead}><h3>Delivered through the day</h3><span>Hover a bar for details</span></header>
+            <div className={s.chart}>
+              {hourly.map((point, index) => (
+                <div key={point.hour} className={s.bar} tabIndex={0} aria-label={`${String(point.hour).padStart(2, "0")}:00 — ${count(point.delivered)} delivered of ${count(point.totalLoad)} load`}>
+                  {index === hourly.length - 1 ? <b>{count(point.delivered)}</b> : null}
+                  <span style={{ height: `${Math.max(2, (point.delivered / maxDelivered) * 100)}%` }} />
+                  <small>{String(point.hour).padStart(2, "0")}</small>
+                  <div className={s.tip} role="tooltip">
+                    <strong>{String(point.hour).padStart(2, "0")}:00 check</strong>
+                    <span>Delivered <b>{count(point.delivered)}</b> · {percent(point.delivered, point.totalLoad)}%</span>
+                    <span>Load <b>{count(point.totalLoad)}</b></span>
+                    <span>Out on road <b>{count(point.outOnRoad)}</b></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <details className={s.more}>
+              <summary>View as a table</summary>
+              <table>
+                <thead><tr><th scope="col">Hour</th><th scope="col">Load</th><th scope="col">Delivered</th><th scope="col">%</th><th scope="col">On road</th></tr></thead>
+                <tbody>{hourly.map((point) => <tr key={point.hour}><td>{String(point.hour).padStart(2, "0")}:00</td><td>{count(point.totalLoad)}</td><td>{count(point.delivered)}</td><td>{percent(point.delivered, point.totalLoad)}%</td><td>{count(point.outOnRoad)}</td></tr>)}</tbody>
+              </table>
+            </details>
+          </section>
+        ) : null}
+      </div>
 
       <section className={s.panel} id="ops-live-stations">
         <header className={s.panelHead}>
-          <div><h3>Station by station</h3><p>Sorted by {sortKey === "base" ? "morning load" : "your chosen column"}. The marker on each delivery bar is the network average ({deliveredPct}%).</p></div>
-          <label className={s.search}><Search size={15} /><span className={s.srOnly}>Search station</span><input type="search" placeholder="Search station code or name" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <h3>Stations</h3>
+          <div className={s.chips} role="group" aria-label="Show stations">
+            {(Object.keys(FILTERS) as FilterKey[]).map((key) => (
+              <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}>{FILTERS[key].label}<b>{filterCounts[key]}</b></button>
+            ))}
+          </div>
+          <label className={s.search}><Search size={14} /><span className={s.srOnly}>Search station</span><input type="search" placeholder="Search station" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
         </header>
-        <div className={s.chips} role="group" aria-label="Show stations">
-          {(Object.keys(FILTERS) as FilterKey[]).map((key) => (
-            <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}>{FILTERS[key].label}<b>{filterCounts[key]}</b></button>
-          ))}
-        </div>
         <div className={s.tableWrap}>
           <table className={s.table}>
             <thead>
@@ -411,11 +399,11 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
                 {header("stationCode", "Station", false)}
                 {header("base", "Morning load")}
                 {header("deliveredPct", "Delivered", false)}
-                {header("outOnRoad", "Out on road")}
-                {header("totalLoad", "At station now")}
+                {header("outOnRoad", "On road")}
+                {header("totalLoad", "At station")}
                 {header("eddToday", "EDD today")}
                 {header("eddPast", "Past EDD")}
-                {header("returnsToday", "Returns due")}
+                {header("returnsToday", "Returns")}
                 {header("pickupPct", "Pickups")}
               </tr>
             </thead>
@@ -424,29 +412,29 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
                 const base = baseOf(row);
                 const width = base > 0 ? Math.min(100, (row.cohortDelivered / base) * 100) : 0;
                 const flags = [
-                  !row.hasSnapshot ? "Waiting for first fetch" : isStale(row) ? "Data may be stale" : "",
-                  FILTERS.notStarted.test(row, isStale) ? "No deliveries yet" : "",
-                  FILTERS.idle.test(row, isStale) ? "Nothing on road" : ""
+                  !row.hasSnapshot ? "No data yet" : isStale(row) ? "Stale" : "",
+                  FILTERS.notStarted.test(row, isStale) ? "No deliveries" : "",
+                  FILTERS.idle.test(row, isStale) ? "None on road" : ""
                 ].filter(Boolean);
                 return (
                   <tr key={row.stationCode}>
-                    <th scope="row">
+                    <th scope="row" title={row.hasSnapshot ? `Updated ${formatWhen(row.fetchedAt)}` : "Not fetched yet"}>
                       <strong>{row.stationCode}</strong>
                       {stationNames[row.stationCode] ? <span>{stationNames[row.stationCode]}</span> : null}
-                      <small>{row.hasSnapshot ? `Updated ${formatWhen(row.fetchedAt)}` : "Not fetched yet"}</small>
-                      {flags.length ? <div className={s.flags}>{flags.map((flag) => <i key={flag}>{flag}</i>)}</div> : null}
+                      {flags.map((flag) => <i key={flag}>{flag}</i>)}
                     </th>
                     <td className={s.num}>{count(base)}</td>
-                    <td className={s.delivery}>
-                      <div><strong>{row.deliveredPct}%</strong><span>{count(row.cohortDelivered)} of {count(base)}</span></div>
+                    <td title={`${count(row.cohortDelivered)} of ${count(base)} delivered`}><div className={s.delivery}>
+                      <strong>{row.deliveredPct}%</strong>
                       <div className={s.track}><span style={{ width: `${width}%` }} /><em style={{ left: `${Math.min(100, deliveredPct)}%` }} /></div>
-                    </td>
+                      <span>{count(row.cohortDelivered)}</span>
+                    </div></td>
                     <td className={s.num}>{row.outOnRoad ? count(row.outOnRoad) : <span className={s.zero}>0</span>}</td>
-                    <td className={s.num}>{count(row.totalLoad)}<small>{count(row.inducted)} + {count(row.retained)} retained</small></td>
-                    <td className={s.num}>{row.eddToday ? count(row.eddToday) : <span className={s.zero}>0</span>}<small>{count(row.eddFuture)} future</small></td>
+                    <td className={s.num} title={`${count(row.inducted)} inducted + ${count(row.retained)} retained`}>{count(row.totalLoad)}</td>
+                    <td className={s.num} title={`${count(row.eddFuture)} with a future EDD`}>{row.eddToday ? count(row.eddToday) : <span className={s.zero}>0</span>}</td>
                     <td className={s.num}>{row.eddPast ? <span className={s.alert}>{count(row.eddPast)}</span> : <span className={s.zero}>0</span>}</td>
                     <td className={s.num}>{row.returnsToday ? count(row.returnsToday) : <span className={s.zero}>0</span>}</td>
-                    <td className={s.num}>{row.pickupsAssigned ? <>{row.pickupPct}%<small>{count(row.pickupsSuccess)} of {count(row.pickupsAssigned)}</small></> : <span className={s.zero}>—</span>}</td>
+                    <td className={s.num}>{row.pickupsAssigned ? <>{count(row.pickupsSuccess)}<span className={s.of}> / {count(row.pickupsAssigned)}</span></> : <span className={s.zero}>—</span>}</td>
                   </tr>
                 );
               })}
@@ -456,23 +444,23 @@ export function LoadFlashView({ initial, stationNames = {} }: { initial: LoadFla
                 <tr>
                   <th scope="row">Total · {rows.length} stations</th>
                   <td className={s.num}>{count(rows.reduce((total, row) => total + baseOf(row), 0))}</td>
-                  <td className={s.delivery}><div><strong>{percent(sum(rows, "cohortDelivered"), rows.reduce((total, row) => total + baseOf(row), 0))}%</strong><span>{count(sum(rows, "cohortDelivered"))} delivered</span></div></td>
+                  <td><div className={s.delivery}><strong>{percent(sum(rows, "cohortDelivered"), rows.reduce((total, row) => total + baseOf(row), 0))}%</strong><span>{count(sum(rows, "cohortDelivered"))} delivered</span></div></td>
                   <td className={s.num}>{count(sum(rows, "outOnRoad"))}</td>
                   <td className={s.num}>{count(sum(rows, "totalLoad"))}</td>
                   <td className={s.num}>{count(sum(rows, "eddToday"))}</td>
                   <td className={s.num}>{count(sum(rows, "eddPast"))}</td>
                   <td className={s.num}>{count(sum(rows, "returnsToday"))}</td>
-                  <td className={s.num}>{percent(sum(rows, "pickupsSuccess"), sum(rows, "pickupsAssigned"))}%</td>
+                  <td className={s.num}>{count(sum(rows, "pickupsSuccess"))}<span className={s.of}> / {count(sum(rows, "pickupsAssigned"))}</span></td>
                 </tr>
               </tfoot>
             ) : null}
           </table>
         </div>
-        {!rows.length ? <p className={s.empty}>No stations match. {filter !== "all" || query ? <button type="button" onClick={() => { setFilter("all"); setQuery(""); }}>Show all stations</button> : null}</p> : null}
-        <footer className={s.notes}>
-          <strong>How to read this report</strong>
-          <span>Morning load is the parcel list taken at the first check of the day; Delivered is measured against it and locked once history shows Delivered. At station now is inducted plus retained. Past EDD is stock whose delivery date has already passed.</span>
-        </footer>
+        {!rows.length ? <p className={s.empty}>No stations match. {filter !== "all" || query ? <button type="button" className={s.link} onClick={() => { setFilter("all"); setQuery(""); }}>Show all stations</button> : null}</p> : null}
+        <details className={s.more}>
+          <summary>How to read this report</summary>
+          <p>Morning load is the parcel list taken at the first check of the day. Delivered is measured against it, and includes parcels whose history shows Delivered even if Amazon later moved them back to Received. The line on each delivery bar is the network average ({deliveredPct}%). At station is inducted plus retained. Past EDD is stock whose delivery date has already passed. Hover a station or a number for more detail.</p>
+        </details>
       </section>
     </div>
   );
