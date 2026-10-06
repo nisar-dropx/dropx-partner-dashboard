@@ -22,3 +22,10 @@ test('Service tasks apply only to owned vans and clear after due date moves forw
  assert.equal(fleetAttention({...data,vehicles:[{...vehicle,nextServiceDate:'2026-10-05'}]}).filter(r=>r.category==='Service').length,1);
  assert.equal(fleetAttention({...data,vehicles:[{...vehicle,nextServiceDate:'2026-12-05'}]}).filter(r=>r.category==='Service').length,0);
 });
+
+test('Partner audits and findings never create maintenance attention',()=>{
+ const audits=[{id:'a',vehicleId:'v',status:'scheduled',scheduledFor:data.today}];
+ const findings=[{id:'f',vehicleId:'v',status:'open'}];
+ for(const ownershipType of ['odcd','rented',null])assert.equal(fleetAttention({...data,capabilities:{visibleSections:['audits']},vehicles:[{...vehicle,ownershipType}],audits,findings}).length,0);
+ assert.equal(fleetAttention({...data,capabilities:{visibleSections:['audits']},audits,findings}).length,2);
+});

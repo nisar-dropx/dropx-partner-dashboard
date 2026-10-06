@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';import {PGlite} from '@electric-sql/pglite';
 function load(path){const exports={};new Function('exports',ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(exports);return exports;}
 const {planAuditMonth}=load('src/lib/fleet/audit-month-planner.ts'),{defaultFleetAuditProgrammeConfig:config}=load('src/lib/fleet/audit-programme-config.ts');
-const vehicles=Array.from({length:32},(_,i)=>({id:`v${i}`,vehicle_no:`KL${i}`,station_code:`ST${Math.floor(i/3)}`,status:'active'}));
+const vehicles=Array.from({length:32},(_,i)=>({id:`v${i}`,vehicle_no:`KL${i}`,station_code:`ST${Math.floor(i/3)}`,status:'active',ownership_type:'own'}));
 let input={month:'2026-10',today:'2026-10-05',config,vehicles,audits:[],stations:[]};
 let p=planAuditMonth(input);assert.equal(p.changes.length,64);assert.ok(p.days.filter(d=>d.physical+d.virtual>0).length>=20);assert.ok(p.changes.some(a=>a.scheduled_for>='2026-10-28'));
 for(const day of p.days){assert.ok(day.physical<=4&&day.virtual<=6);assert.ok(day.stations.length<=1);assert.notEqual(new Date(day.date).getUTCDay(),0);}
@@ -16,7 +16,7 @@ assert.throws(()=>planAuditMonth({...input,today:'2026-10-31'}),/No dates were c
 assert.throws(()=>planAuditMonth({...input,audits:[existing[0],{...existing[0],id:'dup'}]}),/Duplicate/);
 // Whole stations, geographic grouping and fixed visits are independent of vehicle numbering.
 const geoStations=[{station_code:'KOZA',latitude:11.265875,longitude:75.825172},{station_code:'TLPA',latitude:11.9102417,longitude:75.4914798},{station_code:'TLPB',latitude:11.98757,longitude:75.646713},{station_code:'KTUB',latitude:11.2718155,longitude:76.2491261},{station_code:'KTUR',latitude:11.195707,longitude:76.261065}];
-const geoVehicles=geoStations.flatMap((s,i)=>Array.from({length:i===0?6:i<3?3:i===3?2:1},(_,j)=>({id:`g${i}-${j}`,vehicle_no:`G${i}${j}`,station_code:s.station_code,status:'active'})));
+const geoVehicles=geoStations.flatMap((s,i)=>Array.from({length:i===0?6:i<3?3:i===3?2:1},(_,j)=>({id:`g${i}-${j}`,vehicle_no:`G${i}${j}`,station_code:s.station_code,status:'active',ownership_type:'own'})));
 const geoInput={...input,vehicles:geoVehicles,stations:geoStations};
 const geo=planAuditMonth(geoInput),stationDay=code=>geo.changes.filter(a=>a.mode==='physical'&&geoVehicles.find(v=>v.id===a.vehicle_id).station_code===code).map(a=>a.scheduled_for);
 for(const s of geoStations)assert.equal(new Set(stationDay(s.station_code)).size,1,'Never split station vehicles');
@@ -54,3 +54,8 @@ if(fs.existsSync('output/audit-month-live.json')){
 const live=JSON.parse(fs.readFileSync('output/audit-month-live.json','utf8'));const rank=a=>a.status==='in_progress'?0:1;
 const unique=new Map();for(const a of live.audits.sort((a,b)=>rank(a)-rank(b)||a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id))){const k=a.vehicle_id+':'+(/\[mode:video\]/.test(a.scheduled_reason)?'video':'physical');if(!unique.has(k))unique.set(k,a);}
 const plan=planAuditMonth({...input,vehicles:live.vehicles,stations:live.stations,audits:[...unique.values()],rebalance:true});fs.writeFileSync('output/audit-month-preview.json',JSON.stringify(plan,null,2));console.log('Live rehearsal:',JSON.stringify({active:[...unique.values()].length,moved:plan.changes.length,days:plan.days.filter(d=>d.physical+d.virtual>0)}));}
+
+const partners=['odcd','rented',null].map((ownership_type,i)=>({...vehicles[0],id:'partner'+i,ownership_type}));
+const ownedOnly=planAuditMonth({...input,vehicles:[...vehicles,...partners],audits:[{...existing[0],id:'partner-audit',vehicle_id:'partner0'}]});
+assert.equal(ownedOnly.vehicles,32);assert.equal(ownedOnly.changes.length,64);assert.ok(ownedOnly.changes.every(a=>!a.vehicle_id.startsWith('partner')));
+console.log('Owned-only planner: ODCD, rented/vendor and unknown ownership excluded, including existing partner tasks.');

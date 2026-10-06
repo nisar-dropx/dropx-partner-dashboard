@@ -5,7 +5,7 @@ function load(file,require=()=>({})){const exports={};new Function('exports','re
 const rules=load('src/lib/fleet/audit-rules.ts');
 let auth={isMasterOwner:false,userId:'user',hasAllLocationAccess:true,locationScopeIds:['station']};let membership=true;let edit=true;let rpcPayload;
 const item={id:'tyre',is_required:true,label:'Front tyre',category:'Tyres',audit_mode:'both',response_config:rules.auditPresets.condition};
-const records={fleet_audits:{id:'audit',vehicle_id:'vehicle',template_id:'template',status:'in_progress',scheduled_reason:'[mode:physical]',fleet_vehicles:{vehicle_no:'KL11CC2822',station_code:'KOZA'}},fleet_control_settings:{audit_video_required:false,audit_email_enabled:false},fleet_vehicles:{fuel_type:'Diesel',station_code:'KOZA'},fleet_audit_checklist_items:[item],stations:[{station_code:'KOZA'}]};
+const records={fleet_audits:{id:'audit',vehicle_id:'vehicle',template_id:'template',status:'in_progress',scheduled_reason:'[mode:physical]',fleet_vehicles:{vehicle_no:'KL11CC2822',station_code:'KOZA'}},fleet_control_settings:{audit_video_required:false,audit_email_enabled:false},fleet_vehicles:{ownership_type:'own',fuel_type:'Diesel',station_code:'KOZA'},fleet_audit_checklist_items:[item],stations:[{station_code:'KOZA'}]};
 const db={from(table){const builder=new Proxy({}, {get(_,key){if(key==='then')return(resolve)=>resolve({data:records[table],error:null});return()=>builder;}});return builder;},async rpc(name,payload){rpcPayload=payload;return {error:null}}};
 const api=load('src/app/api/fleet-control/route.ts',name=>({
  '@/lib/fleet/system-log':{withFleetSystemLog:fn=>fn},
@@ -23,5 +23,6 @@ r=await submit({responses:[response],evidence});assert.equal(r.status,200);asser
 r=await submit({responses:[{...response,value:'needs_immediate_replacement'}],evidence});assert.equal(r.status,200);assert.equal(rpcPayload.p_data.findings[0].expectedCompletionDate,'2026-10-05');assert.equal(rpcPayload.p_data.responses[0].snapshot.days,null);
 item.response_config={...item.response_config,options:item.response_config.options.map(o=>({...o,photos:o.issue?2:0}))};r=await submit({responses:[response],evidence:[...evidence,...evidence]});assert.equal(r.status,400,'same file cannot satisfy two photos');
 membership=false;r=await submit({});assert.equal(r.status,403);membership=true;edit=false;r=await submit({});assert.equal(r.status,403);edit=true;auth.hasAllLocationAccess=false;records.stations=[{station_code:'OTHER'}];r=await submit({});assert.equal(r.status,403);
+auth.hasAllLocationAccess=true;auth.isMasterOwner=true;for(const source of ['odcd','rented',null]){records.fleet_vehicles.ownership_type=source;for(const action of ['audit.schedule','audit.start','audit.draft','audit.complete','service.create','service.schedule']){r=await submit({action,vehicleId:'vehicle'});assert.equal(r.status,400);assert.match(r.body.error,/DropX-owned/);assert.equal(rpcPayload,undefined);}}
 auth=null;r=await submit({});assert.equal(r.status,401);
 console.log('Audit API: required answers, configurable photos, duplicate evidence, remarks, deadlines, forged pass flags, membership, module permission and station scope verified.');

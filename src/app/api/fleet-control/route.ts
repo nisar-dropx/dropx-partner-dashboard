@@ -79,11 +79,18 @@ async function handlePOST(request: Request) {
       const locations = await supabaseAdmin.from("stations").select("station_code").eq("company_id",context.companyId).in("id",context.authorization.locationScopeIds.length ? context.authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
       if(other.error || locations.error || !otherVehicle || !locations.data?.some(s=>s.station_code===otherVehicle.station_code)) return NextResponse.json({error:"The other audit is outside your assigned locations."},{status:403});
     }
+    const requiresOwnedVehicle = (action.startsWith("audit.") && action !== "audit.cancel") || action.startsWith("service.") || action === "finding.update";
+    if (requiresOwnedVehicle && body.otherAuditId) {
+      const other = await supabaseAdmin.from("fleet_audits").select("fleet_vehicles!inner(ownership_type)").eq("company_id", context.companyId).eq("id", body.otherAuditId).single();
+      const vehicle = Array.isArray(other.data?.fleet_vehicles) ? other.data.fleet_vehicles[0] : other.data?.fleet_vehicles;
+      if (other.error || vehicle?.ownership_type !== "own") throw new Error("Audits and service are only available for DropX-owned vehicles.");
+    }
     if (body.auditId || body.vehicleId || body.findingId) {
       let vehicleId = clean(body.vehicleId);
       let auditId = clean(body.auditId);
       if (body.findingId) { const f = await supabaseAdmin.from("fleet_audit_findings").select("audit_id").eq("company_id",context.companyId).eq("id",body.findingId).single(); if(f.error) throw new Error("Finding not found."); auditId=f.data.audit_id; }
       if (auditId) { const a = await supabaseAdmin.from("fleet_audits").select("vehicle_id").eq("company_id",context.companyId).eq("id",auditId).single(); if(a.error) throw new Error("Audit not found."); vehicleId=a.data.vehicle_id; }
+      if (vehicleId && requiresOwnedVehicle && (await assertVehicle(context.companyId, vehicleId)).ownership_type !== "own") throw new Error("Audits and service are only available for DropX-owned vehicles.");
       if (vehicleId && !context.authorization.isMasterOwner && !context.authorization.hasAllLocationAccess) {
         const v = await assertVehicle(context.companyId,vehicleId);
         const stations = await supabaseAdmin.from("stations").select("station_code").eq("company_id",context.companyId).in("id",context.authorization.locationScopeIds.length ? context.authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
@@ -138,7 +145,7 @@ async function createService(companyId: string, userId: string, allowed: boolean
   if (!allowed) return NextResponse.json({ error: "Fleet maintenance permission denied." }, { status: 403 });
   const vehicleId = required(body.vehicleId, "Vehicle");
   const vehicle = await assertVehicle(companyId, vehicleId);
-  if ((vehicle.ownership_type || "own") !== "own") return NextResponse.json({ error: "Service and maintenance are managed only for owned vehicles." }, { status: 400 });
+  if (vehicle.ownership_type !== "own") return NextResponse.json({ error: "Service and maintenance are managed only for owned vehicles." }, { status: 400 });
   const result = await supabaseAdmin!.from("fleet_service_history").insert({
     company_id: companyId, vehicle_id: vehicleId, service_date: required(body.serviceDate, "Service date"), service_type: required(body.serviceType, "Service type"),
     odometer_km: numberOrNull(body.odometerKm), vendor_name: clean(body.vendorName) || null, vendor_contact: clean(body.vendorContact) || null,
@@ -154,7 +161,7 @@ async function scheduleService(companyId: string, userId: string, allowed: boole
   if (!allowed) return NextResponse.json({ error: "Fleet maintenance permission denied." }, { status: 403 });
   const vehicleId = required(body.vehicleId, "Vehicle");
   const vehicle = await assertVehicle(companyId, vehicleId);
-  if ((vehicle.ownership_type || "own") !== "own") return NextResponse.json({ error: "Service and maintenance are managed only for owned vehicles." }, { status: 400 });
+  if (vehicle.ownership_type !== "own") return NextResponse.json({ error: "Service and maintenance are managed only for owned vehicles." }, { status: 400 });
   const serviceDate = required(body.serviceDate, "Next service date");
   const values = {
     service_date: serviceDate,

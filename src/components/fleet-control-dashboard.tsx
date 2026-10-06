@@ -689,7 +689,7 @@ export function FleetControlDashboard({
 
             <section className="fc-kpis">
               <article><span className="mint"><Truck size={19} /></span><div><small>Fleet availability</small><strong>{availability}%</strong><p>{active} of {vehicles.length} vehicles active</p></div><b className="up">Live</b></article>
-              <article><span className="amber"><Wrench size={19} /></span><div><small>Under service</small><strong>{underService}</strong><p>{vehicles.filter((vehicle) => vehicle.status === "breakdown").length} breakdown today</p></div><b>Action</b></article>
+              <article><span className="amber"><Wrench size={19} /></span><div><small>Owned · service / breakdown</small><strong>{vehicles.filter(v => v.ownershipType === "own" && ["under_service", "breakdown"].includes(v.status)).length}</strong><p>{vehicles.filter((vehicle) => vehicle.ownershipType === "own" && vehicle.status === "breakdown").length} breakdown today</p></div><b>Action</b></article>
               <article><span className="blue"><CircleDollarSign size={19} /></span><div><small>Awaiting your approval</small><strong>{money(data.counts.pendingAmount)}</strong><p>{pendingPayments.length} vehicle payment requests</p></div><b className={pendingPayments.length ? "hot" : "up"}>{pendingPayments.length ? "Review" : "Clear"}</b></article>
               <article><span className="purple"><Activity size={19} /></span><div><small>Ad Hoc usage today</small><strong>{todayAdHoc.length}</strong><p>{todayAdHoc.filter((row) => row.requestType === "Van").length} vans · {todayAdHoc.filter((row) => row.requestType === "Driver").length} drivers</p></div><b>View only</b></article>
             </section>

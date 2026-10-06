@@ -1,5 +1,5 @@
 import type { FleetAuditProgrammeConfig } from './audit-programme-config';
-export type PlanVehicle={id:string;vehicle_no:string;station_code:string;status:string|null};
+export type PlanVehicle={id:string;vehicle_no:string;station_code:string;status:string|null;ownership_type:string|null};
 export type PlanStation={station_code:string;latitude:number|string|null;longitude:number|string|null};
 export type PlanAudit={id:string;vehicle_id:string;scheduled_for:string;scheduled_reason:string|null;status:string;assigned_to:string|null;updated_at:string};
 export type AuditMode='physical'|'video';
@@ -21,9 +21,10 @@ export function planAuditMonth({month,today,config,vehicles,audits,stations,leav
  const [year,m]=month.split('-').map(Number),end=new Date(Date.UTC(year,m,0)).getUTCDate();
  const blocked=new Set(leaveDates);const forbidden=(date:string)=>config.excludedWeekdays.includes(weekday(date))||blocked.has(date);
  const dates=Array.from({length:end},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`).filter(d=>d>=today&&!forbidden(d));
- const active=audits.filter(a=>a.status!=='cancelled'&&a.scheduled_for.startsWith(month));
+ const ownedIds=new Set(vehicles.filter(v=>v.ownership_type==='own').map(v=>v.id));
+ const active=audits.filter(a=>ownedIds.has(a.vehicle_id)&&a.status!=='cancelled'&&a.scheduled_for.startsWith(month));
  const slots=new Set<string>();for(const a of active){const k=key(a.vehicle_id,auditMode(a.scheduled_reason));if(slots.has(k))throw new Error('Duplicate monthly audit slots must be reconciled before rebuilding.');slots.add(k);}
- const fleet=vehicles.filter(v=>!['sold','returned','disposed'].includes((v.status||'').toLowerCase()));
+ const fleet=vehicles.filter(v=>ownedIds.has(v.id)&&!['sold','returned','disposed'].includes((v.status||'').toLowerCase()));
  const vehicleMap=new Map(vehicles.map(v=>[v.id,v])),stationMap=new Map(stations.map(s=>[s.station_code.toUpperCase(),s]));
  const stationOf=(id:string)=>vehicleMap.get(id)?.station_code.toUpperCase()||'UNASSIGNED';
  const leaveAffected=new Set(active.filter(a=>a.status==='scheduled'&&forbidden(a.scheduled_for)).map(a=>a.vehicle_id));

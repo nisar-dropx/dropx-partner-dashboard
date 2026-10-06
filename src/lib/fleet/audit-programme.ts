@@ -32,7 +32,7 @@ export async function generateFleetAuditProgramme(companyId: string, month: stri
   const nextMonth = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, "0")}-01`;
   const [settings, vehiclesResult, auditsResult, stationsResult, templateResult] = await Promise.all([
     supabaseAdmin.from("fleet_control_settings").select("risk_weights").eq("company_id", companyId).maybeSingle(),
-    supabaseAdmin.from("fleet_vehicles").select("id,vehicle_no,station_code,status").eq("company_id", companyId).order("station_code").order("vehicle_no"),
+    supabaseAdmin.from("fleet_vehicles").select("id,vehicle_no,station_code,status,ownership_type").eq("company_id", companyId).eq("ownership_type", "own").order("station_code").order("vehicle_no"),
     supabaseAdmin.from("fleet_audits").select("id,vehicle_id,scheduled_for,scheduled_reason,status,assigned_to,updated_at").eq("company_id", companyId).gte("scheduled_for", `${month}-01`).lt("scheduled_for", nextMonth),
     supabaseAdmin.from("stations").select("station_code,latitude,longitude").eq("company_id", companyId),
     supabaseAdmin.from("fleet_audit_templates").select("id").eq("company_id", companyId).eq("is_default", true).eq("is_active", true).maybeSingle()

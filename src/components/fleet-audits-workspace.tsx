@@ -95,7 +95,7 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles, initia
   const [emailPreview, setEmailPreview] = useState(false);
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState<{ tone: "notice" | "error"; text: string } | null>(null);
-  const activeVehicles = useMemo(() => vehicles.filter((vehicle) => !isClosedVehicle(vehicle)), [vehicles]);
+  const activeVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.ownershipType === "own" && !isClosedVehicle(vehicle)), [vehicles]);
   const monthAudits = useMemo(() => audits.filter((audit) => audit.scheduledFor.startsWith(month)), [audits, month]);
   const physicalVisits = useMemo(() => {
     const visits = new Map<string, Map<string, number>>();
@@ -182,7 +182,7 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles, initia
   const calendarCells = [...Array(firstDay.getDay()).fill(null), ...Array.from({ length: daysInMonth }, (_, index) => index + 1)];
 
   return <div className="fc-audits-workspace">
-    <div className="fc-section-head fc-audit-head"><div><span className="fc-eyebrow">Twice-monthly assurance programme</span><h1>Vehicle audits</h1><p>Every active vehicle receives one virtual video review and one physical Fleet Manager inspection each month.</p></div><div className="fc-audit-head-actions"><button className="fc-button secondary" onClick={() => setEmailPreview(true)} type="button"><Mail size={16} /> Email preview</button>{data.capabilities.canManageAudits ? <button className="fc-button secondary" disabled={saving === "audit.auto-schedule"} onClick={() => act("audit.auto-schedule", { month })} type="button"><CalendarDays size={16} /> {saving === "audit.auto-schedule" ? "Planning…" : "Build smart schedule"}</button> : null}{data.capabilities.canManageAudits ? <button className="fc-button primary" onClick={() => openSchedule()} type="button"><Plus size={16} /> Schedule audits</button> : null}</div></div>
+    <div className="fc-section-head fc-audit-head"><div><span className="fc-eyebrow">Twice-monthly assurance programme</span><h1>Vehicle audits</h1><p>Every active DropX-owned vehicle receives one virtual video review and one physical Fleet Manager inspection each month.</p></div><div className="fc-audit-head-actions"><button className="fc-button secondary" onClick={() => setEmailPreview(true)} type="button"><Mail size={16} /> Email preview</button>{data.capabilities.canManageAudits ? <button className="fc-button secondary" disabled={saving === "audit.auto-schedule"} onClick={() => act("audit.auto-schedule", { month })} type="button"><CalendarDays size={16} /> {saving === "audit.auto-schedule" ? "Planning…" : "Build smart schedule"}</button> : null}{data.capabilities.canManageAudits ? <button className="fc-button primary" onClick={() => openSchedule()} type="button"><Plus size={16} /> Schedule audits</button> : null}</div></div>
     {message ? <div role={message.tone === "error" ? "alert" : "status"} className={`fc-inline-message ${message.tone}`}>{message.text}</div> : null}
     <div className="fc-audit-commandbar">
       <div className="fc-view-switch compact">
