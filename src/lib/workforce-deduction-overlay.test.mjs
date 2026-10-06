@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  resolveWorkforcePayoutDeductionContext,
   workforcePayoutDeductionLines,
   workforcePayoutDeductionTotal
 } from "./workforce-deduction-overlay.ts";
@@ -105,4 +106,38 @@ test("manual-only payout rows exclude unrelated automatic deductions", () => {
 
   assert.deepEqual(lines, [{ code: "DAMAGE", label: "Damage recovery", amount: 250 }]);
   assert.equal(workforcePayoutDeductionTotal(lines), 250);
+});
+
+test("attendance incentive preserves a canonical provider payout's workforce TDS context", () => {
+  const payoutRowId = "provider-worker-1-station-1";
+  const canonicalWorker = { source_profile_type: "contractor" };
+  const canonicalMapping = { workforce_id: "worker-1", contractor_id: null, employee_id: null };
+  const providerCategory = canonicalMapping.contractor_id
+    ? "contractors"
+    : canonicalMapping.employee_id
+      ? "employees"
+      : "workforce";
+  const canonicalFallback = {
+    categoryCode: canonicalWorker.source_profile_type === "contractor" ? "contractors" : "workforce",
+    panNumber: "EQGPP2087A"
+  };
+  const context = resolveWorkforcePayoutDeductionContext(
+    payoutRowId,
+    new Map([[payoutRowId, { categoryCode: providerCategory, panNumber: "EQGPP2087A" }]]),
+    canonicalFallback
+  );
+  const basePayment = 22_971;
+  const attendanceIncentive = 1_767;
+  const lines = workforcePayoutDeductionLines(basePayment + attendanceIncentive, heads, context);
+
+  assert.equal(context.categoryCode, "workforce");
+  assert.deepEqual(lines, [{ code: "TDS", label: "TDS deduction", amount: 247.38 }]);
+});
+
+test("adjustment-only payouts keep their canonical fallback deduction context", () => {
+  const fallback = { categoryCode: "contractors", panNumber: null };
+  assert.equal(
+    resolveWorkforcePayoutDeductionContext("adjustment-only", new Map(), fallback),
+    fallback
+  );
 });

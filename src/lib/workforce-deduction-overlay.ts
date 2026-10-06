@@ -19,6 +19,20 @@ export type WorkforcePayoutDeductionOptions = {
   includeAutomaticDeductions?: boolean;
 };
 
+/**
+ * A payout row may already have resolved its deduction category and PAN from
+ * the payment source that produced it. Keep that source context when uploaded
+ * additions or manual deductions cause the row to be recalculated. Canonical
+ * Workforce source metadata is only a fallback for adjustment-only rows.
+ */
+export function resolveWorkforcePayoutDeductionContext(
+  payoutRowId: string,
+  preservedContexts: ReadonlyMap<string, DeductionWorkerContext>,
+  fallback: DeductionWorkerContext
+): DeductionWorkerContext {
+  return preservedContexts.get(payoutRowId) ?? fallback;
+}
+
 function rounded(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
