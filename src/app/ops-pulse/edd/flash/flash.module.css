@@ -94,7 +94,7 @@
 .more summary { cursor: pointer; font-weight: 600; }
 .more p { max-width: 900px; margin: 8px 0 0; line-height: 1.6; }
 /* The app's global table rule forces an 880px minimum; this one must fit its panel. */
-.hourTable { max-height: 232px; margin-top: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.hourTable { margin-top: 8px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
 .hourTable table { width: 100%; min-width: 0; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .hourTable :is(th, td) { padding: 6px 12px; border-bottom: 1px solid #f1f3f6; background: none; text-align: right; text-transform: none; letter-spacing: normal; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--ink); }
 .hourTable :is(th, td):first-child { text-align: left; }
@@ -111,7 +111,8 @@
 .search { display: flex; align-items: center; gap: 6px; width: 200px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--muted); }
 .search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 12px; color: var(--ink); }
 .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47, 111, 176, .15); }
-.tableWrap { max-height: 640px; overflow: auto; border-top: 1px solid var(--line); }
+/* No inner vertical scroll: a scroll box inside the page traps the wheel and makes scrolling feel stuck. */
+.tableWrap { overflow-x: auto; border-top: 1px solid var(--line); }
 .table { width: 100%; border-collapse: collapse; white-space: nowrap; }
 .table thead th { position: sticky; top: 0; z-index: 2; padding: 0; background: var(--surface-soft); border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 650; color: var(--muted); text-align: left; }
 .table thead th button { display: inline-flex; align-items: center; gap: 4px; width: 100%; padding: 8px 12px; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
