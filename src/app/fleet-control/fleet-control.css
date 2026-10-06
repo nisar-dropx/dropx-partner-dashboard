@@ -566,3 +566,19 @@ button, input, select, textarea { font: inherit; }
 .fc-health-report .fc-health-header h2{color:#fff}
 .fc-finding-tracker{border:1px solid #dce6e9;border-radius:16px;padding:18px;background:#f7fafb}.fc-action-heading{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}.fc-action-heading h3{margin:0 0 5px}.fc-action-heading p{font-size:12px;color:#607780;margin:0}.fc-action-heading nav{display:flex;flex-wrap:wrap;gap:6px}.fc-action-heading nav button{background:white;border:1px solid #d6e3e6;border-radius:20px;padding:7px 11px;font-size:11px;cursor:pointer}.fc-action-heading button[aria-pressed=true]{background:#0c756e;color:white;border-color:#0c756e}.fc-action-card{margin-top:12px;background:white;border:1px solid #dce7e8;border-left:4px solid #d7982b;border-radius:12px;padding:14px}.fc-action-card.critical{border-left-color:#c4234f}.fc-action-card.closed{border-left-color:#168574}.fc-action-title{display:flex;justify-content:space-between;gap:12px;font-size:14px}.fc-action-title span{font-size:10px;font-weight:700;color:#a12a46;white-space:nowrap}.fc-action-card.closed .fc-action-title span{color:#168574}.fc-action-meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:11px;color:#58717e;margin-top:9px}.fc-action-card .fc-report-disclosure{margin-bottom:0}.fc-action-history article{border-left:2px solid #d6e6e5;padding:10px 14px;margin:12px 0}.fc-action-history small{display:block;color:#607680;margin-top:4px}.fc-action-proofs{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}.fc-action-proofs a{width:130px;display:flex;flex-direction:column;text-decoration:none;color:#185c59;border:1px solid #dce7e7;border-radius:8px;overflow:hidden}.fc-action-proofs img{width:100%;height:90px;object-fit:contain;background:#edf5f4}.fc-action-proofs span{padding:7px;font-size:10px;overflow-wrap:anywhere}.fc-action-proofs b{padding:20px;text-align:center;background:#edf5f4}.fc-action-editor{margin-top:18px;border-top:1px solid #dce7e8;padding-top:8px}.fc-action-editor fieldset{border:0;padding:0;margin:0;min-width:0}.fc-action-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.fc-action-fields .full{grid-column:1/-1}.fc-action-fields label{font-size:11px;font-weight:600;display:flex;flex-direction:column;gap:5px}.fc-action-fields input,.fc-action-fields select,.fc-action-fields textarea{border:1px solid #cddde1;padding:10px;border-radius:8px;width:100%;background:white;font-size:13px;box-sizing:border-box;min-width:0;color:#193340}.fc-action-fields small{font-size:10px;font-weight:400;color:#617882}.fc-proof-remove{border:0;background:#f6eded;color:#93314b;font-size:10px;border-radius:6px;padding:6px;margin:0 6px 10px 0}.fc-action-editor>.fc-button{margin-top:12px}.fc-action-editor h4{margin:8px 0 14px}
 @media(max-width:600px){.fc-finding-tracker{padding:12px}.fc-action-fields{grid-template-columns:1fr}.fc-action-title{flex-direction:column;gap:5px}.fc-action-meta{gap:6px 12px}.fc-action-card{padding:12px}.fc-action-card .fc-report-disclosure{padding:10px}.fc-action-proofs a{width:110px}}
+
+/* Shared compact identity context on vehicle rows, cards and detail windows. */
+.fc-app .fc-vehicle-meta {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: clamp(9px, .85em, 12px);
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.fc-app .fc-calendar-grid button > span { font-size: 11px; }
+.fc-app .fc-audit-calendar .fc-vehicle-meta { font-size: 9px; }
