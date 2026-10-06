@@ -1,5 +1,5 @@
 export type ProductionFallbackPolicy = {
-  field_code: string; mode: 'disabled' | 'associate_average' | 'associate_then_station';
+  field_code: string; mode: 'disabled' | 'associate_average' | 'associate_then_station' | 'associate_station_company';
   lookback_months: number; minimum_history_days: number; effective_from: string;
 };
 export type ProductionHistory = {
@@ -7,7 +7,7 @@ export type ProductionHistory = {
   field_code_snapshot: string; units: number; period_from: string; period_to: string; work_days: number;
 };
 export type ProductionEstimate = {
-  units: number; basis: 'associate average' | 'station average';
+  units: number; basis: 'associate average' | 'station average' | 'company average';
   history_from: string; history_to: string; history_units: number; history_work_days: number;
 };
 /** Finance estimate only. Never writes an attendance or payroll input. */
@@ -24,22 +24,24 @@ export function historicalProductionEstimate(input: {
   const since = new Date(`${month}T00:00:00Z`);
   since.setUTCMonth(since.getUTCMonth() - policy.lookback_months);
   const from = since.toISOString().slice(0,10);
-  const sameField = input.history.filter(h => h.station_id === input.stationId && h.field_code_snapshot?.trim().toUpperCase() === code);
+  const fieldHistory = input.history.filter(h => h.field_code_snapshot?.trim().toUpperCase() === code);
+  const sameField = fieldHistory.filter(h => h.station_id === input.stationId);
   // An authoritative imported period covers its entire interval, even when the
   // actual total was posted on month-end. Do not add an estimate alongside it.
   if (sameField.some(h => h.workforce_id === input.workforceId && h.period_from <= input.date && h.period_to >= input.date)) return;
-  const history = sameField.filter(h => h.period_from >= from && h.period_to < month
+  const history = fieldHistory.filter(h => h.period_from >= from && h.period_to < month
     && Number.isFinite(Number(h.units)) && Number(h.units) >= 0 && Number(h.work_days) > 0
     && Number(h.work_days) <= Math.round((Date.parse(h.period_to)-Date.parse(h.period_from))/86400000)+1);
   function average(rows: ProductionHistory[], basis: ProductionEstimate['basis']) {
     // Fail closed on overlapping historical totals for the same person/field.
-    if (rows.some((a,i) => rows.some((b,j) => i!==j && a.workforce_id===b.workforce_id
+    if (rows.some((a,i) => rows.some((b,j) => i!==j && a.workforce_id===b.workforce_id && a.station_id===b.station_id
       && a.period_from<=b.period_to && b.period_from<=a.period_to))) return;
     const units = rows.reduce((n,h)=>n+Number(h.units),0), days = rows.reduce((n,h)=>n+Number(h.work_days),0);
     if (days < policy!.minimum_history_days || !rows.length) return;
     return { units: units/days, basis, history_from: rows.map(h=>h.period_from).sort()[0],
       history_to: rows.map(h=>h.period_to).sort().at(-1)!, history_units:units, history_work_days:days };
   }
-  return average(history.filter(h=>h.workforce_id===input.workforceId),'associate average')
-    ?? (policy.mode==='associate_then_station' ? average(history,'station average') : undefined);
+  return average(history.filter(h=>h.workforce_id===input.workforceId && h.station_id===input.stationId),'associate average')
+    ?? (['associate_then_station','associate_station_company'].includes(policy.mode) ? average(history.filter(h=>h.station_id===input.stationId),'station average') : undefined)
+    ?? (policy.mode==='associate_station_company' ? average(history,'company average') : undefined);
 }

@@ -25,3 +25,8 @@ test('effective revision can disable fallback and associate-only cannot borrow s
  assert.equal(estimate({...input,policies:[policy,{...policy,mode:'disabled',effective_from:'2026-10-01'}]}),undefined);
  assert.equal(estimate({...input,workforceId:'new',policies:[{...policy,mode:'associate_average'}]}),undefined);
 });
+
+test('overall average is opt-in and works when station history is absent',()=>{
+ const result=estimate({...input,stationId:'new-station',policies:[{...policy,mode:'associate_station_company'}]});
+ assert.equal(result.basis,'company average');assert.equal(result.units,60);
+});
