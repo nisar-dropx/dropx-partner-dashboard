@@ -4,28 +4,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { amazonTasks, amazonTaskStates, joiningStages, joiningState, providerStages, trainingEntitlements, type JoiningAttendance, type JoiningMapping, type JoiningPerson, type JoiningPlan } from "@/lib/workforce-joining";
+import { amazonInvitationUrl, idfyActionUrl } from "@/lib/onboarding-action-url";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
-const amazonInvitationUrl=(value:unknown)=>{
-  const cleaned=String(value??"").trim().replace(/[\]\)}>.,;]+$/g,"");
-  if(!cleaned)return null;
-  try{
-    const url=new URL(cleaned);
-    if(url.protocol!=="https:"||url.hostname!=="logistics.amazon.in"||!url.pathname.startsWith("/account-management/invitation"))return null;
-    return url.toString();
-  }catch{return null;}
-};
-const idfyActionUrl=(value:unknown)=>{
-  const cleaned=String(value??"").trim().replace(/[\]\)}>.,;]+$/g,"");
-  if(!cleaned)return null;
-  try{
-    const url=new URL(cleaned);
-    const host=url.hostname.toLowerCase();
-    if(url.protocol!=="https:"||!(host==="idfy.com"||host.endsWith(".idfy.com")))return null;
-    return url.toString();
-  }catch{return null;}
-};
 const checkLabel=(key:string)=>key.replace(/[_-]+/g," ").replace(/\b\w/g,letter=>letter.toUpperCase());
 const checkState=(value:unknown)=>{
   const text=String(value??"").trim().toLowerCase();
