@@ -170,3 +170,50 @@ assert.equal(realPreview.selectedPreviewUserId("different-viewer"), null);
 previewCookie = "owner:malformed";
 assert.equal(realPreview.selectedPreviewUserId("owner"), null);
 console.log("Live helper tests passed: eligible viewer, portal membership, scoped candidates and actor-bound cookie.");
+
+// Read-only previews must load the same station vehicle options as requesters.
+const locationId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+let contextAuth = null, contextReads = 0, contextFailure = false;
+const requestAuth = { ...actualStation, locationScopeIds: [locationId], permissions: {
+  expense_requests: { canView: true, canAdd: true, canEdit: false }
+} };
+const contextRoute = moduleAt("src/app/api/payments/adhoc-context/route.ts", {
+  "@/lib/authorization": { getAuthorization: async () => contextAuth, hasPermission: auth.hasPermission },
+  "@/lib/company-scope": { requireCompanyId: a => { assert.equal(a.companyId, company); return company; } },
+  "@/lib/payment-volume": { dateKey: value => value === "2026-10-06" ? value : null },
+  "@/lib/supabase-admin": { supabaseAdmin: { from: table => {
+    contextReads++;
+    assert.equal(table, "stations");
+    const filters = {};
+    const q = { select: () => q, eq: (k, v) => { filters[k] = v; return q; },
+      maybeSingle: async () => {
+        assert.deepEqual(filters, { company_id: company, id: locationId, is_active: true });
+        return { data: { station_code: "TLPB" }, error: null };
+      } };
+    return q;
+  } } },
+  "@/lib/adhoc-vehicle-server": { loadAdhocContext: async (co, station, date) => {
+    assert.deepEqual([co, station, date], [company, "TLPB", "2026-10-06"]);
+    if (contextFailure) throw new Error("upstream unavailable");
+    return { rules: [{ reason_key: "high_volume", label: "High Volume" }], vehicles: [] };
+  } }
+});
+const contextRequest = (location = locationId) => new Request(`https://ops.example/api/payments/adhoc-context?location=${location}&date=2026-10-06`);
+assert.equal((await contextRoute.GET(contextRequest())).status, 401);
+contextAuth = { ...requestAuth, permissions: {} };
+assert.equal((await contextRoute.GET(contextRequest())).status, 403);
+contextAuth = { ...requestAuth, locationScopeIds: [] };
+assert.equal((await contextRoute.GET(contextRequest())).status, 403);
+assert.equal(contextReads, 0, "unauthorized or out-of-scope lookups never query fleet data");
+for (const readOnly of [false, true]) {
+  contextAuth = { ...requestAuth, readOnly };
+  const result = await contextRoute.GET(contextRequest());
+  assert.equal(result.status, 200, `station lookup works with readOnly=${readOnly}`);
+  assert.equal((await result.json()).rules[0].label, "High Volume");
+  assert.equal(auth.hasPermission(contextAuth, "expense_requests", "add"), !readOnly, "lookup does not permit preview submissions");
+}
+contextAuth = { ...requestAuth, readOnly: true, permissions: { payment_requests: { canView: true, canAdd: false, canEdit: false } } };
+assert.equal((await contextRoute.GET(contextRequest())).status, 200, "payment-page readers can inspect vehicle context");
+contextFailure = true;
+assert.equal((await contextRoute.GET(contextRequest())).status, 503, "upstream failures return a retryable response");
+console.log("Ad hoc lookup tests passed: requester/preview reads, unchanged write protection, company/station scope and retryable failure.");

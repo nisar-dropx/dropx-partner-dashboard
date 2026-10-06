@@ -6,7 +6,9 @@ import { loadAdhocContext } from '@/lib/adhoc-vehicle-server';
 export const dynamic='force-dynamic';
 export async function GET(request:Request){
  const auth=await getAuthorization();if(!auth)return Response.json({error:'Login required.'},{status:401});
- if(!hasPermission(auth,'expense_requests','add')&&!hasPermission(auth,'payment_requests','add'))return Response.json({error:'Request access denied.'},{status:403});
+ // This lookup only reads options. Preview users retain the selected user's
+ // page and station access; submission still requires add permission.
+ if(!hasPermission(auth,'expense_requests','access')&&!hasPermission(auth,'payment_requests','access'))return Response.json({error:'Request access denied.'},{status:403});
  const q=new URL(request.url).searchParams,location=q.get('location')||'',date=q.get('date')||'';
  if(!/^[a-f0-9-]{36}$/i.test(location)||!dateKey(date))return Response.json({error:'Select station and date.'},{status:400});
  if(!auth.hasAllLocationAccess&&!auth.locationScopeIds.includes(location))return Response.json({error:'Station outside your access.'},{status:403});
