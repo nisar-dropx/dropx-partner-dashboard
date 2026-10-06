@@ -97,3 +97,22 @@ test("the same workforce remains one payout row per location", () => {
   ]);
   assert.equal(new Set(result.rows.map(({ row }) => row.id)).size, 2);
 });
+
+test("aggregate WORK_DAYS settlement is not clamped to one day", () => {
+  const aggregate = segment({ id: "aggregate", methodId: "daily", method: "Daily", from: 5, to: 5, rate: 100, units: 4.5, amount: 450 });
+  aggregate.row.dailyBreakdown[0].workDayUnits = 4.5;
+  aggregate.row.dailyBreakdown[0].attendanceSource = "Bulk upload range";
+  aggregate.row.dailyBreakdown[0].attendanceRange = {
+    basis: "days",
+    quantity: 4.5,
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-05"
+  };
+
+  const result = consolidateProviderPayoutSegments([aggregate]);
+
+  assert.equal(result.rows[0].row.workDays, 4.5);
+  assert.equal(result.rows[0].row.workDaysSource, "Bulk upload range");
+  assert.deepEqual(result.rows[0].row.dailyBreakdown[0].attendanceRange, aggregate.row.dailyBreakdown[0].attendanceRange);
+  assert.equal(result.rows[0].row.grossPayment, 450);
+});

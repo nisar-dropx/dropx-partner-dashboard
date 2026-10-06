@@ -13,6 +13,12 @@ const deductionUploadMigration = readFileSync(
 )
   .replace(/create extension if not exists btree_gist\s*;/gi, "")
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const attendanceValuesMigration = readFileSync(
+  new URL("../supabase/migrations/20261006153000_workforce_payout_attendance_values.sql", import.meta.url),
+  "utf8"
+)
+  .replace(/create extension if not exists btree_gist\s*;/gi, "")
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 
 assert.match(migration, /payout_input_snapshot_hash/i);
 assert.match(migration, /lower\(coalesce\(payroll_run\.status, ''\)\) in \('approved', 'paid'\)/i);
@@ -20,6 +26,9 @@ assert.doesNotMatch(migration, /lower\(coalesce\(payroll_run\.status, ''\)\) in 
 assert.doesNotMatch(migration, /lock table public\.workforce_payout_/i);
 assert.match(deductionUploadMigration, /from public\.workforce_payout_deduction_values item/i);
 assert.match(deductionUploadMigration, /workforce_payout_deduction_values_01_finalized_guard/i);
+assert.match(attendanceValuesMigration, /workforce_payout_attendance_values_01_finalized_guard/i);
+assert.match(attendanceValuesMigration, /workforce_payout_input_snapshot_hash_without_attendance_values/i);
+assert.match(attendanceValuesMigration, /attendance_values/i);
 
 const db = new PGlite({ extensions: { btree_gist } });
 await db.exec(`
@@ -197,6 +206,7 @@ await db.exec(`
   end $$;
   ${migration}
   ${deductionUploadMigration}
+  ${attendanceValuesMigration}
 `);
 
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -208,6 +218,8 @@ const user = id(8);
 const manualDeductionHead = id(9);
 const batch = id(20);
 const importRow = id(21);
+const attendanceImportRow = id(23);
+const attendanceValue = id(24);
 await db.query("insert into auth.users(id) values ($1)", [user]);
 await db.query("insert into public.companies(id) values ($1)", [company]);
 await db.query("insert into public.stations(id,company_id) values ($1,$2)", [station, company]);
@@ -268,6 +280,25 @@ await assert.rejects(
 );
 
 await db.query("update public.workforce_payroll_runs set calculated_at=clock_timestamp() where id=$1", [run]);
+await db.query(`insert into public.workforce_payout_import_rows
+  (id,batch_id,company_id,row_number,action,workforce_id,dropx_id_snapshot,station_id,input_type,
+   payment_field_id,additional_payment_field_id,deduction_head_id,field_code_snapshot,effective_from,effective_to,
+   numeric_value,text_value,work_minutes,raw_payload)
+  values ($1,$2,$3,3,'UPSERT',$4,'DX1001',$5,'ATTENDANCE',null,null,null,'WORK_HOURS',
+    '2026-09-01','2026-09-30',30,null,null,'{}')`,
+  [attendanceImportRow, batch, company, worker, station]);
+await db.query(`insert into public.workforce_payout_attendance_values
+  (id,company_id,workforce_id,station_id,attendance_basis,effective_from,effective_to,quantity,
+   source_batch_id,source_row_id,created_by,updated_by)
+  values ($1,$2,$3,$4,'hours','2026-09-01','2026-09-30',30,$5,$6,$7,$7)`,
+  [attendanceValue, company, worker, station, batch, attendanceImportRow, user]);
+await assert.rejects(
+  db.query("update public.workforce_payroll_runs set status='approved' where id=$1", [run]),
+  /inputs changed after this payroll was calculated/i,
+  "aggregate attendance ranges participate in the payroll input snapshot"
+);
+
+await db.query("update public.workforce_payroll_runs set calculated_at=clock_timestamp() where id=$1", [run]);
 await db.query("update public.workforce_payroll_runs set status='approved' where id=$1", [run]);
 await assert.rejects(
   db.query("update public.workforce_payroll_runs set status='draft' where id=$1", [run]),
@@ -292,6 +323,10 @@ await assert.rejects(
 );
 await assert.rejects(
   db.query("update public.workforce_payout_deduction_values set amount=350 where id=$1", [id(22)]),
+  /approved or paid/i
+);
+await assert.rejects(
+  db.query("update public.workforce_payout_attendance_values set quantity=35 where id=$1", [attendanceValue]),
   /approved or paid/i
 );
 

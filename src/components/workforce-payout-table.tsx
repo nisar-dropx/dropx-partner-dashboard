@@ -23,6 +23,13 @@ export type WorkforcePayoutLine = {
   thresholdConfigurationMissing?: boolean;
 };
 
+export type WorkforcePayoutAttendanceRange = {
+  basis: "hours" | "days";
+  quantity: number;
+  effectiveFrom: string;
+  effectiveTo: string;
+};
+
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   reviewSubjectType?: "workforce" | "helper"; reviewSubjectId?: string | null; reviewToken?: string | null;
@@ -37,6 +44,7 @@ export type WorkforcePayoutRow = {
     methodAmounts: Array<{ id: string; label: string; amount: number }>;
     baseAmount: number;
     lines: WorkforcePayoutLine[];
+    attendanceRange?: WorkforcePayoutAttendanceRange;
   }>;
   additionalPaymentBreakdown?: Array<{
     fieldId: string;
@@ -53,6 +61,7 @@ export type WorkforcePayoutRow = {
 function money(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`; }
 function rateMoney(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function units(value: number) { return value.toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
+function dateLabel(value: string) { return value.split("-").reverse().join("/"); }
 function workDaysValue(value: number, source: string) { return source.toLowerCase().includes("unavailable") ? "" : value; }
 function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
 const MAX_REVIEW_SELECTION = 1000;
@@ -384,6 +393,10 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
             const detailId = `payout-breakup-${row.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
             const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0 || item.reportedCount !== undefined);
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
+            const attendanceRanges = [...new Map(row.dailyBreakdown.flatMap((day) => day.attendanceRange ? [[
+              `${day.attendanceRange.basis}|${day.attendanceRange.effectiveFrom}|${day.attendanceRange.effectiveTo}`,
+              day.attendanceRange
+            ] as const] : [])).values()];
             return [
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
                 {canEdit ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for review`} checked={selected.has(row.id)} disabled={!canSendPayoutForReview(row) || (reviewSelectionLimitReached && !selected.has(row.id))} onChange={() => toggleSelected(row.id)} title={reviewSelectionLimitReached && !selected.has(row.id) ? `Maximum ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts selected` : undefined} type="checkbox" /></td> : null}
@@ -413,6 +426,12 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
                       <span><small>Gross deductions</small><strong className={row.deductions ? "negative" : undefined}>{row.deductions ? `- ${money(row.deductions)}` : money(0)}</strong></span>
                       <span><small>Net pay</small><strong>{money(row.netAmount)}</strong></span>
                     </div>
+                    {attendanceRanges.length ? <div className="payout-breakup-summary">
+                      {attendanceRanges.map((range) => <span key={`${range.basis}|${range.effectiveFrom}|${range.effectiveTo}`}>
+                        <small>Uploaded attendance range</small>
+                        <strong>{units(range.quantity)} work {range.basis} · {dateLabel(range.effectiveFrom)}–{dateLabel(range.effectiveTo)}</strong>
+                      </span>)}
+                    </div> : null}
                     <div className="payout-total-groups">
                       <section className="payout-total-group">
                         <h3>Payment totals</h3>

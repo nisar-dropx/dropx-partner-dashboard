@@ -6,6 +6,16 @@ export type WorkforcePayoutAttendanceOverrideRow = {
   work_minutes: number | string | null;
 };
 
+export type WorkforcePayoutAttendancePeriodRow = {
+  id?: string | null;
+  workforce_id: string;
+  station_id: string;
+  attendance_basis: "hours" | "days" | string;
+  effective_from: string;
+  effective_to: string;
+  quantity: number | string;
+};
+
 export type WorkforcePaymentFieldOverrideRow = {
   id?: string | null;
   workforce_id: string;
@@ -48,6 +58,11 @@ type IndexedAttendanceOverride = WorkforcePayoutAttendanceOverrideRow & {
   work_minutes: number | null;
 };
 
+export type IndexedAttendancePeriod = WorkforcePayoutAttendancePeriodRow & {
+  attendance_basis: "hours" | "days";
+  quantity: number;
+};
+
 type IndexedPaymentFieldOverride = WorkforcePaymentFieldOverrideRow & {
   input_value: number;
 };
@@ -58,6 +73,7 @@ type IndexedProductionInput = WorkforceProductionInputRow & {
 
 export type WorkforcePayoutInputMaps = {
   attendanceByWorkforceDate: ReadonlyMap<string, IndexedAttendanceOverride>;
+  attendancePeriodsByWorkforceStation: ReadonlyMap<string, readonly IndexedAttendancePeriod[]>;
   paymentFieldOverridesByWorkforceField: ReadonlyMap<string, readonly IndexedPaymentFieldOverride[]>;
   paymentFieldOverridesByWorkforceCode: ReadonlyMap<string, readonly IndexedPaymentFieldOverride[]>;
   productionByWorkforceFieldDate: ReadonlyMap<string, IndexedProductionInput>;
@@ -95,6 +111,12 @@ function validDate(value: unknown) {
     && parsed.getUTCDate() === day;
 }
 
+function inclusiveDateCount(from: string, to: string) {
+  const start = Date.parse(`${from}T00:00:00.000Z`);
+  const end = Date.parse(`${to}T00:00:00.000Z`);
+  return Math.floor((end - start) / 86_400_000) + 1;
+}
+
 function nonNegativeNumber(value: unknown) {
   if (value === null || value === undefined || clean(value) === "") return null;
   const number = Number(value);
@@ -119,6 +141,10 @@ export function workforcePayoutAttendanceKey(workforceId: unknown, date: unknown
 
 function workforcePaymentFieldKey(workforceId: unknown, stationId: unknown, paymentFieldId: unknown) {
   return `${clean(workforceId)}|${clean(stationId)}|${clean(paymentFieldId)}`;
+}
+
+function workforceAttendancePeriodKey(workforceId: unknown, stationId: unknown) {
+  return `${clean(workforceId)}|${clean(stationId)}`;
 }
 
 function workforcePaymentFieldCodeKey(workforceId: unknown, stationId: unknown, fieldCode: unknown) {
@@ -174,12 +200,14 @@ function sortedIntervals(rows: IndexedPaymentFieldOverride[]) {
  */
 export function buildWorkforcePayoutInputMaps(input: {
   attendanceOverrides?: readonly WorkforcePayoutAttendanceOverrideRow[] | null;
+  attendancePeriods?: readonly WorkforcePayoutAttendancePeriodRow[] | null;
   paymentFieldOverrides?: readonly WorkforcePaymentFieldOverrideRow[] | null;
   productionInputs?: readonly WorkforceProductionInputRow[] | null;
   /** @deprecated Use productionInputs for new calculation code. */
   customProductionInputs?: readonly WorkforceCustomProductionInputRow[] | null;
 }): WorkforcePayoutInputMaps {
   const attendanceByWorkforceDate = new Map<string, IndexedAttendanceOverride>();
+  const attendancePeriodsByWorkforceStation = new Map<string, IndexedAttendancePeriod[]>();
   const paymentFieldOverridesByWorkforceField = new Map<string, IndexedPaymentFieldOverride[]>();
   const paymentFieldOverridesByWorkforceCode = new Map<string, IndexedPaymentFieldOverride[]>();
   const productionByWorkforceFieldDate = new Map<string, IndexedProductionInput>();
@@ -198,6 +226,37 @@ export function buildWorkforcePayoutInputMaps(input: {
       attendance_status: status,
       work_minutes: minutes
     });
+  }
+
+  for (const row of input.attendancePeriods ?? []) {
+    const workforceId = clean(row.workforce_id);
+    const stationId = clean(row.station_id);
+    const basis = normalizedCode(row.attendance_basis).toLowerCase();
+    const effectiveFrom = clean(row.effective_from);
+    const effectiveTo = clean(row.effective_to);
+    const quantity = nonNegativeNumber(row.quantity);
+    const inclusiveDays = validDate(effectiveFrom) && validDate(effectiveTo) && effectiveTo >= effectiveFrom
+      ? inclusiveDateCount(effectiveFrom, effectiveTo)
+      : 0;
+    if (!workforceId || !stationId || (basis !== "hours" && basis !== "days")
+      || !validDate(effectiveFrom) || !validDate(effectiveTo) || effectiveTo < effectiveFrom || quantity === null
+      || (basis === "days" && quantity > inclusiveDays)
+      || (basis === "hours" && quantity > inclusiveDays * 24)) continue;
+    append(attendancePeriodsByWorkforceStation, workforceAttendancePeriodKey(workforceId, stationId), {
+      ...row,
+      workforce_id: workforceId,
+      station_id: stationId,
+      attendance_basis: basis,
+      effective_from: effectiveFrom,
+      effective_to: effectiveTo,
+      quantity
+    });
+  }
+  for (const [key, rows] of attendancePeriodsByWorkforceStation) {
+    attendancePeriodsByWorkforceStation.set(key, rows.slice().sort((left, right) =>
+      left.effective_from.localeCompare(right.effective_from)
+      || left.effective_to.localeCompare(right.effective_to)
+      || clean(left.id).localeCompare(clean(right.id))));
   }
 
   for (const row of input.paymentFieldOverrides ?? []) {
@@ -263,6 +322,7 @@ export function buildWorkforcePayoutInputMaps(input: {
 
   return {
     attendanceByWorkforceDate,
+    attendancePeriodsByWorkforceStation,
     paymentFieldOverridesByWorkforceField,
     paymentFieldOverridesByWorkforceCode,
     productionByWorkforceFieldDate,
@@ -270,6 +330,75 @@ export function buildWorkforcePayoutInputMaps(input: {
     customProductionByWorkforceFieldDate: productionByWorkforceFieldDate,
     customProductionByWorkforceCodeDate: productionByWorkforceCodeDate
   };
+}
+
+/**
+ * Finds the one aggregate attendance value that owns a date. Database overlap
+ * constraints make one row authoritative; ambiguous fixture/manual data fails
+ * closed so payroll never double-counts a range.
+ */
+export function findWorkforcePayoutAttendancePeriod(
+  maps: WorkforcePayoutInputMaps,
+  lookup: { workforceId: string; stationId: string; date: string; basis?: "hours" | "days" | null }
+) {
+  const workforceId = clean(lookup.workforceId);
+  const stationId = clean(lookup.stationId);
+  const date = clean(lookup.date);
+  if (!workforceId || !stationId || !validDate(date)) return undefined;
+  const matches = (maps.attendancePeriodsByWorkforceStation.get(workforceAttendancePeriodKey(workforceId, stationId)) ?? [])
+    .filter((row) => (!lookup.basis || row.attendance_basis === lookup.basis)
+      && row.effective_from <= date && row.effective_to >= date);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * Returns aggregate attendance ranges overlapping an inclusive date window.
+ * The optional basis is important for mixed payment methods: WORK_HOURS must
+ * replace only hourly attendance pay, while WORK_DAYS replaces only daily or
+ * monthly attendance pay.
+ */
+export function listWorkforcePayoutAttendancePeriods(
+  maps: WorkforcePayoutInputMaps,
+  lookup: {
+    workforceId: string;
+    stationId: string;
+    basis?: "hours" | "days" | null;
+    from?: string | null;
+    to?: string | null;
+  }
+) {
+  const workforceId = clean(lookup.workforceId);
+  const stationId = clean(lookup.stationId);
+  const from = clean(lookup.from);
+  const to = clean(lookup.to);
+  if (!workforceId || !stationId || (from && !validDate(from)) || (to && !validDate(to)) || (from && to && to < from)) return [];
+  return (maps.attendancePeriodsByWorkforceStation.get(workforceAttendancePeriodKey(workforceId, stationId)) ?? [])
+    .filter((row) => (!lookup.basis || row.attendance_basis === lookup.basis)
+      && (!from || row.effective_to >= from)
+      && (!to || row.effective_from <= to));
+}
+
+/**
+ * An invalid aggregate must block a payout only when it overlaps the rendered
+ * period, or when an earlier WORK_DAYS total is part of a monthly attendance
+ * entitlement that depends on the month's cumulative units.
+ */
+export function aggregateAttendanceIssueAffectsPayoutPeriod(input: {
+  attendanceBasis: "hours" | "days";
+  aggregateFrom: string;
+  aggregateTo: string;
+  payoutFrom: string;
+  payoutTo: string;
+  requiresMonthlyDayHistory?: boolean;
+}) {
+  if (![input.aggregateFrom, input.aggregateTo, input.payoutFrom, input.payoutTo].every(validDate)
+    || input.aggregateTo < input.aggregateFrom
+    || input.payoutTo < input.payoutFrom) return false;
+  if (input.aggregateFrom <= input.payoutTo && input.aggregateTo >= input.payoutFrom) return true;
+  return input.attendanceBasis === "days"
+    && input.requiresMonthlyDayHistory === true
+    && input.aggregateTo < input.payoutFrom
+    && input.aggregateTo.slice(0, 7) === input.payoutFrom.slice(0, 7);
 }
 
 /** Use this provenance check when selecting the attendance source passed to hourly pay. */

@@ -17,12 +17,9 @@ type PreviewRow = {
   inputType: string;
   fieldCode: string;
   locationCode: string;
-  effectiveDate?: string;
-  effectiveFrom?: string;
-  effectiveTo?: string;
+  effectiveDate: string;
+  effectiveTo: string;
   value: number | string | null;
-  workHours?: number | null;
-  workDays?: number | null;
 };
 
 type PreviewResponse = {
@@ -149,10 +146,10 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
             </div>
 
             <p className="compensation-match-rule">
-              <strong>Excel date:</strong> Enter one EFFECTIVE_DATE on every row, using only DD-MM-YYYY or DD/MM/YYYY. The selected worksheet period ({fromDate} to {toDate}) is applied automatically and is not editable in this upload panel.
+              <strong>Excel dates:</strong> Enter EFFECTIVE_DATE and the compulsory EFFECTIVE_TO on every row, using only DD-MM-YYYY or DD/MM/YYYY. Both dates must be inside the selected worksheet period ({fromDate} to {toDate}); there are no separate effective-date controls in this upload panel.
             </p>
             <p className="compensation-match-rule">
-              <strong>Attendance units:</strong> For ATTENDANCE, fill exactly one column: WORK_HOURS for a person mapped to per-hour attendance, or WORK_DAYS for a person mapped to per-day attendance. Filling both columns, or using a unit that does not match the person&apos;s attendance payment mapping, is rejected.
+              <strong>Attendance quantity:</strong> For ATTENDANCE, set FIELD_CODE to WORK_HOURS or WORK_DAYS and enter the quantity in VALUE. Use WORK_HOURS only for hourly attendance pay, and WORK_DAYS only for daily or monthly attendance pay. A unit that does not match the person&apos;s attendance payment mapping is rejected.
             </p>
 
             {error ? <div className="compensation-import-message error"><strong>Import blocked</strong><span>{error}</span></div> : null}
@@ -183,7 +180,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
 
                 <div className="table-wrap compensation-preview-table">
                   <table>
-                    <thead><tr><th>Row</th><th>DropX ID</th><th>Location</th><th>Database person</th><th>Input</th><th>Field</th><th>Effective date</th><th>Value</th><th>Action</th></tr></thead>
+                    <thead><tr><th>Row</th><th>DropX ID</th><th>Location</th><th>Database person</th><th>Input</th><th>FIELD_CODE</th><th>VALUE</th><th>EFFECTIVE_DATE</th><th>EFFECTIVE_TO</th><th>Action</th></tr></thead>
                     <tbody>{rows.slice(0, 50).map((row) => (
                       <tr key={`${row.rowNumber}-${row.dropxId}-${row.inputType}-${row.fieldCode}`}>
                         <td>{row.rowNumber}</td>
@@ -192,12 +189,9 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
                         <td>{row.fullName}</td>
                         <td>{row.inputType.replaceAll("_", " ")}</td>
                         <td>{row.fieldCode || "—"}</td>
-                        <td>{row.effectiveDate ?? row.effectiveFrom ?? "—"}</td>
-                        <td>
-                          {row.value ?? (row.action === "CLEAR" ? "Clear" : "—")}
-                          {row.workHours !== null && row.workHours !== undefined ? ` · ${row.workHours} hr` : ""}
-                          {row.workDays !== null && row.workDays !== undefined ? ` · ${row.workDays} day${row.workDays === 1 ? "" : "s"}` : ""}
-                        </td>
+                        <td>{row.value ?? (row.action === "CLEAR" ? "Clear" : "—")}</td>
+                        <td>{row.effectiveDate}</td>
+                        <td>{row.effectiveTo}</td>
                         <td><span className={`status-pill ${row.action === "CLEAR" ? "warn" : "good"}`}>{row.action.toLowerCase()}</span></td>
                       </tr>
                     ))}</tbody>

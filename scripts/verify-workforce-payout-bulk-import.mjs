@@ -23,6 +23,12 @@ const deductionIndexMigration = readFileSync(
   new URL("../supabase/migrations/20261006043000_workforce_payout_deduction_fk_indexes.sql", import.meta.url),
   "utf8"
 );
+const attendanceValuesMigration = readFileSync(
+  new URL("../supabase/migrations/20261006153000_workforce_payout_attendance_values.sql", import.meta.url),
+  "utf8"
+)
+  .replace(/create extension if not exists btree_gist\s*;/gi, "")
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const apiSource = readFileSync(
   new URL("../src/app/api/payments/workforce-payouts/bulk-upload/route.ts", import.meta.url),
   "utf8"
@@ -57,6 +63,14 @@ assert.match(deductionUploadMigration, /deduction must use the exact selected pa
 assert.match(deductionUploadMigration, /duplicates resolved DEDUCTION input/i);
 assert.match(deductionUploadMigration, /workforce_payout_deduction_values_01_finalized_guard/i);
 assert.match(deductionUploadMigration, /'deduction'::text/i);
+assert.match(attendanceValuesMigration, /create table public\.workforce_payout_attendance_values/i);
+assert.match(attendanceValuesMigration, /workforce_payout_attendance_values_no_overlap/i);
+assert.match(attendanceValuesMigration, /workforce_payout_attendance_values_single_month_check/i);
+assert.match(attendanceValuesMigration, /stay within one calendar month/i);
+assert.match(attendanceValuesMigration, /field_code_snapshot in \('WORK_HOURS', 'WORK_DAYS'\)/i);
+assert.match(attendanceValuesMigration, /workforce_apply_payout_import_without_attendance_values/i);
+assert.match(attendanceValuesMigration, /workforce_payout_attendance_values_01_finalized_guard/i);
+assert.match(attendanceValuesMigration, /'attendance_values'/i);
 for (const indexName of [
   "workforce_payout_deduction_values_workforce_fk_idx",
   "workforce_payout_deduction_values_source_batch_fk_idx",
@@ -83,6 +97,11 @@ const manualDeductionHead = id(19);
 const fixedDeductionHead = id(20);
 const providerProductionField = id(23);
 const systemManualDeductionHead = id(25);
+const attendanceField = id(26);
+const dailyAttendanceField = id(31);
+const monthlyAttendanceField = id(32);
+const directWorker = id(33);
+const directAllocation = id(34);
 
 await db.exec(`
   create schema if not exists auth;
@@ -120,6 +139,8 @@ await db.exec(`
     label text,
     field_type text not null,
     calculation_type text,
+    calculation_source text,
+    pay_schedule text,
     is_custom_production boolean not null default false,
     is_active boolean not null default true,
     unique (company_id, id)
@@ -130,6 +151,8 @@ await db.exec(`
     payment_method_id uuid not null,
     payment_field_id uuid not null,
     component_code text not null,
+    component_type text,
+    pay_schedule text,
     is_active boolean not null default true
   );
   create table public.field_executive_provider_mappings (
@@ -170,6 +193,20 @@ await db.exec(`
     workforce_id uuid not null,
     status text
   );
+  create table public.workforce_payment_settings (
+    id bigint generated always as identity primary key,
+    company_id uuid not null,
+    calculation_method text not null,
+    paid_off_days smallint not null,
+    work_units_per_paid_off numeric(5,2) not null,
+    cap_at_monthly_amount boolean not null,
+    effective_from date not null,
+    change_reason text not null default 'Verifier',
+    created_by uuid,
+    updated_by uuid,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  );
   create table public.workforce_deduction_heads (
     id uuid primary key,
     company_id uuid not null references public.companies(id),
@@ -200,6 +237,7 @@ await db.exec(migration
   .replace(/create extension if not exists pgcrypto\s*;/gi, "")
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""));
 await db.exec(deductionUploadMigration);
+await db.exec(attendanceValuesMigration);
 
 await db.exec(`
   insert into auth.users(id) values ('${user}');
@@ -209,17 +247,29 @@ await db.exec(`
     ('${otherStation}','${company}','ST2'),
     ('${unrelatedStation}','${company}','ST3');
   insert into public.workforce(id,company_id,dropx_id,full_name,location_id,date_of_join)
-    values ('${worker}','${company}','DX1001','Test Worker','${station}','2026-01-01');
-  insert into public.payment_fields(id,company_id,code,label,field_type,calculation_type,is_custom_production)
-    values ('${amountField}','${company}','BASE_RATE','Base rate','amount','manual_input',false),
-           ('${productionField}','${company}','EXTRA_UNITS','Extra units','production','count_x_rate',true),
-           ('${providerProductionField}','${company}','DELIVERY','Delivery','production','count_x_rate',false);
-  insert into public.payment_method_components(id,company_id,payment_method_id,payment_field_id,component_code)
-    values ('${id(10)}','${company}','${method}','${amountField}','BASE_RATE'),
-           ('${id(11)}','${company}','${method}','${productionField}','EXTRA_UNITS'),
-           ('${id(24)}','${company}','${method}','${providerProductionField}','DELIVERY');
+    values ('${worker}','${company}','DX1001','Test Worker','${station}','2026-01-01'),
+           ('${directWorker}','${company}','DX2002','Direct Worker','${station}','2026-01-01');
+  insert into public.payment_fields(id,company_id,code,label,field_type,calculation_type,calculation_source,pay_schedule,is_custom_production)
+    values ('${amountField}','${company}','BASE_RATE','Base rate','amount','manual_input',null,null,false),
+           ('${productionField}','${company}','EXTRA_UNITS','Extra units','production','count_x_rate',null,null,true),
+           ('${providerProductionField}','${company}','DELIVERY','Delivery','production','count_x_rate',null,null,false),
+           ('${attendanceField}','${company}','ATTENDANCE_HOURS','Attendance hours','amount','fixed_rate','attendance_eligibility','per_hour',false),
+           ('${dailyAttendanceField}','${company}','ATTENDANCE_DAYS','Attendance days','amount','fixed_daily','attendance_eligibility','per_day',false),
+           ('${monthlyAttendanceField}','${company}','FIXED_PAY_PER_MONTH','Monthly attendance','amount','fixed_monthly','attendance_eligibility','per_month',false);
+  insert into public.payment_method_components(id,company_id,payment_method_id,payment_field_id,component_code,component_type,pay_schedule)
+    values ('${id(10)}','${company}','${method}','${amountField}','BASE_RATE','amount',null),
+           ('${id(11)}','${company}','${method}','${productionField}','EXTRA_UNITS','production',null),
+           ('${id(24)}','${company}','${method}','${providerProductionField}','DELIVERY','production',null),
+           ('${id(27)}','${company}','${method}','${attendanceField}','ATTENDANCE_HOURS','amount','per_hour');
   insert into public.field_executive_provider_mappings(id,company_id,workforce_id,station_id,payment_method_id,effective_from,status)
     values ('${id(12)}','${company}','${worker}','${station}','${method}','2026-01-01','active');
+  insert into public.workforce_payment_allocations
+    (id,company_id,workforce_id,station_id,payment_method_id,payment_components,effective_from,status)
+    values (
+      '${directAllocation}','${company}','${directWorker}','${station}',null,
+      '[{"payment_field_id":"${attendanceField}","component_code":"ATTENDANCE_HOURS","component_type":"amount","calculation_type":"fixed_rate","calculation_source":"attendance_eligibility","pay_schedule":"per_hour"},{"payment_field_id":"${dailyAttendanceField}","component_code":"ATTENDANCE_DAYS","component_type":"amount","calculation_type":"fixed_daily","calculation_source":"attendance_eligibility","pay_schedule":"per_day"}]'::jsonb,
+      '2026-01-01','active'
+    );
   insert into public.workforce_additional_payment_fields(id,company_id,code,name,calculation_type)
     values ('${additionalField}','${company}','BONUS','Bonus','manual_amount');
   insert into public.workforce_deduction_heads(id,company_id,code,name,calculation_type,is_system,is_active)
@@ -229,19 +279,21 @@ await db.exec(`
 `);
 
 const rows = [
-  { row_number: 2, action: "UPSERT", dropx_id: "DX1001", input_type: "ATTENDANCE", field_code: null, workforce_id: worker, station_id: station, payment_field_id: null, additional_payment_field_id: null, effective_from: "2026-09-01", effective_to: "2026-09-01", numeric_value: null, text_value: "HD", work_minutes: 240, remark: null },
+  { row_number: 2, action: "UPSERT", dropx_id: "DX1001", input_type: "ATTENDANCE", field_code: "WORK_HOURS", workforce_id: worker, station_id: station, payment_field_id: null, additional_payment_field_id: null, deduction_head_id: null, effective_from: "2026-09-01", effective_to: "2026-09-30", numeric_value: 30, text_value: null, work_minutes: null, remark: "monthly hours" },
   { row_number: 3, action: "UPSERT", dropx_id: "DX1001", input_type: "PAYMENT_FIELD_VALUE", field_code: "BASE_RATE", workforce_id: worker, station_id: station, payment_field_id: amountField, additional_payment_field_id: null, effective_from: "2026-09-01", effective_to: "2026-09-30", numeric_value: 650, text_value: null, work_minutes: null, remark: null },
   { row_number: 4, action: "UPSERT", dropx_id: "DX1001", input_type: "PRODUCTION_UNITS", field_code: "EXTRA_UNITS", workforce_id: worker, station_id: station, payment_field_id: productionField, additional_payment_field_id: null, effective_from: "2026-09-02", effective_to: "2026-09-02", numeric_value: 5, text_value: null, work_minutes: null, remark: null },
   { row_number: 5, action: "UPSERT", dropx_id: "DX1001", input_type: "ADDITIONAL_PAYMENT", field_code: "BONUS", workforce_id: worker, station_id: station, payment_field_id: null, additional_payment_field_id: additionalField, deduction_head_id: null, effective_from: "2026-09-01", effective_to: "2026-09-30", numeric_value: 1200, text_value: null, work_minutes: null, remark: "period bonus" },
   { row_number: 6, action: "UPSERT", dropx_id: "DX1001", input_type: "DEDUCTION", field_code: "LOAN_RECOVERY", workforce_id: worker, station_id: station, payment_field_id: null, additional_payment_field_id: null, deduction_head_id: manualDeductionHead, effective_from: "2026-09-01", effective_to: "2026-09-30", numeric_value: 400, text_value: null, work_minutes: null, remark: "monthly recovery" }
 ];
 
-const apply = (hash, payload = rows, allowed = [station]) => db.query(`
+const applyForPeriod = (hash, from, to, payload, allowed = [station]) => db.query(`
   select public.workforce_apply_payout_import(
-    $1::uuid, '2026-09-01'::date, '2026-09-30'::date,
+    $1::uuid, $6::date, $7::date,
     'payout-inputs.xlsx', $2, $3::jsonb, $4::uuid, $5::uuid[]
   ) as id
-`, [company, hash, JSON.stringify(payload), user, allowed]);
+`, [company, hash, JSON.stringify(payload), user, allowed, from, to]);
+const apply = (hash, payload = rows, allowed = [station]) =>
+  applyForPeriod(hash, "2026-09-01", "2026-09-30", payload, allowed);
 
 const first = await apply("a".repeat(64));
 assert.equal(first.rows.length, 1);
@@ -249,7 +301,7 @@ const counts = await db.query(`
   select
     (select count(*)::int from public.workforce_payout_import_batches) batches,
     (select count(*)::int from public.workforce_payout_import_rows) audit_rows,
-    (select count(*)::int from public.workforce_payout_attendance_overrides) attendance,
+    (select count(*)::int from public.workforce_payout_attendance_values) attendance,
     (select count(*)::int from public.workforce_payment_field_overrides) field_values,
     (select count(*)::int from public.workforce_custom_production_inputs) production,
     (select count(*)::int from public.workforce_additional_payment_values) additions,
@@ -259,12 +311,140 @@ assert.deepEqual(counts.rows[0], { batches: 1, audit_rows: 5, attendance: 1, fie
 assert.equal(Number((await db.query(`select final_amount from public.workforce_additional_payment_values`)).rows[0].final_amount), 1200,
   "the bulk verifier must exercise the real additional-payment preparation trigger");
 assert.equal(Number((await db.query(`select amount from public.workforce_payout_deduction_values`)).rows[0].amount), 400);
+const attendanceAudit = await db.query(`select field_code_snapshot,numeric_value,text_value,work_minutes,
+  effective_from::text effective_from,effective_to::text effective_to
+  from public.workforce_payout_import_rows where input_type='ATTENDANCE'`);
+assert.deepEqual(attendanceAudit.rows, [{
+  field_code_snapshot: "WORK_HOURS",
+  numeric_value: "30.0000",
+  text_value: null,
+  work_minutes: null,
+  effective_from: "2026-09-01",
+  effective_to: "2026-09-30"
+}]);
+
+await assert.rejects(
+  apply("ca".repeat(32), [{ ...rows[0], row_number: 2, numeric_value: 721 }]),
+  /WORK_HOURS VALUE cannot exceed 24 hours for each inclusive effective date/i
+);
+await assert.rejects(
+  apply("cb".repeat(32), [{ ...rows[0], row_number: 2, field_code: "WORK_DAYS", numeric_value: 31 }]),
+  /WORK_DAYS VALUE cannot exceed the inclusive effective-day count/i
+);
+await assert.rejects(
+  db.query(`update public.workforce_payout_attendance_values set quantity=721 where workforce_id=$1`, [worker]),
+  /WORK_HOURS quantity cannot exceed 24 hours for each inclusive effective date/i,
+  "the table trigger enforces the same quantity ceiling outside the RPC"
+);
+await assert.rejects(
+  apply("cc".repeat(32), [{
+    ...rows[0],
+    row_number: 2,
+    effective_from: "2026-09-15",
+    numeric_value: 10
+  }]),
+  /partially overlaps an existing attendance value/i
+);
+
+await db.query(`insert into public.payment_method_components
+  (id,company_id,payment_method_id,payment_field_id,component_code,component_type,pay_schedule)
+  values ($1,$2,$3,$4,'ATTENDANCE_DAYS','amount','per_day')`, [id(35), company, method, dailyAttendanceField]);
+await assert.rejects(
+  apply("c1".repeat(32), [{ ...rows[0], row_number: 2, numeric_value: 35 }]),
+  /mixes hourly and daily or monthly attendance pay/i,
+  "provider allocations with mixed attendance bases fail closed in the RPC"
+);
+await db.query("delete from public.payment_method_components where id=$1", [id(35)]);
+
+const directAttendanceRow = {
+  ...rows[0],
+  row_number: 2,
+  dropx_id: "DX2002",
+  workforce_id: directWorker,
+  station_id: station
+};
+await assert.rejects(
+  apply("c2".repeat(32), [directAttendanceRow]),
+  /mixes hourly and daily or monthly attendance pay/i,
+  "direct allocation snapshots with mixed attendance bases fail closed in the RPC"
+);
+
+await db.query(`insert into public.workforce_payment_field_overrides
+  (company_id,workforce_id,station_id,payment_field_id,field_code_snapshot,
+   effective_from,effective_to,input_value,source_batch_id,source_row_id,created_by,updated_by)
+  select $1,$2,$3,$4,'ATTENDANCE_HOURS','2026-09-15','2026-09-30',5,batch_id,id,$5,$5
+  from public.workforce_payout_import_rows
+  where input_type='ATTENDANCE'
+  order by created_at
+  limit 1`, [company, worker, station, attendanceField, user]);
+await assert.rejects(
+  apply("c3".repeat(32), [{ ...rows[0], row_number: 2, numeric_value: 35 }]),
+  /rate override boundary inside its effective range/i
+);
+await db.query(`update public.workforce_payment_field_overrides
+  set effective_from='2026-09-01'
+  where workforce_id=$1 and payment_field_id=$2`, [worker, attendanceField]);
+await apply("c4".repeat(32), [{ ...rows[0], row_number: 2, numeric_value: 35 }]);
+await db.query(`delete from public.workforce_payment_field_overrides
+  where workforce_id=$1 and payment_field_id=$2`, [worker, attendanceField]);
+
+await db.query(`update public.workforce_payment_allocations
+  set payment_components=$2::jsonb
+  where id=$1`, [directAllocation, JSON.stringify([{
+  payment_field_id: monthlyAttendanceField,
+  component_code: "FIXED_PAY_PER_MONTH",
+  component_type: "amount",
+  calculation_type: "fixed_monthly",
+  calculation_source: "attendance_eligibility",
+  pay_schedule: "per_month"
+}])]);
+await assert.rejects(
+  applyForPeriod("c0".repeat(32), "2026-08-15", "2026-09-30", [{
+    ...directAttendanceRow,
+    field_code: "WORK_DAYS",
+    effective_from: "2026-08-15",
+    effective_to: "2026-09-30",
+    numeric_value: 30
+  }]),
+  /stay within one calendar month/i,
+  "aggregate attendance cannot commit a range the payout loader cannot settle"
+);
+await db.query(`insert into public.workforce_payment_settings
+  (company_id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from)
+  values ($1,'fixed_paid_offs',4,6,true,'2026-09-15')`, [company]);
+await assert.rejects(
+  apply("c5".repeat(32), [{
+    ...directAttendanceRow,
+    field_code: "WORK_DAYS",
+    effective_from: "2026-09-01",
+    effective_to: "2026-09-30",
+    numeric_value: 30
+  }]),
+  /monthly attendance payment policy change inside its effective range/i
+);
+await db.query("delete from public.workforce_payment_settings where company_id=$1", [company]);
+
+const legacyAttendance = {
+  ...rows[0],
+  row_number: 2,
+  field_code: null,
+  effective_from: "2026-09-05",
+  effective_to: "2026-09-05",
+  numeric_value: null,
+  text_value: "P",
+  work_minutes: 480,
+  remark: "rolling-deploy compatibility"
+};
+await apply("cd".repeat(32), [legacyAttendance]);
+assert.deepEqual((await db.query(`select attendance_status,work_minutes
+  from public.workforce_payout_attendance_overrides where workforce_id=$1`, [worker])).rows,
+[{ attendance_status: "P", work_minutes: 480 }]);
 
 // A deduction-only workbook replaces only that exact manual head and period.
 // Every other payout-input table must remain byte-for-byte untouched.
 const unrelatedBefore = await db.query(`
   select
-    (select row_to_json(item) from (select attendance_status,work_minutes from public.workforce_payout_attendance_overrides) item) attendance,
+    (select row_to_json(item) from (select attendance_basis,quantity,effective_from,effective_to from public.workforce_payout_attendance_values) item) attendance,
     (select row_to_json(item) from (select input_value from public.workforce_payment_field_overrides) item) field_value,
     (select row_to_json(item) from (select units from public.workforce_custom_production_inputs) item) production,
     (select row_to_json(item) from (select input_value,final_amount from public.workforce_additional_payment_values) item) addition
@@ -273,7 +453,7 @@ await apply("ab".repeat(32), [{ ...rows[4], row_number: 2, numeric_value: 525 }]
 assert.equal(Number((await db.query(`select amount from public.workforce_payout_deduction_values`)).rows[0].amount), 525);
 const unrelatedAfterReplace = await db.query(`
   select
-    (select row_to_json(item) from (select attendance_status,work_minutes from public.workforce_payout_attendance_overrides) item) attendance,
+    (select row_to_json(item) from (select attendance_basis,quantity,effective_from,effective_to from public.workforce_payout_attendance_values) item) attendance,
     (select row_to_json(item) from (select input_value from public.workforce_payment_field_overrides) item) field_value,
     (select row_to_json(item) from (select units from public.workforce_custom_production_inputs) item) production,
     (select row_to_json(item) from (select input_value,final_amount from public.workforce_additional_payment_values) item) addition
@@ -314,7 +494,7 @@ const duplicateTargetCases = [
   {
     hash: "5".repeat(64),
     inputType: "ATTENDANCE",
-    payload: [rows[0], { ...rows[0], row_number: 3, station_id: otherStation, text_value: "P", work_minutes: null }]
+    payload: [rows[0], { ...rows[0], row_number: 3, station_id: otherStation, numeric_value: 45 }]
   },
   {
     hash: "6".repeat(64),
@@ -348,8 +528,30 @@ const stationSpecificCounts = await db.query(`
 `);
 assert.deepEqual(stationSpecificCounts.rows[0], { field_values: 2, production: 2 });
 await assert.rejects(
-  apply("1".repeat(64), [{ ...rows[0], row_number: 2, station_id: otherStation }], [station, otherStation]),
-  /attendance already belongs to another location/i
+  apply("1".repeat(64), [{ ...rows[0], row_number: 2, station_id: otherStation, numeric_value: 40 }], [station, otherStation]),
+  /attendance period already belongs to another location/i
+);
+await apply("10".repeat(32), [{ ...rows[0], row_number: 2, numeric_value: 40 }]);
+const replacedAttendance = await db.query(`select station_id,attendance_basis,quantity
+  from public.workforce_payout_attendance_values where workforce_id=$1`, [worker]);
+assert.deepEqual(replacedAttendance.rows, [{ station_id: station, attendance_basis: "hours", quantity: "40.0000" }]);
+await apply("11".repeat(32), [{
+  ...rows[0],
+  row_number: 2,
+  action: "CLEAR",
+  field_code: "WORK_DAYS",
+  numeric_value: null,
+  remark: "clear by logical attendance-period identity"
+}]);
+assert.equal((await db.query(`select count(*)::int count from public.workforce_payout_attendance_values
+  where workforce_id=$1`, [worker])).rows[0].count, 0,
+"CLEAR cannot silently retain an exact attendance period merely because its supplied basis differs");
+await apply("12".repeat(32), [{ ...rows[0], row_number: 2, numeric_value: 40 }]);
+unrelatedBefore.rows[0].attendance.quantity = 40;
+await assert.rejects(
+  apply("10".repeat(32), [{ ...rows[0], row_number: 2, numeric_value: 40 }]),
+  /already imported/i,
+  "attendance-only workbooks use the same idempotency key"
 );
 await assert.rejects(
   apply("2".repeat(64), [{ ...rows[3], row_number: 2, station_id: otherStation }], [station, otherStation]),
@@ -459,7 +661,7 @@ await apply("ae".repeat(32), [{
 assert.equal((await db.query(`select count(*)::int count from public.workforce_payout_deduction_values`)).rows[0].count, 0);
 const unrelatedAfterClear = await db.query(`
   select
-    (select row_to_json(item) from (select attendance_status,work_minutes from public.workforce_payout_attendance_overrides) item) attendance,
+    (select row_to_json(item) from (select attendance_basis,quantity,effective_from,effective_to from public.workforce_payout_attendance_values) item) attendance,
     (select row_to_json(item) from (select input_value from public.workforce_payment_field_overrides where station_id=$1) item) field_value,
     (select row_to_json(item) from (select units from public.workforce_custom_production_inputs where station_id=$1) item) production,
     (select row_to_json(item) from (select input_value,final_amount from public.workforce_additional_payment_values where additional_payment_field_id=$2) item) addition

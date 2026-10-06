@@ -54,6 +54,7 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
           date: day.date,
           workDayUnits: Math.max(current.day.workDayUnits, day.workDayUnits),
           attendanceSource: current.day.attendanceSource === day.attendanceSource ? day.attendanceSource : "Mixed",
+          attendanceRange: current.day.attendanceRange ?? day.attendanceRange,
           methodAmounts: summarizePaymentMethodAmounts([
             ...current.day.methodAmounts.map((method) => ({ methodId: method.id, label: method.label, amount: method.amount })),
             ...day.methodAmounts.map((method) => ({ methodId: method.id, label: method.label, amount: method.amount }))
@@ -77,7 +78,8 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
     const baseAmount = rounded(dailyBreakdown.reduce((sum, day) => sum + day.baseAmount, 0));
     const additions = rounded(workerSegments.reduce((sum, segment) => sum + segment.row.additions, 0));
     const grossPayment = rounded(baseAmount + additions);
-    const workDays = rounded(dailyBreakdown.reduce((sum, day) => sum + Math.max(0, Math.min(1, day.workDayUnits)), 0));
+    const workDays = rounded(dailyBreakdown.reduce((sum, day) => sum + Math.max(0,
+      day.attendanceSource === "Bulk upload range" ? day.workDayUnits : Math.min(1, day.workDayUnits)), 0));
     const workDaySources = [...new Set(dailyBreakdown.map((day) => day.attendanceSource).filter(Boolean))];
     const paymentMethodBreakdown = summarizePaymentMethodAmounts(workerSegments.flatMap((segment) =>
       segment.row.paymentMethodBreakdown.map((method) => ({ methodId: method.id, label: method.label, amount: method.amount }))

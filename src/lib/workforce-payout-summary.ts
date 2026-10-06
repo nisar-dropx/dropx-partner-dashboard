@@ -1,9 +1,13 @@
 import type { WorkforceAttendanceCaptureMethod } from "./workforce-attendance-capture.ts";
 
+export type WorkforcePayoutAttendanceSource = WorkforceAttendanceCaptureMethod | "bulk_upload_range";
+
 export type WorkDaySummaryInput = {
   date: string;
   attendanceUnit: number;
-  source: WorkforceAttendanceCaptureMethod;
+  source: WorkforcePayoutAttendanceSource;
+  /** A truthful total for an uploaded inclusive range, settled on this date. */
+  aggregateRange?: boolean;
 };
 
 export type PaymentMethodAmountInput = {
@@ -29,7 +33,8 @@ export type PayoutBreakdownLine = {
 
 const rounded = (value: number) => Math.round(value * 100) / 100;
 
-export function attendanceCaptureLabel(source: WorkforceAttendanceCaptureMethod) {
+export function attendanceCaptureLabel(source: WorkforcePayoutAttendanceSource) {
+  if (source === "bulk_upload_range") return "Bulk upload range";
   return source === "shipment_data" ? "Shipment data" : "Biometric";
 }
 
@@ -39,7 +44,7 @@ export function summarizeWorkDays(inputs: WorkDaySummaryInput[]) {
   for (const input of inputs) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) continue;
     const attendanceUnit = Number.isFinite(input.attendanceUnit)
-      ? Math.max(0, Math.min(1, input.attendanceUnit))
+      ? Math.max(0, input.aggregateRange ? input.attendanceUnit : Math.min(1, input.attendanceUnit))
       : 0;
     const current = byDate.get(input.date);
     if (!current || attendanceUnit > current.attendanceUnit) {

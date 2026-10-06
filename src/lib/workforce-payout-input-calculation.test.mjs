@@ -1,15 +1,88 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  aggregateAttendanceIssueAffectsPayoutPeriod,
   buildWorkforcePayoutInputMaps,
+  findWorkforcePayoutAttendancePeriod,
   findWorkforcePaymentFieldOverride,
   hasWorkforcePayoutAttendanceOverride,
+  listWorkforcePayoutAttendancePeriods,
   overlayWorkforcePayoutAttendance,
   resolveWorkforceProductionUnits,
   resolveWorkforcePaymentFieldRate,
   resolveWorkforcePaymentFieldValue,
   workforcePayoutAttendanceKey
 } from "./workforce-payout-input-calculation.ts";
+
+test("invalid aggregate ranges block only overlapping or monthly-cumulative payout periods", () => {
+  const base = {
+    aggregateFrom: "2026-09-01",
+    aggregateTo: "2026-09-05",
+    payoutFrom: "2026-09-20",
+    payoutTo: "2026-09-26"
+  };
+
+  assert.equal(aggregateAttendanceIssueAffectsPayoutPeriod({
+    ...base,
+    attendanceBasis: "hours"
+  }), false);
+  assert.equal(aggregateAttendanceIssueAffectsPayoutPeriod({
+    ...base,
+    attendanceBasis: "days",
+    requiresMonthlyDayHistory: false
+  }), false);
+  assert.equal(aggregateAttendanceIssueAffectsPayoutPeriod({
+    ...base,
+    attendanceBasis: "days",
+    requiresMonthlyDayHistory: true
+  }), true);
+  assert.equal(aggregateAttendanceIssueAffectsPayoutPeriod({
+    ...base,
+    attendanceBasis: "hours",
+    payoutFrom: "2026-09-04",
+    payoutTo: "2026-09-10"
+  }), true);
+  assert.equal(aggregateAttendanceIssueAffectsPayoutPeriod({
+    ...base,
+    attendanceBasis: "days",
+    requiresMonthlyDayHistory: true,
+    payoutFrom: "2026-10-01",
+    payoutTo: "2026-10-07"
+  }), false);
+});
+
+test("aggregate attendance ranges are basis-aware and use inclusive bounds", () => {
+  const maps = buildWorkforcePayoutInputMaps({
+    attendancePeriods: [
+      { id: "hours", workforce_id: "worker-1", station_id: "station-1", attendance_basis: "hours", effective_from: "2026-09-01", effective_to: "2026-09-05", quantity: 30 },
+      { id: "days", workforce_id: "worker-1", station_id: "station-1", attendance_basis: "days", effective_from: "2026-09-10", effective_to: "2026-09-14", quantity: 4.5 }
+    ]
+  });
+
+  assert.equal(findWorkforcePayoutAttendancePeriod(maps, {
+    workforceId: "worker-1", stationId: "station-1", date: "2026-09-05", basis: "hours"
+  })?.id, "hours");
+  assert.equal(findWorkforcePayoutAttendancePeriod(maps, {
+    workforceId: "worker-1", stationId: "station-1", date: "2026-09-05", basis: "days"
+  }), undefined);
+  assert.deepEqual(listWorkforcePayoutAttendancePeriods(maps, {
+    workforceId: "worker-1", stationId: "station-1", from: "2026-09-05", to: "2026-09-10"
+  }).map((row) => row.id), ["hours", "days"]);
+});
+
+test("impossible aggregate attendance quantities fail closed", () => {
+  const maps = buildWorkforcePayoutInputMaps({
+    attendancePeriods: [
+      { id: "too-many-hours", workforce_id: "worker-1", station_id: "station-1", attendance_basis: "hours", effective_from: "2026-09-01", effective_to: "2026-09-02", quantity: 49 },
+      { id: "too-many-days", workforce_id: "worker-1", station_id: "station-1", attendance_basis: "days", effective_from: "2026-09-01", effective_to: "2026-09-02", quantity: 2.5 },
+      { id: "valid-zero", workforce_id: "worker-1", station_id: "station-1", attendance_basis: "days", effective_from: "2026-09-03", effective_to: "2026-09-03", quantity: 0 }
+    ]
+  });
+
+  assert.deepEqual(listWorkforcePayoutAttendancePeriods(maps, {
+    workforceId: "worker-1", stationId: "station-1"
+  }).map((row) => row.id), ["valid-zero"]);
+});
 
 test("attendance imports replace synthesized status and minutes without mutating the source map", () => {
   const absentKey = workforcePayoutAttendanceKey("worker-1", "2026-09-02");

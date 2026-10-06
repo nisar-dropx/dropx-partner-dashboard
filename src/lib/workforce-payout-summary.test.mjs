@@ -41,6 +41,13 @@ test("summarizeWorkDays reports an effective source change and does not double-c
   ]), { workDays: 2, source: "Mixed" });
 });
 
+test("summarizeWorkDays preserves an aggregate WORK_DAYS range settled on one date", () => {
+  assert.deepEqual(summarizeWorkDays([
+    { date: "2026-09-01", attendanceUnit: 0, source: "bulk_upload_range" },
+    { date: "2026-09-05", attendanceUnit: 4.5, source: "bulk_upload_range", aggregateRange: true }
+  ]), { workDays: 4.5, source: "Bulk upload range" });
+});
+
 test("summarizePaymentMethodAmounts keeps each mapped method in its own total", () => {
   assert.deepEqual(summarizePaymentMethodAmounts([
     { methodId: "fixed", label: "Fixed Pay", amount: 1000.111 },

@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cumulativeDirectPayAttendanceUnitsBefore, directPayForDay, monthlyDailyAccrual, preferredDirectPayAttendance } from "./direct-workforce-pay.ts";
 import {
+  cumulativeDirectPayAttendanceUnitsBefore,
+  cumulativeDirectPayUnitsBefore,
+  directPayAttendanceBasis,
+  directPayForDay,
+  monthlyDailyAccrual,
+  preferredDirectPayAttendance
+} from "./direct-workforce-pay.ts";
+import {
+  monthlyAttendanceAmountForAggregateUnits,
   monthlyAttendanceAmountForDay,
   workforcePaymentExample,
   workforcePaymentMethodFields,
@@ -206,4 +214,195 @@ test("present bulk attendance without minutes fails closed for hourly payment he
   assert.equal(result.total, 0);
   assert.equal(result.missing, true);
   assert.deepEqual(result.lines, []);
+});
+
+test("attendance component basis follows the attendance-eligible pay schedule", () => {
+  assert.equal(directPayAttendanceBasis({
+    component_code: "HOURLY",
+    component_type: "amount",
+    pay_schedule: "per_hour",
+    calculation_source: "attendance_eligibility"
+  }), "hours");
+  assert.equal(directPayAttendanceBasis({
+    component_code: "DAILY",
+    component_type: "amount",
+    pay_schedule: "per_day",
+    calculation_source: "attendance_eligibility"
+  }), "days");
+  assert.equal(directPayAttendanceBasis({
+    component_code: "MONTHLY",
+    component_type: "amount",
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility"
+  }), "days");
+  assert.equal(directPayAttendanceBasis({
+    component_code: "MANUAL",
+    component_type: "amount",
+    pay_schedule: "per_hour",
+    calculation_source: "manual"
+  }), null);
+  assert.equal(directPayAttendanceBasis({
+    component_code: "PRODUCTION",
+    component_type: "production",
+    pay_schedule: "per_hour",
+    calculation_source: "attendance_eligibility"
+  }), null);
+});
+
+test("aggregate attendance replaces only components with the matching basis", () => {
+  const components = [
+    {
+      component_code: "HOURLY",
+      component_type: "amount",
+      pay_schedule: "per_hour",
+      calculation_source: "attendance_eligibility"
+    },
+    {
+      component_code: "DAILY",
+      component_type: "amount",
+      pay_schedule: "per_day",
+      calculation_source: "attendance_eligibility"
+    }
+  ];
+  const attendance = { punch_date: "2026-09-30", status: "P", work_minutes: 120 };
+
+  const hours = directPayForDay({ HOURLY: 100, DAILY: 500 }, components, "2026-09-30", attendance, {
+    attendanceInput: { basis: "hours", quantity: 10 }
+  });
+  assert.equal(hours.total, 1500);
+  assert.deepEqual(hours.lines.map((line) => [line.code, line.count]), [
+    ["HOURLY", 10],
+    ["DAILY", 1]
+  ]);
+  assert.equal(hours.missing, false);
+
+  const zeroHours = directPayForDay({ HOURLY: 100, DAILY: 500 }, components, "2026-09-30", attendance, {
+    attendanceInput: { basis: "hours", quantity: 0 }
+  });
+  assert.equal(zeroHours.total, 500);
+  assert.deepEqual(zeroHours.lines.map((line) => [line.code, line.count]), [
+    ["HOURLY", 0],
+    ["DAILY", 1]
+  ]);
+
+  const days = directPayForDay({ HOURLY: 100, DAILY: 500 }, components, "2026-09-30", attendance, {
+    attendanceInput: { basis: "days", quantity: 3 }
+  });
+  assert.equal(days.total, 1700);
+  assert.deepEqual(days.lines.map((line) => [line.code, line.count]), [
+    ["HOURLY", 2],
+    ["DAILY", 3]
+  ]);
+  assert.equal(days.missing, false);
+});
+
+test("aggregate monthly unit deltas preserve rounding and paid-off thresholds", () => {
+  const calendar = monthlyAttendanceAmountForAggregateUnits({
+    monthlyAmount: 1000,
+    date: "2026-09-30",
+    attendanceUnits: 2,
+    cumulativeAttendanceUnitsBefore: 2,
+    policy: { calculation_method: "calendar_days" }
+  });
+  assert.equal(calendar.amount, 66.66);
+  assert.equal(calendar.payableUnits, 2);
+
+  const calendarAcrossPaidOffThreshold = monthlyAttendanceAmountForAggregateUnits({
+    monthlyAmount: 1000,
+    date: "2026-09-30",
+    attendanceUnits: 1,
+    cumulativeAttendanceUnitsBefore: 5,
+    policy: { calculation_method: "calendar_days" }
+  });
+  assert.equal(calendarAcrossPaidOffThreshold.amount, 33.33);
+  assert.equal(calendarAcrossPaidOffThreshold.creditedPaidOffUnits, 0);
+  assert.equal(calendarAcrossPaidOffThreshold.payableUnits, 1);
+
+  const fixed = monthlyAttendanceAmountForAggregateUnits({
+    monthlyAmount: 18000,
+    date: "2026-09-30",
+    attendanceUnits: 1,
+    cumulativeAttendanceUnitsBefore: 5,
+    policy: { calculation_method: "fixed_paid_offs", paid_off_days: 4 }
+  });
+  assert.equal(fixed.amount, 692.31);
+  assert.equal(fixed.creditedPaidOffUnits, 0);
+  assert.equal(fixed.payableUnits, 1);
+
+  const earned = monthlyAttendanceAmountForAggregateUnits({
+    monthlyAmount: 18000,
+    date: "2026-09-30",
+    attendanceUnits: 1,
+    cumulativeAttendanceUnitsBefore: 5,
+    policy: { calculation_method: "earned_paid_offs", paid_off_days: 4, work_units_per_paid_off: 6 }
+  });
+  assert.equal(earned.amount, 1200);
+  assert.equal(earned.creditedPaidOffUnits, 1);
+  assert.equal(earned.payableUnits, 2);
+});
+
+test("monthly aggregate attendance is settled as one cumulative delta", () => {
+  const result = directPayForDay({ MONTHLY: 1000 }, [{
+    component_code: "MONTHLY",
+    component_type: "amount",
+    pay_schedule: "per_month",
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility"
+  }], "2026-09-30", null, {
+    cumulativeAttendanceUnitsBefore: 2,
+    attendanceInput: { basis: "days", quantity: 2 }
+  });
+
+  assert.equal(result.total, 66.66);
+  assert.equal(result.lines[0].count, 2 / 30);
+  assert.equal(result.missing, false);
+});
+
+test("daily monthly accrual after an aggregate settlement uses the aggregate cumulative units", () => {
+  const units = new Map([
+    ["2026-09-01", 1],
+    ["2026-09-05", 2],
+    ["2026-09-06", 1]
+  ]);
+  const component = {
+    component_code: "MONTHLY",
+    component_type: "amount",
+    pay_schedule: "per_month",
+    calculation_type: "fixed_monthly",
+    calculation_source: "attendance_eligibility"
+  };
+  const policyHistory = [{
+    calculation_method: "earned_paid_offs",
+    paid_off_days: 4,
+    work_units_per_paid_off: 3,
+    cap_at_monthly_amount: true,
+    effective_from: "2026-09-01"
+  }];
+  const cumulativeBeforeSettlement = cumulativeDirectPayUnitsBefore(
+    "2026-09-05",
+    "2026-09-01",
+    (date) => units.get(date) ?? 0
+  );
+  const settlement = directPayForDay({ MONTHLY: 18000 }, [component], "2026-09-05", null, {
+    policyHistory,
+    cumulativeAttendanceUnitsBefore: cumulativeBeforeSettlement,
+    attendanceInput: { basis: "days", quantity: 2 }
+  });
+  const cumulativeBeforeNextDay = cumulativeDirectPayUnitsBefore(
+    "2026-09-06",
+    "2026-09-01",
+    (date) => units.get(date) ?? 0
+  );
+  const nextDay = directPayForDay({ MONTHLY: 18000 }, [component], "2026-09-06", {
+    punch_date: "2026-09-06",
+    status: "P",
+    work_minutes: 480
+  }, {
+    policyHistory,
+    cumulativeAttendanceUnitsBefore: cumulativeBeforeNextDay
+  });
+
+  assert.equal(cumulativeBeforeSettlement, 1);
+  assert.equal(cumulativeBeforeNextDay, 3);
+  assert.equal(settlement.total + nextDay.total, 2400);
 });

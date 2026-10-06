@@ -133,9 +133,8 @@ const KNOWN_HEADERS = new Set([
   "inputtype",
   "fieldcode",
   "effectivedate",
+  "effectiveto",
   "value",
-  "workhours",
-  "workdays",
   "remark"
 ]);
 
@@ -239,15 +238,16 @@ function rowIdentity(row: WorkforcePayoutImportRow) {
   const stationIdentity = row.inputType === "PAYMENT_FIELD_VALUE" || row.inputType === "PRODUCTION_UNITS"
     ? row.locationCode
     : "";
-  return [row.inputType, row.dropxId, stationIdentity, row.fieldCode, row.effectiveFrom, row.effectiveTo].join("|");
+  const fieldIdentity = row.inputType === "ATTENDANCE" ? "" : row.fieldCode;
+  return [row.inputType, row.dropxId, stationIdentity, fieldIdentity, row.effectiveFrom, row.effectiveTo].join("|");
 }
 
 function resolvedRowIdentity(row: ResolvedWorkforcePayoutImportRow) {
   if (!row.workforceId || !row.effectiveFrom || !row.effectiveTo) return null;
   if (row.inputType === "ATTENDANCE") {
-    // Attendance is owned by the worker/date. Station is provenance and must
-    // not allow two actions to target the same stored attendance override.
-    return [row.inputType, row.workforceId, row.effectiveFrom].join("|");
+    // Attendance is owned by the worker, unit and explicit effective period.
+    // Station remains provenance and must not create a second logical value.
+    return [row.inputType, row.workforceId, row.effectiveFrom, row.effectiveTo].join("|");
   }
   if (row.inputType === "ADDITIONAL_PAYMENT") {
     // Additional-payment uniqueness is worker/field/period across stations.
@@ -264,7 +264,7 @@ function resolvedRowIdentity(row: ResolvedWorkforcePayoutImportRow) {
   }
   if (row.inputType === "PRODUCTION_UNITS") {
     return row.locationId && row.paymentFieldId
-      ? [row.inputType, row.workforceId, row.locationId, row.paymentFieldId, row.effectiveFrom].join("|")
+      ? [row.inputType, row.workforceId, row.locationId, row.paymentFieldId, row.effectiveFrom, row.effectiveTo].join("|")
       : null;
   }
   if (row.inputType === "PAYMENT_FIELD_VALUE") {
@@ -278,12 +278,20 @@ function resolvedRowIdentity(row: ResolvedWorkforcePayoutImportRow) {
 function findColumns(header: unknown[]) {
   const normalized = header.map(normalizeHeader);
   const result: Record<string, number> = {};
-  for (const field of ["dropxid", "inputtype", "fieldcode", "effectivedate", "value"] as const) {
+  const required = [
+    ["dropxid", "DROPX_ID"],
+    ["inputtype", "INPUT_TYPE"],
+    ["fieldcode", "FIELD_CODE"],
+    ["effectivedate", "EFFECTIVE_DATE"],
+    ["effectiveto", "EFFECTIVE_TO"],
+    ["value", "VALUE"]
+  ] as const;
+  for (const [field, label] of required) {
     const index = normalized.indexOf(field);
-    if (index < 0) throw new Error(`Required column “${field.replace(/([a-z])([A-Z])/g, "$1 $2")}” is missing.`);
+    if (index < 0) throw new Error(`Required column “${label}” is missing.`);
     result[field] = index;
   }
-  for (const field of ["action", "location", "workhours", "workdays", "remark"] as const) result[field] = normalized.indexOf(field);
+  for (const field of ["action", "location", "remark"] as const) result[field] = normalized.indexOf(field);
   return { result, normalized };
 }
 
@@ -339,21 +347,15 @@ export function parseWorkforcePayoutWorkbook(
     const inputType = normalizeInputType(formatted[columns.inputtype]);
     const fieldCode = normalizeWorkforcePayoutCode(formatted[columns.fieldcode]);
     const effectiveDate = spreadsheetDate(source[columns.effectivedate]);
-    const effectiveFrom = inputType === "ADDITIONAL_PAYMENT" || inputType === "DEDUCTION"
-      ? options.batchFrom
-      : effectiveDate;
-    const effectiveTo = inputType === "ATTENDANCE" || inputType === "PRODUCTION_UNITS"
-      ? effectiveDate
-      : options.batchTo;
+    const effectiveFrom = effectiveDate;
+    const effectiveTo = spreadsheetDate(source[columns.effectiveto]);
     const rawValue = source[columns.value];
-    const rawHours = columns.workhours >= 0 ? source[columns.workhours] : "";
-    const rawDays = columns.workdays >= 0 ? source[columns.workdays] : "";
     const remark = columns.remark >= 0 ? String(formatted[columns.remark] ?? "").trim().slice(0, 500) : "";
     let numericValue: number | null = null;
     let textValue: string | null = null;
     let attendanceBasis: WorkforcePayoutAttendanceBasis | null = null;
-    const workHours = finiteNumber(rawHours);
-    const workDays = finiteNumber(rawDays);
+    let workHours: number | null = null;
+    let workDays: number | null = null;
     let workMinutes: number | null = null;
 
     if (!dropxId) issues.push({ rowNumber, dropxId: null, message: "DropX ID is required." });
@@ -364,40 +366,70 @@ export function parseWorkforcePayoutWorkbook(
     } else if (effectiveDate < options.batchFrom || effectiveDate > options.batchTo) {
       issues.push({ rowNumber, dropxId: dropxId || null, message: `EFFECTIVE_DATE must fall within the selected ${options.batchFrom} to ${options.batchTo} payout period.` });
     }
+    if (!effectiveTo) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "EFFECTIVE_TO is compulsory and must be a real date written as DD-MM-YYYY or DD/MM/YYYY." });
+    } else if (effectiveTo < options.batchFrom || effectiveTo > options.batchTo) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: `EFFECTIVE_TO must fall within the selected ${options.batchFrom} to ${options.batchTo} payout period.` });
+    }
+    if (effectiveDate && effectiveTo && effectiveTo < effectiveDate) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "EFFECTIVE_TO cannot be earlier than EFFECTIVE_DATE." });
+    }
+    if (action !== "CLEAR" && inputType === "ATTENDANCE" && effectiveDate && effectiveTo
+      && effectiveDate.slice(0, 7) !== effectiveTo.slice(0, 7)) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "ATTENDANCE must stay within one calendar month. Split the row at the month boundary." });
+    }
+    if (effectiveDate && effectiveTo && inputType === "PRODUCTION_UNITS" && effectiveTo !== effectiveDate) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "PRODUCTION_UNITS must use the same date in EFFECTIVE_DATE and EFFECTIVE_TO because production is stored per work date." });
+    }
+    if (effectiveDate && effectiveTo && (inputType === "ADDITIONAL_PAYMENT" || inputType === "DEDUCTION")
+      && (effectiveDate !== options.batchFrom || effectiveTo !== options.batchTo)) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: `${inputType} must use the complete selected payout period ${options.batchFrom} to ${options.batchTo}.` });
+    }
     if (formulaRows.has(rowNumber)) issues.push({ rowNumber, dropxId: dropxId || null, message: "Formula cells are not accepted. Paste their values before uploading." });
+    if (inputType === "ATTENDANCE" && fieldCode !== "WORK_HOURS" && fieldCode !== "WORK_DAYS") {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance FIELD_CODE must be WORK_HOURS or WORK_DAYS." });
+    } else if (inputType && inputType !== "ATTENDANCE" && !fieldCode) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "FIELD_CODE is required for this input type." });
+    }
 
     if (action === "CLEAR") {
-      if (String(rawValue ?? "").trim() || String(rawHours ?? "").trim() || String(rawDays ?? "").trim()) {
-        issues.push({ rowNumber, dropxId: dropxId || null, message: "CLEAR rows must leave VALUE, WORK_HOURS and WORK_DAYS blank." });
+      if (String(rawValue ?? "").trim()) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "CLEAR rows must leave VALUE blank." });
       }
     } else if (inputType === "ATTENDANCE") {
-      if (String(rawValue ?? "").trim()) {
-        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance rows must leave VALUE blank and enter either WORK_HOURS or WORK_DAYS." });
-      }
-      if (workHours === null && workDays === null) {
-        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance rows require either WORK_HOURS or WORK_DAYS." });
-      } else if (workHours !== null && workDays !== null) {
-        issues.push({ rowNumber, dropxId: dropxId || null, message: "Enter only one attendance value: WORK_HOURS or WORK_DAYS, not both." });
-      } else if (workHours !== null) {
-        if (!Number.isFinite(workHours) || workHours < 0 || workHours > 24) {
-          issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_HOURS must be a number from 0 to 24." });
+      numericValue = finiteNumber(rawValue);
+      if (numericValue === null || !Number.isFinite(numericValue)) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance VALUE must be a valid number." });
+      } else if (numericValue < 0) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance VALUE cannot be negative." });
+      } else if (Math.abs(numericValue) > 999_999_999_999.9999) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance VALUE is too large." });
+      } else if (Math.abs(numericValue * 10_000 - Math.round(numericValue * 10_000)) > 0.000001) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance VALUE can have at most four decimal places." });
+      } else if (fieldCode === "WORK_HOURS") {
+        const maximumHours = effectiveDate && effectiveTo && effectiveTo >= effectiveDate
+          ? (dateDifferenceDays(effectiveDate, effectiveTo) + 1) * 24
+          : null;
+        if (maximumHours !== null && numericValue > maximumHours) {
+          issues.push({ rowNumber, dropxId: dropxId || null, message: `WORK_HOURS VALUE cannot exceed ${maximumHours} hours for this inclusive effective range.` });
         } else {
-          workMinutes = Math.round(workHours * 60);
-          textValue = workHours === 0 ? "A" : "P";
           attendanceBasis = "hours";
+          workHours = numericValue;
+          workMinutes = Math.round(numericValue * 60);
         }
-      } else if (workDays !== null) {
-        if (!Number.isFinite(workDays) || ![0, 0.5, 1].includes(workDays)) {
-          issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_DAYS must be 0, 0.5 or 1." });
+      } else if (fieldCode === "WORK_DAYS") {
+        const maximumDays = effectiveDate && effectiveTo && effectiveTo >= effectiveDate
+          ? dateDifferenceDays(effectiveDate, effectiveTo) + 1
+          : null;
+        if (maximumDays !== null && numericValue > maximumDays) {
+          issues.push({ rowNumber, dropxId: dropxId || null, message: `WORK_DAYS VALUE cannot exceed ${maximumDays} days for this inclusive effective range.` });
         } else {
-          textValue = workDays === 0 ? "A" : workDays === 0.5 ? "HD" : "P";
           attendanceBasis = "days";
+          workDays = numericValue;
         }
       }
-      if (fieldCode) issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance rows must leave FIELD_CODE blank." });
     } else {
       numericValue = finiteNumber(rawValue);
-      if (!fieldCode) issues.push({ rowNumber, dropxId: dropxId || null, message: "FIELD_CODE is required for this input type." });
       if (numericValue === null || !Number.isFinite(numericValue)) {
         issues.push({ rowNumber, dropxId: dropxId || null, message: "VALUE must be a valid number." });
       } else if (numericValue < 0) {
@@ -409,10 +441,6 @@ export function parseWorkforcePayoutWorkbook(
       } else if (Math.abs(numericValue * 10_000 - Math.round(numericValue * 10_000)) > 0.000001) {
         issues.push({ rowNumber, dropxId: dropxId || null, message: "VALUE can have at most four decimal places." });
       }
-    }
-
-    if (inputType !== "ATTENDANCE" && (workHours !== null || workDays !== null)) {
-      issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_HOURS and WORK_DAYS are only valid for attendance rows." });
     }
 
     return [{
@@ -564,10 +592,10 @@ export function resolveWorkforcePayoutImportRows(
       }
     }
 
-    if (row.inputType === "ATTENDANCE" && row.effectiveFrom) {
+    if (row.inputType === "ATTENDANCE" && row.effectiveFrom && row.effectiveTo) {
       matchingSetups.push(...workerSetups.filter((setup) => setup.workforceId === worker.id
         && (!requestedLocation || setup.locationId === requestedLocation.id)
-        && setupCoversDate(setup, row.effectiveFrom)));
+        && overlaps(setup.effectiveFrom, setup.effectiveTo, row.effectiveFrom, row.effectiveTo)));
     }
 
     const setupLocations = [...new Set(matchingSetups.map((setup) => setup.locationId).filter(Boolean))] as string[];
@@ -606,17 +634,16 @@ export function resolveWorkforcePayoutImportRows(
         locationBlocked = true;
       }
     } else if (locationId && row.inputType === "ATTENDANCE") {
-      const periodSetups = workerSetups.filter((setup) => overlaps(
-        setup.effectiveFrom,
-        setup.effectiveTo,
-        row.effectiveFrom,
-        row.effectiveTo
-      ));
-      const assignedAtLocation = periodSetups.some((setup) => setup.locationId === locationId);
-      const assignedElsewhere = periodSetups.some((setup) => Boolean(setup.locationId) && setup.locationId !== locationId);
-      // Current location is a safe fallback only when no dated payment history
-      // assigns the person elsewhere in the requested period.
-      if (!assignedAtLocation && (locationId !== worker.locationId || assignedElsewhere)) {
+      const assignedAcrossPeriod = datesBetween(row.effectiveFrom, row.effectiveTo).every((date) => {
+        const datedLocations = workerSetups
+          .filter((setup) => setupCoversDate(setup, date))
+          .map((setup) => setup.locationId)
+          .filter(Boolean);
+        // Current location is a safe fallback only when dated payment history
+        // does not assign the person to a different location on that date.
+        return datedLocations.length ? datedLocations.includes(locationId) : locationId === worker.locationId;
+      });
+      if (!assignedAcrossPeriod) {
         issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "This Workforce ID is not assigned to the selected location during this payout period." });
         locationBlocked = true;
       }
@@ -677,14 +704,16 @@ export function buildWorkforcePayoutImportTemplate(
   fields: WorkforcePayoutImportTemplateField[],
   options: { effectiveFrom?: string; effectiveTo?: string; locations?: Array<{ code: string }> } = {}
 ) {
-  const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "VALUE", "WORK_HOURS", "WORK_DAYS", "REMARK"];
-  const columnWidths = [12, 24, 16, 24, 24, 18, 18, 16, 16, 42].map((wch) => ({ wch }));
+  const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "EFFECTIVE_TO", "VALUE", "REMARK"];
+  const columnWidths = [12, 24, 16, 24, 24, 18, 18, 18, 42].map((wch) => ({ wch }));
   const upload = XLSX.utils.aoa_to_sheet([headers]);
   upload["!cols"] = columnWidths;
-  upload["!autofilter"] = { ref: `A1:J1` };
+  upload["!autofilter"] = { ref: `A1:I1` };
 
   const referenceRows = [
     ["FIELD_CODE", "LABEL", "INPUT_TYPE", "CALCULATION", "VALUE MEANING"],
+    ["WORK_HOURS", "Work hours", "ATTENDANCE", "Range quantity", "Total attendance hours for the effective range"],
+    ["WORK_DAYS", "Work days", "ATTENDANCE", "Range quantity", "Total attendance days for the effective range"],
     ...fields.map((field) => [field.code, field.label, field.inputType, field.calculation, field.valueMeaning])
   ];
   const reference = XLSX.utils.aoa_to_sheet(referenceRows);
@@ -692,52 +721,52 @@ export function buildWorkforcePayoutImportTemplate(
   reference["!autofilter"] = { ref: `A1:E${Math.max(1, referenceRows.length)}` };
 
   const dateHint = options.effectiveFrom && options.effectiveTo
-    ? `This template was downloaded for ${displaySpreadsheetDate(options.effectiveFrom)} to ${displaySpreadsheetDate(options.effectiveTo)}. Every row needs one EFFECTIVE_DATE inside that selected payout period.`
-    : "Every Excel row needs one EFFECTIVE_DATE inside the payout period selected on the worksheet page.";
+    ? `This template was downloaded for ${displaySpreadsheetDate(options.effectiveFrom)} to ${displaySpreadsheetDate(options.effectiveTo)}. Every row needs EFFECTIVE_DATE and EFFECTIVE_TO inside that selected payout period.`
+    : "Every Excel row needs EFFECTIVE_DATE and EFFECTIVE_TO inside the payout period selected on the worksheet page.";
   const instructions = XLSX.utils.aoa_to_sheet([
     ["WORKFORCE PAYOUT BULK UPLOAD"],
     [dateHint],
     ["Replacement scope", "Each UPSERT or CLEAR row changes only the matching stored input: the same Workforce person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged. For example, a DELIVERY row, when DELIVERY is enabled for upload, does not replace attendance, additions, or other production fields."],
-    ["ACTION", "Use UPSERT to create or replace the matching input. Use CLEAR with blank VALUE, WORK_HOURS and WORK_DAYS to remove only that matching input."],
-    ["EFFECTIVE_DATE", "Enter exactly one date as DD-MM-YYYY or DD/MM/YYYY. Attendance and production apply only to that date. A configured payment-field value starts on that date and runs to the selected payout-period end. Additional payments and deductions apply once to the selected payout period."],
-    ["WORK_HOURS / WORK_DAYS", "Attendance only. Enter exactly one: WORK_HOURS from 0 to 24 for a person paid by attendance hour, or WORK_DAYS as 0, 0.5 or 1 for a person paid by attendance day. Leave VALUE blank. The upload rejects both columns together and rejects a unit that does not match the person's payment setup."],
-    ["ATTENDANCE", "Leave FIELD_CODE and VALUE blank. Enter one EFFECTIVE_DATE and exactly one attendance quantity in WORK_HOURS or WORK_DAYS. Zero means absent; WORK_DAYS 0.5 means half day."],
-    ["PRODUCTION_UNITS", "Use one date per row and a production FIELD_CODE from Field Reference. The uploaded value replaces only that field for that person, location and date; provider-reported values remain the fallback when no override exists."],
-    ["PAYMENT_FIELD_VALUE", "Use a FIELD_CODE from Field Reference. VALUE overrides that configured rate/input from EFFECTIVE_DATE through the selected payout-period end; it is not a final payout amount."],
-    ["ADDITIONAL_PAYMENT", "Use a FIELD_CODE from Field Reference. VALUE is applied once to the payout period selected on the worksheet page."],
-    ["DEDUCTION", "Use an active manual deduction FIELD_CODE from Field Reference. VALUE is applied once to the selected payout period and may have at most two decimal places. Automatic fixed, percentage and system deductions cannot be uploaded or replaced."],
+    ["ACTION", "Use UPSERT to create or replace the matching input. Use CLEAR with a blank VALUE to remove only that matching input."],
+    ["EFFECTIVE_DATE / EFFECTIVE_TO", "Both dates are compulsory. EFFECTIVE_DATE is the start date and EFFECTIVE_TO is the end date. Enter each as DD-MM-YYYY or DD/MM/YYYY. EFFECTIVE_TO cannot be earlier than EFFECTIVE_DATE, and both dates must be inside the selected payout period."],
+    ["ATTENDANCE", "Set FIELD_CODE to WORK_HOURS or WORK_DAYS and enter the total quantity for the effective range in VALUE. Use WORK_HOURS for hourly attendance pay and WORK_DAYS for daily or monthly attendance pay. The upload rejects a unit that does not match the person's payment setup."],
+    ["PRODUCTION_UNITS", "Use a production FIELD_CODE from Field Reference. Production is stored per work date, so enter the same date in EFFECTIVE_DATE and EFFECTIVE_TO. VALUE replaces only that field for that person, location and date; provider-reported values remain the fallback when no override exists."],
+    ["PAYMENT_FIELD_VALUE", "Use a FIELD_CODE from Field Reference. VALUE overrides that configured rate or input for the entered effective range; it is not a final payout amount."],
+    ["ADDITIONAL_PAYMENT", "Use a FIELD_CODE from Field Reference. VALUE is applied once to the complete payout period selected on the worksheet page."],
+    ["DEDUCTION", "Use an active manual deduction FIELD_CODE from Field Reference. VALUE is applied once to the complete selected payout period and may have at most two decimal places. Automatic fixed, percentage and system deductions cannot be uploaded or replaced."],
     ["Important", "Zero is a real value. A blank value is not zero. Formula cells and negative values are rejected."],
     ["Matching", "People are matched only by the company Workforce DROPX_ID. LOCATION is optional. ADDITIONAL_PAYMENT and DEDUCTION default to the Workforce current location; an explicit location must be current or overlap a historical provider/direct setup. Setup-based inputs may require LOCATION when the same ID has simultaneous payment setups."]
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 110 }];
 
   const exampleDate = displaySpreadsheetDate(options.effectiveFrom ?? "");
+  const exampleTo = displaySpreadsheetDate(options.effectiveTo ?? options.effectiveFrom ?? "");
   const exampleLocation = options.locations?.[0]?.code ?? "";
   const exampleRows: Array<Array<string | number>> = [
     ["EXAMPLES ONLY - copy a row to Upload, then replace the sample ID, dates, location, field code and value. Do not upload this sheet."],
     headers,
-    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "", exampleDate, "", 8, "", "Eight attendance hours for an hourly-paid person"],
-    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "", exampleDate, "", "", 0.5, "Half attendance day for a daily-paid person"]
+    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "WORK_HOURS", exampleDate, exampleTo, 30, "Thirty attendance hours for the effective range"],
+    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "WORK_DAYS", exampleDate, exampleTo, 5, "Five attendance days for the effective range"]
   ];
   const productionField = fields.find((field) => field.inputType === "PRODUCTION_UNITS");
   if (productionField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PRODUCTION_UNITS", productionField.code, exampleDate, 10, "", "", `${productionField.label} units for one work date`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PRODUCTION_UNITS", productionField.code, exampleDate, exampleDate, 10, `${productionField.label} units for one work date`]);
   }
   const paymentField = fields.find((field) => field.inputType === "PAYMENT_FIELD_VALUE");
   if (paymentField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PAYMENT_FIELD_VALUE", paymentField.code, exampleDate, 100, "", "", `${paymentField.label} configured input override`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PAYMENT_FIELD_VALUE", paymentField.code, exampleDate, exampleTo, 100, `${paymentField.label} configured input override`]);
   }
   const additionalField = fields.find((field) => field.inputType === "ADDITIONAL_PAYMENT");
   if (additionalField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ADDITIONAL_PAYMENT", additionalField.code, exampleDate, 500, "", "", `${additionalField.label} for the selected payout period`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ADDITIONAL_PAYMENT", additionalField.code, exampleDate, exampleTo, 500, `${additionalField.label} for the effective range`]);
   }
   const deductionField = fields.find((field) => field.inputType === "DEDUCTION");
   if (deductionField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "DEDUCTION", deductionField.code, exampleDate, 250, "", "", `${deductionField.label} for the selected payout period`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "DEDUCTION", deductionField.code, exampleDate, exampleTo, 250, `${deductionField.label} for the effective range`]);
   }
   const examples = XLSX.utils.aoa_to_sheet(exampleRows);
   examples["!cols"] = columnWidths;
-  examples["!autofilter"] = { ref: `A2:J${exampleRows.length}` };
+  examples["!autofilter"] = { ref: `A2:I${exampleRows.length}` };
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, upload, "Upload");

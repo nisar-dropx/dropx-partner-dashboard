@@ -101,15 +101,26 @@ export function monthlyAttendanceAmountForDay(input: {
   attendanceUnit: number;
   cumulativeAttendanceUnitsBefore?: number;
   policy?: Partial<WorkforcePaymentPolicy> | null;
+  /** @deprecated Use monthlyAttendanceAmountForAggregateUnits for period totals. */
+  aggregateAttendance?: boolean;
 }) {
   const monthlyAmount = Number(input.monthlyAmount);
   const attendanceUnit = Math.max(0, Number(input.attendanceUnit) || 0);
-  const cumulativeBefore = Math.max(0, Number(input.cumulativeAttendanceUnitsBefore) || 0);
   const policy = normalizeWorkforcePaymentPolicy(input.policy);
   const calendarDays = daysInWorkforcePaymentMonth(input.date);
 
   if (!Number.isFinite(monthlyAmount) || monthlyAmount < 0 || !calendarDays) {
     throw new Error("Attendance-based monthly payment contains an invalid amount or date.");
+  }
+
+  if (input.aggregateAttendance) {
+    return monthlyAttendanceAmountForAggregateUnits({
+      monthlyAmount,
+      date: input.date,
+      attendanceUnits: attendanceUnit,
+      cumulativeAttendanceUnitsBefore: input.cumulativeAttendanceUnitsBefore,
+      policy
+    });
   }
 
   if (policy.calculation_method === "calendar_days") {
@@ -124,13 +135,50 @@ export function monthlyAttendanceAmountForDay(input: {
     };
   }
 
+  const delta = monthlyAttendanceAmountForAggregateUnits({
+    monthlyAmount,
+    date: input.date,
+    attendanceUnits: attendanceUnit,
+    cumulativeAttendanceUnitsBefore: input.cumulativeAttendanceUnitsBefore,
+    policy
+  });
+  return {
+    ...delta,
+    // Preserve the existing per-day line-count contract. Aggregate callers
+    // receive the exact entitlement fraction from the dedicated helper.
+    count: monthlyAmount > 0 ? delta.amount / monthlyAmount : 0
+  };
+}
+
+/**
+ * Calculates one period total as the delta between the worker's cumulative
+ * monthly entitlement before and after the supplied aggregate units. Unlike a
+ * daily accrual, this does not invent which calendar dates the units belong to.
+ */
+export function monthlyAttendanceAmountForAggregateUnits(input: {
+  monthlyAmount: number;
+  date: string;
+  attendanceUnits: number;
+  cumulativeAttendanceUnitsBefore?: number;
+  policy?: Partial<WorkforcePaymentPolicy> | null;
+}) {
+  const monthlyAmount = Number(input.monthlyAmount);
+  const attendanceUnits = Math.max(0, Number(input.attendanceUnits) || 0);
+  const cumulativeBefore = Math.max(0, Number(input.cumulativeAttendanceUnitsBefore) || 0);
+  const policy = normalizeWorkforcePaymentPolicy(input.policy);
+  const calendarDays = daysInWorkforcePaymentMonth(input.date);
+
+  if (!Number.isFinite(monthlyAmount) || monthlyAmount < 0 || !calendarDays) {
+    throw new Error("Attendance-based monthly payment contains an invalid amount or date.");
+  }
+
   const target = (attendanceUnits: number) => {
     let payableUnits = attendanceUnits;
     let creditedPaidOffUnits = 0;
     let divisor = calendarDays;
     if (policy.calculation_method === "fixed_paid_offs") {
       divisor = Math.max(1, calendarDays - policy.paid_off_days);
-    } else {
+    } else if (policy.calculation_method === "earned_paid_offs") {
       creditedPaidOffUnits = Math.min(
         policy.paid_off_days,
         Math.floor((attendanceUnits + Number.EPSILON) / policy.work_units_per_paid_off)
@@ -141,17 +189,18 @@ export function monthlyAttendanceAmountForDay(input: {
     const cappedFraction = policy.cap_at_monthly_amount ? Math.min(1, fraction) : fraction;
     return {
       amount: rounded(monthlyAmount * cappedFraction),
+      fraction: cappedFraction,
       creditedPaidOffUnits,
       payableUnits
     };
   };
 
   const before = target(cumulativeBefore);
-  const after = target(cumulativeBefore + attendanceUnit);
+  const after = target(cumulativeBefore + attendanceUnits);
   const amount = rounded(Math.max(0, after.amount - before.amount));
   return {
     amount,
-    count: monthlyAmount > 0 ? amount / monthlyAmount : 0,
+    count: Math.max(0, after.fraction - before.fraction),
     creditedPaidOffUnits: Math.max(0, after.creditedPaidOffUnits - before.creditedPaidOffUnits),
     payableUnits: Math.max(0, after.payableUnits - before.payableUnits)
   };

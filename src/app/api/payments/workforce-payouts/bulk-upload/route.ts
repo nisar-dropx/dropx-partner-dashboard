@@ -7,7 +7,10 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   requiredAttendanceBasisForComponents,
   validateAttendanceImportBases,
+  validateAttendanceImportStability,
+  type AttendancePaymentSetting,
   type AttendancePaymentComponentBasis,
+  type AttendanceRateOverrideBoundary,
   type EffectiveAttendanceAllocation
 } from "./attendance-basis";
 import {
@@ -45,7 +48,7 @@ function sameOrigin(request: Request) {
 
 async function loadReferences(companyId: string, batchFrom: string, batchTo: string) {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
-  const [workersResult, paymentFieldsResult, additionalFieldsResult, deductionHeadsResult, mappingsResult, allocationsResult, stationsResult] = await Promise.all([
+  const [workersResult, paymentFieldsResult, additionalFieldsResult, deductionHeadsResult, mappingsResult, allocationsResult, stationsResult, paymentOverridesResult, paymentSettingsResult] = await Promise.all([
     readAllRows(supabaseAdmin
       .from("workforce")
       .select("id,dropx_id,full_name,location_id,date_of_join,last_working_date,is_active,deleted_at,migration_state,source_profile_type,source_profile_id")
@@ -89,7 +92,20 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
       .from("stations")
       .select("id,station_code")
       .eq("company_id", companyId)
-      .order("station_code"))
+      .order("station_code")),
+    readAllRows(supabaseAdmin
+      .from("workforce_payment_field_overrides")
+      .select("workforce_id,station_id,payment_field_id,field_code_snapshot,effective_from,effective_to")
+      .eq("company_id", companyId)
+      .lte("effective_from", batchTo)
+      .gte("effective_to", batchFrom)
+      .order("effective_from")),
+    readAllRows(supabaseAdmin
+      .from("workforce_payment_settings")
+      .select("calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from")
+      .eq("company_id", companyId)
+      .lte("effective_from", batchTo)
+      .order("effective_from"))
   ]);
   const initialError = workersResult.error?.message
     || paymentFieldsResult.error?.message
@@ -97,7 +113,9 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
     || deductionHeadsResult.error?.message
     || mappingsResult.error?.message
     || allocationsResult.error?.message
-    || stationsResult.error?.message;
+    || stationsResult.error?.message
+    || paymentOverridesResult.error?.message
+    || paymentSettingsResult.error?.message;
   if (initialError) throw new Error(initialError);
 
   const paymentFields: WorkforcePayoutImportPaymentField[] = (paymentFieldsResult.data ?? []).map((field: any) => ({
@@ -116,7 +134,7 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
   const componentsResult = methodIds.length
     ? await readAllRows(supabaseAdmin
       .from("payment_method_components")
-      .select("payment_method_id,payment_field_id,component_code,component_type,pay_schedule,is_active,payment_fields(field_type,pay_schedule,calculation_source)")
+      .select("payment_method_id,payment_field_id,component_code,component_type,pay_schedule,is_active,payment_fields(field_type,pay_schedule,calculation_type,calculation_source)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .in("payment_method_id", methodIds)
@@ -133,16 +151,19 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
     const paymentField: any = Array.isArray(component.payment_fields)
       ? component.payment_fields[0]
       : component.payment_fields;
+    const code = fieldCodeById.get(String(component.payment_field_id ?? ""))
+      ?? normalizeWorkforcePayoutCode(component.component_code);
     attendanceComponentsByMethod.set(methodId, [
       ...(attendanceComponentsByMethod.get(methodId) ?? []),
       {
         componentType: paymentField?.field_type ?? component.component_type,
         calculationSource: paymentField?.calculation_source,
-        paySchedule: paymentField?.pay_schedule ?? component.pay_schedule
+        paySchedule: paymentField?.pay_schedule ?? component.pay_schedule,
+        calculationType: paymentField?.calculation_type,
+        paymentFieldId: String(component.payment_field_id ?? ""),
+        fieldCode: code
       }
     ]);
-    const code = fieldCodeById.get(String(component.payment_field_id ?? ""))
-      ?? normalizeWorkforcePayoutCode(component.component_code);
     if (!code) continue;
     codesByMethod.set(methodId, [...new Set([...(codesByMethod.get(methodId) ?? []), code])]);
   }
@@ -180,7 +201,8 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
       locationId: mapping.station_id ? String(mapping.station_id) : null,
       effectiveFrom: String(mapping.effective_from),
       effectiveTo: mapping.effective_to ? String(mapping.effective_to) : null,
-      requiredBasis: requiredAttendanceBasisForComponents(attendanceComponentsByMethod.get(methodId) ?? [])
+      requiredBasis: requiredAttendanceBasisForComponents(attendanceComponentsByMethod.get(methodId) ?? []),
+      components: attendanceComponentsByMethod.get(methodId) ?? []
     });
     return [{
       workforceId,
@@ -204,17 +226,22 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
       // from the live method because the master may have changed since it was saved.
       fieldCodes: [...new Set(snapshotCodes)]
     });
+    const attendanceComponents = snapshot.map((component: any) => ({
+      componentType: component?.component_type,
+      calculationSource: component?.calculation_source,
+      paySchedule: component?.pay_schedule,
+      calculationType: component?.calculation_type,
+      paymentFieldId: component?.payment_field_id,
+      fieldCode: normalizeWorkforcePayoutCode(component?.component_code)
+    }));
     attendanceAllocations.push({
       sourceId: `direct:${String(allocation.id ?? "")}`,
       workforceId: String(allocation.workforce_id ?? ""),
       locationId: allocation.station_id ? String(allocation.station_id) : null,
       effectiveFrom: String(allocation.effective_from),
       effectiveTo: allocation.effective_to ? String(allocation.effective_to) : null,
-      requiredBasis: requiredAttendanceBasisForComponents(snapshot.map((component: any) => ({
-        componentType: component?.component_type,
-        calculationSource: component?.calculation_source,
-        paySchedule: component?.pay_schedule
-      })))
+      requiredBasis: requiredAttendanceBasisForComponents(attendanceComponents),
+      components: attendanceComponents
     });
   }
 
@@ -249,7 +276,32 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
     id: String(station.id),
     code: normalizeWorkforcePayoutCode(station.station_code)
   })).filter((station) => station.id && station.code);
-  return { workers, paymentFields, additionalFields, deductionHeads, setups, locations, attendanceAllocations };
+  const paymentFieldOverrides: AttendanceRateOverrideBoundary[] = (paymentOverridesResult.data ?? []).map((override: any) => ({
+    workforceId: String(override.workforce_id ?? ""),
+    locationId: String(override.station_id ?? ""),
+    paymentFieldId: String(override.payment_field_id ?? ""),
+    fieldCode: normalizeWorkforcePayoutCode(override.field_code_snapshot),
+    effectiveFrom: String(override.effective_from ?? ""),
+    effectiveTo: String(override.effective_to ?? "")
+  }));
+  const paymentSettings: AttendancePaymentSetting[] = (paymentSettingsResult.data ?? []).map((setting: any) => ({
+    effectiveFrom: String(setting.effective_from ?? ""),
+    calculationMethod: String(setting.calculation_method ?? "calendar_days"),
+    paidOffDays: Number(setting.paid_off_days ?? 4),
+    workUnitsPerPaidOff: Number(setting.work_units_per_paid_off ?? 6),
+    capAtMonthlyAmount: setting.cap_at_monthly_amount !== false
+  }));
+  return {
+    workers,
+    paymentFields,
+    additionalFields,
+    deductionHeads,
+    setups,
+    locations,
+    attendanceAllocations,
+    paymentFieldOverrides,
+    paymentSettings
+  };
 }
 
 async function appendDatabaseIssues(
@@ -261,7 +313,7 @@ async function appendDatabaseIssues(
   issues: WorkforcePayoutImportIssue[]
 ) {
   if (!supabaseAdmin) return;
-  const [priorResult, attendanceOverridesResult, paymentOverridesResult, additionalValuesResult, deductionValuesResult] = await Promise.all([
+  const [priorResult, attendanceOverridesResult, attendanceValuesResult, paymentOverridesResult, additionalValuesResult, deductionValuesResult] = await Promise.all([
     supabaseAdmin
       .from("workforce_payout_import_batches")
       .select("id")
@@ -278,6 +330,13 @@ async function appendDatabaseIssues(
       .gte("work_date", batchFrom)
       .lte("work_date", batchTo)
       .order("work_date")),
+    readAllRows(supabaseAdmin
+      .from("workforce_payout_attendance_values")
+      .select("workforce_id,station_id,attendance_basis,effective_from,effective_to")
+      .eq("company_id", companyId)
+      .lte("effective_from", batchTo)
+      .gte("effective_to", batchFrom)
+      .order("effective_from")),
     readAllRows(supabaseAdmin
       .from("workforce_payment_field_overrides")
       .select("workforce_id,station_id,payment_field_id,effective_from,effective_to")
@@ -301,6 +360,7 @@ async function appendDatabaseIssues(
       .order("effective_from"))
   ]);
   const error = priorResult.error?.message || attendanceOverridesResult.error?.message
+    || attendanceValuesResult.error?.message
     || paymentOverridesResult.error?.message || additionalValuesResult.error?.message
     || deductionValuesResult.error?.message;
   if (error) throw new Error(error);
@@ -329,18 +389,53 @@ async function appendDatabaseIssues(
     effectiveFrom: String(item.effective_from),
     effectiveTo: String(item.effective_to)
   }));
-  const existingAttendance = new Map((attendanceOverridesResult.data ?? []).map((item: any) => [
-    `${String(item.workforce_id)}|${String(item.work_date)}`,
-    item.station_id ? String(item.station_id) : null
-  ]));
+  const existingAttendance = (attendanceOverridesResult.data ?? []).map((item: any) => ({
+    workforceId: String(item.workforce_id),
+    stationId: item.station_id ? String(item.station_id) : null,
+    workDate: String(item.work_date)
+  }));
+  const existingAttendanceValues = (attendanceValuesResult.data ?? []).map((item: any) => ({
+    workforceId: String(item.workforce_id),
+    stationId: item.station_id ? String(item.station_id) : null,
+    attendanceBasis: String(item.attendance_basis ?? ""),
+    effectiveFrom: String(item.effective_from),
+    effectiveTo: String(item.effective_to)
+  }));
   for (const row of rows) {
     if (row.inputType === "ATTENDANCE") {
-      const existingStation = existingAttendance.get(`${row.workforceId}|${row.effectiveFrom}`);
-      if (existingStation && existingStation !== row.locationId) {
+      const exactAttendanceValue = existingAttendanceValues.find((item) =>
+        item.workforceId === row.workforceId
+        && item.effectiveFrom === row.effectiveFrom
+        && item.effectiveTo === row.effectiveTo);
+      if (exactAttendanceValue && exactAttendanceValue.stationId !== row.locationId) {
         issues.push({
           rowNumber: row.rowNumber,
           dropxId: row.dropxId,
-          message: "Attendance for this date already belongs to another location. Clear it from that location first."
+          message: "This exact attendance period already belongs to another location. Clear it from that location first."
+        });
+      }
+      const partialAttendanceValue = existingAttendanceValues.find((item) =>
+        item.workforceId === row.workforceId
+        && item.effectiveFrom <= row.effectiveTo
+        && item.effectiveTo >= row.effectiveFrom
+        && (item.effectiveFrom !== row.effectiveFrom || item.effectiveTo !== row.effectiveTo));
+      if (partialAttendanceValue) {
+        issues.push({
+          rowNumber: row.rowNumber,
+          dropxId: row.dropxId,
+          message: `This attendance range partially overlaps the stored ${partialAttendanceValue.effectiveFrom} to ${partialAttendanceValue.effectiveTo} ${partialAttendanceValue.attendanceBasis} value. Split the row or clear the existing exact period first.`
+        });
+      }
+      const conflictingAttendance = existingAttendance.find((item) =>
+        item.workforceId === row.workforceId
+        && item.workDate >= row.effectiveFrom
+        && item.workDate <= row.effectiveTo
+        && item.stationId !== row.locationId);
+      if (conflictingAttendance) {
+        issues.push({
+          rowNumber: row.rowNumber,
+          dropxId: row.dropxId,
+          message: `Attendance on ${conflictingAttendance.workDate} within this effective period already belongs to another location. Clear it from that location first.`
         });
       }
       continue;
@@ -399,8 +494,8 @@ function rpcRows(rows: ResolvedWorkforcePayoutImportRow[]) {
     effective_from: row.effectiveFrom,
     effective_to: row.effectiveTo,
     numeric_value: row.numericValue,
-    text_value: row.textValue,
-    work_minutes: row.workMinutes,
+    text_value: row.inputType === "ATTENDANCE" ? null : row.textValue,
+    work_minutes: row.inputType === "ATTENDANCE" ? null : row.workMinutes,
     remark: row.remark || null
   }));
 }
@@ -441,6 +536,12 @@ export async function POST(request: Request) {
     const resolved = resolveWorkforcePayoutImportRows(parsed, { ...references, allowedLocationIds });
     const issues = [...resolved.issues];
     issues.push(...validateAttendanceImportBases(resolved.rows, references.attendanceAllocations));
+    issues.push(...validateAttendanceImportStability(
+      resolved.rows,
+      references.attendanceAllocations,
+      references.paymentFieldOverrides,
+      references.paymentSettings
+    ));
     await appendDatabaseIssues(companyId, batchFrom, batchTo, fileSha256, resolved.rows, issues);
 
     const preview = {
@@ -462,13 +563,9 @@ export async function POST(request: Request) {
         inputType: row.inputType,
         fieldCode: row.fieldCode,
         locationCode: row.locationCode || references.locations.find((location) => location.id === row.locationId)?.code || "",
-        effectiveDate: row.effectiveDate,
-        effectiveFrom: row.effectiveFrom,
+        effectiveDate: row.effectiveDate || row.effectiveFrom,
         effectiveTo: row.effectiveTo,
-        value: row.textValue ?? row.numericValue,
-        workHours: row.workHours,
-        workDays: row.workDays,
-        workMinutes: row.workMinutes,
+        value: row.numericValue ?? row.textValue,
         locationId: row.locationId
       })),
       matchRule: "Canonical company Workforce DROPX_ID only"
