@@ -559,3 +559,25 @@ test('Finance adds historical kilometres at current rate and retains actual zero
  f.payout_inputs={productionInputs:[{workforce_id:f.workforce[0].id,station_id:f.stations[0].id,payment_field_id:'km',field_code_snapshot:'KM_RUN',work_date:date,units:0}]};
  assert.equal(rebuildCps(base(),f).associates[0].fuel_pay,0);
 });
+
+
+test('Finance fuel fallback covers punched workdays without shipment rows and respects zero or absence',()=>{
+ const f=facts();f.shipments=[];
+ f.mappings[0].payment_values={SALARY:15000,KM_RUN:3};
+ f.components=[
+  {payment_method_id:'per-packet',component_code:'SALARY',component_type:'fixed',pay_schedule:'per_month',calculation_type:'fixed',calculation_source:'attendance_eligibility'},
+  {payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Fuel per kilometre',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true}
+ ];
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];
+ f.production_fallback_policies=[{field_code:'KM_RUN',mode:'associate_station_company',lookback_months:3,minimum_history_days:1,effective_from:'2026-09-01'}];
+ f.production_history=[{id:'h',workforce_id:'other',station_id:'other-station',payment_field_id:'km',field_code_snapshot:'KM_RUN',units:1200,period_from:'2026-08-01',period_to:'2026-08-31',work_days:20}];
+ f.production_threshold_context={shipments:[],mappings:f.mappings,workforce:f.workforce,components:f.components,providers:f.providers,stations:f.stations};
+ let evidence;const b=base([day('A','2026-09-01',0)]),r=rebuildCps(b,f,e=>{evidence=e;});
+ assert.equal(r.daily[0].da,680);assert.equal(r.da_details[0].fuel,180);
+ assert.equal(evidence.associates[0].input_estimates[0].basis,'company average');
+ assert.ok(!r.gaps.some(g=>g.kind==='Fuel per kilometre input missing'));
+ f.payout_inputs={productionInputs:[{workforce_id:'w1',station_id:'station-a',payment_field_id:'km',field_code_snapshot:'KM_RUN',work_date:'2026-09-01',units:0}]};
+ assert.equal(rebuildCps(b,f).da_details[0].fuel,0);
+ f.payout_inputs={};f.attendance[0].status='A';
+ const absent=rebuildCps(b,f);assert.equal(absent.daily[0].da,0);assert.ok(absent.da_details.every(d=>d.fuel===0));
+});

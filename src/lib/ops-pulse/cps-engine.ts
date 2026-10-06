@@ -419,6 +419,12 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
     const group=thresholdGroups.get(groupKey)??{worker,date:row.work_date,rows:[] as RecordRow[]};
     group.rows.push(row);thresholdGroups.set(groupKey,group);
   }
+  // Attendance-backed days without a provider shipment row still need custom
+  // inputs and approved historical estimates. Reuse the canonical cost rows so
+  // their fuel is calculated once through the same production allocator.
+  for(const [groupKey,group] of groups) {
+    if(!thresholdGroups.has(groupKey)) thresholdGroups.set(groupKey,{worker:group.worker,date:group.date,rows:group.rows});
+  }
   const requestedThresholdRows=new Set([...groups.values()].flatMap(group=>group.rows.map(row=>`${group.date}|${String(row.id)}`)));
   for(const g of [...thresholdGroups.values()].sort((a,b)=>a.date.localeCompare(b.date)||String(a.worker.id).localeCompare(String(b.worker.id)))) {
     const candidates=thresholdMappings.filter(m=>m.worker?.id===g.worker.id && activeOn(m,g.date) && configured(m));
