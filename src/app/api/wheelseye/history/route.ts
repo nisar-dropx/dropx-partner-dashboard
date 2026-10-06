@@ -28,7 +28,8 @@ export async function GET(request: Request) {
   try {
     const movement = await loadWheelseyeMovement(token, vehicle, date);
     if (!authorization.readOnly) await saveDailyWheelseyeKm(companyId, vehicle, date, movement.summary);
-    return Response.json(movement, {headers:{"Cache-Control":"private, no-store"}});
+    const {progress,...base}=movement;
+    return Response.json(url.searchParams.get("detail")==="day"?movement:base, {headers:{"Cache-Control":"private, no-store"}});
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load Wheelseye movement." }, { status: 400 });
   }

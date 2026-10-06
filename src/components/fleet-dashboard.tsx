@@ -1,4 +1,5 @@
 "use client";
+import {nearestTracePoints} from "@/lib/fleet/journey-progress";
 
 import { FleetReports } from "@/components/fleet-daily-report";
 import { Activity, Download, Eye, Fuel, Gauge, MoreVertical, TriangleAlert } from "lucide-react";
@@ -1819,16 +1820,18 @@ function getRouteZoom(points: { lat: number; lng: number }[]) {
 
 export function RouteMap({
   currentPoint,
-  points, segments
+  points, segments, tracePoints, onTraceSelect
 }: {
   currentPoint?: { lat: number; lng: number } | null;
   points: { lat: number; lng: number }[];
   segments?: Array<Array<{lat:number;lng:number}>>;
+  tracePoints?: Array<{lat:number;lng:number}>;
+  onTraceSelect?: (indices:number[])=>void;
 }) {
   const [zoomOffset, setZoomOffset] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const dragStart = useRef<{ pointerId: number; x: number; y: number; originX:number; originY:number; moved:boolean } | null>(null);
   const boundPoints = currentPoint ? [...points, currentPoint] : points;
   const routeSignature = points.length
     ? `${points.length}-${points[0]?.lat},${points[0]?.lng}-${points[points.length - 1]?.lat},${points[points.length - 1]?.lng}`
@@ -1899,8 +1902,8 @@ export function RouteMap({
         setIsDragging(false);
       }}
       onPointerDown={(event) => {
-        if ((event.target as HTMLElement).closest(".fleet-map-controls")) return;
-        dragStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+        if ((event.target as HTMLElement).closest(".fleet-map-controls,button,a,select,input")) return;
+        dragStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, originX:event.clientX, originY:event.clientY, moved:false };
         event.currentTarget.setPointerCapture(event.pointerId);
         setIsDragging(true);
       }}
@@ -1909,11 +1912,18 @@ export function RouteMap({
         if (!start || start.pointerId !== event.pointerId) return;
         const dx = event.clientX - start.x;
         const dy = event.clientY - start.y;
-        dragStart.current = { ...start, x: event.clientX, y: event.clientY };
-        setPan((value) => ({ x: value.x + dx, y: value.y + dy }));
+        const rect=event.currentTarget.getBoundingClientRect();
+        dragStart.current = { ...start, x: event.clientX, y: event.clientY, moved:start.moved || Math.hypot(event.clientX-start.originX,event.clientY-start.originY)>5 };
+        setPan((value) => ({ x: value.x + dx*ROUTE_MAP_WIDTH/rect.width, y: value.y + dy*ROUTE_MAP_HEIGHT/rect.height }));
       }}
       onPointerUp={(event) => {
         if (dragStart.current?.pointerId === event.pointerId) {
+          const drag=dragStart.current;
+          if(onTraceSelect&&tracePoints?.length&&!drag.moved){
+            const rect=event.currentTarget.getBoundingClientRect();
+            const projected=tracePoints.map(p=>{const screen=toScreenPoint(p);return {x:screen.x*rect.width/ROUTE_MAP_WIDTH,y:screen.y*rect.height/ROUTE_MAP_HEIGHT};});
+            onTraceSelect(nearestTracePoints(projected,event.clientX-rect.left,event.clientY-rect.top));
+          }
           dragStart.current = null;
           setIsDragging(false);
         }
@@ -1937,7 +1947,7 @@ export function RouteMap({
             draggable={false}
             key={tile.key}
             src={tile.url}
-            style={{ left: tile.left, top: tile.top }}
+            style={{ left: `${tile.left/ROUTE_MAP_WIDTH*100}%`, top: `${tile.top/ROUTE_MAP_HEIGHT*100}%`, width:`${MAP_TILE_SIZE/ROUTE_MAP_WIDTH*100}%`, height:`${MAP_TILE_SIZE/ROUTE_MAP_HEIGHT*100}%` }}
           />
         ))}
       </div>

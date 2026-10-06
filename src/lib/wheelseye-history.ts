@@ -32,7 +32,8 @@ export type WheelseyeMovementSummary = {
   algorithmVersion: string;
 };
 type Point = { lat: number; lng: number; speed: number | null; epoch: number; ignition: boolean | null };
-export type MovementEvent = { kind: "moving" | "idle" | "stopped" | "stop_unknown" | "gap"; from: string; to: string; minutes: number; lat: number; lng: number; endLat: number; endLng: number };
+export type MovementEvent = { kind: "moving" | "idle" | "stopped" | "stop_unknown" | "gap"; from: string; to: string; minutes: number; lat: number; lng: number; endLat: number; endLng: number; distanceKm?: number; cumulativeKm?: number; distanceIncomplete?: boolean };
+export type MovementProgressPoint = { at:string; lat:number; lng:number; speed:number|null; kind:MovementEvent["kind"]|"start"; addedKm:number|null; cumulativeKm:number; distanceFrom:string|null; afterHours:boolean; gapBefore:boolean };
 const MAX_SPEED = 160;
 const POSITION_TOLERANCE_KM = 0.03;
 const ALGORITHM = 'gps-moving-fixes-v2';
@@ -97,6 +98,7 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
     if (!removed) break;
   }
   const pointIndex = new Map(unique.map((point, index) => [point, index]));
+  const acceptedLegs = new Map<number,{km:number;from:number}>();
   let km = 0, rejectedSegments = conflictingTimes;
   for (let index = 1; index < moving.length; index++) {
     const a = moving[index - 1], b = moving[index];
@@ -114,6 +116,7 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
     }
     if (!plausible(a, b) || (seconds > 300 && (distance > 0.25 || !recordedStop))) { rejectedSegments++; continue; }
     km += distance;
+    acceptedLegs.set(b.epoch,{km:distance,from:a.epoch});
   }
   const parked = originalMoving.length === 0 && unknownSpeedCount === 0 && unique.length >= 2 && unique.every(point => haversineKm(unique[0], point) <= 0.05);
   const movingCoverage = originalMoving.length ? moving.length / originalMoving.length : parked ? 1 : 0;
@@ -138,6 +141,18 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
     const next=nextByIndex[index];
     return !(point.speed===0&&previousMoving&&next&&point.epoch-previousMoving.epoch<=300&&next.epoch-point.epoch<=300&&!plausible(previousMoving,point)&&!plausible(point,next));
   });
+  const progress: MovementProgressPoint[] = [];
+  let runningKm = 0, eventStartKm = 0;
+  const precision=(value:number)=>Math.round(value*1000)/1000;
+  const isAfterHours=(epoch:number)=>{const hour=Math.floor((epoch+19800)/3600)%24;return hour>=22||hour<5;};
+  const observation=(point:Point,kind:MovementProgressPoint['kind'])=>{
+    const leg=acceptedLegs.get(point.epoch);
+    runningKm+=leg?.km??0;
+    return {at:new Date(point.epoch*1000).toISOString(),lat:point.lat,lng:point.lng,speed:point.speed,kind,
+      addedKm:kind==='gap'&&!leg?null:precision(leg?.km??0),cumulativeKm:precision(runningKm),
+      distanceFrom:leg?new Date(leg.from*1000).toISOString():null,afterHours:isAfterHours(point.epoch),gapBefore:kind==='gap'};
+  };
+  if(timelinePoints.length)progress.push(observation(timelinePoints[0],'start'));
   const routeSegments: Array<Array<{lat:number;lng:number}>> = [];
   let segment: Array<{lat:number;lng:number}> = [];
   for (let index = 1; index < timelinePoints.length; index++) {
@@ -149,11 +164,13 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
     const kind: MovementEvent['kind'] = invalid ? 'gap' : stopped ?
       a.ignition === true && b.ignition === true ? 'idle' : a.ignition === false && b.ignition === false ? 'stopped' : 'stop_unknown' : 'moving';
     secondsByKind[kind] += seconds;
+    const reading=observation(b,kind);progress.push(reading);
     const previous = events.at(-1);
     if (previous && previous.kind === kind && (kind === 'moving' || kind === 'gap' || haversineKm(previous,a) <= 0.05)) {
       previous.to = new Date(b.epoch*1000).toISOString(); previous.minutes += seconds/60;
       previous.endLat = b.lat; previous.endLng = b.lng;
-    } else events.push({kind,from:new Date(a.epoch*1000).toISOString(),to:new Date(b.epoch*1000).toISOString(),minutes:seconds/60,lat:a.lat,lng:a.lng,endLat:b.lat,endLng:b.lng});
+      previous.distanceKm=precision(reading.cumulativeKm-eventStartKm);previous.cumulativeKm=reading.cumulativeKm;previous.distanceIncomplete=previous.distanceIncomplete||kind==='gap';
+    } else {eventStartKm=progress[progress.length-2].cumulativeKm;events.push({kind,from:new Date(a.epoch*1000).toISOString(),to:new Date(b.epoch*1000).toISOString(),minutes:seconds/60,lat:a.lat,lng:a.lng,endLat:b.lat,endLng:b.lng,distanceKm:precision(reading.cumulativeKm-eventStartKm),cumulativeKm:reading.cumulativeKm,distanceIncomplete:kind==='gap'});}
     if (kind === 'gap') { if (segment.length) routeSegments.push(segment); segment = []; }
     else { if (!segment.length) segment.push({lat:a.lat,lng:a.lng}); segment.push({lat:b.lat,lng:b.lng}); }
   }
@@ -161,6 +178,7 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
   // The same cleaned coordinates feed Tracking and the report, avoiding the old back-and-forth map spikes.
   const displayPoints = parked ? unique.slice(0, 1) : moving;
   return {
+    progress,
     timeline: events.map(event=>({...event,minutes:rounded(event.minutes)})),
     routeSegments,
     points: displayPoints.map(({ lat, lng }) => ({ lat, lng })),
