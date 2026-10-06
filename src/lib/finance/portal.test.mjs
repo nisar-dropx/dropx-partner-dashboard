@@ -175,7 +175,9 @@ test('Finance groups Pricing and Rent masters under Master and both business sec
   assert.equal(master.children.find(i=>i.code==='finance_pricing').href,'/master/pricing');
   assert.equal(master.children.find(i=>i.code==='finance_rent').href,'/master/rent');
   const group=navigation.financeNavItems.find(i=>i.label==='Business Performance');
-  assert.deepEqual(group.children.map(i=>i.label),['Revenue & Billing','Profit & Loss']);
+  assert.deepEqual(group.children.map(i=>i.label),['Revenue & Billing','Profit & Loss','Station Calculations','Amazon Now Units']);
+  assert.equal(group.children.find(i=>i.label==='Profit & Loss').href,'/finance/profitability');
+  assert.equal(surface.isFinancePortalPath('/master/business'),true);
   assert.equal(surface.isFinancePortalPath('/master/pricing'),true);
   assert.equal(surface.isFinancePortalPath('/master/rent'),true);
   assert.equal(surface.isFinancePortalPath('/finance/business/export'),true);
