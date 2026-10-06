@@ -8,7 +8,7 @@ function compile(auth,permission=true,station='A',fieldType='fixed_daily'){
  '@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>permission},
  '@/lib/ops-pulse/cps-data':{cpsScope:async()=>({companyId:'company',all:[{id:'station-a',station_code:'A'}]})},
  '@/lib/ops-pulse/cps':{isoDate:v=>typeof v==='string'&&/^20\d\d-\d\d-\d\d$/.test(v)&&Number.isFinite(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v},
- '@/lib/supabase-admin':{supabaseAdmin:{rpc(name,args){writes.push({rpc:name,args});return Promise.resolve({data:1,error:null})},from(table){return {select(){return this},eq(){return this},order(){return this},limit(){return this},maybeSingle(){return Promise.resolve({data:table==='designations'?{code:'CLM',name:'Cluster Manager'}:table==='payment_fields'?{code:'VAN_RENT_PER_DAY',label:'Van rental',calculation_type:fieldType}:{id:'bill',station_code:station},error:null})},upsert(value){writes.push({table,value});return Promise.resolve({error:null})},insert(value){writes.push({table,value});return this},update(value){writes.push({table,value});return this},then(resolve){return Promise.resolve(resolve({data:[{id:'saved'}],error:null}))}}}}}
+ '@/lib/supabase-admin':{supabaseAdmin:{rpc(name,args){writes.push({rpc:name,args});return Promise.resolve({data:1,error:null})},from(table){return {select(){return this},eq(){return this},order(){return this},limit(){return this},maybeSingle(){return Promise.resolve({data:table==='designations'?{code:'CLM',name:'Cluster Manager'}:table==='payment_fields'?{code:'VAN_RENT_PER_DAY',label:'Van rental',calculation_type:fieldType,is_custom_production:fieldType==='count_x_rate'}:{id:'bill',station_code:station},error:null})},upsert(value){writes.push({table,value});return Promise.resolve({error:null})},insert(value){writes.push({table,value});return this},update(value){writes.push({table,value});return this},then(resolve){return Promise.resolve(resolve({data:[{id:'saved'}],error:null}))}}}}}
  };
  const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL('./route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(k=>mocks[k],m.exports,m);return {...m.exports,writes};
 }
@@ -48,3 +48,10 @@ test('rental source rules are company scoped and cannot suppress package payment
  test('production payment heads can be configured as P&L-only without changing payroll cards',async()=>{
  const r=compile(auth,true,'A','count_x_rate');assert.equal((await r.POST(req({kind:'component',component_code:'SELLER_PICKUP',mode:'pnl_only',effective_from:'2026-09-01'}))).status,200);assert.equal(r.writes[0].table,'ops_cps_component_policies');assert.equal(r.writes[0].value.mode,'pnl_only');
  });
+
+test('historical fallback requires company edit and valid configurable history',async()=>{
+ const body={kind:'fallback',field_code:'KM_RUN',mode:'associate_then_station',lookback_months:3,minimum_history_days:1,effective_from:'2026-09-01'};
+ const r=compile(auth,true,'A','count_x_rate');assert.equal((await r.POST(req(body))).status,200);assert.equal(r.writes[0].table,'ops_cps_production_fallback_policies');assert.equal(r.writes[0].value.company_id,'company');
+ for(const patch of [{lookback_months:0},{minimum_history_days:0},{mode:'invented'}]) assert.equal((await r.POST(req({...body,...patch}))).status,400);
+ const station=compile({...auth,hasAllLocationAccess:false},true,'A','count_x_rate');assert.equal((await station.POST(req(body))).status,403);
+});
