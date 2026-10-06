@@ -856,3 +856,24 @@ export async function refreshLoadFlashNetwork(): Promise<EddNetworkRunStatus | n
   }
   return normalizeRun(raw.run);
 }
+
+/** Advance the sweep while Ops Live is open, instead of waiting for the next minute. */
+export async function continueLoadFlashNetwork(): Promise<{ run: EddNetworkRunStatus | null; advanced: boolean; busy: boolean }> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  const response = await fetch(`${baseUrl}/api/admin/executive/edd/load-flash/network/continue`, {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(45000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return { run: normalizeRun(raw.run), advanced: Boolean(raw.advanced), busy: Boolean(raw.busy) };
+}

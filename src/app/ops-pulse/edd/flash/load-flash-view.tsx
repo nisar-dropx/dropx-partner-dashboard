@@ -5,7 +5,7 @@ import { Download, Loader2, RefreshCw } from "lucide-react";
 import type { EddNetworkRunStatus, LoadFlashNetworkPayload, LoadFlashStation } from "@/lib/ops-pulse/edd-worker";
 import type { LoadFlashReportKind } from "@/lib/ops-pulse/load-flash-report";
 
-const POLL_MS = 15000;
+const POLL_MS = 4000;
 
 function formatWhen(value: string | null) {
   if (!value) return "Not fetched yet";
@@ -55,16 +55,42 @@ export function LoadFlashView({ initial }: { initial: LoadFlashNetworkPayload })
 
   useEffect(() => {
     if (run?.status !== "running") return;
-    const timer = window.setInterval(() => {
-      void fetch(`/api/ops-pulse/edd/flash/network?date=${encodeURIComponent(payload.businessDate)}`, { cache: "no-store" })
-        .then((response) => response.json())
-        .then((next: LoadFlashNetworkPayload) => {
-          setPayload(next);
-          setRun(next.run);
-        })
-        .catch(() => undefined);
-    }, POLL_MS);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    const date = payload.businessDate;
+
+    async function pull() {
+      const response = await fetch(`/api/ops-pulse/edd/flash/network?date=${encodeURIComponent(date)}`, { cache: "no-store" });
+      const next = await response.json() as LoadFlashNetworkPayload;
+      if (cancelled) return null;
+      setPayload(next);
+      setRun(next.run);
+      return next.run;
+    }
+
+    void (async () => {
+      while (!cancelled) {
+        const started = Date.now();
+        try {
+          const response = await fetch("/api/ops-pulse/edd/flash/network/continue", { method: "POST", cache: "no-store" });
+          const body = await response.json() as { run?: EddNetworkRunStatus | null };
+          if (!cancelled && body.run) setRun(body.run);
+          if (body.run && body.run.status !== "running") {
+            await pull();
+            break;
+          }
+        } catch {
+          /* The next pull still shows whatever the cron has saved. */
+        }
+        const latest = await pull().catch(() => null);
+        if (cancelled || !latest || latest.status !== "running") break;
+        const wait = Math.max(0, POLL_MS - (Date.now() - started));
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [run?.status, payload.businessDate]);
 
   const rows = useMemo(() => {
