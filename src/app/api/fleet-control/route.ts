@@ -15,6 +15,8 @@ import { generateFleetAuditProgramme } from "@/lib/fleet/audit-programme";
 import { fleetAccessPageCodes } from "@/lib/access-surface";
 import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
+import { validateFleetOperatingPolicy, policyDays } from "@/lib/fleet/operating-policy";
+
 type Payload = Record<string, any>;
 const emailPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -120,6 +122,7 @@ async function handlePOST(request: Request) {
     if (action === "vehicle-status.remove") return await removeVehicleStatus(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status-reason.upsert") return await upsertVehicleStatusReason(context.companyId, context.canManageSettings, body);
     if (action === "vehicle-status-reason.remove") return await removeVehicleStatusReason(context.companyId, context.canManageSettings, body);
+    if (action === "settings.update-operating-policy") return await updateOperatingPolicy(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "settings.update") return await updateSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "settings.update-audit-programme") return await updateAuditProgrammeSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
     if (action === "settings.update-mail") return await updateMailSettings(context.companyId, context.authorization.userId, context.canManageSettings, body);
@@ -574,7 +577,7 @@ async function removeVehicleStatusReason(companyId: string, allowed: boolean, bo
 
 async function updateSettings(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
-  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, default_audit_cadence_days: Number(body.defaultAuditCadenceDays ?? 30), document_warning_days: Number(body.documentWarningDays ?? 30), service_warning_days: Number(body.serviceWarningDays ?? 14), auto_suggest_audits: Boolean(body.autoSuggestAudits), breakdown_vehicle_link_required: Boolean(body.breakdownVehicleLinkRequired), audit_email_enabled: Boolean(body.auditEmailEnabled), audit_video_required: Boolean(body.auditVideoRequired), updated_by: userId, updated_at: new Date().toISOString() });
+  const result = await supabaseAdmin!.from("fleet_control_settings").upsert({ company_id: companyId, default_audit_cadence_days: policyDays(body.defaultAuditCadenceDays, "Audit cadence"), document_warning_days: policyDays(body.documentWarningDays, "Document warning"), service_warning_days: policyDays(body.serviceWarningDays, "Service warning"), auto_suggest_audits: Boolean(body.autoSuggestAudits), audit_email_enabled: Boolean(body.auditEmailEnabled), audit_video_required: Boolean(body.auditVideoRequired), updated_by: userId, updated_at: new Date().toISOString() });
   if (result.error) throw new Error(result.error.message);
   return NextResponse.json({ ok: true, message: "Fleet settings updated." });
 }
@@ -690,3 +693,21 @@ async function saveVehicleSource(companyId:string,allowed:boolean,body:Payload) 
 }
 
 export const POST = withFleetSystemLog(handlePOST);
+
+async function updateOperatingPolicy(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet settings permission denied." }, { status: 403 });
+  const policy = validateFleetOperatingPolicy(body.operatingPolicy);
+  const existing = await supabaseAdmin!.from("fleet_control_settings").select("risk_weights,updated_at").eq("company_id", companyId).maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+  const weights = existing.data?.risk_weights && typeof existing.data.risk_weights === "object" ? existing.data.risk_weights : {};
+  const values = { risk_weights: { ...weights, operating_policy: policy }, updated_by: userId, updated_at: new Date().toISOString() };
+  let result;
+  if (existing.data) {
+    let update = supabaseAdmin!.from("fleet_control_settings").update(values).eq("company_id", companyId);
+    update = existing.data.updated_at ? update.eq("updated_at", existing.data.updated_at) : update.is("updated_at", null);
+    result = await update.select("company_id").maybeSingle();
+  } else result = await supabaseAdmin!.from("fleet_control_settings").insert({ company_id: companyId, ...values }).select("company_id").single();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) return NextResponse.json({error: "Settings changed while saving. Refresh and try again."}, {status: 409});
+  return NextResponse.json({ok: true, message: "Availability target and service work categories saved."});
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, AlertTriangle, ArrowDownUp, Clock3, Gauge, MapPin, RefreshCw, Route, Search, ShieldAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FleetGpsExceptions, type ExceptionTarget } from '@/components/fleet-gps-exceptions';
 import type { GpsExceptionReview } from '@/lib/fleet/gps-exceptions';
 import { dayDuration, dayHours } from "@/lib/fleet/day-tracking";
@@ -74,19 +74,26 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
   const [movementDate, setMovementDate] = useState(shiftDate(isoToday(), -1));
   const [route, setRoute] = useState<RouteHistory | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const liveController = useRef<AbortController | null>(null);
+  const routeController = useRef<AbortController | null>(null);
+  useEffect(() => () => {liveController.current?.abort();routeController.current?.abort();}, []);
 
   async function loadLive(manual = false) {
+    if (liveController.current) return;
+    const controller = new AbortController(); liveController.current = controller;
+    const timeout = window.setTimeout(()=>controller.abort(new Error("Live GPS refresh timed out. Retry.")), 20000);
     if (manual) setRefreshing(true); else setLoading(true);
     try {
-      const response = await fetch(`/api/fleet/summary?ts=${Date.now()}`, { cache: "no-store" });
+      const response = await fetch(`/api/fleet/summary?ts=${Date.now()}`, { cache: "no-store", signal: controller.signal });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load live GPS.");
       setSummary(payload);
       const rows = (payload.gpsLive ?? []) as GpsRow[];
       setSelectedVehicle((current) => current && rows.some((row) => row.vehicle_no === current) ? current : rows[0]?.vehicle_no ?? "");
     } catch (error) {
-      setSummary({ error: error instanceof Error ? error.message : "Unable to load live GPS." });
+      if (controller.signal.reason?.name !== "AbortError") setSummary(current=>({...current,error: error instanceof Error ? error.message : "Unable to load live GPS."}));
     } finally {
+      window.clearTimeout(timeout); liveController.current = null;
       setLoading(false); setRefreshing(false);
     }
   }
@@ -122,7 +129,8 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
       return order * (sort.direction === "asc" ? 1 : -1);
     });
   }, [summary, stationByVehicle, modelByVehicle, stationByCode, search, placements, clusters, regions, ignition, sort]);
-  const selected = (summary?.gpsLive ?? []).find((row) => row.vehicle_no === selectedVehicle) ?? rows[0] ?? null;
+  const selected = rows.find((row) => row.vehicle_no === selectedVehicle) ?? rows[0] ?? null;
+  useEffect(()=>{routeController.current?.abort();routeController.current=null;setRoute(null);setRouteLoading(false);},[selected?.vehicle_no,movementDate]);
   const moving = rows.filter((row) => row.speed > 0).length;
 
   function changeSort(key: "vehicle" | "speed" | "time") {
@@ -131,15 +139,18 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
 
   async function loadMovement() {
     if (!selected?.vehicle_no) return;
+    routeController.current?.abort();
+    const controller = new AbortController(); routeController.current = controller;
+    const timeout = window.setTimeout(()=>controller.abort(new Error("Route lookup timed out. Retry.")),30000);
     setRouteLoading(true); setRoute(null);
     try {
-      const response = await fetch(`/api/wheelseye/history?vehicle=${encodeURIComponent(selected.vehicle_no)}&date=${encodeURIComponent(movementDate)}`, { cache: "no-store" });
+      const response = await fetch(`/api/wheelseye/history?vehicle=${encodeURIComponent(selected.vehicle_no)}&date=${encodeURIComponent(movementDate)}`, { cache: "no-store", signal:controller.signal });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load movement.");
-      setRoute(payload);
+      if (routeController.current === controller) setRoute(payload);
     } catch (error) {
-      setRoute({ error: error instanceof Error ? error.message : "Unable to load movement." });
-    } finally { setRouteLoading(false); }
+      if (routeController.current === controller && controller.signal.reason?.name !== "AbortError") setRoute({ error: error instanceof Error ? error.message : "Unable to load movement." });
+    } finally { window.clearTimeout(timeout); if(routeController.current === controller){routeController.current=null;setRouteLoading(false);} }
   }
 
   return <div className="fc-tracking-workspace">
@@ -152,7 +163,7 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
 
     {view === "day" ? <FleetDayTracking data={data} gpsVehicles={(summary?.gpsLive??[]).map(row=>row.vehicle_no)} /> : view === "exceptions" ? <FleetGpsExceptions data={data} initialException={exceptionEntry?.target} onReviewed={onReviewed} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
       <div className="fc-section-head fc-tracking-heading"><div><span className="fc-eyebrow">WheelsEye live feed</span><h1>Vehicle tracking</h1><p>Current GPS position and historical movement for vehicles that have tracking configured.</p></div><button className="fc-button secondary" disabled={refreshing} onClick={() => loadLive(true)} type="button"><RefreshCw className={refreshing ? "spin" : ""} size={16} /> Refresh live</button></div>
-      {summary?.error ? <div className="fc-flash error"><span>{summary.error}</span></div> : null}
+      {summary?.error ? <div className="fc-flash error"><span>{summary.error}{summary.gpsLive?.length ? " Showing the last loaded positions; check GPS timestamps." : " Use Refresh live to retry."}</span></div> : null}
       <section className="fc-tracking-kpis">
         <article><MapPin size={18} /><span>GPS vehicles</span><strong>{rows.length}</strong><small>matching current filters</small></article>
         <article><Activity size={18} /><span>Moving now</span><strong>{moving}</strong><small>speed above 0 km/h</small></article>
