@@ -5,7 +5,7 @@ import {
   findWorkforcePaymentFieldOverride,
   hasWorkforcePayoutAttendanceOverride,
   overlayWorkforcePayoutAttendance,
-  resolveWorkforceCustomProductionUnits,
+  resolveWorkforceProductionUnits,
   resolveWorkforcePaymentFieldRate,
   resolveWorkforcePaymentFieldValue,
   workforcePayoutAttendanceKey
@@ -103,33 +103,82 @@ test("ambiguous overlapping fixture rows fail closed instead of choosing a rate"
   }), 75);
 });
 
-test("custom production resolves by workforce, field and date and preserves zero units", () => {
+test("uploaded production resolves by workforce, location, field and date and preserves zero units", () => {
   const maps = buildWorkforcePayoutInputMaps({
-    customProductionInputs: [
+    productionInputs: [
       { workforce_id: "worker-1", station_id: "station-1", payment_field_id: "custom-field", field_code_snapshot: "EXTRA", work_date: "2026-09-08", units: "0" },
       { workforce_id: "worker-1", station_id: "station-1", payment_field_id: "custom-field", field_code_snapshot: "EXTRA", work_date: "2026-09-09", units: 12 },
       { workforce_id: "worker-2", station_id: "station-1", payment_field_id: "custom-field", field_code_snapshot: "EXTRA", work_date: "2026-09-08", units: 99 }
     ]
   });
 
-  assert.equal(resolveWorkforceCustomProductionUnits(maps, {
+  assert.equal(resolveWorkforceProductionUnits(maps, {
     workforceId: "worker-1", stationId: "station-1", paymentFieldId: "custom-field", date: "2026-09-08", fallbackUnits: 7
   }), 0);
-  assert.equal(resolveWorkforceCustomProductionUnits(maps, {
+  assert.equal(resolveWorkforceProductionUnits(maps, {
     workforceId: "worker-1", stationId: "station-1", paymentFieldId: "custom-field", date: "2026-09-09", fallbackUnits: 7
   }), 12);
-  assert.equal(resolveWorkforceCustomProductionUnits(maps, {
+  assert.equal(resolveWorkforceProductionUnits(maps, {
     workforceId: "worker-1", stationId: "station-1", fieldCode: " extra ", date: "2026-09-09", fallbackUnits: 7
   }), 12);
-  assert.equal(resolveWorkforceCustomProductionUnits(maps, {
+  assert.equal(resolveWorkforceProductionUnits(maps, {
     workforceId: "worker-1", stationId: "station-2", paymentFieldId: "custom-field", date: "2026-09-09", fallbackUnits: 7
   }), 7);
-  assert.equal(resolveWorkforceCustomProductionUnits(maps, {
+  assert.equal(resolveWorkforceProductionUnits(maps, {
     workforceId: "worker-1", paymentFieldId: "another-field", date: "2026-09-08", fallbackUnits: 7
   }), 7);
-  assert.equal(resolveWorkforceCustomProductionUnits(maps, {
+  assert.equal(resolveWorkforceProductionUnits(maps, {
     workforceId: "worker-1", paymentFieldId: "custom-field", date: "2026-09-10", fallbackUnits: 7
   }), 7);
+});
+
+test("a DELIVERY upload replaces only DELIVERY while CRETURN, provider fallback and attendance remain unchanged", () => {
+  const date = "2026-09-08";
+  const attendanceKey = workforcePayoutAttendanceKey("worker-1", date);
+  const sourceAttendance = new Map([[attendanceKey, {
+    punch_date: date,
+    status: "P",
+    in_time: "2026-09-08T03:00:00Z",
+    work_minutes: 480
+  }]]);
+  const maps = buildWorkforcePayoutInputMaps({
+    productionInputs: [{
+      workforce_id: "worker-1",
+      station_id: "station-1",
+      payment_field_id: "field-delivery",
+      field_code_snapshot: "DELIVERY",
+      work_date: date,
+      units: 75
+    }]
+  });
+
+  assert.equal(resolveWorkforceProductionUnits(maps, {
+    workforceId: "worker-1",
+    stationId: "station-1",
+    paymentFieldId: "field-delivery",
+    fieldCode: "DELIVERY",
+    date,
+    fallbackUnits: 120
+  }), 75);
+  assert.equal(resolveWorkforceProductionUnits(maps, {
+    workforceId: "worker-1",
+    stationId: "station-1",
+    paymentFieldId: "field-creturn",
+    fieldCode: "CRETURN",
+    date,
+    fallbackUnits: 8
+  }), 8);
+  assert.equal(resolveWorkforceProductionUnits(maps, {
+    workforceId: "worker-1",
+    stationId: "station-1",
+    paymentFieldId: "field-delivery",
+    fieldCode: "DELIVERY",
+    date: "2026-09-09",
+    fallbackUnits: 130
+  }), 130);
+
+  const attendance = overlayWorkforcePayoutAttendance(sourceAttendance, maps.attendanceByWorkforceDate);
+  assert.deepEqual(attendance.get(attendanceKey), sourceAttendance.get(attendanceKey));
 });
 
 test("invalid rows never become payout overrides", () => {
@@ -145,7 +194,7 @@ test("invalid rows never become payout overrides", () => {
       { workforce_id: "worker-1", station_id: "station-1", payment_field_id: "field-1", effective_from: "2026-09-30", effective_to: "2026-09-01", input_value: 100 },
       { workforce_id: "worker-1", station_id: "station-1", payment_field_id: "field-1", effective_from: "2026-09-01", effective_to: "2026-09-30", input_value: -1 }
     ],
-    customProductionInputs: [
+    productionInputs: [
       { workforce_id: "worker-1", station_id: "station-1", payment_field_id: "field-1", work_date: "2026-09-01", units: Number.NaN },
       { workforce_id: "worker-1", station_id: "", payment_field_id: "field-1", work_date: "2026-09-02", units: 1 }
     ]
@@ -153,5 +202,5 @@ test("invalid rows never become payout overrides", () => {
 
   assert.equal(maps.attendanceByWorkforceDate.size, 0);
   assert.equal(maps.paymentFieldOverridesByWorkforceField.size, 0);
-  assert.equal(maps.customProductionByWorkforceFieldDate.size, 0);
+  assert.equal(maps.productionByWorkforceFieldDate.size, 0);
 });

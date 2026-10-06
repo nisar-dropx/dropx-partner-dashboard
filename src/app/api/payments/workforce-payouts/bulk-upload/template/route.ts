@@ -35,7 +35,7 @@ export async function GET(request: Request) {
       return errorResponse("Select a valid effective-from and effective-to date range.", 400);
     }
 
-    const [paymentFieldsResult, additionalFieldsResult, stationsResult] = await Promise.all([
+    const [paymentFieldsResult, additionalFieldsResult, deductionHeadsResult, stationsResult] = await Promise.all([
       supabaseAdmin
         .from("payment_fields")
         .select("code,label,field_type,calculation_type,pay_schedule,is_custom_production")
@@ -49,12 +49,21 @@ export async function GET(request: Request) {
         .eq("is_active", true)
         .order("code"),
       supabaseAdmin
+        .from("workforce_deduction_heads")
+        .select("code,name,calculation_type,is_system")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .eq("calculation_type", "manual")
+        .eq("is_system", false)
+        .order("code"),
+      supabaseAdmin
         .from("stations")
         .select("id,station_code")
         .eq("company_id", companyId)
         .order("station_code")
     ]);
-    const error = paymentFieldsResult.error?.message || additionalFieldsResult.error?.message || stationsResult.error?.message;
+    const error = paymentFieldsResult.error?.message || additionalFieldsResult.error?.message
+      || deductionHeadsResult.error?.message || stationsResult.error?.message;
     if (error) throw new Error(error);
 
     const fields: WorkforcePayoutImportTemplateField[] = [];
@@ -67,13 +76,13 @@ export async function GET(request: Request) {
         calculation: [field.calculation_type, field.pay_schedule].filter(Boolean).join(" / ") || "configured input",
         valueMeaning: "Configured rate/input override; the payment formula still calculates the payout."
       });
-      if (field.field_type === "production" && field.is_custom_production) {
+      if (field.field_type === "production") {
         fields.push({
           code,
           label: String(field.label ?? code),
           inputType: "PRODUCTION_UNITS",
           calculation: String(field.calculation_type ?? "count_x_rate"),
-          valueMeaning: "Unit count for one work date."
+          valueMeaning: "Unit count for one work date. This replaces only this production field for that worker, location and date."
         });
       }
     }
@@ -88,6 +97,16 @@ export async function GET(request: Request) {
         valueMeaning: calculation === "manual_amount"
           ? "Final additional amount for the exact payout period."
           : `Units multiplied by the configured rate${field.default_rate_value === null ? " (rate is not configured)" : ` ${field.default_rate_value}`}.`
+      });
+    }
+    for (const head of deductionHeadsResult.data ?? []) {
+      const code = normalizeWorkforcePayoutCode(head.code);
+      fields.push({
+        code,
+        label: String(head.name ?? code),
+        inputType: "DEDUCTION",
+        calculation: "manual deduction",
+        valueMeaning: "Final deduction amount for the exact selected payout period."
       });
     }
 

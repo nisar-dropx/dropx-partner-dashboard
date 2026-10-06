@@ -17,7 +17,12 @@ export type WorkforcePaymentFieldOverrideRow = {
   input_value: number | string;
 };
 
-export type WorkforceCustomProductionInputRow = {
+/**
+ * One uploaded production-unit value. The backing table retains its historical
+ * `workforce_custom_production_inputs` name, but these exact-key values can
+ * override either provider-reported or custom production fields.
+ */
+export type WorkforceProductionInputRow = {
   id?: string | null;
   workforce_id: string;
   station_id: string;
@@ -26,6 +31,9 @@ export type WorkforceCustomProductionInputRow = {
   work_date: string;
   units: number | string;
 };
+
+/** @deprecated Use WorkforceProductionInputRow for new calculation code. */
+export type WorkforceCustomProductionInputRow = WorkforceProductionInputRow;
 
 export type WorkforcePayoutAttendanceRecord = {
   punch_date: string;
@@ -44,7 +52,7 @@ type IndexedPaymentFieldOverride = WorkforcePaymentFieldOverrideRow & {
   input_value: number;
 };
 
-type IndexedCustomProductionInput = WorkforceCustomProductionInputRow & {
+type IndexedProductionInput = WorkforceProductionInputRow & {
   units: number;
 };
 
@@ -52,8 +60,11 @@ export type WorkforcePayoutInputMaps = {
   attendanceByWorkforceDate: ReadonlyMap<string, IndexedAttendanceOverride>;
   paymentFieldOverridesByWorkforceField: ReadonlyMap<string, readonly IndexedPaymentFieldOverride[]>;
   paymentFieldOverridesByWorkforceCode: ReadonlyMap<string, readonly IndexedPaymentFieldOverride[]>;
-  customProductionByWorkforceFieldDate: ReadonlyMap<string, IndexedCustomProductionInput>;
-  customProductionByWorkforceCodeDate: ReadonlyMap<string, readonly IndexedCustomProductionInput[]>;
+  productionByWorkforceFieldDate: ReadonlyMap<string, IndexedProductionInput>;
+  productionByWorkforceCodeDate: ReadonlyMap<string, readonly IndexedProductionInput[]>;
+  /** @deprecated Historical aliases retained for callers using the table name. */
+  customProductionByWorkforceFieldDate: ReadonlyMap<string, IndexedProductionInput>;
+  customProductionByWorkforceCodeDate: ReadonlyMap<string, readonly IndexedProductionInput[]>;
 };
 
 type WorkforcePaymentFieldLookup = {
@@ -114,14 +125,17 @@ function workforcePaymentFieldCodeKey(workforceId: unknown, stationId: unknown, 
   return `${clean(workforceId)}|${clean(stationId)}|${normalizedCode(fieldCode)}`;
 }
 
-function workforceCustomProductionCodeKey(workforceId: unknown, stationId: unknown, fieldCode: unknown, date: unknown) {
+function workforceProductionCodeKey(workforceId: unknown, stationId: unknown, fieldCode: unknown, date: unknown) {
   return `${clean(workforceId)}|${clean(stationId)}|${normalizedCode(fieldCode)}|${clean(date)}`;
 }
 
-/** Exact identity used by workforce_custom_production_inputs. */
-export function workforceCustomProductionKey(workforceId: unknown, stationId: unknown, paymentFieldId: unknown, date: unknown) {
+/** Exact field-level identity used by uploaded production-unit values. */
+export function workforceProductionKey(workforceId: unknown, stationId: unknown, paymentFieldId: unknown, date: unknown) {
   return `${clean(workforceId)}|${clean(stationId)}|${clean(paymentFieldId)}|${clean(date)}`;
 }
+
+/** @deprecated Historical alias retained for callers using the table name. */
+export const workforceCustomProductionKey = workforceProductionKey;
 
 function append<K, V>(map: Map<K, V[]>, key: K, value: V) {
   map.set(key, [...(map.get(key) ?? []), value]);
@@ -152,21 +166,24 @@ function sortedIntervals(rows: IndexedPaymentFieldOverride[]) {
  * 4. Resolve field values for each calculation date, before calling the payout
  *    formula. Pass `paymentFieldId` whenever available; `fieldCode` exists only
  *    for immutable component snapshots that do not contain the field id.
- * 5. Resolve custom units both for threshold inputs and final daily lines, and
- *    only for fields whose master has `is_custom_production = true`. Pass the
- *    active mapping/allocation `stationId` so one daily input cannot be reused
- *    by a simultaneous setup at another location.
+ * 5. Resolve uploaded units for every production rule, both for threshold
+ *    inputs and final daily lines. Provider metrics remain the fallback for
+ *    provider-backed fields; custom fields fall back to zero. Pass the active
+ *    mapping/allocation `stationId` so one daily input cannot be reused by a
+ *    simultaneous setup at another location.
  */
 export function buildWorkforcePayoutInputMaps(input: {
   attendanceOverrides?: readonly WorkforcePayoutAttendanceOverrideRow[] | null;
   paymentFieldOverrides?: readonly WorkforcePaymentFieldOverrideRow[] | null;
+  productionInputs?: readonly WorkforceProductionInputRow[] | null;
+  /** @deprecated Use productionInputs for new calculation code. */
   customProductionInputs?: readonly WorkforceCustomProductionInputRow[] | null;
 }): WorkforcePayoutInputMaps {
   const attendanceByWorkforceDate = new Map<string, IndexedAttendanceOverride>();
   const paymentFieldOverridesByWorkforceField = new Map<string, IndexedPaymentFieldOverride[]>();
   const paymentFieldOverridesByWorkforceCode = new Map<string, IndexedPaymentFieldOverride[]>();
-  const customProductionByWorkforceFieldDate = new Map<string, IndexedCustomProductionInput>();
-  const customProductionByWorkforceCodeDate = new Map<string, IndexedCustomProductionInput[]>();
+  const productionByWorkforceFieldDate = new Map<string, IndexedProductionInput>();
+  const productionByWorkforceCodeDate = new Map<string, IndexedProductionInput[]>();
 
   for (const row of input.attendanceOverrides ?? []) {
     const workforceId = clean(row.workforce_id);
@@ -214,14 +231,15 @@ export function buildWorkforcePayoutInputMaps(input: {
     paymentFieldOverridesByWorkforceCode.set(key, sortedIntervals(rows));
   }
 
-  for (const row of input.customProductionInputs ?? []) {
+  const productionInputs = input.productionInputs ?? input.customProductionInputs ?? [];
+  for (const row of productionInputs) {
     const workforceId = clean(row.workforce_id);
     const stationId = clean(row.station_id);
     const paymentFieldId = clean(row.payment_field_id);
     const workDate = clean(row.work_date);
     const units = nonNegativeNumber(row.units);
     if (!workforceId || !stationId || !paymentFieldId || !validDate(workDate) || units === null) continue;
-    const indexed: IndexedCustomProductionInput = {
+    const indexed: IndexedProductionInput = {
       ...row,
       workforce_id: workforceId,
       station_id: stationId,
@@ -230,15 +248,15 @@ export function buildWorkforcePayoutInputMaps(input: {
       work_date: workDate,
       units
     };
-    customProductionByWorkforceFieldDate.set(workforceCustomProductionKey(workforceId, stationId, paymentFieldId, workDate), indexed);
+    productionByWorkforceFieldDate.set(workforceProductionKey(workforceId, stationId, paymentFieldId, workDate), indexed);
   }
   // Build the code fallback from the exact-key map so a duplicate fixture obeys
   // the same last-valid-row rule as the authoritative id lookup.
-  for (const indexed of customProductionByWorkforceFieldDate.values()) {
+  for (const indexed of productionByWorkforceFieldDate.values()) {
     if (!indexed.field_code_snapshot) continue;
     append(
-      customProductionByWorkforceCodeDate,
-      workforceCustomProductionCodeKey(indexed.workforce_id, indexed.station_id, indexed.field_code_snapshot, indexed.work_date),
+      productionByWorkforceCodeDate,
+      workforceProductionCodeKey(indexed.workforce_id, indexed.station_id, indexed.field_code_snapshot, indexed.work_date),
       indexed
     );
   }
@@ -247,8 +265,10 @@ export function buildWorkforcePayoutInputMaps(input: {
     attendanceByWorkforceDate,
     paymentFieldOverridesByWorkforceField,
     paymentFieldOverridesByWorkforceCode,
-    customProductionByWorkforceFieldDate,
-    customProductionByWorkforceCodeDate
+    productionByWorkforceFieldDate,
+    productionByWorkforceCodeDate,
+    customProductionByWorkforceFieldDate: productionByWorkforceFieldDate,
+    customProductionByWorkforceCodeDate: productionByWorkforceCodeDate
   };
 }
 
@@ -333,7 +353,7 @@ export function resolveWorkforcePaymentFieldRate<Fallback>(
   return resolveWorkforcePaymentFieldValue(maps, { ...lookup, fallbackValue: lookup.fallbackRate });
 }
 
-export function findWorkforceCustomProductionInput(
+export function findWorkforceProductionInput(
   maps: WorkforcePayoutInputMaps,
   lookup: { workforceId: string; stationId?: string | null; paymentFieldId?: string | null; fieldCode?: string | null; date: string }
 ) {
@@ -345,19 +365,35 @@ export function findWorkforceCustomProductionInput(
   if (!workforceId || !validDate(date)) return undefined;
   if (paymentFieldId) {
     if (!stationId) return undefined;
-    return maps.customProductionByWorkforceFieldDate.get(workforceCustomProductionKey(workforceId, stationId, paymentFieldId, date));
+    return maps.productionByWorkforceFieldDate.get(workforceProductionKey(workforceId, stationId, paymentFieldId, date));
   }
   if (!fieldCode) return undefined;
   if (!stationId) return undefined;
-  const candidates = maps.customProductionByWorkforceCodeDate.get(workforceCustomProductionCodeKey(workforceId, stationId, fieldCode, date)) ?? [];
+  const candidates = maps.productionByWorkforceCodeDate.get(workforceProductionCodeKey(workforceId, stationId, fieldCode, date)) ?? [];
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
-/** Imported daily units win over calculated/reported units, including zero. */
+/** Uploaded daily units win over provider-reported or custom fallback units, including zero. */
+export function resolveWorkforceProductionUnits<Fallback>(
+  maps: WorkforcePayoutInputMaps,
+  lookup: { workforceId: string; stationId?: string | null; paymentFieldId?: string | null; fieldCode?: string | null; date: string; fallbackUnits: Fallback }
+): number | Fallback {
+  const input = findWorkforceProductionInput(maps, lookup);
+  return input ? input.units : lookup.fallbackUnits;
+}
+
+/** @deprecated Historical name retained while the backing table keeps its original name. */
+export function findWorkforceCustomProductionInput(
+  maps: WorkforcePayoutInputMaps,
+  lookup: { workforceId: string; stationId?: string | null; paymentFieldId?: string | null; fieldCode?: string | null; date: string }
+) {
+  return findWorkforceProductionInput(maps, lookup);
+}
+
+/** @deprecated Use resolveWorkforceProductionUnits for new calculation code. */
 export function resolveWorkforceCustomProductionUnits<Fallback>(
   maps: WorkforcePayoutInputMaps,
   lookup: { workforceId: string; stationId?: string | null; paymentFieldId?: string | null; fieldCode?: string | null; date: string; fallbackUnits: Fallback }
 ): number | Fallback {
-  const input = findWorkforceCustomProductionInput(maps, lookup);
-  return input ? input.units : lookup.fallbackUnits;
+  return resolveWorkforceProductionUnits(maps, lookup);
 }

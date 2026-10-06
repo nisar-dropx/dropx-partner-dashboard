@@ -1,4 +1,5 @@
 export type AutomaticDeductionHead = {
+  id?: string;
   code: string;
   name?: string | null;
   calculation_type: "fixed" | "percentage" | "manual";

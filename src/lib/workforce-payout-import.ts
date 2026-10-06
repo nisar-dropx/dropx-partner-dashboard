@@ -4,7 +4,8 @@ export const workforcePayoutInputTypes = [
   "ATTENDANCE",
   "PRODUCTION_UNITS",
   "PAYMENT_FIELD_VALUE",
-  "ADDITIONAL_PAYMENT"
+  "ADDITIONAL_PAYMENT",
+  "DEDUCTION"
 ] as const;
 
 export type WorkforcePayoutInputType = (typeof workforcePayoutInputTypes)[number];
@@ -66,6 +67,15 @@ export type WorkforcePayoutImportAdditionalField = {
   isActive: boolean;
 };
 
+export type WorkforcePayoutImportDeductionHead = {
+  id: string;
+  code: string;
+  name: string;
+  calculationType: "manual" | "fixed" | "percentage";
+  isSystem: boolean;
+  isActive: boolean;
+};
+
 export type WorkforcePayoutImportSetup = {
   workforceId: string;
   locationId: string | null;
@@ -85,6 +95,7 @@ export type ResolvedWorkforcePayoutImportRow = WorkforcePayoutImportRow & {
   locationId: string;
   paymentFieldId: string | null;
   additionalPaymentFieldId: string | null;
+  deductionHeadId: string | null;
   additionalCalculationType: WorkforcePayoutImportAdditionalField["calculationType"] | null;
 };
 
@@ -92,6 +103,7 @@ export type WorkforcePayoutImportReferences = {
   workers: WorkforcePayoutImportWorker[];
   paymentFields: WorkforcePayoutImportPaymentField[];
   additionalFields: WorkforcePayoutImportAdditionalField[];
+  deductionHeads: WorkforcePayoutImportDeductionHead[];
   setups: WorkforcePayoutImportSetup[];
   locations?: WorkforcePayoutImportLocation[];
   allowedLocationIds: Set<string> | null;
@@ -100,7 +112,7 @@ export type WorkforcePayoutImportReferences = {
 export type WorkforcePayoutImportTemplateField = {
   code: string;
   label: string;
-  inputType: "PAYMENT_FIELD_VALUE" | "PRODUCTION_UNITS" | "ADDITIONAL_PAYMENT";
+  inputType: "PAYMENT_FIELD_VALUE" | "PRODUCTION_UNITS" | "ADDITIONAL_PAYMENT" | "DEDUCTION";
   calculation: string;
   valueMeaning: string;
 };
@@ -176,7 +188,9 @@ function normalizeInputType(value: unknown): WorkforcePayoutInputType | "" {
     PAYMENT_VALUE: "PAYMENT_FIELD_VALUE",
     PAYMENT_FIELD_VALUE: "PAYMENT_FIELD_VALUE",
     ADDITIONAL: "ADDITIONAL_PAYMENT",
-    ADDITIONAL_PAYMENT: "ADDITIONAL_PAYMENT"
+    ADDITIONAL_PAYMENT: "ADDITIONAL_PAYMENT",
+    DEDUCTION: "DEDUCTION",
+    DEDUCTIONS: "DEDUCTION"
   };
   return aliases[normalized] ?? "";
 }
@@ -235,6 +249,13 @@ function resolvedRowIdentity(row: ResolvedWorkforcePayoutImportRow) {
     // Additional-payment uniqueness is worker/field/period across stations.
     return row.additionalPaymentFieldId
       ? [row.inputType, row.workforceId, row.additionalPaymentFieldId, row.effectiveFrom, row.effectiveTo].join("|")
+      : null;
+  }
+  if (row.inputType === "DEDUCTION") {
+    // Manual deductions are global worker/head/period inputs. Station is
+    // ownership metadata and cannot create a duplicate value for the same head.
+    return row.deductionHeadId
+      ? [row.inputType, row.workforceId, row.deductionHeadId, row.effectiveFrom, row.effectiveTo].join("|")
       : null;
   }
   if (row.inputType === "PRODUCTION_UNITS") {
@@ -352,6 +373,8 @@ export function parseWorkforcePayoutWorkbook(
         issues.push({ rowNumber, dropxId: dropxId || null, message: "VALUE cannot be negative." });
       } else if (Math.abs(numericValue) > 999_999_999_999.9999) {
         issues.push({ rowNumber, dropxId: dropxId || null, message: "VALUE is too large." });
+      } else if (inputType === "DEDUCTION" && Math.abs(numericValue * 100 - Math.round(numericValue * 100)) > 0.000001) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Deduction VALUE can have at most two decimal places." });
       } else if (Math.abs(numericValue * 10_000 - Math.round(numericValue * 10_000)) > 0.000001) {
         issues.push({ rowNumber, dropxId: dropxId || null, message: "VALUE can have at most four decimal places." });
       }
@@ -369,8 +392,12 @@ export function parseWorkforcePayoutWorkbook(
     if ((inputType === "ATTENDANCE" || inputType === "PRODUCTION_UNITS") && effectiveFrom && effectiveTo && effectiveFrom !== effectiveTo) {
       issues.push({ rowNumber, dropxId: dropxId || null, message: `${inputType === "ATTENDANCE" ? "Attendance" : "Production units"} must be supplied one work date per row.` });
     }
-    if (inputType === "ADDITIONAL_PAYMENT" && effectiveFrom && effectiveTo && (effectiveFrom !== options.batchFrom || effectiveTo !== options.batchTo)) {
-      issues.push({ rowNumber, dropxId: dropxId || null, message: "An additional payment must use the exact selected payout period." });
+    if ((inputType === "ADDITIONAL_PAYMENT" || inputType === "DEDUCTION") && effectiveFrom && effectiveTo && (effectiveFrom !== options.batchFrom || effectiveTo !== options.batchTo)) {
+      issues.push({
+        rowNumber,
+        dropxId: dropxId || null,
+        message: `${inputType === "DEDUCTION" ? "A deduction" : "An additional payment"} must use the exact selected payout period.`
+      });
     }
 
     return [{
@@ -422,6 +449,7 @@ export function resolveWorkforcePayoutImportRows(
   }
   const paymentFieldsByCode = new Map(references.paymentFields.map((field) => [normalizeWorkforcePayoutCode(field.code), field]));
   const additionalFieldsByCode = new Map(references.additionalFields.map((field) => [normalizeWorkforcePayoutCode(field.code), field]));
+  const deductionHeadsByCode = new Map(references.deductionHeads.map((head) => [normalizeWorkforcePayoutCode(head.code), head]));
   const locationsByCode = new Map((references.locations ?? []).map((location) => [normalizeWorkforcePayoutCode(location.code), location]));
   const setupsByWorkforce = new Map<string, WorkforcePayoutImportSetup[]>();
   for (const setup of references.setups) {
@@ -462,6 +490,7 @@ export function resolveWorkforcePayoutImportRows(
 
     let paymentFieldId: string | null = null;
     let additionalPaymentFieldId: string | null = null;
+    let deductionHeadId: string | null = null;
     let additionalCalculationType: WorkforcePayoutImportAdditionalField["calculationType"] | null = null;
     const matchingSetups: WorkforcePayoutImportSetup[] = [];
 
@@ -471,8 +500,8 @@ export function resolveWorkforcePayoutImportRows(
         issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `Payment field ${row.fieldCode || "(blank)"} is not active for this company.` });
       } else {
         paymentFieldId = field.id;
-        if (row.inputType === "PRODUCTION_UNITS" && !(field.fieldType === "production" && field.isCustomProduction)) {
-          issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `${field.code} is not a custom-production field. Provider-derived production cannot be overwritten by this import.` });
+        if (row.inputType === "PRODUCTION_UNITS" && field.fieldType !== "production") {
+          issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `${field.code} is not configured as a production field.` });
         }
       }
 
@@ -505,6 +534,15 @@ export function resolveWorkforcePayoutImportRows(
           issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `${field.code} requires a default rate before input values can be uploaded.` });
         }
       }
+    } else if (row.inputType === "DEDUCTION") {
+      const head = deductionHeadsByCode.get(row.fieldCode);
+      if (!head) {
+        issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `Deduction head ${row.fieldCode || "(blank)"} does not exist in this company.` });
+      } else if (row.action === "UPSERT" && (!head.isActive || head.isSystem || head.calculationType !== "manual")) {
+        issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `Deduction head ${row.fieldCode || "(blank)"} is not an active manual deduction for this company.` });
+      } else {
+        deductionHeadId = head.id;
+      }
     }
 
     if (row.inputType === "ATTENDANCE" && row.effectiveFrom) {
@@ -519,10 +557,10 @@ export function resolveWorkforcePayoutImportRows(
     // Workforce member's current location; an explicit historical location
     // is authorized separately below when any provider/direct setup overlaps.
     let locationId = requestedLocation?.id
-      ?? (row.inputType === "ADDITIONAL_PAYMENT"
+      ?? (row.inputType === "ADDITIONAL_PAYMENT" || row.inputType === "DEDUCTION"
         ? worker.locationId
         : (setupLocations.length === 1 ? setupLocations[0] : worker.locationId));
-    if (row.inputType !== "ADDITIONAL_PAYMENT" && setupLocations.length > 1) {
+    if (row.inputType !== "ADDITIONAL_PAYMENT" && row.inputType !== "DEDUCTION" && setupLocations.length > 1) {
       issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "This input crosses payment locations. Split it into one row per location period." });
       locationId = null;
     }
@@ -533,7 +571,7 @@ export function resolveWorkforcePayoutImportRows(
       issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "This Workforce member is outside your location scope." });
       locationBlocked = true;
     }
-    if (locationId && row.inputType === "ADDITIONAL_PAYMENT") {
+    if (locationId && (row.inputType === "ADDITIONAL_PAYMENT" || row.inputType === "DEDUCTION")) {
       const hasOverlappingHistoricalSetup = workerSetups.some((setup) => setup.locationId === locationId && overlaps(
         setup.effectiveFrom,
         setup.effectiveTo,
@@ -541,7 +579,11 @@ export function resolveWorkforcePayoutImportRows(
         row.effectiveTo
       ));
       if (locationId !== worker.locationId && !hasOverlappingHistoricalSetup) {
-        issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "The additional payment location must be the Workforce current location or an overlapping historical payment location." });
+        issues.push({
+          rowNumber: row.rowNumber,
+          dropxId: row.dropxId,
+          message: `The ${row.inputType === "DEDUCTION" ? "deduction" : "additional payment"} location must be the Workforce current location or an overlapping historical payment location.`
+        });
         locationBlocked = true;
       }
     } else if (locationId && row.inputType === "ATTENDANCE") {
@@ -572,6 +614,7 @@ export function resolveWorkforcePayoutImportRows(
       locationId: locationId ?? "",
       paymentFieldId,
       additionalPaymentFieldId,
+      deductionHeadId,
       additionalCalculationType
     };
   });
@@ -601,10 +644,10 @@ export function resolveWorkforcePayoutImportRows(
 }
 
 export function payoutImportRowsOverlap(
-  left: Pick<ResolvedWorkforcePayoutImportRow, "workforceId" | "locationId" | "inputType" | "paymentFieldId" | "additionalPaymentFieldId" | "effectiveFrom" | "effectiveTo">,
+  left: Pick<ResolvedWorkforcePayoutImportRow, "workforceId" | "locationId" | "inputType" | "paymentFieldId" | "additionalPaymentFieldId" | "deductionHeadId" | "effectiveFrom" | "effectiveTo">,
   right: { workforceId: string; stationId: string | null; fieldId: string; effectiveFrom: string; effectiveTo: string }
 ) {
-  const fieldId = left.paymentFieldId ?? left.additionalPaymentFieldId;
+  const fieldId = left.paymentFieldId ?? left.additionalPaymentFieldId ?? left.deductionHeadId;
   return left.workforceId === right.workforceId
     && fieldId === right.fieldId
     && (left.inputType !== "PAYMENT_FIELD_VALUE" || left.locationId === right.stationId)
@@ -616,8 +659,9 @@ export function buildWorkforcePayoutImportTemplate(
   options: { effectiveFrom?: string; effectiveTo?: string; locations?: Array<{ code: string }> } = {}
 ) {
   const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_FROM", "EFFECTIVE_TO", "VALUE", "WORK_MINUTES", "REMARK"];
+  const columnWidths = [12, 24, 16, 24, 24, 16, 16, 18, 16, 42].map((wch) => ({ wch }));
   const upload = XLSX.utils.aoa_to_sheet([headers]);
-  upload["!cols"] = [12, 18, 16, 24, 24, 16, 16, 18, 16, 42].map((wch) => ({ wch }));
+  upload["!cols"] = columnWidths;
   upload["!autofilter"] = { ref: `A1:J1` };
 
   const referenceRows = [
@@ -629,20 +673,52 @@ export function buildWorkforcePayoutImportTemplate(
   reference["!autofilter"] = { ref: `A1:E${Math.max(1, referenceRows.length)}` };
 
   const dateHint = options.effectiveFrom && options.effectiveTo
-    ? `This template was downloaded for ${options.effectiveFrom} to ${options.effectiveTo}. Every row must remain inside that range.`
-    : "Choose an effective-from and effective-to range in the payout page before previewing the file.";
+    ? `This template was downloaded for ${options.effectiveFrom} to ${options.effectiveTo}. These dates are the inclusive allowed upload window; every row still needs its own dates inside that window.`
+    : "Effective from and Effective to on the payout page set the inclusive allowed upload window. Every Excel row still needs its own dates inside that window.";
   const instructions = XLSX.utils.aoa_to_sheet([
     ["WORKFORCE PAYOUT BULK UPLOAD"],
     [dateHint],
-    ["ACTION", "Use UPSERT to create/replace an exact input, or CLEAR with a blank VALUE to remove one."],
-    ["ATTENDANCE", "Leave FIELD_CODE blank. Use one date per row and VALUE P, HD or A. WORK_MINUTES is optional (0-1440)."],
-    ["PRODUCTION_UNITS", "Use one date per row. FIELD_CODE must be a custom-production field."],
-    ["PAYMENT_FIELD_VALUE", "VALUE overrides the configured rate/input for the effective interval; it is not a final payout amount."],
-    ["ADDITIONAL_PAYMENT", "The row dates must exactly match the selected payout period. VALUE is the field input and is applied once."],
+    ["Replacement scope", "Each UPSERT or CLEAR row changes only the matching stored input: the same Workforce person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged. For example, a DELIVERY row, when DELIVERY is enabled for upload, does not replace attendance, additions, or other production fields."],
+    ["ACTION", "Use UPSERT to create or replace the matching input. Use CLEAR with blank VALUE and WORK_MINUTES to remove only that matching input."],
+    ["EFFECTIVE_FROM / EFFECTIVE_TO", "These are row dates, not values copied automatically from the page. Attendance and production use one work date, so enter the same date in both columns. Configured field values may use an interval inside the selected window. Additional payments and deductions use the exact selected payout period."],
+    ["WORK_MINUTES", "Optional attendance-only field containing the payable work minutes used for attendance and hourly calculations on that date. Enter a whole number from 0 to 1440. Leave blank to keep existing biometric minutes, if available. An absent day must be blank or 0."],
+    ["ATTENDANCE", "Leave FIELD_CODE blank. Use one date per row, enter that same date in both date columns, and set VALUE to P (present), HD (half day), or A (absent). See the Examples sheet."],
+    ["PRODUCTION_UNITS", "Use one date per row and a production FIELD_CODE from Field Reference. The uploaded value replaces only that field for that person, location and date; provider-reported values remain the fallback when no override exists."],
+    ["PAYMENT_FIELD_VALUE", "Use a FIELD_CODE from Field Reference. VALUE overrides that configured rate/input for the row interval; it is not a final payout amount."],
+    ["ADDITIONAL_PAYMENT", "Use a FIELD_CODE from Field Reference. The row dates must exactly match the selected payout period. VALUE is applied once for that period."],
+    ["DEDUCTION", "Use an active manual deduction FIELD_CODE from Field Reference. The row dates must exactly match the selected payout period, and VALUE may have at most two decimal places. Automatic fixed, percentage and system deductions cannot be uploaded or replaced."],
     ["Important", "Zero is a real value. A blank value is not zero. Formula cells and negative values are rejected."],
-    ["Matching", "People are matched only by the company Workforce DROPX_ID. LOCATION is optional. ADDITIONAL_PAYMENT defaults to the Workforce current location; an explicit location must be current or overlap a historical provider/direct setup. Setup-based inputs may require LOCATION when the same ID has simultaneous payment setups."]
+    ["Matching", "People are matched only by the company Workforce DROPX_ID. LOCATION is optional. ADDITIONAL_PAYMENT and DEDUCTION default to the Workforce current location; an explicit location must be current or overlap a historical provider/direct setup. Setup-based inputs may require LOCATION when the same ID has simultaneous payment setups."]
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 110 }];
+
+  const exampleFrom = options.effectiveFrom ?? "YYYY-MM-DD";
+  const exampleTo = options.effectiveTo ?? "YYYY-MM-DD";
+  const exampleLocation = options.locations?.[0]?.code ?? "";
+  const exampleRows: Array<Array<string | number>> = [
+    ["EXAMPLES ONLY - copy a row to Upload, then replace the sample ID, dates, location, field code and value. Do not upload this sheet."],
+    headers,
+    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "", exampleFrom, exampleFrom, "HD", 240, "Half day with 240 actual work minutes"]
+  ];
+  const productionField = fields.find((field) => field.inputType === "PRODUCTION_UNITS");
+  if (productionField) {
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PRODUCTION_UNITS", productionField.code, exampleFrom, exampleFrom, 10, "", `${productionField.label} units for one work date`]);
+  }
+  const paymentField = fields.find((field) => field.inputType === "PAYMENT_FIELD_VALUE");
+  if (paymentField) {
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PAYMENT_FIELD_VALUE", paymentField.code, exampleFrom, exampleTo, 100, "", `${paymentField.label} configured input override`]);
+  }
+  const additionalField = fields.find((field) => field.inputType === "ADDITIONAL_PAYMENT");
+  if (additionalField) {
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ADDITIONAL_PAYMENT", additionalField.code, exampleFrom, exampleTo, 500, "", `${additionalField.label} for the exact payout period`]);
+  }
+  const deductionField = fields.find((field) => field.inputType === "DEDUCTION");
+  if (deductionField) {
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "DEDUCTION", deductionField.code, exampleFrom, exampleTo, 250, "", `${deductionField.label} for the exact payout period`]);
+  }
+  const examples = XLSX.utils.aoa_to_sheet(exampleRows);
+  examples["!cols"] = columnWidths;
+  examples["!autofilter"] = { ref: `A2:J${exampleRows.length}` };
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, upload, "Upload");
@@ -652,6 +728,7 @@ export function buildWorkforcePayoutImportTemplate(
   locations["!cols"] = [{ wch: 24 }];
   locations["!autofilter"] = { ref: `A1:A${Math.max(1, locationRows.length)}` };
   XLSX.utils.book_append_sheet(workbook, locations, "Locations");
+  XLSX.utils.book_append_sheet(workbook, examples, "Examples");
   XLSX.utils.book_append_sheet(workbook, instructions, "Instructions");
   return new Uint8Array(XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }));
 }

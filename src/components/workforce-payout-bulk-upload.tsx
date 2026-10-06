@@ -57,17 +57,29 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [busy, setBusy] = useState<"preview" | "commit" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   useEffect(() => {
     setEffectiveFrom(fromDate);
     setEffectiveTo(toDate);
     setPreview(null);
     setError(null);
+    setConfirmationOpen(false);
   }, [fromDate, toDate]);
+
+  useEffect(() => {
+    if (!confirmationOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) setConfirmationOpen(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, confirmationOpen]);
 
   function invalidatePreview() {
     setPreview(null);
     setError(null);
+    setConfirmationOpen(false);
   }
 
   async function submit(mode: "preview" | "commit") {
@@ -79,10 +91,6 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
       setError("Select a valid effective-from and effective-to range.");
       return;
     }
-    if (mode === "commit" && !window.confirm(
-      `Apply all ${preview?.totalRows ?? 0} previewed payout input rows for ${effectiveFrom} to ${effectiveTo}? This is one atomic import.`
-    )) return;
-
     setBusy(mode);
     setError(null);
     try {
@@ -105,6 +113,9 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
 
   const issues = preview?.issues ?? [];
   const rows = preview?.rows ?? [];
+  const uploadedInputTypes = Object.entries(preview?.counts ?? {})
+    .filter(([, count]) => count > 0)
+    .map(([inputType]) => inputType.toLowerCase().replaceAll("_", " "));
   const templateUrl = `/api/payments/workforce-payouts/bulk-upload/template?effective_from=${encodeURIComponent(effectiveFrom)}&effective_to=${encodeURIComponent(effectiveTo)}`;
 
   return (
@@ -118,7 +129,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
           <div className="panel-head">
             <div>
               <h2>Bulk upload payout inputs</h2>
-              <p className="subtle">Preview attendance, configured field values, custom production units and additional payments before applying them.</p>
+              <p className="subtle">Preview attendance, configured field values, production units, additional payments and manual deductions before applying them.</p>
             </div>
             <a className="template-download-link" download href={templateUrl}>Download current Excel template</a>
           </div>
@@ -148,7 +159,10 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
             </div>
 
             <p className="compensation-match-rule">
-              <strong>Effective-date rules:</strong> attendance and production use one date per row; additional payments must use this exact payout period. Zero is preserved as a real value.
+              <strong>How the dates work:</strong> Effective from and Effective to set the inclusive allowed upload window; they do not replace the dates in each Excel row. For attendance and production, enter the same work date in both row columns. A configured field value may use an interval inside this window. Additional payments and deductions must use this exact payout period.
+            </p>
+            <p className="compensation-match-rule">
+              <strong>What WORK_MINUTES means:</strong> the payable work minutes used for attendance and hourly calculations on that date. It is optional, is accepted only for ATTENDANCE, and must be a whole number from 0 to 1440. Leave it blank to keep existing biometric minutes, if available. Zero is kept as a real value.
             </p>
 
             {error ? <div className="compensation-import-message error"><strong>Import blocked</strong><span>{error}</span></div> : null}
@@ -163,6 +177,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
                   <span><strong>{preview.counts?.PRODUCTION_UNITS ?? 0}</strong> production</span>
                   <span><strong>{preview.counts?.PAYMENT_FIELD_VALUE ?? 0}</strong> field values</span>
                   <span><strong>{preview.counts?.ADDITIONAL_PAYMENT ?? 0}</strong> additions</span>
+                  <span><strong>{preview.counts?.DEDUCTION ?? 0}</strong> deductions</span>
                 </div>
 
                 {issues.length ? (
@@ -198,7 +213,13 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
                 {preview.canCommit && !preview.importId ? (
                   <div className="compensation-commit-row">
                     <span>Every row passed server validation. Nothing has been changed yet.</span>
-                    <button className="button" disabled={Boolean(busy)} onClick={() => submit("commit")} type="button">
+                    <button
+                      aria-haspopup="dialog"
+                      className="button"
+                      disabled={Boolean(busy)}
+                      onClick={() => setConfirmationOpen(true)}
+                      type="button"
+                    >
                       {busy === "commit" ? "Applying…" : `Apply ${preview.totalRows} rows`}
                     </button>
                   </div>
@@ -207,6 +228,58 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
             ) : null}
           </div>
         </section>
+      ) : null}
+
+      {confirmationOpen ? (
+        <div
+          className="modal-backdrop confirmation-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) setConfirmationOpen(false);
+          }}
+          role="presentation"
+        >
+          <section
+            aria-labelledby="payout-upload-confirmation-title"
+            aria-modal="true"
+            className="modal-panel confirmation-dialog"
+            role="alertdialog"
+          >
+            <div className="panel-head">
+              <div>
+                <h2 id="payout-upload-confirmation-title">Replace matching payout inputs?</h2>
+                <p className="subtle">Review the replacement scope before applying this workbook.</p>
+              </div>
+            </div>
+            <div className="confirmation-body">
+              <p>
+                Apply <strong>{preview?.totalRows ?? 0} uploaded rows</strong> for {effectiveFrom} to {effectiveTo}
+                {uploadedInputTypes.length ? ` (${uploadedInputTypes.join(", ")})` : ""}?
+              </p>
+              <p>
+                Each row replaces only its matching stored payout input: the same Workforce person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged.
+              </p>
+              <p>
+                For example, an uploaded DELIVERY row changes only that matching production field and date. It does not replace C-return, attendance, deductions, additional payments, or any other production field.
+              </p>
+            </div>
+            <div className="form-actions modal-actions confirmation-actions">
+              <button autoFocus className="button secondary" disabled={Boolean(busy)} onClick={() => setConfirmationOpen(false)} type="button">
+                Cancel
+              </button>
+              <button
+                className="button"
+                disabled={Boolean(busy)}
+                onClick={() => {
+                  setConfirmationOpen(false);
+                  void submit("commit");
+                }}
+                type="button"
+              >
+                {busy === "commit" ? "Applying…" : "Confirm matching replacements"}
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </div>
   );

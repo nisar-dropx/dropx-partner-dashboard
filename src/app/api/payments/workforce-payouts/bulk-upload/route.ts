@@ -11,6 +11,7 @@ import {
   resolveWorkforcePayoutImportRows,
   type ResolvedWorkforcePayoutImportRow,
   type WorkforcePayoutImportAdditionalField,
+  type WorkforcePayoutImportDeductionHead,
   type WorkforcePayoutImportIssue,
   type WorkforcePayoutImportPaymentField,
   type WorkforcePayoutImportSetup,
@@ -38,7 +39,7 @@ function sameOrigin(request: Request) {
 
 async function loadReferences(companyId: string, batchFrom: string, batchTo: string) {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
-  const [workersResult, paymentFieldsResult, additionalFieldsResult, mappingsResult, allocationsResult, stationsResult] = await Promise.all([
+  const [workersResult, paymentFieldsResult, additionalFieldsResult, deductionHeadsResult, mappingsResult, allocationsResult, stationsResult] = await Promise.all([
     readAllRows(supabaseAdmin
       .from("workforce")
       .select("id,dropx_id,full_name,location_id,date_of_join,last_working_date,is_active,deleted_at,migration_state,source_profile_type,source_profile_id")
@@ -53,6 +54,11 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
     readAllRows(supabaseAdmin
       .from("workforce_additional_payment_fields")
       .select("id,code,name,calculation_type,default_rate_value,is_active")
+      .eq("company_id", companyId)
+      .order("code")),
+    readAllRows(supabaseAdmin
+      .from("workforce_deduction_heads")
+      .select("id,code,name,calculation_type,is_system,is_active")
       .eq("company_id", companyId)
       .order("code")),
     readAllRows(supabaseAdmin
@@ -82,6 +88,7 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
   const initialError = workersResult.error?.message
     || paymentFieldsResult.error?.message
     || additionalFieldsResult.error?.message
+    || deductionHeadsResult.error?.message
     || mappingsResult.error?.message
     || allocationsResult.error?.message
     || stationsResult.error?.message;
@@ -189,11 +196,19 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
     defaultRateValue: field.default_rate_value === null ? null : Number(field.default_rate_value),
     isActive: Boolean(field.is_active)
   }));
+  const deductionHeads: WorkforcePayoutImportDeductionHead[] = (deductionHeadsResult.data ?? []).map((head: any) => ({
+    id: String(head.id),
+    code: normalizeWorkforcePayoutCode(head.code),
+    name: String(head.name ?? head.code ?? ""),
+    calculationType: String(head.calculation_type) as WorkforcePayoutImportDeductionHead["calculationType"],
+    isSystem: Boolean(head.is_system),
+    isActive: Boolean(head.is_active)
+  }));
   const locations = (stationsResult.data ?? []).map((station: any) => ({
     id: String(station.id),
     code: normalizeWorkforcePayoutCode(station.station_code)
   })).filter((station) => station.id && station.code);
-  return { workers, paymentFields, additionalFields, setups, locations };
+  return { workers, paymentFields, additionalFields, deductionHeads, setups, locations };
 }
 
 async function appendDatabaseIssues(
@@ -205,7 +220,7 @@ async function appendDatabaseIssues(
   issues: WorkforcePayoutImportIssue[]
 ) {
   if (!supabaseAdmin) return;
-  const [priorResult, attendanceOverridesResult, paymentOverridesResult, additionalValuesResult] = await Promise.all([
+  const [priorResult, attendanceOverridesResult, paymentOverridesResult, additionalValuesResult, deductionValuesResult] = await Promise.all([
     supabaseAdmin
       .from("workforce_payout_import_batches")
       .select("id")
@@ -235,10 +250,18 @@ async function appendDatabaseIssues(
       .eq("company_id", companyId)
       .lte("effective_from", batchTo)
       .gte("effective_to", batchFrom)
+      .order("effective_from")),
+    readAllRows(supabaseAdmin
+      .from("workforce_payout_deduction_values")
+      .select("workforce_id,station_id,deduction_head_id,effective_from,effective_to")
+      .eq("company_id", companyId)
+      .lte("effective_from", batchTo)
+      .gte("effective_to", batchFrom)
       .order("effective_from"))
   ]);
   const error = priorResult.error?.message || attendanceOverridesResult.error?.message
-    || paymentOverridesResult.error?.message || additionalValuesResult.error?.message;
+    || paymentOverridesResult.error?.message || additionalValuesResult.error?.message
+    || deductionValuesResult.error?.message;
   if (error) throw new Error(error);
   if (priorResult.data) {
     issues.push({ rowNumber: null, dropxId: null, message: "This exact workbook was already imported for the selected payout period." });
@@ -255,6 +278,13 @@ async function appendDatabaseIssues(
     workforceId: String(item.workforce_id),
     stationId: item.station_id ? String(item.station_id) : null,
     fieldId: String(item.additional_payment_field_id),
+    effectiveFrom: String(item.effective_from),
+    effectiveTo: String(item.effective_to)
+  }));
+  const existingDeductions = (deductionValuesResult.data ?? []).map((item: any) => ({
+    workforceId: String(item.workforce_id),
+    stationId: item.station_id ? String(item.station_id) : null,
+    fieldId: String(item.deduction_head_id),
     effectiveFrom: String(item.effective_from),
     effectiveTo: String(item.effective_to)
   }));
@@ -276,6 +306,7 @@ async function appendDatabaseIssues(
     }
     const existing = row.inputType === "PAYMENT_FIELD_VALUE" ? existingPayment
       : row.inputType === "ADDITIONAL_PAYMENT" ? existingAdditional
+        : row.inputType === "DEDUCTION" ? existingDeductions
         : [];
     if (existing.some((item) => payoutImportRowsOverlap(row, item)
       && (item.effectiveFrom !== row.effectiveFrom || item.effectiveTo !== row.effectiveTo))) {
@@ -297,6 +328,18 @@ async function appendDatabaseIssues(
         message: "This additional payment period already belongs to another location. Clear it from that location first."
       });
     }
+    if (row.inputType === "DEDUCTION" && existing.some((item) =>
+      item.workforceId === row.workforceId
+      && item.fieldId === row.deductionHeadId
+      && item.effectiveFrom === row.effectiveFrom
+      && item.effectiveTo === row.effectiveTo
+      && item.stationId !== row.locationId)) {
+      issues.push({
+        rowNumber: row.rowNumber,
+        dropxId: row.dropxId,
+        message: "This deduction period already belongs to another location. Clear it from that location first."
+      });
+    }
   }
 }
 
@@ -311,6 +354,7 @@ function rpcRows(rows: ResolvedWorkforcePayoutImportRow[]) {
     station_id: row.locationId,
     payment_field_id: row.paymentFieldId,
     additional_payment_field_id: row.additionalPaymentFieldId,
+    deduction_head_id: row.deductionHeadId,
     effective_from: row.effectiveFrom,
     effective_to: row.effectiveTo,
     numeric_value: row.numericValue,
@@ -366,7 +410,7 @@ export async function POST(request: Request) {
       matchedRows: resolved.rows.length,
       canCommit: issues.length === 0,
       issues,
-      counts: Object.fromEntries(["ATTENDANCE", "PRODUCTION_UNITS", "PAYMENT_FIELD_VALUE", "ADDITIONAL_PAYMENT"]
+      counts: Object.fromEntries(["ATTENDANCE", "PRODUCTION_UNITS", "PAYMENT_FIELD_VALUE", "ADDITIONAL_PAYMENT", "DEDUCTION"]
         .map((type) => [type, parsed.rows.filter((row) => row.inputType === type).length])),
       rows: resolved.rows.slice(0, 50).map((row) => ({
         rowNumber: row.rowNumber,
