@@ -18,8 +18,10 @@ const payoutInputs={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payout-input-calculation.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(payoutInputs.exports,payoutInputs);
 const details={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details);
+const fallback={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('./production-fallback.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(fallback.exports,fallback);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='./production-fallback')return fallback.exports;if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -543,4 +545,17 @@ test('missing configured kilometre input is visible while known pay remains coun
  f.components.push({payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Kilometres',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
  const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);assert.ok(r.gaps.some(g=>g.kind==='Kilometres input missing'));
 
+});
+
+test('Finance adds historical kilometres at current rate and retains actual zero',()=>{
+ const f=facts();const date=f.shipments[0].work_date;const prev=new Date(date+'T00:00:00Z');prev.setUTCMonth(prev.getUTCMonth()-1);const from=prev.toISOString().slice(0,7)+'-01';
+ f.components.push({payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Fuel per kilometre',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
+ f.mappings[0].payment_values.KM_RUN=3;
+ f.production_fallback_policies=[{field_code:'KM_RUN',mode:'associate_then_station',lookback_months:3,minimum_history_days:1,effective_from:from}];
+ f.production_history=[{id:'h',workforce_id:'w1',station_id:'s1',payment_field_id:'km',field_code_snapshot:'KM_RUN',units:1200,period_from:from,period_to:from.slice(0,7)+'-28',work_days:20}];
+ // Fixture identities are intentionally resolved from source data.
+ f.production_history[0].workforce_id=f.workforce[0].id;f.production_history[0].station_id=f.stations[0].id;
+ const r=rebuildCps(base(),f);assert.equal(r.associates[0].fuel_pay,180);assert.equal(r.da_details[0].fuel,180);
+ f.payout_inputs={productionInputs:[{workforce_id:f.workforce[0].id,station_id:f.stations[0].id,payment_field_id:'km',field_code_snapshot:'KM_RUN',work_date:date,units:0}]};
+ assert.equal(rebuildCps(base(),f).associates[0].fuel_pay,0);
 });

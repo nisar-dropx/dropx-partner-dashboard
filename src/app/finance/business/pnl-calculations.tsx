@@ -529,7 +529,7 @@ export function ExpenseCalculation({
                         </td>
                         <td>{money(d.salary)}</td>
                         <td>{money(d.variable)}</td>
-                        <td>{money(d.fuel)}</td>
+                        <td>{money(d.fuel)}{d.input_estimates?.map((e,j)=><small key={j} style={{display:'block'}}>Estimated · {e.label}: {qty(e.units)} × {money(e.rate)} · {e.basis}. History {e.history_from}–{e.history_to}: {qty(e.history_units)} ÷ {qty(e.history_work_days)} worked days.</small>)}</td>
                         <td>{money(d.van)}</td>
                         <td>{money(d.salary + d.variable + d.fuel)}</td>
                       </tr>

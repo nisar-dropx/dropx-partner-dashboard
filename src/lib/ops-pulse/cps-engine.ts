@@ -1,3 +1,4 @@
+import { historicalProductionEstimate, type ProductionFallbackPolicy, type ProductionHistory, type ProductionEstimate } from "./production-fallback";
 import { summarizeDaDetails, type CpsDaDay, type CpsRate, type CpsStaffDay, type CpsCalculationEvidence } from "./cps-details";
 import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput, CpsStaffCost, CpsPeoplePolicy } from './cps';
 import {
@@ -34,6 +35,8 @@ import { buildWorkforcePayoutInputMaps, overlayWorkforcePayoutAttendance,
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
 export type CpsFacts = {
+  production_fallback_policies?: ProductionFallbackPolicy[];
+  production_history?: ProductionHistory[];
   payout_inputs?: Parameters<typeof buildWorkforcePayoutInputMaps>[0];
   shipments: RecordRow[]; volumes: RecordRow[]; mappings: RecordRow[];
   workforce: RecordRow[]; components: RecordRow[]; providers: RecordRow[];
@@ -377,6 +380,8 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       associates.push(row); groups.set(k,{worker:m.worker,date,rows:[row],maps:[m]});
     }
   }
+  const estimatedInputs=new Map<string,ProductionEstimate>();
+  const estimateKey=(workerId:string,stationId:string,code:string,date:string)=>`${workerId}|${stationId}|${code}|${date}`;
   const thresholdInputs:WorkforceProductionThresholdInput[]=[];
   const thresholdInputTargets=new Map<string,{rowKey:string;groupKey:string}>();
   // A day/custom CPS view still needs production from the start of the calendar
@@ -430,7 +435,14 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       const stationId=thresholdStationById.size ? [...thresholdStationById.values()].find(s=>s.station_code===row.station_code)?.id : card.station_id;
       const uploaded=findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId,paymentFieldId:c.payment_field_id,fieldCode:code,date:g.date});
       const firstAtStation=orderedRows.findIndex(r=>r.station_code===row.station_code)===rowIndex;
-      const count=uploaded ? (firstAtStation?Number(uploaded.units):0) : production(row,source) ?? (c.is_custom_production?0:null);
+      const hasActivity=orderedRows.some(r=>r.station_code===row.station_code && [r.total_activity,r.total_delivery,r.c_return,r.mfn,r.mfn_return].some(v=>num(v)>0));
+      const estimate=!uploaded && c.is_custom_production && num(values[code])>0 ? historicalProductionEstimate({
+        policies:facts.production_fallback_policies??[],history:facts.production_history??[],
+        workforceId:g.worker.id,stationId,fieldCode:code,date:g.date,
+        worked:hasActivity || directPayAttendanceUnit(attendanceByWorkerDate.get(`${g.worker.id}|${g.date}`) as DirectPayAttendance|undefined)>0
+      }):undefined;
+      if(estimate && firstAtStation) estimatedInputs.set(estimateKey(g.worker.id,stationId,code,g.date),estimate);
+      const count=uploaded ? (firstAtStation?Number(uploaded.units):0) : estimate ? (firstAtStation?estimate.units:0) : production(row,source) ?? (c.is_custom_production?0:null);
       if(count==null) continue;
       const inputId=`${card.id}|${g.date}|${String(row.id)}|${code}|${rowIndex}|${componentIndex}`;
       thresholdInputs.push({
@@ -534,7 +546,8 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
       const rowCard=paymentCard(card!,cs,g.worker.id,g.date,rowStationId);
       const missingInputs=cs.filter(c=>c.is_custom_production
         && num(rowCard.payment_values[key(c.component_code)])>0
-        && !findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId:rowStationId,paymentFieldId:c.payment_field_id,fieldCode:key(c.component_code),date:g.date}));
+        && !findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId:rowStationId,paymentFieldId:c.payment_field_id,fieldCode:key(c.component_code),date:g.date})
+        && !estimatedInputs.has(estimateKey(g.worker.id,rowStationId,key(c.component_code),g.date)));
       if(num(row.total_activity)>0 || directPayAttendanceUnit(attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined)>0)
         for(const c of missingInputs)gap(`${c.label||c.component_code} input missing`,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Operations uploads');
       const variable=calculateRateCard(
@@ -564,6 +577,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts, capture?: (eviden
         worked,work_basis:attendanceWorked?'attendance':worked?'shipment activity':'no work evidence',
         deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:num(row.mfn),seller_returns:num(row.mfn_return),
         salary:row.mg_pay,variable:row.variable_pay,fuel:row.fuel_pay,van:row.van_pay,
+        input_estimates:first?cs.flatMap(c=>{const e=estimatedInputs.get(estimateKey(g.worker.id,rowStationId,key(c.component_code),g.date));return e?[{...e,label:c.label||c.component_code,rate:num(rowCard.payment_values[key(c.component_code)])}]:[]}):[],
         production_details:variable.production_details,pending_fixed_pay:pendingFixed || Boolean(range&&!range.complete) || Boolean(issue) || missingInputs.length>0,
         source:'Workforce rate card',card_from:card!.effective_from,rates:detailRates(rowCard,cs,String(row.client??'Amazon'))});
       add(row.station_code,g.date,'DA','Salary / minimum guarantee',row.mg_pay,'Workforce rate card');

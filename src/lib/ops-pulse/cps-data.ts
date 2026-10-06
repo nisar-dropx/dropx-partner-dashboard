@@ -79,6 +79,7 @@ const snapshot = cache(
       stationFlags,
       peopleAssignments,
       advertising,
+      productionFallbacks,
     ] = await Promise.all([
       supabaseAdmin.rpc("ops_cps_base_v2", {
         p_company: company,
@@ -157,6 +158,7 @@ const snapshot = cache(
         p_through: to,
       }),
       loadAdvertising(company, from, to, codes),
+      supabaseAdmin.from("ops_cps_production_fallback_policies").select("field_code,mode,lookback_months,minimum_history_days,effective_from").eq("company_id",company).lte("effective_from",to).order("effective_from"),
     ]);
     if (result.error) {
       console.error("CPS snapshot failed", result.error.code);
@@ -206,7 +208,18 @@ const snapshot = cache(
       throw Error(
         "People station assignments could not be loaded. Please retry.",
       );
+    if(productionFallbacks.error) throw Error("P&L fuel fallback rules could not be loaded.");
     const sourceFacts = facts.data as CpsFacts;
+    sourceFacts.production_fallback_policies = productionFallbacks.data ?? [];
+    if(sourceFacts.production_fallback_policies.some(p=>p.mode!=="disabled")) {
+      const historyFrom=new Date(`${attendanceFrom}T00:00:00Z`);
+      historyFrom.setUTCMonth(historyFrom.getUTCMonth()-Math.max(...sourceFacts.production_fallback_policies.map(p=>p.lookback_months)));
+      // Load through month-end to recognize actual monthly uploads before adding estimates.
+      const historyThrough=new Date(Date.UTC(Number(to.slice(0,4)),Number(to.slice(5,7)),0)).toISOString().slice(0,10);
+      const history=await supabaseAdmin.rpc("ops_cps_production_history",{p_company:company,p_from:historyFrom.toISOString().slice(0,10),p_through:historyThrough});
+      if(history.error || !Array.isArray(history.data)) throw Error("P&L historical inputs could not be loaded.");
+      sourceFacts.production_history=history.data;
+    }
     const productionThresholdFacts = (monthSourceFacts.data ?? sourceFacts) as CpsFacts;
     const productionThresholdMappings = productionThresholdFacts.mappings ?? [];
     const providerMappingIds = [...new Set([...(sourceFacts.mappings ?? []), ...productionThresholdMappings]

@@ -12,6 +12,7 @@ export type CpsDaDay = {
   deliveries: number; customer_returns: number; seller_pickups: number; seller_returns: number;
   salary: number; variable: number; fuel: number; van: number;
   card_from: string; rates: CpsRate[]; source: string;
+  input_estimates?: (import("./production-fallback").ProductionEstimate & {label:string;rate:number})[];
   production_details?: CpsProductionDetail[];
   pending_fixed_pay?: boolean;
 };
@@ -21,7 +22,7 @@ export type CpsDaPeriod = {
   salary: number; variable: number; fuel: number; van: number;
   production_details?: CpsProductionDetail[];
 };
-export type CpsDaDetail = Omit<CpsDaDay, "date" | "worked" | "work_basis" | "card_from" | "rates" | "source" | "pending_fixed_pay" | "production_details"> & {
+export type CpsDaDetail = Omit<CpsDaDay, "date" | "worked" | "work_basis" | "card_from" | "rates" | "source" | "pending_fixed_pay" | "production_details" | "input_estimates"> & {
   work_dates: string[]; cost_dates: string[]; work_bases: string[]; periods: CpsDaPeriod[];
   pending_fixed_dates?: string[];
 };
