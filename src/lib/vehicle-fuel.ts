@@ -24,6 +24,13 @@ export function isPureElectricFuel(value: unknown) {
   return pureElectricFuelTypes.has(normalizedFuelType(value));
 }
 
+export function vehicleFuelTypeForClient(value: unknown) {
+  const fuelType = text(value).replace(/\s+/g, " ");
+  // Older DropX One clients only recognized values containing "electric".
+  // Keep the provider value in the audit, but return a compatible label to clients.
+  return isPureElectricFuel(fuelType) ? "Electric" : fuelType;
+}
+
 export function normalizeVehicleRegistration(value: unknown) {
   return text(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
