@@ -107,7 +107,7 @@ export async function loadAssetRegister(context: FinanceContext) {
   }));
   const ids = assets.map((asset) => String(asset.id));
   const [attachmentResult, rentalResult, eventResult, auditItemResult] = ids.length ? await Promise.all([
-    context.db.from("asset_attachments").select("id,asset_id,attachment_type,file_name,content_type,storage_bucket,storage_path,uploaded_at").eq("company_id", context.companyId).in("asset_id", ids).order("uploaded_at", { ascending: true }),
+    context.db.from("asset_attachments").select("id,asset_id,attachment_type,file_name,content_type,storage_bucket,storage_path,created_at").eq("company_id", context.companyId).in("asset_id", ids).order("created_at", { ascending: true }),
     context.db.from("asset_rental_terms").select("id,asset_id,vendor_name,agreement_number,invoice_number,rental_rate,billing_frequency,security_deposit,starts_on,ends_on,notice_period_days,off_hire_date,status").eq("company_id", context.companyId).in("asset_id", ids).in("status", ["draft", "active", "notice_given"]).order("starts_on", { ascending: false }),
     context.db.from("asset_events").select("asset_id,event_type,notes,created_at").eq("company_id", context.companyId).in("asset_id", ids).order("created_at", { ascending: false }).limit(2000),
     context.db.from("asset_audit_items").select("asset_id,observed_condition,notes,observed_at,asset_audit_sessions(audit_number,title)").eq("company_id", context.companyId).in("asset_id", ids).order("observed_at", { ascending: false }).limit(2000),
@@ -128,7 +128,7 @@ export async function loadAssetRegister(context: FinanceContext) {
     attachmentsByAsset.set(assetId, [...(attachmentsByAsset.get(assetId) ?? []), {
       id: String(attachment.id), attachment_type: String(attachment.attachment_type), file_name: String(attachment.file_name),
       content_type: attachment.content_type ? String(attachment.content_type) : null, signed_url: attachmentUrlById.get(String(attachment.id)) ?? null,
-      uploaded_at: String(attachment.uploaded_at ?? ""),
+      uploaded_at: String(attachment.created_at ?? ""),
     }]);
   });
   const termsByAsset = new Map<string, AssetRentalTerm>();
