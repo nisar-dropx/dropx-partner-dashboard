@@ -24,8 +24,6 @@ const summaryRow = (s: ReturnType<typeof summarizeCps>) => ({
   "Amazon deliveries": s.amazon,
   "SWA deliveries": s.swa,
   "C-return": s.returns,
-  MFN: s.mfn,
-  "MFN return": s.mfnReturn,
   "Associate-days": s.associateDays,
   "DA cost": s.da,
   "UTR cost": s.utr,
@@ -171,8 +169,6 @@ export async function GET(request: Request) {
                   "Pay scheme": r.pay_type,
                   Deliveries: r.total_delivery,
                   "C-return": r.c_return,
-                  MFN: r.mfn,
-                  "MFN return": r.mfn_return,
                   "Variable pay":
                     r.mapping_status === "Mapped" ? r.variable_pay : null,
                   "MG or salary":

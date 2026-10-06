@@ -4,6 +4,7 @@ import {
   aggregateShipmentDeliveriesByWorkforceDay,
   normalizeWorkforceAttendanceCaptureSetting,
   shipmentAttendanceRecord,
+  shipmentAttendanceReview,
   shipmentAttendanceUnit,
   workforceAttendanceCaptureSettingForDate
 } from "./workforce-attendance-capture.ts";
@@ -86,3 +87,11 @@ test("shipment threshold is inclusive and always resolves to one whole attendanc
     work_minutes: 0
   });
 });
+
+ test("low-delivery review does not reduce shipment attendance and is configurable", () => {
+ const setting={capture_method:"shipment_data",minimum_daily_deliveries:1,review_below_deliveries:15,effective_from:"2026-09-01"};
+ assert.equal(shipmentAttendanceUnit(1,setting),1);assert.equal(shipmentAttendanceUnit(14,setting),1);
+ assert.deepEqual(shipmentAttendanceReview(14,setting),{deliveries:14,threshold:15});
+ assert.equal(shipmentAttendanceReview(15,setting),null);assert.equal(shipmentAttendanceReview(19,{...setting,review_below_deliveries:20}).threshold,20);
+ assert.equal(shipmentAttendanceReview(1,{...setting,review_below_deliveries:null}),null);
+ });

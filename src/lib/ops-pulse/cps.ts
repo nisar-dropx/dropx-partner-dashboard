@@ -129,7 +129,7 @@ export function cpsMonthSlices(from: string, through: string) {
   }
   return slices;
 }
-export type CpsPlace = { code: string; name: string; parent?: string; isXpt?: boolean };
+export type CpsPlace = { code: string; name: string; parent?: string; isXpt?: boolean; region?:string; cluster?:string };
 export function cpsStationGroups(places: CpsPlace[]) {
   const groups = new Map<string, CpsPlace[]>();
   for (const place of places) {
@@ -166,6 +166,7 @@ export function cpsForStations(data: CpsSnapshot, stations: string[]): CpsSnapsh
     people: only(data.people),
     staff: only(data.staff),
     vehicles: only(data.vehicles),
+    facility_rents: only(data.facility_rents),
     expense_periods: only(data.expense_periods),
     advertising: only(data.advertising),
   };
@@ -206,10 +207,12 @@ export function mergeCpsMonths(parts: CpsSnapshot[]): CpsSnapshot {
       work_bases:[...new Set([...a.work_bases,...b.work_bases])], periods:[...a.periods,...b.periods],
       deliveries:a.deliveries+b.deliveries,customer_returns:a.customer_returns+b.customer_returns,
       seller_pickups:a.seller_pickups+b.seller_pickups,seller_returns:a.seller_returns+b.seller_returns,
-      salary:a.salary+b.salary,variable:a.variable+b.variable,fuel:a.fuel+b.fuel,van:a.van+b.van
+      salary:a.salary+b.salary,variable:a.variable+b.variable,fuel:a.fuel+b.fuel,van:a.van+b.van,
+      pending_fixed_dates:[...new Set([...(a.pending_fixed_dates??[]),...(b.pending_fixed_dates??[])])]
     })),
     staff: parts.flatMap((p) => p.staff ?? []),
     vehicles: parts.flatMap((p) => p.vehicles ?? []),
+    facility_rents: parts.flatMap((p) => p.facility_rents ?? []),
     allocation_notices: [
       ...new Set(parts.flatMap((p) => p.allocation_notices ?? [])),
     ],
@@ -302,6 +305,19 @@ export type CpsSnapshot = {
   allocation_notices?: string[];
   expense_periods?: CpsExpensePeriod[];
   vehicles?: CpsVehicleCost[];
+  facility_rents?: CpsFacilityRent[];
+};
+export type CpsFacilityRent = {
+  id: string;
+  site_code: string;
+  station_code: string;
+  monthly_rent: number;
+  monthly_maintenance: number;
+  from_date: string;
+  through_date: string;
+  days: number;
+  calendar_days: number;
+  amount: number;
 };
 // Public CPS data contains grouped staff cost only; never employee identities or CTC.
 export type CpsStaffCost = {

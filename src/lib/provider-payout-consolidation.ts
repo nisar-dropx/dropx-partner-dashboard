@@ -53,6 +53,7 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
         current.day = {
           date: day.date,
           workDayUnits: Math.max(current.day.workDayUnits, day.workDayUnits),
+          deliveryReview: current.day.deliveryReview ?? day.deliveryReview,
           attendanceSource: current.day.attendanceSource === day.attendanceSource ? day.attendanceSource : "Mixed",
           attendanceRange: current.day.attendanceRange ?? day.attendanceRange,
           methodAmounts: summarizePaymentMethodAmounts([

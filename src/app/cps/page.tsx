@@ -18,6 +18,7 @@ import {
   loadCpsSnapshot,
 } from "@/lib/ops-pulse/cps-data";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
+import { adHocClusterLabel } from "@/lib/ops-pulse/adhoc-activity";
 import "./cps.css";
 
 export const dynamic = "force-dynamic";
@@ -172,6 +173,8 @@ export default async function CpsPage({
                       name: l.station_name || l.city || l.station_code,
                       parent: l.parent_station_code,
                       isXpt: l.is_xpt,
+                      region: l.region || "Unassigned",
+                      cluster: adHocClusterLabel(l),
                     }))}
                     params={params}
                     canExport={canExport}

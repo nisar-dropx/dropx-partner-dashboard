@@ -55,6 +55,9 @@ export async function saveWorkforceAttendanceCaptureSetting(formData: FormData) 
       }
     }
 
+    const reviewText = clean(formData.get("review_below_deliveries"));
+    const reviewBelow = reviewText ? Number(reviewText) : null;
+    if (reviewBelow !== null && (!Number.isInteger(reviewBelow) || reviewBelow < 1 || reviewBelow > 100000)) throw new Error("Review threshold must be from 1 to 100000, or blank.");
     const effectiveMonth = clean(formData.get("effective_from"));
     if (!validMonth(effectiveMonth)) {
       throw new Error("Choose a valid effective month.");
@@ -64,10 +67,11 @@ export async function saveWorkforceAttendanceCaptureSetting(formData: FormData) 
       throw new Error("Change reason must be from 3 to 250 characters.");
     }
 
-    const saved = await supabaseAdmin.rpc("save_workforce_attendance_capture_setting", {
+    const saved = await supabaseAdmin.rpc("save_workforce_attendance_capture_setting_v2", {
       p_company_id: companyId,
       p_capture_method: captureMethod,
       p_minimum_daily_deliveries: minimumDailyDeliveries,
+      p_review_below_deliveries: reviewBelow,
       p_effective_from: `${effectiveMonth}-01`,
       p_change_reason: changeReason,
       p_actor_user_id: authorization.userId

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { CpsCostWorkspace } from "./cps-cost-workspace";
+import { CpsAttention } from "./cps-attention";
 import { SearchableSelect } from "./searchable-select";
 import {
   cpsForStations,
@@ -44,6 +45,8 @@ export function CpsExplorer({
   const [showIssues, setShowIssues] = useState(false);
   const [search, setSearch] = useState("");
   const [comparison, setComparison] = useState(() => groups.map(p => p.code));
+  const [view,setView] = useState(params.view === "unmapped" ? "attention" : "costs");
+  const [attentionStation,setAttentionStation] = useState("");
   const names = Object.fromEntries(groups.map(p => [p.code, p.name]));
   const rows = groupCps(snapshot.daily, r => groupByMember.get(r.station_code) || r.station_code).sort((a, b) => a.key.localeCompare(b.key));
   const matched = groups.filter(p => p.search.toLowerCase().includes(search.toLowerCase()));
@@ -56,12 +59,11 @@ export function CpsExplorer({
     window.history.replaceState(null, "", `/cps?${q}`);
   }
   function open(code: string, cost?: Head) {
+    setView("costs");
     selectStation(code);
     setShowIssues(false);
     if (cost) setHead(cost);
-    document
-      .getElementById("cps-station-detail")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    requestAnimationFrame(()=>document.getElementById("cps-station-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
   const report = new URLSearchParams({
     ...params,
@@ -70,6 +72,8 @@ export function CpsExplorer({
   });
   return (
     <>
+      <nav className="cps-local-tabs" aria-label="CPS workspace"><button className="button" aria-pressed={view==="costs"} onClick={()=>setView("costs")}>Station CPS</button><button className="button" aria-pressed={view==="attention"} onClick={()=>{setAttentionStation("");setView("attention");}}>Needs attention ({cpsReviewItems(snapshot).count})</button></nav>
+      {view==="attention" ? <CpsAttention key={attentionStation} snapshot={snapshot} places={places} initialStation={attentionStation} canResolve={canResolve} onOpen={(code,cost)=>open(groupByMember.get(code)||code,cost)}/> : <>
       <section className="panel cps-comparison" aria-label="Station comparison">
         <div className="panel-head">
           <div>
@@ -159,7 +163,6 @@ export function CpsExplorer({
                   "Van CPS",
                   "Other CPS",
                   "Total CPS",
-                  "Total cost",
                   "Attention",
                 ].map((label) => (
                   <th key={label}>{label}</th>
@@ -212,13 +215,12 @@ export function CpsExplorer({
                         <small className="cps-missing">Provisional</small>
                       )}
                     </td>
-                    <td>{money(r.total)}</td>
                     <td>
                       <button
                         className="cps-cell-link"
                         onClick={() => {
-                          open(r.key);
-                          setShowIssues(true);
+                          setAttentionStation(r.key);
+                          setView("attention");
                         }}
                       >
                         {issues
@@ -278,6 +280,7 @@ export function CpsExplorer({
       ) : (
         <p className="panel-body">Select a station to see its details.</p>
       )}
+      </>}
     </>
   );
 }

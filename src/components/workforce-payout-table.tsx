@@ -41,6 +41,7 @@ export type WorkforcePayoutRow = {
     date: string;
     workDayUnits: number;
     attendanceSource: string;
+    deliveryReview?: { deliveries: number; threshold: number };
     methodAmounts: Array<{ id: string; label: string; amount: number }>;
     baseAmount: number;
     lines: WorkforcePayoutLine[];
@@ -391,6 +392,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
           {visible.length ? visible.flatMap((row) => {
             const expanded = expandedId === row.id;
             const detailId = `payout-breakup-${row.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+            const reviewDays = row.dailyBreakdown.filter(day => day.deliveryReview);
             const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0 || item.reportedCount !== undefined);
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
             const attendanceRanges = [...new Map(row.dailyBreakdown.flatMap((day) => day.attendanceRange ? [[
@@ -410,7 +412,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
                 <td className="payout-money">{row.paymentDetailsAvailable ? <strong>{money(row.grossPayment)}</strong> : null}</td>
                 <td className="negative payout-money">{row.paymentDetailsAvailable ? row.deductions ? `- ${money(row.deductions)}` : "—" : null}</td>
                 <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <strong>{money(row.netAmount)}</strong> : null}</td>
-                <td><div className="payout-status-stack"><span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span>{row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
+                <td><div className="payout-status-stack">{reviewDays.length > 0 && <span className="status-pill warn">{reviewDays.length} low-delivery days</span>}<span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span>{row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
                 <td><div className="payout-detail-actions">{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}<PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId || row.providerMemberId || row.name} · ${row.name}`} /></div></td>
               </tr>,
               expanded ? <tr className="payout-total-detail-row" key={`${row.id}-totals`}>
@@ -432,6 +434,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
                         <strong>{units(range.quantity)} work {range.basis} · {dateLabel(range.effectiveFrom)}–{dateLabel(range.effectiveTo)}</strong>
                       </span>)}
                     </div> : null}
+                    {reviewDays.length > 0 && <details className="payout-breakup-summary"><summary>Review low-delivery days · pay is included</summary><ul>{reviewDays.map(day => <li key={day.date}>{dateLabel(day.date)}: {day.deliveryReview!.deliveries} deliveries · below {day.deliveryReview!.threshold}</li>)}</ul></details>}
                     <div className="payout-total-groups">
                       <section className="payout-total-group">
                         <h3>Payment totals</h3>

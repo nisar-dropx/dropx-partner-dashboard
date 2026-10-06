@@ -2,6 +2,8 @@
 import { AdvertisingBreakdown } from "./advertising-breakdown";
 import { CpsAssociateTable, CpsDaCohorts } from "./cps-associate-breakdown";
 import { CpsFuelInsights } from "./cps-fuel-insights";
+import { CpsRentDetails } from "./cps-rent-details";
+import { CpsVanBreakdown } from "./cps-van-breakdown";
 import { CpsBillPeriods } from "./cps-bill-periods";
 import { Fragment, useState } from "react";
 import {
@@ -127,7 +129,7 @@ export function CpsCostWorkspace({
   const staff = (snapshot.staff ?? []).filter(
     (p) => groupHead(p.head) === head,
   );
-  const vehicles = snapshot.vehicles ?? [];
+  const vanPeople = (snapshot.people ?? []).filter(p => p.van !== 0);
   return (
     <>
       <section className="cps-summary-strip" aria-label="CPS summary">
@@ -135,11 +137,6 @@ export function CpsCostWorkspace({
           <span>Delivered shipments</span>
           <strong>{count(total.deliveries)}</strong>
           <small>For this station and selected dates</small>
-        </div>
-        <div>
-          <span>Total operating cost</span>
-          <strong>{money(total.total)}</strong>
-          <small>All four cost groups combined</small>
         </div>
         <div className="cps-total">
           <span>
@@ -368,7 +365,7 @@ export function CpsCostWorkspace({
           <strong>{money(costs[head])}</strong>
         </div>
         {head === "DA" && <CpsDaCohorts rows={snapshot.da_details ?? []} />}
-        <div className="cps-table-wrap">
+        {head === "Van" ? <CpsVanBreakdown snapshot={snapshot} deliveries={total.deliveries} amount={costs.Van}/> : <div className="cps-table-wrap">
           <table>
             <thead>
               <tr>
@@ -426,7 +423,7 @@ export function CpsCostWorkspace({
                       {expanded === key && (
                         <tr className="cps-expanded-row">
                           <td colSpan={4}>
-                            {r.source === "Workforce rate card" && head === "DA" ? <CpsAssociateTable rows={snapshot.da_details ?? []} source={r.source} component={/fuel/i.test(r.label)?"fuel":/salary|guarantee/i.test(r.label)?"salary":"variable"}/> : <div className="cps-allocation-grid">
+                            {r.source === "Workforce rate card" && head === "DA" ? <CpsAssociateTable rows={snapshot.da_details ?? []} source={r.source} component={/fuel/i.test(r.label)?"fuel":/salary|guarantee/i.test(r.label)?"salary":"variable"}/> : r.source === "Finance Rent Master" ? <CpsRentDetails rows={snapshot.facility_rents ?? []}/> : <div className="cps-allocation-grid">
                               {[...allocations]
                                 .sort(([a], [b]) => a.localeCompare(b))
                                 .map(([station, item]) => (
@@ -477,7 +474,7 @@ export function CpsCostWorkspace({
               </tr>
             </tfoot>
           </table>
-        </div>
+        </div>}
         {head === "UTR" && !staff.some(p=>p.group !== "Manager share" && p.group !== "Telecaller share") && <p className="cps-footnote">No active station-team CTC was allocated for these dates. Check active People assignments and effective CTC if a station team should be included. Unassigned manager roles add no cost or exception.</p>}
         {!bySource.size && (
           <p className="panel-body">
@@ -534,11 +531,11 @@ export function CpsCostWorkspace({
             canEdit={canEditBilling}
           />
         )}
-        {head === "Van" && (
+        {head === "Van" && vanPeople.length > 0 && (
           <details className="cps-drilldown">
             <summary>
-              Associate / driver payout details{" "}
-              <span>{snapshot.people?.length ?? 0} station assignments</span>
+              Delivery-linked vehicle pay details{" "}
+              <span>{vanPeople.length} station assignments</span>
             </summary>
             <div className="cps-table-wrap">
               <table>
@@ -555,7 +552,7 @@ export function CpsCostWorkspace({
                   </tr>
                 </thead>
                 <tbody>
-                  {(snapshot.people ?? []).map((p) => (
+                  {vanPeople.map((p) => (
                     <tr key={`${p.id}|${p.station_code}`}>
                       <td>
                         <strong>{p.name}</strong>
@@ -580,62 +577,6 @@ export function CpsCostWorkspace({
           </details>
         )}
         {head === "Van" && <CpsFuelInsights snapshot={snapshot} />}
-        {head === "Van" && (
-          <details className="cps-drilldown" open>
-            <summary>
-              Vehicle rent details{" "}
-              <span>
-                {new Set(vehicles.map((v) => v.vehicle_id)).size} vehicles
-              </span>
-            </summary>
-            <div className="cps-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Vehicle</th>
-                    <th>Allocated station</th>
-                    <th>Fleet rental rate</th>
-                    <th>Deployed days</th>
-                    <th>Period cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vehicles.map((v, i) => (
-                    <tr key={`${v.vehicle_id}|${v.station_code}|${i}`}>
-                      <td>
-                        <strong>{v.vehicle_no}</strong>
-                        <small>{v.model}</small>
-                      </td>
-                      <td>{v.station_code}</td>
-                      <td>
-                        {v.daily_rent != null ? <>{money(v.daily_rent)} / day</> : v.monthly_rent == null ? (
-                          <span className="cps-missing">Setup required</span>
-                        ) : (
-                          `${money(v.monthly_rent)} / month`
-                        )}
-                      </td>
-                      <td>
-                        {v.days}
-                        <small>
-                          {v.from_date} – {v.through_date}
-                        </small>
-                      </td>
-                      <td>{money(v.amount, 2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="cps-footnote">
-              Own-vehicle rent starts from 1 September 2026. Rates and future
-              revisions are managed in{" "}
-              <a href="https://fleet.dropxlogistics.com/fleet-control?section=masters&master=vehicle_master">
-                Fleet → Masters → Vehicle Master
-              </a>
-              . Rent continues for a deployed vehicle during downtime.
-            </p>
-          </details>
-        )}
       </section>
       <details className="panel cps-drilldown">
         <summary>
