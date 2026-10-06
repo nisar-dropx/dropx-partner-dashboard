@@ -877,3 +877,48 @@ export async function continueLoadFlashNetwork(): Promise<{ run: EddNetworkRunSt
   }
   return { run: normalizeRun(raw.run), advanced: Boolean(raw.advanced), busy: Boolean(raw.busy) };
 }
+
+export type LoadFlashTrackingRow = {
+  stationCode: string;
+  trackingId: string;
+  bucket: string;
+  state: string;
+  edd: string;
+  morning: boolean;
+  delivered: boolean;
+};
+
+/** Every tracking ID for the full workbook. Kept off the page payload. */
+export async function fetchLoadFlashTracking(date?: string): Promise<LoadFlashTrackingRow[]> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/load-flash/packages`);
+  if (date) url.searchParams.set("date", date);
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(60000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  if (!Array.isArray(raw.rows)) return [];
+  return raw.rows.map((item) => {
+    const row = (item ?? {}) as Record<string, unknown>;
+    return {
+      stationCode: String(row.stationCode ?? "").toUpperCase(),
+      trackingId: String(row.trackingId ?? "").trim(),
+      bucket: String(row.bucket ?? ""),
+      state: String(row.state ?? ""),
+      edd: String(row.edd ?? ""),
+      morning: Boolean(row.morning),
+      delivered: Boolean(row.delivered)
+    };
+  }).filter((row) => row.trackingId);
+}

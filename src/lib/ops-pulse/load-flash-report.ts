@@ -1,4 +1,4 @@
-import type { LoadFlashNetworkPayload, LoadFlashStation } from "@/lib/ops-pulse/edd-worker";
+import type { LoadFlashNetworkPayload, LoadFlashStation, LoadFlashTrackingRow } from "@/lib/ops-pulse/edd-worker";
 
 export const LOAD_FLASH_REPORTS = {
   load: "Total load",
@@ -84,7 +84,23 @@ function hourlyRows(payload: LoadFlashNetworkPayload): Record<string, unknown>[]
   }));
 }
 
-export function loadFlashReportSheets(payload: LoadFlashNetworkPayload, kind: LoadFlashReportKind): Array<{ name: string; rows: Record<string, unknown>[] }> {
+function trackingRows(rows: LoadFlashTrackingRow[]): Record<string, unknown>[] {
+  return rows.map((row) => ({
+    Station: row.stationCode,
+    "Tracking ID": row.trackingId,
+    Bucket: row.bucket,
+    State: row.state,
+    EDD: row.edd,
+    "Morning census": row.morning ? "Yes" : "No",
+    Delivered: row.delivered ? "Yes" : "No"
+  }));
+}
+
+export function loadFlashReportSheets(
+  payload: LoadFlashNetworkPayload,
+  kind: LoadFlashReportKind,
+  tracking: LoadFlashTrackingRow[] = []
+): Array<{ name: string; rows: Record<string, unknown>[] }> {
   if (kind !== "full") return [{ name: LOAD_FLASH_REPORTS[kind], rows: reportRows(payload, kind) }];
   return [
     { name: "Full data", rows: fullRows(payload) },
@@ -92,7 +108,8 @@ export function loadFlashReportSheets(payload: LoadFlashNetworkPayload, kind: Lo
     ...Object.entries(LOAD_FLASH_REPORTS).map(([key, name]) => ({
       name,
       rows: reportRows(payload, key as keyof typeof LOAD_FLASH_REPORTS)
-    }))
+    })),
+    { name: "Tracking IDs", rows: trackingRows(tracking) }
   ];
 }
 

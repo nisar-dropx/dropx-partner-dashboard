@@ -41,7 +41,7 @@ export default async function LoadFlashPage({ searchParams }: { searchParams?: {
         <PageHead
           eyebrow="Ops Pulse · Ops Live"
           title="Ops Live"
-          subtitle="Live station load, today's EDD, out on road, customer returns, and first-day pickups. Refreshed every hour from 6:00am to 11:00pm IST."
+          subtitle="Live station load, today's EDD, out on road, customer returns, and first-day pickups. Refreshed every hour from 6:05am to 11:05pm IST."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />
