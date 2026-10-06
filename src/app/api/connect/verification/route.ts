@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { matchNames } from "@/lib/name-match";
+import { verifyPanWithFallback } from "@/lib/pan-verification";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { callVerificationProvider } from "@/lib/verification-api-audit";
@@ -10,6 +11,8 @@ import { isPureElectricFuel } from "@/lib/vehicle-fuel";
 import { isWorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
 const IDSPAY_BASE_URL = "https://javabackend.idspay.in/api/v1/prod";
+
+export const maxDuration = 30;
 
 type VerificationKind = "pan" | "pan_aadhaar" | "dl" | "vehicle" | "bank" | "pf_uan";
 
@@ -274,13 +277,12 @@ export async function POST(request: NextRequest) {
       const panNumber = text(payload.panNumber).toUpperCase();
       if (!panNumber) throw new Error("PAN number is required.");
       if (!/^[A-Z0-9]{10}$/.test(panNumber)) throw new Error("Invalid PAN.");
-      const { body } = await callVerificationProvider({
-        ...auditContext,
-        endpoint: "/pan/verification",
-        payload: { ...credentials, pan_number: panNumber }
+      const { apiSuccess, name: apiName, rawStatus } = await verifyPanWithFallback({
+        callProvider: callVerificationProvider,
+        auditContext,
+        credentials,
+        panNumber
       });
-      const apiName = compact(findFirstString(body, ["full_name", "fullName", "name", "pan_name", "panName"]));
-      const apiSuccess = body?.data?.success === true || body?.status?.type === "success";
       const nameMatch = apiSuccess ? matchNames(registeredName, apiName) : { status: "none" as const, percent: 0 };
       const verified = apiSuccess && nameMatch.status === "exact";
       const partial = apiSuccess && nameMatch.status === "partial";
@@ -299,7 +301,7 @@ export async function POST(request: NextRequest) {
             : apiSuccess
               ? "PAN name mismatch."
               : "PAN verification failed.",
-        rawStatus: body?.status ?? null
+        rawStatus
       };
       return verifiedResponse(result);
     }

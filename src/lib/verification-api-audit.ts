@@ -13,12 +13,22 @@ type AuditContext = {
   verificationKind: string;
 };
 
-type ProviderCall = AuditContext & {
+export type ProviderCall = AuditContext & {
   baseUrl: string;
   endpoint: string;
+  isSuccessfulResponse?: (response: Response, body: unknown) => boolean;
   payload: Record<string, unknown>;
+  projectResponse?: (body: unknown) => unknown;
   providerCode: string;
+  timeoutMs?: number;
 };
+
+export class VerificationProviderTransportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VerificationProviderTransportError";
+  }
+}
 
 type CacheClaim = {
   action: "cached" | "claimed" | "processing";
@@ -136,7 +146,11 @@ function resultMessage(value: unknown) {
 }
 
 function cacheDurationHours(response: Response) {
-  return response.status === 500 ? 3 / 60 : 24;
+  const retryable = response.status === 408 ||
+    response.status === 425 ||
+    response.status === 429 ||
+    response.status >= 500;
+  return retryable ? 3 / 60 : 24;
 }
 
 async function claimProviderCall(input: ProviderCall, requestData: unknown, hash: string) {
@@ -169,7 +183,8 @@ async function completeProviderCall(
   response: Response | null,
   body: unknown,
   durationMs: number,
-  cacheForHours: number
+  cacheForHours: number,
+  isSuccess: boolean
 ) {
   if (!supabaseAdmin) return;
   const responseData = body && typeof body === "object" ? body : { value: body };
@@ -182,7 +197,7 @@ async function completeProviderCall(
       completed_at: completedAt.toISOString(),
       duration_ms: durationMs,
       http_status: response?.status ?? null,
-      is_success: response ? providerSucceeded(response, body) : false,
+      is_success: isSuccess,
       request_status: "completed",
       response_data: sanitize(responseData),
       result_code: resultCode(responseData),
@@ -243,8 +258,11 @@ export async function callVerificationProvider(input: ProviderCall) {
   const hash = inputHash(input, requestData);
   const claim = await claimProviderCall(input, requestData, hash);
   if (claim?.action === "cached") {
-    const response = responseFromCache(claim.http_status, claim.response_data);
-    return { response, body: claim.response_data };
+    const body = input.projectResponse
+      ? input.projectResponse(claim.response_data)
+      : claim.response_data;
+    const response = responseFromCache(claim.http_status, body);
+    return { response, body };
   }
   if (claim?.action === "processing") {
     throw new Error("This verification is already in progress.");
@@ -255,23 +273,29 @@ export async function callVerificationProvider(input: ProviderCall) {
     const response = await fetch(`${input.baseUrl}${input.endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input.payload)
+      body: JSON.stringify(input.payload),
+      signal: input.timeoutMs ? AbortSignal.timeout(input.timeoutMs) : undefined
     });
-    const body = await response.json().catch(() => ({}));
+    const rawBody = await response.json().catch(() => ({}));
+    const body = input.projectResponse ? input.projectResponse(rawBody) : rawBody;
+    const isSuccess = input.isSuccessfulResponse
+      ? input.isSuccessfulResponse(response, body)
+      : providerSucceeded(response, body);
     if (claim?.log_id) {
       await completeProviderCall(
         claim.log_id,
         response,
         body,
         Date.now() - startedAt,
-        cacheDurationHours(response)
+        cacheDurationHours(response),
+        isSuccess
       );
     } else {
       await writeAudit({
         ...input,
         durationMs: Date.now() - startedAt,
         httpStatus: response.status,
-        isSuccess: providerSucceeded(response, body),
+        isSuccess,
         requestData: input.payload,
         responseData: body
       });
@@ -281,7 +305,14 @@ export async function callVerificationProvider(input: ProviderCall) {
     const errorBody = { error: error instanceof Error ? error.message : "Provider request failed." };
     if (claim?.log_id) {
       // A short cache prevents rapid retries after a connection-level failure.
-      await completeProviderCall(claim.log_id, null, errorBody, Date.now() - startedAt, 5 / 60);
+      await completeProviderCall(
+        claim.log_id,
+        null,
+        errorBody,
+        Date.now() - startedAt,
+        5 / 60,
+        false
+      );
     } else {
       await writeAudit({
         ...input,
@@ -292,6 +323,8 @@ export async function callVerificationProvider(input: ProviderCall) {
         responseData: errorBody
       });
     }
-    throw error;
+    throw new VerificationProviderTransportError(
+      error instanceof Error ? error.message : "Provider request failed."
+    );
   }
 }
