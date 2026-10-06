@@ -251,6 +251,7 @@ export function ImportForm({
         {loading ? "Reading file…" : "Choose CSV or Excel file"}
         <input
           type="file"
+          required
           accept=".csv,.xlsx"
           onChange={(e) => void read(e.target.files?.[0])}
         />

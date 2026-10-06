@@ -43,7 +43,9 @@ export async function saveBooks(
       throw new Error("Review the details and confirm before saving.");
     let payload: Record<string, unknown> = {};
     const rows = () => {
-      const raw = field(data, "rows", 700000);
+      const raw = String(data.get("rows") ?? "");
+      if (!raw.trim()) throw new Error("Choose a CSV or Excel file and review its preview before importing.");
+      if (raw.length > 700000) throw new Error("This import is too large. Split it into smaller files and try again.");
       const result: unknown = JSON.parse(raw);
       if (
         !Array.isArray(result) ||
