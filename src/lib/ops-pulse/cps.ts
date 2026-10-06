@@ -129,9 +129,33 @@ export function cpsMonthSlices(from: string, through: string) {
   }
   return slices;
 }
+export type CpsPlace = { code: string; name: string; parent?: string; isXpt?: boolean };
+export function cpsStationGroups(places: CpsPlace[]) {
+  const groups = new Map<string, CpsPlace[]>();
+  for (const place of places) {
+    const key = place.isXpt && place.parent ? place.parent : place.code;
+    const group = groups.get(key) ?? [];
+    if (!group.some(p => p.code === place.code)) group.push(place);
+    groups.set(key, group);
+  }
+  return [...groups].map(([code, group]) => {
+    const parent = group.find(p => p.code === code);
+    const xpts = group.filter(p => p.isXpt).map(p => p.code).sort();
+    return {
+      code, name: parent?.name || code,
+      members: group.map(p => p.code),
+      subtitle: xpts.length ? `${parent ? "Includes XPT" : "XPT only in your access:"} ${xpts.join(", ")}` : "",
+      search: group.map(p => `${p.code} ${p.name}`).join(" ") + ` ${code}`,
+    };
+  }).sort((a, b) => a.code.localeCompare(b.code));
+}
 export function cpsForStation(data: CpsSnapshot, station: string): CpsSnapshot {
+  return cpsForStations(data, [station]);
+}
+export function cpsForStations(data: CpsSnapshot, stations: string[]): CpsSnapshot {
+  const codes = new Set(stations);
   const only = <T extends { station_code: string }>(rows?: T[]) =>
-    rows?.filter((r) => r.station_code === station);
+    rows?.filter((r) => codes.has(r.station_code));
   return {
     ...data,
     daily: only(data.daily) ?? [],

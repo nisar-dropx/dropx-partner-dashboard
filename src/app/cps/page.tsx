@@ -44,6 +44,7 @@ export default async function CpsPage({
     const scope = await cpsScope(
       auth,
       view === "inputs" ? params : { ...params, station: undefined },
+      view !== "inputs",
     );
     const { period, all, selected, companyId } = scope;
     let loadError = "";
@@ -168,6 +169,8 @@ export default async function CpsPage({
                     places={selected.map((l) => ({
                       code: l.station_code,
                       name: l.station_name || l.city || l.station_code,
+                      parent: l.parent_station_code,
+                      isXpt: l.is_xpt,
                     }))}
                     params={params}
                     canExport={canExport}

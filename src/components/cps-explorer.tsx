@@ -3,7 +3,9 @@ import { useState } from "react";
 import { CpsCostWorkspace } from "./cps-cost-workspace";
 import { SearchableSelect } from "./searchable-select";
 import {
-  cpsForStation,
+  cpsForStations,
+  cpsStationGroups,
+  type CpsPlace,
   cpsReviewItems,
   groupCps,
   ratio,
@@ -25,31 +27,26 @@ export function CpsExplorer({
   canExport,
 }: {
   snapshot: CpsSnapshot;
-  places: { code: string; name: string }[];
+  places: CpsPlace[];
   params: CpsParams;
   canResolve: boolean;
   canEditBilling: boolean;
   canExport: boolean;
 }) {
-  const [station, setStation] = useState(
-    () =>
-      selectedCpsStations(params.station).find((c) =>
-        places.some((p) => p.code === c),
-      ) ??
-      places[0]?.code ??
-      "",
-  );
+  const groups = cpsStationGroups(places);
+  const byGroup = new Map(groups.map(g => [g.code, g]));
+  const groupByMember = new Map(groups.flatMap(g => g.members.map(code => [code, g.code] as const)));
+  const [station, setStation] = useState(() => {
+    const requested = selectedCpsStations(params.station).map(code => groupByMember.get(code) || code);
+    return requested.find(code => byGroup.has(code)) || groups[0]?.code || "";
+  });
   const [head, setHead] = useState(params.head ?? "DA");
   const [showIssues, setShowIssues] = useState(false);
   const [search, setSearch] = useState("");
-  const [comparison, setComparison] = useState(() => places.map((p) => p.code));
-  const names = Object.fromEntries(places.map((p) => [p.code, p.name]));
-  const rows = groupCps(snapshot.daily, (r) => r.station_code).sort((a, b) =>
-    a.key.localeCompare(b.key),
-  );
-  const matched = places.filter((p) =>
-    `${p.code} ${p.name}`.toLowerCase().includes(search.toLowerCase()),
-  );
+  const [comparison, setComparison] = useState(() => groups.map(p => p.code));
+  const names = Object.fromEntries(groups.map(p => [p.code, p.name]));
+  const rows = groupCps(snapshot.daily, r => groupByMember.get(r.station_code) || r.station_code).sort((a, b) => a.key.localeCompare(b.key));
+  const matched = groups.filter(p => p.search.toLowerCase().includes(search.toLowerCase()));
   const shown = rows.filter((r) => comparison.includes(r.key));
   function selectStation(code: string) {
     setStation(code);
@@ -78,8 +75,7 @@ export function CpsExplorer({
           <div>
             <h2>Station comparison</h2>
             <p>
-              Select stations to compare. Each row uses that station’s delivered
-              shipments.
+              Each parent row combines its authorized EDSP and XPT costs and delivered shipments. CPS is combined cost ÷ combined deliveries.
             </p>
           </div>
           {canExport && comparison.length > 0 && (
@@ -90,7 +86,7 @@ export function CpsExplorer({
         </div>
         <details className="cps-compare-picker">
           <summary>
-            {comparison.length} of {places.length} stations selected{" "}
+            {comparison.length} of {groups.length} station groups selected{" "}
             <span>Change stations</span>
           </summary>
           <div className="cps-compare-controls">
@@ -103,7 +99,7 @@ export function CpsExplorer({
             <button
               type="button"
               className="button"
-              onClick={() => setComparison(places.map((p) => p.code))}
+              onClick={() => setComparison(groups.map((p) => p.code))}
             >
               Select all
             </button>
@@ -142,7 +138,7 @@ export function CpsExplorer({
                 />
                 <span>
                   <strong>{p.code}</strong>
-                  <small>{p.name}</small>
+                  <small>{p.subtitle || p.name}</small>
                 </span>
               </label>
             ))}
@@ -172,13 +168,7 @@ export function CpsExplorer({
             </thead>
             <tbody>
               {shown.map((r) => {
-                const issues = cpsReviewItems({
-                  ...snapshot,
-                  gaps: snapshot.gaps?.filter((g) => g.station_code === r.key),
-                  expense_periods: snapshot.expense_periods?.filter(
-                    (b) => b.station_code === r.key,
-                  ),
-                }).count;
+                const issues = cpsReviewItems(cpsForStations(snapshot, byGroup.get(r.key)?.members || [])).count;
                 return (
                   <tr
                     key={r.key}
@@ -191,7 +181,7 @@ export function CpsExplorer({
                       >
                         {r.key}
                       </button>
-                      <small>{names[r.key]}</small>
+                      <small>{byGroup.get(r.key)?.subtitle || names[r.key]}</small>
                     </td>
                     <td>{r.deliveries.toLocaleString("en-IN")}</td>
                     {(["DA", "UTR", "Van", "Other"] as Head[]).map((h) => (
@@ -252,22 +242,22 @@ export function CpsExplorer({
       </section>
       <section className="panel cps-detail-selector" id="cps-station-detail">
         <div>
-          <span className="cps-eyebrow">SINGLE STATION</span>
+          <span className="cps-eyebrow">PARENT STATION GROUP</span>
           <h2>
             {station ? `${station} · ${names[station]}` : "Station details"}
           </h2>
           <p>
-            Choose one station to inspect costs, pending mappings and bills.
+            {byGroup.get(station)?.subtitle || "Choose one station to inspect costs, pending mappings and bills."}
           </p>
         </div>
         <label>
           Search and select station
           <SearchableSelect
             name="detail_station"
-            options={places.map((p) => ({
+            options={groups.map((p) => ({
               value: p.code,
               label: `${p.code} · ${p.name}`,
-              helper: p.code,
+              helper: `${p.subtitle} ${p.search}`,
             }))}
             placeholder="Search station code or name"
             value={station}
@@ -279,7 +269,7 @@ export function CpsExplorer({
       {station ? (
         <CpsCostWorkspace
           key={`${station}|${head}|${showIssues}`}
-          snapshot={cpsForStation(snapshot, station)}
+          snapshot={cpsForStations(snapshot, byGroup.get(station)?.members || [])}
           initialHead={head}
           showAttention={params.view === "unmapped" || showIssues}
           canResolve={canResolve}
