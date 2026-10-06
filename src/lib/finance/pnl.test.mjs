@@ -25,6 +25,8 @@ const p = compile("./pnl.ts", {
   "./pricing": pricing,
   "../ops-pulse/cps": cps,
 });
+const comparison = compile("./pnl-comparison.ts", { "./pnl": p });
+const exportsPnl = compile("./pnl-export.ts", { "./pnl": p, "./pnl-comparison": comparison, "./pricing": pricing });
 const perf = compile("./performance.ts", { "./pricing": pricing });
 const place = { station_code: "A", station_name: "Station A", region: "South" };
 const cday = {
@@ -262,6 +264,7 @@ test("unknown station scope stays closed and does not query unrestricted source 
     "./data": { loadPricing: async () => [], effectiveCards: () => [] },
     "./performance": perf,
     "./pnl": p,
+    "./pnl-comparison": comparison,
     "./pricing": pricing,
     "../ops-pulse/cps-data": {
       loadCpsSnapshot: async (company, from, to, locations) => {
@@ -338,6 +341,7 @@ test("P&L CSV uses scoped live loader, exports reconciled totals and no staff id
     ),
     filters: { from: "2026-09-01", to: "2026-09-01" },
     readAt: "2026-10-05",
+    locations: [place],
   };
   let seen;
   class NR extends Response {
@@ -353,7 +357,8 @@ test("P&L CSV uses scoped live loader, exports reconciled totals and no staff id
         return report;
       },
     },
-    "@/lib/finance/pnl": p,
+    "@/lib/finance/pnl-comparison": comparison,
+    "@/lib/finance/pnl-export": exportsPnl,
     "@/lib/finance/data": {
       financeContext: async (code) => {
         assert.equal(code, "finance_pnl");
@@ -378,14 +383,15 @@ test("P&L CSV uses scoped live loader, exports reconciled totals and no staff id
   assert.match(response.headers.get("Cache-Control"), /no-store/);
   const text = await response.text(),
     rows = pricing.parseCsv(text),
-    fields = Object.fromEntries(rows[0].map((h, i) => [h, rows[1][i]]));
+    header = rows.findIndex(r => r[0] === "Group"),
+    fields = Object.fromEntries(rows[header].map((h, i) => [h, rows[header + 1][i]]));
   assert.equal(fields["Revenue INR"], "200");
   assert.equal(fields["Expenses INR"], "100");
-  assert.equal(fields["Provisional operating P&L INR"], "100");
+  assert.equal(fields["Profit / loss INR"], "100");
   assert.equal(fields["CPS INR"], "10");
-  assert.equal(fields["Calculated through delivery data"], "2026-09-01");
+  assert.equal(fields["Latest station cutoff"], "2026-09-01");
   assert.ok(!text.includes("PRIVATE STAFF"));
-  assert.match(text, /Missing inputs are not zero/);
+  assert.match(text, /unavailable, never zero/);
 });
 
 test("delivery cutoff excludes later fixed revenue, all expense heads and future source details",()=>{

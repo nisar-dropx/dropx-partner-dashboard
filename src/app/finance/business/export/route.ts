@@ -1,5 +1,6 @@
 import { loadPnl } from "@/lib/finance/pnl-data";
-import { pnlTotal } from "@/lib/finance/pnl";
+import { comparisonOptions } from "@/lib/finance/pnl-comparison";
+import { exportPnlCsv, exportPnlExcel, exportPnlPdf } from "@/lib/finance/pnl-export";
 import { NextResponse } from "next/server";
 import { financeContext, loadBusiness } from "@/lib/finance/data";
 import { selectDailyRows } from "@/lib/finance/performance";
@@ -15,137 +16,16 @@ export async function GET(request: Request) {
   try {
     if (query.tab === "pnl") {
       const r = await loadPnl(context, query);
-      const totals = [
-        ["Business", [r.total]],
-        ["Region", r.regions],
-        ["Station", r.stations],
-        ["Month", r.months],
-        ["Day", r.daily],
-      ] as const;
-      const header = [
-        "View",
-        "Key",
-        "Requested from",
-        "Requested through",
-        "Delivered shipments",
-        "Revenue INR",
-        "Expenses INR",
-        "Provisional operating P&L INR",
-        "Margin %",
-        "CPS INR",
-        "Revenue per shipment INR",
-        "MG / fixed INR",
-        "Variable / slab INR",
-        "SWA INR",
-        "MFN INR",
-        "DA INR",
-        "UTR INR",
-        "Van INR",
-        "Rent INR",
-        "Other INR",
-        "Shipment station-days",
-        "Total station-days",
-        "Issue days",
-        "Calculated through delivery data",
-      ];
-      const body: (string | number | null)[][] = [header];
-      for (const [view, rows] of totals)
-        for (const t of rows)
-          body.push([
-            view,
-            t.key,
-            r.filters.from,
-            r.filters.to,
-            t.deliveries,
-            t.revenue,
-            t.cost,
-            t.profit,
-            t.margin,
-            t.cps,
-            t.rps,
-            t.base,
-            t.variable,
-            t.swa,
-            t.mfn,
-            t.da,
-            t.utr,
-            t.van,
-            t.rent,
-            t.other,
-            t.shipmentDays,
-            t.stationDays,
-            t.issueDays,
-            t.dataThrough,
-          ]);
-      for (const d of r.days) {
-        const t = pnlTotal([d]);
-        body.push([
-          "Station day",
-          d.station,
-          d.date,
-          d.date,
-          t.deliveries,
-          t.revenue,
-          t.cost,
-          t.profit,
-          t.margin,
-          t.cps,
-          t.rps,
-          t.base,
-          t.variable,
-          t.swa,
-          t.mfn,
-          t.da,
-          t.utr,
-          t.van,
-          t.rent,
-          t.other,
-          t.shipmentDays,
-          1,
-          t.issueDays,
-          t.dataThrough,
-        ]);
-      }
-      body.push(
-        [],
-        ["Source cost details"],
-        ["Station", "Date", "Head", "Item", "Source", "Amount INR"],
-      );
-      for (const c of r.costs)
-        body.push([
-          c.station_code,
-          c.work_date,
-          c.head,
-          c.sub_head,
-          c.source,
-          c.amount,
-        ]);
-      body.push(
-        [],
-        ["Items to review"],
-        ["Station", "Issue", "ID / reference", "From", "Through", "Deliveries"],
-      );
-      for (const g of r.reviews)
-        body.push([g.station, g.kind, g.reference, g.from, g.to, g.deliveries]);
-      body.push(
-        [],
-        [
-          "Management operating estimate. Missing inputs are not zero. SWA uses provisional matching delivery rates. Unconfigured settlements, chargebacks, tax and unallocated corporate costs are excluded.",
-        ],
-        ["Read at", r.readAt],
-      );
-      return new NextResponse(
-        csvText(
-          body.map((row) => row.map((v) => (v === null ? "" : String(v)))),
-        ),
-        {
-          headers: {
-            "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": `attachment; filename="profit-loss-${r.filters.from}-to-${r.filters.to}.csv"`,
-            "Cache-Control": "private, no-store",
-          },
-        },
-      );
+      const options = comparisonOptions(query);
+      const format = query.format || "csv";
+      if (!["xlsx", "pdf", "csv"].includes(format)) throw Error("Choose Excel, PDF or CSV.");
+      const body = format === "xlsx" ? await exportPnlExcel(r, options) : format === "pdf" ? await exportPnlPdf(r, options) : exportPnlCsv(r, options);
+      return new NextResponse(typeof body === "string" ? body : new Uint8Array(body).buffer, { headers: {
+        "Content-Type": format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : format === "pdf" ? "application/pdf" : "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="profit-loss-${options.view}-${r.filters.from}-to-${r.filters.to}.${format}"`,
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      } });
     }
 
     const { rows, filters, readAt } = await loadBusiness(context, query);

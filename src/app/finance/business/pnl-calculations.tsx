@@ -64,13 +64,13 @@ export function RevenueCalculation({
   rows,
   report,
 }: {
-  kind: "base" | "variable" | "swa" | "mfn";
+  kind: "base" | "xpt" | "variable" | "swa" | "mfn";
   rows: PnlDay[];
   report: LivePnl;
 }) {
   const keys = new Set(rows.map((d) => `${d.station}/${d.date}`));
   const source = report.revenueCalculations.filter((d) =>
-    keys.has(`${d.station}/${d.date}`),
+    keys.has(`${d.station}/${d.date}`) && (kind === "base" ? d.model !== "xpt" : kind === "xpt" ? d.model === "xpt" : true),
   );
   const groups = new Map<string, typeof source>();
   for (const d of source) {
@@ -97,7 +97,7 @@ export function RevenueCalculation({
             p.month === month,
         );
         const field =
-          kind === "swa" ? "swaRevenue" : kind === "mfn" ? "mfnRevenue" : kind;
+          kind === "swa" ? "swaRevenue" : kind === "mfn" ? "mfnRevenue" : kind === "xpt" ? "base" : kind;
         const amount = known(days, (d) => d[field]);
         const eligible = known(days, (d) => d.eligibleDeliveries),
           excess = known(days, (d) => d.excessVolume);
@@ -120,7 +120,7 @@ export function RevenueCalculation({
                 daily accruals used in P&L; cumulative paise rounding keeps the
                 totals reconciled.
               </p>
-              {kind === "base" && (
+              {(kind === "base" || kind === "xpt") && (
                 <>
                   <Facts
                     items={[

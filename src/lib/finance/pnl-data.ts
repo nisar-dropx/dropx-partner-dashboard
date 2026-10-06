@@ -9,6 +9,7 @@ import { buildPnl, pnlFilters, cpsMonthSlices, type PnlQuery } from "./pnl";
 import { loadCpsSnapshot } from "../ops-pulse/cps-data";
 import type { CpsSnapshot } from "../ops-pulse/cps";
 import { addQuantities } from "./pricing";
+import { stationGroupKey } from "./pnl-comparison";
 
 export type SourceAvailability = Record<
   string,
@@ -16,20 +17,25 @@ export type SourceAvailability = Record<
 >;
 export async function loadPnl(context: FinanceContext, query: PnlQuery) {
   const filters = pnlFilters(query);
+  // P&L treats an EDSP parent and its XPTs as one business unit.
+  filters.includeXpts = true;
   const allowed = context.locations.filter(
     (l) =>
       !l.hide_from_location_list &&
       !l.is_ho &&
       !/^HO(?:_|$)/i.test(l.station_code),
   );
+  const byCode = new Map(allowed.map(l => [l.station_code, l]));
+  const selected = byCode.get(filters.location);
+  if (selected) filters.location = stationGroupKey(selected);
   const locations = allowed.filter((l) => {
-    const provider = Array.isArray(l.providers) ? l.providers[0] : l.providers;
+    const group = byCode.get(stationGroupKey(l)) ?? l;
+    const provider = Array.isArray(group.providers) ? group.providers[0] : group.providers;
     return (
       (!filters.location ||
-        l.station_code === filters.location ||
-        (filters.includeXpts && l.parent_station_code === filters.location)) &&
-      (!filters.region || (l.region || "Unassigned") === filters.region) &&
-      (!filters.cluster || (l.cluster || "Unassigned") === filters.cluster) &&
+        stationGroupKey(l) === filters.location) &&
+      (!filters.region || (group.region || "Unassigned") === filters.region) &&
+      (!filters.cluster || (group.cluster || "Unassigned") === filters.cluster) &&
       (!filters.provider ||
         (provider?.name || provider?.code || "").toLowerCase() ===
           filters.provider.toLowerCase())
@@ -194,6 +200,8 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery) {
       station_name: l.station_name,
       region: l.region || "Unassigned",
       cluster: l.cluster || "Unassigned",
+      pricing_model: l.pricing_model,
+      parent_station_code: l.parent_station_code,
     })),
     pricing: revenue.map((r) => ({
       station: r.station,
