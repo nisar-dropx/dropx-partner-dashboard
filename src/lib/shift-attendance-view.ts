@@ -9,12 +9,13 @@ export type ShiftAttendance = {
     inTime: string | null; outTime: string | null;
     workMode?: string | null; wfhState?: string | null; approvedLeave?: boolean;
     shiftStartsAt?: string | null; shiftEndsAt?: string | null;
+    rosterSetupStatus?: string | null; rosterSetupLabel?: string | null;
   };
 };
 export const shiftFilters = [
   ["all", "All"], ["present", "Punched"], ["late", "Late in"], ["early", "Early out"],
   ["single", "Missing punch"], ["wfh", "WFH"], ["leave", "Approved leave"],
-  ["off", "Week off"], ["trip", "Business trip"], ["missing", "Not reported"], ["upcoming", "Upcoming"], ["unassigned", "No roster"]
+  ["off", "Week off"], ["trip", "Business trip"], ["missing", "Not reported"], ["upcoming", "Upcoming"], ["pending", "Roster pending"], ["unassigned", "No roster"]
 ] as const;
 export type ShiftFilter = typeof shiftFilters[number][0];
 export function shiftCategory(p: ShiftAttendance, now = Date.now()) {
@@ -23,7 +24,7 @@ export function shiftCategory(p: ShiftAttendance, now = Date.now()) {
   if (t.workMode === "wfh") return "wfh";
   if (t.workMode === "business_trip") return "trip";
   if (t.rosterDayType === "weekly_off") return "off";
-  if (!t.shiftName && !t.rosterDayType) return "unassigned";
+  if (!t.shiftName && !t.rosterDayType) return t.rosterSetupStatus ? "pending" : "unassigned";
   if (!t.reported && t.shiftStartsAt && Date.parse(t.shiftStartsAt) > now) return "upcoming";
   if (t.lateMinutes > 0) return "late";
   if (t.reported) return "present";
@@ -52,6 +53,7 @@ export function shiftLabel(p: ShiftAttendance, now = Date.now()) {
     awaiting_finalization: "WFH · credit pending", credited: "WFH · credited"
   }[t.wfhState ?? ""] ?? "WFH");
   if (category === "trip") return t.reported ? "Business trip · punched" : "Business trip";
+  if (category === "pending") return (t.rosterSetupLabel || "Roster pending") + (t.reported ? " · punched" : "");
   if (category === "unassigned") return t.reported ? "No roster · punched" : "No approved roster";
   if (category === "upcoming") return "Upcoming shift";
   if (!t.reported) return "Not reported";
@@ -61,6 +63,18 @@ export function shiftLabel(p: ShiftAttendance, now = Date.now()) {
     t.missingPunch ? matchesShift(p, "single", "", now) ? "Missing OUT" : "OUT pending" : ""
   ].filter(Boolean);
   return labels.join(" · ") || "On time · completed";
+}
+/** Scheduled includes future approved shifts; absence excludes future/away/setup. */
+export function isScheduledShift(p: ShiftAttendance) {
+  return Boolean(p.today.shiftName) && p.today.rosterDayType === "working"
+    && !p.today.approvedLeave && p.availability !== "On leave"
+    && !["wfh", "business_trip"].includes(p.today.workMode ?? "");
+}
+export function rosterSetupSummary(people: ShiftAttendance[]) {
+  const pending = people.filter(p => !p.today.shiftName && !p.today.rosterDayType && p.today.rosterSetupStatus).length;
+  const missing = people.filter(p => !p.today.shiftName && !p.today.rosterDayType && !p.today.rosterSetupStatus).length;
+  return [pending ? `${pending} roster${pending === 1 ? "" : "s"} awaiting completion / approval` : "",
+    missing ? `${missing} without a roster` : ""].filter(Boolean).join(" · ");
 }
 export function shiftPunchMinute(value: string | null, day: string) {
   if (!value) return null;

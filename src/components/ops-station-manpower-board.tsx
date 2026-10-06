@@ -3,7 +3,7 @@
 import { useState, type CSSProperties } from "react";
 import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, Clock3, Gauge, LogIn, MapPin, UserRoundCheck, Users2 } from "lucide-react";
 import { ShiftAttendanceTools } from "@/components/shift-attendance-tools";
-import { matchesShift, shiftCategory, shiftLabel, shiftPunchMinute, type ShiftFilter } from "@/lib/shift-attendance-view";
+import { matchesShift, shiftCategory, shiftLabel, shiftPunchMinute, isScheduledShift, rosterSetupSummary, type ShiftFilter } from "@/lib/shift-attendance-view";
 import { StationLiveRefresh } from "@/components/station-live-refresh";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { OpsStationManpowerPerson } from "@/lib/ops-pulse/station-manpower";
@@ -55,7 +55,7 @@ function PunchLocationBadge({ person }: { person: OpsStationManpowerPerson }) {
 }
 
 function AttendanceDetail({ person }: { person: OpsStationManpowerPerson }) {
-  const rosterStatus = person.today.rosterDayType === "weekly_off" ? "Week off" : person.today.shiftName?.split(" · ")[0] ?? "Approved roster";
+  const rosterStatus = person.today.rosterDayType === "weekly_off" ? "Week off" : person.today.shiftName?.split(" · ")[0] ?? person.today.rosterSetupLabel ?? "No roster";
   return <div className="station-timetable-detail">
     <span><LogIn size={12} />In <strong>{clock(person.today.inTime)}</strong></span>
     <span>Out <strong>{person.today.outTime ? clock(person.today.outTime) : person.today.reported ? "No OUT punch" : "—"}</strong></span>
@@ -78,7 +78,7 @@ function rosterRoleGroups(members: OpsStationManpowerPerson[]) {
 
 function attendanceState(person: OpsStationManpowerPerson): AttendanceState {
   const category = shiftCategory(person);
-  if (["wfh", "trip", "leave", "off", "upcoming", "unassigned"].includes(category)) return "away";
+  if (["wfh", "trip", "leave", "off", "upcoming", "unassigned", "pending"].includes(category)) return "away";
   if (person.today.lateMinutes > 0 || (person.today.earlyMinutes ?? 0) > 0 || matchesShift(person, "single")) return "late";
   if (person.today.reported) return "on-time";
   return "missing";
@@ -190,7 +190,7 @@ function StationTimetableContent({ people, locationCode, asOf, onShiftChange }: 
   const shiftSummary = [...new Map(scheduled.map((person) => [person.today.shiftName, person.today.shiftName])).values()]
     .filter((name): name is string => Boolean(name))
     .map((name) => {
-      const members = scheduled.filter((person) => person.today.shiftName === name && attendanceState(person) !== "away");
+      const members = scheduled.filter((person) => person.today.shiftName === name && isScheduledShift(person));
       return { name, clock: shiftClock(name)!, expected: members.length, reported: members.filter((person) => person.today.reported).length };
     })
     .sort((left, right) => (left.clock.start < window.start ? left.clock.start + 1440 : left.clock.start) - (right.clock.start < window.start ? right.clock.start + 1440 : right.clock.start));
@@ -260,7 +260,7 @@ function StationTimetableContent({ people, locationCode, asOf, onShiftChange }: 
           return <div className={`station-timetable-person-row away ${person.today.reported ? "off-worked" : ""} ${open ? "open" : ""}`} key={personKey}>
             <button type="button" className="station-timetable-row" aria-expanded={open} onClick={() => setSelectedPersonId(open ? null : personKey)}>
               <span className="station-timetable-person"><span className="station-timetable-person-name"><b>{person.name}</b><PunchLocationBadge person={person} /></span><small>{person.designation}</small></span>
-              <span className="station-timetable-shift"><b>Off / other</b><small>Approved roster</small></span>
+              <span className="station-timetable-shift"><b>{person.today.rosterDayType === "weekly_off" ? "Week off" : "Roster setup"}</b><small>{person.today.rosterDayType ? "Approved roster" : person.today.rosterSetupLabel ?? "Not configured"}</small></span>
               <span className="station-timetable-lane">
                 <span className="station-timetable-off-label">{stateLabel(person)}</span>
                 {arrival !== null && actualEnd !== null ? <span className="station-timetable-actual off-worked" style={{ left: `${actualLeft}%`, width: `${actualWidth}%` }} /> : null}
@@ -274,12 +274,13 @@ function StationTimetableContent({ people, locationCode, asOf, onShiftChange }: 
         {!visibleScheduled.length && !visibleOffDuty.length ? <div className="station-timetable-no-match"><strong>No people match these filters.</strong><span>Choose another shift or attendance status.</span></div> : null}
       </div>
     </div>
-    {withoutRoster.length ? <div className="station-timetable-unassigned"><strong>{withoutRoster.length} active {withoutRoster.length === 1 ? "person has" : "people have"} no approved roster entry for this date.</strong><span>They are not counted as expected manpower.</span></div> : null}
+    {withoutRoster.length ? <div className="station-timetable-unassigned"><strong>{rosterSetupSummary(withoutRoster)}</strong><span>Not counted as missing attendance.</span><a href={`/rostering?station=${encodeURIComponent(locationCode)}`}>View roster →</a></div> : null}
   </section>;
 }
 
 export function OpsStationManpowerBoard({ asOf, locations, people, canExport = false }: { asOf: string; locations: CodLocationRow[]; people: OpsStationManpowerPerson[]; canExport?: boolean }) {
-  const expectedPeople = people.filter((person) => Boolean(shiftClock(person.today.shiftName)) && attendanceState(person) !== "away");
+  const expectedPeople = people.filter(isScheduledShift);
+  const upcoming = expectedPeople.filter(person => shiftCategory(person) === "upcoming").length;
   const scheduledReported = expectedPeople.filter((person) => person.today.reported).length;
   const present = people.filter((person) => person.today.reported).length;
   const offDayWorked = people.filter((person) => person.today.rosterDayType === "weekly_off" && person.today.reported).length;
@@ -289,11 +290,11 @@ export function OpsStationManpowerBoard({ asOf, locations, people, canExport = f
   const missing = expectedPeople.filter((person) => attendanceState(person) === "missing").length;
   return <div className="station-manpower-workspace">
     <section className="station-manpower-summary">
-      <article><Users2 size={17} /><span>Scheduled</span><strong>{expectedPeople.length}</strong><small>{people.length} active people · {locations.length} locations</small></article>
+      <article><Users2 size={17} /><span>Scheduled</span><strong>{expectedPeople.length}</strong><small>{upcoming} upcoming · {people.length} active people</small></article>
       <article className="good"><UserRoundCheck size={17} /><span>Punched</span><strong>{present}</strong><small>{scheduledReported} scheduled{offDayWorked ? ` · ${offDayWorked} off-day` : ""}</small></article>
       <article className="good"><CheckCircle2 size={17} /><span>No exceptions</span><strong>{onTime}</strong><small>No late in or early out</small></article>
       <article className={late ? "warn" : "good"}><Clock3 size={17} /><span>Late in</span><strong>{late}</strong><small>{early} early out · see filters</small></article>
-      <article className={missing ? "attention" : "good"}><AlertTriangle size={17} /><span>Not reported</span><strong>{missing}</strong><small>Scheduled but no punch</small></article>
+      <article className={missing ? "attention" : "good"}><AlertTriangle size={17} /><span>Not reported</span><strong>{missing}</strong><small>Shift started · no punch</small></article>
       <StationLiveRefresh />
     </section>
     <section className="station-insight-intro"><div><span><Gauge size={14} />Shift attendance insights</span><h2>Roster timetable and attendance gaps</h2></div><div className="station-insight-legend"><span className="on-time">On time / present</span><span className="late">Late in / early out</span><span className="missing">Empty = not reported</span><span className="away">WFH / leave / off</span></div></section>
@@ -303,7 +304,7 @@ export function OpsStationManpowerBoard({ asOf, locations, people, canExport = f
       const leadership = locationPeople.filter((person) => tier(person.designation) === 0);
       const shiftLeadership = locationPeople.filter((person) => tier(person.designation) === 1);
       const shifts = new Set(locationPeople.map((person) => person.today.shiftName).filter(Boolean));
-      const locationExpected = locationPeople.filter((person) => Boolean(shiftClock(person.today.shiftName)) && attendanceState(person) !== "away");
+      const locationExpected = locationPeople.filter(isScheduledShift);
       const locationReported = locationExpected.filter((person) => person.today.reported).length;
       const locationOffDayWorked = locationPeople.filter((person) => person.today.rosterDayType === "weekly_off" && person.today.reported).length;
       const locationLate = locationExpected.filter((person) => matchesShift(person, "late")).length;

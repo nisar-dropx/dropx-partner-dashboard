@@ -1,8 +1,9 @@
 import "server-only";
 import { wfhCreditState } from "@/lib/wfh-attendance-credit";
 import { shiftBounds, shiftPunchMinute } from "@/lib/shift-attendance-view";
+import { loadRosterSetupHints } from "@/lib/roster-setup-hints";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
-import { compareRosterPlanPreference, formatShiftClock } from "@/lib/roster-plan-preference";
+import { compareRosterPlanPreference, formatShiftClock, isRosterPlanActiveOn } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Relation<T> = T | T[] | null | undefined;
@@ -71,6 +72,8 @@ export type OpsStationManpowerPerson = {
     approvedLeave?: boolean;
     shiftStartsAt?: string | null;
     shiftEndsAt?: string | null;
+    rosterSetupStatus?: string | null;
+    rosterSetupLabel?: string | null;
     earlyMinutes?: number;
     reported: boolean;
     lateMinutes: number;
@@ -147,6 +150,17 @@ function shiftStartMinutes(value: string | null | undefined) {
 function isoWeekday(value: string) {
   const day = new Date(`${value}T00:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
+}
+
+async function allRosterRows<T>(query: () => { range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }> }) {
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const result = await query().range(offset, offset + 499);
+    if (result.error) throw new Error(result.error.message);
+    rows.push(...result.data ?? []);
+    if ((result.data ?? []).length < 500) break;
+  }
+  return { data: rows, error: null };
 }
 
 export async function loadOpsStationManpower(
@@ -260,7 +274,7 @@ export async function loadOpsStationManpower(
   const leaveFilters = [employeeIds.length ? `employee_id.in.(${employeeIds.join(",")})` : "", contractorIds.length ? `contractor_id.in.(${contractorIds.join(",")})` : ""].filter(Boolean);
   const workerIds = rawPeople.map((person) => person.id);
   const enrolmentIds = [...new Set(rawPeople.flatMap((person) => biometricVariants(person.biometricId)))];
-  const [attendanceResult, punchResult, datedRosterResult, weeklyPlansResult, leaveResult] = await Promise.all([
+  const [attendanceResult, punchResult, datedRosterResult, weeklyPlansResult, leaveResult, rosterHints] = await Promise.all([
     admin.from("attendance_daily")
       .select("enrolment_id,worker_type,employee_id,contractor_id,in_time,out_time,punch_count,work_minutes,status,work_mode,wfh_scheduled_start_at,wfh_scheduled_end_at,wfh_credit_finalized_at")
       .eq("company_id", companyId).eq("punch_date", asOf).neq("status", "U").limit(5000),
@@ -268,14 +282,15 @@ export async function loadOpsStationManpower(
       .select("enrolment_id,punch_time,punch_label,location_id,device_id")
       .eq("company_id", companyId).eq("punch_date", asOf).eq("calculated", true)
       .in("enrolment_id", enrolmentIds).order("punch_time", { ascending: true }).limit(5000) : Promise.resolve({ data: [], error: null }),
-    workerIds.length ? admin.from("hr_roster_entries")
+    workerIds.length ? allRosterRows(() => admin.from("hr_roster_entries")
       .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
-      .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).eq("hr_roster_plans.status", "approved").eq("hr_roster_plans.roster_kind", "dated").limit(5000) : Promise.resolve({ data: [], error: null }),
-    admin.from("hr_roster_plans")
-      .select("id,status,roster_kind,effective_from,superseded_at,revision_no,location_id,hr_roster_plan_locations(location_id)")
-      .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").lte("effective_from", asOf).limit(2000),
+      .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).eq("hr_roster_plans.status", "approved").eq("hr_roster_plans.roster_kind", "dated").order("id")) : Promise.resolve({ data: [], error: null }),
+    allRosterRows(() => admin.from("hr_roster_plans")
+      .select("id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at")
+      .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").lte("effective_from", asOf).order("id")),
     leaveFilters.length ? admin.from("hr_leave_requests")
-      .select("employee_id,contractor_id").eq("company_id", companyId).eq("status", "approved").or(leaveFilters.join(",")).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null })
+      .select("employee_id,contractor_id").eq("company_id", companyId).eq("status", "approved").or(leaveFilters.join(",")).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null }),
+    loadRosterSetupHints(admin, companyId, workerIds, asOf)
   ]);
   const detailError = attendanceResult.error ?? punchResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error;
   if (detailError) throw new Error(detailError.message);
@@ -306,20 +321,13 @@ export async function loadOpsStationManpower(
     rows.push(punch);
     punchesByEnrolment.set(key, rows);
   }
-  const selectedLocationIds = new Set(locations.map((location) => location.id));
-  const activeWeeklyPlans = (weeklyPlansResult.data ?? []).filter((plan) => {
-    if (plan.superseded_at && !(asOf < plan.superseded_at)) return false;
-    const linked = Array.isArray(plan.hr_roster_plan_locations) ? plan.hr_roster_plan_locations : [];
-    if (plan.location_id && selectedLocationIds.has(plan.location_id)) return true;
-    if (linked.some((item: { location_id: string }) => selectedLocationIds.has(item.location_id))) return true;
-    // Keep plans without location metadata so worker-scoped entries can still resolve.
-    return !plan.location_id && linked.length === 0;
-  });
+  // People were already scoped to authorised current locations above. A transfer
+  // must not hide their approved recurring plan just because it was saved elsewhere.
+  const activeWeeklyPlans = weeklyPlansResult.data.filter(plan => isRosterPlanActiveOn(plan, asOf));
   const activeWeeklyPlanIds = activeWeeklyPlans.map((plan) => plan.id);
-  const weeklyEntriesResult = activeWeeklyPlanIds.length && workerIds.length ? await admin.from("hr_roster_entries")
+  const weeklyEntriesResult = activeWeeklyPlanIds.length && workerIds.length ? await allRosterRows(() => admin.from("hr_roster_entries")
     .select("plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes)")
-    .eq("company_id", companyId).in("plan_id", activeWeeklyPlanIds).in("worker_id", workerIds).limit(5000) : { data: [], error: null };
-  if (weeklyEntriesResult.error) throw new Error(weeklyEntriesResult.error.message);
+    .eq("company_id", companyId).in("plan_id", activeWeeklyPlanIds).in("worker_id", workerIds).order("id")) : { data: [], error: null };
   const weeklyPlanById = new Map(activeWeeklyPlans.map((plan) => [plan.id, plan]));
   const rosterRows = [
     ...(datedRosterResult.data ?? []),
@@ -354,9 +362,7 @@ export async function loadOpsStationManpower(
   const people = rawPeople.map((person): OpsStationManpowerPerson => {
     const roster = rosterRows.filter((row) => {
       const plan = relation(row.hr_roster_plans as Relation<{ status: string; roster_kind: string | null; effective_from: string | null; superseded_at: string | null; revision_no: number | null }>);
-      return row.worker_type === person.workerType && row.worker_id === person.id && plan?.status === "approved"
-        && (!plan.effective_from || plan.effective_from <= asOf)
-        && (!plan.superseded_at || asOf < plan.superseded_at);
+      return row.worker_type === person.workerType && row.worker_id === person.id && isRosterPlanActiveOn(plan, asOf);
     }).sort((left, right) => {
       // Ties on roster_kind/revision_no/effective_from happen for real when
       // two approved dated plans briefly cover the same week - updated_at
@@ -420,6 +426,8 @@ export async function loadOpsStationManpower(
       availability,
       today: {
         ...bounds,
+        rosterSetupStatus: roster ? null : rosterHints.get(`${person.workerType}:${person.id}`)?.status ?? null,
+        rosterSetupLabel: roster ? null : rosterHints.get(`${person.workerType}:${person.id}`)?.label ?? null,
         earlyMinutes,
         workMode: attendance?.work_mode ?? null,
         wfhState,
