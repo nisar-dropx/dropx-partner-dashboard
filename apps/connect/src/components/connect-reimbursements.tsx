@@ -35,7 +35,7 @@ type Claim = {
   items: Array<{ id: string; expense_date: string; merchant?: string | null; description: string; amount: number; approved_amount?: number | null; finance_policy_snapshot?: ExpensePolicyQuote | null; hr_expense_categories?: { id: string; name: string; code: string } | Array<{ id: string; name: string; code: string }> | null }>;
   steps: Array<{ id: string; step_order: number; step_name: string; status: string; approver_name?: string | null; decision_note?: string | null; decided_at?: string | null }>;
   events: Array<{ id: string; event_type: string; actor_name?: string | null; actor_role?: string | null; comments?: string | null; created_at: string; metadata?: Record<string, unknown> }>;
-  attachments: Array<{ id: string; item_id?: string | null; file_name: string; content_type?: string | null; url?: string | null }>;
+  attachments: Array<{ id: string; item_id?: string | null; file_name: string; content_type?: string | null; document_kind?: "receipt" | "supporting_approval" | null; url?: string | null }>;
   payment?: { request_no: string; status: string; approval_status?: string | null; utr_cin?: string | null; bank_status?: string | null; bank_processing_remarks?: string | null; processed_at?: string | null } | null;
 };
 type Payload = {
@@ -60,6 +60,13 @@ function dateTime(value: string) { return new Date(value).toLocaleString("en-IN"
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function statusLabel(status: string) { return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function amountInput(value: number) { return value > 0 ? String(value) : ""; }
+function documentLabel(attachment: { document_kind?: string | null; file_name: string }) {
+  return attachment.document_kind === "supporting_approval" ? "Special approval proof" : attachment.file_name === "receipts.pdf" ? "Receipt pack" : attachment.file_name;
+}
+// Each pick adds to the list; a file that is already picked is ignored.
+function addPickedFiles(current: File[], picked: File[], limit: number) {
+  return [...current, ...picked.filter((file) => !current.some((existing) => existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified))].slice(0, limit);
+}
 
 async function responsePayload(response: Response) {
   const text = await response.text();
@@ -157,6 +164,8 @@ export function ConnectReimbursements({ account, active = true }: { account: App
   const [purpose, setPurpose] = useState("");
   const [items, setItems] = useState<ExpenseItem[]>([newItem()]);
   const [receipts, setReceipts] = useState<File[]>([]);
+  const [supportingDocuments, setSupportingDocuments] = useState<File[]>([]);
+  const [keepExistingDocuments, setKeepExistingDocuments] = useState(true);
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -229,6 +238,13 @@ export function ConnectReimbursements({ account, active = true }: { account: App
   const estimateCategories = useMemo(() => requestExpenseCategories(data?.categories ?? []), [data?.categories]);
   const visibleExpectedExpenses = useMemo(() => requestExpenseAmounts(expectedExpenses, estimateCategories), [expectedExpenses, estimateCategories]);
   const estimatedTotal = useMemo(() => sumExpectedExpenses(visibleExpectedExpenses), [visibleExpectedExpenses]);
+  const editingClaim = useMemo(
+    () => (editingClaimId ? data?.claims.find((claim) => claim.id === editingClaimId) ?? null : null),
+    [data?.claims, editingClaimId]
+  );
+  const existingDocuments = editingClaim?.attachments ?? [];
+  const keepsExistingReceipts = keepExistingDocuments && existingDocuments.some((attachment) => attachment.document_kind !== "supporting_approval");
+  const today = todayInIndia();
   const selectedStations = useMemo(
     () => (data?.stations ?? []).filter((station) => selectedStationIds.includes(station.id)),
     [data?.stations, selectedStationIds]
@@ -288,6 +304,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
     setTripTo(request.trip_to ?? "");
     setItems([newItem()]);
     setReceipts([]);
+    setSupportingDocuments([]);
     setEditingClaimId(null);
     setTab("claims");
     setNotice("Complete expense lines and attach receipts for the approved request.");
@@ -392,8 +409,16 @@ export function ConnectReimbursements({ account, active = true }: { account: App
     event.preventDefault(); setSaving(true); setError(""); setNotice("");
     try {
       if (!editingClaimId && !selectedRequestId) throw new Error("Select an approved request before submitting a claim.");
-      if (!receipts.length) throw new Error("Attach at least one receipt image or PDF.");
-      const uploadedReceipts = await prepareAndUploadReceipts(account, receipts);
+      if (!receipts.length && !keepsExistingReceipts) throw new Error("Attach at least one receipt image or PDF.");
+      if (items.some((item) => item.expenseDate > today)) throw new Error("An expense date cannot be in the future. Correct the date on each expense line.");
+      const uploadedReceipts = receipts.length ? await prepareAndUploadReceipts(account, receipts) : [];
+      let uploadedSupporting: Awaited<ReturnType<typeof prepareAndUploadReceipts>> = [];
+      try {
+        uploadedSupporting = supportingDocuments.length ? await prepareAndUploadReceipts(account, supportingDocuments) : [];
+      } catch (reason) {
+        discardPreparedReceipts(account, uploadedReceipts.map((receipt) => receipt.path));
+        throw reason;
+      }
       const form = new FormData();
       form.set("kind", "claim");
       form.set("accountId", account.id);
@@ -405,14 +430,16 @@ export function ConnectReimbursements({ account, active = true }: { account: App
       if (editingClaimId) form.set("claimId", editingClaimId);
       form.set("items", JSON.stringify(items.map((item) => ({ ...item, amount: Number(item.amount) }))));
       form.set("uploadedReceipts", JSON.stringify(uploadedReceipts));
+      form.set("uploadedSupportingDocuments", JSON.stringify(uploadedSupporting));
+      if (editingClaimId && keepExistingDocuments) form.set("keepExistingDocuments", "1");
       const response = await fetch("/api/connect/reimbursements", { method: "POST", body: form });
       const payload = await responsePayload(response);
       if (!response.ok) {
-        discardPreparedReceipts(account, uploadedReceipts.map((receipt) => receipt.path));
+        discardPreparedReceipts(account, [...uploadedReceipts, ...uploadedSupporting].map((receipt) => receipt.path));
         throw new Error(String(payload.error || "Unable to submit claim."));
       }
       setNotice(String(payload.notice || "Claim submitted."));
-      setPurpose(""); setTripFrom(""); setTripTo(""); setItems([newItem()]); setReceipts([]); setSelectedRequestId(""); setEditingClaimId(null);
+      setPurpose(""); setTripFrom(""); setTripTo(""); setItems([newItem()]); setReceipts([]); setSupportingDocuments([]); setSelectedRequestId(""); setEditingClaimId(null);
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to submit claim.");
@@ -437,9 +464,11 @@ export function ConnectReimbursements({ account, active = true }: { account: App
       amount: String(item.amount)
     })));
     setReceipts([]);
+    setSupportingDocuments([]);
+    setKeepExistingDocuments(true);
     setExpanded(null);
     setTab("claims");
-    setNotice("Correct the returned claim, re-attach receipts, and resubmit through the current approval policy.");
+    setNotice("Correct the returned claim and resubmit. Your attached receipts are kept; add any document the approver asked for.");
   }
 
   return <section className="dx-expenses">
@@ -654,10 +683,10 @@ export function ConnectReimbursements({ account, active = true }: { account: App
 
     {!loading && tab === "claims" ? <>
       {(claimableRequests.length || editingClaimId) ? <form className="dx-expense-form" onSubmit={submitClaim}>
-        {editingClaimId ? <div className="dx-alert warning">You are correcting a returned claim. Previous decisions remain in the audit timeline.</div> : null}
+        {editingClaimId ? <div className="dx-alert warning">You are correcting a returned claim. Previous decisions remain in the audit timeline.{editingClaim?.return_reason ? <><br /><strong>Returned because:</strong> {editingClaim.return_reason}</> : null}</div> : null}
         <section className="dx-expense-summary">
           <div><ReceiptText /><span><small>Report total</small><strong>{money(total)}</strong></span></div>
-          <div><FileText /><span><small>Receipt files</small><strong>{receipts.length}</strong></span></div>
+          <div><FileText /><span><small>Documents</small><strong>{receipts.length + supportingDocuments.length + (keepExistingDocuments ? existingDocuments.length : 0)}</strong></span></div>
         </section>
         <section className="dx-expense-card">
           <h2>Claim against approved request</h2>
@@ -688,11 +717,12 @@ export function ConnectReimbursements({ account, active = true }: { account: App
         </section>
         <section className="dx-expense-card">
           <header>
-            <div><h2>Expense lines</h2><p>Add every bill. For multi-night hotel bills, enter one dated line per night.</p></div>
+            <div><h2>Expense lines</h2><p>Add every bill. For a hotel or daily-allowance bill covering several days, enter the first date and the number of days / nights.</p></div>
             <button className="dx-small-action" onClick={() => setItems((current) => [...current, newItem()])} type="button"><Plus /> Add line</button>
           </header>
           <div className="dx-expense-lines">{items.map((item, index) => {
             const category = data?.categories.find((entry) => entry.id === item.categoryId);
+            const quote = policyQuotes.find((line) => line.id === item.id && line.category_id === item.categoryId);
             return <article key={item.id}>
               <header>
                 <strong>#{index + 1}</strong>
@@ -701,14 +731,15 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                 {items.length > 1 ? <button aria-label="Remove expense line" onClick={() => setItems((current) => current.filter((entry) => entry.id !== item.id))} type="button"><Trash2 /></button> : null}
               </header>
               <div className="dx-expense-line-grid">
-                <label>Category<select onChange={(event) => changeItem(item.id, { categoryId: event.target.value })} required value={item.categoryId}><option value="">Select</option>{data?.categories.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
-                <label>Date<input onChange={(event) => changeItem(item.id, { expenseDate: event.target.value })} required type="date" value={item.expenseDate} /></label>
+                <label>Category<select onChange={(event) => changeItem(item.id, { categoryId: event.target.value, quantity: "" })} required value={item.categoryId}><option value="">Select</option>{data?.categories.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
+                <label>{quote?.limit_basis === "per_day" ? "First date" : "Date"}<input max={today} onChange={(event) => changeItem(item.id, { expenseDate: event.target.value })} required type="date" value={item.expenseDate} /></label>
                 <label>Amount<input min="0.01" onChange={(event) => changeItem(item.id, { amount: event.target.value })} required step="0.01" type="number" value={item.amount} /></label>
-                {policyQuotes.find(line => line.id === item.id && line.category_id === item.categoryId)?.limit_basis === "per_km" ? <label>Distance (km)<input min="0.001" max="100000" step="0.001" type="number" inputMode="decimal" required value={item.quantity} onChange={event => changeItem(item.id, { quantity: event.target.value })} /></label> : null}
+                {quote?.limit_basis === "per_day" ? <label>Days / nights<input min="1" max="31" step="1" type="number" inputMode="numeric" value={item.quantity || "1"} onChange={event => changeItem(item.id, { quantity: event.target.value })} /></label> : null}
+                {quote?.limit_basis === "per_km" ? <label>Distance (km)<input min="0.001" max="100000" step="0.001" type="number" inputMode="decimal" required value={item.quantity} onChange={event => changeItem(item.id, { quantity: event.target.value })} /></label> : null}
                 <label>Merchant<input maxLength={160} onChange={(event) => changeItem(item.id, { merchant: event.target.value })} placeholder="Vendor / hotel" value={item.merchant} /></label>
                 <label className="wide">Description<input maxLength={500} onChange={(event) => changeItem(item.id, { description: event.target.value })} placeholder="What was this expense for?" required value={item.description} /></label>
               </div>
-              {category ? <p role="status" className="dx-expense-help">{policyLoading ? "Checking Finance policy…" : policyQuotes.find(line => line.id === item.id) ? expensePolicyMessage(policyQuotes.find(line => line.id === item.id)!) : "Policy check unavailable. Submission will be checked by the server."}</p> : null}
+              {category ? <p role="status" className="dx-expense-help">{policyLoading ? "Checking Finance policy…" : quote ? expensePolicyMessage(quote) : "Policy check unavailable. Submission will be checked by the server."}</p> : null}
             </article>;
           })}</div>
           {policyError ? <p role="alert" className="dx-alert warning">{policyError}</p> : null}
@@ -717,17 +748,41 @@ export function ConnectReimbursements({ account, active = true }: { account: App
         <section className="dx-expense-card">
           <h2>Receipts</h2>
           <p className="dx-expense-help">Upload multiple images or PDFs. They are merged into a single PDF before storage.</p>
+          {editingClaimId && existingDocuments.length ? <>
+            <ul className="dx-expense-file-list">{existingDocuments.map((attachment) => <li key={attachment.id}>
+              <FileText /><span>{documentLabel(attachment)}</span><small>{keepExistingDocuments ? "Attached" : "Will be replaced"}</small>
+              {attachment.url ? <a aria-label={`View ${documentLabel(attachment)}`} href={attachment.url} rel="noreferrer" target="_blank"><Download /></a> : <i />}
+            </li>)}</ul>
+            <label className="dx-expense-keep-documents">
+              <input checked={keepExistingDocuments} onChange={(event) => setKeepExistingDocuments(event.target.checked)} type="checkbox" />
+              <span>Keep the documents already attached<small>New files are added to the same pack. Untick to replace everything with new uploads.</small></span>
+            </label>
+          </> : null}
           <label className="dx-expense-upload">
             <Upload />
-            <span><strong>Add images or PDFs</strong><small>PDF, JPG, PNG, WebP · max 10 MB each</small></span>
+            <span><strong>{keepsExistingReceipts ? "Add more receipts" : "Add images or PDFs"}</strong><small>PDF, JPG, PNG, WebP · max 10 MB each</small></span>
             <input accept="application/pdf,image/jpeg,image/png,image/webp" multiple onChange={(event) => {
-              // Each pick adds to the list; the input is cleared so the same file can be picked again after removal.
+              // The input is cleared so the same file can be picked again after removal.
               const picked = Array.from(event.target.files ?? []);
               event.target.value = "";
-              setReceipts((current) => [...current, ...picked.filter((file) => !current.some((existing) => existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified))].slice(0, 20));
-            }} required={receipts.length === 0} type="file" />
+              setReceipts((current) => addPickedFiles(current, picked, 20));
+            }} required={receipts.length === 0 && !keepsExistingReceipts} type="file" />
           </label>
           {receipts.length ? <ul className="dx-expense-file-list">{receipts.map((file, index) => <li key={`${file.name}-${file.size}-${file.lastModified}`}><FileText /><span>{file.name}</span><small>{Math.ceil(file.size / 1024)} KB</small><button aria-label={`Remove ${file.name}`} onClick={() => setReceipts((current) => current.filter((_, position) => position !== index))} type="button"><X /></button></li>)}</ul> : null}
+        </section>
+        <section className="dx-expense-card">
+          <h2>Special approval proof</h2>
+          <p className="dx-expense-help">Optional. If an expense is above your policy limit, attach the approval you received — for example a print of the approval email. Finance reviews it as a separate document before deciding the payable amount.</p>
+          <label className="dx-expense-upload">
+            <Upload />
+            <span><strong>Add approval email or letter</strong><small>PDF, JPG, PNG, WebP · max 10 MB each</small></span>
+            <input accept="application/pdf,image/jpeg,image/png,image/webp" multiple onChange={(event) => {
+              const picked = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              setSupportingDocuments((current) => addPickedFiles(current, picked, 10));
+            }} type="file" />
+          </label>
+          {supportingDocuments.length ? <ul className="dx-expense-file-list">{supportingDocuments.map((file, index) => <li key={`${file.name}-${file.size}-${file.lastModified}`}><FileText /><span>{file.name}</span><small>{Math.ceil(file.size / 1024)} KB</small><button aria-label={`Remove ${file.name}`} onClick={() => setSupportingDocuments((current) => current.filter((_, position) => position !== index))} type="button"><X /></button></li>)}</ul> : null}
         </section>
         <div id="dx-expense-claim-feedback" aria-live="polite">
           {error ? <div className="dx-alert error">{error}</div> : null}
@@ -750,13 +805,14 @@ export function ConnectReimbursements({ account, active = true }: { account: App
             {claim.items.map((item) => <div className="dx-expense-row" key={item.id}>
               <span>
                 <strong>{first(item.hr_expense_categories)?.name ?? "Expense"}</strong>
-                <small>{item.expense_date} · {item.merchant || item.description}</small>
+                <small>{item.expense_date}{Number(item.finance_policy_snapshot?.days) > 1 ? ` · ${item.finance_policy_snapshot?.days} days / nights` : ""} · {item.merchant || item.description}</small>
+                {Number(item.approved_amount ?? item.amount) < Number(item.amount) ? <small>Claimed {money(item.amount)}</small> : null}
                 {item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}
               </span>
               <b>{money(item.approved_amount ?? item.amount)}</b>
             </div>)}
             {claim.attachments.filter((attachment) => attachment.url).map((attachment) => (
-              <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText /> {attachment.file_name}</a>
+              <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText /> {documentLabel(attachment)}</a>
             ))}
           </section>
           <section>

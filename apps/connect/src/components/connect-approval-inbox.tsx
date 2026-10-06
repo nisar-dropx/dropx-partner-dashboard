@@ -3,7 +3,7 @@
 import type { ConnectApprovalSection } from "@/lib/connect-approval-links";
 import type { PayAdvanceApproval } from "@/lib/connect-pay-advance-approval";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, Eye, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, Eye, FileText, Home, LocateFixed, MapPin, MapPinned, Pencil, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ConnectDialog } from "./connect-dialog";
 import type { AppAccount } from "./connect-profile-app";
@@ -12,7 +12,7 @@ import { TimeOffAttachmentLink, type TimeOffAttachment } from "./time-off-attach
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
-import { expensePolicyMessage, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
+import { expensePolicyMessage, expensePolicyRule, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
 import { EXPECTED_EXPENSE_KEYS, sumExpectedExpenses, type ExpectedExpenses } from "@/lib/expense-request-form";
 
 type ApprovalJourney = {
@@ -43,7 +43,7 @@ type ExpenseItem = {
   hr_expense_categories?: { name: string } | Array<{ name: string }> | null;
 };
 
-type Attachment = { id: string; item_id?: string | null; file_name: string; url?: string | null };
+type Attachment = { id: string; item_id?: string | null; file_name: string; document_kind?: "receipt" | "supporting_approval" | null; url?: string | null };
 
 type ReimbursementApproval = {
   id: string;
@@ -306,7 +306,15 @@ function dateTime(value: string | null) {
 function statusLabel(status: string) {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+function expenseDocumentLabel(attachment: Attachment) {
+  return attachment.document_kind === "supporting_approval" ? "Special approval proof" : "Receipt pack";
+}
+/** What will be paid for a line: Finance's figure when set, otherwise the policy-eligible amount. */
+function expensePayable(item: ExpenseItem) {
+  return Number(item.approved_amount ?? item.finance_policy_snapshot?.eligible_amount ?? item.amount);
+}
 function expensePolicyState(quote?: ExpensePolicyQuote | null) {
+  if (quote?.finance_adjustment) return { label: "Adjusted by Finance", tone: "warning" };
   if (!quote || quote.limit_amount == null) return { label: "Policy not configured", tone: "neutral" };
   if (quote.expense_allowed === false) return { label: "Not allowed", tone: "danger" };
   if (quote.excess_amount <= 0) return { label: "Within policy", tone: "success" };
@@ -650,6 +658,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const [exitWithdrawalApprovals, setExitWithdrawalApprovals] = useState<ExitWithdrawalApproval[]>([]);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [payableEdit, setPayableEdit] = useState<{ itemId: string; amount: string; note: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -657,7 +666,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const [othersOpen, setOthersOpen] = useState(false);
   const othersRef = useRef<HTMLDivElement | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  function closeModal() { setActiveKey(null); setExpenseOversightDetail(null); }
+  function closeModal() { setActiveKey(null); setExpenseOversightDetail(null); setPayableEdit(null); }
   async function act(fn: () => Promise<void>) { await fn(); closeModal(); }
 
   useEffect(() => {
@@ -812,6 +821,27 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
       if (!response.ok) throw new Error(payload.error || "Unable to update reimbursement.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [claimId]: "" })); await load();
     } catch (reason) { setError(userFacingError(reason, "Unable to update reimbursement.")); }
+    finally { setSaving(false); }
+  }
+
+  /** Finance sets the payable amount of one line; the claim stays open for the decision. */
+  async function adjustReimbursementItem(claimId: string, item: ExpenseItem) {
+    if (!payableEdit || payableEdit.itemId !== item.id) return;
+    const amount = Number(payableEdit.amount);
+    if (payableEdit.amount.trim() === "" || !Number.isFinite(amount) || amount < 0) { setError("Enter a valid payable amount."); return; }
+    if (amount > Number(item.amount)) { setError(`The payable amount cannot exceed the claimed bill amount of ${money(item.amount)}.`); return; }
+    if (payableEdit.note.trim().length < 3) { setError("Record why the payable amount is being changed."); return; }
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/reimbursements", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, kind: "claim", action: "adjust_item", claimId, itemId: item.id, amount, note: payableEdit.note.trim() })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update the payable amount.");
+      setNotice(payload.notice); setPayableEdit(null); await load();
+    } catch (reason) { setError(userFacingError(reason, "Unable to update the payable amount.")); }
     finally { setSaving(false); }
   }
 
@@ -1883,7 +1913,8 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             if (!approval) return null;
             const financeReview = approval.stage_code === "finance" || approval.step_name === "Finance approval";
             const items = approval.claim.hr_expense_items ?? [];
-            const payableTotal = items.reduce((sum, item) => sum + Number(item.finance_policy_snapshot?.eligible_amount ?? item.amount), 0);
+            const payableTotal = items.reduce((sum, item) => sum + expensePayable(item), 0);
+            const adjustedCount = items.filter((item) => item.finance_policy_snapshot?.finance_adjustment).length;
             const cappedCount = items.filter((item) => item.finance_policy_snapshot?.excess_action === "cap" && Number(item.finance_policy_snapshot.excess_amount) > 0).length;
             const exceptionCount = items.filter((item) => item.finance_policy_snapshot?.excess_action === "special_approval" && Number(item.finance_policy_snapshot.excess_amount) > 0).length;
             return (
@@ -1897,7 +1928,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                 {financeReview ? <section className="dx-finance-review">
                   <header>
                     <span><small>Claimed</small><strong>{money(approval.claim.total_claimed)}</strong></span>
-                    <span><small>Policy payable</small><strong>{money(payableTotal)}</strong></span>
+                    <span className={adjustedCount ? "warning" : ""}><small>{adjustedCount ? "Payable · Finance adjusted" : "Policy payable"}</small><strong>{money(payableTotal)}</strong></span>
                     <span className={cappedCount ? "warning" : ""}><small>Capped lines</small><strong>{cappedCount}</strong></span>
                     <span className={exceptionCount ? "danger" : ""}><small>Exceptions</small><strong>{exceptionCount}</strong></span>
                   </header>
@@ -1906,16 +1937,28 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                     {items.map((item) => {
                       const quote = item.finance_policy_snapshot;
                       const state = expensePolicyState(quote);
-                      return <div className="row" key={item.id} role="row">
-                        <span><b>{first(item.hr_expense_categories)?.name ?? "Expense"}</b><small>{displayDate(item.expense_date)}{item.merchant ? ` · ${item.merchant}` : ""}</small>{item.description ? <small>{item.description}</small> : null}</span>
+                      const adjustment = quote?.finance_adjustment;
+                      const editing = payableEdit?.itemId === item.id ? payableEdit : null;
+                      return <div className={editing ? "row editing" : "row"} key={item.id} role="row">
+                        <span><b>{first(item.hr_expense_categories)?.name ?? "Expense"}</b><small>{displayDate(item.expense_date)}{Number(quote?.days) > 1 ? ` · ${quote?.days} days / nights` : ""}{item.merchant ? ` · ${item.merchant}` : ""}</small>{item.description ? <small>{item.description}</small> : null}</span>
                         <span data-label="Claimed">{money(item.amount)}</span>
-                        <span data-label="Policy rule">{quote?.limit_amount == null ? "Not set" : `${money(quote.limit_amount)} ${quote.limit_basis === "per_day" ? "/ day" : quote.limit_basis === "per_km" ? "/ km" : "/ item"}`}</span>
-                        <span data-label="Payable"><b>{money(quote?.eligible_amount ?? item.amount)}</b></span>
-                        <span data-label="Assessment"><em className={state.tone}>{state.label}</em>{quote?.policy_note ? <small title={quote.policy_note}>{quote.policy_note}</small> : null}</span>
+                        <span data-label="Policy rule">{expensePolicyRule(quote)}</span>
+                        <span data-label="Payable">
+                          <b>{money(expensePayable(item))}</b>
+                          {adjustment ? <small>Policy {money(adjustment.policy_eligible_amount)}</small> : null}
+                          {editing ? null : <button className="dx-finance-payable-edit" disabled={saving} onClick={() => { setError(""); setPayableEdit({ itemId: item.id, amount: String(expensePayable(item)), note: "" }); }} type="button"><Pencil />Edit</button>}
+                        </span>
+                        <span data-label="Assessment"><em className={state.tone}>{state.label}</em>{adjustment ? <small title={adjustment.note}>{adjustment.note}</small> : quote?.policy_note ? <small title={quote.policy_note}>{quote.policy_note}</small> : null}</span>
+                        {editing ? <form className="dx-finance-payable-form" onSubmit={(event) => { event.preventDefault(); void adjustReimbursementItem(approval.claim.id, item); }}>
+                          <label>Payable amount (₹)<input autoFocus inputMode="decimal" max={Number(item.amount)} min="0" onChange={(event) => setPayableEdit({ ...editing, amount: event.target.value })} required step="0.01" type="number" value={editing.amount} /><small>Up to the claimed {money(item.amount)}</small></label>
+                          <label>Reason<input maxLength={500} minLength={3} onChange={(event) => setPayableEdit({ ...editing, note: event.target.value })} placeholder="e.g. 3 nights at ₹1,200; special approval mail verified" required value={editing.note} /></label>
+                          {error ? <p className="dx-approval-error" role="alert">{error}</p> : null}
+                          <div><button disabled={saving} onClick={() => { setError(""); setPayableEdit(null); }} type="button">Cancel</button><button className="primary" disabled={saving} type="submit">{saving ? "Saving…" : "Save payable"}</button></div>
+                        </form> : null}
                       </div>;
                     })}
                   </div>
-                  <p>Finance must verify the receipt, expense head, business-policy limit, eligible payable amount, and exception status before deciding.</p>
+                  <p>Finance must verify the receipt, expense head, business-policy limit, eligible payable amount, and exception status before deciding. Use Edit to set a line's payable amount after checking a special approval; the amount sent to Payments is the payable total shown above.</p>
                 </section> : <dl className="dx-approval-facts">
                   {items.map((item) => (
                     <div key={item.id}><dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt><dd>{item.expense_date} · {money(item.amount)}{item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}</dd></div>
@@ -1924,11 +1967,11 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                 <dl className="dx-approval-facts">
                   {approval.claim.attachments?.filter((attachment) => attachment.url).map((attachment) => (
                     <div key={attachment.id}>
-                      <dt>Receipt pack</dt>
+                      <dt>{expenseDocumentLabel(attachment)}</dt>
                       <dd>
                         <ConnectAttachmentViewer
-                          files={[{ label: attachment.file_name || "Receipt", url: attachment.url as string, fileName: attachment.file_name }]}
-                          title={`${approval.claim.requesterName} · ${attachment.file_name || "Receipt"}`}
+                          files={[{ label: expenseDocumentLabel(attachment), url: attachment.url as string, fileName: attachment.file_name }]}
+                          title={`${approval.claim.requesterName} · ${expenseDocumentLabel(attachment)}`}
                           trigger={<><FileText />{attachment.file_name}</>}
                         />
                       </dd>
@@ -1960,7 +2003,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               <div className="dx-oversight-status"><span><small>Status</small><strong>{statusLabel(claim.status)}</strong></span><span><small>Submitted</small><strong>{dateTime(claim.submitted_at ?? null)}</strong></span><span><small>Claimed</small><strong>{money(claim.total_claimed)}</strong></span><span><small>Approved / payable</small><strong>{claim.total_approved == null ? "Pending" : money(claim.total_approved)}</strong></span></div>
               <dl className="dx-approval-facts">
                 {claim.items.map((item) => <div key={item.id}><dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt><dd>{displayDate(item.expense_date)} · {money(item.amount)}{item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}</dd></div>)}
-                {claim.attachments.filter((attachment) => attachment.url).map((attachment) => <div key={attachment.id}><dt>Receipt</dt><dd><ConnectAttachmentViewer files={[{ label: attachment.file_name || "Receipt", url: attachment.url as string, fileName: attachment.file_name }]} title={`${claim.requesterName} · ${attachment.file_name || "Receipt"}`} trigger={<><FileText />{attachment.file_name}</>} /></dd></div>)}
+                {claim.attachments.filter((attachment) => attachment.url).map((attachment) => <div key={attachment.id}><dt>{expenseDocumentLabel(attachment)}</dt><dd><ConnectAttachmentViewer files={[{ label: attachment.file_name || "Receipt", url: attachment.url as string, fileName: attachment.file_name }]} title={`${claim.requesterName} · ${attachment.file_name || "Receipt"}`} trigger={<><FileText />{attachment.file_name}</>} /></dd></div>)}
               </dl>
               <section className="dx-oversight-route">
                 <h3>Approval route</h3>
@@ -2130,10 +2173,10 @@ function ReimbursementApprovalHistory({ account }: { account: AppAccount }) {
               <div><dt>Claim status now</dt><dd>{statusLabel(item.claim.status ?? "")}</dd></div>
               <div><dt>Your decision</dt><dd>{statusLabel(item.status)} on {decidedOn(item.decided_at)}{item.decision_note ? ` · ${item.decision_note}` : ""}</dd></div>
             </dl>
-            {lines.length ? <table className="dx-approval-history-table"><thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Amount</th></tr></thead><tbody>
+            {lines.length ? <table className="dx-approval-history-table"><thead><tr><th>Date</th><th>Category</th><th>Details</th><th>Claimed</th><th>Payable</th></tr></thead><tbody>
               {lines.map((line) => {
                 const category = Array.isArray(line.hr_expense_categories) ? line.hr_expense_categories[0] : line.hr_expense_categories;
-                return <tr key={line.id}><td>{displayDate(line.expense_date)}</td><td>{category?.name ?? "—"}</td><td>{[line.merchant, line.description].filter(Boolean).join(" · ") || "—"}</td><td>{money(line.amount)}</td></tr>;
+                return <tr key={line.id}><td>{displayDate(line.expense_date)}</td><td>{category?.name ?? "—"}</td><td>{[line.merchant, line.description].filter(Boolean).join(" · ") || "—"}</td><td>{money(line.amount)}</td><td>{money(expensePayable(line))}</td></tr>;
               })}
             </tbody></table> : null}
             {item.claim.attachments?.length ? <p className="dx-approval-history-files">{item.claim.attachments.map((file) => file.url

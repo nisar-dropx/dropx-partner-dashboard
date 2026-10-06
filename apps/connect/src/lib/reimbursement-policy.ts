@@ -5,14 +5,32 @@ export type ExpensePolicyQuote = {
   quantity?: number | null; quantity_required?: boolean; policy_note?: string | null;
   excess_amount: number; eligible_amount: number; excess_action: "cap" | "special_approval" | null;
   special_approver_user_id: string | null; rule_id: string | null;
+  /** Days/nights a per-day line covers. */
+  days?: number | null;
+  /** Present once the Finance approver has set the payable amount by hand. */
+  finance_adjustment?: { policy_eligible_amount: number; amount: number; note: string; adjusted_by_name?: string | null; adjusted_at?: string | null } | null;
 };
 const money = (value: number) => `₹${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+/** The ceiling a line is measured against, e.g. "₹1,200 / day × 3". */
+export function expensePolicyRule(quote: ExpensePolicyQuote | null | undefined) {
+  if (!quote || quote.limit_amount == null) return "Not set";
+  if (quote.limit_basis === "per_day") return `${money(quote.limit_amount)} / day${Number(quote.days) > 1 ? ` × ${quote.days}` : ""}`;
+  if (quote.limit_basis === "per_km") return `${money(quote.limit_amount)} / km${quote.quantity ? ` × ${quote.quantity}` : ""}`;
+  return `${money(quote.limit_amount)} / item`;
+}
 export function expensePolicyMessage(quote: ExpensePolicyQuote) {
+  const assessed = policyAssessment(quote);
+  const adjustment = quote.finance_adjustment;
+  return adjustment ? `${assessed} · Finance set the payable amount to ${money(adjustment.amount)}: ${adjustment.note}` : assessed;
+}
+function policyAssessment(quote: ExpensePolicyQuote) {
+  // After a Finance adjustment eligible_amount holds the adjusted figure; the policy figure is kept beside it.
+  const policyEligible = quote.finance_adjustment?.policy_eligible_amount ?? quote.eligible_amount;
   if (quote.expense_allowed === false) return "Not eligible for reimbursement under your designation's Finance policy.";
   if (quote.limit_amount == null) return "Designation limit not configured in Finance. Subject to the existing approval policy.";
-  const limit = `Limit ${money(quote.limit_amount)} ${quote.limit_basis === "per_day" ? "per day / night" : quote.limit_basis === "per_km" ? `per km${quote.quantity ? ` × ${quote.quantity} km` : ""}` : "per expense item"}`;
+  const limit = `Limit ${money(quote.limit_amount)} ${quote.limit_basis === "per_day" ? `per day / night${Number(quote.days) > 1 ? ` × ${quote.days}` : ""}` : quote.limit_basis === "per_km" ? `per km${quote.quantity ? ` × ${quote.quantity} km` : ""}` : "per expense item"}`;
   if (quote.quantity_required) return `${limit} · Enter distance in kilometres to calculate the payable amount.`;
   const used = quote.already_used > 0 ? ` · ${money(quote.already_used)} already used or reserved` : "";
   if (quote.excess_amount <= 0) return `${limit}${used} · Within limit`;
-  return `${limit}${used} · Exceeds by ${money(quote.excess_amount)}. ${quote.excess_action === "cap" ? `Maximum payable ${money(quote.eligible_amount)}.` : "Special approval required for the excess."}`;
+  return `${limit}${used} · Exceeds by ${money(quote.excess_amount)}. ${quote.excess_action === "cap" ? `Maximum payable ${money(policyEligible)}.` : "Special approval required for the excess."}`;
 }

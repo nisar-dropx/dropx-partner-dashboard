@@ -45,6 +45,10 @@ function db() { if (!supabaseAdmin) throw new Error("Database configuration is u
 function clean(value: unknown) { return String(value ?? "").trim(); }
 function safeFileName(value: string) { return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 120) || "receipt"; }
 function relation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
+/** Embedded rows arrive unordered; reviewers must see lines in the order the claimant entered them. */
+function inEntryOrder<T extends { sort_order?: number | null; expense_date: string }>(items: T[] | null | undefined) {
+  return [...(items ?? [])].sort((left, right) => Number(left.sort_order ?? 0) - Number(right.sort_order ?? 0) || left.expense_date.localeCompare(right.expense_date));
+}
 
 function stagedReceiptPrefix(account: ConnectAccount) {
   return `${account.companyId}/staging/${account.profileType}/${account.id}/`;
@@ -85,10 +89,10 @@ async function discardStagedReceipts(form: FormData, account: ConnectAccount) {
   return NextResponse.json({ ok: true });
 }
 
-async function signedAttachments(value: Array<{ id: string; item_id: string | null; file_name: string; content_type: string | null; storage_path: string }> | null | undefined) {
+async function signedAttachments(value: Array<{ id: string; item_id: string | null; file_name: string; content_type: string | null; storage_path: string; document_kind?: string | null }> | null | undefined) {
   return Promise.all((value ?? []).map(async (attachment) => {
     const signed = await db().storage.from("hr-expense-receipts").createSignedUrl(attachment.storage_path, 15 * 60);
-    return { id: attachment.id, item_id: attachment.item_id, file_name: attachment.file_name, content_type: attachment.content_type, url: signed.data?.signedUrl ?? null };
+    return { id: attachment.id, item_id: attachment.item_id, file_name: attachment.file_name, content_type: attachment.content_type, document_kind: attachment.document_kind ?? "receipt", url: signed.data?.signedUrl ?? null };
   }));
 }
 
@@ -105,7 +109,7 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
 async function approvalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_approval_steps")
-    .select("id,claim_id,step_order,step_name,stage_code,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
+    .select("id,claim_id,step_order,step_name,stage_code,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
@@ -120,6 +124,7 @@ async function approvalPayload(companyId: string, userIds: string[]) {
       ...step,
       claim: {
         ...claim,
+        hr_expense_items: inEntryOrder(claim.hr_expense_items),
         requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
         requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
         attachments: await signedAttachments(claim.hr_expense_attachments)
@@ -146,7 +151,7 @@ async function approvalHistoryPayload(companyId: string, userIds: string[], page
   if (!userIds.length) return { items: [], page: 1, pageSize: APPROVAL_HISTORY_PAGE_SIZE, total: 0 };
   const from = (page - 1) * APPROVAL_HISTORY_PAGE_SIZE;
   const result = await db().from("hr_expense_approval_steps")
-    .select("id,claim_id,step_order,step_name,stage_code,status,decision_note,decided_at,hr_expense_claims(id,claim_no,purpose,total_claimed,total_approved,trip_from,trip_to,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))", { count: "exact" })
+    .select("id,claim_id,step_order,step_name,stage_code,status,decision_note,decided_at,hr_expense_claims(id,claim_no,purpose,total_claimed,total_approved,trip_from,trip_to,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind))", { count: "exact" })
     .eq("company_id", companyId)
     .or(`approver_user_id.in.(${userIds.join(",")}),decided_by.in.(${userIds.join(",")})`)
     .in("status", ["approved", "returned", "rejected"])
@@ -163,6 +168,7 @@ async function approvalHistoryPayload(companyId: string, userIds: string[], page
       ...step,
       claim: {
         ...claim,
+        hr_expense_items: inEntryOrder(claim.hr_expense_items),
         requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
         requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
         attachments: await signedAttachments(claim.hr_expense_attachments)
@@ -293,7 +299,7 @@ async function expenseOversightSummary(account: ConnectAccount) {
 async function expenseOversightDetail(account: ConnectAccount, claimId: string) {
   if (!await hasOrganizationExpenseVisibility(account)) throw new Error("Organisation-wide reimbursement visibility is not available for this account.");
   const result = await db().from("hr_expense_claims")
-    .select("id,claim_no,purpose,total_claimed,total_approved,status,current_step,submitted_at,created_at,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path),hr_expense_approval_steps(id,step_order,step_name,stage_code,approver_user_id,status,decision_note,decided_at)")
+    .select("id,claim_no,purpose,total_claimed,total_approved,status,current_step,submitted_at,created_at,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind),hr_expense_approval_steps(id,step_order,step_name,stage_code,approver_user_id,status,decision_note,decided_at)")
     .eq("company_id", account.companyId).eq("id", claimId).maybeSingle();
   if (result.error || !result.data) throw new Error(result.error?.message ?? "Reimbursement claim was not found.");
   const claim = result.data;
@@ -315,7 +321,7 @@ async function expenseOversightDetail(account: ConnectAccount, claimId: string) 
     submitted_at: claim.submitted_at ?? claim.created_at,
     requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
     requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
-    items: claim.hr_expense_items ?? [],
+    items: inEntryOrder(claim.hr_expense_items),
     attachments: await signedAttachments(claim.hr_expense_attachments),
     steps: [...(claim.hr_expense_approval_steps ?? [])].sort((left, right) => left.step_order - right.step_order).map((step) => ({
       ...step,
@@ -331,7 +337,7 @@ async function claimPayload(account: ConnectAccount) {
     activeExpenseCategories(account),
     expensePayoutReadiness(account),
     db().from("hr_expense_claims")
-      .select("id,claim_no,claim_request_id,purpose,trip_from,trip_to,total_claimed,total_approved,status,current_step,submitted_at,created_at,return_reason,rejection_reason,payment_request_id,hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,reviewer_note,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path),hr_expense_approval_steps(id,step_order,step_name,approver_user_id,status,decision_note,decided_by,decided_at),hr_expense_events(id,event_type,from_status,to_status,actor_name,actor_role,comments,metadata,created_at),payment_requests(request_no,status,approval_status,utr_cin,bank_status,bank_processing_remarks,processing_started_at,processed_at)")
+      .select("id,claim_no,claim_request_id,purpose,trip_from,trip_to,total_claimed,total_approved,status,current_step,submitted_at,created_at,return_reason,rejection_reason,payment_request_id,hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,quantity,reviewer_note,sort_order,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path,document_kind),hr_expense_approval_steps(id,step_order,step_name,approver_user_id,status,decision_note,decided_by,decided_at),hr_expense_events(id,event_type,from_status,to_status,actor_name,actor_role,comments,metadata,created_at),payment_requests(request_no,status,approval_status,utr_cin,bank_status,bank_processing_remarks,processing_started_at,processed_at)")
       .eq("company_id", account.companyId).eq(workerColumn, account.id).order("created_at", { ascending: false }).limit(50),
     db().from("hr_expense_claim_requests")
       .select("id,request_no,purpose,purpose_code,estimated_amount,trip_from,trip_to,notes,visit_station_ids,expected_expenses,status,decision_note,decided_at,consumed_claim_id,created_at,hr_expense_claim_request_assignees(id,assignee_role,approver_user_id,status,decision_note,decided_at)")
@@ -369,7 +375,7 @@ async function claimPayload(account: ConnectAccount) {
   const claims = await Promise.all((claimsResult.data ?? []).map(async (claim) => ({
     ...claim,
     payment: relation(claim.payment_requests),
-    items: claim.hr_expense_items,
+    items: inEntryOrder(claim.hr_expense_items),
     steps: [...(claim.hr_expense_approval_steps ?? [])]
       .sort((a, b) => a.step_order - b.step_order)
       .map((step) => ({
@@ -525,6 +531,29 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load reimbursements.") }, { status: 400 });
   }
 }
+
+function stagedUploads(value: FormDataEntryValue | null, account: ConnectAccount, label: string): StagedReceipt[] {
+  const parsed = JSON.parse(clean(value) || "[]") as unknown;
+  const uploads: StagedReceipt[] = Array.isArray(parsed) ? parsed.map((entry) => {
+    const row = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+    return {
+      contentType: clean(row.contentType).toLowerCase(),
+      fileName: safeFileName(clean(row.fileName)),
+      path: clean(row.path),
+      size: Number(row.size)
+    };
+  }) : [];
+  const requiredPrefix = stagedReceiptPrefix(account);
+  for (const upload of uploads) {
+    if (!upload.path.startsWith(requiredPrefix)) throw new Error(`A staged ${label} does not belong to this account.`);
+    if (!upload.fileName || !allowedReceiptTypes.has(upload.contentType)) throw new Error("Receipts and approval documents must be PDF, JPG, PNG or WebP.");
+    if (!Number.isFinite(upload.size) || upload.size <= 0 || upload.size > maxReceiptBytes) throw new Error("Each file must be 10 MB or smaller.");
+  }
+  return uploads;
+}
+
+type ClaimDocumentKind = "receipt" | "supporting_approval";
+type PriorAttachment = { id: string; storage_path: string; file_name: string; content_type: string | null; document_kind: string | null };
 
 type InputItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: number; quantity?: number | null };
 
@@ -729,7 +758,7 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
 async function submitClaim(form: FormData, account: ConnectAccount) {
   const uploadedPaths: string[] = [];
   const stagedPaths: string[] = [];
-  let priorPaths: string[] = [];
+  let priorAttachments: PriorAttachment[] = [];
   let claimId = "";
   let isResubmit = false;
   try {
@@ -771,33 +800,28 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       }
     }
 
-    const stagedInput = JSON.parse(clean(form.get("uploadedReceipts")) || "[]") as unknown;
-    const stagedReceipts: StagedReceipt[] = Array.isArray(stagedInput) ? stagedInput.map((entry) => {
-      const row = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
-      return {
-        contentType: clean(row.contentType).toLowerCase(),
-        fileName: safeFileName(clean(row.fileName)),
-        path: clean(row.path),
-        size: Number(row.size)
-      };
-    }) : [];
-    if (!receiptFiles.length && !stagedReceipts.length) throw new Error("Attach at least one receipt image or PDF.");
+    const stagedReceipts = stagedUploads(form.get("uploadedReceipts"), account, "receipt");
+    const stagedSupporting = stagedUploads(form.get("uploadedSupportingDocuments"), account, "approval document");
+    // A returned claim keeps the documents already on it unless the claimant chooses to replace them.
+    const keepExistingDocuments = isResubmit && clean(form.get("keepExistingDocuments")) === "1";
+    const hasNewReceipts = receiptFiles.length + stagedReceipts.length > 0;
+    if (!hasNewReceipts && !keepExistingDocuments) throw new Error("Attach at least one receipt image or PDF.");
     if (receiptFiles.length + stagedReceipts.length > 20) throw new Error("Attach no more than 20 receipt files.");
-    const requiredPrefix = stagedReceiptPrefix(account);
-    for (const receipt of stagedReceipts) {
-      if (!receipt.path.startsWith(requiredPrefix)) throw new Error("A staged receipt does not belong to this account.");
-      if (!receipt.fileName || !allowedReceiptTypes.has(receipt.contentType)) throw new Error("Receipts must be PDF, JPG, PNG or WebP.");
-      if (!Number.isFinite(receipt.size) || receipt.size <= 0 || receipt.size > maxReceiptBytes) throw new Error("Each receipt must be 10 MB or smaller.");
-    }
+    if (stagedSupporting.length > 10) throw new Error("Attach no more than 10 approval documents.");
 
     for (const item of items) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.expenseDate)) throw new Error("Every expense line needs a valid date.");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.expenseDate) || Number.isNaN(Date.parse(item.expenseDate))) throw new Error("Every expense line needs a valid date.");
       if (item.description.length < 3) throw new Error("Every expense line needs a description.");
       if (!Number.isFinite(item.amount) || item.amount <= 0) throw new Error("Every expense line needs a valid positive amount.");
+      if (item.quantity != null && (!Number.isFinite(item.quantity) || item.quantity <= 0)) throw new Error("Enter a valid distance or number of days for every expense line that needs one.");
     }
 
     const total = items.reduce((sum, item) => sum + item.amount, 0);
     const approval = await resolveExpenseApprovers(account, total);
+    // A claim is raised after the expense. A future date is a typing error that would also reserve the wrong day's allowance.
+    if (items.some((item) => item.expenseDate > approval.identity.today)) {
+      throw new Error("An expense date cannot be in the future. Correct the date on each expense line.");
+    }
     const categories = await expenseCategoriesForPolicy(account, approval.policy.id);
     const policyQuote = await quotePolicy(account, items, existingClaimId || undefined);
     if (policyQuote.some(line => line.expense_allowed === false)) throw new Error("This expense head is not eligible for your designation under the Finance policy.");
@@ -815,7 +839,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       dailyTotals.set(dayKey, (dailyTotals.get(dayKey) ?? 0) + item.amount);
       if (!quoteById.get(item.id)?.rule_id && category.per_day_limit != null && Number(dailyTotals.get(dayKey)) > Number(category.per_day_limit)) throw new Error(`${category.name} exceeds the configured daily limit.`);
       const receiptNeeded = category.receipt_required && item.amount >= Number(category.receipt_threshold ?? 0);
-      if (receiptNeeded && !receiptFiles.length && !stagedReceipts.length) throw new Error(`Receipt is required for ${category.name}.`);
+      if (receiptNeeded && !hasNewReceipts && !keepExistingDocuments) throw new Error(`Receipt is required for ${category.name}.`);
     }
 
     claimId = existingClaimId || randomUUID();
@@ -825,11 +849,11 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       const workerColumn = approval.identity.workerType === "employee" ? "employee_id" : "contractor_id";
       const [claim, attachments] = await Promise.all([
         db().from("hr_expense_claims").select(`id,status,claim_request_id,${workerColumn}`).eq("company_id", account.companyId).eq("id", claimId).eq(workerColumn, account.id).maybeSingle(),
-        db().from("hr_expense_attachments").select("storage_path").eq("company_id", account.companyId).eq("claim_id", claimId)
+        db().from("hr_expense_attachments").select("id,storage_path,file_name,content_type,document_kind").eq("company_id", account.companyId).eq("claim_id", claimId)
       ]);
       if (claim.error || !claim.data || claim.data.status !== "returned") throw new Error(claim.error?.message ?? "Only your returned reimbursement can be resubmitted.");
       if (attachments.error) throw new Error(attachments.error.message);
-      priorPaths = (attachments.data ?? []).map((item) => item.storage_path);
+      priorAttachments = attachments.data ?? [];
       linkedRequestId = claim.data.claim_request_id ?? linkedRequestId;
       if (!linkedRequestId) throw new Error("The approved reimbursement request linked to this claim was not found.");
       const request = await db().from("hr_expense_claim_requests")
@@ -859,30 +883,59 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     const carryForward = carryForwardApprovedExpenseRequest(approval.steps, approvedRequest, items);
     if (carryForward?.applied) approval.steps = carryForward.steps;
 
-    const mergeInputs = await Promise.all(receiptFiles.map(async (file) => ({
-      bytes: new Uint8Array(await file.arrayBuffer()),
-      fileName: file.name,
-      contentType: file.type || "application/octet-stream"
-    })));
-    for (const receipt of stagedReceipts) {
-      const download = await db().storage.from("hr-expense-receipts").download(receipt.path);
-      if (download.error || !download.data) throw new Error(download.error?.message ?? `Unable to read ${receipt.fileName}.`);
-      if (download.data.size > maxReceiptBytes) throw new Error("Each receipt must be 10 MB or smaller.");
-      stagedPaths.push(receipt.path);
-      mergeInputs.push({
-        bytes: new Uint8Array(await download.data.arrayBuffer()),
-        fileName: receipt.fileName,
-        contentType: receipt.contentType
-      });
+    const retainedAttachments = keepExistingDocuments ? priorAttachments : [];
+    const kindOf = (attachment: PriorAttachment): ClaimDocumentKind => attachment.document_kind === "supporting_approval" ? "supporting_approval" : "receipt";
+    if (!hasNewReceipts && !retainedAttachments.some((attachment) => kindOf(attachment) === "receipt")) {
+      throw new Error("Attach at least one receipt image or PDF.");
     }
-    const mergedPdf = await mergeExpenseReceiptsToPdf(mergeInputs);
-    const mergedPath = `${account.companyId}/${claimId}/merged/${Date.now()}-receipts.pdf`;
-    const upload = await db().storage.from("hr-expense-receipts").upload(mergedPath, mergedPdf, {
-      contentType: "application/pdf",
-      upsert: false
-    });
-    if (upload.error) throw new Error(`Receipt upload failed: ${upload.error.message}`);
-    uploadedPaths.push(mergedPath);
+    const stagedMergeInputs = async (uploads: StagedReceipt[]) => {
+      const inputs: Array<{ bytes: Uint8Array; fileName: string; contentType: string }> = [];
+      for (const staged of uploads) {
+        const download = await db().storage.from("hr-expense-receipts").download(staged.path);
+        if (download.error || !download.data) throw new Error(download.error?.message ?? `Unable to read ${staged.fileName}.`);
+        if (download.data.size > maxReceiptBytes) throw new Error("Each file must be 10 MB or smaller.");
+        stagedPaths.push(staged.path);
+        inputs.push({ bytes: new Uint8Array(await download.data.arrayBuffer()), fileName: staged.fileName, contentType: staged.contentType });
+      }
+      return inputs;
+    };
+    const newDocuments: Array<{ kind: ClaimDocumentKind; fileName: string; path: string; size: number }> = [];
+    const replacedAttachments: PriorAttachment[] = priorAttachments.filter((attachment) => !retainedAttachments.includes(attachment));
+    // Each kind is stored as one PDF. New files are appended to the retained pack so approvers open a single document.
+    for (const document of [
+      {
+        kind: "receipt" as const,
+        fileName: "receipts.pdf",
+        fresh: [
+          ...await Promise.all(receiptFiles.map(async (file) => ({
+            bytes: new Uint8Array(await file.arrayBuffer()),
+            fileName: file.name,
+            contentType: file.type || "application/octet-stream"
+          }))),
+          ...await stagedMergeInputs(stagedReceipts)
+        ]
+      },
+      { kind: "supporting_approval" as const, fileName: "special-approval.pdf", fresh: await stagedMergeInputs(stagedSupporting) }
+    ]) {
+      if (!document.fresh.length) continue;
+      const retained = retainedAttachments.filter((attachment) => kindOf(attachment) === document.kind);
+      const retainedInputs: typeof document.fresh = [];
+      for (const attachment of retained) {
+        const download = await db().storage.from("hr-expense-receipts").download(attachment.storage_path);
+        if (download.error || !download.data) throw new Error(download.error?.message ?? `Unable to read the existing ${attachment.file_name}.`);
+        retainedInputs.push({ bytes: new Uint8Array(await download.data.arrayBuffer()), fileName: attachment.file_name, contentType: attachment.content_type || "application/pdf" });
+      }
+      const mergedPdf = await mergeExpenseReceiptsToPdf([...retainedInputs, ...document.fresh]);
+      const mergedPath = `${account.companyId}/${claimId}/merged/${Date.now()}-${document.fileName}`;
+      const upload = await db().storage.from("hr-expense-receipts").upload(mergedPath, mergedPdf, {
+        contentType: "application/pdf",
+        upsert: false
+      });
+      if (upload.error) throw new Error(`Document upload failed: ${upload.error.message}`);
+      uploadedPaths.push(mergedPath);
+      newDocuments.push({ kind: document.kind, fileName: document.fileName, path: mergedPath, size: mergedPdf.byteLength });
+      replacedAttachments.push(...retained);
+    }
 
     const commonRpc = {
       p_company_id: account.companyId,
@@ -940,21 +993,27 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       if (auditEvent.error) throw new Error(auditEvent.error.message);
     }
 
-    if (isResubmit) {
-      await db().from("hr_expense_attachments").delete().eq("company_id", account.companyId).eq("claim_id", claimId);
+    if (newDocuments.length) {
+      const attachmentResult = await db().from("hr_expense_attachments").insert(newDocuments.map((document) => ({
+        company_id: account.companyId,
+        claim_id: claimId,
+        item_id: null,
+        storage_path: document.path,
+        file_name: document.fileName,
+        content_type: "application/pdf",
+        file_size: document.size,
+        document_kind: document.kind,
+        uploaded_by: approval.identity.userId
+      })));
+      if (attachmentResult.error) throw new Error(attachmentResult.error.message);
     }
-    const attachmentResult = await db().from("hr_expense_attachments").insert({
-      company_id: account.companyId,
-      claim_id: claimId,
-      item_id: null,
-      storage_path: mergedPath,
-      file_name: "receipts.pdf",
-      content_type: "application/pdf",
-      file_size: mergedPdf.byteLength,
-      uploaded_by: approval.identity.userId
-    });
-    if (attachmentResult.error) throw new Error(attachmentResult.error.message);
-    if (isResubmit && priorPaths.length) await db().storage.from("hr-expense-receipts").remove(priorPaths);
+    // A resubmitted claim cannot be rolled back, so its new documents must survive any later failure.
+    if (isResubmit) uploadedPaths.length = 0;
+    if (replacedAttachments.length) {
+      const removed = await db().from("hr_expense_attachments").delete().eq("company_id", account.companyId).eq("claim_id", claimId)
+        .in("id", replacedAttachments.map((attachment) => attachment.id));
+      if (!removed.error) await db().storage.from("hr-expense-receipts").remove(replacedAttachments.map((attachment) => attachment.storage_path));
+    }
     if (stagedPaths.length) await db().storage.from("hr-expense-receipts").remove(stagedPaths);
 
     // The submitted route already includes any configured policy-exception approver and always ends in Finance.
@@ -1155,6 +1214,29 @@ export async function PATCH(request: Request) {
     const approverUserId = await resolveConnectActorUserId(account);
     if (!approverUserId) throw new Error("Your One account is not linked to a People approver login.");
 
+    if (kind === "claim" && action === "adjust_item") {
+      const claimId = clean(body.claimId);
+      const itemId = clean(body.itemId);
+      const amount = typeof body.amount === "number" ? body.amount : Number(clean(body.amount) || NaN);
+      if (!claimId || !itemId) throw new Error("Select the expense line to adjust.");
+      if (!Number.isFinite(amount) || amount < 0) throw new Error("Enter a valid payable amount.");
+      if (note.length < 3) throw new Error("Record why the payable amount is being changed.");
+      const result = await db().rpc("hr_finance_adjust_expense_item", {
+        p_company_id: account.companyId,
+        p_claim_id: claimId,
+        p_item_id: itemId,
+        p_actor_user_id: approverUserId,
+        p_amount: Math.round(amount * 100) / 100,
+        p_note: note
+      });
+      if (result.error) throw new Error(result.error.message);
+      const adjusted = (result.data ?? {}) as { payable?: number; claim_payable_total?: number };
+      return NextResponse.json({
+        ok: true,
+        notice: `Payable amount updated to Rs ${Number(adjusted.payable ?? amount).toLocaleString("en-IN")}. Claim payable is now Rs ${Number(adjusted.claim_payable_total ?? 0).toLocaleString("en-IN")}.`
+      });
+    }
+
     if (kind === "pre_request") {
       const requestId = clean(body.requestId);
       if (!requestId || !["approved", "rejected"].includes(action)) throw new Error("Select a valid reimbursement request decision.");
@@ -1199,13 +1281,18 @@ export async function PATCH(request: Request) {
     if (!decision?.next_approver_user_id) {
       await dismissExpenseApprovalNotifications({ companyId: account.companyId, claimId });
     }
-    const claim = await db().from("hr_expense_claims").select("claim_no,purpose,total_claimed,claimant_user_id").eq("company_id", account.companyId).eq("id", claimId).single();
+    const claim = await db().from("hr_expense_claims").select("claim_no,purpose,total_claimed,total_approved,claimant_user_id").eq("company_id", account.companyId).eq("id", claimId).single();
     if (claim.error) throw new Error(claim.error.message);
+    // Tell the claimant what will actually be paid when Finance approved less than the bills claimed.
+    const approvedTotal = Number(claim.data.total_approved ?? claim.data.total_claimed);
+    const payableNote = approvedTotal < Number(claim.data.total_claimed)
+      ? ` Payable Rs ${approvedTotal.toLocaleString("en-IN")} of Rs ${Number(claim.data.total_claimed).toLocaleString("en-IN")} claimed.`
+      : "";
     const nextUserId = decision?.next_approver_user_id ?? null;
     if (nextUserId) {
       await notifyExpenseUser({ companyId: account.companyId, claimId, recipientUserId: nextUserId, eventCode: "REIMBURSEMENT_APPROVAL_REQUIRED", title: "Reimbursement needs approval", body: `${claim.data.claim_no} is waiting for your approval.`, emailSubject: `Reimbursement approval required · ${claim.data.claim_no}`, emailBody: `${claim.data.claim_no} for Rs ${Number(claim.data.total_claimed).toLocaleString("en-IN")} is waiting for your approval. Open DropX One or People Approval Inbox.`, route: "approvals" });
     }
-    await notifyExpenseUser({ companyId: account.companyId, claimId, recipientUserId: claim.data.claimant_user_id, eventCode: `REIMBURSEMENT_${action.toUpperCase()}`, title: action === "approved" ? "Reimbursement updated" : `Reimbursement ${action}`, body: nextUserId ? `${claim.data.claim_no} was approved and moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is approved and sent to Payments.` : `${claim.data.claim_no} was ${action}.${note ? ` ${note}` : ""}`, emailSubject: `Reimbursement ${action} · ${claim.data.claim_no}`, emailBody: nextUserId ? `${claim.data.claim_no} was approved and has moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is fully approved and has been sent to Payments. You can track processing and UTR in DropX One.` : `${claim.data.claim_no} was ${action}.${note ? `\n\nReason: ${note}` : ""}` });
+    await notifyExpenseUser({ companyId: account.companyId, claimId, recipientUserId: claim.data.claimant_user_id, eventCode: `REIMBURSEMENT_${action.toUpperCase()}`, title: action === "approved" ? "Reimbursement updated" : `Reimbursement ${action}`, body: nextUserId ? `${claim.data.claim_no} was approved and moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is approved and sent to Payments.${payableNote}` : `${claim.data.claim_no} was ${action}.${note ? ` ${note}` : ""}`, emailSubject: `Reimbursement ${action} · ${claim.data.claim_no}`, emailBody: nextUserId ? `${claim.data.claim_no} was approved and has moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is fully approved and has been sent to Payments.${payableNote} You can track processing and UTR in DropX One.` : `${claim.data.claim_no} was ${action}.${note ? `\n\nReason: ${note}` : ""}` });
     return NextResponse.json({ ok: true, notice: decision?.claim_status === "approved_for_payment" ? "Approved and sent to Payments." : `Claim ${action}.` });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to update reimbursement.") }, { status: 400 });

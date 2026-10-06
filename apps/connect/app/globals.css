@@ -16183,6 +16183,103 @@ html.native-app .dx-app-install {
 .dx-finance-review-table em.warning { color: #b54708; background: #fffaeb; }
 .dx-finance-review-table em.danger { color: #b42318; background: #fff1f3; }
 
+.dx-finance-review-table > .row.editing { background: #fffcf5; }
+
+.dx-finance-payable-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: max-content;
+  padding: 2px 6px;
+  color: #c94f0d;
+  background: #fff8f3;
+  border: 1px solid #ffd9c2;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.dx-finance-payable-edit svg { width: 9px; height: 9px; }
+
+.dx-finance-payable-form {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(120px, .5fr) minmax(0, 1.5fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding-top: 8px;
+  border-top: 1px dashed #fedf89;
+}
+
+.dx-finance-payable-form label {
+  display: grid;
+  gap: 3px;
+  color: #667085;
+  font-size: 8px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.dx-finance-payable-form input {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  color: #101828;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 7px;
+  font-size: 12px;
+  text-transform: none;
+}
+
+.dx-finance-payable-form label small { text-transform: none; white-space: normal; }
+
+.dx-finance-payable-form > div {
+  display: flex;
+  gap: 6px;
+  align-self: end;
+  padding-bottom: 1px;
+}
+
+.dx-finance-payable-form > p { grid-column: 1 / -1; margin: 0; }
+
+.dx-finance-payable-form button {
+  min-height: 32px;
+  padding: 6px 10px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dx-finance-payable-form button.primary { color: #fff; background: #067647; border-color: #067647; }
+.dx-finance-payable-form button:disabled, .dx-finance-payable-edit:disabled { opacity: .6; cursor: default; }
+
+.dx-expense-file-list li a {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px -4px 0;
+  border-radius: 6px;
+}
+
+.dx-expense-card label.dx-expense-keep-documents {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #344054;
+  font-size: 12px;
+  text-transform: none;
+}
+
+.dx-expense-card label.dx-expense-keep-documents input { width: 16px; min-height: 16px; margin-top: 2px; padding: 0; }
+.dx-expense-card label.dx-expense-keep-documents span { display: grid; gap: 2px; }
+
 .dx-finance-review > p {
   margin: 0;
   padding: 9px 10px;
@@ -16306,6 +16403,7 @@ html.native-app .dx-app-install {
   .dx-finance-review-table > .head { display: none; }
   .dx-finance-review-table > .row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dx-finance-review-table > .row > span:first-child { grid-column: 1 / -1; }
+  .dx-finance-payable-form { grid-template-columns: 1fr; }
   .dx-finance-review-table > .row > span:not(:first-child)::before {
     color: #98a2b3;
     content: attr(data-label);
