@@ -2,6 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentMethodForm } from "@/components/payment-method-form";
 import { PaymentFieldForm } from "@/components/payment-field-form";
+import { AdditionalPaymentFieldForm, type AdditionalPaymentField } from "@/components/additional-payment-field-form";
 import { DeductionHeadForm, type DeductionHead } from "@/components/deduction-head-form";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
@@ -11,6 +12,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { createPaymentField, createPaymentMethod, deletePaymentField, deletePaymentMethod, updatePaymentField, updatePaymentMethod } from "./actions";
+import { createAdditionalPaymentField, updateAdditionalPaymentField } from "./additional-payment-actions";
 import { createDeductionHead, updateDeductionHead } from "./deduction-actions";
 import { cookies } from "next/headers";
 import type { PaymentCalculationSource, PaymentCalculationType, ProviderCalculationSources } from "@/lib/payment-calculation";
@@ -163,6 +165,17 @@ async function loadDeductionHeads(companyId: string) {
   return (result.data ?? []) as DeductionHead[];
 }
 
+async function loadAdditionalPaymentFields(companyId: string) {
+  if (!supabaseAdmin) return { fields: [] as AdditionalPaymentField[], error: "Supabase service role key is not configured." };
+  const result = await supabaseAdmin.from("workforce_additional_payment_fields")
+    .select("id, code, name, description, calculation_type, default_rate_value, is_active")
+    .eq("company_id", companyId)
+    .order("name")
+    .order("code");
+  if (result.error) return { fields: [] as AdditionalPaymentField[], error: result.error.message };
+  return { fields: (result.data ?? []) as AdditionalPaymentField[], error: null as string | null };
+}
+
 async function loadWorkforceCategories(companyId: string) {
   if (!supabaseAdmin) return [] as WorkforceCategoryOption[];
   const result = await supabaseAdmin.from("workforce_categories")
@@ -191,16 +204,27 @@ function loadPaymentMethodFlash() {
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentMethodsPage({ searchParams }: { searchParams?: { edit?: string; fields?: string; deductions?: string } }) {
+export default async function PaymentMethodsPage({ searchParams }: { searchParams?: { edit?: string; fields?: string; additionalFields?: string; deductions?: string } }) {
   const authorization = await requirePagePermission("payment_methods", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_methods;
-  const { methods, error } = await loadPaymentMethods(companyId);
-  const { fields, error: fieldsError } = await loadPaymentFields(companyId);
-  const providerMetrics = await loadProviderMetrics(companyId);
-  const providerModels = await loadProviderModels(companyId);
-  const deductionHeads = await loadDeductionHeads(companyId);
-  const workforceCategories = await loadWorkforceCategories(companyId);
+  const [
+    { methods, error },
+    { fields, error: fieldsError },
+    providerMetrics,
+    providerModels,
+    { fields: additionalPaymentFields, error: additionalPaymentFieldsError },
+    deductionHeads,
+    workforceCategories
+  ] = await Promise.all([
+    loadPaymentMethods(companyId),
+    loadPaymentFields(companyId),
+    loadProviderMetrics(companyId),
+    loadProviderModels(companyId),
+    loadAdditionalPaymentFields(companyId),
+    loadDeductionHeads(companyId),
+    loadWorkforceCategories(companyId)
+  ]);
   const flash = loadPaymentMethodFlash();
   const editMethod = methods.find((method) => method.id === searchParams?.edit) ?? null;
 
@@ -210,30 +234,30 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
         eyebrow="Master Data"
         title="Payment methods"
         subtitle="Define the payment method and the exact fields managers must fill during Provider ID mapping."
-        action={<div className="page-head-actions"><PendingLink className="button secondary" href="/master/payment-methods?fields=1" scroll={false}>Payment Fields</PendingLink><PendingLink className="button secondary" href="/master/payment-methods?deductions=1" scroll={false}>Deduction Heads</PendingLink><span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span></div>}
+        action={<div className="page-head-actions"><PendingLink className="button secondary" href="/master/payment-methods?fields=1" scroll={false}>Payment Fields</PendingLink><PendingLink className="button secondary" href="/master/payment-methods?additionalFields=1" scroll={false}>Additional Payment Fields</PendingLink><PendingLink className="button secondary" href="/master/payment-methods?deductions=1" scroll={false}>Deduction Heads</PendingLink><span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span></div>}
       />
 
-      {error || fieldsError ? (
+      {error || fieldsError || additionalPaymentFieldsError ? (
         <section className="panel message-panel error">
           <div className="panel-body">
             <strong>Database setup needed</strong>
             <p className="subtle" style={{ marginTop: 6 }}>
-              {error ?? fieldsError} Run `scripts/payment_fields_master_v2.sql` in Supabase SQL Editor, then refresh this page.
+              {error ?? fieldsError ?? additionalPaymentFieldsError} Apply the latest database migrations, then refresh this page.
             </p>
           </div>
         </section>
       ) : null}
 
-      {!error && !fieldsError && (flash.error || flash.notice) ? (
+      {!error && !fieldsError && !additionalPaymentFieldsError && (flash.error || flash.notice) ? (
         <section className={`panel message-panel ${flash.error ? "error" : "success"}`}>
           <div className="panel-body">
-            <strong>{flash.error ? (searchParams?.deductions === "1" ? "Deduction head not saved" : "Payment method not deleted") : "Completed"}</strong>
+            <strong>{flash.error ? (searchParams?.additionalFields === "1" ? "Additional payment field not saved" : searchParams?.deductions === "1" ? "Deduction head not saved" : "Payment method not deleted") : "Completed"}</strong>
             <p className="subtle" style={{ marginTop: 6 }}>{flash.error ?? flash.notice}</p>
           </div>
         </section>
       ) : null}
 
-      {!error && !fieldsError && pagePermission.canAdd ? (
+      {!error && !fieldsError && !additionalPaymentFieldsError && pagePermission.canAdd ? (
         <section className="panel">
           <div className="panel-head">
             <div>
@@ -245,7 +269,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
         </section>
       ) : null}
 
-      {!error && !fieldsError && pagePermission.canView ? (
+      {!error && !fieldsError && !additionalPaymentFieldsError && pagePermission.canView ? (
         <section className="panel">
           <div className="panel-head">
             <div>
@@ -353,6 +377,28 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
                   </div>
                 </div>
               )) : <p className="empty-cell">No payment fields created yet.</p>}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {searchParams?.additionalFields === "1" ? (
+        <div className="modal-backdrop">
+          <section className="modal-panel wide additional-payment-fields-modal" aria-labelledby="additional-payment-fields-title" aria-modal="true" role="dialog">
+            <div className="panel-head">
+              <div><h2 id="additional-payment-fields-title">Additional Payment Fields</h2><p className="subtle">Define global earnings such as incentives and bonuses. These fields are available for every workforce person and are not part of payment-method mapping.</p></div>
+              <PendingLink className="icon-button" href="/master/payment-methods" scroll={false} aria-label="Close">x</PendingLink>
+            </div>
+            {pagePermission.canAdd ? <div className="additional-payment-field-create"><div><h3>Add additional payment field</h3><p className="subtle">Create the field once; values can be supplied for each workforce person and payout period.</p></div><AdditionalPaymentFieldForm action={createAdditionalPaymentField} /></div> : null}
+            <div className="additional-payment-field-list">
+              {additionalPaymentFields.length ? additionalPaymentFields.map((field) => pagePermission.canEdit
+                ? <AdditionalPaymentFieldForm action={updateAdditionalPaymentField} compact field={field} key={field.id} />
+                : <div className="additional-payment-field-summary" key={field.id}>
+                    <div><strong>{field.name}</strong><small>{field.code}</small></div>
+                    <span>{field.calculation_type === "manual_amount" ? "Custom amount per workforce" : `Units × rate${field.default_rate_value === null ? "" : ` · default Rs ${field.default_rate_value}`}`}</span>
+                    <StatusPill status={field.is_active ? "Active" : "Inactive"} />
+                  </div>)
+                : <p className="empty-cell">No additional payment fields created yet.</p>}
             </div>
           </section>
         </div>

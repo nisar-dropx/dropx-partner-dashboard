@@ -5,12 +5,14 @@ import {
 } from "./workforce-payment-policy.ts";
 
 export type DirectPayComponent = {
+  payment_field_id?: string | null;
   component_code: string;
   component_type: string;
   label?: string | null;
   pay_schedule?: string | null;
   calculation_type?: string | null;
   calculation_source?: string | null;
+  is_custom_production?: boolean | null;
   sort_order?: number | string | null;
 };
 
@@ -139,6 +141,12 @@ export function directPayForDay(
       // Shipment totals prove that the daily threshold was met, but they do
       // not contain worked minutes. Paying an hourly head from this source
       // would silently invent time, so leave the row incomplete for review.
+      missing = true;
+      continue;
+    }
+    if (attendanceBased && schedule === "per_hour" && present && attendance?.work_minutes == null) {
+      // A bulk attendance status can establish P/HD without supplying worked
+      // minutes. Hourly pay must remain incomplete until real minutes exist.
       missing = true;
       continue;
     }

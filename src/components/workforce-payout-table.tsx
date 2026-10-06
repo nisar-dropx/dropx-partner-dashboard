@@ -2,6 +2,7 @@
 
 import { ChevronDown, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useRouter } from "next/navigation";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "@/lib/workforce-payout-filters";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
@@ -24,6 +25,7 @@ export type WorkforcePayoutLine = {
 
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
+  reviewSubjectType?: "workforce" | "helper"; reviewSubjectId?: string | null; reviewToken?: string | null;
   location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
   history: PaymentAllocationHistoryEntry[];
@@ -36,6 +38,15 @@ export type WorkforcePayoutRow = {
     baseAmount: number;
     lines: WorkforcePayoutLine[];
   }>;
+  additionalPaymentBreakdown?: Array<{
+    fieldId: string;
+    code: string;
+    label: string;
+    calculationType: "manual_amount" | "units_x_rate";
+    inputValue: number;
+    rateValue: number | null;
+    amount: number;
+  }>;
   baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED" | ""; netAmount: number; status: string;
 };
 
@@ -44,8 +55,14 @@ function rateMoney(value: number) { return `Rs ${value.toLocaleString("en-IN", {
 function units(value: number) { return value.toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
 function workDaysValue(value: number, source: string) { return source.toLowerCase().includes("unavailable") ? "" : value; }
 function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
+const MAX_REVIEW_SELECTION = 1000;
+function canSendPayoutForReview(row: WorkforcePayoutRow) {
+  return Boolean(row.reviewSubjectId && row.locationId && row.reviewToken && row.paymentDetailsAvailable)
+    && (row.status === "Ready for review" || row.status === "Returned");
+}
 function statusTone(status: string) {
-  if (status === "Ready for review") return "good";
+  if (status === "Ready for review" || status === "Approved") return "good";
+  if (status === "Under Review" || status === "Returned") return "warn";
   if (status === "ID not mapped" || status === "Mapping conflict") return "bad";
   if (status === "Configuration incomplete" || status === "Payment method not allocated") return "warn";
   return "payout-status-neutral";
@@ -140,7 +157,8 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
   </div>;
 }
 
-export function WorkforcePayoutTable({ audience = "workforce", rows }: { audience?: "workforce" | "helpers"; rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; canEdit?: boolean; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
+  const router = useRouter();
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
   const [search, setSearch] = useState("");
@@ -155,8 +173,11 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const [expandedId, setExpandedId] = useState("");
   const [stickyScrollWidth, setStickyScrollWidth] = useState(0);
   const [stickyScrollFrame, setStickyScrollFrame] = useState({ left: 0, width: 0, visible: false });
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [reviewState, setReviewState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef<HTMLDivElement>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
   const deferredSearch = useDeferredValue(search);
   const locationOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.location || "-"))).values()).sort(), [rows]);
   const designationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.designation).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [rows]);
@@ -169,8 +190,28 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const selectable = useMemo(() => filtered.filter(canSendPayoutForReview), [filtered]);
+  const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
+  const reviewSelectionTarget = useMemo(() => selectable.slice(0, MAX_REVIEW_SELECTION), [selectable]);
+  const reviewSelectionFull = reviewSelectionTarget.length > 0 && reviewSelectionTarget.every((row) => selected.has(row.id));
+  const reviewSelectionLimitReached = selectedRows.length >= MAX_REVIEW_SELECTION;
   const activeFilterCount = locations.length + designations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
-  const tableColumnCount = 12;
+  const tableColumnCount = canEdit ? 13 : 12;
+
+  useEffect(() => {
+    const selectableIds = new Set(selectable.map((row) => row.id));
+    setSelected((current) => new Set([...current].filter((id) => selectableIds.has(id))));
+  }, [selectable]);
+
+  useEffect(() => {
+    setSelected(new Set());
+    setReviewState({ busy: false, error: "", notice: "" });
+  }, [periodStart, periodEnd]);
+
+  useEffect(() => {
+    if (!selectAllRef.current) return;
+    selectAllRef.current.indeterminate = selectedRows.length > 0 && !reviewSelectionFull;
+  }, [reviewSelectionFull, selectedRows.length]);
 
   useEffect(() => {
     const tableWrap = tableWrapRef.current;
@@ -239,6 +280,63 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `${audience}-payouts.csv`; link.click(); URL.revokeObjectURL(link.href);
   }
 
+  function toggleSelected(rowId: string) {
+    if (!selected.has(rowId) && reviewSelectionLimitReached) {
+      setReviewState({ busy: false, error: `Submit at most ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts at a time. Deselect one or narrow the filters.`, notice: "" });
+      return;
+    }
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) next.delete(rowId); else next.add(rowId);
+      return next;
+    });
+    setReviewState((current) => ({ ...current, error: "", notice: "" }));
+  }
+
+  function toggleAll() {
+    if (reviewSelectionFull) {
+      setSelected(new Set());
+      setReviewState((current) => ({ ...current, error: "", notice: "" }));
+      return;
+    }
+    setSelected(new Set(reviewSelectionTarget.map((row) => row.id)));
+    setReviewState((current) => ({
+      ...current,
+      error: "",
+      notice: selectable.length > MAX_REVIEW_SELECTION
+        ? `Selected the first ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} matching payouts. Narrow the filters to select a different batch.`
+        : ""
+    }));
+  }
+
+  async function sendForReview() {
+    if (!selectedRows.length || reviewState.busy) return;
+    setReviewState({ busy: true, error: "", notice: "" });
+    try {
+      const response = await fetch("/api/payments/workforce-payouts/send-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          periodStart,
+          periodEnd,
+          items: selectedRows.map((row) => ({
+            subjectType: row.reviewSubjectType,
+            subjectId: row.reviewSubjectId,
+            locationId: row.locationId,
+            reviewToken: row.reviewToken
+          }))
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error ?? "Unable to send payouts for review.");
+      setSelected(new Set());
+      setReviewState({ busy: false, error: "", notice: `${payload.submitted} payout${payload.submitted === 1 ? "" : "s"} sent for review.` });
+      router.refresh();
+    } catch (error) {
+      setReviewState({ busy: false, error: error instanceof Error ? error.message : "Unable to send payouts for review.", notice: "" });
+    }
+  }
+
   return <>
     <div className="payout-search-strip">
       <label>
@@ -247,9 +345,12 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
       </label>
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
+        {canEdit ? <span className="payout-result-count">Up to {MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts per review batch.</span> : null}
+        {canEdit ? <button className="button" disabled={!selectedRows.length || reviewState.busy} onClick={sendForReview} type="button">{reviewState.busy ? "Sending…" : `Send for review${selectedRows.length ? ` (${selectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" type="button" onClick={exportRows}>Export full CSV</button>
       </div>
     </div>
+    {reviewState.error || reviewState.notice ? <div aria-live="polite" className={`payout-inline-message ${reviewState.error ? "error" : "success"}`}>{reviewState.error || reviewState.notice}</div> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
       <PayoutMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />
@@ -263,6 +364,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
       <table className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
         <caption className="sr-only">{subjectLabel} payout totals</caption>
         <thead><tr>
+          {canEdit ? <th className="payout-select-cell" scope="col"><input aria-label={`Select up to ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} matching ${subjectLabelLower} payouts`} checked={reviewSelectionFull} disabled={!selectable.length} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
           <th className="payout-sticky-id" scope="col">DropX ID</th>
           <th className="payout-sticky-worker" scope="col">{subjectLabel} / payment source</th>
           <th scope="col">Designation</th>
@@ -284,6 +386,7 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
             return [
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
+                {canEdit ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for review`} checked={selected.has(row.id)} disabled={!canSendPayoutForReview(row) || (reviewSelectionLimitReached && !selected.has(row.id))} onChange={() => toggleSelected(row.id)} title={reviewSelectionLimitReached && !selected.has(row.id) ? `Maximum ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts selected` : undefined} type="checkbox" /></td> : null}
                 <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={`DropX ID status: ${row.dropxStatus}`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
                 <td>{row.designation ? <strong>{row.designation}</strong> : <span aria-hidden="true">—</span>}</td>
@@ -335,7 +438,13 @@ export function WorkforcePayoutTable({ audience = "workforce", rows }: { audienc
                                 <td className="payout-money">{rateMoney(item.rate)}</td>
                                 <td className="payout-money"><strong>{money(item.amount)}</strong></td>
                               </tr>)}
-                              {row.additions ? <tr><td><strong>Additional payments</strong></td><td className="payout-money">—</td><td className="payout-money">—</td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
+                              {(row.additionalPaymentBreakdown ?? []).filter((item) => item.amount !== 0).map((item) => <tr key={`additional-${item.fieldId}`}>
+                                <td><strong>{item.label}</strong><small>{item.code} · Additional payment</small></td>
+                                <td className="payout-money">{item.calculationType === "manual_amount" ? "—" : units(item.inputValue)}</td>
+                                <td className="payout-money">{item.rateValue === null ? "—" : rateMoney(item.rateValue)}</td>
+                                <td className="positive payout-money"><strong>+ {money(item.amount)}</strong></td>
+                              </tr>)}
+                              {row.additions && !(row.additionalPaymentBreakdown ?? []).some((item) => item.amount !== 0) ? <tr><td><strong>Additional payments</strong></td><td className="payout-money">—</td><td className="payout-money">—</td><td className="positive payout-money"><strong>+ {money(row.additions)}</strong></td></tr> : null}
                               {!paymentTotals.length && !row.additions ? <tr><td className="empty-cell" colSpan={4}>No payment amount for this period.</td></tr> : null}
                             </tbody>
                             <tfoot><tr><th colSpan={3} scope="row">Gross payment</th><td className="payout-money"><strong>{money(row.grossPayment)}</strong></td></tr></tfoot>

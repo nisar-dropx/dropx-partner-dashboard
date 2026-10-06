@@ -62,6 +62,25 @@ test("attendance and rent heads export rate and amount without misleading counts
   assert.equal(table.rows[0][table.headers.indexOf("Van Rent Per Day Amount (INR)")], 22400);
 });
 
+test("additional payment fields export as named human-readable columns", () => {
+  const row = {
+    ...combinedMethodRow,
+    additionalPaymentBreakdown: [
+      { fieldId: "bonus", code: "BONUS", label: "Festival Bonus", calculationType: "manual_amount", inputValue: 750, rateValue: null, amount: 750 },
+      { fieldId: "km", code: "KM_INCENTIVE", label: "KM Incentive", calculationType: "units_x_rate", inputValue: 40, rateValue: 3, amount: 120 }
+    ],
+    additions: 870,
+    grossPayment: 53157,
+    netAmount: 52634
+  };
+  const table = buildWorkforcePayoutExportTable([row], "Workforce");
+
+  assert.equal(table.rows[0][table.headers.indexOf("Festival Bonus (INR)")], 750);
+  assert.equal(table.rows[0][table.headers.indexOf("KM Incentive Units")], 40);
+  assert.equal(table.rows[0][table.headers.indexOf("KM Incentive Rate (INR)")], 3);
+  assert.equal(table.rows[0][table.headers.indexOf("Additional Payments (INR)")], 870);
+});
+
 test("payout export preserves the payment method's custom mixed field order", () => {
   const customOrder = {
     ...combinedMethodRow,

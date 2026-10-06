@@ -1,5 +1,6 @@
 import type { WorkforcePayoutRow } from "../components/workforce-payout-table.tsx";
 import { summarizePaymentMethodAmounts, summarizePayoutBreakdownLines } from "./workforce-payout-summary.ts";
+import { groupPayoutItemsBySubjectLocation } from "./workforce-payout-location-groups.ts";
 
 export type ProviderPayoutSegment = {
   workforceId: string;
@@ -24,15 +25,16 @@ function joined(values: string[], fallback: string) {
 }
 
 export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegment[]) {
-  const grouped = new Map<string, ProviderPayoutSegment[]>();
-  for (const segment of segments) {
-    grouped.set(segment.workforceId, [...(grouped.get(segment.workforceId) ?? []), segment]);
-  }
+  const grouped = groupPayoutItemsBySubjectLocation(
+    segments,
+    (segment) => segment.workforceId,
+    (segment) => segment.row.locationId
+  );
 
   const conflicts: string[] = [];
   const rows: ConsolidatedProviderPayout[] = [];
 
-  for (const [workforceId, workerSegments] of grouped) {
+  for (const { subjectId: workforceId, locationId, items: workerSegments } of grouped) {
     const first = workerSegments[0];
     if (!first) continue;
     const dailyByDate = new Map<string, { day: WorkforcePayoutRow["dailyBreakdown"][number]; paymentSetupKey: string }>();
@@ -94,9 +96,10 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
       panNumber: first.panNumber,
       row: {
         ...first.row,
-        id: `provider-${workforceId}`,
+        id: `provider-${workforceId}-${locationId || "unassigned"}`,
         providerMemberId: joined(workerSegments.map((segment) => segment.row.providerMemberId), "-"),
         providerMemberName: joined(workerSegments.map((segment) => segment.row.providerMemberName), "-"),
+        locationId: locationId || null,
         location: joined(workerSegments.map((segment) => segment.row.location), "-"),
         provider: joined(workerSegments.map((segment) => segment.row.provider), "-"),
         model: joined(workerSegments.map((segment) => segment.row.model), "All models"),

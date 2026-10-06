@@ -29,6 +29,15 @@ export type WorkforcePayoutExportRow = {
   workDays: number;
   workDaysSource: string;
   productionBreakdown: WorkforcePayoutExportComponent[];
+  additionalPaymentBreakdown?: Array<{
+    fieldId: string;
+    code: string;
+    label: string;
+    calculationType: "manual_amount" | "units_x_rate";
+    inputValue: number;
+    rateValue: number | null;
+    amount: number;
+  }>;
   baseAmount: number;
   additions: number;
   grossPayment: number;
@@ -123,6 +132,15 @@ function deductionHeader(label: string) {
   return `${/deduction$/i.test(normalized) ? normalized : `${normalized} Deduction`} (INR)`;
 }
 
+function additionalColumns(rows: WorkforcePayoutExportRow[]) {
+  const values = new Map<string, NonNullable<WorkforcePayoutExportRow["additionalPaymentBreakdown"]>[number]>();
+  for (const row of rows) for (const item of row.additionalPaymentBreakdown ?? []) {
+    const key = item.fieldId || item.code;
+    if (!values.has(key)) values.set(key, item);
+  }
+  return withUniqueLabels([...values.values()].map((item) => ({ ...item })));
+}
+
 function spreadsheetIdentifier(value: string) {
   const normalized = value.trim();
   return /^\d{11,}$/.test(normalized) || /^\d+(?:\.\d+)?E[+-]?\d+$/i.test(normalized)
@@ -136,6 +154,7 @@ function csvCell(value: ExportValue) {
 
 export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[], subjectLabel: "Workforce" | "Helper") {
   const details = componentColumns(rows);
+  const additionalPayments = additionalColumns(rows);
   const deductions = deductionColumns(rows);
   const detailHeaders = details.flatMap((item) => item.componentType === "production" && item.reportedCount !== undefined
     ? [`${item.exportLabel} Threshold Period`, `${item.exportLabel} Minimum Units`, `${item.exportLabel} Reported Units`, `${item.exportLabel} Threshold / Excluded Units`, `${item.exportLabel} Payable Units`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]
@@ -157,6 +176,9 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     "Attendance Source",
     ...detailHeaders,
     "Base Payment (INR)",
+    ...additionalPayments.flatMap((item) => item.calculationType === "manual_amount"
+      ? [`${item.exportLabel} (INR)`]
+      : [`${item.exportLabel} Units`, `${item.exportLabel} Rate (INR)`, `${item.exportLabel} Amount (INR)`]),
     "Additional Payments (INR)",
     "Gross Payment (INR)",
     ...deductions.map((item) => deductionHeader(item.exportLabel)),
@@ -190,6 +212,12 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     const deductionValues: ExportValue[] = deductions.map((column) => blankPayments
       ? ""
       : row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0);
+    const additionalValues: ExportValue[] = additionalPayments.flatMap((column): ExportValue[] => {
+      if (blankPayments) return column.calculationType === "manual_amount" ? [""] : ["", "", ""];
+      const item = (row.additionalPaymentBreakdown ?? []).find((value) => (value.fieldId || value.code) === (column.fieldId || column.code));
+      if (column.calculationType === "manual_amount") return [item?.amount ?? 0];
+      return [item?.inputValue ?? 0, item?.rateValue ?? 0, item?.amount ?? 0];
+    });
     return [
       row.dropxId,
       row.dropxStatus,
@@ -205,6 +233,7 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
       blankPayments ? "" : row.workDaysSource,
       ...detailValues,
       blankPayments ? "" : row.baseAmount,
+      ...additionalValues,
       blankPayments ? "" : row.additions,
       blankPayments ? "" : row.grossPayment,
       ...deductionValues,

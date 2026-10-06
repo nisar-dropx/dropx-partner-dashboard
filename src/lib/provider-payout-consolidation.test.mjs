@@ -3,7 +3,7 @@ import test from "node:test";
 import { consolidateProviderPayoutSegments } from "./provider-payout-consolidation.ts";
 import { directPayForDay } from "./direct-workforce-pay.ts";
 
-function segment({ id, methodId, method, from, to, rate, units, amount, paymentSetupKey }) {
+function segment({ id, methodId, method, from, to, rate, units, amount, paymentSetupKey, locationId = "station" }) {
   const days = [];
   for (let day = from; day <= to; day += 1) {
     const date = `2026-09-${String(day).padStart(2, "0")}`;
@@ -16,7 +16,7 @@ function segment({ id, methodId, method, from, to, rate, units, amount, paymentS
     panNumber: null,
     paymentSetupKey,
     row: {
-      id, dropxId: "DROPX1", dropxStatus: "Active", name: "Worker", designation: "DA", providerMemberId: "P1", providerMemberName: "Provider worker", locationId: "station", location: "ABC", provider: "Amazon", model: "EDSP", paymentMethod: method, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays: days.length, workDaysSource: "Biometric", history: [], paymentMethodBreakdown: [{ id: methodId, label: method, amount }], production: units, productionBreakdown: [], dailyBreakdown: days, baseAmount: amount, additions: 0, grossPayment: amount, deductions: 0, deductionBreakdown: [], panAadhaarStatus: "NOT LINKED", netAmount: amount, status: "Ready for review"
+      id, dropxId: "DROPX1", dropxStatus: "Active", name: "Worker", designation: "DA", providerMemberId: "P1", providerMemberName: "Provider worker", locationId, location: locationId, provider: "Amazon", model: "EDSP", paymentMethod: method, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays: days.length, workDaysSource: "Biometric", history: [], paymentMethodBreakdown: [{ id: methodId, label: method, amount }], production: units, productionBreakdown: [], dailyBreakdown: days, baseAmount: amount, additions: 0, grossPayment: amount, deductions: 0, deductionBreakdown: [], panAadhaarStatus: "NOT LINKED", netAmount: amount, status: "Ready for review"
     }
   };
 }
@@ -82,4 +82,18 @@ test("simultaneous provider IDs with the same payment setup merge without double
   assert.equal(result.rows[0].row.workDays, 1);
   assert.equal(result.rows[0].row.grossPayment, 120);
   assert.equal(result.rows[0].row.providerMemberId, "P1 / P2");
+});
+
+test("the same workforce remains one payout row per location", () => {
+  const first = segment({ id: "station-a", methodId: "fixed-a", method: "Fixed A", from: 1, to: 1, rate: 100, units: 1, amount: 100, locationId: "station-a" });
+  const second = segment({ id: "station-b", methodId: "fixed-b", method: "Fixed B", from: 1, to: 1, rate: 200, units: 1, amount: 200, locationId: "station-b" });
+
+  const result = consolidateProviderPayoutSegments([first, second]);
+
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.rows.map(({ row }) => [row.locationId, row.grossPayment]), [
+    ["station-a", 100],
+    ["station-b", 200]
+  ]);
+  assert.equal(new Set(result.rows.map(({ row }) => row.id)).size, 2);
 });

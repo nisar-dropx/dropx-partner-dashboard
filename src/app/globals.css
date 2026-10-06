@@ -4196,7 +4196,7 @@ h3 {
 
 .compensation-import-controls {
   display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(280px, 1fr) auto;
+  grid-template-columns: minmax(150px, 190px) minmax(150px, 190px) minmax(280px, 1fr) auto;
   gap: 12px;
   align-items: end;
 }
@@ -21125,6 +21125,22 @@ td strong,
 .tracking-search-history-state { font-weight: 700; color: var(--ink); }
 .tracking-search-history-time { color: var(--muted); text-align: right; white-space: nowrap; }
 .tracking-search-history-by { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.additional-payment-fields-modal { max-width: 1220px; }
+.additional-payment-field-create { display: grid; gap: 12px; padding: 18px; border-bottom: 1px solid var(--line); }
+.additional-payment-field-create h3, .additional-payment-field-create p { margin: 0; }
+.additional-payment-field-list { display: grid; gap: 12px; padding: 16px; }
+.additional-payment-field-form { display: grid; grid-template-columns: 140px minmax(190px, 1fr) minmax(210px, 1fr) 180px; gap: 12px; align-items: end; padding: 16px; }
+.additional-payment-field-form.compact { border: 1px solid #dce4ed; border-radius: 12px; background: #fff; }
+.additional-payment-field-form label { display: grid; gap: 6px; min-width: 0; color: #526078; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.additional-payment-field-form .field { min-width: 0; width: 100%; }
+.additional-payment-description { grid-column: span 2; }
+.additional-payment-rate-disabled { opacity: .68; }
+.additional-payment-global-note { display: grid; align-self: stretch; align-content: center; gap: 3px; padding: 9px 11px; border: 1px solid #b9d8fb; border-radius: 9px; background: #f0f7ff; }
+.additional-payment-global-note strong { color: #175cd3; font-size: 12px; }
+.additional-payment-global-note span { color: #526078; font-size: 11px; line-height: 1.35; }
+.additional-payment-field-summary { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) auto; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid #dce4ed; border-radius: 12px; background: #fff; }
+.additional-payment-field-summary div { display: grid; gap: 3px; }
+.additional-payment-field-summary small { color: var(--muted); }
 .deduction-heads-modal { max-width: 1180px; }
 .deduction-head-create, .deduction-head-row { display: grid; grid-template-columns: 140px minmax(180px,1fr) 170px minmax(190px,1fr); gap: 12px; align-items: end; padding: 16px; }
 .deduction-head-create { background: #fff8ee; border-bottom: 1px solid #f2dcc7; }
@@ -21153,9 +21169,18 @@ td strong,
 .workforce-payout-table td small { display: block; color: #68758a; margin-top: 4px; white-space: nowrap; }
 .workforce-payout-table .positive { color: #087a54; }
 .workforce-payout-table .negative { color: #c43d32; }
+.payout-select-cell { width: 42px; min-width: 42px; text-align: center !important; }
+.payout-select-cell input { width: 16px; height: 16px; margin: 0; accent-color: #e84a24; cursor: pointer; }
+.payout-select-cell input:disabled { cursor: not-allowed; opacity: .45; }
+.payout-inline-message { margin: 0 16px 12px; padding: 9px 12px; border: 1px solid; border-radius: 9px; font-size: 12px; font-weight: 700; }
+.payout-inline-message.success { color: #067647; background: #ecfdf3; border-color: #abefc6; }
+.payout-inline-message.error { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+.workforce-payout-bulk-upload { display: grid; justify-items: end; gap: 10px; }
+.workforce-payout-bulk-upload > .compensation-import-panel { width: 100%; justify-self: stretch; margin: 0; }
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px; border-top: 1px solid #e4e9f0; color: #647087; }
 .pagination > div { display: flex; align-items: center; gap: 12px; }
-@media (max-width: 1100px) { .payout-filters { grid-template-columns: repeat(3, minmax(170px, 1fr)); } .deduction-head-create, .deduction-head-row { grid-template-columns: repeat(2, minmax(180px,1fr)); } }
+@media (max-width: 1100px) { .payout-filters { grid-template-columns: repeat(3, minmax(170px, 1fr)); } .additional-payment-field-form, .deduction-head-create, .deduction-head-row { grid-template-columns: repeat(2, minmax(180px,1fr)); } }
+@media (max-width: 640px) { .page-head-actions { flex-wrap: wrap; } .additional-payment-field-form, .additional-payment-field-summary { grid-template-columns: 1fr; } .additional-payment-description { grid-column: auto; } }
 .workforce-payout-detail-table th, .workforce-payout-detail-table td { white-space: nowrap; }
 .workforce-payout-detail-table thead tr:first-child th { vertical-align: middle; }
 .workforce-payout-detail-table .work-days-group { text-align: center; background: #eff6ff; border-left: 1px solid #bfd7f5; border-right: 1px solid #bfd7f5; color: #175cd3; }

@@ -22,6 +22,7 @@ import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import { workforcePayoutDropxStatus } from "@/lib/workforce-payout-population";
 import { normalizePaymentFieldCode, paymentComponentOrderMap, sortByPaymentFieldOrder } from "@/lib/payment-field-order";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
+import { groupPayoutItemsBySubjectLocation } from "@/lib/workforce-payout-location-groups";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 
@@ -273,18 +274,21 @@ export async function loadHelperPayoutRows(
     historyByHelperId.set(helperId, [...(historyByHelperId.get(helperId) ?? []), entry]);
   }
   for (const [helperId, history] of historyByHelperId) historyByHelperId.set(helperId, sortPaymentAllocationHistory(history));
-  const allocationsByHelper = new Map<string, any[]>();
-  for (const allocation of allocations) {
-    if (!helperById.has(String(allocation.helper_id))) continue;
-    allocationsByHelper.set(String(allocation.helper_id), [
-      ...(allocationsByHelper.get(String(allocation.helper_id)) ?? []),
-      allocation
-    ]);
+  const helperGroups = groupPayoutItemsBySubjectLocation(
+    allocations.filter((allocation: any) => helperById.has(String(allocation.helper_id))),
+    (allocation: any) => allocation.helper_id,
+    (allocation: any) => allocation.station_id
+  );
+  const groupedHelperIds = new Set(helperGroups.map((group) => group.subjectId));
+  for (const helper of helpers) {
+    const helperId = String(helper.id);
+    if (!groupedHelperIds.has(helperId)) {
+      helperGroups.push({ subjectId: helperId, locationId: String(helper.location_id ?? ""), items: [] });
+    }
   }
 
-  const rows: WorkforcePayoutRow[] = helpers.map((helper: any) => {
-    const helperId = String(helper.id);
-    const helperAllocations = allocationsByHelper.get(helperId) ?? [];
+  const rows: WorkforcePayoutRow[] = helperGroups.map(({ subjectId: helperId, locationId, items: helperAllocations }) => {
+    const helper: any = helperById.get(helperId);
     const helperPeriodFrom = [fromDate, String(helper?.date_of_join ?? fromDate)].sort().at(-1)!;
     const helperPeriodTo = [toDate, todayKolkata()].sort()[0];
     const rawDailyBreakdown = helperAllocations.flatMap((allocation: any) => {
@@ -385,10 +389,8 @@ export async function loadHelperPayoutRows(
       })
       : [];
     const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
-    const locationIds = [...new Set((helperAllocations.length
-      ? helperAllocations.map((allocation: any) => String(allocation.station_id ?? ""))
-      : [String(helper?.location_id ?? "")]).filter(Boolean))];
-    const locationLabels = [...new Set(locationIds.map((id) => locationById.get(id)?.station_code ?? "-"))];
+    const resolvedLocationId = locationId || String(helper?.location_id ?? "");
+    const location: any = resolvedLocationId ? locationById.get(resolvedLocationId) : null;
     const dailyBreakdown = dailyBreakdownWithState.map(({ date, baseAmount: dailyBaseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({
       date,
       baseAmount: dailyBaseAmount,
@@ -399,15 +401,17 @@ export async function loadHelperPayoutRows(
     }));
 
     return {
-      id: `helper-${helperId}`,
+      id: `helper-${helperId}-${resolvedLocationId || "unassigned"}`,
+      reviewSubjectType: "helper",
+      reviewSubjectId: helperId,
       dropxId: helper?.dropx_id ?? "-",
       dropxStatus: workforcePayoutDropxStatus(helper),
       name: helper?.full_name ?? "Unlinked Helper",
       designation: String(helper?.designation ?? "").trim(),
       providerMemberId: "No provider ID",
       providerMemberName: "Helper direct pay",
-      locationId: locationIds[0] ?? null,
-      location: locationLabels.join(" / ") || "-",
+      locationId: resolvedLocationId || null,
+      location: String(location?.station_code ?? "-"),
       provider: "Direct",
       model: helperAllocations.length ? "Attendance / fixed" : "No payment method",
       paymentMethod: paymentMethodBreakdown.map((item) => item.label).join(" / ") || "Not allocated",

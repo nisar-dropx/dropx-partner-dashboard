@@ -36,7 +36,7 @@ assert.match(workforcePage, /"MFN return"/, "Workforce must use the requested MF
 assert.match(workforcePage, /summarizeWorkDays/, "Workforce must summarize capture-aware attendance as Work Days");
 assert.match(workforcePage, /workDayUnits:\s*calculation\.attendanceUnit/, "Direct payout Work Days must use canonical attendance units");
 assert.match(workforcePage, /paymentMethodBreakdown/, "Workforce must subtotal each mapped payment method separately");
-assert.match(workforcePage, /select\("payment_method_id,component_code,component_type,label,pay_schedule,sort_order,/, "Workforce payout must load the saved payment-field order");
+assert.match(workforcePage, /select\("payment_method_id,payment_field_id,component_code,component_type,label,pay_schedule,sort_order,/, "Workforce payout must load the saved payment-field order and field identity");
 assert.match(workforcePage, /const lines = orderPayoutLines\(\[\.\.\.productionLines, \.\.\.attendanceLines\], configuredComponentOrder\)/, "Mixed payout fields must use the payment method's configured order");
 assert.match(workforcePage, /const currentComponentOrder = paymentComponentOrderMap\(componentsByMethod\.get\(methodId\)[\s\S]*?lines: orderPayoutLines\(calculation\.lines\.map/, "Existing direct-allocation values must render in the payment method's current field order");
 assert.match(workforcePage, /Shipment data unavailable/, "Providerless shipment attendance must be shown as unavailable instead of zero");
@@ -72,7 +72,7 @@ assert.doesNotMatch(workforceExport, /paymentMethodBreakdown/, "Export must not 
 assert.match(workforceExport, /componentType === "production"[\s\S]*Count[\s\S]*Rate \(INR\)[\s\S]*Amount \(INR\)/, "Only production components must export Count, Rate, and Amount");
 assert.match(workforceExport, /Reported Units[\s\S]*Threshold \/ Excluded Units[\s\S]*Payable Units/, "Thresholded production must export reported, excluded and payable units separately");
 assert.match(workforceExport, /:\s*\[`\$\{item\.exportLabel\} Rate \(INR\)`, `\$\{item\.exportLabel\} Amount \(INR\)`\]/, "Attendance and fixed components must omit misleading Count columns");
-assert.match(workforceTable, /const tableColumnCount = 12/, "Workforce detail and empty rows must span the compact totals worksheet");
+assert.match(workforceTable, /const tableColumnCount = canEdit \? 13 : 12/, "Workforce detail and empty rows must span the compact totals worksheet, including the permission-gated selection column");
 assert.match(workforceTable, /Payment totals[\s\S]*Deduction totals/, "Workforce breakup must show period payment and deduction totals");
 assert.match(workforceTable, /row\.productionBreakdown\.filter\(\(item\) => item\.amount !== 0 \|\| item\.reportedCount !== undefined\)/, "Workforce breakup must retain zero-pay threshold lines for auditability");
 assert.match(workforceTable, />Payment<\/th><th className="payout-money" scope="col">Units<\/th><th className="payout-money" scope="col">Rate<\/th><th className="payout-money" scope="col">Amount<\/th>/, "Workforce breakup must show right-aligned payment units, rate, and amount");
@@ -146,7 +146,7 @@ assert.match(directAllocationAction, /save_helper_payment_allocation/, "Helper a
 assert.match(directAllocationWorksheet, /name="subject_type"[\s\S]*value=\{audience\}/, "The allocation worksheet must post the selected Workforce or Helpers population");
 assert.match(workforcePeriodFilter, /name="audience"/, "Changing a payout period must preserve the selected population tab");
 assert.doesNotMatch(workforcePeriodFilter, /payrollStatus/, "The removed confirmed-payroll filter must not remain in the period selector");
-assert.match(workforcePage, /<WorkforcePayoutTable key=\{audience\}/, "Switching Workforce and Helpers must reset client-side row filters");
+assert.match(workforcePage, /<WorkforcePayoutTable key=\{`\$\{audience\}-\$\{period\.fromDate\}-\$\{period\.toDate\}`\}/, "Switching population or payout period must reset client-side row filters and review selections");
 
 assert.match(paymentMethodForm, /const \[selectedIds, setSelectedIds\] = useState\(\(\) => normalizePaymentFieldOrder/, "Payment method editing must preserve the stored field order");
 assert.match(paymentMethodForm, /draggable[\s\S]*movePaymentField\(current, activeId, field\.id/, "Payment fields must support drag reordering");
