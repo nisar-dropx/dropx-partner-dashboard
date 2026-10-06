@@ -109,8 +109,12 @@ export function shipmentAttendanceUnit(
 export function shipmentAttendanceRecord(
   date: string,
   totalDeliveries: unknown,
-  setting?: Partial<WorkforceAttendanceCaptureSetting> | null
+  setting?: Partial<WorkforceAttendanceCaptureSetting> | null,
+  recorded?: DirectPayAttendance | null
 ): DirectPayAttendance {
+  // Shipment activity fills missing work evidence; it must never erase a
+  // recorded present/half-day or the actual minutes needed by hourly heads.
+  if (recorded && ["P", "HD"].includes(String(recorded.status ?? "").toUpperCase())) return recorded;
   const unit = shipmentAttendanceUnit(totalDeliveries, setting);
   return {
     punch_date: date,

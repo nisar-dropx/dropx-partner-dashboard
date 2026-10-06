@@ -121,7 +121,7 @@ export function WorkforceAttendanceCaptureForm({
         >
           {captureMethodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <span className="subtle">Biometric uses recorded attendance punches. Shipment data uses completed deliveries to qualify each workday.</span>
+        <span className="subtle">Biometric uses recorded attendance punches. Shipment data fills missing attendance from completed deliveries; recorded present and half-days are preserved.</span>
       </label>
       <label>Minimum daily deliveries
         <input

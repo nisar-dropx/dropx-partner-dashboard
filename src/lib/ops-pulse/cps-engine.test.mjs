@@ -560,3 +560,19 @@ test('P&L-only exclusion ignores incomplete seller rates without suppressing kno
  const r=calculateRateCard({payment_values:{DELIVERY:15}},cs,{total_delivery:2,mfn:30},'2026-10-01',true);
  assert.equal(r.variable,30);assert.equal(r.missing,false);
 });
+
+
+test('shipment fallback preserves actual attendance on days with no delivery and keeps hourly minutes',()=>{
+ const f=facts();f.shipments[0].total_delivery=0;f.shipments[0].total_activity=0;
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P',work_minutes:480}];
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
+ f.mappings[0].payment_values={HOUR:100};f.components=[{payment_method_id:'per-packet',component_code:'HOUR',component_type:'fixed',pay_schedule:'per_hour',calculation_type:'fixed',calculation_source:'attendance_eligibility'}];
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,800);
+});
+
+test('missing configured kilometre input is visible while known pay remains counted',()=>{
+ const f=facts();f.mappings[0].payment_values.KM_RUN=4;
+ f.components.push({payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Kilometres',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);assert.ok(r.gaps.some(g=>g.kind==='Kilometres input missing'));
+
+});

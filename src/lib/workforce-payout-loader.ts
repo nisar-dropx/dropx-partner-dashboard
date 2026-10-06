@@ -357,7 +357,7 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
       if (capture.capture_method !== "shipment_data") continue;
       if (!allMappings.some((mapping: any) => workerBySource.get(mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id)?.id === worker.id && allocationActiveOn(mapping, date))) continue;
       const key = `${worker.id}|${date}`;
-      attendanceByWorkerDate.set(key, shipmentAttendanceRecord(date, shipmentDeliveriesByWorkerDate.get(key) ?? 0, capture));
+      attendanceByWorkerDate.set(key, shipmentAttendanceRecord(date, shipmentDeliveriesByWorkerDate.get(key) ?? 0, capture, attendanceByWorkerDate.get(key)));
     }
   }
   attendanceByWorkerDate = new Map(overlayWorkforcePayoutAttendance(attendanceByWorkerDate, payoutInputMaps.attendanceByWorkforceDate));
