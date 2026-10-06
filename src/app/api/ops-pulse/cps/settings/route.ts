@@ -51,7 +51,7 @@ export async function POST(request:Request) {
     if(!isoDate(body.effective_from))return reply({error:'Choose a valid effective date.'},400);
     let table:string,values:Record<string,unknown>;
     if(body.kind==='fallback') {
-      if(!['disabled','associate_average','associate_then_station'].includes(body.mode)||!Number.isInteger(Number(body.lookback_months))||Number(body.lookback_months)<1||Number(body.lookback_months)>12||!Number.isInteger(Number(body.minimum_history_days))||Number(body.minimum_history_days)<1||Number(body.minimum_history_days)>366)return reply({error:'Choose a valid fallback and history window.'},400);
+      if(!['disabled','associate_average','associate_then_station','associate_station_company'].includes(body.mode)||!Number.isInteger(Number(body.lookback_months))||Number(body.lookback_months)<1||Number(body.lookback_months)>12||!Number.isInteger(Number(body.minimum_history_days))||Number(body.minimum_history_days)<1||Number(body.minimum_history_days)>366)return reply({error:'Choose a valid fallback and history window.'},400);
       const field=await supabaseAdmin.from('payment_fields').select('code,is_custom_production').eq('company_id',scope.companyId).eq('code',String(body.field_code)).maybeSingle();
       if(field.error||!field.data?.is_custom_production)return reply({error:'Choose a custom production field from this company.'},400);
       table='ops_cps_production_fallback_policies';values={field_code:field.data.code,mode:body.mode,lookback_months:Number(body.lookback_months),minimum_history_days:Number(body.minimum_history_days)};
