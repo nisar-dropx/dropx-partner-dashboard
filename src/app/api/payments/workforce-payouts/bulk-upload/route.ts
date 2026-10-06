@@ -5,6 +5,12 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
+  requiredAttendanceBasisForComponents,
+  validateAttendanceImportBases,
+  type AttendancePaymentComponentBasis,
+  type EffectiveAttendanceAllocation
+} from "./attendance-basis";
+import {
   normalizeWorkforcePayoutCode,
   parseWorkforcePayoutWorkbook,
   payoutImportRowsOverlap,
@@ -110,7 +116,7 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
   const componentsResult = methodIds.length
     ? await readAllRows(supabaseAdmin
       .from("payment_method_components")
-      .select("payment_method_id,payment_field_id,component_code,is_active")
+      .select("payment_method_id,payment_field_id,component_code,component_type,pay_schedule,is_active,payment_fields(field_type,pay_schedule,calculation_source)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .in("payment_method_id", methodIds)
@@ -120,11 +126,24 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
   if (componentsResult.error) throw new Error(componentsResult.error.message);
 
   const codesByMethod = new Map<string, string[]>();
+  const attendanceComponentsByMethod = new Map<string, AttendancePaymentComponentBasis[]>();
   for (const component of componentsResult.data ?? []) {
     const methodId = String(component.payment_method_id ?? "");
+    if (!methodId) continue;
+    const paymentField: any = Array.isArray(component.payment_fields)
+      ? component.payment_fields[0]
+      : component.payment_fields;
+    attendanceComponentsByMethod.set(methodId, [
+      ...(attendanceComponentsByMethod.get(methodId) ?? []),
+      {
+        componentType: paymentField?.field_type ?? component.component_type,
+        calculationSource: paymentField?.calculation_source,
+        paySchedule: paymentField?.pay_schedule ?? component.pay_schedule
+      }
+    ]);
     const code = fieldCodeById.get(String(component.payment_field_id ?? ""))
       ?? normalizeWorkforcePayoutCode(component.component_code);
-    if (!methodId || !code) continue;
+    if (!code) continue;
     codesByMethod.set(methodId, [...new Set([...(codesByMethod.get(methodId) ?? []), code])]);
   }
 
@@ -150,15 +169,25 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
     return "";
   }
 
+  const attendanceAllocations: EffectiveAttendanceAllocation[] = [];
   const setups: WorkforcePayoutImportSetup[] = (mappingsResult.data ?? []).flatMap((mapping: any) => {
     const workforceId = canonicalMappingWorkforceId(mapping);
     if (!workforceId) return [];
+    const methodId = String(mapping.payment_method_id ?? "");
+    attendanceAllocations.push({
+      sourceId: `provider:${String(mapping.id ?? "")}`,
+      workforceId,
+      locationId: mapping.station_id ? String(mapping.station_id) : null,
+      effectiveFrom: String(mapping.effective_from),
+      effectiveTo: mapping.effective_to ? String(mapping.effective_to) : null,
+      requiredBasis: requiredAttendanceBasisForComponents(attendanceComponentsByMethod.get(methodId) ?? [])
+    });
     return [{
       workforceId,
       locationId: mapping.station_id ? String(mapping.station_id) : null,
       effectiveFrom: String(mapping.effective_from),
       effectiveTo: mapping.effective_to ? String(mapping.effective_to) : null,
-      fieldCodes: codesByMethod.get(String(mapping.payment_method_id ?? "")) ?? []
+      fieldCodes: codesByMethod.get(methodId) ?? []
     }];
   });
   for (const allocation of allocationsResult.data ?? []) {
@@ -174,6 +203,18 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
       // A direct allocation is an immutable payment snapshot. Never infer fields
       // from the live method because the master may have changed since it was saved.
       fieldCodes: [...new Set(snapshotCodes)]
+    });
+    attendanceAllocations.push({
+      sourceId: `direct:${String(allocation.id ?? "")}`,
+      workforceId: String(allocation.workforce_id ?? ""),
+      locationId: allocation.station_id ? String(allocation.station_id) : null,
+      effectiveFrom: String(allocation.effective_from),
+      effectiveTo: allocation.effective_to ? String(allocation.effective_to) : null,
+      requiredBasis: requiredAttendanceBasisForComponents(snapshot.map((component: any) => ({
+        componentType: component?.component_type,
+        calculationSource: component?.calculation_source,
+        paySchedule: component?.pay_schedule
+      })))
     });
   }
 
@@ -208,7 +249,7 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
     id: String(station.id),
     code: normalizeWorkforcePayoutCode(station.station_code)
   })).filter((station) => station.id && station.code);
-  return { workers, paymentFields, additionalFields, deductionHeads, setups, locations };
+  return { workers, paymentFields, additionalFields, deductionHeads, setups, locations, attendanceAllocations };
 }
 
 async function appendDatabaseIssues(
@@ -399,6 +440,7 @@ export async function POST(request: Request) {
       : new Set(authorization.locationScopeIds);
     const resolved = resolveWorkforcePayoutImportRows(parsed, { ...references, allowedLocationIds });
     const issues = [...resolved.issues];
+    issues.push(...validateAttendanceImportBases(resolved.rows, references.attendanceAllocations));
     await appendDatabaseIssues(companyId, batchFrom, batchTo, fileSha256, resolved.rows, issues);
 
     const preview = {
@@ -420,9 +462,12 @@ export async function POST(request: Request) {
         inputType: row.inputType,
         fieldCode: row.fieldCode,
         locationCode: row.locationCode || references.locations.find((location) => location.id === row.locationId)?.code || "",
+        effectiveDate: row.effectiveDate,
         effectiveFrom: row.effectiveFrom,
         effectiveTo: row.effectiveTo,
         value: row.textValue ?? row.numericValue,
+        workHours: row.workHours,
+        workDays: row.workDays,
         workMinutes: row.workMinutes,
         locationId: row.locationId
       })),
