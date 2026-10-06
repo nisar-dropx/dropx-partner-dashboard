@@ -11,6 +11,7 @@ export const workforcePayoutInputTypes = [
 export type WorkforcePayoutInputType = (typeof workforcePayoutInputTypes)[number];
 export type WorkforcePayoutImportAction = "UPSERT" | "CLEAR";
 export type WorkforcePayoutAttendanceStatus = "P" | "HD" | "A";
+export type WorkforcePayoutAttendanceBasis = "hours" | "days";
 
 export type WorkforcePayoutImportIssue = {
   rowNumber: number | null;
@@ -25,10 +26,14 @@ export type WorkforcePayoutImportRow = {
   locationCode: string;
   inputType: WorkforcePayoutInputType | "";
   fieldCode: string;
+  effectiveDate: string;
   effectiveFrom: string;
   effectiveTo: string;
   numericValue: number | null;
   textValue: string | null;
+  attendanceBasis: WorkforcePayoutAttendanceBasis | null;
+  workHours: number | null;
+  workDays: number | null;
   workMinutes: number | null;
   remark: string;
 };
@@ -127,10 +132,10 @@ const KNOWN_HEADERS = new Set([
   "location",
   "inputtype",
   "fieldcode",
-  "effectivefrom",
-  "effectiveto",
+  "effectivedate",
   "value",
-  "workminutes",
+  "workhours",
+  "workdays",
   "remark"
 ]);
 
@@ -154,19 +159,26 @@ function formatDate(year: number, month: number, day: number) {
   return isValidWorkforcePayoutDate(value) ? value : "";
 }
 
+function displaySpreadsheetDate(value: string) {
+  if (!isValidWorkforcePayoutDate(value)) return "DD/MM/YYYY";
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
 function spreadsheetDate(value: unknown) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return formatDate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
   }
   if (typeof value === "number" && Number.isFinite(value)) {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    return parsed ? formatDate(parsed.y, parsed.m, parsed.d) : "";
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000);
+    return Number.isNaN(date.getTime())
+      ? ""
+      : formatDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
   }
   const text = String(value ?? "").trim();
   if (!text) return "";
-  if (isValidWorkforcePayoutDate(text)) return text;
-  const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-  return match ? formatDate(Number(match[3]), Number(match[2]), Number(match[1])) : "";
+  const match = text.match(/^(\d{2})([\/-])(\d{2})\2(\d{4})$/);
+  return match ? formatDate(Number(match[4]), Number(match[3]), Number(match[1])) : "";
 }
 
 function finiteNumber(value: unknown) {
@@ -199,14 +211,6 @@ function normalizeAction(value: unknown): WorkforcePayoutImportAction | "" {
   const normalized = normalizeWorkforcePayoutCode(value);
   if (!normalized || normalized === "UPSERT") return "UPSERT";
   return normalized === "CLEAR" ? "CLEAR" : "";
-}
-
-function attendanceStatus(value: unknown): WorkforcePayoutAttendanceStatus | null {
-  const normalized = normalizeWorkforcePayoutCode(value).replace(/[^A-Z0-9]+/g, "_");
-  if (normalized === "P" || normalized === "PRESENT") return "P";
-  if (normalized === "HD" || normalized === "HALF_DAY" || normalized === "HALFDAY") return "HD";
-  if (normalized === "A" || normalized === "ABSENT") return "A";
-  return null;
 }
 
 function dateDifferenceDays(from: string, to: string) {
@@ -274,12 +278,12 @@ function resolvedRowIdentity(row: ResolvedWorkforcePayoutImportRow) {
 function findColumns(header: unknown[]) {
   const normalized = header.map(normalizeHeader);
   const result: Record<string, number> = {};
-  for (const field of ["dropxid", "inputtype", "fieldcode", "effectivefrom", "effectiveto", "value"] as const) {
+  for (const field of ["dropxid", "inputtype", "fieldcode", "effectivedate", "value"] as const) {
     const index = normalized.indexOf(field);
     if (index < 0) throw new Error(`Required column “${field.replace(/([a-z])([A-Z])/g, "$1 $2")}” is missing.`);
     result[field] = index;
   }
-  for (const field of ["action", "location", "workminutes", "remark"] as const) result[field] = normalized.indexOf(field);
+  for (const field of ["action", "location", "workhours", "workdays", "remark"] as const) result[field] = normalized.indexOf(field);
   return { result, normalized };
 }
 
@@ -334,35 +338,62 @@ export function parseWorkforcePayoutWorkbook(
     const action = normalizeAction(columns.action >= 0 ? formatted[columns.action] : "");
     const inputType = normalizeInputType(formatted[columns.inputtype]);
     const fieldCode = normalizeWorkforcePayoutCode(formatted[columns.fieldcode]);
-    const effectiveFrom = spreadsheetDate(source[columns.effectivefrom]);
-    const effectiveTo = spreadsheetDate(source[columns.effectiveto]);
+    const effectiveDate = spreadsheetDate(source[columns.effectivedate]);
+    const effectiveFrom = inputType === "ADDITIONAL_PAYMENT" || inputType === "DEDUCTION"
+      ? options.batchFrom
+      : effectiveDate;
+    const effectiveTo = inputType === "ATTENDANCE" || inputType === "PRODUCTION_UNITS"
+      ? effectiveDate
+      : options.batchTo;
     const rawValue = source[columns.value];
-    const rawMinutes = columns.workminutes >= 0 ? source[columns.workminutes] : "";
+    const rawHours = columns.workhours >= 0 ? source[columns.workhours] : "";
+    const rawDays = columns.workdays >= 0 ? source[columns.workdays] : "";
     const remark = columns.remark >= 0 ? String(formatted[columns.remark] ?? "").trim().slice(0, 500) : "";
     let numericValue: number | null = null;
     let textValue: string | null = null;
-    const workMinutes = finiteNumber(rawMinutes);
+    let attendanceBasis: WorkforcePayoutAttendanceBasis | null = null;
+    const workHours = finiteNumber(rawHours);
+    const workDays = finiteNumber(rawDays);
+    let workMinutes: number | null = null;
 
     if (!dropxId) issues.push({ rowNumber, dropxId: null, message: "DropX ID is required." });
     if (!action) issues.push({ rowNumber, dropxId: dropxId || null, message: "ACTION must be UPSERT or CLEAR." });
     if (!inputType) issues.push({ rowNumber, dropxId: dropxId || null, message: "INPUT_TYPE is not supported." });
-    if (!effectiveFrom || !effectiveTo) {
-      issues.push({ rowNumber, dropxId: dropxId || null, message: "Effective From and Effective To must be valid spreadsheet dates." });
-    } else {
-      if (effectiveTo < effectiveFrom) issues.push({ rowNumber, dropxId: dropxId || null, message: "Effective To cannot be before Effective From." });
-      if (effectiveFrom < options.batchFrom || effectiveTo > options.batchTo) {
-        issues.push({ rowNumber, dropxId: dropxId || null, message: `Dates must fall within the selected ${options.batchFrom} to ${options.batchTo} import period.` });
-      }
+    if (!effectiveDate) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "EFFECTIVE_DATE must be a real date written as DD-MM-YYYY or DD/MM/YYYY." });
+    } else if (effectiveDate < options.batchFrom || effectiveDate > options.batchTo) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: `EFFECTIVE_DATE must fall within the selected ${options.batchFrom} to ${options.batchTo} payout period.` });
     }
     if (formulaRows.has(rowNumber)) issues.push({ rowNumber, dropxId: dropxId || null, message: "Formula cells are not accepted. Paste their values before uploading." });
 
     if (action === "CLEAR") {
-      if (String(rawValue ?? "").trim() || String(rawMinutes ?? "").trim()) {
-        issues.push({ rowNumber, dropxId: dropxId || null, message: "CLEAR rows must leave VALUE and WORK_MINUTES blank." });
+      if (String(rawValue ?? "").trim() || String(rawHours ?? "").trim() || String(rawDays ?? "").trim()) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "CLEAR rows must leave VALUE, WORK_HOURS and WORK_DAYS blank." });
       }
     } else if (inputType === "ATTENDANCE") {
-      textValue = attendanceStatus(rawValue);
-      if (!textValue) issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance VALUE must be P, HD or A." });
+      if (String(rawValue ?? "").trim()) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance rows must leave VALUE blank and enter either WORK_HOURS or WORK_DAYS." });
+      }
+      if (workHours === null && workDays === null) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance rows require either WORK_HOURS or WORK_DAYS." });
+      } else if (workHours !== null && workDays !== null) {
+        issues.push({ rowNumber, dropxId: dropxId || null, message: "Enter only one attendance value: WORK_HOURS or WORK_DAYS, not both." });
+      } else if (workHours !== null) {
+        if (!Number.isFinite(workHours) || workHours < 0 || workHours > 24) {
+          issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_HOURS must be a number from 0 to 24." });
+        } else {
+          workMinutes = Math.round(workHours * 60);
+          textValue = workHours === 0 ? "A" : "P";
+          attendanceBasis = "hours";
+        }
+      } else if (workDays !== null) {
+        if (!Number.isFinite(workDays) || ![0, 0.5, 1].includes(workDays)) {
+          issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_DAYS must be 0, 0.5 or 1." });
+        } else {
+          textValue = workDays === 0 ? "A" : workDays === 0.5 ? "HD" : "P";
+          attendanceBasis = "days";
+        }
+      }
       if (fieldCode) issues.push({ rowNumber, dropxId: dropxId || null, message: "Attendance rows must leave FIELD_CODE blank." });
     } else {
       numericValue = finiteNumber(rawValue);
@@ -380,24 +411,8 @@ export function parseWorkforcePayoutWorkbook(
       }
     }
 
-    if (workMinutes !== null && (!Number.isInteger(workMinutes) || workMinutes < 0 || workMinutes > 1_440)) {
-      issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_MINUTES must be a whole number from 0 to 1440." });
-    }
-    if (inputType !== "ATTENDANCE" && workMinutes !== null) {
-      issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_MINUTES is only valid for attendance rows." });
-    }
-    if (inputType === "ATTENDANCE" && textValue === "A" && workMinutes !== null && workMinutes !== 0) {
-      issues.push({ rowNumber, dropxId: dropxId || null, message: "Absent attendance cannot contain work minutes." });
-    }
-    if ((inputType === "ATTENDANCE" || inputType === "PRODUCTION_UNITS") && effectiveFrom && effectiveTo && effectiveFrom !== effectiveTo) {
-      issues.push({ rowNumber, dropxId: dropxId || null, message: `${inputType === "ATTENDANCE" ? "Attendance" : "Production units"} must be supplied one work date per row.` });
-    }
-    if ((inputType === "ADDITIONAL_PAYMENT" || inputType === "DEDUCTION") && effectiveFrom && effectiveTo && (effectiveFrom !== options.batchFrom || effectiveTo !== options.batchTo)) {
-      issues.push({
-        rowNumber,
-        dropxId: dropxId || null,
-        message: `${inputType === "DEDUCTION" ? "A deduction" : "An additional payment"} must use the exact selected payout period.`
-      });
+    if (inputType !== "ATTENDANCE" && (workHours !== null || workDays !== null)) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "WORK_HOURS and WORK_DAYS are only valid for attendance rows." });
     }
 
     return [{
@@ -407,10 +422,14 @@ export function parseWorkforcePayoutWorkbook(
       locationCode,
       inputType,
       fieldCode,
+      effectiveDate,
       effectiveFrom,
       effectiveTo,
       numericValue: action === "CLEAR" ? null : numericValue,
       textValue: action === "CLEAR" ? null : textValue,
+      attendanceBasis: action === "CLEAR" ? null : attendanceBasis,
+      workHours: action === "CLEAR" ? null : workHours,
+      workDays: action === "CLEAR" ? null : workDays,
       workMinutes: action === "CLEAR" ? null : workMinutes,
       remark
     }];
@@ -658,8 +677,8 @@ export function buildWorkforcePayoutImportTemplate(
   fields: WorkforcePayoutImportTemplateField[],
   options: { effectiveFrom?: string; effectiveTo?: string; locations?: Array<{ code: string }> } = {}
 ) {
-  const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_FROM", "EFFECTIVE_TO", "VALUE", "WORK_MINUTES", "REMARK"];
-  const columnWidths = [12, 24, 16, 24, 24, 16, 16, 18, 16, 42].map((wch) => ({ wch }));
+  const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "VALUE", "WORK_HOURS", "WORK_DAYS", "REMARK"];
+  const columnWidths = [12, 24, 16, 24, 24, 18, 18, 16, 16, 42].map((wch) => ({ wch }));
   const upload = XLSX.utils.aoa_to_sheet([headers]);
   upload["!cols"] = columnWidths;
   upload["!autofilter"] = { ref: `A1:J1` };
@@ -673,48 +692,48 @@ export function buildWorkforcePayoutImportTemplate(
   reference["!autofilter"] = { ref: `A1:E${Math.max(1, referenceRows.length)}` };
 
   const dateHint = options.effectiveFrom && options.effectiveTo
-    ? `This template was downloaded for ${options.effectiveFrom} to ${options.effectiveTo}. These dates are the inclusive allowed upload window; every row still needs its own dates inside that window.`
-    : "Effective from and Effective to on the payout page set the inclusive allowed upload window. Every Excel row still needs its own dates inside that window.";
+    ? `This template was downloaded for ${displaySpreadsheetDate(options.effectiveFrom)} to ${displaySpreadsheetDate(options.effectiveTo)}. Every row needs one EFFECTIVE_DATE inside that selected payout period.`
+    : "Every Excel row needs one EFFECTIVE_DATE inside the payout period selected on the worksheet page.";
   const instructions = XLSX.utils.aoa_to_sheet([
     ["WORKFORCE PAYOUT BULK UPLOAD"],
     [dateHint],
     ["Replacement scope", "Each UPSERT or CLEAR row changes only the matching stored input: the same Workforce person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged. For example, a DELIVERY row, when DELIVERY is enabled for upload, does not replace attendance, additions, or other production fields."],
-    ["ACTION", "Use UPSERT to create or replace the matching input. Use CLEAR with blank VALUE and WORK_MINUTES to remove only that matching input."],
-    ["EFFECTIVE_FROM / EFFECTIVE_TO", "These are row dates, not values copied automatically from the page. Attendance and production use one work date, so enter the same date in both columns. Configured field values may use an interval inside the selected window. Additional payments and deductions use the exact selected payout period."],
-    ["WORK_MINUTES", "Optional attendance-only field containing the payable work minutes used for attendance and hourly calculations on that date. Enter a whole number from 0 to 1440. Leave blank to keep existing biometric minutes, if available. An absent day must be blank or 0."],
-    ["ATTENDANCE", "Leave FIELD_CODE blank. Use one date per row, enter that same date in both date columns, and set VALUE to P (present), HD (half day), or A (absent). See the Examples sheet."],
+    ["ACTION", "Use UPSERT to create or replace the matching input. Use CLEAR with blank VALUE, WORK_HOURS and WORK_DAYS to remove only that matching input."],
+    ["EFFECTIVE_DATE", "Enter exactly one date as DD-MM-YYYY or DD/MM/YYYY. Attendance and production apply only to that date. A configured payment-field value starts on that date and runs to the selected payout-period end. Additional payments and deductions apply once to the selected payout period."],
+    ["WORK_HOURS / WORK_DAYS", "Attendance only. Enter exactly one: WORK_HOURS from 0 to 24 for a person paid by attendance hour, or WORK_DAYS as 0, 0.5 or 1 for a person paid by attendance day. Leave VALUE blank. The upload rejects both columns together and rejects a unit that does not match the person's payment setup."],
+    ["ATTENDANCE", "Leave FIELD_CODE and VALUE blank. Enter one EFFECTIVE_DATE and exactly one attendance quantity in WORK_HOURS or WORK_DAYS. Zero means absent; WORK_DAYS 0.5 means half day."],
     ["PRODUCTION_UNITS", "Use one date per row and a production FIELD_CODE from Field Reference. The uploaded value replaces only that field for that person, location and date; provider-reported values remain the fallback when no override exists."],
-    ["PAYMENT_FIELD_VALUE", "Use a FIELD_CODE from Field Reference. VALUE overrides that configured rate/input for the row interval; it is not a final payout amount."],
-    ["ADDITIONAL_PAYMENT", "Use a FIELD_CODE from Field Reference. The row dates must exactly match the selected payout period. VALUE is applied once for that period."],
-    ["DEDUCTION", "Use an active manual deduction FIELD_CODE from Field Reference. The row dates must exactly match the selected payout period, and VALUE may have at most two decimal places. Automatic fixed, percentage and system deductions cannot be uploaded or replaced."],
+    ["PAYMENT_FIELD_VALUE", "Use a FIELD_CODE from Field Reference. VALUE overrides that configured rate/input from EFFECTIVE_DATE through the selected payout-period end; it is not a final payout amount."],
+    ["ADDITIONAL_PAYMENT", "Use a FIELD_CODE from Field Reference. VALUE is applied once to the payout period selected on the worksheet page."],
+    ["DEDUCTION", "Use an active manual deduction FIELD_CODE from Field Reference. VALUE is applied once to the selected payout period and may have at most two decimal places. Automatic fixed, percentage and system deductions cannot be uploaded or replaced."],
     ["Important", "Zero is a real value. A blank value is not zero. Formula cells and negative values are rejected."],
     ["Matching", "People are matched only by the company Workforce DROPX_ID. LOCATION is optional. ADDITIONAL_PAYMENT and DEDUCTION default to the Workforce current location; an explicit location must be current or overlap a historical provider/direct setup. Setup-based inputs may require LOCATION when the same ID has simultaneous payment setups."]
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 110 }];
 
-  const exampleFrom = options.effectiveFrom ?? "YYYY-MM-DD";
-  const exampleTo = options.effectiveTo ?? "YYYY-MM-DD";
+  const exampleDate = displaySpreadsheetDate(options.effectiveFrom ?? "");
   const exampleLocation = options.locations?.[0]?.code ?? "";
   const exampleRows: Array<Array<string | number>> = [
     ["EXAMPLES ONLY - copy a row to Upload, then replace the sample ID, dates, location, field code and value. Do not upload this sheet."],
     headers,
-    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "", exampleFrom, exampleFrom, "HD", 240, "Half day with 240 actual work minutes"]
+    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "", exampleDate, "", 8, "", "Eight attendance hours for an hourly-paid person"],
+    ["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ATTENDANCE", "", exampleDate, "", "", 0.5, "Half attendance day for a daily-paid person"]
   ];
   const productionField = fields.find((field) => field.inputType === "PRODUCTION_UNITS");
   if (productionField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PRODUCTION_UNITS", productionField.code, exampleFrom, exampleFrom, 10, "", `${productionField.label} units for one work date`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PRODUCTION_UNITS", productionField.code, exampleDate, 10, "", "", `${productionField.label} units for one work date`]);
   }
   const paymentField = fields.find((field) => field.inputType === "PAYMENT_FIELD_VALUE");
   if (paymentField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PAYMENT_FIELD_VALUE", paymentField.code, exampleFrom, exampleTo, 100, "", `${paymentField.label} configured input override`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "PAYMENT_FIELD_VALUE", paymentField.code, exampleDate, 100, "", "", `${paymentField.label} configured input override`]);
   }
   const additionalField = fields.find((field) => field.inputType === "ADDITIONAL_PAYMENT");
   if (additionalField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ADDITIONAL_PAYMENT", additionalField.code, exampleFrom, exampleTo, 500, "", `${additionalField.label} for the exact payout period`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "ADDITIONAL_PAYMENT", additionalField.code, exampleDate, 500, "", "", `${additionalField.label} for the selected payout period`]);
   }
   const deductionField = fields.find((field) => field.inputType === "DEDUCTION");
   if (deductionField) {
-    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "DEDUCTION", deductionField.code, exampleFrom, exampleTo, 250, "", `${deductionField.label} for the exact payout period`]);
+    exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "DEDUCTION", deductionField.code, exampleDate, 250, "", "", `${deductionField.label} for the selected payout period`]);
   }
   const examples = XLSX.utils.aoa_to_sheet(exampleRows);
   examples["!cols"] = columnWidths;

@@ -17,10 +17,12 @@ type PreviewRow = {
   inputType: string;
   fieldCode: string;
   locationCode: string;
-  effectiveFrom: string;
-  effectiveTo: string;
+  effectiveDate?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
   value: number | string | null;
-  workMinutes: number | null;
+  workHours?: number | null;
+  workDays?: number | null;
 };
 
 type PreviewResponse = {
@@ -51,8 +53,6 @@ async function readResponse(response: Response): Promise<PreviewResponse> {
 export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: string; toDate: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [effectiveFrom, setEffectiveFrom] = useState(fromDate);
-  const [effectiveTo, setEffectiveTo] = useState(toDate);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [busy, setBusy] = useState<"preview" | "commit" | null>(null);
@@ -60,8 +60,6 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
   const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   useEffect(() => {
-    setEffectiveFrom(fromDate);
-    setEffectiveTo(toDate);
     setPreview(null);
     setError(null);
     setConfirmationOpen(false);
@@ -87,8 +85,8 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
       setError("Choose the completed payout input workbook first.");
       return;
     }
-    if (!effectiveFrom || !effectiveTo || effectiveTo < effectiveFrom) {
-      setError("Select a valid effective-from and effective-to range.");
+    if (!fromDate || !toDate || toDate < fromDate) {
+      setError("The selected payout period is unavailable. Apply a valid worksheet period and retry.");
       return;
     }
     setBusy(mode);
@@ -96,8 +94,8 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
     try {
       const body = new FormData();
       body.set("mode", mode);
-      body.set("effective_from", effectiveFrom);
-      body.set("effective_to", effectiveTo);
+      body.set("effective_from", fromDate);
+      body.set("effective_to", toDate);
       body.set("file", file);
       const response = await fetch("/api/payments/workforce-payouts/bulk-upload", { method: "POST", body });
       const result = await readResponse(response);
@@ -116,7 +114,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
   const uploadedInputTypes = Object.entries(preview?.counts ?? {})
     .filter(([, count]) => count > 0)
     .map(([inputType]) => inputType.toLowerCase().replaceAll("_", " "));
-  const templateUrl = `/api/payments/workforce-payouts/bulk-upload/template?effective_from=${encodeURIComponent(effectiveFrom)}&effective_to=${encodeURIComponent(effectiveTo)}`;
+  const templateUrl = `/api/payments/workforce-payouts/bulk-upload/template?effective_from=${encodeURIComponent(fromDate)}&effective_to=${encodeURIComponent(toDate)}`;
 
   return (
     <div className="workforce-payout-bulk-upload">
@@ -137,14 +135,6 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
           <div className="compensation-import-body">
             <div className="compensation-import-controls">
               <label>
-                <span>Effective from</span>
-                <input className="field" type="date" value={effectiveFrom} onChange={(event) => { setEffectiveFrom(event.target.value); invalidatePreview(); }} required />
-              </label>
-              <label>
-                <span>Effective to</span>
-                <input className="field" type="date" min={effectiveFrom} value={effectiveTo} onChange={(event) => { setEffectiveTo(event.target.value); invalidatePreview(); }} required />
-              </label>
-              <label>
                 <span>Payout input workbook</span>
                 <input
                   accept=".xlsx,.xls,.csv"
@@ -159,10 +149,10 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
             </div>
 
             <p className="compensation-match-rule">
-              <strong>How the dates work:</strong> Effective from and Effective to set the inclusive allowed upload window; they do not replace the dates in each Excel row. For attendance and production, enter the same work date in both row columns. A configured field value may use an interval inside this window. Additional payments and deductions must use this exact payout period.
+              <strong>Excel date:</strong> Enter one EFFECTIVE_DATE on every row, using only DD-MM-YYYY or DD/MM/YYYY. The selected worksheet period ({fromDate} to {toDate}) is applied automatically and is not editable in this upload panel.
             </p>
             <p className="compensation-match-rule">
-              <strong>What WORK_MINUTES means:</strong> the payable work minutes used for attendance and hourly calculations on that date. It is optional, is accepted only for ATTENDANCE, and must be a whole number from 0 to 1440. Leave it blank to keep existing biometric minutes, if available. Zero is kept as a real value.
+              <strong>Attendance units:</strong> For ATTENDANCE, fill exactly one column: WORK_HOURS for a person mapped to per-hour attendance, or WORK_DAYS for a person mapped to per-day attendance. Filling both columns, or using a unit that does not match the person&apos;s attendance payment mapping, is rejected.
             </p>
 
             {error ? <div className="compensation-import-message error"><strong>Import blocked</strong><span>{error}</span></div> : null}
@@ -193,7 +183,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
 
                 <div className="table-wrap compensation-preview-table">
                   <table>
-                    <thead><tr><th>Row</th><th>DropX ID</th><th>Location</th><th>Database person</th><th>Input</th><th>Field</th><th>Effective dates</th><th>Value</th><th>Action</th></tr></thead>
+                    <thead><tr><th>Row</th><th>DropX ID</th><th>Location</th><th>Database person</th><th>Input</th><th>Field</th><th>Effective date</th><th>Value</th><th>Action</th></tr></thead>
                     <tbody>{rows.slice(0, 50).map((row) => (
                       <tr key={`${row.rowNumber}-${row.dropxId}-${row.inputType}-${row.fieldCode}`}>
                         <td>{row.rowNumber}</td>
@@ -202,8 +192,12 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
                         <td>{row.fullName}</td>
                         <td>{row.inputType.replaceAll("_", " ")}</td>
                         <td>{row.fieldCode || "—"}</td>
-                        <td>{row.effectiveFrom === row.effectiveTo ? row.effectiveFrom : `${row.effectiveFrom} – ${row.effectiveTo}`}</td>
-                        <td>{row.value ?? (row.action === "CLEAR" ? "Clear" : "—")}{row.workMinutes !== null ? ` · ${row.workMinutes} min` : ""}</td>
+                        <td>{row.effectiveDate ?? row.effectiveFrom ?? "—"}</td>
+                        <td>
+                          {row.value ?? (row.action === "CLEAR" ? "Clear" : "—")}
+                          {row.workHours !== null && row.workHours !== undefined ? ` · ${row.workHours} hr` : ""}
+                          {row.workDays !== null && row.workDays !== undefined ? ` · ${row.workDays} day${row.workDays === 1 ? "" : "s"}` : ""}
+                        </td>
                         <td><span className={`status-pill ${row.action === "CLEAR" ? "warn" : "good"}`}>{row.action.toLowerCase()}</span></td>
                       </tr>
                     ))}</tbody>
@@ -252,7 +246,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
             </div>
             <div className="confirmation-body">
               <p>
-                Apply <strong>{preview?.totalRows ?? 0} uploaded rows</strong> for {effectiveFrom} to {effectiveTo}
+                Apply <strong>{preview?.totalRows ?? 0} uploaded rows</strong> for the selected payout period {fromDate} to {toDate}
                 {uploadedInputTypes.length ? ` (${uploadedInputTypes.join(", ")})` : ""}?
               </p>
               <p>
