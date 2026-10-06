@@ -72,7 +72,11 @@ export function LoadFlashView({ initial }: { initial: LoadFlashNetworkPayload })
         const started = Date.now();
         try {
           const response = await fetch("/api/ops-pulse/edd/flash/network/continue", { method: "POST", cache: "no-store" });
-          const body = await response.json() as { run?: EddNetworkRunStatus | null };
+          const body = await response.json() as { run?: EddNetworkRunStatus | null; error?: string };
+          if (!response.ok) {
+            if (!cancelled) setError(body.error ?? "Unable to keep refreshing stations.");
+            break;
+          }
           if (!cancelled && body.run) setRun(body.run);
           if (body.run && body.run.status !== "running") {
             await pull();
