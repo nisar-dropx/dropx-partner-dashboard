@@ -26,7 +26,7 @@ export function compareFindings(previous: ReportFinding[], current: ReportRespon
  });
 }
 export type FindingProof = {id:string;url:string;type:string;caption:string;auditId:string};
-export type FindingUpdate = {id:string;at:string;actor:string;status:string;note:string;action:string;owner:string;due:string;severity:string;proofs:FindingProof[];before:{status:string;due:string|null;action:string;owner:string;severity:string}};
+export type FindingUpdate = {id:string;at:string;actor:string;status:string;note:string;action:string;owner:string;due:string;severity:string;proofs:FindingProof[];before:{status:string;due:string|null;action:string;owner:string;severity:string;resolution?:string}};
 export type FindingAction = ReportFinding & {owner:string;updatedAt:string;updates:FindingUpdate[]};
 export function findingUrgency(f:ReportFinding,today:string) {
  if(['resolved','accepted'].includes(f.status))return 'Closed';

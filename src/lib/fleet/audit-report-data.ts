@@ -35,7 +35,7 @@ export async function loadAuditReport(companyId:string,auditId:string):Promise<A
   const raw=findings.data!.find(r=>r.id===f.id)!;
   return {...f,owner:raw.responsible_name||owners.data?.find(o=>o.id===raw.owner_user_id)?.full_name||'',updatedAt:raw.updated_at,
    updates:(updates.data||[]).filter(u=>u.finding_id===f.id).map(u=>({id:u.id,at:u.created_at,actor:u.actor_name,status:u.status,note:u.note,action:u.action_required,owner:u.responsible_name,due:u.due_date,severity:u.severity,
-    before:{status:u.before_state.status,due:u.before_state.expected_completion_date,action:u.before_state.action_required||'',owner:u.before_state.responsible_name||'',severity:u.before_state.severity},
+    before:{resolution:u.before_state.resolution_note||'',status:u.before_state.status,due:u.before_state.expected_completion_date,action:u.before_state.action_required||'',owner:u.before_state.responsible_name||'',severity:u.before_state.severity},
     proofs:(u.proofs||[]).map((p:{id:string;path:string;type:string;caption:string})=>({id:p.id,url:`/api/fleet/audit-evidence?path=${encodeURIComponent(p.path)}`,type:p.type,caption:p.caption,auditId:f.auditId}))}))};
  });
  const health=summarizeHealth(mapped);health.critical ||= currentFindings.some(f=>f.severity==='critical');
