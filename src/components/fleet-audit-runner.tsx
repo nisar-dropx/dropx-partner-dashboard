@@ -17,7 +17,7 @@ async function smallPhoto(file:File):Promise<File> {
  const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Photo processing failed.')),'image/jpeg',0.82));return new File([blob],'audit-photo.jpg',{type:'image/jpeg'});
  } finally {URL.revokeObjectURL(url);}
 }
-export function FleetAuditRunner({audit,data,onClose,onDone}:{audit:FleetAudit;data:FleetControlData;onClose:()=>void;onDone:()=>void}) {
+export function FleetAuditRunner({audit,data,onClose,onDone}:{audit:FleetAudit;data:FleetControlData;onClose:()=>void;onDone:(confirmation:string)=>void}) {
  const vehicle=data.vehicles.find(v=>v.id===audit.vehicleId);
  const template=audit.templateId || data.auditTemplates.find(t=>t.isDefault)?.id;
  const items=data.checklistItems.filter(i=>i.templateId===template&&(i.auditMode==='both'||i.auditMode===audit.auditMode)&&auditApplies(i.responseConfig,vehicle?.fuelType||''));
@@ -51,7 +51,7 @@ export function FleetAuditRunner({audit,data,onClose,onDone}:{audit:FleetAudit;d
  const responses=items.map(i=>({itemId:i.id,value:values[`item_${i.id}`]||'',comments:values[`comment_${i.id}`]||'',days:values[`days_${i.id}`]||configFor(i).options.find(o=>o.value===values[`item_${i.id}`])?.days,action:values[`action_${i.id}`]||''}));
  const evidence=items.flatMap(i=>Array.from({length:7},(_,n)=>({itemId:i.id,url:values[`photo_${i.id}_${n}`]||'',type:values[`photo_${i.id}_${n}_type`]||'photo',caption:`${i.label} · photo ${n+1}`}))).filter(e=>e.url);
  if(values.video)evidence.push({itemId:'',url:values.video,type:'video',caption:'Complete walk-around video'});
- await send('audit.complete',{responses,evidence,summary:values.summary,odometerKm:values.odometer || values[`item_${items.find(i=>i.category==='Usage'&&i.responseType==='number')?.id}`],sendEmail:values.sendEmail!=='no'&&data.settings.auditEmailEnabled,finding:values.finding,findingCategory:'Additional finding',severity:values.severity||'medium',actionRequired:values.action,expectedCompletionDate:values.due});setDirty(false);onDone();
+ const result=await send('audit.complete',{responses,evidence,summary:values.summary,odometerKm:values.odometer || values[`item_${items.find(i=>i.category==='Usage'&&i.responseType==='number')?.id}`],sendEmail:values.sendEmail!=='no'&&data.settings.auditEmailEnabled,finding:values.finding,findingCategory:'Additional finding',severity:values.severity||'medium',actionRequired:values.action,expectedCompletionDate:values.due});setDirty(false);onDone(result.message || 'Audit submitted successfully. Your answers and evidence are saved.');
  }catch(e){setError(e instanceof Error?e.message:'Could not submit. Your answers remain here.');}finally{setBusy('');}}
  return <div className="fc-modal-backdrop"><section role="dialog" aria-modal="true" aria-label="Conduct vehicle audit" className="fc-modal fc-audit-runner">
  <header className="fc-runner-header"><div><small>{audit.stationCode} · {audit.auditMode==='physical'?'Physical inspection':'Virtual inspection'}</small><h2>{audit.vehicleNo}</h2><p>{vehicle?.model} · {answered}/{items.length} answered</p></div><button aria-label="Save and close audit" disabled={!!busy} onClick={()=>dirty?save(true):onClose()} type="button"><X size={22}/></button></header>

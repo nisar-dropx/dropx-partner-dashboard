@@ -343,7 +343,10 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
   if(update.error) throw new Error(update.error.message);
   let emailStatus = "not_sent";
   if (body.sendEmail !== false && settings.data?.audit_email_enabled !== false) emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, failed, score, clean(body.summary), findings, evidence);
-  return NextResponse.json({ ok: true, message: emailStatus === "sent" ? "Audit completed and summary emailed." : "Audit completed.", emailStatus });
+  const completionMessage = failed
+    ? "Audit submitted successfully · Needs attention. Your answers and evidence are saved; follow up on the recorded vehicle issues in Need Attention."
+    : "Audit submitted successfully · Passed. Your answers and evidence are saved.";
+  return NextResponse.json({ ok: true, message: `${completionMessage}${emailStatus === "sent" ? " Summary emailed." : ""}`, emailStatus });
 }
 
 async function sendAuditEmail(companyId: string, auditId: string, audit: Payload, failed: boolean, score: number | null, summary: string, findings: Payload[], evidence: Payload[]) {
