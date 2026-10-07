@@ -1,5 +1,5 @@
 export const PAN_PRIMARY_ENDPOINT = "/pan/verification";
-export const PAN_FALLBACK_ENDPOINT = "/srv2/validation/pan";
+export const PAN_FALLBACK_ENDPOINT = "/srv2/validation/pan/father-details";
 
 export type PanVerificationCredentials = {
   api_id: string;

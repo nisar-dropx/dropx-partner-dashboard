@@ -5,7 +5,7 @@ import { locationModelName, providerName } from "@/lib/ops-pulse/cod";
 export const operatingModes = [
   { code: "amazon_edsp", label: "Amazon EDSP" },
   { code: "flipkart_odh_mdh", label: "Flipkart ODH/MDH" },
-  { code: "amazon_now", label: "Amazon Now" }
+  { code: "amazon_now", label: "Dark Store (DS)" }
 ] as const;
 
 export type OperatingMode = typeof operatingModes[number]["code"];
@@ -33,6 +33,7 @@ export function locationsForMode(locations: CodLocationRow[], mode: OperatingMod
 }
 
 export function resolveOperatingContext(locations: CodLocationRow[]) {
+  locations = locations.filter(l=>!l.is_ho&&!l.hide_from_location_list);
   const availableModes = operatingModes.filter((mode) => locationsForMode(locations, mode.code).length);
   const requestedMode = cookies().get("dropx-ops-mode")?.value as OperatingMode | undefined;
   const mode = availableModes.some((entry) => entry.code === requestedMode)

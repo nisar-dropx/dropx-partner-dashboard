@@ -14,10 +14,12 @@ const productionThresholdSnapshot={exports:{}};
 new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../production-threshold-snapshot.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(productionThresholdSnapshot.exports,productionThresholdSnapshot,(id)=>{if(id==='./production-threshold-config.ts')return productionThresholdConfig.exports;throw new Error(`Unexpected import ${id}`);});
 const workforceProductionThreshold={exports:{}};
 new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../workforce-production-threshold.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(workforceProductionThreshold.exports,workforceProductionThreshold,(id)=>{if(id==='./production-threshold-config.ts')return productionThresholdConfig.exports;if(id==='./production-threshold-snapshot.ts')return productionThresholdSnapshot.exports;throw new Error(`Unexpected import ${id}`);});
+const payoutInputs={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payout-input-calculation.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(payoutInputs.exports,payoutInputs);
 const details={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
@@ -465,4 +467,112 @@ test('rental source revisions apply by cost date and rental-only direct cards do
  f.allocations=[{workforce_id:'w1',station_id:'station-a',payment_method_id:'per-packet',effective_from:'2026-01-01',payment_values:{},payment_components:f.components}];
  const r=rebuildCps(base([day('A','2026-09-02',0)]),f);
  assert.equal(r.daily[0].van,0);assert.ok(!r.gaps.some(g=>g.kind==='Direct payment allocation incomplete'));
+});
+
+test('mixed fixed and packet pay exposes absent attendance without inventing wages or a low cohort CPS',()=>{
+ const f=facts();
+ f.shipments[0]={...f.shipments[0],amazon_delivery:208,swa_delivery:0,total_delivery:208,total_activity:225,c_return:17};
+ f.components=[{payment_method_id:'per-packet',component_code:'MONTHLY',component_type:'amount',label:'Fixed pay',pay_schedule:'per_month',calculation_type:'fixed_monthly',calculation_source:'attendance_eligibility'},
+ {payment_method_id:'per-packet',component_code:'DELIVERY',label:'Delivery',component_type:'production',calculation_type:'count_x_rate'},
+ {payment_method_id:'per-packet',component_code:'CRETURN',label:'Customer return',component_type:'production',calculation_type:'count_x_rate'}];
+ f.mappings[0].payment_values={MONTHLY:10000,DELIVERY:3,CRETURN:3};
+ const r=rebuildCps(base([day('A','2026-09-01',208)]),f);
+ assert.equal(r.daily[0].da,675);assert.equal(r.da_details[0].salary,0);
+ assert.deepEqual(r.da_details[0].pending_fixed_dates,['2026-09-01']);
+ assert.ok(r.gaps.some(g=>g.kind==='Fixed pay attendance missing'&&g.dropx_id==='D1'));
+ assert.equal(r.da_details[0].periods[0].production_details.reduce((n,p)=>n+p.amount,0),675);
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];
+ const complete=rebuildCps(base([day('A','2026-09-01',208)]),f);
+ assert.ok(complete.da_details[0].salary>0);assert.ok(!complete.da_details[0].pending_fixed_dates?.length);
+ f.attendance[0].status='A';
+ assert.ok(!rebuildCps(base([day('A','2026-09-01',208)]),f).da_details[0].pending_fixed_dates?.length,'explicit absence is not missing attendance');
+});
+test('flat delivery and return rate reconciles production heads to delivered-only CPS',()=>{
+ const f=facts();f.shipments[0]={...f.shipments[0],amazon_delivery:497,swa_delivery:0,total_delivery:497,total_activity:532,c_return:35};
+ f.components.push({payment_method_id:'per-packet',component_code:'CRETURN',component_type:'production',calculation_type:'count_x_rate'});f.mappings[0].payment_values={DELIVERY:15,CRETURN:15};
+ const r=rebuildCps(base([day('A','2026-09-01',497)]),f),detail=r.da_details[0];
+ assert.equal(detail.variable,7980);assert.equal((detail.variable/detail.deliveries).toFixed(2),'16.06');
+ assert.deepEqual(detail.periods[0].production_details.map(p=>[p.rate,p.payable_units,p.amount]),[[15,35,525],[15,497,7455]]);
+});
+
+test('Dashboard production uploads and dated rate overrides are included once across provider IDs',()=>{
+ const f=facts();
+ f.shipments.push({...f.shipments[0],id:'s2',provider_employee_id:'AM2'});
+ f.mappings.push({...f.mappings[0],id:'m2',provider_member_id:'AM2'});
+ f.components[0].payment_field_id='field-delivery';
+ f.components.push({payment_method_id:'per-packet',component_code:'KM_RUN',payment_field_id:'field-km',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true,label:'Fuel KM'});
+ f.mappings.forEach(m=>m.payment_values={DELIVERY:10,KM_RUN:5});
+ f.payout_inputs={productionInputs:[{workforce_id:'w1',station_id:'station-a',payment_field_id:'field-km',work_date:'2026-09-01',units:60}],paymentFieldOverrides:[{workforce_id:'w1',station_id:'station-a',payment_field_id:'field-delivery',effective_from:'2026-09-01',effective_to:'2026-09-30',input_value:12}]};
+ const r=rebuildCps(base(),f);near(r.people[0].variable,2400);near(r.people[0].fuel,300);
+ assert.equal(r.da_details[0].periods[0].production_details.find(c=>c.label==='Fuel KM').reported_units,60);
+});
+
+test('a missing production field retains known fixed pay and flags the incomplete component',()=>{
+ const f=facts();f.components.push({payment_method_id:'per-packet',component_code:'UNKNOWN',component_type:'production'});f.mappings[0].payment_values.UNKNOWN=2;
+ const r=rebuildCps(base(),f);near(r.daily[0].da,1000);assert.ok(r.gaps.some(g=>/production source/.test(g.kind)));assert.ok(r.da_details[0].pending_fixed_dates.length);
+});
+
+test('uploaded attendance range wins over shipment attendance and pays exactly once at range end',()=>{
+ const f=facts();f.components=[{payment_method_id:'per-packet',component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_type:'fixed_daily',calculation_source:'attendance_eligibility'}];f.mappings[0].payment_values={DAILY:700};
+ f.shipments.push({...f.shipments[0],id:'s2',work_date:'2026-09-02'});
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
+ f.payout_inputs={attendancePeriods:[{workforce_id:'w1',station_id:'station-a',attendance_basis:'days',effective_from:'2026-09-01',effective_to:'2026-09-02',quantity:1.5}]};
+ const r=rebuildCps(base([day(),day('A','2026-09-02')]),f);assert.deepEqual(r.daily.map(d=>d.da),[0,1050]);
+ const partial=rebuildCps(base(),f);assert.equal(partial.daily[0].da,0);assert.ok(partial.gaps.some(g=>/full-period/.test(g.kind)));
+ f.mappings.push({...f.mappings[0],id:'overlap'});
+ const conflict=rebuildCps(base([day(),day('A','2026-09-02')]),f);assert.equal(conflict.daily.reduce((s,d)=>s+d.da,0),0);assert.ok(conflict.gaps.some(g=>/setup changes/.test(g.kind)));
+});
+
+test('low-delivery flag is configurable and never removes an eligible day pay',()=>{
+ const f=facts();f.components=[{payment_method_id:'per-packet',component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_type:'fixed_daily',calculation_source:'attendance_eligibility'}];f.mappings[0].payment_values={DAILY:700};
+ f.shipments[0].total_delivery=10;f.shipments[0].total_activity=10;
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,review_below_deliveries:15,effective_from:'2026-09-01'}];
+ let r=rebuildCps(base([day('A','2026-09-01',10)]),f);assert.equal(r.daily[0].da,700);assert.ok(r.gaps.some(g=>g.kind==='Low deliveries · below 15'));
+ f.attendance_capture_history[0].review_below_deliveries=10;r=rebuildCps(base(),f);assert.equal(r.daily[0].da,700);assert.ok(!r.gaps.some(g=>/Low deliveries/.test(g.kind)));
+});
+
+test('providerless direct employees retain biometric pay when DAs use shipment attendance',()=>{
+ const f=facts();f.mappings=[];f.shipments=[];f.workforce[0].provider_mapping_required=false;
+ f.allocations=[{id:'direct',workforce_id:'w1',station_id:'station-a',effective_from:'2026-09-01',payment_values:{DAILY:600},payment_components:[{component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'}]}];
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,600);
+});
+
+test('configured P&L-only seller heads are removed from CPS costs, counts and rates; customer returns remain',()=>{
+ const f=facts();
+ f.shipments[0]={...f.shipments[0],total_delivery:100,c_return:10,mfn:20,mfn_return:30,total_activity:160};
+ f.components.push(...['CRETURN','SELLER_PICKUP','SLLLER_RETURN'].map(code=>({...f.components[0],component_code:code})));
+ f.mappings[0].payment_values={DELIVERY:15,CRETURN:15,SELLER_PICKUP:4,SLLLER_RETURN:5};
+ f.component_policies=['SELLER_PICKUP','SLLLER_RETURN'].map(component_code=>({component_code,mode:'pnl_only',effective_from:'2026-09-01'}));
+ const r=rebuildCps(base([{...day(),mfn:20,mfn_return:30,activity:160}]),f);
+ assert.equal(r.daily[0].da,1650);assert.equal(r.daily[0].mfn,0);assert.equal(r.daily[0].mfn_return,0);assert.equal(r.daily[0].activity,110);
+ assert.equal(r.associates[0].variable_pay,1650);assert.equal(r.associates[0].mfn,0);
+ assert.equal(r.da_details[0].seller_pickups,0);assert.equal(r.da_details[0].customer_returns,10);
+ assert.deepEqual(r.da_details[0].periods[0].rates.map(r=>r.label).sort(),['CRETURN','DELIVERY']);
+ assert.deepEqual(r.da_details[0].periods[0].production_details.map(r=>r.label).sort(),['CRETURN','DELIVERY']);
+ // The original payroll facts are intact, including all seller activity/rates.
+ assert.equal(f.shipments[0].mfn,20);assert.equal(f.mappings[0].payment_values.SELLER_PICKUP,4);
+ const full=calculateRateCard(f.mappings[0],f.components,f.shipments[0],'2026-09-01',true);
+ assert.equal(full.variable,1880);
+});
+test('P&L-only exclusion ignores incomplete seller rates without suppressing known delivery cost',()=>{
+ const cs=[{component_code:'DELIVERY',component_type:'production'}, {component_code:'SELLER_PICKUP',component_type:'production',cps_cost_source:'pnl_only'}];
+ const r=calculateRateCard({payment_values:{DELIVERY:15}},cs,{total_delivery:2,mfn:30},'2026-10-01',true);
+ assert.equal(r.variable,30);assert.equal(r.missing,false);
+});
+
+
+test('shipment fallback preserves actual attendance on days with no delivery and keeps hourly minutes',()=>{
+ const f=facts();f.shipments[0].total_delivery=0;f.shipments[0].total_activity=0;
+ f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P',work_minutes:480}];
+ f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
+ f.mappings[0].payment_values={HOUR:100};f.components=[{payment_method_id:'per-packet',component_code:'HOUR',component_type:'fixed',pay_schedule:'per_hour',calculation_type:'fixed',calculation_source:'attendance_eligibility'}];
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,800);
+});
+
+test('missing configured kilometre input is visible while known pay remains counted',()=>{
+ const f=facts();f.mappings[0].payment_values.KM_RUN=4;
+ f.components.push({payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Kilometres',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);assert.ok(r.gaps.some(g=>g.kind==='Kilometres input missing'));
+
 });

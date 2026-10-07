@@ -232,8 +232,8 @@ function normalizeFieldExecutivePayload(formData: FormData, requireId = false) {
   if (ifscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode)) throw new Error("IFSC format is invalid.");
   if (bankAccountNo && !/^[A-Z0-9]+$/.test(bankAccountNo)) throw new Error("Bank account number can contain only letters and numbers.");
   if (pfUan && !/^\d{12}$/.test(pfUan)) throw new Error("PF UAN must contain exactly 12 digits.");
-  if (pfAccountNo && !/^[A-Z0-9]+$/.test(pfAccountNo)) throw new Error("PF Account No can contain only letters and numbers.");
-  if (esiNo && !/^[A-Z0-9]+$/.test(esiNo)) throw new Error("ESI No can contain only letters and numbers.");
+  if (pfAccountNo && !/^[A-Z0-9/-]+$/.test(pfAccountNo)) throw new Error("PF Account No can contain only letters, numbers, / and -.");
+  if (esiNo && !/^[A-Z0-9/-]+$/.test(esiNo)) throw new Error("ESI No can contain only letters, numbers, / and -.");
 
   [
     ["Date of join", dateOfJoin],
@@ -358,6 +358,7 @@ export async function createFieldExecutive(formData: FormData) {
           if (!(file instanceof File) || file.size === 0) throw new Error(`${documentField.label} is required.`);
           continue;
         }
+        if (key === "pf_uan" || key === "pf_account_no" || key === "esi_no") continue;
         const payloadKey = payloadKeys[key];
         if (payloadKey && !String(directPayload[payloadKey] ?? "").trim()) throw new Error(`${key.replaceAll("_", " ")} is required.`);
       }
@@ -709,18 +710,24 @@ export async function updateFieldExecutive(formData: FormData) {
     };
     if (config.profileType !== "field_executive" && config.profileType !== "contractor") {
       for (const key of dashboardRules.required) {
+        if (key === "pf_uan" || key === "pf_account_no" || key === "esi_no") continue;
         const payloadKey = profilePayloadKeys[key];
         if (payloadKey && !String(payload[payloadKey] ?? "").trim()) {
           throw new Error(`${key.replaceAll("_", " ")} is required.`);
         }
       }
     }
-    const profilePayload = Object.fromEntries(
-      dashboardRules.enabled
-        .map((key) => profilePayloadKeys[key])
-        .filter((key): key is keyof typeof payload => Boolean(key))
-        .map((key) => [key, payload[key]])
-    );
+    const profilePayload = {
+      ...Object.fromEntries(
+        dashboardRules.enabled
+          .map((key) => profilePayloadKeys[key])
+          .filter((key): key is keyof typeof payload => Boolean(key))
+          .map((key) => [key, payload[key]])
+      ),
+      pf_uan: payload.pf_uan,
+      pf_account_no: payload.pf_account_no,
+      esi_no: payload.esi_no
+    };
     await assertWorkforceContactsAvailable({
       companyId,
       mobile: payload.mobile,

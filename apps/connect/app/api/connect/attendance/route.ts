@@ -402,8 +402,17 @@ export async function GET(request: NextRequest) {
     // Regularization window (HRMS > Attendance policy): the rolling backdate
     // window plus the "month closes on day N of next month" rule. Same rule as
     // hr_regularization_window_open, which also guards the insert.
-    const windowSettings = await supabaseAdmin.from("hr_company_settings")
-      .select("regularization_max_backdate_days,regularization_close_day").eq("company_id", worker.companyId).maybeSingle();
+    // hr_regularization_rules returns this person's rule set over the company
+    // default (HRMS > Regularization rule sets); before that function exists
+    // everyone follows the company row.
+    const personRules = await supabaseAdmin.rpc("hr_regularization_rules", {
+      p_company_id: worker.companyId, p_profile_type: worker.profileType, p_profile_id: worker.profileId
+    });
+    const personRule = personRules.error ? null : (Array.isArray(personRules.data) ? personRules.data[0] : personRules.data) ?? null;
+    const windowSettings = personRule
+      ? { data: { regularization_max_backdate_days: personRule.backdate_days, regularization_close_day: personRule.close_day } }
+      : await supabaseAdmin.from("hr_company_settings")
+        .select("regularization_max_backdate_days,regularization_close_day").eq("company_id", worker.companyId).maybeSingle();
     const backdateDays = Number(windowSettings.data?.regularization_max_backdate_days ?? 30);
     const closeDay = windowSettings.data?.regularization_close_day == null ? null : Number(windowSettings.data.regularization_close_day);
     const earliest = new Date(`${todayIst}T00:00:00Z`);
@@ -414,11 +423,20 @@ export async function GET(request: NextRequest) {
       const [year, month] = date.split("-").map(Number);
       return new Date(Date.UTC(year, month, closeDay)).toISOString().slice(0, 10);
     };
+    // Custom dates from the person's rule set: extra attendance days kept open
+    // until their own closing date, on top of the window above.
+    const customFrom = personRule?.custom_from ? String(personRule.custom_from).slice(0, 10) : null;
+    const customTo = personRule?.custom_to ? String(personRule.custom_to).slice(0, 10) : null;
+    const customClosesOn = personRule?.custom_closes_on ? String(personRule.custom_closes_on).slice(0, 10) : null;
     const withWindow = responseRows.map((row) => {
       const closeDate = closesOn(row.date);
       // With a close day set, the month rule alone decides; otherwise the backdate window.
-      const open = row.date <= todayIst && (closeDate ? todayIst <= closeDate : row.date >= earliestDate);
-      return { ...row, regularizationOpen: open, regularizationClosesOn: closeDate };
+      const baseOpen = closeDate ? todayIst <= closeDate : row.date >= earliestDate;
+      const inCustom = Boolean(customFrom && customTo && customClosesOn && row.date >= customFrom && row.date <= customTo);
+      const open = row.date <= todayIst && (baseOpen || (inCustom && todayIst <= customClosesOn!));
+      // The later of the two deadlines is the one the person sees.
+      const closesOnDate = inCustom && (!closeDate || customClosesOn! > closeDate) ? customClosesOn : closeDate;
+      return { ...row, regularizationOpen: open, regularizationClosesOn: closesOnDate };
     });
 
     return NextResponse.json({

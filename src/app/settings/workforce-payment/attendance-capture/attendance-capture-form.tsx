@@ -54,6 +54,7 @@ export function WorkforceAttendanceCaptureForm({
   const [minimumDailyDeliveries, setMinimumDailyDeliveries] = useState(
     initialSetting.minimum_daily_deliveries === null ? "" : String(initialSetting.minimum_daily_deliveries)
   );
+  const [reviewBelow, setReviewBelow] = useState(String(initialSetting.review_below_deliveries ?? ""));
   const effectiveFrom = `${effectiveMonth}-01`;
   const usesShipmentData = captureMethod === "shipment_data";
   const locked = workforcePaymentMonthIsFinalized(effectiveFrom, finalizedPeriods);
@@ -76,6 +77,7 @@ export function WorkforceAttendanceCaptureForm({
     setMinimumDailyDeliveries(
       initialSetting.minimum_daily_deliveries === null ? "" : String(initialSetting.minimum_daily_deliveries)
     );
+    setReviewBelow(String(initialSetting.review_below_deliveries ?? ""));
     formRef.current?.reset();
     returnFocusToEditRef.current = true;
     setIsEditing(false);
@@ -91,6 +93,7 @@ export function WorkforceAttendanceCaptureForm({
     if (!/^\d{4}-\d{2}$/.test(month)) return;
     const selected = workforceAttendanceCaptureSettingForDate(settings, `${month}-01`);
     setCaptureMethod(selected.capture_method);
+    setReviewBelow(String(selected.review_below_deliveries ?? ""));
     setMinimumDailyDeliveries(selected.minimum_daily_deliveries === null ? "" : String(selected.minimum_daily_deliveries));
   }
 
@@ -118,7 +121,7 @@ export function WorkforceAttendanceCaptureForm({
         >
           {captureMethodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <span className="subtle">Biometric uses recorded attendance punches. Shipment data uses completed deliveries to qualify each workday.</span>
+        <span className="subtle">Biometric uses recorded attendance punches. Shipment data fills missing attendance from completed deliveries; recorded present and half-days are preserved.</span>
       </label>
       <label>Minimum daily deliveries
         <input
@@ -134,6 +137,10 @@ export function WorkforceAttendanceCaptureForm({
           value={minimumDailyDeliveries}
         />
         <span className="subtle">Required only when shipment delivery data is selected.</span>
+      </label>
+      <label>Flag days with fewer deliveries than
+        <input className="field" type="number" name="review_below_deliveries" min={1} max={100000} step={1} value={reviewBelow} onChange={event => setReviewBelow(event.target.value)} disabled={formDisabled}/>
+        <span className="subtle">Review only. Eligible days keep their pay. Leave blank to disable the flag.</span>
       </label>
       <label>Effective from
         <input

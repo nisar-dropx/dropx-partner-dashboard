@@ -311,6 +311,9 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
       location_id: locationId,
       designation,
       ...enabledProfilePayload,
+      pf_uan: profileValues.pf_uan,
+      pf_account_no: profileValues.pf_account_no,
+      esi_no: profileValues.esi_no,
       is_active: String(formData.get("is_active") ?? existing.is_active) === "true",
       updated_at: new Date().toISOString()
     };
@@ -323,6 +326,7 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
         }
         continue;
       }
+      if (key === "pf_uan" || key === "pf_account_no" || key === "esi_no") continue;
       const column = ruleColumns[key] ?? key;
       if (!String(payload[column] ?? existing[column] ?? "").trim()) {
         throw new Error(`${key.replaceAll("_", " ")} is required.`);

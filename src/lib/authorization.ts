@@ -145,12 +145,14 @@ const groupedParentPermissions: Record<string, string[]> = {
     "ops_reports",
     "ops_attendance_reports",
     "ops_unplanned_leaves",
+    "ops_my_team",
     "ops_offboarding_checklist",
     "ops_salary_hold",
     "ops_workforce_losses",
     "ops_workforce_mileage",
     "ops_losses",
     "ops_loss_master",
+    "ops_workforce_advances",
     "ops_rostering",
     "daily_submission",
     "cod",
@@ -166,6 +168,7 @@ const groupedParentPermissions: Record<string, string[]> = {
     "station_edd",
     "cps",
     "cps_overview",
+    "cpu_overview",
     "cps_daily",
     "cps_monthly",
     "cps_cost_breakup",
@@ -204,7 +207,7 @@ const groupedParentPermissions: Record<string, string[]> = {
   reports: ["attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports"],
   master_data: ["master_locations", "master_providers", "master_models", "payment_methods", "master_payment_banks", "master_payment_heads", "master_contacts", "workforce_categories", "workforce_whatsapp", "designations", "biometric_devices", "cod_master", "station_audit_master", "master_documents", "master_imports"],
   app_settings: ["app_settings", "ai_connector", "amazon_connector", "developer_mode"],
-  payments: ["advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "payment_reports"]
+  payments: ["advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "workforce_advances", "payment_reports"]
 };
 
 const peopleProfilePageCodes = [
@@ -255,7 +258,7 @@ function inheritGroupedParentPermissions(permissions: Record<string, PagePermiss
 }
 
 const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string) => {
-  const requiredCodes = ["people_all", "people_review", "people_exceptions", "asset_audits", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "performance_review", "performance_review_cluster_filter", "performance_review_status", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold", "ops_workforce_losses", "ops_workforce_mileage", "ops_losses", "ops_loss_master", "ops_provider_mapping", "ops_workforce_payouts", "ops_rostering", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "station_audits", "station_audit_master", "edd_dashboard", "station_edd", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master", "finance_pricing", "finance_rent", "finance_assets", "finance_revenue", "finance_pnl"];
+  const requiredCodes = ["people_all", "people_review", "people_exceptions", "asset_audits", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "workforce_advances", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "performance_review", "performance_review_cluster_filter", "performance_review_status", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "ops_unplanned_leaves", "ops_my_team", "ops_offboarding_checklist", "ops_salary_hold", "ops_workforce_losses", "ops_workforce_mileage", "ops_losses", "ops_loss_master", "ops_provider_mapping", "ops_workforce_payouts", "ops_workforce_advances", "ops_rostering", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "station_audits", "station_audit_master", "edd_dashboard", "station_edd", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cpu_overview", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master", "finance_pricing", "finance_rent", "finance_assets", "finance_revenue", "finance_pnl"];
   const { data, error } = await supabaseAdmin!
     .from("app_pages")
     .select("code")
@@ -266,7 +269,7 @@ const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string)
   if (requiredCodes.some((code) => !existingCodes.has(code))) {
     await ensureAccessPages(supabaseAdmin!, companyId);
   }
-}, ["current-access-pages-v6"], { revalidate: 3600 });
+}, ["current-access-pages-v8"], { revalidate: 3600 });
 
 export const getAuthorization = cache(async (): Promise<AuthorizationContext | null> => {
   const supabase = createServerSupabaseClient();

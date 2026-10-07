@@ -41,7 +41,7 @@ const dashboardGroups: PermissionGroup[] = [
   { key: "imports", label: "Report Imports", codes: ["imports"] },
   { key: "inbox", label: "Inbox", codes: ["inbox"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
-  { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "payment_reports"], hiddenCodes: ["payments"] },
+  { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "workforce_advances", "payment_reports"], hiddenCodes: ["payments"] },
   { key: "reports", label: "Reports", codes: ["attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
   { key: "trash", label: "Trash", codes: ["trash"] },
   { key: "notifications", label: "Notifications", codes: ["notifications_whatsapp", "notifications_history", "notifications_email", "notifications_app"] },
@@ -51,7 +51,7 @@ const dashboardGroups: PermissionGroup[] = [
 ];
 
 const opsGroups: PermissionGroup[] = [
-  { key: "ops_attendance", label: "Team Ops", codes: ["ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold", "ops_losses"] },
+  { key: "ops_attendance", label: "Team Ops", codes: ["ops_my_team", "ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold", "ops_losses"] },
   { key: "ops_pulse", label: "Command Center", codes: ["ops_pulse"] },
   { key: "performance", label: "Performance", codes: ["performance", "performance_review", "performance_review_cluster_filter", "performance_review_status"] },
   { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
@@ -59,11 +59,13 @@ const opsGroups: PermissionGroup[] = [
   { key: "workforce_register", label: "Workforce Register", codes: ["delivery_associates"] },
   { key: "ops_provider_mapping", label: "ID Mapping", codes: ["ops_provider_mapping"] },
   { key: "ops_workforce_payouts", label: "Workforce Payouts", codes: ["ops_workforce_payouts"] },
+  { key: "ops_workforce_advances", label: "Workforce Advance Register", codes: ["ops_workforce_advances"] },
   { key: "ops_rostering", label: "Rostering", codes: ["ops_rostering"] },
   { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
   { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"], hiddenCodes: ["station_edd"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_reports"], hiddenCodes: ["payments"] },
+  { key: "cpu", label: "Dark Store CPU", codes: ["cpu_overview"] },
   { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },
   { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"], hiddenCodes: ["fleet"] },
   { key: "ops_reports", label: "Reports", codes: ["ops_reports"] },

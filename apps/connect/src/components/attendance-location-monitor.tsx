@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readResilientPosition } from "@/lib/read-geolocation";
 
 type Account = { id: string; profileType: string };
@@ -67,6 +67,7 @@ async function finalizeMissingPunchLocation(
  * - In-shift samples for 9 hours after punch-in when location tracking is ON.
  */
 export function AttendanceLocationMonitor({ account }: { account: Account }) {
+  const [pilotActive,setPilotActive]=useState(false);
   const sessionId = useRef(`web-${Date.now()}`);
   const reportedPunchIds = useRef(new Set<string>());
   const finalizedPunchIds = useRef(new Set<string>());
@@ -81,6 +82,8 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
       const status = await statusResponse.json().catch(() => null);
       if (!statusResponse.ok || !status) return;
 
+      const distancePilot=status.attendanceSettings?.distancePilotEnabled===true;
+      setPilotActive(distancePilot&&status.shift?.open===true);
       const integrityFlags = status.attendanceSettings?.integrityFlagsEnabled === true;
       const locationTracking = status.attendanceSettings?.locationTrackingEnabled === true;
       if (!integrityFlags && !locationTracking) return;
@@ -112,7 +115,7 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
       if (!locationTracking) return;
 
       const inTime = status.shift?.inTime ? String(status.shift.inTime) : null;
-      if (!inTime) return;
+      if (!inTime||status.shift?.open!==true||status.shift?.trackingWindowElapsed===true) return;
 
       const position = await readPosition();
       const form = new FormData();
@@ -127,6 +130,7 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
       form.set("clientCapturedAt", new Date().toISOString());
       form.set("sessionId", sessionId.current);
       form.set("integritySignals", JSON.stringify(integrityPayload()));
+      if(distancePilot){form.set("capturedAt",new Date(position.timestamp).toISOString());await fetch("/api/connect/attendance/live-position",{method:"POST",body:form});return;}
       await fetch("/api/connect/attendance/location-heartbeat", { method: "POST", body: form });
     } catch {
       // Silent — monitoring must not interrupt Connect UX.
@@ -151,5 +155,5 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
     };
   }, [tick]);
 
-  return null;
+  return pilotActive?<div role="status" style={{padding:"8px 12px",fontSize:12,background:"#e8f6f1",color:"#19634f"}}>Distance pilot active during your open shift. GPS samples stop after punch-out. This pilot does not change your pay.</div>:null;
 }

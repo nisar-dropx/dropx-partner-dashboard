@@ -29,7 +29,7 @@ export async function cpsScope(auth: AuthorizationContext, params: CpsParams, gr
   const permitted = locations.locations.filter(
     (l) =>
       !l.hide_from_location_list &&
-      !l.is_ho &&
+      !l.is_ho && locationModelName(l).toUpperCase()!=="NOW" &&
       !/^HO(?:_|$)/i.test(l.station_code),
   );
   // Relationships are metadata only: never use this company-wide read to widen

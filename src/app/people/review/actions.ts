@@ -74,12 +74,21 @@ export async function reviewPeopleProfile(formData: FormData) {
     }
 
     const reviewedAt = new Date().toISOString();
+    const approvesWorkforceIdentityException = action === "approve" &&
+      profileType === "workforce" &&
+      Boolean((current.data as { identity_exception_required?: unknown }).identity_exception_required);
     const update = action === "approve"
       ? {
           [statusColumn]: "active",
           profile_return_remarks: null,
           profile_returned_at: null,
           ...(profileType === "employee" ? { profile_completed_at: reviewedAt } : {}),
+          ...(approvesWorkforceIdentityException
+            ? {
+                identity_exception_approved_at: reviewedAt,
+                identity_exception_approved_by: authorization.userId
+              }
+            : {}),
           updated_at: reviewedAt
         }
       : {

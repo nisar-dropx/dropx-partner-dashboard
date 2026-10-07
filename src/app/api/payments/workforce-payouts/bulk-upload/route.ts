@@ -69,6 +69,7 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
       .from("workforce_deduction_heads")
       .select("id,code,name,calculation_type,is_system,is_active")
       .eq("company_id", companyId)
+      .neq("code", "ADVANCE")
       .order("code")),
     readAllRows(supabaseAdmin
       .from("field_executive_provider_mappings")

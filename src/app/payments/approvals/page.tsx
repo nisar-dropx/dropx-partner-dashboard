@@ -1,3 +1,4 @@
+import { isPendingPaymentApproval } from '@/lib/payment-pending-approval';
 import {adhocVehicleLabel} from '@/lib/adhoc-vehicle-policy';
 import { PaymentCostSummary } from "@/components/payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
@@ -249,20 +250,12 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests);
   const normalizedFilter = filters.status || "pending";
   const normalizedSearch = String(filters.search ?? "").trim().toLowerCase();
-  const terminalApprovalStatuses = new Set(["RE_APPROVED", "REJECTED", "RETURNED", "CANCELLED", "PROCESSING", "PROCESSED"]);
   const statusScopedRequests = unscopedRequests.filter((request) => {
     if (!eligibleIds.has(request.id)) return false;
     const requestStatus = String(request.status ?? "").trim().toLowerCase();
     const approvalStatus = String(request.approval_status || request.status || "").trim().toUpperCase();
     if (normalizedFilter === "pending") {
-      const hasCurrentApprover = Boolean(
-        request.current_approver_user_id ||
-        request.current_approver_role_id ||
-        request.current_approver_role_ids?.length
-      );
-      const isPendingApproval = !terminalApprovalStatuses.has(approvalStatus) &&
-        (hasCurrentApprover || approvalStatus === "PENDING" || approvalStatus === "RESUBMITTED" || approvalStatus === "RE_PENDING");
-      if (!isPendingApproval) return false;
+      if (!isPendingPaymentApproval(request)) return false;
     } else if (normalizedFilter === "returned") {
       if (requestStatus !== "returned" && approvalStatus !== "RETURNED") return false;
     } else if (normalizedFilter === "rejected") {
@@ -434,7 +427,7 @@ export default async function PaymentApprovalsPage({
       <PageHead
         eyebrow="Payments"
         title="Approvals"
-        subtitle="Review the requests assigned to you, inspect the evidence, and record a clear decision."
+        subtitle="All requests assigned to you across your authorized locations. This queue is shared across Last Mile and Dark Store workspaces."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 

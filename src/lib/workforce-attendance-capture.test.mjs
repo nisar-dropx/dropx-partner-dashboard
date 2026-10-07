@@ -4,6 +4,7 @@ import {
   aggregateShipmentDeliveriesByWorkforceDay,
   normalizeWorkforceAttendanceCaptureSetting,
   shipmentAttendanceRecord,
+  shipmentAttendanceReview,
   shipmentAttendanceUnit,
   workforceAttendanceCaptureSettingForDate
 } from "./workforce-attendance-capture.ts";
@@ -85,4 +86,20 @@ test("shipment threshold is inclusive and always resolves to one whole attendanc
     status: "P",
     work_minutes: 0
   });
+});
+
+ test("low-delivery review does not reduce shipment attendance and is configurable", () => {
+ const setting={capture_method:"shipment_data",minimum_daily_deliveries:1,review_below_deliveries:15,effective_from:"2026-09-01"};
+ assert.equal(shipmentAttendanceUnit(1,setting),1);assert.equal(shipmentAttendanceUnit(14,setting),1);
+ assert.deepEqual(shipmentAttendanceReview(14,setting),{deliveries:14,threshold:15});
+ assert.equal(shipmentAttendanceReview(15,setting),null);assert.equal(shipmentAttendanceReview(19,{...setting,review_below_deliveries:20}).threshold,20);
+ assert.equal(shipmentAttendanceReview(1,{...setting,review_below_deliveries:null}),null);
+ });
+
+test("shipment fallback preserves recorded P/HD and uses activity for missing attendance",()=>{
+ const policy={capture_method:"shipment_data",minimum_daily_deliveries:1,effective_from:"2026-09-01"};
+ const recorded={punch_date:"2026-09-01",status:"HD",work_minutes:240};
+ assert.deepEqual(shipmentAttendanceRecord("2026-09-01",0,policy,recorded),recorded);
+ assert.deepEqual(shipmentAttendanceRecord("2026-09-01",30,policy,recorded),recorded);
+ assert.equal(shipmentAttendanceRecord("2026-09-01",2,policy,{...recorded,status:"A"}).status,"P");
 });

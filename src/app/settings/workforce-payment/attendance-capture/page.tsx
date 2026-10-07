@@ -22,6 +22,7 @@ export const dynamic = "force-dynamic";
 type AttendanceCaptureSettingRow = {
   capture_method: WorkforceAttendanceCaptureMethod;
   minimum_daily_deliveries: number | null;
+  review_below_deliveries?: number | null;
   effective_from: string;
   change_reason: string;
   updated_at: string | null;
@@ -74,7 +75,7 @@ async function loadSettings(companyId: string) {
   const [settingsResult, payrollResult] = await Promise.all([
     readAllRows(supabaseAdmin
       .from("workforce_attendance_capture_settings")
-      .select("capture_method,minimum_daily_deliveries,effective_from,change_reason,updated_at")
+      .select("capture_method,minimum_daily_deliveries,review_below_deliveries,effective_from,change_reason,updated_at")
       .eq("company_id", companyId)
       .order("effective_from", { ascending: false })),
     readAllRows(supabaseAdmin
@@ -177,6 +178,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
               settings={data.settings.map((setting): WorkforceAttendanceCaptureSetting => ({
                 capture_method: setting.capture_method,
                 minimum_daily_deliveries: setting.minimum_daily_deliveries,
+                review_below_deliveries: setting.review_below_deliveries,
                 effective_from: setting.effective_from
               }))}
             />
@@ -216,7 +218,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
                     <th>Effective month</th>
                     <th>Capture method</th>
                     <th>Minimum deliveries</th>
-                    <th>Change reason</th>
+                    <th>Review below</th><th>Change reason</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -230,13 +232,13 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
                         <td><strong>{formatMonth(setting.effective_from)}</strong></td>
                         <td>{methodCopy[setting.capture_method].label}</td>
                         <td>{setting.capture_method === "shipment_data" ? setting.minimum_daily_deliveries : "-"}</td>
-                        <td>{setting.change_reason}</td>
+                        <td>{setting.review_below_deliveries ?? "—"} deliveries</td><td>{setting.change_reason}</td>
                         <td><span className={`status-pill ${isLocked || isScheduled ? "warn" : isActive ? "good" : "neutral"}`}>{isLocked ? "Locked" : isScheduled ? "Scheduled" : isActive ? "Active" : "Superseded"}</span></td>
                       </tr>
                     );
                   }) : (
                     <tr>
-                      <td className="empty-cell" colSpan={5}>No saved policy yet. Biometric attendance remains the default.</td>
+                      <td className="empty-cell" colSpan={6}>No saved policy yet. Biometric attendance remains the default.</td>
                     </tr>
                   )}
                 </tbody>

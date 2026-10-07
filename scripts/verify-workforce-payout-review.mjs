@@ -14,7 +14,7 @@ assert.match(tableSource, /Send for review/);
 assert.match(tableSource, /type="checkbox"/);
 assert.match(tableSource, /MAX_REVIEW_SELECTION = 1000/);
 assert.match(tableSource, /selectable\.slice\(0, MAX_REVIEW_SELECTION\)/);
-assert.match(tableSource, /Up to \{MAX_REVIEW_SELECTION\.toLocaleString\("en-IN"\)\} payouts per review batch/);
+assert.match(tableSource, /Up to \{MAX_REVIEW_SELECTION\.toLocaleString\("en-IN"\)\} payouts per action/);
 assert.match(routeSource, /ops_workforce_payouts/);
 assert.match(routeSource, /hasPermission\(authorization, pageCode, "edit"\)/);
 assert.match(routeSource, /if \(!sameOrigin\(request\)\)/);

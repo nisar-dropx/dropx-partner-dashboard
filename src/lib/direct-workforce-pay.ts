@@ -178,7 +178,7 @@ export function directPayForDay(
     const attendanceBased = attendanceBasis !== null;
     const usesAggregateAttendance = attendanceBasis !== null
       && attendanceBasis === options?.attendanceInput?.basis;
-    if (attendanceBased && schedule === "per_hour" && options?.attendanceSource === "shipment_data" && !usesAggregateAttendance) {
+    if (attendanceBased && schedule === "per_hour" && options?.attendanceSource === "shipment_data" && Number(attendance?.work_minutes ?? 0) <= 0 && !usesAggregateAttendance) {
       // Shipment totals prove that the daily threshold was met, but they do
       // not contain worked minutes. Paying an hourly head from this source
       // would silently invent time, so leave the row incomplete for review.

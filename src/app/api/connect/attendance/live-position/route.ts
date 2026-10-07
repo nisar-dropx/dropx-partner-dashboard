@@ -1,3 +1,4 @@
+import {distancePilot,captureDistance} from "@/lib/ops-pulse/da-distance-data";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -20,8 +21,10 @@ export async function POST(request: NextRequest) {
     const profileType = String(formData.get("profileType") ?? "").trim();
     if (!accountId) throw new Error("Account is required.");
 
+    if (!String(formData.get("lat") ?? "").trim() || !String(formData.get("lng") ?? "").trim()) throw new Error("Coordinates are required.");
     const lat = Number(String(formData.get("lat") ?? "").trim());
     const lng = Number(String(formData.get("lng") ?? "").trim());
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) throw new Error("Coordinates are out of range.");
     if (!Number.isFinite(lat)) throw new Error("Latitude is required.");
     if (!Number.isFinite(lng)) throw new Error("Longitude is required.");
     const accuracyRaw = String(formData.get("accuracyM") ?? "").trim();
@@ -33,6 +36,8 @@ export async function POST(request: NextRequest) {
     // No requirePeopleScope here — this is a plain "who is this" lookup, not a portal-scope
     // gate, and skipping it avoids an extra designations query on every single call.
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
+    const pilot=await distancePilot(worker);
+    if(pilot){const result=await captureDistance(worker,pilot,{lat,lng,accuracy_m:accuracyM,captured_at:capturedAt.toISOString()});return NextResponse.json({ok:true,...result});}
     if (worker.profileType !== "employee" && worker.profileType !== "contractor") {
       return NextResponse.json({ ok: true, skipped: true, reason: "unsupported_profile_type" });
     }

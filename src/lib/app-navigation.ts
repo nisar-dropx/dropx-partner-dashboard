@@ -64,6 +64,7 @@ export const navItems: NavItem[] = [
       { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
       { code: "payment_process", label: "Process", href: "/payments/process" },
       { code: "workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
+      { code: "workforce_advances", label: "Workforce Advance Register", href: "/payments/workforce-advances" },
       { code: "payment_reports", label: "Report", href: "/payments/report" }
     ]
   },

@@ -25,13 +25,15 @@ const PaymentNotificationContext = createContext<PaymentNotificationContextValue
 
 export function PaymentNotificationProvider({
   children,
-  initialData
+  initialData,
+  refreshOnMount = false
 }: {
   children: ReactNode;
   initialData: PaymentNotificationSnapshot;
+  refreshOnMount?: boolean;
 }) {
   const [snapshot, setSnapshot] = useState<PaymentNotificationSnapshot>(initialData);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(refreshOnMount);
   const inFlightRef = useRef<Promise<void> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastAttemptRef = useRef(0);
@@ -79,6 +81,7 @@ export function PaymentNotificationProvider({
   const refresh = useCallback(() => runRefresh(true), [runRefresh]);
 
   useEffect(() => {
+    if (refreshOnMount) void runRefresh(false);
     const intervalId = window.setInterval(() => {
       void runRefresh(false);
     }, REFRESH_INTERVAL_MS);
@@ -100,7 +103,7 @@ export function PaymentNotificationProvider({
       document.removeEventListener("visibilitychange", handleVisibility);
       abortRef.current?.abort();
     };
-  }, [runRefresh]);
+  }, [runRefresh, refreshOnMount]);
 
   const value = useMemo(() => ({ isRefreshing, refresh, snapshot }), [isRefreshing, refresh, snapshot]);
 

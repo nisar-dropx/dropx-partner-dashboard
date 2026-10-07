@@ -513,7 +513,7 @@ assert.match(attendancePageSource, /key=\{formRevision\}/);
 assert.match(attendanceFormSource, /name="minimum_daily_deliveries"/);
 assert.match(attendanceFormSource, /type="month"/);
 assert.match(attendanceFormStyles, /\.threshold:disabled[\s\S]*background: #e4e7ec/);
-assert.match(attendanceActionSource, /rpc\("save_workforce_attendance_capture_setting"/);
+assert.match(attendanceActionSource, /rpc\("save_workforce_attendance_capture_setting_v2"/);
 assert.match(attendanceActionSource, /p_capture_method: captureMethod/);
 assert.match(attendanceActionSource, /p_minimum_daily_deliveries: minimumDailyDeliveries/);
 assert.match(attendanceActionSource, /p_effective_from: `\$\{effectiveMonth\}-01`/);

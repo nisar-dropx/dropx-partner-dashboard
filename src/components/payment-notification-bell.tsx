@@ -39,7 +39,7 @@ export function PaymentNotificationBell() {
         <div className="payment-notification-panel">
           <div className="payment-notification-head">
             <strong>Notifications</strong>
-            <span>{snapshot.total > 0 ? `${snapshot.total} open` : "All clear"}</span>
+            <span>{isRefreshing ? "Updating…" : snapshot.total > 0 ? `${snapshot.total} open` : "All clear"}</span>
           </div>
           {snapshot.items.length ? (
             <div className="payment-notification-list">
@@ -59,7 +59,7 @@ export function PaymentNotificationBell() {
               ))}
             </div>
           ) : (
-            <div className="payment-notification-empty">No payment notifications.</div>
+            <div className="payment-notification-empty">{isRefreshing ? "Loading notifications…" : "No payment notifications."}</div>
           )}
         </div>
       ) : null}

@@ -1,3 +1,5 @@
+import {redirect} from "next/navigation";
+import {cookies,headers} from "next/headers";
 import { CpsLink as Link } from "@/components/cps-link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -18,6 +20,7 @@ import {
   loadCpsSnapshot,
 } from "@/lib/ops-pulse/cps-data";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
+import { adHocClusterLabel } from "@/lib/ops-pulse/adhoc-activity";
 import "./cps.css";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +30,7 @@ export default async function CpsPage({
 }: {
   searchParams?: CpsParams;
 }) {
+  if((headers().get("host")||"").startsWith("ops")&&cookies().get("dropx-ops-mode")?.value==='amazon_now')redirect('/cpu');
   const params = Object.fromEntries(
     Object.entries(searchParams).filter(([, v]) => typeof v === "string"),
   ) as CpsParams;
@@ -172,6 +176,8 @@ export default async function CpsPage({
                       name: l.station_name || l.city || l.station_code,
                       parent: l.parent_station_code,
                       isXpt: l.is_xpt,
+                      region: l.region || "Unassigned",
+                      cluster: adHocClusterLabel(l),
                     }))}
                     params={params}
                     canExport={canExport}

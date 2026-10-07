@@ -31,11 +31,13 @@ const commonStart: NavItem[] = [
   { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register", icon: "+" },
   { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping", icon: "<>" },
   { code: "ops_workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts", icon: "₹" },
+  { code: "ops_workforce_advances", label: "Workforce Advance Register", href: "/payments/workforce-advances", icon: "₹" },
   { code: "ops_rostering", label: "Rostering", href: "/rostering", icon: "S" }
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
 const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Team Ops", icon: "T", children: [
+  { code: "ops_my_team", label: "My Team & Org", href: "/attendance/my-team" },
   { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
   { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" },
   { code: "ops_offboarding_checklist", label: "Offboarding", href: "/attendance/offboarding" },
@@ -43,6 +45,7 @@ const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Tea
   { code: "ops_salary_hold", label: "Workforce Payment Holds", href: "/attendance/workforce-holds" },
   { code: "ops_workforce_losses", label: "Station Loss Claims", href: "/attendance/workforce-losses" },
   { code: "ops_workforce_losses", label: "Payout disputes", href: "/attendance/payout-review" },
+  { code: "ops_workforce_mileage", label: "DA distance pilot", href: "/attendance/da-distance" },
   { code: "ops_workforce_mileage", label: "Mileage Claims", href: "/attendance/workforce-mileage" },
   { code: "ops_losses", label: "Losses", href: "/attendance/losses/nl" }
 ] };
@@ -86,6 +89,7 @@ const administration: NavItem[] = [
     icon: "*",
     children: [
       { code: "cps_inputs", label: "CPS Master", href: "/master/cps" },
+      { code: "ops_workforce_mileage", label: "DA distance pilot", href: "/attendance/da-distance" },
       { code: "cps_inputs", label: "Advertising Master", href: "/master/advertising" },
       { code: "cod_master", label: "COD Master", href: "/master/cod-master" },
       { code: "ops_loss_master", label: "Loss Recovery Master", href: "/master/loss-recovery" },
@@ -156,6 +160,19 @@ function modelOperations(mode: OperatingMode): NavItem {
 const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash", icon: "E" };
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
+  if (mode === "amazon_now") return [
+    {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
+    {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
+    businessDocuments,payments,
+    {code:'cpu_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,
+    administration[0],
+    {code:'master_data',label:'Ops Masters',icon:'*',children:[
+      {code:'cps_inputs',label:'CPU Master & units',href:'/cpu/master'},
+      {code:'master_locations',label:'Location Master',href:'/master/location'},
+      {code:'master_providers',label:'Client / Provider Master',href:'/master/providers'},
+      {code:'master_models',label:'Operation Models',href:'/master/models'}
+    ]},administration[2]
+  ];
   const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
   return items.map(item=>item.children?{...item,children:item.children.filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))}:item);
 }

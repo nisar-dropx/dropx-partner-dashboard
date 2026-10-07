@@ -351,3 +351,35 @@
 .cps-expanded-row > td { white-space:normal; }
 .cps-da-person-body { min-width:0; }
 .cps-cohort-cards button:focus-visible,.cps-da-person > summary:focus-visible,.cps-fuel-chart button:focus-visible { outline:2px solid #2b6bc2; outline-offset:3px; }
+/* Compact cost groups, with rate evidence kept beside the accrued amount. */
+.cps-cost-columns,.cps-cost-group>summary,.cps-cost-item>summary,.cps-grouped-total{display:grid;grid-template-columns:minmax(0,1fr) 150px 95px;gap:16px;align-items:center;padding:16px 20px;text-align:right;font-size:13px}
+.cps-cost-columns{background:#f5f7fb;color:#718199;font-size:10px;text-transform:uppercase;font-weight:700}
+.cps-cost-columns> :first-child,.cps-cost-group>summary> :first-child,.cps-cost-item>summary> :first-child,.cps-grouped-total> :first-child{text-align:left}
+.cps-cost-group>summary,.cps-cost-item>summary{cursor:pointer;list-style:none;border-top:1px solid #e7ecf3;color:#263e5d}
+.cps-cost-group summary::-webkit-details-marker,.cps-cost-item summary::-webkit-details-marker{display:none}
+.cps-cost-group summary:focus-visible,.cps-cost-item summary:focus-visible{outline:2px solid #3979bf;outline-offset:-3px}
+.cps-cost-group>summary:hover,.cps-cost-item>summary:hover{background:#f5f8fc}
+.cps-cost-group summary svg{display:inline;vertical-align:middle;margin-right:9px;transition:transform .15s}
+.cps-cost-group[open]>summary svg,.cps-cost-item[open]>summary svg{transform:rotate(180deg)}
+.cps-cost-group summary small{display:block;margin:5px 0 0 25px;font-size:11px;font-weight:400;color:#718199}
+.cps-cost-group-body{padding:8px 18px 18px;background:#f5f8fc}
+.cps-cost-item{background:white;border:1px solid #e1e8f1;border-radius:8px;overflow:hidden;margin:6px 0}
+.cps-cost-item>summary{border:0;padding:13px 15px;font-size:12px}
+.cps-grouped-total{background:#f5f7fb;border-top:1px solid #e1e8f1;font-size:12px}
+.cps-source-days{max-height:300px;margin:0 16px 16px;border:1px solid #e1e8f1;border-radius:7px}
+.cps-source-days caption{padding:10px;text-align:left;font-weight:650;color:#506480}
+.cps-rent-details{padding:14px;display:grid;gap:12px;white-space:normal;text-align:left}
+.cps-rent-details article{background:white;border:1px solid #dfe7f1;border-radius:9px;padding:16px}
+.cps-rent-details header{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px}
+.cps-rent-details header span,.cps-rent-details p{color:#64748b;font-size:12px;line-height:1.6}
+.cps-rent-details dl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}
+.cps-rent-details dt{font-size:11px;color:#64748b;margin-bottom:7px}
+.cps-rent-details dd{font-size:17px;font-weight:700;margin:0;color:#233c5a;font-variant-numeric:tabular-nums}
+.cps-rent-details .cps-rent-formula{background:#eff6fc;padding:10px 12px;border-radius:6px;margin:0;color:#365877}
+.cps-rent-details .cps-footnote{padding:0;margin:0}
+@media(max-width:700px){.cps-cost-columns,.cps-cost-group>summary,.cps-cost-item>summary,.cps-grouped-total{grid-template-columns:minmax(0,1fr) 100px 65px;gap:8px;padding:14px 10px;font-size:12px}.cps-cost-columns{font-size:9px}.cps-cost-group-body{padding:6px}.cps-rent-details{padding:8px}.cps-rent-details dl{grid-template-columns:repeat(2,minmax(0,1fr))}.cps-rent-details article{padding:12px}.cps-cost-group summary small{margin-left:0}.cps-cost-item>summary>span:first-child{overflow-wrap:anywhere}.cps-rent-details dd{font-size:15px}}
+.cps-local-tabs{display:flex;gap:8px;margin:0 0 20px}.cps-local-tabs [aria-pressed=true]{background:#1c3155;color:white;border-color:#1c3155}
+.cps-attention .cps-issue-switch{padding:0 20px 18px;flex-wrap:wrap}.cps-attention-filters{display:flex;align-items:end;flex-wrap:wrap;gap:12px;padding:18px 20px}.cps-attention-filters label{display:grid;gap:6px;min-width:175px;flex:1;color:#64748b;font-size:12px;font-weight:650}.cps-attention-filters select,.cps-attention-filters input{min-height:40px;border:1px solid #dce3ed;border-radius:7px;background:white;padding:9px;width:100%}.cps-attention td{white-space:normal;min-width:130px}.cps-attention td:nth-child(2){text-align:left}
+.cps-da-warning{background:#fff7e8;border:1px solid #f2d5a2;border-radius:8px;padding:12px 16px;color:#865517;font-size:12px;white-space:normal}.cps-da-warning p{margin:6px 0 0;line-height:1.6}.cps-da-equation{background:#eef5ff;border-radius:7px;padding:12px 16px;color:#34557c;font-size:13px;white-space:normal}
+
+.cps-summary-strip{grid-template-columns:1fr 1fr}

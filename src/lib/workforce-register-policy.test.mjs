@@ -4,8 +4,8 @@ import { workforceProfileStatus, workforceRegisterLocations, workforceStationPol
 const station = (id, model, provider = "Amazon", parent) => ({ id, station_code: id, parent_station_id: parent, providers: { name: provider }, location_models: { code: model } });
 for (const model of ["EDSP", "XPT", "AMXL"]) test(`${model} requires station email, accepting any domain and case`, () => {
   assert.equal(workforceStationPolicy(station("KOZA", model)).requiresStationEmail, true);
-  for (const email of ["Akshay.KOZA@outlook.com", "akshay.koza@gmail.com", "a.b.KoZa@example.org"]) assert.equal(workforceStationEmailError(email, "KOZA", true), null);
-  for (const email of ["akshay@gmail.com", "akshay.ktub@gmail.com", "akshay.koza.other@gmail.com", ".koza@gmail.com", "a.koza@bad"]) assert.ok(workforceStationEmailError(email, "KOZA", true));
+  for (const email of ["Akshay.KOZA@outlook.com", "akshay.koza@gmail.com", "a.b.KoZa@example.org", "sujithlal.koza1996@gmail.com"]) assert.equal(workforceStationEmailError(email, "KOZA", true), null);
+  for (const email of ["akshay@gmail.com", "akshay.ktub@gmail.com", "akshay.koza.other@gmail.com", ".koza@gmail.com", ".koza12@gmail.com", "akshay.koza1x@gmail.com", "a.koza@bad"]) assert.ok(workforceStationEmailError(email, "KOZA", true));
 });
 test("Flipkart personal email remains valid", () => {
   for (const model of ["ODH", "MDH"]) assert.equal(workforceStationPolicy(station("PHN", model, "Flipkart")).requiresStationEmail, false);

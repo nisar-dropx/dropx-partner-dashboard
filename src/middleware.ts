@@ -27,6 +27,7 @@ const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/requests",
   "/payments/approvals",
   "/payments/workforce-payouts",
+  "/payments/workforce-advances",
   "/payments/report"
 ];
 const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors", "/workers"];
@@ -161,7 +162,9 @@ function unavailableSessionResponse() {
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname || "/";
-  if (request.cookies.get("dropx_portal_preview_v1")?.value && !["GET", "HEAD", "OPTIONS"].includes(request.method) && path !== "/api/owner-preview") {
+  // Workspace selection only changes a view preference, with the preview user's
+  // authorized locations rechecked by the endpoint; it cannot change business data.
+  if (request.cookies.get("dropx_portal_preview_v1")?.value && !["GET", "HEAD", "OPTIONS"].includes(request.method) && path !== "/api/owner-preview" && path !== "/api/ops-pulse/workspace") {
     return NextResponse.json({ error: "User preview is read-only. Exit preview to make changes." }, { status: 403 });
   }
   const host = request.headers.get("host")?.split(":")[0].toLowerCase() ?? "";
@@ -261,6 +264,7 @@ export async function middleware(request: NextRequest) {
     !isSharedOpsPath &&
     path !== "/settings/notifications" &&
     !path.startsWith("/cps") &&
+    !path.startsWith("/cpu") &&
     !path.startsWith("/master/") &&
     !path.startsWith("/users") &&
     !path.startsWith("/api/") &&

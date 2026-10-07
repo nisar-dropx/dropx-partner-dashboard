@@ -5,6 +5,7 @@ import {
   directPayAttendanceUnit,
   directPayForDay,
   preferredDirectPayAttendance,
+  directPayAttendanceBasis,
   type DirectPayAttendance,
   type DirectPayComponent,
 } from '../direct-workforce-pay';
@@ -16,6 +17,7 @@ import {
 import {
   aggregateShipmentDeliveriesByWorkforceDay,
   shipmentAttendanceRecord,
+  shipmentAttendanceReview,
   workforceAttendanceCaptureSettingForDate,
   type WorkforceAttendanceCaptureSetting,
 } from '../workforce-attendance-capture';
@@ -25,9 +27,14 @@ import {
   type WorkforceProductionThresholdInput,
 } from '../workforce-production-threshold';
 
+import { buildWorkforcePayoutInputMaps, overlayWorkforcePayoutAttendance,
+  resolveWorkforcePaymentFieldRate, findWorkforceProductionInput,
+  findWorkforcePayoutAttendancePeriod, hasWorkforcePayoutAttendanceOverride } from '../workforce-payout-input-calculation';
+
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
 export type CpsFacts = {
+  payout_inputs?: Parameters<typeof buildWorkforcePayoutInputMaps>[0];
   shipments: RecordRow[]; volumes: RecordRow[]; mappings: RecordRow[];
   workforce: RecordRow[]; components: RecordRow[]; providers: RecordRow[];
   stations: RecordRow[]; employees: RecordRow[]; salaries: RecordRow[];
@@ -129,20 +136,22 @@ export function calculateRateCard(
   paymentPolicyHistory?: WorkforcePaymentPolicy[] | null,
   cumulativeAttendanceUnitsBefore = 0,
   attendanceSource: 'biometric' | 'shipment_data' = 'biometric',
-  productionAllocations?: ReadonlyMap<string, WorkforceProductionThresholdAllocation>
+  productionAllocations?: ReadonlyMap<string, WorkforceProductionThresholdAllocation>,
+  attendanceInput?: {basis:'days'|'hours';quantity:number}
 ) {
-  const cost={salary:0,variable:0,fuel:0,van:0,missing:false};
+  const cost={salary:0,variable:0,fuel:0,van:0,missing:false,production_details:[] as import("./cps-details").CpsProductionDetail[]};
   if (r.payment_method_id && !components.length) cost.missing=true;
   const values = Object.fromEntries(Object.entries(r.payment_values ?? {}).map(([k,v])=>[key(k),v]));
   for(const c of components) {
     const code=key(c.component_code), label=key(`${code} ${c.label}`);
     // Fleet owns fixed rental accrual; payroll settlement keeps its original card.
+    if(c.cps_cost_source==='pnl_only') continue;
     if(c.cps_cost_source==='fleet' && c.component_type!=='production' && c.calculation_type!=='count_x_rate') continue;
     const raw=values[code];
     if(raw==null || String(raw).trim()==='' || !Number.isFinite(Number(raw)) || Number(raw)<0) { cost.missing=true; continue; }
     const rate=Number(raw), isProduction=c.component_type==='production' || c.calculation_type==='count_x_rate';
     const source=c.provider_calculation_sources?.[String(shipment.client ?? 'Amazon').toLowerCase()] || c.calculation_source || code;
-    const count=production(shipment,source);
+    const count=productionAllocations?.get(code)?.reportedUnits ?? production(shipment,source) ?? (c.is_custom_production ? 0 : null);
     if(isProduction && count==null) {cost.missing=true;continue;}
     const thresholdAllocation=isProduction ? productionAllocations?.get(code) : undefined;
     if(isProduction && productionAllocations && !thresholdAllocation) {cost.missing=true;continue;}
@@ -153,7 +162,7 @@ export function calculateRateCard(
     const daily=/day/i.test(String(c.pay_schedule));
     const attendanceBased=!isProduction && c.calculation_source==='attendance_eligibility';
     if(attendanceBased && !monthly && !hourly && !daily) {cost.missing=true;continue;}
-    if(attendanceBased && hourly && attendanceSource==='shipment_data') {cost.missing=true;continue;}
+    if(attendanceBased && hourly && attendanceSource==='shipment_data' && num(attendance?.work_minutes)<=0 && attendanceInput?.basis!=='hours') {cost.missing=true;continue;}
     const attendanceUnit=attendanceBased ? directPayAttendanceUnit(attendance) : 1;
     const workedHours=attendanceUnit>0 ? Math.max(0,num(attendance?.work_minutes))/60 : 0;
     const attendanceAmount=monthly
@@ -165,23 +174,28 @@ export function calculateRateCard(
         policy: workforcePaymentPolicyForDate(paymentPolicyHistory,date)
       }).amount
       : hourly ? rate*workedHours : rate*attendanceUnit;
+    const aggregateFixed = attendanceBased && attendanceInput && directPayAttendanceBasis(c as DirectPayComponent)===attendanceInput.basis
+      ? directPayForDay({[code]:rate},[c as DirectPayComponent],date,attendance,{policyHistory:paymentPolicyHistory,cumulativeAttendanceUnitsBefore,attendanceSource,attendanceInput}).total : undefined;
     const amount=isProduction
       ? thresholdAllocation?.amount ?? rate*count!
-      : attendanceBased ? Math.round(attendanceAmount*100)/100 : monthly ? monthlyAccrual(rate,date) : rate;
+      : aggregateFixed ?? (attendanceBased ? Math.round(attendanceAmount*100)/100 : monthly ? monthlyAccrual(rate,date) : rate);
     const bucket=/VAN|VEHICLE|DOCK/.test(label) ? 'van' : /FUEL|KILOMET|\bKM\b/.test(label) ? 'fuel' : !isProduction ? 'salary' : 'variable';
     cost[bucket]+=amount;
+    if(isProduction) cost.production_details.push({label:c.label||c.component_code,basis:String(source).replaceAll("_"," ").toLowerCase(),rate,reported_units:count!,payable_units:thresholdAllocation?.payableUnits??count!,threshold_units:thresholdAllocation?.thresholdDeducted??0,amount,bucket});
   }
   if(!components.length && !r.payment_method_id) {
-    cost.variable=num(shipment.total_delivery)*num(r.delivery_rate)+num(shipment.c_return)*num(r.pickup_rate)+num(shipment.mfn)*num(r.mfn_rate)+num(shipment.mfn_return)*num(r.mfn_return_rate);
+    const sellerPay=num(shipment.mfn)*num(r.mfn_rate)+num(shipment.mfn_return)*num(r.mfn_return_rate);
+    cost.variable=num(shipment.total_delivery)*num(r.delivery_rate)+num(shipment.c_return)*num(r.pickup_rate)+sellerPay;
     cost.fuel=num(shipment.total_delivery)*num(r.fuel_rate);
     if(includeFixed) cost.salary=Math.max(0,(/month/i.test(r.guarantee_schedule ?? '') ? monthlyAccrual(num(r.guarantee_amount),date) : num(r.guarantee_amount))-cost.variable);
+    if(r.exclude_seller_costs) cost.variable-=sellerPay;
     if(!configured(r)) cost.missing=true;
   }
   return cost;
 }
 function detailRates(card: RecordRow, components: RecordRow[], client: string): CpsRate[] {
   const values=Object.fromEntries(Object.entries(card.payment_values??{}).map(([k,v])=>[key(k),v]));
-  if(components.length) return components.filter(c=>values[key(c.component_code)]!=null && (c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate')).map(c=>({
+  if(components.length) return components.filter(c=>values[key(c.component_code)]!=null && c.cps_cost_source!=='pnl_only' && (c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate')).map(c=>({
     label:c.label||c.component_code, rate:num(values[key(c.component_code)]),
     basis:(c.component_type==='production'||c.calculation_type==='count_x_rate')
       ? String(c.provider_calculation_sources?.[client.toLowerCase()]||c.calculation_source||c.component_code).replaceAll('_',' ').toLowerCase()
@@ -189,7 +203,7 @@ function detailRates(card: RecordRow, components: RecordRow[], client: string): 
   }));
   return [
     ['Delivery',card.delivery_rate,'per delivery'],['Customer return',card.pickup_rate,'per return'],
-    ['Seller pickup',card.mfn_rate,'per pickup'],['Seller return',card.mfn_return_rate,'per return'],
+    ...(!card.exclude_seller_costs ? [['Seller pickup',card.mfn_rate,'per pickup'],['Seller return',card.mfn_return_rate,'per return']] : []),
     ['Minimum guarantee',card.guarantee_amount,card.guarantee_schedule||'per day'],['DA fuel',card.fuel_rate,'per delivery']
   ].filter(([,rate])=>rate!=null).map(([label,rate,basis])=>({label:String(label),rate:num(rate),basis:String(basis)}));
 }
@@ -206,6 +220,9 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const sourceComponents = <T extends RecordRow>(rows: T[], date: string) => rows.map(c=>({...c,cps_cost_source:
     (facts.component_policies??[]).filter(p=>key(p.component_code)===key(c.component_code) && p.effective_from<=date)
       .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode??'workforce'}));
+  const sellerExcludedOn=(date:string)=>['SELLER_PICKUP','SLLLER_RETURN','SELLER_RETURN','MFN','MFN_RETURN'].some(code=>
+    (facts.component_policies??[]).filter(p=>key(p.component_code)===code&&p.effective_from<=date).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode==='pnl_only');
+  const inputMaps=buildWorkforcePayoutInputMaps(facts.payout_inputs??{});
   const stationById=new Map(facts.stations.map(s=>[s.id,s]));
   const selected=new Set(base.daily.map(d=>d.station_code));
   const dates=[...new Set(base.daily.map(d=>d.work_date))].sort();
@@ -234,7 +251,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const attendanceMappings=(facts.attendance_mappings??facts.mappings).map((m):RecordRow=>({...m,worker:attendanceCanonical(m)}));
   const attendanceProviders=new Map((facts.attendance_providers??facts.providers).map(p=>[p.id,compact(`${p.code} ${p.name}`)]));
   const attendanceStationById=new Map((facts.attendance_stations??facts.stations).map(s=>[s.id,s]));
-  const attendanceByWorkerDate=new Map<string,RecordRow>();
+  let attendanceByWorkerDate=new Map<string,RecordRow>();
   for(const row of facts.attendance??[]) {
     if(!row.punch_date) continue;
     const attendanceWorker=workforceByAttendanceIdentity.get(`workforce|${row.workforce_id}`)
@@ -253,20 +270,50 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const identities=[...new Set(matches.map(m=>m.worker?.id).filter(Boolean))];
     return identities.length===1 ? [{workforce_id:identities[0],work_date:String(row.work_date),total_delivery:num(row.total_delivery)}] : [];
   }));
-  for(const [workerDate] of attendanceByWorkerDate) {
-    const date=workerDate.slice(workerDate.lastIndexOf('|')+1);
-    if(workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date).capture_method==='shipment_data') {
-      attendanceByWorkerDate.delete(workerDate);
-    }
-  }
   for(const [workerDate,totalDeliveries] of shipmentDeliveries) {
     const date=workerDate.slice(workerDate.lastIndexOf('|')+1);
     const capture=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
     if(capture.capture_method==='shipment_data') {
-      attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,totalDeliveries,capture) as RecordRow);
+      attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,totalDeliveries,capture,attendanceByWorkerDate.get(workerDate) as DirectPayAttendance|undefined) as RecordRow);
     }
   }
+  attendanceByWorkerDate=new Map(overlayWorkforcePayoutAttendance(attendanceByWorkerDate as Map<string,DirectPayAttendance>,inputMaps.attendanceByWorkforceDate));
+  const paymentCard=(card:RecordRow,cs:RecordRow[],workerId:string,date:string,stationId=card.station_id):RecordRow=>({ ...card,exclude_seller_costs:sellerExcludedOn(date),
+    payment_values:Object.fromEntries(cs.map(c=>{const code=key(c.component_code);return [code,resolveWorkforcePaymentFieldRate(inputMaps,{workforceId:workerId,stationId:String(stationId??''),paymentFieldId:c.payment_field_id,fieldCode:code,date,fallbackRate:Object.entries(card.payment_values??{}).find(([k])=>key(k)===code)?.[1]})]}))
+  });
+  const rangeValidation=new Map<string,boolean>();
+  const rangeInput=(workerId:string,stationId:string,date:string)=>{
+    const period=findWorkforcePayoutAttendancePeriod(inputMaps,{workforceId:workerId,stationId,date});
+    if(!period)return undefined;
+    const periodKey=String(period.id??`${workerId}|${stationId}|${period.effective_from}|${period.effective_to}`);
+    if(!rangeValidation.has(periodKey)) {
+      const signatures=new Set<string>();let valid=period.effective_from.slice(0,7)===period.effective_to.slice(0,7);
+      for(let cursor=new Date(`${period.effective_from}T00:00:00Z`);cursor<=new Date(`${period.effective_to}T00:00:00Z`);cursor.setUTCDate(cursor.getUTCDate()+1)) {
+        const d=cursor.toISOString().slice(0,10);
+        const sources=[...mappings.filter(m=>m.worker?.id===workerId && m.station_id===stationId && activeOn(m,d)),
+          ...(facts.allocations??[]).filter(m=>m.workforce_id===workerId && m.station_id===stationId && m.status!=='cancelled' && activeOn(m,d))]
+          .map(card=>({card,cs:(Array.isArray(card.payment_components)&&card.payment_components.length?card.payment_components:components.get(card.payment_method_id)??[]).filter((c:RecordRow)=>directPayAttendanceBasis(c as DirectPayComponent)===period.attendance_basis)}))
+          .filter(source=>source.cs.length);
+        if(sources.length!==1){valid=false;continue;}
+        const {card,cs}=sources[0],resolved=paymentCard(card,cs,workerId,d,stationId);
+        signatures.add(JSON.stringify([card.id,cs.map((c:RecordRow)=>[c.component_code,c.pay_schedule,c.calculation_type,resolved.payment_values[key(c.component_code)]]),workforcePaymentPolicyForDate(facts.payment_policy_history,d)]));
+      }
+      rangeValidation.set(periodKey,valid&&signatures.size===1);
+    }
+    const valid=rangeValidation.get(periodKey)!;
+    const complete=valid && period.effective_from>=dates[0] && period.effective_to<=dates.at(-1)!;
+    // Uploaded ranges contain no daily attendance. Settle once at range end,
+    // just like Dashboard; flag a partial view instead of inventing workdays.
+    return {period,complete,valid,input:{basis:period.attendance_basis,quantity:complete&&date===period.effective_to?period.quantity:0}};
+  };
   const cumulativeAttendanceUnitsBefore=new Map<string,number>();
+  for(const periods of inputMaps.attendancePeriodsByWorkforceStation.values()) for(const period of periods) {
+    if(period.attendance_basis!=='days') continue;
+    for(let cursor=new Date(`${period.effective_from}T00:00:00Z`);cursor<=new Date(`${period.effective_to}T00:00:00Z`);cursor.setUTCDate(cursor.getUTCDate()+1)) {
+      const date=cursor.toISOString().slice(0,10),k=`${period.workforce_id}|${date}`;
+      attendanceByWorkerDate.set(k,{punch_date:date,status:'A',aggregate_units:date===period.effective_to&&rangeInput(period.workforce_id,period.station_id,date)?.valid?Number(period.quantity):0});
+    }
+  }
   for(const worker of facts.workforce) {
     const workerDates=[...attendanceByWorkerDate.entries()]
       .filter(([entry])=>entry.startsWith(`${worker.id}|`))
@@ -276,7 +323,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       const date=entry.slice(worker.id.length+1),nextMonth=date.slice(0,7);
       if(nextMonth!==month){month=nextMonth;running=0;}
       cumulativeAttendanceUnitsBefore.set(entry,running);
-      running+=directPayAttendanceUnit(attendance as DirectPayAttendance);
+      running+=attendance.aggregate_units??directPayAttendanceUnit(attendance as DirectPayAttendance);
     }
   }
   const dailyVolumes=new Map<string,Map<string,number>>();
@@ -292,7 +339,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const seen=gapDates.get(k)??new Set<string>();seen.add(date);gapDates.set(k,seen);
     if(existing) {existing.days=seen.size;existing.first_date=existing.first_date<date?existing.first_date:date;existing.last_date=existing.last_date>date?existing.last_date:date;existing.deliveries+=deliveries;existing.known_cost+=cost;return;}
     gaps.set(k,{key:k,kind,station_code:station,provider_id:id,dropx_id:dropx,name,first_date:date,last_date:date,days:1,deliveries,known_cost:cost,owner,
-      href:owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `https://dashboard.dropxlogistics.com/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : `https://dashboard.dropxlogistics.com/provider-id-mapping?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
+      href:owner==='Workforce attendance' ? `https://dashboard.dropxlogistics.com/attendance` : owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `https://dashboard.dropxlogistics.com/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : `https://dashboard.dropxlogistics.com/provider-id-mapping?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
   }
   const add=(station:string,date:string,head:CpsHead,sub:string,amount:number,source:string) => {
     if(selected.has(station) && amount!==0) lines.push({station_code:station,work_date:date,head,sub_head:sub,amount,source});
@@ -306,7 +353,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const identities=new Set(matches.map(m=>m.worker?.id).filter(Boolean));
     if(identities.size!==1 || matches.some(m=>!m.worker)) {
       row.mapping_status=matches.length ? 'Conflicting or missing DropX identity' : 'Unmapped';
-      if(num(row.total_activity)>0) gap(row.mapping_status,row.station_code,row.work_date,row.provider_employee_id,row.provider_employee_name??'','',num(row.total_delivery));
+      if(num(row.total_delivery)+num(row.c_return)>0) gap(row.mapping_status,row.station_code,row.work_date,row.provider_employee_id,row.provider_employee_name??'','',num(row.total_delivery));
       continue;
     }
     const worker=matches[0].worker!;
@@ -326,7 +373,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       const attendance=attendanceByWorkerDate.get(k) as DirectPayAttendance|undefined;
       const calendarMonthly=cs.some(c=>c.component_type!=='production' && c.calculation_type!=='count_x_rate' && c.calculation_source!=='attendance_eligibility' && (/month/i.test(c.pay_schedule??'') || c.calculation_type==='fixed_monthly')) || /month/i.test(m.guarantee_schedule??'');
       const attendanceFixed=cs.some(c=>c.component_type!=='production' && c.calculation_type!=='count_x_rate' && c.calculation_source==='attendance_eligibility');
-      if(!calendarMonthly && !(attendanceFixed && directPayAttendanceUnit(attendance)>0)) continue;
+      if(!calendarMonthly && !(attendanceFixed && (directPayAttendanceUnit(attendance)>0 || rangeInput(m.worker.id,m.station_id,date)))) continue;
       const station=stationById.get(m.station_id ?? m.worker.location_id)?.station_code;
       if(!station) continue;
       const row={id:`fixed:${m.worker.id}:${date}`,client:'Amazon',work_date:date,station_code:station,provider_employee_id:m.provider_member_id,provider_employee_name:m.worker.full_name,dropx_name:m.worker.full_name,dropx_emp_code:m.worker.dropx_id,pay_type:m.pay_type,total_delivery:0,total_activity:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:0,fuel_pay:0,van_pay:0,da_total_pay:0,mapping_status:'Mapped'};
@@ -383,7 +430,10 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       const code=key(c.component_code),isProduction=c.component_type==='production'||c.calculation_type==='count_x_rate';
       if(!isProduction) continue;
       const source=c.provider_calculation_sources?.[String(row.client??'Amazon').toLowerCase()]||c.calculation_source||code;
-      const count=production(row,source);
+      const stationId=thresholdStationById.size ? [...thresholdStationById.values()].find(s=>s.station_code===row.station_code)?.id : card.station_id;
+      const uploaded=findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId,paymentFieldId:c.payment_field_id,fieldCode:code,date:g.date});
+      const firstAtStation=orderedRows.findIndex(r=>r.station_code===row.station_code)===rowIndex;
+      const count=uploaded ? (firstAtStation?Number(uploaded.units):0) : production(row,source) ?? (c.is_custom_production?0:null);
       if(count==null) continue;
       const inputId=`${card.id}|${g.date}|${String(row.id)}|${code}|${rowIndex}|${componentIndex}`;
       thresholdInputs.push({
@@ -396,7 +446,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         componentCode:code,
         componentOrder:Number.isFinite(Number(c.sort_order))?Number(c.sort_order):componentIndex,
         reportedUnits:count,
-        rate:num(values[code]),
+        rate:num(resolveWorkforcePaymentFieldRate(inputMaps,{workforceId:g.worker.id,stationId,paymentFieldId:c.payment_field_id,fieldCode:code,date:g.date,fallbackRate:values[code]})),
         thresholdConfig:card.production_threshold_config,
         methodThresholdConfig:card.method_production_threshold_config
       });
@@ -442,18 +492,20 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const latest=candidates.sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
     const current=latest ? candidates.filter(m=>m.effective_from===latest.effective_from) : [];
     const conflict=new Set(current.map(rateSignature)).size>1;
-    const card=latest;
+    let card=latest;
     const cs=sourceComponents(card ? components.get(card.payment_method_id)??[] : [],g.date);
+    if(card)card=paymentCard(card,cs,g.worker.id,g.date);
     const aggregate:RecordRow={client:g.rows[0].client};
     for(const field of ['amazon_delivery','swa_delivery','total_delivery','total_activity','c_return','mfn','mfn_return']) aggregate[field]=g.rows.reduce((n,r)=>n+num(r[field]),0);
     const workerDateKey=`${g.worker.id}|${g.date}`;
+    const range=card?rangeInput(g.worker.id,card.station_id,g.date):undefined;
     const costs=card ? calculateRateCard(
       card,cs,aggregate,g.date,true,
       attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined,
       facts.payment_policy_history,
       cumulativeAttendanceUnitsBefore.get(workerDateKey)??0,
-      workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,g.date).capture_method,
-      thresholdAllocationsByGroup.get(`${card.id}|${g.worker.id}|${g.date}`)
+      hasWorkforcePayoutAttendanceOverride(inputMaps,g.worker.id,g.date)?'biometric':workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,g.date).capture_method,
+      thresholdAllocationsByGroup.get(`${card.id}|${g.worker.id}|${g.date}`),range?.input
     ) : {salary:0,variable:0,fuel:0,van:0,missing:true};
     const thresholdConfigurationMissing=card
       ? [...(thresholdAllocationsByGroup.get(`${card.id}|${g.worker.id}|${g.date}`)?.values()??[])]
@@ -468,7 +520,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
           : costs.missing ? 'Rate values or production source missing' : '';
     if(issue) {
       for(const row of g.rows) {row.mapping_status=issue;gap(issue,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery));}
-      continue;
+      if(conflict || !card || thresholdConfigurationMissing) continue;
     }
     if(g.worker.source_profile_type==='employee' && employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`)) costs.salary=0;
     const volumes=new Map<string,number>();g.rows.forEach(r=>volumes.set(r.station_code,(volumes.get(r.station_code)??0)+num(r.total_delivery)));
@@ -481,25 +533,42 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const fuelByStation=allocateCost(fuelFixed,[...volumes.keys()],volumes);
     const seenStations=new Set<string>();
     for(const row of g.rows) {
+      const rowStationId=[...stationById.values()].find(s=>s.station_code===row.station_code)?.id;
+      const rowCard=paymentCard(card!,cs,g.worker.id,g.date,rowStationId);
+      const missingInputs=cs.filter(c=>c.is_custom_production && c.cps_cost_source!=='pnl_only'
+        && num(rowCard.payment_values[key(c.component_code)])>0
+        && !findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId:rowStationId,paymentFieldId:c.payment_field_id,fieldCode:key(c.component_code),date:g.date}));
+      if(num(row.total_activity)>0 || directPayAttendanceUnit(attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined)>0)
+        for(const c of missingInputs)gap(`${c.label||c.component_code} input missing`,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Operations uploads');
       const variable=calculateRateCard(
-        card!,cs,row,g.date,false,undefined,undefined,0,'biometric',
+        rowCard,cs,row,g.date,false,undefined,undefined,0,'biometric',
         thresholdAllocationsByRow.get(`${card!.id}|${g.date}|${String(row.id)}`)
       );
       const first=!seenStations.has(row.station_code);seenStations.add(row.station_code);
       row.variable_pay=variable.variable;row.mg_pay=first?salaryByStation.get(row.station_code)??0:0;
       row.fuel_pay=variable.fuel+(first?fuelByStation.get(row.station_code)??0:0);
       row.van_pay=first?vanByStation.get(row.station_code)??0:0;
-      row.da_total_pay=row.variable_pay+row.mg_pay+row.fuel_pay;row.pay_type=card!.pay_type;row.mapping_status='Mapped';
+      row.da_total_pay=row.variable_pay+row.mg_pay+row.fuel_pay;row.pay_type=card!.pay_type;row.mapping_status=issue||'Mapped';
       const attendance=attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined;
       const attendanceWorked=directPayAttendanceUnit(attendance)>0;
       const worked=attendanceWorked || [row.total_activity,row.total_delivery,row.c_return,row.mfn,row.mfn_return].some(v=>num(v)>0);
+      const pendingFixed = !attendance && worked && cs.some(c=>c.component_type!=='production' && c.calculation_type!=='count_x_rate'
+        && c.calculation_source==='attendance_eligibility' && c.cps_cost_source!=='fleet'
+        && !/VAN|VEHICLE|DOCK|FUEL|KILOMET|\bKM\b/i.test(`${c.component_code} ${c.label}`)
+        && num(Object.entries(card!.payment_values??{}).find(([k])=>key(k)===key(c.component_code))?.[1])>0)
+        && !(g.worker.source_profile_type==='employee' && employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`));
+      if(range&&!range.complete) gap(range.valid?'Uploaded attendance range needs full-period view':'Uploaded attendance range crosses payment setup changes',row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Workforce attendance');
+      const review=worked?shipmentAttendanceReview(shipmentDeliveries.get(workerDateKey)??0,workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,g.date)):null;
+      if(review)gap(`Low deliveries · below ${review.threshold}`,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Workforce attendance');
+      if(pendingFixed) gap('Fixed pay attendance missing',row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),row.da_total_pay,'Workforce attendance');
       detailDays.push({worker_id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,
         station_code:row.station_code,date:g.date,provider_ids:[row.provider_employee_id],
         cohort:hasFixedDaPay(card!,cs)||employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`)?'guarantee':'variable',
         worked,work_basis:attendanceWorked?'attendance':worked?'shipment activity':'no work evidence',
-        deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:num(row.mfn),seller_returns:num(row.mfn_return),
+        deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:0,seller_returns:0,
         salary:row.mg_pay,variable:row.variable_pay,fuel:row.fuel_pay,van:row.van_pay,
-        source:'Workforce rate card',card_from:card!.effective_from,rates:detailRates(card!,cs,String(row.client??'Amazon'))});
+        production_details:variable.production_details,pending_fixed_pay:pendingFixed || Boolean(range&&!range.complete) || Boolean(issue) || missingInputs.length>0,
+        source:'Workforce rate card',card_from:card!.effective_from,rates:detailRates(rowCard,cs,String(row.client??'Amazon'))});
       add(row.station_code,g.date,'DA','Salary / minimum guarantee',row.mg_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','Variable delivery pay',row.variable_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','DA fuel',row.fuel_pay,'Workforce rate card');
@@ -570,22 +639,19 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       }
       const snapshotComponents=Array.isArray(latest.payment_components) ? latest.payment_components.filter((component:unknown)=>component&&typeof component==='object') as DirectPayComponent[] : [];
       const allDirectComponents=snapshotComponents.length ? snapshotComponents : (components.get(latest.payment_method_id)??[]) as DirectPayComponent[];
-      const directComponents=sourceComponents(allDirectComponents,date).filter(c=>c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate');
+      const directComponents=sourceComponents(allDirectComponents,date).filter(c=>c.cps_cost_source!=='pnl_only' && (c.cps_cost_source!=='fleet' || c.component_type==='production' || c.calculation_type==='count_x_rate'));
       // A rental-only card is covered by Fleet and is not a missing pay setup.
       if(allDirectComponents.length && !directComponents.length) continue;
       const workerDateKey=`${w.id}|${date}`;
-      const captureSetting=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
-      const needsAttendanceSource=directComponents.some(component=>component.component_type!=='production' && component.calculation_source==='attendance_eligibility');
-      if(needsAttendanceSource && captureSetting.capture_method==='shipment_data') {
-        gap('Shipment attendance unavailable without provider mapping',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
-        continue;
-      }
+      const captureSetting={...workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date),capture_method:'biometric' as const};
+      const directRange=rangeInput(w.id,latest.station_id,date);
+      if(directRange&&!directRange.complete)gap(directRange.valid?'Uploaded attendance range needs full-period view':'Uploaded attendance range crosses payment setup changes',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce attendance');
       const result=directPayForDay(
-        latest.payment_values,
+        paymentCard(latest,directComponents,w.id,date).payment_values,
         directComponents,
         date,
         attendanceByWorkerDate.get(workerDateKey) as {punch_date:string;status?:string|null;in_time?:string|null;out_time?:string|null;work_minutes?:number|string|null}|undefined,
-        {policyHistory:facts.payment_policy_history,cumulativeAttendanceUnitsBefore:cumulativeAttendanceUnitsBefore.get(workerDateKey)??0,attendanceSource:captureSetting.capture_method}
+        {policyHistory:facts.payment_policy_history,cumulativeAttendanceUnitsBefore:cumulativeAttendanceUnitsBefore.get(workerDateKey)??0,attendanceSource:captureSetting.capture_method,attendanceInput:rangeInput(w.id,latest.station_id,date)?.input}
       );
       if(result.missing) {
         gap('Direct payment allocation incomplete',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
@@ -606,7 +672,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       detailDays.push({worker_id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,date,provider_ids:[],
         cohort:'guarantee',worked:result.present,work_basis:result.present?'attendance':'no work evidence',
         deliveries:0,customer_returns:0,seller_pickups:0,seller_returns:0,salary,variable:0,fuel,van,
-        source:'Direct workforce allocation',card_from:latest.effective_from,rates:detailRates(latest,directComponents,'Direct')});
+        pending_fixed_pay:Boolean(directRange&&!directRange.complete),source:'Direct workforce allocation',card_from:latest.effective_from,rates:detailRates(paymentCard(latest,directComponents,w.id,date),directComponents,'Direct')});
       const personKey=`${w.id}|${station}`,person=people.get(personKey)??{id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
       person.salary+=salary;person.fuel+=fuel;person.van+=van;if(result.total>0){person.paid_days++;person.zero_delivery_days++;}people.set(personKey,person);
     }
@@ -717,9 +783,9 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const sum=(head:string,sub?:string)=>ledger.filter(l=>l.head===head&&(!sub||l.sub_head===sub)).reduce((n,l)=>n+num(l.amount),0);
     const daBucket=(bucket:string)=>ledger.filter(l=>l.head==='DA' && (bucket==='salary'?/salary|minimum|guarantee|\bmg\b|fixed/i.test(l.sub_head):bucket==='fuel'?/fuel/i.test(l.sub_head):!/salary|minimum|guarantee|\bmg\b|fixed|fuel/i.test(l.sub_head))).reduce((n,l)=>n+num(l.amount),0);
     const rows=associates.filter(r=>r.station_code===d.station_code&&r.work_date===d.work_date);
-    const unresolved=rows.filter(r=>r.mapping_status!=='Mapped' && num(r.total_activity)>0);
+    const unresolved=rows.filter(r=>r.mapping_status!=='Mapped' && num(r.total_delivery)+num(r.c_return)>0);
     const dayGaps=[...gaps.values()].filter(g=>g.station_code===d.station_code&&g.first_date<=d.work_date&&g.last_date>=d.work_date);
-    return {...d,da:sum('DA'),utr:sum('UTR'),van:sum('Van'),rent:sum('Rent'),overhead:sum('Overhead'),other:sum('Other'),
+    return {...d,mfn:0,mfn_return:0,activity:Math.max(0,num(d.activity)-num(d.mfn)-num(d.mfn_return)),da:sum('DA'),utr:sum('UTR'),van:sum('Van'),rent:sum('Rent'),overhead:sum('Overhead'),other:sum('Other'),
       da_salary:daBucket('salary'),da_variable:daBucket('variable'),da_fuel:daBucket('fuel'),
       total:ledger.reduce((n,l)=>n+num(l.amount),0),unmapped:unresolved.length,unpaid:0,
       exposed_deliveries:unresolved.reduce((n,r)=>n+num(r.total_delivery),0),cost_gaps:dayGaps.length+allocationNotices.size,
@@ -729,5 +795,5 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const privateCodes=new Set(privateEmployees.map(e=>e.employee_code).filter(Boolean));
   const privateWorkerIds=new Set(facts.workforce.filter(w=>w.source_profile_type==='employee'&&privateEmployees.some(e=>e.id===w.source_profile_id)).map(w=>w.id));
   for(const g of gaps.values()) if(privateCodes.has(g.dropx_id)) {g.name='';g.dropx_id='';g.provider_id='';}
-  return {...base,da_details:summarizeDaDetails(detailDays.filter(d=>selected.has(d.station_code)&&!privateCodes.has(d.dropx_id)&&!privateWorkerIds.has(d.worker_id))),allocation_notices:[...allocationNotices],staff:[...staff.values()].sort((a,b)=>b.amount-a.amount),daily,breakup:lines,associates:associates.filter(r=>selected.has(r.station_code)&&!privateCodes.has(r.dropx_emp_code)),gaps:[...gaps.values()].sort((a,b)=>b.deliveries-a.deliveries||a.first_date.localeCompare(b.first_date)),people:[...people.values()].filter(p=>selected.has(p.station_code)&&!privateCodes.has(p.dropx_id)&&!privateWorkerIds.has(p.id)).sort((a,b)=>b.salary-a.salary)};
+  return {...base,da_details:summarizeDaDetails(detailDays.filter(d=>selected.has(d.station_code)&&!privateCodes.has(d.dropx_id)&&!privateWorkerIds.has(d.worker_id))),allocation_notices:[...allocationNotices],staff:[...staff.values()].sort((a,b)=>b.amount-a.amount),daily,breakup:lines,associates:associates.filter(r=>selected.has(r.station_code)&&!privateCodes.has(r.dropx_emp_code)).map(r=>({...r,mfn:0,mfn_return:0,total_activity:Math.max(0,num(r.total_activity)-num(r.mfn)-num(r.mfn_return))})),gaps:[...gaps.values()].sort((a,b)=>b.deliveries-a.deliveries||a.first_date.localeCompare(b.first_date)),people:[...people.values()].filter(p=>selected.has(p.station_code)&&!privateCodes.has(p.dropx_id)&&!privateWorkerIds.has(p.id)).sort((a,b)=>b.salary-a.salary)};
 }
