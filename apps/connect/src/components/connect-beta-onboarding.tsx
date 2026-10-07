@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { betaGuidance, betaJourneyCopy, guidanceLanguages, stationGuidanceLanguage } from "../lib/beta-guidance";
+import { useBetaGuidanceLanguage } from "./connect-beta-journey-shell";
 import { betaJourney } from "../lib/beta-journey";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -52,7 +53,7 @@ function Soc({children,updated}:{children:string;updated?:string|null}){return <
 
 export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;onRegister:()=>void}){
   const [data,setData]=useState<Data|null>(null),[view,setView]=useState<Stage>("overview"),[loading,setLoading]=useState(true),[error,setError]=useState(""),[refreshing,setRefreshing]=useState(false),[refresh,setRefresh]=useState(0);
-  const [useRegionalLanguage,setUseRegionalLanguage]=useState(false);
+  const [useRegionalLanguage,setUseRegionalLanguage]=useBetaGuidanceLanguage();
   const [copied,setCopied]=useState<"email"|"link"|null>(null);
   const [exitOpen,setExitOpen]=useState(false),[reasonId,setReasonId]=useState(""),[exitNote,setExitNote]=useState(""),[exitError,setExitError]=useState(""),[exitSaving,setExitSaving]=useState(false),[decisionSaving,setDecisionSaving]=useState(false);
   const latest=useRef<Data|null>(null);

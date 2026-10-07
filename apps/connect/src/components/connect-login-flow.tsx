@@ -23,6 +23,7 @@ import { ConnectMyRequests } from "./connect-my-requests";
 import { ConnectWorkforcePayments } from "./connect-workforce-payments";
 import { ConnectWorkforceWork } from "./connect-workforce-work";
 import { ConnectPeopleWorkspace } from "./connect-people-workspace";
+import { ConnectBetaJourneyShell } from "./connect-beta-journey-shell";
 import { ConnectActivationStatus } from "./connect-activation-status";
 import { ConnectReferEarn } from "./connect-refer-earn";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
@@ -698,6 +699,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     <button onClick={() => setSessionAttempt((attempt) => attempt + 1)}>Retry workspace</button>
   </section></div>;
 
+  const isolatedBetaJourney = Boolean(account?.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
   return <div className={`dx-app ${loggedIn ? "logged-in" : ""}`}>
     {loggedIn && account ? <aside className="dx-desktop-nav" aria-label="DropX One navigation">
       <div className="dx-desktop-brand">
@@ -832,10 +834,11 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       ) : null}
       {account ? <ConnectNativeBridge account={account} /> : null}
       <PullToRefresh />
-      {step === "activation" && account?.onboardingBeta ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
+      {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} />}</ConnectBetaJourneyShell> : null}
+      {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
-      {step === "profile" && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
+      {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && sharedSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "connect" && account && isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
       {step === "connect" && account && !isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
