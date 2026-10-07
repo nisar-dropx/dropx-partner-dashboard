@@ -47,7 +47,8 @@ test('anonymous installs can read the manifest while financial pages still requi
   '@/lib/finance/surface':compile('./surface.ts'),
   '@/lib/provider-mapping-host':{providerMappingPageCodeForHost:()=>null},
   '@/lib/timeout-fetch':{timeoutFetch:()=>fetch},
-  '@/lib/with-timeout':{TimeoutError:class extends Error{},withTimeout:p=>p},
+  '@/lib/session-verification':compile('../session-verification.ts',{'./with-timeout':compile('../with-timeout.ts')}),
+  '@/lib/session-recovery':compile('../session-recovery.ts'),
   '@supabase/supabase-js':{createClient:()=>({auth:{getUser:async()=>({data:{user:null},error:null})}})}
  });
  for(const path of ['/finance-app/manifest.webmanifest','/finance-sw.js','/downloads/DropX-Finance-1.0.0.apk']){
