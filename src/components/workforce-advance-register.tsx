@@ -16,7 +16,8 @@ export type WorkforceAdvanceRegisterRow = {
   total: number;
   deducted: number;
   pending: number;
-  status: "Pending" | "Partially deducted" | "Fully deducted";
+  status: "Awaiting Workforce registration" | "Pending" | "Partially deducted" | "Fully deducted";
+  linkStatus: "pending" | "linked";
   paymentMode: string;
   paymentReference: string;
   externalReference: string;
@@ -191,6 +192,7 @@ export function WorkforceAdvanceRegister({ canAdd, rows, workforceOptions }: {
   const total = useMemo(() => rows.reduce((sum, row) => sum + row.total, 0), [rows]);
   const deducted = useMemo(() => rows.reduce((sum, row) => sum + row.deducted, 0), [rows]);
   const pending = Math.max(0, total - deducted);
+  const awaitingRegistration = useMemo(() => rows.filter((row) => row.linkStatus === "pending").length, [rows]);
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return rows.filter((row) => (status === "all" || row.status === status) && (!term || [
@@ -236,9 +238,9 @@ export function WorkforceAdvanceRegister({ canAdd, rows, workforceOptions }: {
 
   return <div className="workforce-advance-page">
     <section aria-label="Advance totals" className="workforce-advance-totals">
-      <article><span>Total advances</span><strong>{money(total)}</strong><small>{rows.length.toLocaleString("en-IN")} records</small></article>
-      <article><span>Deducted</span><strong className="good-text">{money(deducted)}</strong><small>Applied through payouts</small></article>
-      <article><span>Pending</span><strong className={pending > 0 ? "negative" : "good-text"}>{money(pending)}</strong><small>Balance to recover</small></article>
+      <article><span>Total advances</span><strong>{money(total)}</strong><small>{rows.length.toLocaleString("en-IN")} records{awaitingRegistration ? ` · ${awaitingRegistration.toLocaleString("en-IN")} awaiting registration` : ""}</small></article>
+      <article><span>Deducted</span><strong className="good-text">{money(deducted)}</strong><small>Already recovered or deducted through payouts</small></article>
+      <article><span>Pending</span><strong className={pending > 0 ? "negative" : "good-text"}>{money(pending)}</strong><small>Balance to recover, including unregistered IDs</small></article>
     </section>
 
     {canAdd ? <div className="workforce-advance-actions">
@@ -263,16 +265,16 @@ export function WorkforceAdvanceRegister({ canAdd, rows, workforceOptions }: {
     </section> : null}
 
     <section className="panel">
-      <div className="panel-head workforce-advance-register-head"><div><h2>Advance register</h2><p className="subtle">Total, deducted and pending balances are calculated from recovery history.</p></div><div className="workforce-advance-filters"><label><span>Search advances</span><input className="field" onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="ID, name, location or reference" type="search" value={search} /></label><label><span>Deduction status</span><select className="field" onChange={(event) => { setStatus(event.target.value); setPage(1); }} value={status}><option value="all">All statuses</option><option value="Pending">Pending</option><option value="Partially deducted">Partially deducted</option><option value="Fully deducted">Fully deducted</option></select></label></div></div>
+      <div className="panel-head workforce-advance-register-head"><div><h2>Advance register</h2><p className="subtle">Unregistered DropX IDs remain in these totals but cannot be deducted from payouts until Workforce registration links them.</p></div><div className="workforce-advance-filters"><label><span>Search advances</span><input className="field" onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="ID, name, location or reference" type="search" value={search} /></label><label><span>Deduction status</span><select className="field" onChange={(event) => { setStatus(event.target.value); setPage(1); }} value={status}><option value="all">All statuses</option><option value="Awaiting Workforce registration">Awaiting registration</option><option value="Pending">Pending</option><option value="Partially deducted">Partially deducted</option><option value="Fully deducted">Fully deducted</option></select></label></div></div>
       <div className="table-wrap"><table className="workforce-advance-table"><thead><tr><th>Advance</th><th>Workforce</th><th>Designation</th><th>Location</th><th>Paid on</th><th>Payment details</th><th className="payout-money">Total</th><th className="payout-money">Deducted</th><th className="payout-money">Pending</th><th>Status</th><th>Source / remark</th></tr></thead>
-        <tbody>{visible.length ? visible.map((row) => <tr key={row.id}>
+        <tbody>{visible.length ? visible.map((row) => <tr className={row.linkStatus === "pending" ? "workforce-advance-pending-row" : undefined} key={row.id}>
           <td><strong>{row.advanceNumber}</strong></td>
           <td><strong>{row.dropxId}</strong><small>{row.workforceName}</small></td>
-          <td>{row.designation || "—"}</td><td><strong>{row.location}</strong>{row.paidLocation !== row.location ? <small>Advance paid at {row.paidLocation}</small> : null}</td><td>{dateLabel(row.advanceDate)}</td>
+          <td>{row.designation || "—"}</td><td><strong>{row.location}</strong>{row.linkStatus === "linked" && row.paidLocation !== row.location ? <small>Advance paid at {row.paidLocation}</small> : null}</td><td>{dateLabel(row.advanceDate)}</td>
           <td><strong>{modeLabel(row.paymentMode)}</strong><small>{row.paymentReference || row.externalReference || "No reference"}</small>{row.paymentReference && row.externalReference ? <small>{row.externalReference}</small> : null}</td>
           <td className="payout-money"><strong>{money(row.total)}</strong></td><td className="payout-money good-text">{money(row.deducted)}</td><td className="payout-money"><strong>{money(row.pending)}</strong></td>
-          <td><span className={`status-pill ${row.status === "Fully deducted" ? "good" : row.status === "Partially deducted" ? "warn" : "payout-status-neutral"}`}>{row.status}</span></td>
-          <td><strong>{modeLabel(row.source)}</strong><small>{row.remark || `Added ${dateLabel(row.createdAt)}`}</small>{row.recoveryHistory.length ? <details className="workforce-advance-history"><summary>Recovery history ({row.recoveryHistory.length})</summary><div>{row.recoveryHistory.map((recovery) => <p key={recovery.id}><strong>{money(recovery.amount)}</strong> · {recovery.type === "opening_balance" ? "Opening deduction" : `${dateLabel(recovery.periodStart)}–${dateLabel(recovery.periodEnd)}`}<small>{modeLabel(recovery.status)}{recovery.reversalReason ? ` · ${recovery.reversalReason}` : ""}</small></p>)}</div></details> : null}</td>
+          <td><span className={`status-pill ${row.status === "Fully deducted" ? "good" : row.status === "Partially deducted" || row.status === "Awaiting Workforce registration" ? "warn" : "payout-status-neutral"}`}>{row.status}</span>{row.linkStatus === "pending" ? <small>Not eligible for payout deduction</small> : null}</td>
+          <td><strong>{modeLabel(row.source)}</strong><small>{row.remark || `Added ${dateLabel(row.createdAt)}`}</small>{row.linkStatus === "pending" ? <small>Links automatically when this exact DropX ID is registered.</small> : null}{row.recoveryHistory.length ? <details className="workforce-advance-history"><summary>Recovery history ({row.recoveryHistory.length})</summary><div>{row.recoveryHistory.map((recovery) => <p key={recovery.id}><strong>{money(recovery.amount)}</strong> · {recovery.type === "opening_balance" ? "Opening deduction" : `${dateLabel(recovery.periodStart)}–${dateLabel(recovery.periodEnd)}`}<small>{modeLabel(recovery.status)}{recovery.reversalReason ? ` · ${recovery.reversalReason}` : ""}</small></p>)}</div></details> : null}</td>
         </tr>) : <tr><td className="empty-cell" colSpan={11}>No Workforce advances match this view.</td></tr>}</tbody>
       </table></div>
       <div className="workforce-advance-pagination"><label>Rows <select className="field" onChange={(event) => { setSize(event.target.value); setPage(1); }} value={size}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="all">All</option></select></label><span>{filtered.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)} of ${filtered.length}` : "0 records"} · Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">Previous</button><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage((value) => Math.min(pages, value + 1))} type="button">Next</button></div>

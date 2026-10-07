@@ -57,7 +57,7 @@ export async function POST(request: Request) {
 
     const worker = await supabaseAdmin
       .from("workforce")
-      .select("id,location_id")
+      .select("id,dropx_id,location_id")
       .eq("company_id", companyId)
       .eq("id", workforceId)
       .is("deleted_at", null)
@@ -66,6 +66,8 @@ export async function POST(request: Request) {
     if (worker.error) return errorResponse(worker.error.message, 400);
     const stationId = String(worker.data?.location_id ?? "");
     if (!worker.data || !UUID.test(stationId)) return errorResponse("This Workforce member does not have a valid location.", 400);
+    const importedDropxId = String(worker.data.dropx_id ?? "").trim();
+    if (!importedDropxId) return errorResponse("This Workforce member does not have a valid DropX ID.", 400);
     const allLocations = authorization.hasAllLocationAccess || isCompanyOwner(authorization);
     if (!allLocations && !authorization.locationScopeIds.includes(stationId)) {
       return errorResponse("This Workforce member is outside your assigned locations.", 403);
@@ -75,6 +77,8 @@ export async function POST(request: Request) {
       company_id: companyId,
       workforce_id: workforceId,
       station_id: stationId,
+      imported_dropx_id: importedDropxId,
+      link_status: "linked",
       advance_date: advanceDate,
       amount: Math.round(amount * 100) / 100,
       payment_mode: paymentMode,

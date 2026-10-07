@@ -19,6 +19,10 @@ const finalSafetyMigration = readFileSync(
   new URL("20261007112000_workforce_advance_recovery_overlap_lock_order.sql", migrationsUrl),
   "utf8"
 );
+const pendingIdentityMigration = readFileSync(
+  new URL("20261007160000_workforce_advance_pending_identity_link.sql", migrationsUrl),
+  "utf8"
+);
 
 assert.match(migration, /create table public\.workforce_advance_import_batches/i);
 assert.match(migration, /create table public\.workforce_advances/i);
@@ -88,6 +92,24 @@ assert.match(
   /if v_plan_is_identical then[\s\S]*?continue;[\s\S]*?recovery\.period_start > p_period_end/i,
   "an identical exact-period retry must no-op before the later-period guard"
 );
+assert.match(pendingIdentityMigration, /add column imported_dropx_id text/i);
+assert.match(pendingIdentityMigration, /add column link_status text not null default 'linked'/i);
+assert.match(pendingIdentityMigration, /add column opening_deducted_amount numeric\(18,2\)/i);
+assert.match(pendingIdentityMigration, /alter column workforce_id drop not null/i);
+assert.match(pendingIdentityMigration, /alter column station_id drop not null/i);
+assert.match(pendingIdentityMigration, /link_status = 'pending'[\s\S]*?workforce_id is null[\s\S]*?station_id is null/i);
+assert.match(pendingIdentityMigration, /public\.normalize_people_dropx_id\(requested\.item->>'dropx_id'\)/i);
+assert.match(
+  pendingIdentityMigration,
+  /pg_advisory_xact_lock\([\s\S]*?hashtextextended\(v_lock_key, 0\)[\s\S]*?perform public\.lock_workforce_payment_allocation_company\(p_company_id\)/i,
+  "imports must take sorted global DropX identity locks before the company allocation lock"
+);
+assert.match(pendingIdentityMigration, /is unregistered and cannot be imported without all-location access/i);
+assert.match(pendingIdentityMigration, /create trigger workforce_advance_pending_identity_link/i);
+assert.match(pendingIdentityMigration, /create trigger workforce_advances_10_materialize_opening_recovery/i);
+assert.match(pendingIdentityMigration, /'opening-balance:' \|\| new\.id::text/i);
+assert.match(pendingIdentityMigration, /'WAI2-' \|\| pg_catalog\.md5/i);
+assert.match(pendingIdentityMigration, /WAI1 and WAI2 references are reserved/i);
 
 const db = new PGlite();
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -105,6 +127,7 @@ const reclassifiedWorker = id(11);
 const providerMapping = id(12);
 const openingBalanceWorker = id(21);
 const laterAdvance = id(22);
+const pendingWorker = id(23);
 
 await db.exec(`
   create schema if not exists auth;
@@ -217,8 +240,24 @@ await db.exec(`
   create table public.workforce_payment_settings (id uuid primary key, company_id uuid not null);
   create table public.workforce_attendance_capture_settings (id uuid primary key, company_id uuid not null);
   create table public.cps_shipment_daily (id uuid primary key, company_id uuid not null);
-  create table public.contractors (id uuid primary key, company_id uuid not null);
-  create table public.employees (id uuid primary key, company_id uuid not null);
+  create table public.contractors (
+    id uuid primary key, company_id uuid not null, full_name text, dropx_id text
+  );
+  create table public.employees (
+    id uuid primary key, company_id uuid not null, full_name text, employee_code text
+  );
+  create table public.helpers (
+    id uuid primary key, company_id uuid not null, full_name text, dropx_id text
+  );
+  create table public.vendors (
+    id uuid primary key, company_id uuid not null, full_name text, dropx_id text
+  );
+  create table public.workforce_helpers (
+    id uuid primary key, company_id uuid not null, full_name text, dropx_id text
+  );
+  create table public.workforce_pickers (
+    id uuid primary key, company_id uuid not null, full_name text, dropx_id text
+  );
   create table public.connect_profile_verifications (id uuid primary key, company_id uuid not null);
   create table public.payment_method_components (id uuid primary key, company_id uuid not null);
   create table public.payment_methods (id uuid primary key, company_id uuid not null);
@@ -232,6 +271,15 @@ await db.exec(`
   create table public.workforce_additional_payment_values (id uuid primary key, company_id uuid not null);
   create table public.providers (id uuid primary key, company_id uuid not null);
   create table public.designations (id uuid primary key, company_id uuid not null);
+
+  create or replace function public.normalize_people_dropx_id(p_value text)
+  returns text language sql immutable parallel safe returns null on null input
+  set search_path = '' as $$
+    select nullif(
+      regexp_replace(upper(btrim(p_value)), '[[:space:]]+', '', 'g'),
+      ''
+    )
+  $$;
 
   create table public.verifier_workforce_snapshot_state (
     company_id uuid primary key references public.companies(id),
@@ -567,7 +615,7 @@ const importedBusinessKey = await db.query(`
 `);
 assert.equal(
   importedBusinessKey.rows[0].external_reference,
-  `WAI1-${createHash("md5").update(`v1|${worker}|reference|bank-001`).digest("hex")}`,
+  `WAI2-${createHash("md5").update("v2|DX1001|reference|bank-001").digest("hex")}`,
   "the database and upload preview must derive the same stable reference key"
 );
 
@@ -1060,6 +1108,111 @@ assert.deepEqual(afterMayRetryWithLaterPeriod.rows[0], {
   active_count: 1,
   reversed_count: auditBeforeMayRetry.rows[0].reversed_count
 }, "an identical historical retry must not rewrite recovery audit history");
+
+const pendingIdentityRow = {
+  row_number: 12,
+  dropx_id: " Dx Pending 007 ",
+  advance_date: "2026-07-05",
+  amount: 500,
+  deducted_amount: 125,
+  payment_mode: "upi",
+  payment_reference: "PENDING-REF-007",
+  remark: "Imported before registration"
+};
+
+await assert.rejects(
+  applyImport("4".repeat(64), [pendingIdentityRow], [station]),
+  /unregistered and cannot be imported without all-location access/i,
+  "a location-scoped caller must not create a locationless pending identity"
+);
+
+await applyImport("5".repeat(64), [pendingIdentityRow], null);
+const pendingBeforeRegistration = await db.query(`
+  select
+    imported_dropx_id,
+    link_status,
+    workforce_id,
+    station_id,
+    amount::numeric amount,
+    opening_deducted_amount::numeric opening_deducted_amount,
+    external_reference,
+    linked_at,
+    (select count(*)::int from public.workforce_advance_recoveries recovery
+      where recovery.advance_id=advance.id) recovery_count
+  from public.workforce_advances advance
+  where payment_reference='PENDING-REF-007'
+`);
+assert.deepEqual(pendingBeforeRegistration.rows, [{
+  imported_dropx_id: " Dx Pending 007 ",
+  link_status: "pending",
+  workforce_id: null,
+  station_id: null,
+  amount: "500.00",
+  opening_deducted_amount: "125.00",
+  external_reference: `WAI2-${createHash("md5").update("v2|DXPENDING007|reference|pending-ref-007").digest("hex")}`,
+  linked_at: null,
+  recovery_count: 0
+}], "an unmatched import must retain the exact ID and opening balance without inventing canonical keys");
+
+await db.query(`
+  insert into public.workforce(id, company_id, dropx_id, full_name, location_id, migration_state)
+  values ($1,$2,'dxpending007','Pending Worker',null,null)
+`, [pendingWorker, company]);
+const stillPending = await db.query(`
+  select link_status from public.workforce_advances where payment_reference='PENDING-REF-007'
+`);
+assert.equal(stillPending.rows[0].link_status, "pending",
+  "a profile without a canonical current location must not link a pending advance");
+
+await db.query(`update public.workforce set location_id=$1 where id=$2`, [station, pendingWorker]);
+const linkedAfterRegistration = await db.query(`
+  select
+    advance.imported_dropx_id,
+    advance.link_status,
+    advance.workforce_id::text workforce_id,
+    advance.station_id::text station_id,
+    advance.opening_deducted_amount::numeric opening_deducted_amount,
+    (advance.linked_at is not null) linked,
+    recovery.amount::numeric recovered,
+    recovery.recovery_type,
+    recovery.status,
+    recovery.period_start::text period_start,
+    recovery.period_end::text period_end
+  from public.workforce_advances advance
+  join public.workforce_advance_recoveries recovery on recovery.advance_id=advance.id
+  where advance.payment_reference='PENDING-REF-007'
+`);
+assert.deepEqual(linkedAfterRegistration.rows, [{
+  imported_dropx_id: " Dx Pending 007 ",
+  link_status: "linked",
+  workforce_id: pendingWorker,
+  station_id: station,
+  opening_deducted_amount: "125.00",
+  linked: true,
+  recovered: "125.00",
+  recovery_type: "opening_balance",
+  status: "deducted",
+  period_start: "2026-07-05",
+  period_end: "2026-07-05"
+}], "Workforce registration must link identity, location, and opening recovery in one transaction");
+
+await assert.rejects(
+  applyImport("6".repeat(64), [{ ...pendingIdentityRow, row_number: 14 }], null),
+  /duplicates an advance already in the register|already exists in the register/i,
+  "the identity-based WAI2 key must remain duplicate-safe after automatic linking"
+);
+
+await assert.rejects(
+  db.query(`
+    insert into public.workforce_advances(
+      id, company_id, workforce_id, station_id, advance_number, advance_date,
+      amount, payment_mode, external_reference, source_type, created_by, updated_by
+    ) values ($1,$2,$3,$4,'WA-RESERVED','2026-07-06',10,'cash',
+      'WAI2-00000000000000000000000000000000','manual',$5,$5)
+  `, [id(24), company, pendingWorker, station, actor]),
+  /WAI1 and WAI2 references are reserved/i,
+  "manual entries must not reserve or spoof an internal import key"
+);
 
 for (const table of [
   "workforce_advance_import_batches",

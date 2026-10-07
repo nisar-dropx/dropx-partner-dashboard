@@ -4,8 +4,10 @@ import * as XLSX from "xlsx";
 import {
   WORKFORCE_ADVANCE_IMPORT_HEADERS,
   buildWorkforceAdvanceImportTemplate,
+  normalizeWorkforceAdvanceId,
   parseWorkforceAdvanceWorkbook,
   workforceAdvanceImportBusinessKey,
+  workforceAdvanceLegacyImportBusinessKey,
   workforceAdvanceWorkbookSha256
 } from "./workforce-advance-import.ts";
 
@@ -15,7 +17,7 @@ function workbookBytes(rows, headers = WORKFORCE_ADVANCE_IMPORT_HEADERS) {
   return new Uint8Array(XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }));
 }
 
-test("parses existing advances, normalizes IDs and accepts supported date cells", () => {
+test("parses existing advances, preserves source IDs and builds normalized lookup keys", () => {
   const excelDate = new Date(Date.UTC(2026, 9, 2));
   const bytes = workbookBytes([
     [" dropx1001 ", "01-10-2026", 5000, 1250, "REF-1", "Bank transfer", "Existing advance"],
@@ -25,17 +27,20 @@ test("parses existing advances, normalizes IDs and accepts supported date cells"
 
   assert.equal(parsed.canCommit, true);
   assert.deepEqual(parsed.issues, []);
-  assert.equal(parsed.rows[0].dropxId, "DROPX1001");
+  assert.equal(parsed.rows[0].dropxId, "dropx1001");
+  assert.equal(parsed.rows[0].normalizedDropxId, "DROPX1001");
   assert.equal(parsed.rows[0].advanceDate, "2026-10-01");
   assert.equal(parsed.rows[0].deductedAmount, 1250);
   assert.equal(parsed.rows[0].paymentMode, "bank_transfer");
   assert.equal(parsed.rows[1].dropxId, "2000031112340");
+  assert.equal(parsed.rows[1].normalizedDropxId, "2000031112340");
   assert.equal(parsed.rows[1].advanceDate, "2026-10-02");
   assert.equal(parsed.rows[1].amount, 1250.5);
   assert.equal(parsed.rows[1].deductedAmount, 0);
   assert.equal(parsed.rows[1].paymentMode, "upi");
   assert.equal(parsed.fileSha256, workforceAdvanceWorkbookSha256(bytes));
   assert.match(parsed.fileSha256, /^[a-f0-9]{64}$/);
+  assert.equal(normalizeWorkforceAdvanceId(" Drop x 1001 "), "DROPX1001");
 });
 
 test("honors the workbook date epoch without changing 1900 dates or date strings", () => {
@@ -71,7 +76,8 @@ test("parses CSV input and preserves optional blank details", () => {
   const parsed = parseWorkforceAdvanceWorkbook(new TextEncoder().encode(csv));
 
   assert.equal(parsed.canCommit, true);
-  assert.equal(parsed.rows[0].dropxId, "DROPX2002");
+  assert.equal(parsed.rows[0].dropxId, "dropx2002");
+  assert.equal(parsed.rows[0].normalizedDropxId, "DROPX2002");
   assert.equal(parsed.rows[0].advanceDate, "2026-10-03");
   assert.equal(parsed.rows[0].reference, "");
   assert.equal(parsed.rows[0].paymentMode, "other");
@@ -136,37 +142,44 @@ test("requires the current header contract", () => {
 
 test("builds a stable row key from reference or fallback business details", () => {
   const referenceKey = workforceAdvanceImportBusinessKey({
-    workforceId: "00000000-0000-4000-8000-000000000005",
+    dropxId: " drop x 1001 ",
     advanceDate: "2026-10-01",
     amount: 500,
     reference: " Bank   Ref 001 ",
     paymentMode: "bank_transfer"
   });
   const equivalentReferenceKey = workforceAdvanceImportBusinessKey({
-    workforceId: "00000000-0000-4000-8000-000000000005",
+    dropxId: "DROPX1001",
     advanceDate: "2026-11-01",
     amount: 900,
     reference: "bank ref 001",
     paymentMode: "cash"
   });
   const fallbackKey = workforceAdvanceImportBusinessKey({
-    workforceId: "00000000-0000-4000-8000-000000000005",
+    dropxId: "dropx1001",
     advanceDate: "2026-10-01",
     amount: 500,
     reference: "",
     paymentMode: "cash"
   });
 
-  assert.match(referenceKey, /^WAI1-[a-f0-9]{32}$/);
+  assert.match(referenceKey, /^WAI2-[a-f0-9]{32}$/);
   assert.equal(referenceKey, equivalentReferenceKey);
   assert.notEqual(referenceKey, fallbackKey);
   assert.equal(fallbackKey, workforceAdvanceImportBusinessKey({
-    workforceId: "00000000-0000-4000-8000-000000000005",
+    dropxId: "DROP X 1001",
     advanceDate: "2026-10-01",
     amount: 500,
     reference: "",
     paymentMode: "cash"
   }));
+  assert.match(workforceAdvanceLegacyImportBusinessKey({
+    workforceId: "00000000-0000-4000-8000-000000000005",
+    advanceDate: "2026-10-01",
+    amount: 500,
+    reference: "",
+    paymentMode: "cash"
+  }), /^WAI1-[a-f0-9]{32}$/);
 });
 
 test("builds a focused workbook with safe examples and instructions", () => {
@@ -189,4 +202,5 @@ test("builds a focused workbook with safe examples and instructions", () => {
   assert.match(instructionText, /greater than zero/i);
   assert.match(instructionText, /DEDUCTED_AMOUNT/i);
   assert.match(instructionText, /re-saved workbook/i);
+  assert.match(instructionText, /awaiting Workforce registration/i);
 });

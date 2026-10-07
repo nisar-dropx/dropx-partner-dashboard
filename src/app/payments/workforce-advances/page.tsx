@@ -6,7 +6,7 @@ import {
   type WorkforceAdvanceRegisterRow
 } from "@/components/workforce-advance-register";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
-import { hasPermission, requirePagePermission } from "@/lib/authorization";
+import { hasPermission, isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -39,6 +39,7 @@ export default async function WorkforceAdvancesPage() {
   const pageCode = surface === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
+  const allLocations = authorization.hasAllLocationAccess || isCompanyOwner(authorization);
   const canAdd = hasPermission(authorization, pageCode, "add");
   let rows: WorkforceAdvanceRegisterRow[] = [];
   let workforceOptions: WorkforceAdvanceOption[] = [];
@@ -58,7 +59,7 @@ export default async function WorkforceAdvancesPage() {
       .select("id,station_code,station_name")
       .eq("company_id", companyId)
       .order("station_code");
-    if (!authorization.hasAllLocationAccess) {
+    if (!allLocations) {
       const scope = authorization.locationScopeIds.length ? authorization.locationScopeIds : [NO_LOCATION];
       workforceQuery = workforceQuery.in("location_id", scope);
     }
@@ -71,10 +72,10 @@ export default async function WorkforceAdvancesPage() {
     if (!error) {
       const visibleWorkforceIds = workforceResult.data.map((worker) => String(worker.id));
       const advances: any[] = [];
-      if (authorization.hasAllLocationAccess) {
+      if (allLocations) {
         const advanceResult = await readAllRows(supabaseAdmin
           .from("workforce_advances")
-          .select("id,workforce_id,station_id,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
+          .select("id,workforce_id,station_id,imported_dropx_id,link_status,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
           .eq("company_id", companyId)
           .order("advance_date", { ascending: false })
           .order("created_at", { ascending: false }));
@@ -84,7 +85,7 @@ export default async function WorkforceAdvancesPage() {
         for (let index = 0; index < visibleWorkforceIds.length; index += 100) {
           const advanceResult = await readAllRows(supabaseAdmin
             .from("workforce_advances")
-            .select("id,workforce_id,station_id,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
+            .select("id,workforce_id,station_id,imported_dropx_id,link_status,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
             .eq("company_id", companyId)
             .in("workforce_id", visibleWorkforceIds.slice(index, index + 100))
             .order("advance_date", { ascending: false })
@@ -130,26 +131,30 @@ export default async function WorkforceAdvancesPage() {
           const worker = workforceById.get(String(advance.workforce_id));
           const paidStation = stationById.get(String(advance.station_id));
           const currentStation = stationById.get(String(worker?.location_id ?? ""));
+          const linkStatus = String(advance.link_status) === "pending" ? "pending" : "linked";
           const total = roundMoney(Number(advance.amount ?? 0));
-          const deducted = Math.min(total, roundMoney(recoveredByAdvance.get(String(advance.id)) ?? 0));
+          const deducted = Math.min(total, roundMoney(linkStatus === "pending"
+            ? Number(advance.opening_deducted_amount ?? 0)
+            : recoveredByAdvance.get(String(advance.id)) ?? 0));
           const pending = Math.max(0, roundMoney(total - deducted));
           const externalReference = String(advance.external_reference ?? "");
           return {
             id: String(advance.id),
             advanceNumber: String(advance.advance_number),
             advanceDate: String(advance.advance_date),
-            dropxId: String(worker?.dropx_id ?? ""),
-            workforceName: String(worker?.full_name ?? "Workforce record unavailable"),
-            designation: designationLabel(worker),
-            location: String(currentStation?.station_code ?? currentStation?.station_name ?? "—"),
-            paidLocation: String(paidStation?.station_code ?? paidStation?.station_name ?? "—"),
+            dropxId: String(linkStatus === "pending" ? advance.imported_dropx_id ?? "" : worker?.dropx_id ?? advance.imported_dropx_id ?? ""),
+            workforceName: linkStatus === "pending" ? "Awaiting Workforce registration" : String(worker?.full_name ?? "Workforce record unavailable"),
+            designation: linkStatus === "pending" ? "" : designationLabel(worker),
+            location: linkStatus === "pending" ? "—" : String(currentStation?.station_code ?? currentStation?.station_name ?? "—"),
+            paidLocation: linkStatus === "pending" ? "—" : String(paidStation?.station_code ?? paidStation?.station_name ?? "—"),
             total,
             deducted,
             pending,
-            status: pending <= 0 ? "Fully deducted" : deducted > 0 ? "Partially deducted" : "Pending",
+            status: linkStatus === "pending" ? "Awaiting Workforce registration" : pending <= 0 ? "Fully deducted" : deducted > 0 ? "Partially deducted" : "Pending",
+            linkStatus,
             paymentMode: String(advance.payment_mode ?? "other"),
             paymentReference: String(advance.payment_reference ?? ""),
-            externalReference: externalReference.startsWith("WAI1-") ? "" : externalReference,
+            externalReference: /^WAI[12]-/.test(externalReference) ? "" : externalReference,
             remark: String(advance.remark ?? ""),
             source: String(advance.source_type ?? "manual"),
             createdAt: String(advance.created_at),
@@ -176,7 +181,7 @@ export default async function WorkforceAdvancesPage() {
     <PageHead
       eyebrow="Payments"
       title="Workforce Advance Register"
-      subtitle="Track advances paid, recovered through Workforce payouts, and still pending. Data is limited to your assigned locations."
+      subtitle="Track paid, recovered, and pending advances. Unregistered DropX IDs remain visible to company-wide users and become deductible only after Workforce registration links them."
     />
     {error
       ? <section className="panel message-panel error"><div className="panel-body"><strong>Advance register unavailable</strong><p className="subtle">{error}</p></div></section>

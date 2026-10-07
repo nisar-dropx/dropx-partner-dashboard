@@ -23294,6 +23294,10 @@ td strong,
 .workforce-advance-filters label > span { color: #64748b; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .workforce-advance-table td small { display: block; max-width: 260px; margin-top: 3px; color: #718096; font-size: 10px; white-space: normal; }
 .workforce-advance-table td, .workforce-advance-table th { vertical-align: top; }
+.workforce-advance-table tr.workforce-advance-pending-row td,
+.compensation-preview-table tr.workforce-advance-pending-row td { background: #fffaf0; }
+.workforce-advance-table tr.workforce-advance-pending-row td:first-child,
+.compensation-preview-table tr.workforce-advance-pending-row td:first-child { box-shadow: inset 3px 0 #f59e0b; }
 .workforce-advance-history { position: relative; margin-top: 7px; }
 .workforce-advance-history summary { cursor: pointer; color: #c2410c; font-size: 10px; font-weight: 800; }
 .workforce-advance-history > div { display: grid; gap: 6px; min-width: 220px; margin-top: 7px; padding: 8px; border: 1px solid #e5eaf0; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(15, 23, 42, .08); }

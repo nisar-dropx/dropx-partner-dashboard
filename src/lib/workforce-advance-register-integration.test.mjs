@@ -35,7 +35,8 @@ test("Workforce Advance Register is shared by Dashboard and Ops with separate pa
 });
 
 test("the register and both advance creation paths use canonical current-location scope", () => {
-  assert.match(registerPage, /if\s*\(!authorization\.hasAllLocationAccess\)/);
+  assert.match(registerPage, /const allLocations\s*=\s*authorization\.hasAllLocationAccess\s*\|\|\s*isCompanyOwner\(authorization\)/);
+  assert.match(registerPage, /if\s*\(!allLocations\)/);
   assert.match(registerPage, /authorization\.locationScopeIds/);
   assert.match(registerPage, /\.or\(["']migration_state\.is\.null,migration_state\.neq\.reclassified["']\)/);
   assert.match(registerPage, /workforceQuery\s*=\s*workforceQuery\.in\(["']location_id["'],\s*scope\)/);
@@ -45,22 +46,27 @@ test("the register and both advance creation paths use canonical current-locatio
   assert.doesNotMatch(registerPage, /\.from\(["']stations["']\)[\s\S]{0,300}?\.in\(["']id["'],\s*scope\)/);
   assert.match(registerPage, /const paidStation\s*=\s*stationById\.get\(String\(advance\.station_id\)\)/);
   assert.match(registerPage, /const currentStation\s*=\s*stationById\.get\(String\(worker\?\.location_id\s*\?\?\s*["']["']\)\)/);
-  assert.match(registerPage, /location:\s*String\(currentStation\?\.station_code\s*\?\?\s*currentStation\?\.station_name/);
-  assert.match(registerPage, /paidLocation:\s*String\(paidStation\?\.station_code\s*\?\?\s*paidStation\?\.station_name/);
+  assert.match(registerPage, /location:\s*linkStatus\s*===\s*["']pending["']\s*\?\s*["']—["']\s*:\s*String\(currentStation\?\.station_code\s*\?\?\s*currentStation\?\.station_name/);
+  assert.match(registerPage, /paidLocation:\s*linkStatus\s*===\s*["']pending["']\s*\?\s*["']—["']\s*:\s*String\(paidStation\?\.station_code\s*\?\?\s*paidStation\?\.station_name/);
   assert.match(registerComponent, /row\.paidLocation\s*!==\s*row\.location\s*\?\s*<small>Advance paid at \{row\.paidLocation\}<\/small>/);
 
   assert.match(addAdvanceRoute, /const stationId\s*=\s*String\(worker\.data\?\.location_id\s*\?\?\s*["']["']\)/);
+  assert.match(addAdvanceRoute, /\.select\(["']id,dropx_id,location_id["']\)/);
   assert.match(addAdvanceRoute, /\.or\(["']migration_state\.is\.null,migration_state\.neq\.reclassified["']\)/);
   assert.match(addAdvanceRoute, /!allLocations\s*&&\s*!authorization\.locationScopeIds\.includes\(stationId\)/);
   assert.match(addAdvanceRoute, /workforce_id:\s*workforceId,[\s\S]*?station_id:\s*stationId/);
+  assert.match(addAdvanceRoute, /imported_dropx_id:\s*importedDropxId,[\s\S]*?link_status:\s*["']linked["']/);
 
   assert.match(bulkUploadRoute, /authorization\.hasAllLocationAccess\s*\|\|\s*isCompanyOwner\(authorization\)/);
   assert.match(bulkUploadRoute, /new Set\(authorization\.locationScopeIds\)/);
+  assert.match(bulkUploadRoute, /workersQuery\s*=\s*workersQuery\.in\(["']location_id["']/);
   assert.match(bulkUploadRoute, /!allLocations\s*&&\s*!allowedLocations\.has\(stationId\)/);
   assert.match(bulkUploadRoute, /outside your assigned locations/i);
   assert.match(bulkUploadRoute, /\.or\(["']migration_state\.is\.null,migration_state\.neq\.reclassified["']\)/);
   assert.match(bulkUploadRoute, /const stationId\s*=\s*String\(worker\.location_id\s*\?\?\s*["']["']\)/);
-  assert.match(bulkUploadRoute, /workforce_id:\s*row\.workforceId,[\s\S]*?station_id:\s*row\.stationId/);
+  assert.match(bulkUploadRoute, /dropx_id:\s*row\.dropxId/);
+  assert.doesNotMatch(bulkUploadRoute, /p_rows:[\s\S]{0,500}?workforce_id:\s*row\.workforceId/);
+  assert.doesNotMatch(bulkUploadRoute, /p_rows:[\s\S]{0,500}?station_id:\s*row\.stationId/);
 });
 
 test("bulk upload requires add permission and follows preview then explicit confirmation", () => {
@@ -75,7 +81,8 @@ test("bulk upload requires add permission and follows preview then explicit conf
   assert.match(bulkUploadRoute, /file_sha256/);
   assert.match(bulkUploadRoute, /already imported/i);
   assert.match(bulkUploadRoute, /workforceAdvanceImportBusinessKey/);
-  assert.match(bulkUploadRoute, /external_reference:\s*row\.businessKey/);
+  assert.match(bulkUploadRoute, /dropx_id:\s*row\.dropxId/);
+  assert.doesNotMatch(bulkUploadRoute, /external_reference:\s*row\.businessKey/);
   assert.match(bulkUploadRoute, /deducted_amount:\s*row\.deductedAmount/);
   assert.match(bulkUploadRoute, /already in the register as/);
 
@@ -88,6 +95,24 @@ test("bulk upload requires add permission and follows preview then explicit conf
   assert.match(bulkUploadComponent, /Duplicate advances are blocked even if the workbook was re-saved/i);
   assert.match(bulkUploadComponent, /Already deducted/);
   assert.match(registerComponent, /canAdd\s*\?\s*<div[^>]*>[\s\S]*?<WorkforceAdvanceBulkUpload\s*\/>/);
+});
+
+test("unregistered DropX IDs preview and render as non-deductible pending advances", () => {
+  assert.match(bulkUploadRoute, /workersByDropxId\.get\(row\.normalizedDropxId\)/);
+  assert.match(bulkUploadRoute, /if\s*\(!matches\.length\)[\s\S]*?if\s*\(!allLocations\)[\s\S]*?not available in your assigned locations/i);
+  assert.match(bulkUploadRoute, /fullName:\s*["']Awaiting Workforce registration["']/);
+  assert.match(bulkUploadRoute, /linkStatus:\s*["']pending["']/);
+  assert.match(bulkUploadRoute, /pendingRows:/);
+  assert.match(bulkUploadComponent, /Awaiting Workforce registration/);
+  assert.match(bulkUploadComponent, /cannot be deducted from payouts until registration links it automatically/i);
+
+  for (const column of ["imported_dropx_id", "link_status", "opening_deducted_amount", "linked_at"]) {
+    assert.match(registerPage, new RegExp(column));
+  }
+  assert.match(registerPage, /linkStatus\s*===\s*["']pending["'][\s\S]*?advance\.opening_deducted_amount/);
+  assert.match(registerPage, /status:\s*linkStatus\s*===\s*["']pending["']\s*\?\s*["']Awaiting Workforce registration["']/);
+  assert.match(registerComponent, /Not eligible for payout deduction/);
+  assert.match(registerComponent, /row\.linkStatus\s*===\s*["']pending["']/);
 });
 
 test("bulk import hardening atomically records opening deductions and stable duplicate keys", () => {

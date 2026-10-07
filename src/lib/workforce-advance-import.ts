@@ -13,6 +13,7 @@ export type WorkforceAdvancePaymentMode = (typeof workforceAdvancePaymentModes)[
 export type WorkforceAdvanceImportRow = {
   rowNumber: number;
   dropxId: string;
+  normalizedDropxId: string;
   advanceDate: string;
   amount: number | null;
   deductedAmount: number;
@@ -54,7 +55,7 @@ export function normalizeWorkforceAdvanceId(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)) {
     return value.toFixed(0).toUpperCase();
   }
-  return String(value ?? "").trim().toUpperCase();
+  return String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
 }
 
 export function normalizeWorkforceAdvancePaymentMode(value: unknown): WorkforceAdvancePaymentMode {
@@ -140,7 +141,7 @@ function columns(header: unknown[]) {
 
 function exactDuplicateKey(row: WorkforceAdvanceImportRow) {
   return [
-    row.dropxId,
+    row.normalizedDropxId,
     row.advanceDate,
     row.amount === null || !Number.isFinite(row.amount) ? "" : row.amount.toFixed(2),
     row.reference.toUpperCase(),
@@ -153,6 +154,21 @@ function normalizedBusinessReference(value: string) {
 }
 
 export function workforceAdvanceImportBusinessKey(input: {
+  dropxId: string;
+  advanceDate: string;
+  amount: number;
+  reference: string;
+  paymentMode: WorkforceAdvancePaymentMode;
+}) {
+  const normalizedDropxId = normalizeWorkforceAdvanceId(input.dropxId);
+  const reference = normalizedBusinessReference(input.reference);
+  const material = reference
+    ? ["v2", normalizedDropxId, "reference", reference]
+    : ["v2", normalizedDropxId, "business", input.advanceDate, input.amount.toFixed(2), input.paymentMode];
+  return `WAI2-${createHash("md5").update(material.join("|")).digest("hex")}`;
+}
+
+export function workforceAdvanceLegacyImportBusinessKey(input: {
   workforceId: string;
   advanceDate: string;
   amount: number;
@@ -228,9 +244,13 @@ export function parseWorkforceAdvanceWorkbook(bytes: Uint8Array): ParsedWorkforc
     if (!populated) return [];
 
     const rawDropxId = source[indexes.dropxid];
-    const dropxId = normalizeWorkforceAdvanceId(
-      typeof rawDropxId === "number" ? rawDropxId : formatted[indexes.dropxid]
-    );
+    // Keep the source value for pending records. Matching is intentionally done
+    // with a separate normalized key so an ID that is not registered yet is not
+    // silently rewritten before it can be linked to Workforce later.
+    const dropxId = typeof rawDropxId === "number" && Number.isFinite(rawDropxId) && Number.isInteger(rawDropxId)
+      ? rawDropxId.toFixed(0)
+      : textCell(formatted[indexes.dropxid]);
+    const normalizedDropxId = normalizeWorkforceAdvanceId(dropxId);
     const advanceDate = spreadsheetDate(source[indexes.advancedate], date1904);
     const amount = money(source[indexes.amount]);
     const rawDeductedAmount = money(source[indexes.deductedamount]);
@@ -284,6 +304,7 @@ export function parseWorkforceAdvanceWorkbook(bytes: Uint8Array): ParsedWorkforc
     return [{
       rowNumber,
       dropxId,
+      normalizedDropxId,
       advanceDate,
       amount,
       deductedAmount,
@@ -338,7 +359,7 @@ export function buildWorkforceAdvanceImportTemplate(options: { exampleDate?: str
 
   const instructions = XLSX.utils.aoa_to_sheet([
     ["WORKFORCE ADVANCE BULK UPLOAD"],
-    ["DROPX_ID", "Required. Enter the Workforce DropX ID. It is matched within the current company."],
+    ["DROPX_ID", "Required. Enter the DropX ID exactly as supplied. Registered IDs are linked within the current company. An unregistered ID is retained as awaiting Workforce registration and becomes deductible only after it is linked."],
     ["ADVANCE_DATE", "Required. Enter DD-MM-YYYY or DD/MM/YYYY. A genuine Excel date cell is also accepted."],
     ["AMOUNT", "Required. Enter an amount greater than zero with no more than two decimal places."],
     ["DEDUCTED_AMOUNT", "Optional. Enter the amount already recovered before this upload. Leave blank or enter zero when nothing has been deducted. It cannot exceed AMOUNT."],
@@ -346,7 +367,7 @@ export function buildWorkforceAdvanceImportTemplate(options: { exampleDate?: str
     ["PAYMENT_MODE", "Optional. Enter Bank transfer, UPI, Cash or Other. A blank or unrecognised value is stored as Other."],
     ["REMARK", "Optional. Add a short note about the advance."],
     ["Duplicate protection", "A re-saved workbook cannot add the same advance again. REFERENCE is used when present. Without a reference, DropX member, date, amount and payment mode form the duplicate key."],
-    ["Important", "Formula cells are not accepted. An exact duplicate payment in the same file is rejected. DEDUCTED_AMOUNT is saved as an opening deduction in the recovery history."]
+    ["Important", "Formula cells are not accepted. An exact duplicate payment in the same file is rejected. For a registered ID, DEDUCTED_AMOUNT is saved as an opening deduction in recovery history. For an unregistered ID, it is retained and applied only when the advance is linked to Workforce."]
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 110 }];
 

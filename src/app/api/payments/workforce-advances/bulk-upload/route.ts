@@ -2,9 +2,12 @@ import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
+  normalizeWorkforceAdvanceId,
   parseWorkforceAdvanceWorkbook,
   workforceAdvanceImportBusinessKey,
-  type WorkforceAdvanceImportIssue
+  workforceAdvanceLegacyImportBusinessKey,
+  type WorkforceAdvanceImportIssue,
+  type WorkforceAdvanceImportRow
 } from "@/lib/workforce-advance-import";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -13,7 +16,18 @@ export const runtime = "nodejs";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const FILE_PATTERN = /\.(xlsx|xls|csv)$/i;
+const NO_LOCATION = "00000000-0000-0000-0000-000000000000";
 const noStore = { "Cache-Control": "private, no-store" };
+
+type PreparedAdvanceRow = WorkforceAdvanceImportRow & {
+  workforceId: string | null;
+  fullName: string;
+  stationId: string | null;
+  location: string;
+  linkStatus: "pending" | "linked";
+  businessKey: string;
+  legacyBusinessKey: string | null;
+};
 
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
@@ -46,6 +60,8 @@ export async function POST(request: Request) {
     }
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
+    const allLocations = authorization.hasAllLocationAccess || isCompanyOwner(authorization);
+    const allowedLocations = new Set(authorization.locationScopeIds);
     const form = await request.formData();
     const mode = String(form.get("mode") ?? "preview");
     const file = form.get("file");
@@ -60,13 +76,17 @@ export async function POST(request: Request) {
     } catch (error) {
       return errorResponse(error instanceof Error ? error.message : "The workbook could not be read.", 400);
     }
+    let workersQuery = supabaseAdmin.from("workforce")
+      .select("id,dropx_id,full_name,location_id,deleted_at")
+      .eq("company_id", companyId)
+      .is("deleted_at", null)
+      .or("migration_state.is.null,migration_state.neq.reclassified")
+      .order("id");
+    if (!allLocations) {
+      workersQuery = workersQuery.in("location_id", allowedLocations.size ? [...allowedLocations] : [NO_LOCATION]);
+    }
     const [workers, stations, previousBatch] = await Promise.all([
-      readAllRows(supabaseAdmin.from("workforce")
-        .select("id,dropx_id,full_name,location_id,deleted_at")
-        .eq("company_id", companyId)
-        .is("deleted_at", null)
-        .or("migration_state.is.null,migration_state.neq.reclassified")
-        .order("id")),
+      readAllRows(workersQuery),
       readAllRows(supabaseAdmin.from("stations")
         .select("id,station_code,station_name")
         .eq("company_id", companyId)
@@ -81,18 +101,38 @@ export async function POST(request: Request) {
     const stationById = new Map(stations.map((station) => [String(station.id), station]));
     const workersByDropxId = new Map<string, any[]>();
     for (const worker of workers) {
-      const key = String(worker.dropx_id ?? "").trim().toUpperCase();
+      const key = normalizeWorkforceAdvanceId(worker.dropx_id);
       if (!key) continue;
       workersByDropxId.set(key, [...(workersByDropxId.get(key) ?? []), worker]);
     }
-    const allLocations = authorization.hasAllLocationAccess || isCompanyOwner(authorization);
-    const allowedLocations = new Set(authorization.locationScopeIds);
     const issues: WorkforceAdvanceImportIssue[] = [...parsed.issues];
-    const resolved = parsed.rows.flatMap((row) => {
-      const matches = workersByDropxId.get(row.dropxId) ?? [];
+    const prepared = parsed.rows.flatMap<PreparedAdvanceRow>((row) => {
+      const matches = workersByDropxId.get(row.normalizedDropxId) ?? [];
       if (!matches.length) {
-        issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "No canonical Workforce profile matches this DropX ID." });
-        return [];
+        if (!allLocations) {
+          issues.push({
+            rowNumber: row.rowNumber,
+            dropxId: row.dropxId,
+            message: "This DropX ID is not available in your assigned locations. Company-wide location access is required to import advances that await Workforce registration."
+          });
+          return [];
+        }
+        return [{
+          ...row,
+          workforceId: null,
+          fullName: "Awaiting Workforce registration",
+          stationId: null,
+          location: "—",
+          linkStatus: "pending" as const,
+          businessKey: workforceAdvanceImportBusinessKey({
+            dropxId: row.dropxId,
+            advanceDate: row.advanceDate,
+            amount: Number(row.amount),
+            reference: row.reference,
+            paymentMode: row.paymentMode
+          }),
+          legacyBusinessKey: null
+        }];
       }
       if (matches.length > 1) {
         issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "More than one Workforce profile matches this DropX ID." });
@@ -115,7 +155,15 @@ export async function POST(request: Request) {
         fullName: String(worker.full_name ?? "Workforce"),
         stationId,
         location: String(station.station_code ?? station.station_name ?? "—"),
+        linkStatus: "linked" as const,
         businessKey: workforceAdvanceImportBusinessKey({
+          dropxId: row.dropxId,
+          advanceDate: row.advanceDate,
+          amount: Number(row.amount),
+          reference: row.reference,
+          paymentMode: row.paymentMode
+        }),
+        legacyBusinessKey: workforceAdvanceLegacyImportBusinessKey({
           workforceId: String(worker.id),
           advanceDate: row.advanceDate,
           amount: Number(row.amount),
@@ -125,7 +173,7 @@ export async function POST(request: Request) {
       }];
     });
     const firstRowByBusinessKey = new Map<string, number>();
-    for (const row of resolved) {
+    for (const row of prepared) {
       const firstRow = firstRowByBusinessKey.get(row.businessKey);
       if (firstRow) {
         issues.push({
@@ -138,7 +186,7 @@ export async function POST(request: Request) {
       }
     }
     const existingByBusinessKey = new Map<string, { advance_number: string }>();
-    const businessKeys = [...new Set(resolved.map((row) => row.businessKey))];
+    const businessKeys = [...new Set(prepared.flatMap((row) => [row.businessKey, row.legacyBusinessKey].filter((key): key is string => Boolean(key))))];
     for (let index = 0; index < businessKeys.length; index += 100) {
       const existing = await readAllRows(supabaseAdmin.from("workforce_advances")
         .select("advance_number,external_reference")
@@ -148,8 +196,9 @@ export async function POST(request: Request) {
         existingByBusinessKey.set(String(advance.external_reference), advance);
       }
     }
-    for (const row of resolved) {
-      const existing = existingByBusinessKey.get(row.businessKey);
+    for (const row of prepared) {
+      const existing = existingByBusinessKey.get(row.businessKey)
+        ?? (row.legacyBusinessKey ? existingByBusinessKey.get(row.legacyBusinessKey) : undefined);
       if (existing) {
         issues.push({
           rowNumber: row.rowNumber,
@@ -165,14 +214,16 @@ export async function POST(request: Request) {
       fileName: file.name,
       fileSha256: parsed.fileSha256,
       totalRows: parsed.rows.length,
-      matchedRows: resolved.length,
+      matchedRows: prepared.filter((row) => row.linkStatus === "linked").length,
+      pendingRows: prepared.filter((row) => row.linkStatus === "pending").length,
       canCommit: issues.length === 0,
       issues,
-      rows: resolved.slice(0, 50).map((row) => ({
+      rows: prepared.slice(0, 50).map((row) => ({
         rowNumber: row.rowNumber,
         dropxId: row.dropxId,
         fullName: row.fullName,
         location: row.location,
+        linkStatus: row.linkStatus,
         advanceDate: row.advanceDate,
         amount: row.amount,
         deductedAmount: row.deductedAmount,
@@ -189,16 +240,14 @@ export async function POST(request: Request) {
       p_company_id: companyId,
       p_file_name: file.name.slice(0, 240),
       p_file_sha256: parsed.fileSha256,
-      p_rows: resolved.map((row) => ({
+      p_rows: prepared.map((row) => ({
         row_number: row.rowNumber,
-        workforce_id: row.workforceId,
-        station_id: row.stationId,
+        dropx_id: row.dropxId,
         advance_date: row.advanceDate,
         amount: row.amount,
         deducted_amount: row.deductedAmount,
         payment_mode: row.paymentMode,
         payment_reference: row.reference || null,
-        external_reference: row.businessKey,
         remark: row.remark || null
       })),
       p_actor_user_id: authorization.userId,
@@ -215,7 +264,7 @@ export async function POST(request: Request) {
       ...preview,
       canCommit: false,
       importId: applied.data,
-      message: `${resolved.length} Workforce advance${resolved.length === 1 ? " was" : "s were"} imported.`
+      message: `${prepared.length} Workforce advance${prepared.length === 1 ? " was" : "s were"} imported.${preview.pendingRows ? ` ${preview.pendingRows} ${preview.pendingRows === 1 ? "is" : "are"} awaiting Workforce registration.` : ""}`
     }, { headers: noStore });
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Unable to process the Workforce advance workbook.", 500);
