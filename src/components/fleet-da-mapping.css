@@ -11,3 +11,5 @@
 @media(max-width:700px){.da-filter-options{grid-template-columns:repeat(2,minmax(0,1fr))}.da-filters>label:last-child{grid-column:1/-1}.da-summary small{display:none}.da-mapping .da-row{padding:10px}.da-mapping .da-bulk .da-primary{flex:1;justify-content:center}}
 
 .da-mapping .fc-export-toggle{display:none}
+
+.da-mapping .searchable-clear,.da-mapping .searchable-toggle{padding:0;min-height:32px;justify-content:center;border:0;background:transparent}.da-mapping .searchable-control svg{flex-shrink:0}.da-mapping .searchable-input{border:0!important;background:transparent!important}.da-mapping .searchable-option{width:100%;justify-content:flex-start;text-align:left}
