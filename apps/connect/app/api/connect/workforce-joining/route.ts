@@ -1,3 +1,4 @@
+import { betaJourney } from "@/lib/beta-journey";
 import {pilotStatus,withLiveAmazonEvidence,type Pilot} from '@/lib/amazon-pilot';
 import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
 import { NextRequest, NextResponse } from "next/server";
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
     if (!supabaseAdmin) throw new Error("Joining details are temporarily unavailable.");
     const db = supabaseAdmin, company = account.companyId;
     if(account.onboardingBeta&&account.activationStage?.startsWith("amazon_email_pilot:")){
-      const candidate=await db.from("workforce_amazon_email_pilot_candidates").select("id,full_name,mobile,biometric_id,alias_email,inbox_status,status,last_message_at,updated_at,continuation_status,continuation_decided_at").eq("company_id",company).eq("id",account.id).is("closed_at",null).maybeSingle();
+      const candidate=await db.from("workforce_amazon_email_pilot_candidates").select("id,full_name,mobile,biometric_id,alias_email,inbox_status,status,last_message_at,updated_at,continuation_status,continuation_decided_at,stations(state)").eq("company_id",company).eq("id",account.id).is("closed_at",null).maybeSingle();
       if(candidate.error&&!['42P01','42703','PGRST205'].includes(candidate.error.code))throw new Error("Email-pilot status is unavailable.");
       if(!candidate.data)return NextResponse.json({available:false},{headers});
       const [messages,invitation,attendance,registration,exitReasons,exitRequest]=await Promise.all([
@@ -59,20 +60,19 @@ export async function GET(request: NextRequest) {
       const invitationReceived=Boolean(rawInvitationUrl||amazonMessage?.received_at);
       const registrationStatus=registration.error?"pending":registration.data?.status??"pending";
       const registrationSubmitted=["submitted","confirmed"].includes(registrationStatus);
-      const continuing=candidate.data.continuation_status==="continuing";
       const offboardingRequested=candidate.data.continuation_status==="not_continuing";
-      const invitationUrl=registrationSubmitted&&continuing?rawInvitationUrl:null;
       const bgcChecks=idfyMessages.map((item,index)=>({
         code:`idfy_email_${item.id??index}`,label:item.subject||"IDfy verification",status:"action",
         detail:item.preview||"Open the IDfy request and complete the required verification.",owner:"Associate",source:"DropX monitored inbox",
         updatedAt:item.received_at,actionUrl:idfyActionUrl(item.action_url)
       }));
-      const stage=!registrationSubmitted?"dropx_registration_pending":offboardingRequested?"not_continuing":!continuing?"training_decision_pending":bgcChecks.length?"bgc_action":invitationReceived?"registration_pending":"invitation_pending";
+      const journey=betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus,invitationAvailable:Boolean(rawInvitationUrl),bgcAction:bgcChecks.length>0});
+      const invitationUrl=journey.invitationUnlocked?rawInvitationUrl:null;
       return NextResponse.json({
         available:true,pilot:true,isolatedBeta:true,
-        stage,
-        stageLabel:stage==="dropx_registration_pending"?"Complete DropX registration":stage==="training_decision_pending"?"Confirm after training":stage==="not_continuing"?"Exit requested":stage==="bgc_action"?"IDfy action required":invitationReceived?"Amazon invitation ready":"Waiting for Amazon invitation",
-        instruction:!registrationSubmitted?"Complete your private beta registration first.":!continuing&&!offboardingRequested?"Attend training for 1–2 days, then choose whether to continue with Amazon.":invitationReceived?"Use the Amazon Flex sign-in ID below and open the monitored invitation link.":"The Amazon invitation has been requested. This page will update when DropX receives it.",
+        stationState:(Array.isArray(candidate.data.stations)?candidate.data.stations[0]:candidate.data.stations)?.state??null,
+        stage:journey.stage,stageLabel:journey.label,instruction:journey.instruction,
+        registrationReady:journey.ready,
         reportUpdatedAt:null,reportDate:null,stale:false,syncDelayed:false,
         driverId:null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
         invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
@@ -175,6 +175,11 @@ export async function POST(request:NextRequest){
   const note=String(body.note??"").trim();
   if(body.action==="not_continuing"&&(!body.reasonId||note.length>1000))return NextResponse.json({error:"Choose a reason and keep the note under 1,000 characters."},{status:400,headers});
   if(account.onboardingBeta&&account.activationStage?.startsWith("amazon_email_pilot:")){
+   if(body.action==="continue_amazon"){
+    const candidate=await supabaseAdmin.from("workforce_amazon_email_pilot_candidates").select("continuation_status").eq("company_id",account.companyId).eq("id",account.id).is("closed_at",null).maybeSingle();
+    if(candidate.error||!candidate.data)throw new Error("Private beta candidate is unavailable.");
+    if(candidate.data.continuation_status==="not_continuing")throw new Error("Ask your station team to review your existing request before continuing.");
+   }
    const result=await supabaseAdmin.rpc("workforce_update_isolated_amazon_email_pilot_decision",{p_company:account.companyId,p_candidate:account.id,p_action:body.action,p_reason:body.reasonId??null,p_note:note});
    if(result.error)throw new Error(result.error.message);
    return NextResponse.json({ok:true,result:result.data},{headers});
