@@ -74,7 +74,8 @@ function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches || busy} onClick={() => onSave(index)} type="button">{busy ? "Saving..." : dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialMonth, canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+  initialMonth: string;
   shipmentMonths: string[];
   initialQuery?: string;
   initialStationId?: string;
@@ -89,8 +90,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [query, setQuery] = useState(initialQuery);
   const deferredQuery = useDeferredValue(query);
   const [stationFilters, setStationFilters] = useState<string[]>(initialStationId ? [initialStationId] : []);
-  const [monthFilters, setMonthFilters] = useState<string[]>([]);
-  const monthOptions = useMemo(() => providerMappingMonthOptions(shipmentMonths), [shipmentMonths]);
+  const [monthFilters, setMonthFilters] = useState<string[]>([initialMonth]);
+  const monthOptions = useMemo(() => providerMappingMonthOptions([initialMonth, ...shipmentMonths]), [initialMonth, shipmentMonths]);
   const [methodFilters, setMethodFilters] = useState<string[]>([]);
   const [mappingFilters, setMappingFilters] = useState<string[]>(["unmapped"]);
   const [validationFilters, setValidationFilters] = useState<string[]>([]);
