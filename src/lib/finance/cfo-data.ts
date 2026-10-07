@@ -22,7 +22,7 @@ export async function loadHoCosts(c:FinanceContext,from:string,to:string){
 }
 export async function loadCfo(c:FinanceContext,query:PnlQuery){
  const filters=pnlFilters(query),from=filters.from,to=filters.to;
- const viewFilters={model:typeof query.model==='string'?query.model.slice(0,100):'',region:filters.region,cluster:filters.cluster,station:filters.location};
+ const viewFilters={model:typeof query.model==='string'?query.model.slice(0,100):'',region:filters.region,cluster:filters.cluster,station:filters.location,includeOverhead:query.overhead==='1'};
  const operating=c.locations.filter(l=>!l.is_ho&&!l.hide_from_location_list),normal=operating.filter(l=>locationModel(l)!=='NOW'),now=operating.filter(l=>locationModel(l)==='NOW');
  const [masters,volumes,rents,pnl,source,ho,hoCosts]=await Promise.all([
   loadBusinessMaster(c),loadNowVolumes(c,from,to),loadRent(c),

@@ -5,7 +5,7 @@ import {financeContext} from '@/lib/finance/data';
 import {loadBusinessMaster} from '@/lib/finance/business-master';
 import {loadCfo} from '@/lib/finance/cfo-data';
 import {filterCfoDays} from '@/lib/finance/cfo-detail';
-import {groupCfo,totalCfo} from '@/lib/finance/cfo';
+import {groupCfo,totalCfo,profitabilityView} from '@/lib/finance/cfo';
 import {dateRange} from '@/lib/finance/now';
 export const dynamic='force-dynamic';export const maxDuration=300;
 export async function POST(req:NextRequest){
@@ -21,8 +21,9 @@ export async function POST(req:NextRequest){
   const report=await loadCfo(c,{period:'custom',from:body.from,to:body.to});
   const rows=filterCfoDays(report.days,{model:body.model||'',region:body.region||'',cluster:body.cluster||'',station:body.station||''});
   // Allowlisted summaries only. No People names, salaries, IDs, free-text notes or payroll records leave Finance.
-  const clean=(g:ReturnType<typeof totalCfo>)=>({revenue:g.revenue,expense:g.expense,profit:g.profit,margin:g.margin,volume:g.volume,unit:g.unit,costPerUnit:g.cpu,coverageNotes:g.issues.length});
-  const summary={period:{from:body.from,to:body.to,availableThrough:report.cutoff},total:clean(totalCfo(rows,!body.model&&!body.region&&!body.cluster&&!body.station?report.overhead.filter(x=>['corporate','unallocated'].includes(x.mode)).reduce((s,x)=>s+x.amount,0):0)),models:groupCfo(rows,'model').map(g=>({model:g.key,...clean(g)})),regions:groupCfo(rows,'region').map(g=>({region:g.key,...clean(g)})),days:groupCfo(rows,'day').map(g=>({date:g.key,...clean(g)})),inputNotesCount:report.issues.length};
+  const includeOverhead=body.includeOverhead===true;
+  const clean=(g:ReturnType<typeof totalCfo>)=>{const view=profitabilityView(g,includeOverhead);return {revenue:g.revenue,expense:view.expense,profit:view.profit,margin:view.margin,volume:g.volume,unit:g.unit,costPerUnit:view.cpu,coverageNotes:g.issues.length};};
+  const summary={profitBasis:includeOverhead?'After regional HO; central HO only in unfiltered business total':'Before regional and central HO',period:{from:body.from,to:body.to,availableThrough:report.cutoff},total:clean(totalCfo(rows,!body.model&&!body.region&&!body.cluster&&!body.station?report.overhead.filter(x=>['corporate','unallocated'].includes(x.mode)).reduce((s,x)=>s+x.amount,0):0)),models:groupCfo(rows,'model').map(g=>({model:g.key,...clean(g)})),regions:groupCfo(rows,'region').map(g=>({region:g.key,...clean(g)})),days:groupCfo(rows,'day').map(g=>({date:g.key,...clean(g)})),inputNotesCount:report.issues.length};
   const hash=createHash('sha256').update(JSON.stringify({model:config.model,summary})).digest('hex');
   const cached=await c.db.from('finance_insight_cache').select('text').eq('company_id',c.companyId).eq('cache_key',hash).gte('created_at',new Date(Date.now()-3600000).toISOString()).maybeSingle();
   if(cached.data)return NextResponse.json({text:cached.data.text,cached:true});
