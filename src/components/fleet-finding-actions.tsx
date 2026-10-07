@@ -1,4 +1,5 @@
 'use client';
+import { FleetAttachmentPreview } from './fleet-attachment-preview';
 import {useState} from 'react';
 import {findingUrgency,type AuditReport,type FindingAction,type FindingProof} from '@/lib/fleet/audit-health';
 const date=(value:string|null)=>value?new Date(`${value}T12:00:00+05:30`).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Kolkata'}):'Not set';
@@ -17,7 +18,7 @@ export function FleetFindingActions({report,onSaved}:{report:AuditReport;onSaved
  {report.canManageActions?<FindingEditor finding={f} onSaved={onSaved}/>:<p>View only. A Fleet audit or maintenance editor can update and close this action.</p>}</details></article>)}
  </section>;
 }
-function Proofs({proofs}:{proofs:FindingProof[]}){return <div className="fc-action-proofs">{proofs.map(p=><a href={p.url} target="_blank" rel="noreferrer" key={p.id}>{p.type==='photo'?<img loading="lazy" src={p.url} alt={p.caption}/>:<b>PDF</b>}<span>{p.caption||'Supporting proof'}</span></a>)}</div>;}
+function Proofs({proofs}:{proofs:FindingProof[]}){return <div className="fc-action-proofs">{proofs.map(p=><FleetAttachmentPreview href={p.url} key={p.id}>{p.type==='photo'?<img loading="lazy" src={p.url} alt={p.caption}/>:<b>PDF</b>}<span>{p.caption||'Supporting proof'}</span></FleetAttachmentPreview>)}</div>;}
 function FindingEditor({finding:f,onSaved}:{finding:FindingAction;onSaved:()=>void}) {
  const [status,setStatus]=useState(closed(f)?'resolved':f.status),[action,setAction]=useState(f.action),[owner,setOwner]=useState(f.owner),[due,setDue]=useState(f.due||''),[severity,setSeverity]=useState(f.severity),[note,setNote]=useState('');
  const [proofs,setProofs]=useState<FindingProof[]>([]),[busy,setBusy]=useState(false),[uploading,setUploading]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false),[receipt,setReceipt]=useState<{payload:string;id:string}|null>(null);

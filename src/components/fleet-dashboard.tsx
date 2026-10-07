@@ -1,4 +1,7 @@
 "use client";
+import { lazy, Suspense } from "react";
+import { FleetAttachmentBoundary } from "./fleet-attachment-boundary";
+const FleetAttachmentViewer = lazy(() => import("./fleet-attachment-viewer"));
 import {nearestTracePoints} from "@/lib/fleet/journey-progress";
 
 import { FleetReports } from "@/components/fleet-daily-report";
@@ -709,6 +712,7 @@ function FleetDateFileActions({
   documentType: FleetDocumentType;
 }) {
   const [loading, setLoading] = useState<"view" | "download" | null>(null);
+  const [preview, setPreview] = useState<{url:string;downloadUrl:string;fileName:string}|null>(null);
 
   async function getDocumentUrl() {
     const response = await fetch(`/api/fleet/documents?vehicle_no=${encodeURIComponent(row.vehicle_no)}`, { cache: "no-store" });
@@ -727,7 +731,7 @@ function FleetDateFileActions({
     try {
       setLoading("view");
       const document = await getDocumentUrl();
-      window.open(document.url, "_blank", "noopener,noreferrer");
+      setPreview(document);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Unable to open document.");
     } finally {
@@ -758,6 +762,7 @@ function FleetDateFileActions({
 
   return (
     <div className="fleet-file-actions">
+      {preview ? <FleetAttachmentBoundary fallback={<span role="alert">Preview unavailable. <button type="button" onClick={() => setPreview(null)}>Close</button></span>}><Suspense fallback={<span role="status">Opening preview…</span>}><FleetAttachmentViewer {...preview} onClose={() => setPreview(null)}/></Suspense></FleetAttachmentBoundary> : null}
       <button aria-label={`Open ${documentLabel(documentType)} for ${row.vehicle_no}`} className={`icon-button ${loading === "view" ? "loading" : ""}`} disabled={Boolean(loading)} onClick={openDocument} title="Open" type="button">
         <Eye size={16} />
       </button>
