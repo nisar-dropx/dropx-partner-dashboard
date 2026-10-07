@@ -1,3 +1,4 @@
+import {loadGpsPolicy} from "@/lib/fleet/gps-policy-server";
 import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { getAuthorization } from '@/lib/authorization';
 import { saveDailyWheelseyeKm } from '@/lib/fleet/gps-storage';
@@ -23,12 +24,13 @@ async function handlePOST(request: Request) {
     if (pairs.some(p => !allowed.has(p.vehicle))) throw new FleetReportError('One or more vehicles are outside your permitted locations.', 403);
     const token = await getWheelseyeAccessToken(scope.companyId);
     if (!token) throw new FleetReportError('GPS connection is unavailable. Check WheelsEye settings.', 503);
+    const gpsPolicy=await loadGpsPolicy(scope.companyId);
     const results: Array<{ vehicle: string; date: string; status: string }> = [];
     const unique = [...new Map(pairs.map(p => [`${p.vehicle}|${p.date}`, p])).values()];
     for (let offset = 0; offset < unique.length; offset += 3) {
       const batch = await Promise.all(unique.slice(offset, offset + 3).map(async pair => {
         try {
-          const movement = await loadWheelseyeMovement(token, pair.vehicle, pair.date);
+          const movement = await loadWheelseyeMovement(token, pair.vehicle, pair.date, gpsPolicy);
           return { ...pair, status: await saveDailyWheelseyeKm(scope.companyId, pair.vehicle, pair.date, movement.summary) };
         } catch { return { ...pair, status: 'gps_failed' }; }
       }));

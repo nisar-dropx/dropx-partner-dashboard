@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 function compile(file,deps={}){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>deps[id]??{},m.exports,m);return m.exports;}
-const policy=compile('src/lib/fleet/operating-policy.ts');
+const gps=compile('src/lib/fleet/gps-policy.ts');
+const policy=compile('src/lib/fleet/operating-policy.ts',{'./gps-policy':gps});
 assert.equal(policy.operatingPolicyFromSettings({audit_programme:{enabled:false}}).availabilityTargetPercent,90);
-assert.deepEqual(policy.validateFleetOperatingPolicy({availabilityTargetPercent:97.5,serviceWorkTypes:[' EV check ','EV check','Brake check']}),{availabilityTargetPercent:97.5,serviceWorkTypes:['EV check','Brake check']});
+assert.deepEqual(policy.validateFleetOperatingPolicy({stationVehicleTargets:{},gps:gps.defaultGpsPolicy,availabilityTargetPercent:97.5,serviceWorkTypes:[' EV check ','EV check','Brake check']}),{stationVehicleTargets:{},gps:gps.defaultGpsPolicy,availabilityTargetPercent:97.5,serviceWorkTypes:['EV check','Brake check']});
 for(const target of [-1,0,101,'bad',null])assert.throws(()=>policy.validateFleetOperatingPolicy({availabilityTargetPercent:target,serviceWorkTypes:['Service']}));
 assert.throws(()=>policy.validateFleetOperatingPolicy({availabilityTargetPercent:90,serviceWorkTypes:[]}));
 for(const days of ['',null,-1,0,1.5,366,'bad'])assert.throws(()=>policy.policyDays(days,'Warning'));
@@ -32,6 +33,6 @@ const body={action:'settings.update-operating-policy',companyId:'forged-company'
 const request=(value)=>new Request('https://fleet.dropxlogistics.com/api/fleet-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
 let api=endpoint({allowed:false});assert.equal((await api.POST(request(body))).status,403);assert.equal(api.writes.length,0);
 api=endpoint();assert.equal((await api.POST(request({...body,operatingPolicy:{...body.operatingPolicy,availabilityTargetPercent:101}}))).status,400);assert.equal(api.writes.length,0);
-api=endpoint();assert.equal((await api.POST(request(body))).status,200);assert.deepEqual(api.writes[0].risk_weights,{audit_programme:{enabled:false},existing:42,operating_policy:body.operatingPolicy});assert.ok(api.filters.some(([k,v])=>k==='company_id'&&v==='company-a'));assert.ok(api.filters.some(([k,v])=>k==='updated_at'&&v==='previous-version'));assert.equal(api.writes[0].updated_by,'manager');
+api=endpoint();assert.equal((await api.POST(request(body))).status,200);assert.deepEqual(api.writes[0].risk_weights,{audit_programme:{enabled:false},existing:42,operating_policy:{...body.operatingPolicy,gps:gps.defaultGpsPolicy,stationVehicleTargets:{}}});assert.ok(api.filters.some(([k,v])=>k==='company_id'&&v==='company-a'));assert.ok(api.filters.some(([k,v])=>k==='updated_at'&&v==='previous-version'));assert.equal(api.writes[0].updated_by,'manager');
 api=endpoint({conflict:true});assert.equal((await api.POST(request(body))).status,409);
 console.log('Fleet policy, earliest service, report dates, authorization, company scope and concurrent settings checks passed.');

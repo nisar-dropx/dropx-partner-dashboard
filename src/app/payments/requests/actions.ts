@@ -1,4 +1,5 @@
 "use server";
+import {withPaymentActor} from "@/lib/fleet/payment-actor";
 import { prepareAdhocRequest } from "@/lib/adhoc-vehicle-server";
 import { hasActiveFleetMembership } from "@/lib/fleet-control";
 
@@ -228,7 +229,7 @@ function configuredRoleIds(roleIds: string[] | null | undefined, legacyRoleId: s
   return legacyRoleId ? [legacyRoleId] : [];
 }
 
-async function createExpenseRequestCore(formData: FormData, fleetBreakdown = false) {
+async function createExpenseRequestCoreWithContext(formData: FormData, fleetBreakdown = false) {
   const authorization = await requirePagePermission("expense_requests", "add");
   const companyId = requireCompanyId(authorization);
   if (fleetBreakdown && !authorization.isMasterOwner && !await hasActiveFleetMembership(companyId, authorization.userId)) throw new Error("Fleet access is required.");
@@ -455,7 +456,7 @@ export async function createExpenseRequest(formData: FormData) {
   expenseRequestsRedirect(outcome as Record<string,string>);
 }
 
-export async function createPaymentRequest(formData: FormData) {
+async function createPaymentRequestWithContext(formData: FormData) {
   const authorization = await requirePagePermission("payment_requests", "add");
   const companyId = requireCompanyId(authorization);
   try {
@@ -798,7 +799,7 @@ export async function createPaymentRequest(formData: FormData) {
   paymentRequestsRedirect({ paymentNotice: "Payment request submitted successfully." });
 }
 
-export async function submitPaymentBankDetails(formData: FormData) {
+async function submitPaymentBankDetailsWithContext(formData: FormData) {
   const authorization = await requirePagePermission("payment_requests", "add");
   const companyId = requireCompanyId(authorization);
   const returnToExpense = clean(formData.get("return_to")) === "expense";
@@ -1024,7 +1025,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
   paymentRequestsRedirect({ paymentNotice: "Payment details submitted for payment processing." });
 }
 
-export async function resubmitExpenseRequest(formData: FormData) {
+async function resubmitExpenseRequestWithContext(formData: FormData) {
   const authorization = await requirePagePermission("expense_requests", "add");
   const companyId = requireCompanyId(authorization);
   try {
@@ -1218,7 +1219,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
   expenseRequestsRedirect({ expenseNotice: "Expense request resubmitted for approval." });
 }
 
-export async function resubmitPaymentRequest(formData: FormData) {
+async function resubmitPaymentRequestWithContext(formData: FormData) {
   const authorization = await requirePagePermission("payment_requests", "add");
   const companyId = requireCompanyId(authorization);
   try {
@@ -1516,4 +1517,24 @@ export async function resubmitPaymentRequest(formData: FormData) {
   }
 
   paymentRequestsRedirect({ paymentNotice: "Payment request resubmitted successfully." });
+}
+
+async function createExpenseRequestCore(formData: FormData, fleetBreakdown = false) {
+  return withPaymentActor("createExpenseRequestCore",()=>createExpenseRequestCoreWithContext(formData, fleetBreakdown));
+}
+
+export async function createPaymentRequest(formData: FormData) {
+  return withPaymentActor("createPaymentRequest",()=>createPaymentRequestWithContext(formData));
+}
+
+export async function submitPaymentBankDetails(formData: FormData) {
+  return withPaymentActor("submitPaymentBankDetails",()=>submitPaymentBankDetailsWithContext(formData));
+}
+
+export async function resubmitExpenseRequest(formData: FormData) {
+  return withPaymentActor("resubmitExpenseRequest",()=>resubmitExpenseRequestWithContext(formData));
+}
+
+export async function resubmitPaymentRequest(formData: FormData) {
+  return withPaymentActor("resubmitPaymentRequest",()=>resubmitPaymentRequestWithContext(formData));
 }

@@ -17,6 +17,7 @@ const records={fleet_vehicles:{id:'vehicle',vehicle_no:'KL01',station_code:'KOZA
 const queries=[];
 const db={from(table){const builder=new Proxy({}, {get(_,key){if(key==='then')return(resolve)=>resolve({data:records[table]||[],error:dbError?{message:'Write failed'}:null});return(...args)=>{queries.push([table,key,...args]);if(key==='upsert'||key==='insert')saved=args[0];return builder;};}});return builder;}};
 const api=load('src/app/api/fleet/gps-exceptions/route.ts',name=>({
+ '@/lib/fleet/gps-policy':load('src/lib/fleet/gps-policy.ts'),'@/lib/fleet/service-work':load('src/lib/fleet/service-work.ts'),
  '@/lib/fleet/system-log':{withFleetSystemLog:fn=>fn},
  '@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:(_,code,action)=>action==='access'?access:edit},'@/lib/company-scope':{requireCompanyId:()=> 'company'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/fleet-control':{hasActiveFleetMembership:async()=>member},'@/lib/fleet/gps-exceptions':helpers,'@/lib/wheelseye':{getWheelseyeAccessToken:async()=> 'token'},'@/lib/wheelseye-history':{loadWheelseyeMovement:async()=>({points:[],afterHours:[]})}
 }[name]||{}));
@@ -30,6 +31,7 @@ records.fleet_daily_km=[];assert.equal((await post()).status,400);records.fleet_
 dbError=true;assert.notEqual((await post()).status,200);dbError=false;
 const savedAuth=auth;auth=null;assert.equal((await post()).status,401);auth=savedAuth;
 const service=load('src/app/api/fleet-control/route.ts',name=>({
+ '@/lib/fleet/gps-policy':load('src/lib/fleet/gps-policy.ts'),'@/lib/fleet/service-work':load('src/lib/fleet/service-work.ts'),
  '@/lib/fleet/system-log':{withFleetSystemLog:fn=>fn},
  'next/server':{NextResponse:{json:(body,options)=>Response.json(body,options)}},'@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=> 'company'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/access-surface':{fleetAccessPageCodes:['fleet_maintenance']},'@/lib/fleet-control':{hasActiveFleetMembership:async()=>true}
 }[name]||{}));

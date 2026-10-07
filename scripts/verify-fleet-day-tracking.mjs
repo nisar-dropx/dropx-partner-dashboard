@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{if(id in deps)return deps[id];throw Error(id);},exports);return exports;}
-const d=compile('src/lib/fleet/day-tracking.ts'),h=compile('src/lib/wheelseye-history.ts');
+const gps=compile('src/lib/fleet/gps-policy.ts');
+const d=compile('src/lib/fleet/day-tracking.ts'),h=compile('src/lib/wheelseye-history.ts',{'./fleet/gps-policy':gps});
 const day='2026-10-05',start=Date.parse(`${day}T00:00:00+05:30`)/1000;
 const point=(minute,speed,ignition,longitude=75)=>({latitude:11,longitude,speed,ignition,dttimeInEpoch:start+minute*60,vehicleName:'VAN'});
 const journey=h.calculateWheelseyeMovement([point(0,10,1),point(1,10,1,75.001),point(2,0,1,75.001),point(3,0,1,75.001),point(4,0,0,75.001),point(5,0,0,75.001),point(20,10,1,75.002),point(21,10,1,75.003)],'VAN',day);
@@ -23,7 +24,7 @@ const matched=d.matchAssignmentDeliveries([assignment],[{station_code:'KOZA',wor
 assert.equal(d.assignmentPackageTotal([{...assignment,purpose:'shipment_drop',delivered:null}]),null);
 // History refuses out-of-scope vehicles before requesting GPS credentials/provider data.
 let called=0;
-const route=compile('src/app/api/wheelseye/history/route.ts',{'@/lib/authorization':{getAuthorization:async()=>({userId:'user'})},'@/lib/fleet/report-data':{trackingScope:async()=>({companyId:'company',vehicles:[]}),FleetReportError:class extends Error{}},'@/lib/fleet/daily-report':{validateReportRange:()=>null},'@/lib/wheelseye':{getWheelseyeAccessToken:async()=>{called++;return 'token';}},'@/lib/wheelseye-history':h,'@/lib/fleet/gps-storage':{saveDailyWheelseyeKm:async()=>{called++;}}});
+const route=compile('src/app/api/wheelseye/history/route.ts',{'@/lib/fleet/gps-policy-server':{loadGpsPolicy:async()=>gps.defaultGpsPolicy},'@/lib/authorization':{getAuthorization:async()=>({userId:'user'})},'@/lib/fleet/report-data':{trackingScope:async()=>({companyId:'company',vehicles:[]}),FleetReportError:class extends Error{}},'@/lib/fleet/daily-report':{validateReportRange:()=>null},'@/lib/wheelseye':{getWheelseyeAccessToken:async()=>{called++;return 'token';}},'@/lib/wheelseye-history':h,'@/lib/fleet/gps-storage':{saveDailyWheelseyeKm:async()=>{called++;}}});
 assert.equal((await route.GET(new Request('https://fleet.test/api/wheelseye/history?vehicle=SECRET&date=2026-10-05'))).status,403);assert.equal(called,0);
 // Assignment database protects tenancy and duplicate daily package attribution.
 const {PGlite}=await import('@electric-sql/pglite');const db=new PGlite();

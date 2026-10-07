@@ -1,3 +1,4 @@
+import {loadGpsPolicy} from "@/lib/fleet/gps-policy-server";
 export const dynamic = "force-dynamic";
 
 import { getWheelseyeAccessToken } from "@/lib/wheelseye";
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
   if (!token) return Response.json({ error: "Wheelseye is disabled or access token is not configured in Settings." }, { status: 400 });
 
   try {
-    const movement = await loadWheelseyeMovement(token, vehicle, date);
+    const movement = await loadWheelseyeMovement(token, vehicle, date, await loadGpsPolicy(companyId));
     if (!authorization.readOnly) await saveDailyWheelseyeKm(companyId, vehicle, date, movement.summary);
     const {progress,...base}=movement;
     return Response.json(url.searchParams.get("detail")==="day"?movement:base, {headers:{"Cache-Control":"private, no-store"}});

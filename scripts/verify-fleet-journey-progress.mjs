@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>{if(id in deps)return deps[id];throw Error(id);},exports);return exports;}
-const h=compile('src/lib/wheelseye-history.ts'),u=compile('src/lib/fleet/journey-progress.ts');
+const gps=compile('src/lib/fleet/gps-policy.ts');
+const h=compile('src/lib/wheelseye-history.ts',{'./fleet/gps-policy':gps}),u=compile('src/lib/fleet/journey-progress.ts',{'./gps-policy':gps});
 const day='2026-10-06',start=Date.parse(`${day}T00:00:00+05:30`)/1000;
 const point=(minute,lng,speed=20,ignition=1)=>({latitude:11,longitude:lng,speed,ignition,dttimeInEpoch:start+minute*60,vehicleName:'VAN'});
 const raw=[point(600,75),point(601,75.001),point(602,75.002),point(602,75.002),point(603,75.002,0),point(604,75.002,0),point(620,75.1),point(621,75.101),point(1320,75.2),point(1321,75.201)];
@@ -33,7 +34,7 @@ assert.deepEqual(u.nearestTracePoints([{x:5,y:5}],100,100),[]);
 assert.equal(u.locationLink(11,75),'https://www.google.com/maps?q=11,75');
 // Progress is opt-in, scoped and read-only preview does not persist GPS summaries.
 let saves=0;
-const route=compile('src/app/api/wheelseye/history/route.ts',{'@/lib/authorization':{getAuthorization:async()=>({userId:'u',readOnly:true})},'@/lib/fleet/report-data':{trackingScope:async()=>({companyId:'c',vehicles:[{vehicle_no:'VAN'}]}),FleetReportError:class extends Error{}},'@/lib/fleet/daily-report':{validateReportRange:()=>null},'@/lib/wheelseye':{getWheelseyeAccessToken:async()=>'token'},'@/lib/wheelseye-history':{loadWheelseyeMovement:async()=>j},'@/lib/fleet/gps-storage':{saveDailyWheelseyeKm:async()=>{saves++;}}});
+const route=compile('src/app/api/wheelseye/history/route.ts',{'@/lib/fleet/gps-policy-server':{loadGpsPolicy:async()=>gps.defaultGpsPolicy},'@/lib/authorization':{getAuthorization:async()=>({userId:'u',readOnly:true})},'@/lib/fleet/report-data':{trackingScope:async()=>({companyId:'c',vehicles:[{vehicle_no:'VAN'}]}),FleetReportError:class extends Error{}},'@/lib/fleet/daily-report':{validateReportRange:()=>null},'@/lib/wheelseye':{getWheelseyeAccessToken:async()=>'token'},'@/lib/wheelseye-history':{loadWheelseyeMovement:async()=>j},'@/lib/fleet/gps-storage':{saveDailyWheelseyeKm:async()=>{saves++;}}});
 assert.equal((await (await route.GET(new Request(`https://fleet.test/api/wheelseye/history?vehicle=VAN&date=${day}`))).json()).progress,undefined);
 assert.equal((await (await route.GET(new Request(`https://fleet.test/api/wheelseye/history?vehicle=VAN&date=${day}&detail=day`))).json()).progress.length,j.progress.length);
 assert.equal(saves,0);

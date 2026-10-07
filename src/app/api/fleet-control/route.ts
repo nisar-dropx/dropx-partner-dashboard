@@ -1,3 +1,4 @@
+import { serviceWorkValues } from "@/lib/fleet/service-work";
 import { scoreAuditAnswer } from '@/lib/fleet/audit-rules';
 import { summarizeHealth } from '@/lib/fleet/audit-health';
 import { withFleetSystemLog } from "@/lib/fleet/system-log";
@@ -149,15 +150,16 @@ async function createService(companyId: string, userId: string, allowed: boolean
   const vehicleId = required(body.vehicleId, "Vehicle");
   const vehicle = await assertVehicle(companyId, vehicleId);
   if (vehicle.ownership_type !== "own") return NextResponse.json({ error: "Service and maintenance are managed only for owned vehicles." }, { status: 400 });
-  const result = await supabaseAdmin!.from("fleet_service_history").insert({
-    company_id: companyId, vehicle_id: vehicleId, service_date: required(body.serviceDate, "Service date"), service_type: required(body.serviceType, "Service type"),
-    odometer_km: numberOrNull(body.odometerKm), vendor_name: clean(body.vendorName) || null, vendor_contact: clean(body.vendorContact) || null,
-    amount: numberOrNull(body.amount) ?? 0, status: clean(body.status) || "completed", description: clean(body.description) || null,
-    invoice_url: clean(body.invoiceUrl) || null, next_service_date: clean(body.nextServiceDate) || null,
-    next_service_odometer_km: numberOrNull(body.nextServiceOdometerKm), downtime_hours: numberOrNull(body.downtimeHours), created_by: userId
-  }).select("id").single();
+  const values = serviceWorkValues(body);
+  const planId = clean(body.planId);
+  // One conditional write closes precisely the selected plan. No separate insert/close race.
+  const result = planId
+    ? await supabaseAdmin!.from("fleet_service_history").update({...values, updated_at:new Date().toISOString()})
+      .eq("company_id",companyId).eq("vehicle_id",vehicleId).eq("id",planId).in("status",["scheduled","in_progress"]).select("id").maybeSingle()
+    : await supabaseAdmin!.from("fleet_service_history").insert({...values, company_id:companyId,vehicle_id:vehicleId,created_by:userId}).select("id").single();
   if (result.error) throw new Error(result.error.message);
-  return NextResponse.json({ ok: true, id: result.data.id, message: "Service history saved." });
+  if (!result.data) return NextResponse.json({error:"This plan was already completed or changed. Refresh Service before trying again."},{status:409});
+  return NextResponse.json({ok:true,id:result.data.id,message:planId ? (values.status === "completed" ? "Service completed; linked plan closed." : "Linked service work updated.") : "Service history saved."});
 }
 
 async function scheduleService(companyId: string, userId: string, allowed: boolean, body: Payload) {
@@ -700,6 +702,10 @@ async function updateOperatingPolicy(companyId: string, userId: string, allowed:
   const existing = await supabaseAdmin!.from("fleet_control_settings").select("risk_weights,updated_at").eq("company_id", companyId).maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
   const weights = existing.data?.risk_weights && typeof existing.data.risk_weights === "object" ? existing.data.risk_weights : {};
+  if (!(body.operatingPolicy as any)?.gps && weights.operating_policy?.gps) policy.gps = weights.operating_policy.gps;
+  if (!(body.operatingPolicy as any)?.stationVehicleTargets && weights.operating_policy?.stationVehicleTargets) policy.stationVehicleTargets = weights.operating_policy.stationVehicleTargets;
+  const targetCodes=Object.keys(policy.stationVehicleTargets||{});
+  if(targetCodes.length){const stations=await supabaseAdmin!.from("stations").select("station_code").eq("company_id",companyId).in("station_code",targetCodes);if(stations.error)throw new Error("Unable to validate station targets.");const known=new Set((stations.data||[]).map(row=>row.station_code));if(targetCodes.some(code=>!known.has(code)))throw new Error("One or more station target codes are not in this company.");}
   const values = { risk_weights: { ...weights, operating_policy: policy }, updated_by: userId, updated_at: new Date().toISOString() };
   let result;
   if (existing.data) {
@@ -709,5 +715,5 @@ async function updateOperatingPolicy(companyId: string, userId: string, allowed:
   } else result = await supabaseAdmin!.from("fleet_control_settings").insert({ company_id: companyId, ...values }).select("company_id").single();
   if (result.error) throw new Error(result.error.message);
   if (!result.data) return NextResponse.json({error: "Settings changed while saving. Refresh and try again."}, {status: 409});
-  return NextResponse.json({ok: true, message: "Availability target and service work categories saved."});
+  return NextResponse.json({ok: true, message: "Fleet operating controls saved."});
 }

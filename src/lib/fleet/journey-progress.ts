@@ -1,3 +1,4 @@
+import {defaultGpsPolicy,isAfterHours,type FleetGpsPolicy} from "./gps-policy";
 import type {MovementEvent,MovementProgressPoint} from '../wheelseye-history';
 export const locationLink=(lat:number,lng:number)=>`https://www.google.com/maps?q=${lat},${lng}`;
 export const traceTime=(at:string)=>new Date(at).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -15,13 +16,13 @@ export function sampleProgress(points:MovementProgressPoint[],minutes:number){
   return {...p,addedKm:gap&&added===0?null:Math.max(0,Number(added.toFixed(3))),gapBefore:gap};
  });
 }
-export function journeyOverview(events:MovementEvent[],points:MovementProgressPoint[]){
- const stops=events.filter(e=>['idle','stopped','stop_unknown'].includes(e.kind)&&e.minutes>=5);
+export function journeyOverview(events:MovementEvent[],points:MovementProgressPoint[],policy:FleetGpsPolicy=defaultGpsPolicy){
+ const stops=events.filter(e=>['idle','stopped','stop_unknown'].includes(e.kind)&&e.minutes>=policy.minimumStopMinutes);
  const longest=[...stops].sort((a,b)=>b.minutes-a.minutes)[0]??null;
  const moving=events.filter(e=>e.kind==='moving').reduce((sum,e)=>sum+e.minutes,0);
  const km=points.at(-1)?.cumulativeKm??0;
- // Only accepted moving legs wholly inside the existing 22:00–05:00 IST window are attributed.
- const afterHours=points.filter(p=>p.afterHours&&p.distanceFrom&&(()=>{const h=new Date(Date.parse(p.distanceFrom!)+19800000).getUTCHours();return h>=22||h<5;})());
+ // Only accepted moving legs wholly inside the captured policy window are attributed.
+ const afterHours=points.filter(p=>p.afterHours&&p.distanceFrom&&isAfterHours(Date.parse(p.distanceFrom)/1000,policy));
  return {longest,stops:stops.length,movingMinutes:moving,averageMovingSpeed:moving>0?km/(moving/60):null,
   afterHoursKm:afterHours.reduce((sum,p)=>sum+(p.addedKm??0),0),afterHoursPoints:points.filter(p=>p.afterHours&&(p.speed??0)>0).length,
   gapCount:events.filter(e=>e.kind==='gap').length};

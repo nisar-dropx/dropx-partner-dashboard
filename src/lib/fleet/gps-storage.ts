@@ -8,6 +8,7 @@ export async function saveDailyWheelseyeKm(companyId: string, vehicle: string, d
   const existing = await supabaseAdmin.from('fleet_daily_km').select('id,calculated_at').eq('company_id', companyId).eq('vehicle_no', vehicle).eq('movement_date', date).eq('source', 'wheelseye').maybeSingle();
   if (existing.error) return 'save_failed';
   const values = {
+    gps_policy: summary.gpsPolicy ?? null,
     km: summary.km, raw_km: summary.rawKm, point_count: summary.pointCount,
     accepted_point_count: summary.acceptedPointCount, rejected_point_count: summary.rejectedPointCount,
     stationary_point_count: summary.stationaryPointCount, algorithm_version: summary.algorithmVersion,

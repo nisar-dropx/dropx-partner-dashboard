@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import ts from 'typescript';
+function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(name=>{if(name in deps)return deps[name];throw Error(`Missing test dependency ${name}`);},exports);return exports;}
+const gps=compile('src/lib/fleet/gps-policy.ts'),policy=compile('src/lib/fleet/operating-policy.ts',{'./gps-policy':gps});
+const history=compile('src/lib/wheelseye-history.ts',{'./fleet/gps-policy':gps});
+const day='2026-10-07',epoch=clock=>Date.parse(`${day}T${clock}:00+05:30`)/1000;
+const custom={afterHoursStart:'20:30',afterHoursEnd:'06:15',minimumStopMinutes:12,exceptionMinSpeedKph:5};
+for(const [clock,expected] of [['20:29',false],['20:30',true],['23:59',true],['00:00',true],['06:14',true],['06:15',false]])assert.equal(gps.isAfterHours(epoch(clock),custom),expected);
+assert.equal(gps.isAfterHours(epoch('12:00'),{...custom,afterHoursStart:'10:00',afterHoursEnd:'14:00'}),true);
+for(const patch of [{afterHoursStart:'25:00'},{afterHoursEnd:'20:30'},{minimumStopMinutes:0},{exceptionMinSpeedKph:61}])assert.throws(()=>gps.validateGpsPolicy({...custom,...patch}));
+const point=(clock,speed,lng)=>({latitude:11,longitude:lng,speed,dttimeInEpoch:epoch(clock),vehicleName:'TEST'});
+let movement=history.calculateWheelseyeMovement([point('20:31',4,75),point('20:32',4,75.001)],'TEST',day,custom);
+assert.equal(movement.summary.lateNight,false);
+movement=history.calculateWheelseyeMovement([point('20:31',10,75),point('20:32',10,75.001)],'TEST',day,custom);
+assert.equal(movement.summary.lateNight,true);assert.deepEqual(movement.summary.gpsPolicy,custom);assert.equal(movement.afterHours.length,2);
+const progress=compile('src/lib/fleet/journey-progress.ts',{'./gps-policy':gps});
+assert.equal(progress.journeyOverview([{kind:'idle',minutes:10}],[],custom).stops,0);
+assert.equal(progress.journeyOverview([{kind:'idle',minutes:12}],[],custom).stops,1);
+const pagination=compile('src/lib/supabase-pagination.ts');
+const source=Array.from({length:1207},(_,id)=>({id})),pages=[];
+const all=await pagination.readAllRows({async range(a,b){pages.push([a,b]);return {data:source.slice(a,b+1),error:null};}});
+assert.equal(all.data.length,1207);assert.deepEqual(pages,[[0,499],[500,999],[1000,1499]]);
+assert.equal((await pagination.readAllRows({range:async()=>({data:[],error:{message:'offline'}})})).data,null);
+// Historical endpoint reads only permitted vehicle IDs, covers all pages, and rejects failed pages.
+const reads=[];let allowed=true,dbFailure=false;
+const records={fleet_vehicles:[{id:'owned',vehicle_no:'TEST',station_code:'TEST',ownership_type:'own'}],fleet_service_history:source.map(row=>({...row,vehicle_id:'owned',service_date:day,service_type:'Repair',status:'completed',amount:12}))};
+const db={from(table){const q=new Proxy({}, {get(_,name){if(name==='range')return async(a,b)=>({data:(records[table]||[]).slice(a,b+1),error:dbFailure?{message:'offline'}:null});return (...args)=>{reads.push([table,name,...args]);return q;};}});return q;}};
+class FleetReportError extends Error{constructor(message,status=500){super(message);this.status=status;}}
+const reports=compile('src/lib/fleet/report-history.ts',{'server-only':{},'@/lib/authorization':{hasPermission:()=>allowed},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':pagination,'./report-data':{FleetReportError,reportScope:async()=>({companyId:'tenant',vehicles:[{vehicle_no:'TEST'}]})},'./operating-policy':policy,'@/lib/ops-pulse/cod':{loadCodLocations:async()=>({locations:[{id:'station',station_code:'TEST'}]})},'@/lib/ops-pulse/adhoc-activity':{},'@/lib/fleet-control-adhoc-scope':{},'@/lib/fleet-control-payment-scope':{}});
+const report=await reports.loadReportHistory({locationScopeIds:['station']},'service',day,day);
+assert.equal(report.serviceHistory.length,1207);
+assert.ok(reads.some(r=>r[0]==='fleet_service_history'&&r[1]==='in'&&r[2]==='vehicle_id'&&r[3][0]==='owned'));
+assert.ok(reads.some(r=>r[1]==='eq'&&r[2]==='company_id'&&r[3]==='tenant'));
+assert.ok(reads.some(r=>r[1]==='gte'&&r[2]==='service_date'&&r[3]===day));
+allowed=false;await assert.rejects(reports.loadReportHistory({},'service',day,day),/access/);allowed=true;
+dbFailure=true;await assert.rejects(reports.loadReportHistory({},'service',day,day),/complete report/);dbFailure=false;
+await assert.rejects(reports.loadReportHistory({},'service','2026-02-30',day),/dates/);
+// Service validation prevents invalid financial/odometer values without touching a database.
+const service=compile('src/lib/fleet/service-work.ts');
+const valid={serviceDate:day,serviceType:'Repair',status:'completed',amount:1200,odometerKm:200,nextServiceOdometerKm:300};
+assert.equal(service.serviceWorkValues(valid).amount,1200);
+for(const patch of [{amount:-1},{status:'paid'},{serviceDate:'2026-02-30'},{nextServiceDate:day},{nextServiceOdometerKm:100},{downtimeHours:'NaN'}])assert.throws(()=>service.serviceWorkValues({...valid,...patch}));
+// Concurrent actor attribution is isolated and always session-derived.
+const context=new AsyncLocalStorage();let auth={userId:'verified-user',companyId:'tenant',fullName:'Manager'};
+const actor=compile('src/lib/fleet/payment-actor.ts',{'@/lib/authorization':{getAuthorization:async()=>auth},'@/lib/company-scope':{requireCompanyId:a=>a.companyId},'./audit-context':{fleetAuditContext:context}});
+const seen=await Promise.all(['approve','return','reject'].map(action=>actor.withPaymentActor(action,async()=>{await new Promise(r=>setTimeout(r,5));return context.getStore();})));
+assert.deepEqual(seen.map(s=>s.action),['payment.approve','payment.return','payment.reject']);assert.ok(seen.every(s=>s.actorId==='verified-user'));assert.equal(new Set(seen.map(s=>s.requestId)).size,3);assert.equal(context.getStore(),undefined);
+auth={...auth,readOnly:true};await assert.rejects(actor.withPaymentActor('approve',async()=>{throw Error('Must not run');}),/preview/);
+auth=null;await assert.rejects(actor.withPaymentActor('approve',async()=>{}),/expired/);
+console.log('Fleet reliability: configurable GPS boundaries/speed/stops, 1,207-row pagination, permission/tenant/vehicle scope, read failures, service validation and concurrent verified payment actors passed.');
+let plan={id:'plan',company_id:'tenant',vehicle_id:'owned',status:'scheduled'},writeCount=0;
+const serviceDb={from(table){let update,filters=[];const q=new Proxy({}, {get(_,name){if(name==='then')return resolve=>{if(table==='fleet_vehicles')return resolve({data:{id:'owned',ownership_type:'own',station_code:'TEST'}});if(table==='fleet_service_history'){const match=filters.every(([kind,key,value])=>kind==='in'?value.includes(plan[key]):plan[key]===value);if(update&&match){plan={...plan,...update};writeCount++;}return resolve({data:match?{id:plan.id}:null});}return resolve({data:null});};return (...args)=>{if(name==='update')update=args[0];if(['eq','in'].includes(name))filters.push([name,...args]);return q;};}});return q;}};
+const serviceMocks=new Proxy({'@/lib/fleet/service-work':service,'@/lib/fleet/system-log':{withFleetSystemLog:fn=>fn},'@/lib/authorization':{getAuthorization:async()=>({userId:'manager',isMasterOwner:true,hasAllLocationAccess:true}),hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=> 'tenant'},'@/lib/access-surface':{fleetAccessPageCodes:['fleet_maintenance']},'@/lib/supabase-admin':{supabaseAdmin:serviceDb},'next/server':{NextResponse:{json:(value,options)=>Response.json(value,options)}}},{has:()=>true,get:(target,name)=>target[name]||{}});
+const serviceApi=compile('src/app/api/fleet-control/route.ts',serviceMocks);
+const complete=()=>serviceApi.POST(new Request('https://fleet.test/api/fleet-control',{method:'POST',body:JSON.stringify({...valid,action:'service.create',vehicleId:'owned',planId:'plan'})}));
+assert.equal((await complete()).status,200);assert.equal(plan.status,'completed');assert.equal(writeCount,1);
+assert.equal((await complete()).status,409);assert.equal(writeCount,1,'Retry cannot complete or bill the same plan twice');
+console.log('Service plan closure: a single scoped conditional write completes the selected plan, with duplicate completion rejected.');
+const capacity=compile('src/lib/fleet/capacity.ts',{'./operating-policy':policy});
+const capacityData={today:day,settings:{operatingPolicy:{availabilityTargetPercent:90,serviceWorkTypes:['Repair'],stationVehicleTargets:{TEST:3}}},stationOptions:[{code:'TEST'},{code:'OTHER'}],vehicleStatuses:[{key:'ready',isOperational:true},{key:'retired',isTerminal:true}],vehicles:[{id:'a',stationCode:'TEST',status:'ready',deploymentStatus:'deployed',ownershipType:'own'},{id:'b',stationCode:'TEST',status:'ready',deploymentStatus:'not_deployed',ownershipType:'odcd'},{id:'c',stationCode:'TEST',status:'retired',deploymentStatus:'deployed',ownershipType:'own'}],adHocRows:[{stationCode:'TEST',date:day,requestType:'Van',amount:500,approvalStatus:'pending'},{stationCode:'TEST',date:day,requestType:'Van',amount:9999,approvalStatus:'rejected'}]};
+const capacities=capacity.stationCapacity(capacityData,day,day);
+assert.equal(capacities[0].ready,1);assert.equal(capacities[0].shortfall,2);assert.equal(capacities[0].assigned,2);assert.equal(capacities[0].vanAmount,500);assert.equal(capacities[1].target,null);
+console.log('Capacity planning: configured operational/terminal status, deployment, targets, and exclusion of rejected cost verified.');

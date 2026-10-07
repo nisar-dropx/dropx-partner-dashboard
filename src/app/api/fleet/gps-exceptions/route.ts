@@ -1,3 +1,4 @@
+import {normalizeGpsPolicy} from "@/lib/fleet/gps-policy";
 import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import {getAuthorization,hasPermission} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
@@ -17,16 +18,16 @@ async function access(vehicleNo:string,date:string,edit=false){
  const vehicle=await supabaseAdmin.from('fleet_vehicles').select('id,vehicle_no,station_code').eq('company_id',company).eq('vehicle_no',vehicleNo).single();
  if(vehicle.error)throw new Error('Vehicle not found.');
  if(!auth.isMasterOwner&&!auth.hasAllLocationAccess){const stations=await supabaseAdmin.from('stations').select('station_code').eq('company_id',company).in('id',auth.locationScopeIds.length?auth.locationScopeIds:['00000000-0000-0000-0000-000000000000']);if(stations.error||!stations.data?.some(s=>s.station_code===vehicle.data.station_code))throw Object.assign(new Error('Vehicle is outside your assigned locations.'),{status:403});}
- const movement=await supabaseAdmin.from('fleet_daily_km').select('id').eq('company_id',company).eq('vehicle_no',vehicleNo).eq('movement_date',date).eq('late_night',true).limit(1);
+ const movement=await supabaseAdmin.from('fleet_daily_km').select('id,gps_policy').eq('company_id',company).eq('vehicle_no',vehicleNo).eq('movement_date',date).eq('late_night',true).limit(1);
  if(movement.error||!movement.data?.length)throw new Error('No recorded after-hours exception for this vehicle and date.');
- return {auth,company,vehicle:vehicle.data};
+ return {auth,company,vehicle:vehicle.data,gpsPolicy:normalizeGpsPolicy(movement.data[0].gps_policy)};
 }
 const failure=(error:unknown)=>Response.json({error:error instanceof Error?error.message:'Unable to process exception.'},{status:Number((error as {status?:number})?.status)||400});
 export async function GET(request:Request){try{
  const url=new URL(request.url),vehicle=(url.searchParams.get('vehicle')||'').trim().toUpperCase(),date=url.searchParams.get('date')||'';
- const {company}=await access(vehicle,date);
+ const {company,gpsPolicy}=await access(vehicle,date);
  const token=await getWheelseyeAccessToken(company);if(!token)throw new Error('GPS history is currently unavailable. The saved daily summary is shown below.');
- return Response.json(await loadWheelseyeMovement(token,vehicle,date),{headers:{'Cache-Control':'private, no-store'}});
+ return Response.json(await loadWheelseyeMovement(token,vehicle,date,gpsPolicy),{headers:{'Cache-Control':'private, no-store'}});
  }catch(error){return failure(error);}}
 async function handlePOST(request: Request){try{
  const body=await request.json(),vehicleNo=String(body.vehicleNo||'').trim().toUpperCase(),date=String(body.date||'');

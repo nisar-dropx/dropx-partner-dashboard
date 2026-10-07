@@ -1,3 +1,4 @@
+import {loadGpsPolicy} from "@/lib/fleet/gps-policy-server";
 import { withFleetSystemLog } from "@/lib/fleet/system-log";
 export const dynamic = "force-dynamic";
 
@@ -224,11 +225,12 @@ function normalizeRawPayload(raw: Record<string, string>, header: string[]) {
 async function syncWheelseyeKm(rows: Array<{ vehicle_no: string; transaction_date: string }>, companyId: string) {
   const token = await getWheelseyeAccessToken(companyId);
   if (!token || !supabaseAdmin) return;
+  let gpsPolicy; try { gpsPolicy=await loadGpsPolicy(companyId); } catch { return; }
   const uniquePairs = Array.from(new Map(rows.map((row) => [`${row.vehicle_no}|${row.transaction_date}`, row])).values());
 
   for (const row of uniquePairs) {
     try {
-      const movement = await loadWheelseyeMovement(token, row.vehicle_no, row.transaction_date);
+      const movement = await loadWheelseyeMovement(token, row.vehicle_no, row.transaction_date, gpsPolicy);
       await saveDailyWheelseyeKm(companyId, row.vehicle_no, row.transaction_date, movement.summary);
     } catch {
       // Fuel import should not fail when one vehicle has no WheelEye movement for that day.

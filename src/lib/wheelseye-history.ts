@@ -1,3 +1,4 @@
+import {defaultGpsPolicy,normalizeGpsPolicy,isAfterHours as outsideWindow,type FleetGpsPolicy} from "./fleet/gps-policy";
 export type WheelseyeHistoryPoint = {
   longitude?: number | null;
   latitude?: number | null;
@@ -8,6 +9,7 @@ export type WheelseyeHistoryPoint = {
   vehicleName?: string;
 };
 export type WheelseyeMovementSummary = {
+  gpsPolicy?: FleetGpsPolicy;
   km: number;
   rawKm: number;
   maxSpeed: number;
@@ -40,7 +42,7 @@ const ALGORITHM = 'gps-moving-fixes-v2';
 const plate = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 const rounded = (value: number) => Math.round(value * 10) / 10;
 
-export async function loadWheelseyeMovement(accessToken: string, vehicle: string, date: string) {
+export async function loadWheelseyeMovement(accessToken: string, vehicle: string, date: string, gpsPolicy: FleetGpsPolicy = defaultGpsPolicy) {
   const { fromTime, toTime } = dayEpochRange(date);
   const upstream = new URL('https://api.wheelseye.com/currentLocV2');
   upstream.searchParams.set('accessToken', accessToken);
@@ -51,11 +53,12 @@ export async function loadWheelseyeMovement(accessToken: string, vehicle: string
   const payload = await response.json().catch(() => null);
   if (!response.ok || payload?.success === false) throw new Error('Unable to load WheelsEye movement.');
   if (!Array.isArray(payload?.Vehicle)) throw new Error('GPS provider returned an unexpected history response.');
-  return calculateWheelseyeMovement(payload.Vehicle, vehicle, date);
+  return calculateWheelseyeMovement(payload.Vehicle, vehicle, date, gpsPolicy);
 }
 
 /** GPS-derived movement, not an odometer reading. Never sum cached/stationary fixes into a moving track. */
-export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle: string, date: string) {
+export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle: string, date: string, gpsPolicy: FleetGpsPolicy = defaultGpsPolicy) {
+  const policy = normalizeGpsPolicy(gpsPolicy);
   const { fromTime, toTime } = dayEpochRange(date);
   let rejectedPointCount = 0;
   const normalized: Point[] = [];
@@ -144,13 +147,13 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
   const progress: MovementProgressPoint[] = [];
   let runningKm = 0, eventStartKm = 0;
   const precision=(value:number)=>Math.round(value*1000)/1000;
-  const isAfterHours=(epoch:number)=>{const hour=Math.floor((epoch+19800)/3600)%24;return hour>=22||hour<5;};
+  const isAfterHours=(epoch:number)=>outsideWindow(epoch,policy);
   const observation=(point:Point,kind:MovementProgressPoint['kind']):MovementProgressPoint=>{
     const leg=acceptedLegs.get(point.epoch);
     runningKm+=leg?.km??0;
     return {at:new Date(point.epoch*1000).toISOString(),lat:point.lat,lng:point.lng,speed:point.speed,kind:kind==='start'?'start':point.speed===null?'gap':point.speed>0?'moving':point.ignition===true?'idle':point.ignition===false?'stopped':'stop_unknown',
       addedKm:kind==='gap'&&!leg?null:precision(leg?.km??0),cumulativeKm:precision(runningKm),
-      distanceFrom:leg?new Date(leg.from*1000).toISOString():null,afterHours:isAfterHours(point.epoch),gapBefore:kind==='gap'};
+      distanceFrom:leg?new Date(leg.from*1000).toISOString():null,afterHours:isAfterHours(point.epoch) && (point.speed??0)>policy.exceptionMinSpeedKph,gapBefore:kind==='gap'};
   };
   if(timelinePoints.length)progress.push(observation(timelinePoints[0],'start'));
   const routeSegments: Array<Array<{lat:number;lng:number}>> = [];
@@ -182,12 +185,13 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
     timeline: events.map(event=>({...event,minutes:rounded(event.minutes)})),
     routeSegments,
     points: displayPoints.map(({ lat, lng }) => ({ lat, lng })),
-    afterHours: moving.filter(point=>{const hour=Math.floor((point.epoch+19800)/3600)%24;return hour>=22||hour<5;}).map(point=>({lat:point.lat,lng:point.lng,speed:point.speed,at:new Date(point.epoch*1000).toISOString()})),
+    afterHours: moving.filter(point=>isAfterHours(point.epoch)&&(point.speed??0)>policy.exceptionMinSpeedKph).map(point=>({lat:point.lat,lng:point.lng,speed:point.speed,at:new Date(point.epoch*1000).toISOString()})),
     summary: {
+      gpsPolicy:policy,
       km: rounded(km), rawKm: rounded(rawKm), maxSpeed: unique.reduce((max, point) => Math.max(max, point.speed ?? 0), 0),
       movingMinutes: Math.round(secondsByKind.moving / 60), idleMinutes: Math.round(secondsByKind.idle / 60), stoppedMinutes: Math.round(secondsByKind.stopped / 60), stopUnknownMinutes: Math.round(secondsByKind.stop_unknown / 60), unknownMinutes: Math.round(secondsByKind.gap / 60), pointCount: unique.length,
       acceptedPointCount: parked ? unique.length : moving.length, rejectedPointCount, stationaryPointCount,
-      lateNight: moving.some(point => { const hour = Math.floor((point.epoch + 19800) / 3600) % 24; return hour >= 22 || hour < 5; }),
+      lateNight: moving.some(point => isAfterHours(point.epoch)&&(point.speed??0)>policy.exceptionMinSpeedKph),
       firstMovingAt: moving.length ? new Date(moving[0].epoch * 1000).toISOString() : null,
       lastMovingAt: moving.length ? new Date(moving.at(-1)!.epoch * 1000).toISOString() : null,
       firstMovingLatitude: moving[0]?.lat ?? null,

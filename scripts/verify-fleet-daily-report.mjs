@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
-function compile(file, deps = {}) { const exports = {}; new Function('require', 'exports', ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(name => deps[name] ?? require(name), exports); return exports; }
+function compile(file, deps = {}) { const exports = {}; new Function('require', 'exports', ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(name => deps[name] ?? (name==='@/lib/fleet/gps-policy-server'?{loadGpsPolicy:async()=>({afterHoursStart:'22:00',afterHoursEnd:'05:00',minimumStopMinutes:5,exceptionMinSpeedKph:0})}:require(name)), exports); return exports; }
 const p = compile('src/lib/fleet/daily-report.ts');
 const v = { vehicle_no: 'KL11BZ2194', station_code: 'ERSE', model: 'Van', fuel_type: 'Diesel', status: 'active' };
 const km = { vehicle_no: v.vehicle_no, movement_date: '2026-09-22', km: 100, point_count: 20, source: 'wheelseye', calculated_at: '2026-09-23T00:00:00Z' };

@@ -1,4 +1,5 @@
 "use server";
+import {withPaymentActor} from "@/lib/fleet/payment-actor";
 
 import * as XLSX from "xlsx";
 import {canProcessPayment} from "@/lib/payment-processing-policy";
@@ -213,7 +214,7 @@ function cleanFormText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
-export async function updatePaymentProcessStatus(
+async function updatePaymentProcessStatusWithContext(
   _previousState: PaymentProcessActionState,
   formData: FormData
 ): Promise<PaymentProcessActionState> {
@@ -393,7 +394,7 @@ export async function updatePaymentProcessStatus(
   }
 }
 
-export async function finalizePaymentProcess(formData: FormData) {
+async function finalizePaymentProcessWithContext(formData: FormData) {
   try {
     const authorization = await requirePagePermission("payment_process", "edit");
     const companyId = requireCompanyId(authorization);
@@ -503,4 +504,12 @@ export async function finalizePaymentProcess(formData: FormData) {
     if (isNextRedirect(error)) throw error;
     processRedirect({ processError: errorMessage(error) });
   }
+}
+
+export async function updatePaymentProcessStatus(_previousState: PaymentProcessActionState, formData: FormData) {
+  return withPaymentActor("updatePaymentProcessStatus",()=>updatePaymentProcessStatusWithContext(_previousState, formData));
+}
+
+export async function finalizePaymentProcess(formData: FormData) {
+  return withPaymentActor("finalizePaymentProcess",()=>finalizePaymentProcessWithContext(formData));
 }

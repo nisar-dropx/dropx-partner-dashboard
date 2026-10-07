@@ -1,4 +1,5 @@
 "use server";
+import {withPaymentActor} from "@/lib/fleet/payment-actor";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -366,7 +367,7 @@ async function updatePaymentRequest(
   throw new Error(errorMessage(lastError));
 }
 
-export async function approvePaymentRequest(formData: FormData) {
+async function approvePaymentRequestWithContext(formData: FormData) {
   const authorization = await requirePagePermission("payment_approvals", "edit");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
@@ -527,7 +528,7 @@ export async function approvePaymentRequest(formData: FormData) {
   return emailResult.sent ? undefined : emailResult.reason;
 }
 
-export async function rejectPaymentRequest(formData: FormData) {
+async function rejectPaymentRequestWithContext(formData: FormData) {
   const authorization = await requirePagePermission("payment_approvals", "edit");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
@@ -578,7 +579,7 @@ export async function rejectPaymentRequest(formData: FormData) {
   return emailResult.sent ? undefined : emailResult.reason;
 }
 
-export async function returnPaymentRequest(formData: FormData) {
+async function returnPaymentRequestWithContext(formData: FormData) {
   const authorization = await requirePagePermission("payment_approvals", "edit");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
@@ -669,4 +670,16 @@ export async function handleReturnPaymentApproval(formData: FormData) {
 
 export async function handleRejectPaymentApproval(formData: FormData) {
   await runApprovalAction(formData, rejectPaymentRequest, "Payment request rejected.");
+}
+
+export async function approvePaymentRequest(formData: FormData) {
+  return withPaymentActor("approvePaymentRequest",()=>approvePaymentRequestWithContext(formData));
+}
+
+export async function rejectPaymentRequest(formData: FormData) {
+  return withPaymentActor("rejectPaymentRequest",()=>rejectPaymentRequestWithContext(formData));
+}
+
+export async function returnPaymentRequest(formData: FormData) {
+  return withPaymentActor("returnPaymentRequest",()=>returnPaymentRequestWithContext(formData));
 }

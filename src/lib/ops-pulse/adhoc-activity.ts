@@ -277,7 +277,8 @@ export async function loadAdHocActivity(
   companyId: string,
   locations: CodLocationRow[],
   from: string,
-  to: string
+  to: string,
+  options: {includeInactiveHeads?:boolean} = {}
 ): Promise<AdHocActivityResult> {
   const eligibleLocations = locations.filter(isAdHocActivityLocation);
   const stationRows = eligibleLocations.map(blankStation);
@@ -300,11 +301,9 @@ export async function loadAdHocActivity(
   if (!supabaseAdmin) return { ...empty, error: "Database service is unavailable." };
   const db = supabaseAdmin;
 
-  const headsResult = await db
-    .from("payment_heads")
-    .select("id,code,name")
-    .eq("company_id", companyId)
-    .eq("is_active", true);
+  let headsQuery = db.from("payment_heads").select("id,code,name").eq("company_id",companyId);
+  if(!options.includeInactiveHeads)headsQuery=headsQuery.eq("is_active",true);
+  const headsResult=await headsQuery;
   if (headsResult.error) return { ...empty, error: headsResult.error.message };
 
   const heads = ((headsResult.data ?? []) as AdHocHeadRow[])

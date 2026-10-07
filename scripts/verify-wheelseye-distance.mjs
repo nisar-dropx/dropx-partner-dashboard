@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
+const gps={};new Function('exports',ts.transpileModule(readFileSync('src/lib/fleet/gps-policy.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(gps);
 const exports = {};
-new Function('exports', ts.transpileModule(readFileSync('src/lib/wheelseye-history.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(exports);
+new Function('exports','require', ts.transpileModule(readFileSync('src/lib/wheelseye-history.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(exports,()=>gps);
 const date = '2026-09-23', start = Date.parse(`${date}T00:00:00+05:30`) / 1000, vehicle = 'TEST001';
 const point = (second, lon = 75, speed = 36) => ({ latitude: 11, longitude: lon, speed, dttimeInEpoch: start + second, vehicleName: vehicle });
 const calc = points => exports.calculateWheelseyeMovement(points, vehicle, date);
