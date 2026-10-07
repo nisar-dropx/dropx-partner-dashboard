@@ -14,7 +14,7 @@ export const mappingCanDefaults=(a:AuthorizationContext)=>!a.readOnly&&(a.isMast
 export async function mappingScope(auth:AuthorizationContext){
  if(!supabaseAdmin)throw new FleetReportError('Mapping is temporarily unavailable.',503);
  if(!mappingCanView(auth))throw new FleetReportError('Vehicle or station request access is required.',403);
- const companyId=requireCompanyId(auth),surface=currentAdminAccessSurface();
+ const companyId=requireCompanyId(auth),surface=String(currentAdminAccessSurface());
  if(!['fleet','ops'].includes(surface))throw new FleetReportError('Open vehicle DA mapping in Fleet or OpsPulse.',403);
  if(!auth.isMasterOwner){const member=await supabaseAdmin.from('company_product_memberships').select('id,role_id').eq('company_id',companyId).eq('user_id',auth.userId).eq('product_code',surface==='fleet'?'fleet':'operations').eq('is_active',true).maybeSingle();if(member.error||!member.data?.role_id)throw new FleetReportError('Product access is required.',403);}
  let q=supabaseAdmin.from('stations').select('station_code,station_name').eq('company_id',companyId).eq('is_active',true).order('station_code');
