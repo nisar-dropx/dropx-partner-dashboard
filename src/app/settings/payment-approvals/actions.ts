@@ -132,6 +132,7 @@ export async function saveApprovalSteps(formData: FormData) {
       })
       .eq("company_id", companyId)
       .eq("payment_head_id", paymentHeadId)
+      .is("adhoc_approval_steps", null)
       .lte("current_step_order", rows.length)
       .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
       .not("approval_status", "in", "(FINAL_APPROVED,PROCESSED,PROCESSING,RETURNED,REJECTED,CANCELLED)");
