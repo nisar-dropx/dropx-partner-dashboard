@@ -854,11 +854,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   const dateField = (field: string, label: string, options?: { readOnly?: boolean; warning?: string }) => {
     if (!enabled.has(field)) return null;
     const valueKey = fieldValueKeys[field] ?? field;
-    const verificationToClear = field === "date_of_birth" || field === "driving_license_exp_date"
-      ? ["dl"]
-      : ["vehicle_reg_exp_date", "vehicle_insurance_exp_date", "vehicle_pollution_exp_date"].includes(field)
-        ? ["vehicle"]
-        : [];
+    // Only the date of birth is an input to a check. Expiry dates are either
+    // supplied by the check (and read-only) or typed by hand when it had none,
+    // so editing one must not throw the check away.
+    const verificationToClear = field === "date_of_birth" ? ["dl"] : [];
     return <ManualDateField
       key={field}
       label={label}
@@ -983,17 +982,17 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     </ProfileSection> : null}
     {drivingEnabled ? <ProfileSection title="Driving and vehicle">
       {enabled.has("driving_license_no") ? <>
-        <VerifyField label={`Driving license no${required.has("driving_license_no") ? " *" : ""}`} name="driving_license_no" onChange={(value) => set("drivingLicenseNo", value, ["dl"])} onVerify={() => verify("dl")} running={running === "dl"} value={values.drivingLicenseNo || ""} checked={attempted("dl")} verified={verified("dl")} error={verificationErrors.dl || verificationInputError("dl", values)} required={required.has("driving_license_no")} />
+        <VerifyField label={`Driving license no${required.has("driving_license_no") ? " *" : ""}`} name="driving_license_no" onChange={(value) => set("drivingLicenseNo", value, ["dl"])} onVerify={() => verify("dl")} running={running === "dl"} value={values.drivingLicenseNo || ""} checked={attempted("dl") && !dlCheck?.blockSubmit} verified={verified("dl")} error={verificationErrors.dl || verificationInputError("dl", values)} required={required.has("driving_license_no")} />
         <VerificationText checks={[dlCheck]} running={running === "dl" ? "dl" : undefined} />
       </> : null}
-      {dateField("driving_license_exp_date","DL expiry date",{ readOnly: Boolean(dlCheck), warning: expired(values.drivingLicenseExpiry) ? "Driving licence has expired." : "" })}
+      {dateField("driving_license_exp_date","DL expiry date",{ readOnly: Boolean(dlCheck?.expiryDate), warning: expired(values.drivingLicenseExpiry) ? "Driving licence has expired." : "" })}
       {enabled.has("vehicle_reg_no") ? <>
         <VerifyField label={`Vehicle reg no${required.has("vehicle_reg_no") ? " *" : ""}`} name="vehicle_reg_no" onChange={(value) => set("vehicleRegistrationNo", value, ["vehicle"])} onVerify={() => verify("vehicle")} running={running === "vehicle"} value={values.vehicleRegistrationNo || ""} verified={verified("vehicle")} error={verificationErrors.vehicle || verificationInputError("vehicle", values)} required={required.has("vehicle_reg_no")} />
         <VerificationText checks={[vehicleCheck]} running={running === "vehicle" ? "vehicle" : undefined} />
       </> : null}
-      {dateField("vehicle_reg_exp_date","Reg expiry date",{ readOnly: verifiedVehicleCheck, warning: expired(values.registrationExpiry) ? "Vehicle registration has expired." : "" })}
-      {dateField("vehicle_insurance_exp_date","Vehicle Insurance expiry",{ readOnly: verifiedVehicleCheck, warning: expired(values.insuranceExpiry) ? "Vehicle insurance has expired." : "" })}
-      {!(verifiedVehicleCheck && isPureElectricFuel(vehicleCheck?.fuelType)) ? dateField("vehicle_pollution_exp_date","Pollution expiry date",{ readOnly: verifiedVehicleCheck, warning: expired(values.pollutionExpiry) ? "Pollution certificate has expired." : "" }) : null}
+      {dateField("vehicle_reg_exp_date","Reg expiry date",{ readOnly: verifiedVehicleCheck && Boolean(vehicleCheck?.registrationExpiryDate), warning: expired(values.registrationExpiry) ? "Vehicle registration has expired." : "" })}
+      {dateField("vehicle_insurance_exp_date","Vehicle Insurance expiry",{ readOnly: verifiedVehicleCheck && Boolean(vehicleCheck?.insuranceExpiryDate), warning: expired(values.insuranceExpiry) ? "Vehicle insurance has expired." : "" })}
+      {!(verifiedVehicleCheck && isPureElectricFuel(vehicleCheck?.fuelType)) ? dateField("vehicle_pollution_exp_date","Pollution expiry date",{ readOnly: verifiedVehicleCheck && Boolean(vehicleCheck?.pollutionExpiryDate), warning: expired(values.pollutionExpiry) ? "Pollution certificate has expired." : "" }) : null}
     </ProfileSection> : null}
     <ProfileSection title="Emergency contact">
       {input("emergency_contact_number","Emergency contact number")}{input("emergency_contact_name","Contact person name")}{input("emergency_contact_relation","Relation",{ choices: relations })}
@@ -1064,13 +1063,17 @@ function VerificationText({ checks, running }: { checks: Array<Verification | un
 
   const holder = check.name || check.accountName || check.ownerName;
   const status = check.message || (check.verified ? "Verified." : "Verification failed.");
-  const tone = check.verified ? "ok" : check.manualReview ? "review" : "fail";
-  const Icon = check.verified ? ShieldCheck : check.manualReview ? TriangleAlert : CircleX;
+  // Vehicle and bank checks never block registration, so an unverified one is a notice, not a failure.
+  const advisory = check.manualReview || (!check.verified && !check.blockSubmit && ["vehicle", "bank"].includes(check.kind));
+  const tone = check.verified ? "ok" : advisory ? "review" : "fail";
+  const Icon = check.verified ? ShieldCheck : advisory ? TriangleAlert : CircleX;
   const identityMismatch = ["pan", "dl", "pf_uan"].includes(check.kind) && !check.verified && Boolean(holder);
-  const fallbackLabel = check.kind === "vehicle"
-    ? "Vehicle details checked"
-    : `${verificationLabel(check.kind)} verification failed`;
-  const label = check.kind === "bank"
+  const fallbackLabel = check.verified
+    ? `${verificationLabel(check.kind)} checked`
+    : advisory
+      ? `${verificationLabel(check.kind)} not verified`
+      : `${verificationLabel(check.kind)} verification failed`;
+  const label = check.kind === "bank" && (check.verified || check.accountName || check.name)
     ? `Beneficiary: ${check.accountName || check.name || "Name not returned"}`
     : check.kind === "pan_aadhaar"
       ? status
@@ -1079,7 +1082,7 @@ function VerificationText({ checks, running }: { checks: Array<Verification | un
       : holder || fallbackLabel;
   const detail = check.kind === "vehicle" && check.fuelType
     ? `${check.fuelType}${status ? ` · ${status}` : ""}`
-    : holder ? status : undefined;
+    : holder || check.message ? status : undefined;
 
   return <div className={`dx-verification ${tone}${identityMismatch ? " mismatch" : ""}`}>
     <Icon />

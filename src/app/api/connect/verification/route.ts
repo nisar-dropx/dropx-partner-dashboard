@@ -6,7 +6,7 @@ import { matchNames } from "@/lib/name-match";
 import { verifyPanWithFallback } from "@/lib/pan-verification";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { callVerificationProvider } from "@/lib/verification-api-audit";
+import { callVerificationProvider, VerificationProviderTransportError, type ProviderCall } from "@/lib/verification-api-audit";
 import { isPureElectricFuel, vehicleFuelTypeForClient } from "@/lib/vehicle-fuel";
 import { isWorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
@@ -90,6 +90,38 @@ function normalizeDate(value: unknown) {
   const match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (!match) return raw;
   return `${match[1].padStart(2, "0")}/${match[2].padStart(2, "0")}/${match[3]}`;
+}
+
+/** A provider date as dd/mm/yyyy, or blank when the provider sent "NA" or nothing usable. */
+function providerDate(value: unknown) {
+  const normalized = normalizeDate(value);
+  return /^\d{2}\/\d{2}\/\d{4}$/.test(normalized) ? normalized : "";
+}
+
+/** The date of birth as the app keys it (dd/mm/yyyy), whichever format it arrived in. */
+function displayDob(value: unknown) {
+  const iso = text(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : normalizeDate(value);
+}
+
+type ProviderOutcome = "answered" | "bad_input" | "unavailable";
+
+/**
+ * Ask the provider, telling apart a real answer from the provider rejecting
+ * the input and from the provider (or its government source) being down.
+ * An outage must never read as a failed identity check.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function askProvider(call: ProviderCall): Promise<{ body: any; outcome: ProviderOutcome }> {
+  try {
+    const { response, body } = await callVerificationProvider({ timeoutMs: 20_000, ...call });
+    if (response.ok && text(body?.status?.type).toLowerCase() !== "error") return { body, outcome: "answered" };
+    const sourceStatus = Number(body?.error?.http_response_code ?? body?.error?.code);
+    return { body, outcome: sourceStatus === 400 ? "bad_input" : "unavailable" };
+  } catch (error) {
+    if (error instanceof VerificationProviderTransportError) return { body: null, outcome: "unavailable" };
+    throw error;
+  }
 }
 
 function parseDate(value: string) {
@@ -236,6 +268,10 @@ export async function GET(request: NextRequest) {
           name: row.display_name,
           message: row.message,
           fuelType: vehicleFuelTypeForClient(details.fuelType),
+          expiryDate: text(details.expiryDate),
+          registrationExpiryDate: text(details.registrationExpiryDate),
+          insuranceExpiryDate: text(details.insuranceExpiryDate),
+          pollutionExpiryDate: text(details.pollutionExpiryDate),
           details: row.details,
           verifiedAt: row.verified_at
         };
@@ -345,16 +381,38 @@ export async function POST(request: NextRequest) {
       const dob = idspayDob(payload.dateOfBirth);
       if (!dlNumber || !dob) throw new Error("DL number and date of birth are required.");
       if (!/^[A-Z0-9]{4,30}$/.test(dlNumber)) throw new Error("Invalid DL No.");
-      const { body } = await callVerificationProvider({
+      const { body, outcome } = await askProvider({
         ...auditContext,
         endpoint: "/srv2/validation/dl",
         payload: { ...credentials, dlNumber, dob }
       });
+      const dlInputKey = inputKey([dlNumber, displayDob(payload.dateOfBirth)]);
+      if (outcome === "bad_input") {
+        return verifiedResponse({
+          verified: false,
+          manualReview: false,
+          blockSubmit: true,
+          inputKey: dlInputKey,
+          message: "Check the DL number and date of birth. They are not in a format the licence service accepts."
+        });
+      }
+      // No licence came back: the service is down, or it holds no record for
+      // this number and date of birth. Neither proves the licence is wrong, so
+      // the applicant continues and a person reviews the uploaded licence.
+      if (outcome === "unavailable" || !body?.data?.details_of_driving_licence) {
+        return verifiedResponse({
+          verified: false,
+          manualReview: true,
+          blockSubmit: false,
+          inputKey: dlInputKey,
+          message: outcome === "unavailable"
+            ? "DL could not be checked right now. Enter the expiry date and continue. Your licence will be reviewed."
+            : "No licence found for this DL number and date of birth. Check both. If they are correct, enter the expiry date and continue. Your licence will be reviewed."
+        });
+      }
       const details = body?.data?.details_of_driving_licence ?? {};
       const apiName = compact(details?.name || findFirstString(body, ["name", "full_name", "fullName"]));
-      const transportExpiry = normalizeDate(body?.data?.dl_validity?.transport?.to);
-      const nonTransportExpiry = normalizeDate(body?.data?.dl_validity?.non_transport?.to);
-      const expiryDate = transportExpiry && transportExpiry.toUpperCase() !== "NA" ? transportExpiry : nonTransportExpiry;
+      const expiryDate = providerDate(body?.data?.dl_validity?.transport?.to) || providerDate(body?.data?.dl_validity?.non_transport?.to);
       const parsedExpiry = parseDate(expiryDate);
       const expired = parsedExpiry ? parsedExpiry.getTime() < Date.now() : false;
       const apiSuccess = body?.status?.type === "success" || text(body?.message).toLowerCase().includes("validated");
@@ -366,7 +424,7 @@ export async function POST(request: NextRequest) {
         verified: nameMatched && !expired,
         manualReview: partial && !expired,
         blockSubmit: blocked,
-        inputKey: inputKey([dlNumber, normalizeDate(payload.dateOfBirth)]),
+        inputKey: dlInputKey,
         name: apiName,
         nameMatchStatus: nameMatch.status,
         nameMatchPercent: nameMatch.percent,
@@ -388,13 +446,23 @@ export async function POST(request: NextRequest) {
       const regNo = text(payload.vehicleRegNo).toUpperCase();
       if (!regNo) throw new Error("Vehicle registration number is required.");
       if (!/^[A-Z0-9]{4,30}$/.test(regNo)) throw new Error("Invalid vehicle number.");
-      const { body } = await callVerificationProvider({
+      const { body, outcome } = await askProvider({
         ...auditContext,
         endpoint: "/srv2/validation/rc",
         payload: { ...credentials, reg_no: regNo }
       });
       const data = body?.data ?? {};
-      const verified = body?.status?.type === "success" || body?.success === true;
+      // The provider reports "success" even when it found no vehicle, so a
+      // registration number in the answer is what proves a match.
+      const verified = outcome === "answered" && Boolean(text(data?.reg_no)) &&
+        (body?.status?.type === "success" || body?.success === true);
+      const warning = verified
+        ? ""
+        : outcome === "bad_input"
+          ? "Check the vehicle number. It is not in a format the vehicle service accepts."
+          : outcome === "unavailable"
+            ? "Vehicle details could not be fetched right now. Enter the expiry dates yourself and continue."
+            : "No vehicle found for this number. Check it. If it is correct, enter the expiry dates yourself and continue.";
       const providerFuelType = compact(data?.type ?? data?.fuel_type ?? data?.fuelType);
       const fuelType = vehicleFuelTypeForClient(providerFuelType);
       const result = {
@@ -402,10 +470,11 @@ export async function POST(request: NextRequest) {
         inputKey: inputKey([regNo]),
         ownerName: compact(data?.owner_name),
         fuelType,
-        warning: verified ? "" : text(body?.message) || "Vehicle details could not be verified.",
-        registrationExpiryDate: normalizeDate(data?.rc_expiry_date),
-        insuranceExpiryDate: normalizeDate(data?.vehicle_insurance_upto ?? data?.insurance_upto),
-        pollutionExpiryDate: isPureElectricFuel(providerFuelType) ? "" : normalizeDate(data?.pucc_upto)
+        warning,
+        message: warning,
+        registrationExpiryDate: providerDate(data?.rc_expiry_date),
+        insuranceExpiryDate: providerDate(data?.vehicle_insurance_upto ?? data?.insurance_upto),
+        pollutionExpiryDate: isPureElectricFuel(providerFuelType) ? "" : providerDate(data?.pucc_upto)
       };
       return verifiedResponse(result);
     }
@@ -416,7 +485,7 @@ export async function POST(request: NextRequest) {
       if (!creditorAccountId || !ifscCode) throw new Error("Bank account number and IFSC are required.");
       if (!/^[A-Z0-9]{4,30}$/.test(creditorAccountId.toUpperCase())) throw new Error("Invalid bank account number.");
       if (!/^[A-Z0-9]{11}$/.test(ifscCode)) throw new Error("Invalid IFSC.");
-      const { body } = await callVerificationProvider({
+      const { body } = await askProvider({
         ...auditContext,
         endpoint: "/idfc/beneficiary",
         payload: { ...credentials, creditorAccountId, ifscCode }
@@ -427,7 +496,9 @@ export async function POST(request: NextRequest) {
         verified,
         inputKey: inputKey([creditorAccountId, ifscCode]),
         accountName: compact(resource?.creditorName),
-        message: verified ? text(body?.message) || "Bank account checked." : "Bank verification failed."
+        message: verified
+          ? text(body?.message) || "Bank account checked."
+          : "Bank account could not be checked automatically. Check the account number and IFSC. If they are correct, continue."
       };
       if (verified) await saveVerifiedIfsc(profileType, accountId, ifscCode);
       return verifiedResponse(result);
