@@ -45,12 +45,14 @@ export function ConnectBetaJourneyShell({ account, registration, children }: { a
   const language = languageState[0] ? regional : "en";
   const text = copy[language];
   return <LanguageContext.Provider value={languageState}>
-    <aside className="dx-beta-helpbar" aria-label="Station support" lang={language}>
-      <div className="dx-beta-helpbar-contact"><span>{text.title}</span>{data?.leader ? <><strong>{data.leader.name}</strong><small>{text.label}{data.stationCode ? ` · ${data.stationCode}` : ""}</small>{data.leader.phone ? <a className="dx-beta-helpbar-number" href={`tel:${data.leader.phone}`}>{data.leader.phone}</a> : <small>{text.unavailable}</small>}</> : <p role="status">{error ? "Station contact couldn’t load. Try again." : data ? text.unavailable : "Finding your station team leader…"}</p>}</div>
+    <div className={`dx-beta-journey-shell${registration?" registration":""}`}><aside className="dx-beta-helpbar" aria-label="Station support" lang={language}>
+      <div className="dx-beta-helpbar-contact"><span>{text.title}</span>{data?.leader ? <><strong>{data.leader.name}</strong><small className="dx-beta-leader-label">{text.label}{data.stationCode ? ` · ${data.stationCode}` : ""}</small>{data.leader.phone ? <a className="dx-beta-helpbar-number" href={`tel:${data.leader.phone}`}>{data.leader.phone}</a> : <small>{text.unavailable}</small>}</> : <p role="status">{error ? "Station contact couldn’t load. Try again." : data ? text.unavailable : "Finding your station team leader…"}</p>}</div>
       <div className="dx-beta-helpbar-actions">{data?.leader?.phone ? <a className="dx-beta-call" href={`tel:${data.leader.phone}`}><Phone size={18}/>{text.call}</a> : error ? <button type="button" onClick={() => setAttempt(value => value + 1)}><RefreshCw size={16}/>Try again</button> : null}
-        {registration && regional !== "en" ? <button className="dx-beta-helpbar-language" type="button" onClick={() => languageState[1](value => !value)}>{language === "en" ? <>Read in <span lang={regional}>{guidanceLanguages.find(item => item.code === regional)?.label}</span></> : "Read in English"}</button> : null}
+
       </div>
     </aside>
+    <div className="dx-beta-registration-language">{registration && regional !== "en" ? <button className="dx-beta-helpbar-language" type="button" onClick={() => languageState[1](value => !value)}>{language === "en" ? <>Read in <span lang={regional}>{guidanceLanguages.find(item => item.code === regional)?.label}</span></> : "Read in English"}</button> : null}</div>
     {children}
+    </div>
   </LanguageContext.Provider>;
 }
