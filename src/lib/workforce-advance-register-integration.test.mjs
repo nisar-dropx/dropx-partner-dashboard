@@ -10,6 +10,7 @@ const registerPage = source("../app/payments/workforce-advances/page.tsx");
 const registerComponent = source("../components/workforce-advance-register.tsx");
 const registerView = source("./workforce-advance-register-view.ts");
 const addAdvanceRoute = source("../app/api/payments/workforce-advances/route.ts");
+const reassignAdvanceRoute = source("../app/api/payments/workforce-advances/reassign/route.ts");
 const bulkUploadComponent = source("../components/workforce-advance-bulk-upload.tsx");
 const bulkUploadRoute = source("../app/api/payments/workforce-advances/bulk-upload/route.ts");
 const payoutPage = source("../app/payments/workforce-payouts/page.tsx");
@@ -23,6 +24,8 @@ const periodDependencyMigration = source("../../supabase/migrations/202610071710
 const accessPages = source("./access-pages.ts");
 const accessSurface = source("./access-surface.ts");
 const importHardeningMigration = source("../../supabase/migrations/20261007111000_workforce_advance_import_hardening.sql");
+const reassignmentMigration = source("../../supabase/migrations/20261007210000_workforce_advance_reassignment.sql");
+const reassignmentPaidLocationFix = source("../../supabase/migrations/20261007211000_workforce_advance_reassignment_paid_location_fix.sql");
 
 test("Workforce Advance Register is shared by Dashboard and Ops with separate page codes", () => {
   assert.match(registerPage, /currentAdminAccessSurface\(\)/);
@@ -98,6 +101,82 @@ test("bulk upload requires add permission and follows preview then explicit conf
   assert.match(bulkUploadComponent, /Duplicate advances are blocked even if the workbook was re-saved/i);
   assert.match(bulkUploadComponent, /Already deducted/);
   assert.match(registerComponent, /canAdd\s*\?\s*<>[\s\S]*?<WorkforceAdvanceBulkUpload\s*\/>/);
+});
+
+test("advance reassignment is edit-only, company-scoped, transactional and audit-backed", () => {
+  assert.match(registerPage, /const canEdit\s*=\s*hasPermission\(authorization,\s*pageCode,\s*["']edit["']\)/);
+  assert.match(registerPage, /<WorkforceAdvanceRegister[^>]+canEdit=\{canEdit\}/);
+  assert.match(registerComponent, /<th className=["']workforce-advance-action-cell["']>Actions<\/th>/);
+  assert.match(registerComponent, /<AdvanceReassignmentModal/);
+  assert.match(registerComponent, /fetch\(["']\/api\/payments\/workforce-advances\/reassign["']/);
+  assert.match(registerComponent, /const locked\s*=\s*row\.deducted\s*>\s*0/);
+  assert.match(registerComponent, /disabled=\{locked\}/);
+  assert.match(registerComponent, /workforceOptions\.filter\(\(option\)\s*=>\s*option\.id\s*!==\s*reassignRow\.workforceId\)/);
+  assert.match(registerComponent, /if\s*\(!normalizedReason\)[\s\S]*?Enter the reason for this reassignment/);
+  assert.match(registerComponent, /<textarea[\s\S]{0,500}?\brequired\b/);
+  assert.match(registerComponent, /Original imported ID/);
+  assert.match(registerComponent, /Reassignment history \(\{row\.reassignmentHistory\.length\}\)/);
+  assert.match(registerPage, /from_station_id[\s\S]*?to_station_id/);
+  assert.match(
+    registerPage,
+    /!allLocations\s*&&\s*!reassignmentLocationIds\.every\(\(locationId\)\s*=>\s*allowedLocationIds\.has\(locationId\)\)/
+  );
+  assert.match(registerPage, /normalizeDropxId\(worker\.dropx_id\)\s*!==\s*["']{2}/);
+
+  assert.match(reassignAdvanceRoute, /sameOrigin\(request\)/);
+  assert.match(
+    reassignAdvanceRoute,
+    /currentAdminAccessSurface\(\)\s*===\s*["']ops["']\s*\?\s*["']ops_workforce_advances["']\s*:\s*["']workforce_advances["']/
+  );
+  assert.match(reassignAdvanceRoute, /hasPermission\(authorization,\s*pageCode,\s*["']edit["']\)/);
+  assert.doesNotMatch(reassignAdvanceRoute, /hasPermission\(authorization,\s*pageCode,\s*["']add["']\)/);
+  assert.match(reassignAdvanceRoute, /reason\.length\s*<\s*3\s*\|\|\s*reason\.length\s*>\s*500/);
+  assert.match(reassignAdvanceRoute, /rpc\(["']workforce_reassign_advance["']/);
+  for (const parameter of [
+    "p_company_id",
+    "p_advance_id",
+    "p_target_workforce_id",
+    "p_expected_workforce_id",
+    "p_expected_identity_revision",
+    "p_reason",
+    "p_actor_user_id",
+    "p_allowed_location_ids"
+  ]) assert.match(reassignAdvanceRoute, new RegExp(`${parameter}:`));
+  assert.match(
+    reassignAdvanceRoute,
+    /p_allowed_location_ids:\s*allLocations\s*\?\s*null\s*:\s*authorization\.locationScopeIds/
+  );
+
+  assert.match(reassignmentMigration, /add column identity_revision integer not null default 0/i);
+  assert.match(reassignmentMigration, /create table public\.workforce_advance_reassignments/i);
+  assert.match(reassignmentMigration, /foreign key \(company_id, advance_id\)[\s\S]*?references public\.workforce_advances\(company_id, id\)[\s\S]*?on delete restrict/i);
+  assert.match(reassignmentMigration, /unique \(company_id, advance_id, revision\)/i);
+  assert.match(reassignmentMigration, /before update or delete on public\.workforce_advance_reassignments/i);
+  assert.match(reassignmentMigration, /original imported DropX ID is immutable/i);
+  assert.match(reassignmentMigration, /identity changes require an immutable reassignment audit/i);
+  assert.match(reassignmentMigration, /create or replace function public\.workforce_reassign_advance/i);
+  assert.match(reassignmentMigration, /order by workforce\.id[\s\S]*?for update;[\s\S]*?lock_workforce_payment_allocation_company\(p_company_id\)/i);
+  assert.match(reassignmentMigration, /advance\.identity_revision\s*<>\s*p_expected_identity_revision/i);
+  assert.match(reassignmentMigration, /advance\.workforce_id is distinct from p_expected_workforce_id/i);
+  assert.match(reassignmentMigration, /opening_deducted_amount\s*>\s*0\s*or\s*v_active_deducted\s*>\s*0/i);
+  assert.match(reassignmentMigration, /source or target Workforce advance is outside your assigned locations/i);
+  assert.match(reassignmentMigration, /insert into public\.workforce_advance_reassignments/i);
+  assert.match(reassignmentMigration, /identity_revision\s*=\s*v_next_revision/i);
+  assert.match(reassignmentMigration, /alter table public\.workforce_advance_reassignments enable row level security/i);
+  assert.match(reassignmentMigration, /grant select on table public\.workforce_advance_reassignments to service_role/i);
+  assert.match(reassignmentMigration, /revoke all on function public\.workforce_reassign_advance[\s\S]*?from public, anon, authenticated, service_role/i);
+  assert.match(reassignmentMigration, /grant execute on function public\.workforce_reassign_advance[\s\S]*?to service_role/i);
+  assert.match(reassignmentPaidLocationFix, /Historical station where the advance was paid/i);
+  assert.match(reassignmentPaidLocationFix, /The advance paid-at location is immutable/i);
+  assert.doesNotMatch(
+    reassignmentPaidLocationFix,
+    /set[\s\S]{0,180}?station_id\s*=\s*v_target_workforce\.location_id/i
+  );
+  assert.match(
+    reassignmentPaidLocationFix,
+    /v_advance\.workforce_id,\s*v_source_workforce\.location_id/i
+  );
+  assert.match(reassignmentPaidLocationFix, /'paidLocationPreserved',\s*true/i);
 });
 
 test("unregistered DropX IDs preview and render as non-deductible pending advances", () => {

@@ -14,6 +14,7 @@ const rows = [
     advanceNumber: "WA-001",
     advanceDate: "2026-09-01",
     dropxId: "2000031112340",
+    originalDropxId: "2000031112340",
     workforceName: "Boundary One",
     designation: "Delivery Associate",
     location: "NLRF",
@@ -34,6 +35,7 @@ const rows = [
     advanceNumber: "WA-002",
     advanceDate: "2026-09-30",
     dropxId: "JDBD1002",
+    originalDropxId: "OLD-JDBD-1002",
     workforceName: "Boundary Two",
     designation: "Driver",
     location: "NLRF",
@@ -54,6 +56,7 @@ const rows = [
     advanceNumber: "WA-003",
     advanceDate: "2026-10-01",
     dropxId: "DROPX1003",
+    originalDropxId: "DROPX1003",
     workforceName: "Awaiting Workforce registration",
     designation: "",
     location: "—",
@@ -74,6 +77,7 @@ const rows = [
     advanceNumber: "WA-004",
     advanceDate: "2026-10-15",
     dropxId: "DROPX1004",
+    originalDropxId: "DROPX1004",
     workforceName: "Partial Person",
     designation: "Delivery Associate",
     location: "JDBD",
@@ -107,6 +111,7 @@ const all = {
 test("empty selections retain every advance and text search covers register details", () => {
   assert.equal(filterWorkforceAdvanceRows(rows, "", all).length, 4);
   assert.equal(matchesWorkforceAdvanceFilters(rows[1], "ext-002", all), true);
+  assert.equal(matchesWorkforceAdvanceFilters(rows[1], "old-jdbd-1002", all), true);
   assert.equal(matchesWorkforceAdvanceFilters(rows[1], "missing value", all), false);
 });
 

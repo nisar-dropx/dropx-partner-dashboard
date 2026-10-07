@@ -5,7 +5,7 @@ import { PGlite } from "@electric-sql/pglite";
 
 const migrationsUrl = new URL("../supabase/migrations/", import.meta.url);
 const advanceMigrationFiles = readdirSync(migrationsUrl)
-  .filter((name) => /^202610071\d+_workforce_advance.*\.sql$/i.test(name))
+  .filter((name) => /^20261007\d+_workforce_advance.*\.sql$/i.test(name))
   .sort();
 const migration = advanceMigrationFiles
   .map((name) => readFileSync(new URL(name, migrationsUrl), "utf8"))
@@ -29,6 +29,10 @@ const allPendingRecoveryMigration = readFileSync(
 );
 const periodDependencyMigration = readFileSync(
   new URL("20261007171000_workforce_payout_period_dependency_revisions.sql", migrationsUrl),
+  "utf8"
+);
+const reassignmentMigration = readFileSync(
+  new URL("20261007210000_workforce_advance_reassignment.sql", migrationsUrl),
   "utf8"
 );
 
@@ -69,6 +73,14 @@ assert.match(migration, /alter table public\.workforce_advances enable row level
 assert.match(migration, /alter table public\.workforce_advance_recoveries enable row level security/i);
 assert.match(migration, /'workforce_advances', 'Workforce Advance Register'/i);
 assert.match(migration, /'ops_workforce_advances', 'Workforce Advance Register'/i);
+assert.match(reassignmentMigration, /create table public\.workforce_advance_reassignments/i);
+assert.match(reassignmentMigration, /add column identity_revision integer not null default 0/i);
+assert.match(reassignmentMigration, /foreign key \(company_id, advance_id\)[\s\S]*?references public\.workforce_advances\(company_id, id\)[\s\S]*?on delete restrict/i);
+assert.match(reassignmentMigration, /create or replace function public\.workforce_reassign_advance/i);
+assert.match(reassignmentMigration, /before update or delete on public\.workforce_advance_reassignments/i);
+assert.match(reassignmentMigration, /opening_deducted_amount > 0 or v_active_deducted > 0/i);
+assert.match(reassignmentMigration, /revoke all on function public\.workforce_reassign_advance/i);
+assert.match(reassignmentMigration, /grant execute on function public\.workforce_reassign_advance[\s\S]*?to service_role/i);
 assert.match(migration, /v_deducted_amount\s*:=\s*coalesce/i);
 assert.match(migration, /v_business_key\s*:=\s*'WAI1-'\s*\|\|\s*md5/i);
 assert.match(migration, /insert into public\.workforce_advance_recoveries\([\s\S]*?'opening_balance'/i);
@@ -145,6 +157,7 @@ const db = new PGlite();
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 const company = id(1);
 const actor = id(2);
+const secondaryActor = id(33);
 const station = id(3);
 const otherStation = id(4);
 const worker = id(5);
@@ -160,6 +173,11 @@ const laterAdvance = id(22);
 const pendingWorker = id(23);
 const futureAdvanceWorker = id(24);
 const futureDatedAdvance = id(25);
+const reassignmentWorkerOne = id(26);
+const reassignmentWorkerTwo = id(27);
+const reassignmentWorkerThree = id(28);
+const reassignmentRecovery = id(32);
+const paidLocationAdvance = id(34);
 
 await db.exec(`
   create schema if not exists auth;
@@ -467,7 +485,7 @@ await db.exec(`
   before insert or update or delete on public.workforce_payout_deduction_values
   for each row execute function public.guard_finalized_workforce_payout_input();
 
-  insert into auth.users(id) values ('${actor}');
+  insert into auth.users(id) values ('${actor}'), ('${secondaryActor}');
   insert into public.companies(id) values ('${company}');
   insert into public.verifier_workforce_snapshot_state(
     company_id, payout_inputs, direct_allocations, payment_policy
@@ -480,7 +498,10 @@ await db.exec(`
     ('${worker}', '${company}', 'DX1001', 'Advance Worker', '${station}', null),
     ('${reclassifiedWorker}', '${company}', 'DX-OLD', 'Reclassified Worker', '${station}', 'reclassified'),
     ('${openingBalanceWorker}', '${company}', 'DX-OPENING', 'Opening Balance Worker', '${station}', null),
-    ('${futureAdvanceWorker}', '${company}', 'DX-FUTURE', 'Future Advance Worker', '${station}', null);
+    ('${futureAdvanceWorker}', '${company}', 'DX-FUTURE', 'Future Advance Worker', '${station}', null),
+    ('${reassignmentWorkerOne}', '${company}', 'DX-REASSIGN-1', 'First Reassignment Target', '${station}', null),
+    ('${reassignmentWorkerTwo}', '${company}', 'DX-REASSIGN-2', 'Second Reassignment Target', '${otherStation}', null),
+    ('${reassignmentWorkerThree}', '${company}', 'DX-REASSIGN-3', 'Third Reassignment Target', '${station}', null);
   insert into public.workforce_deduction_heads(
     id, company_id, code, name, calculation_type, is_system, is_active
   ) values
@@ -1344,6 +1365,306 @@ await assert.rejects(
   "the identity-based WAI2 key must remain duplicate-safe after automatic linking"
 );
 
+const pendingReassignmentRow = {
+  row_number: 15,
+  dropx_id: " KANA Original 9014 ",
+  advance_date: "2026-10-03",
+  amount: 2000,
+  deducted_amount: 0,
+  payment_mode: "bank_transfer",
+  payment_reference: "REASSIGN-PENDING-001",
+  remark: "Imported under the wrong DropX ID"
+};
+await applyImport("7".repeat(64), [pendingReassignmentRow], null);
+const pendingReassignment = await db.query(`
+  select id::text id, workforce_id::text workforce_id, identity_revision
+  from public.workforce_advances
+  where payment_reference='REASSIGN-PENDING-001'
+`);
+const reassignmentAdvance = pendingReassignment.rows[0].id;
+assert.deepEqual(pendingReassignment.rows, [{
+  id: reassignmentAdvance,
+  workforce_id: null,
+  identity_revision: 0
+}], "a pending advance must start without an invented identity and at revision zero");
+
+const reassignAdvance = (
+  advanceId,
+  targetWorkforceId,
+  expectedWorkforceId,
+  expectedRevision,
+  reason,
+  allowedLocations = null
+) => db.query(`
+  select public.workforce_reassign_advance(
+    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::integer,
+    $6::text, $7::uuid, $8::uuid[]
+  ) as result
+`, [
+  company,
+  advanceId,
+  targetWorkforceId,
+  expectedWorkforceId,
+  expectedRevision,
+  reason,
+  actor,
+  allowedLocations
+]);
+
+const firstReassignment = await reassignAdvance(
+  reassignmentAdvance,
+  reassignmentWorkerOne,
+  null,
+  0,
+  "Correct the imported DropX identity"
+);
+assert.deepEqual({
+  workforceId: firstReassignment.rows[0].result.workforceId,
+  identityRevision: firstReassignment.rows[0].result.identityRevision,
+  originalImportedDropxId: firstReassignment.rows[0].result.originalImportedDropxId
+}, {
+  workforceId: reassignmentWorkerOne,
+  identityRevision: 1,
+  originalImportedDropxId: " KANA Original 9014 "
+}, "a pending advance must link to the chosen canonical Workforce member without rewriting its source ID");
+
+const firstReassignmentState = await db.query(`
+  select
+    advance.imported_dropx_id,
+    advance.link_status,
+    advance.workforce_id::text workforce_id,
+    advance.station_id::text station_id,
+    advance.identity_revision,
+    audit.revision audit_revision,
+    audit.original_imported_dropx_id,
+    audit.from_workforce_id::text from_workforce_id,
+    audit.from_dropx_id,
+    audit.from_workforce_name,
+    audit.from_location,
+    audit.to_workforce_id::text to_workforce_id,
+    audit.to_dropx_id,
+    audit.to_workforce_name,
+    audit.to_location,
+    audit.reason,
+    audit.reassigned_by::text reassigned_by
+  from public.workforce_advances advance
+  join public.workforce_advance_reassignments audit
+    on audit.company_id=advance.company_id and audit.advance_id=advance.id
+  where advance.id=$1
+`, [reassignmentAdvance]);
+assert.deepEqual(firstReassignmentState.rows, [{
+  imported_dropx_id: " KANA Original 9014 ",
+  link_status: "linked",
+  workforce_id: reassignmentWorkerOne,
+  station_id: null,
+  identity_revision: 1,
+  audit_revision: 1,
+  original_imported_dropx_id: " KANA Original 9014 ",
+  from_workforce_id: null,
+  from_dropx_id: " KANA Original 9014 ",
+  from_workforce_name: "Awaiting Workforce registration",
+  from_location: "—",
+  to_workforce_id: reassignmentWorkerOne,
+  to_dropx_id: "DX-REASSIGN-1",
+  to_workforce_name: "First Reassignment Target",
+  to_location: "ST1",
+  reason: "Correct the imported DropX identity",
+  reassigned_by: actor
+}], "the first reassignment must be fully snapshot-audited in the same transaction");
+
+const secondReassignment = await reassignAdvance(
+  reassignmentAdvance,
+  reassignmentWorkerTwo,
+  reassignmentWorkerOne,
+  1,
+  "Move the balance to the verified Workforce profile"
+);
+assert.equal(secondReassignment.rows[0].result.identityRevision, 2);
+const reassignmentHistory = await db.query(`
+  select revision, from_workforce_id::text from_workforce_id,
+    to_workforce_id::text to_workforce_id, reason
+  from public.workforce_advance_reassignments
+  where advance_id=$1
+  order by revision
+`, [reassignmentAdvance]);
+assert.deepEqual(reassignmentHistory.rows, [
+  {
+    revision: 1,
+    from_workforce_id: null,
+    to_workforce_id: reassignmentWorkerOne,
+    reason: "Correct the imported DropX identity"
+  },
+  {
+    revision: 2,
+    from_workforce_id: reassignmentWorkerOne,
+    to_workforce_id: reassignmentWorkerTwo,
+    reason: "Move the balance to the verified Workforce profile"
+  }
+], "repeat corrections must append revisions rather than overwrite their history");
+
+await db.query(`
+  insert into public.workforce_advances(
+    id, company_id, workforce_id, station_id, advance_number, advance_date,
+    amount, payment_mode, source_type, created_by, updated_by
+  ) values ($1,$2,$3,$4,'WA-PAID-LOCATION','2026-10-03',300,'cash','manual',$5,$5)
+`, [paidLocationAdvance, company, reassignmentWorkerOne, station, actor]);
+await reassignAdvance(
+  paidLocationAdvance,
+  reassignmentWorkerTwo,
+  reassignmentWorkerOne,
+  0,
+  "Correct the liable Workforce identity without changing payment facts"
+);
+const preservedPaidLocation = await db.query(`
+  select
+    advance.workforce_id::text workforce_id,
+    advance.station_id::text paid_station_id,
+    audit.from_station_id::text from_station_id,
+    audit.to_station_id::text to_station_id
+  from public.workforce_advances advance
+  join public.workforce_advance_reassignments audit
+    on audit.company_id=advance.company_id and audit.advance_id=advance.id
+  where advance.id=$1
+`, [paidLocationAdvance]);
+assert.deepEqual(preservedPaidLocation.rows, [{
+  workforce_id: reassignmentWorkerTwo,
+  paid_station_id: station,
+  from_station_id: station,
+  to_station_id: otherStation
+}], "cross-station reassignment must preserve the historical paid-at station while auditing both identity locations");
+await assert.rejects(
+  db.query(`update public.workforce_advances set station_id=$1 where id=$2`, [otherStation, paidLocationAdvance]),
+  /paid-at location is immutable/i,
+  "the historical paid-at station must not be editable after reassignment"
+);
+
+await db.query(`
+  update public.workforce_advances
+  set remark='Reviewed after reassignment', updated_by=$1
+  where id=$2
+`, [secondaryActor, reassignmentAdvance]);
+const ordinaryPostReassignmentUpdate = await db.query(`
+  select workforce_id::text workforce_id, identity_revision, remark, updated_by::text updated_by
+  from public.workforce_advances
+  where id=$1
+`, [reassignmentAdvance]);
+assert.deepEqual(ordinaryPostReassignmentUpdate.rows, [{
+  workforce_id: reassignmentWorkerTwo,
+  identity_revision: 2,
+  remark: "Reviewed after reassignment",
+  updated_by: secondaryActor
+}], "an ordinary non-identity update after reassignment must use the current audit revision without requiring the original reassignment actor");
+
+await assert.rejects(
+  reassignAdvance(
+    reassignmentAdvance,
+    reassignmentWorkerThree,
+    reassignmentWorkerOne,
+    1,
+    "This browser state is stale"
+  ),
+  /assignment changed/i,
+  "a stale expected revision or current Workforce identity must not overwrite a newer reassignment"
+);
+
+await assert.rejects(
+  db.query(`
+    update public.workforce_advances
+    set workforce_id=$1
+    where id=$2
+  `, [reassignmentWorkerThree, reassignmentAdvance]),
+  /Use the Workforce advance reassignment workflow/i,
+  "a direct mismatched identity update must not bypass the audit workflow"
+);
+
+await assert.rejects(
+  db.query(`
+    update public.workforce_advances
+    set imported_dropx_id='DX-REASSIGN-2'
+    where id=$1
+  `, [reassignmentAdvance]),
+  /original imported DropX ID is immutable/i,
+  "the source workbook identity must remain immutable after reassignment"
+);
+
+const scopePendingRow = {
+  ...pendingReassignmentRow,
+  row_number: 16,
+  dropx_id: "SCOPE-PENDING-001",
+  payment_reference: "REASSIGN-SCOPE-001"
+};
+await applyImport("8".repeat(64), [scopePendingRow], null);
+const scopePendingAdvance = await db.query(`
+  select id::text id from public.workforce_advances
+  where payment_reference='REASSIGN-SCOPE-001'
+`);
+await assert.rejects(
+  reassignAdvance(
+    scopePendingAdvance.rows[0].id,
+    reassignmentWorkerOne,
+    null,
+    0,
+    "Location-scoped pending reassignment",
+    [station]
+  ),
+  /outside your assigned locations/i,
+  "a location-scoped caller must not claim a locationless pending advance"
+);
+
+await db.query(`
+  insert into public.workforce_advance_recoveries(
+    id, company_id, advance_id, workforce_id, station_id,
+    period_start, period_end, amount, recovery_type, status,
+    idempotency_key, created_by
+  ) values (
+    $1,$2,$3,$4,$5,'2026-10-01','2026-10-31',10,'payout','deducted',
+    'reassignment-blocked-recovery',$6
+  )
+`, [
+  reassignmentRecovery,
+  company,
+  reassignmentAdvance,
+  reassignmentWorkerTwo,
+  otherStation,
+  actor
+]);
+await assert.rejects(
+  reassignAdvance(
+    reassignmentAdvance,
+    reassignmentWorkerThree,
+    reassignmentWorkerTwo,
+    2,
+    "Attempt after an active deduction"
+  ),
+  /already has a deducted amount/i,
+  "an active recovered amount must block reassignment"
+);
+
+await assert.rejects(
+  reassignAdvance(
+    (await db.query(`
+      select id::text id from public.workforce_advances
+      where payment_reference='PENDING-REF-007'
+    `)).rows[0].id,
+    reassignmentWorkerOne,
+    pendingWorker,
+    0,
+    "Attempt to move an opening balance"
+  ),
+  /already has a deducted amount/i,
+  "an imported opening deduction must block reassignment even before payout recovery"
+);
+
+await assert.rejects(
+  db.query(`
+    update public.workforce_advance_reassignments
+    set reason='History rewrite'
+    where advance_id=$1 and revision=1
+  `, [reassignmentAdvance]),
+  /reassignment history is immutable/i,
+  "reassignment audit rows must remain append-only"
+);
+
 await assert.rejects(
   db.query(`
     insert into public.workforce_advances(
@@ -1359,10 +1680,33 @@ await assert.rejects(
 for (const table of [
   "workforce_advance_import_batches",
   "workforce_advances",
-  "workforce_advance_recoveries"
+  "workforce_advance_recoveries",
+  "workforce_advance_reassignments"
 ]) {
   const rls = await db.query(`select relrowsecurity from pg_class where oid=$1::regclass`, [`public.${table}`]);
   assert.equal(rls.rows[0].relrowsecurity, true, `${table} must have RLS enabled`);
 }
+
+const reassignmentPrivileges = await db.query(`
+  select
+    has_table_privilege('service_role', 'public.workforce_advance_reassignments', 'SELECT') can_select,
+    has_table_privilege('service_role', 'public.workforce_advance_reassignments', 'INSERT') can_insert,
+    has_function_privilege(
+      'service_role',
+      'public.workforce_reassign_advance(uuid,uuid,uuid,uuid,integer,text,uuid,uuid[])',
+      'EXECUTE'
+    ) can_execute,
+    has_function_privilege(
+      'authenticated',
+      'public.workforce_reassign_advance(uuid,uuid,uuid,uuid,integer,text,uuid,uuid[])',
+      'EXECUTE'
+    ) authenticated_can_execute
+`);
+assert.deepEqual(reassignmentPrivileges.rows[0], {
+  can_select: true,
+  can_insert: false,
+  can_execute: true,
+  authenticated_can_execute: false
+}, "only the server-side service role may read the audit ledger or execute reassignment");
 
 console.log("Workforce advance register migration verification passed.");

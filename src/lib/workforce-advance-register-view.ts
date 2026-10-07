@@ -2,6 +2,7 @@ export type WorkforceAdvanceRegisterViewRow = {
   advanceNumber: string;
   advanceDate: string;
   dropxId: string;
+  originalDropxId: string;
   workforceName: string;
   designation: string;
   location: string;
@@ -88,6 +89,7 @@ export function matchesWorkforceAdvanceFilters(
   const matchesSearch = !term || [
     row.advanceNumber,
     row.dropxId,
+    row.originalDropxId,
     row.workforceName,
     row.designation,
     row.location,

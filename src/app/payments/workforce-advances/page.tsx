@@ -32,6 +32,10 @@ function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function normalizeDropxId(value: unknown) {
+  return String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function WorkforceAdvancesPage() {
@@ -40,7 +44,9 @@ export default async function WorkforceAdvancesPage() {
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const allLocations = authorization.hasAllLocationAccess || isCompanyOwner(authorization);
+  const allowedLocationIds = new Set(authorization.locationScopeIds.map(String));
   const canAdd = hasPermission(authorization, pageCode, "add");
+  const canEdit = hasPermission(authorization, pageCode, "edit");
   let rows: WorkforceAdvanceRegisterRow[] = [];
   let workforceOptions: WorkforceAdvanceOption[] = [];
   let error: string | null = null;
@@ -75,7 +81,7 @@ export default async function WorkforceAdvancesPage() {
       if (allLocations) {
         const advanceResult = await readAllRows(supabaseAdmin
           .from("workforce_advances")
-          .select("id,workforce_id,station_id,imported_dropx_id,link_status,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
+          .select("id,workforce_id,station_id,imported_dropx_id,link_status,identity_revision,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
           .eq("company_id", companyId)
           .order("advance_date", { ascending: false })
           .order("created_at", { ascending: false }));
@@ -85,7 +91,7 @@ export default async function WorkforceAdvancesPage() {
         for (let index = 0; index < visibleWorkforceIds.length; index += 100) {
           const advanceResult = await readAllRows(supabaseAdmin
             .from("workforce_advances")
-            .select("id,workforce_id,station_id,imported_dropx_id,link_status,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
+            .select("id,workforce_id,station_id,imported_dropx_id,link_status,identity_revision,opening_deducted_amount,linked_at,advance_number,advance_date,amount,payment_mode,payment_reference,external_reference,remark,source_type,created_at")
             .eq("company_id", companyId)
             .in("workforce_id", visibleWorkforceIds.slice(index, index + 100))
             .order("advance_date", { ascending: false })
@@ -99,15 +105,26 @@ export default async function WorkforceAdvancesPage() {
       const stationById = new Map(stationResult.data.map((station) => [String(station.id), station]));
       const recoveredByAdvance = new Map<string, number>();
       const recoveryHistoryByAdvance = new Map<string, WorkforceAdvanceRegisterRow["recoveryHistory"]>();
+      const reassignmentHistoryByAdvance = new Map<string, WorkforceAdvanceRegisterRow["reassignmentHistory"]>();
       const advanceIds = advances.map((row) => String(row.id));
       for (let index = 0; index < advanceIds.length; index += 100) {
-        const recoveries = await readAllRows(supabaseAdmin
-          .from("workforce_advance_recoveries")
-          .select("id,advance_id,period_start,period_end,amount,recovery_type,status,created_at,reversed_at,reversal_reason")
-          .eq("company_id", companyId)
-          .in("advance_id", advanceIds.slice(index, index + 100))
-          .order("created_at"));
-        if (recoveries.error) { error = recoveries.error.message; break; }
+        const ids = advanceIds.slice(index, index + 100);
+        const [recoveries, reassignments] = await Promise.all([
+          readAllRows(supabaseAdmin
+            .from("workforce_advance_recoveries")
+            .select("id,advance_id,period_start,period_end,amount,recovery_type,status,created_at,reversed_at,reversal_reason")
+            .eq("company_id", companyId)
+            .in("advance_id", ids)
+            .order("created_at")),
+          readAllRows(supabaseAdmin
+            .from("workforce_advance_reassignments")
+            .select("id,advance_id,revision,original_imported_dropx_id,from_station_id,from_dropx_id,from_workforce_name,from_location,to_station_id,to_dropx_id,to_workforce_name,to_location,reason,reassigned_at")
+            .eq("company_id", companyId)
+            .in("advance_id", ids)
+            .order("revision", { ascending: false }))
+        ]);
+        error = recoveries.error?.message ?? reassignments.error?.message ?? null;
+        if (error) break;
         for (const recovery of recoveries.data) {
           const key = String(recovery.advance_id);
           recoveryHistoryByAdvance.set(key, [...(recoveryHistoryByAdvance.get(key) ?? []), {
@@ -125,6 +142,28 @@ export default async function WorkforceAdvancesPage() {
             recoveredByAdvance.set(key, roundMoney((recoveredByAdvance.get(key) ?? 0) + Number(recovery.amount ?? 0)));
           }
         }
+        for (const reassignment of reassignments.data) {
+          const reassignmentLocationIds = [reassignment.from_station_id, reassignment.to_station_id]
+            .filter((value) => value != null)
+            .map(String);
+          if (!allLocations && !reassignmentLocationIds.every((locationId) => allowedLocationIds.has(locationId))) {
+            continue;
+          }
+          const key = String(reassignment.advance_id);
+          reassignmentHistoryByAdvance.set(key, [...(reassignmentHistoryByAdvance.get(key) ?? []), {
+            id: String(reassignment.id),
+            revision: Number(reassignment.revision ?? 0),
+            originalDropxId: String(reassignment.original_imported_dropx_id ?? ""),
+            fromDropxId: String(reassignment.from_dropx_id ?? ""),
+            fromWorkforceName: String(reassignment.from_workforce_name ?? ""),
+            fromLocation: String(reassignment.from_location ?? ""),
+            toDropxId: String(reassignment.to_dropx_id ?? ""),
+            toWorkforceName: String(reassignment.to_workforce_name ?? ""),
+            toLocation: String(reassignment.to_location ?? ""),
+            reason: String(reassignment.reason ?? ""),
+            reassignedAt: String(reassignment.reassigned_at)
+          }]);
+        }
       }
       if (!error) {
         rows = advances.map((advance) => {
@@ -140,9 +179,12 @@ export default async function WorkforceAdvancesPage() {
           const externalReference = String(advance.external_reference ?? "");
           return {
             id: String(advance.id),
+            workforceId: String(advance.workforce_id ?? ""),
             advanceNumber: String(advance.advance_number),
             advanceDate: String(advance.advance_date),
             dropxId: String(linkStatus === "pending" ? advance.imported_dropx_id ?? "" : worker?.dropx_id ?? advance.imported_dropx_id ?? ""),
+            originalDropxId: String(advance.imported_dropx_id ?? ""),
+            identityRevision: Number(advance.identity_revision ?? 0),
             workforceName: linkStatus === "pending" ? "Awaiting Workforce registration" : String(worker?.full_name ?? "Workforce record unavailable"),
             designation: linkStatus === "pending" ? "" : designationLabel(worker),
             location: linkStatus === "pending" ? "—" : String(currentStation?.station_code ?? currentStation?.station_name ?? "—"),
@@ -158,11 +200,15 @@ export default async function WorkforceAdvancesPage() {
             remark: String(advance.remark ?? ""),
             source: String(advance.source_type ?? "manual"),
             createdAt: String(advance.created_at),
-            recoveryHistory: recoveryHistoryByAdvance.get(String(advance.id)) ?? []
+            recoveryHistory: recoveryHistoryByAdvance.get(String(advance.id)) ?? [],
+            reassignmentHistory: reassignmentHistoryByAdvance.get(String(advance.id)) ?? []
           } satisfies WorkforceAdvanceRegisterRow;
         });
         workforceOptions = workforceResult.data
-          .filter((worker) => !worker.deleted_at && worker.location_id && stationById.has(String(worker.location_id)))
+          .filter((worker) => !worker.deleted_at
+            && worker.location_id
+            && stationById.has(String(worker.location_id))
+            && normalizeDropxId(worker.dropx_id) !== "")
           .map((worker) => {
             const station = stationById.get(String(worker.location_id));
             return {
@@ -185,6 +231,6 @@ export default async function WorkforceAdvancesPage() {
     />
     {error
       ? <section className="panel message-panel error"><div className="panel-body"><strong>Advance register unavailable</strong><p className="subtle">{error}</p></div></section>
-      : <WorkforceAdvanceRegister canAdd={canAdd} rows={rows} workforceOptions={workforceOptions} />}
+      : <WorkforceAdvanceRegister canAdd={canAdd} canEdit={canEdit} rows={rows} workforceOptions={workforceOptions} />}
   </AppShell>;
 }
