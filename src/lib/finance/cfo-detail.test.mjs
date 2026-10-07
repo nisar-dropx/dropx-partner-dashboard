@@ -56,6 +56,7 @@ test('model, period and HO basis survive refresh URLs, quick dates and escaped m
  assert.equal(refresh.from,'2026-09-01');assert.equal(refresh.to,'2026-09-30');
  const quick=new URL(cfoViewHref({...dates,period:'mtd'},filters,true),'https://fin.dropxlogistics.com').searchParams;
  assert.equal(quick.get('overhead'),'1');assert.equal(quick.get('model'),filters.model);
+ assert.equal(quick.get('month'),null);assert.equal(quick.get('from'),null);
  assert.equal(pnl.pnlFilters(Object.fromEntries(quick),'2026-10-07').from,'2026-10-01');
 });
 test('missing direct inputs and zero-volume costs never become fictitious profits or unit rates',()=>{

@@ -17,7 +17,9 @@ export function chartReport(days:CfoDay[],overhead:OverheadLine[],includeCorpora
 }
 /** Keep client-side filtering instant, while making reloads and date changes reproducible. */
 export function cfoViewHref(dates:{period:string;month:string;from:string;to:string},filters:{model:string;region:string;cluster:string;station:string},includeOverhead:boolean){
- const params=new URLSearchParams({...dates,model:filters.model,region:filters.region,cluster:filters.cluster,location:filters.station,overhead:includeOverhead?'1':'0'});
+ const params=new URLSearchParams({period:dates.period,model:filters.model,region:filters.region,cluster:filters.cluster,location:filters.station,overhead:includeOverhead?'1':'0'});
+ if(dates.period==='month')params.set('month',dates.month);
+ if(dates.period==='custom'){params.set('from',dates.from);params.set('to',dates.to);}
  return '/finance/profitability?'+params.toString();
 }
 export function cfoComparison(days:CfoDay[],by:'model'|'region'|'station'|'month'|'day'){
