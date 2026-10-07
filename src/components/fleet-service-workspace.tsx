@@ -92,7 +92,7 @@ export function FleetServiceWorkspace({ data, vehicles, onChanged, initialVehicl
   const exportScope=[regions.length?regions.join(', '):'All regions',models.length?models.join(', '):'All models',stations.length?stations.join(', '):'All stations'].join(' | ');
   if(view==='non_operational'){
     exportReport.subtitle=`${data.today} | ${exportScope}`;
-    exportReport.compactVisual={headers:['Station','Vehicle / model','Pending item','Action / latest update','Due'],widths:[.7,1.8,1.05,2.6,.85],notes:['DropX-owned vehicles only. Missing actions or dates need a Fleet update.'],rows:exceptions.map(v=>[v.stationCode,`${v.vehicleNo} · ${v.model||'Model not recorded'}`,v.statusLabel,v.statusComment||'Action not recorded',v.expectedOperationalDate||'Not set'])};
+    exportReport.compactVisual={headers:['Station','Vehicle / model','Pending item','Action / latest update','Due'],widths:[.7,1.8,1.05,2.4,1.05],notes:['DropX-owned vehicles only. Missing actions or dates need a Fleet update.'],rows:exceptions.map(v=>[v.stationCode,`${v.vehicleNo} · ${v.model||'Model not recorded'}`,v.statusLabel,v.statusComment||'Action not recorded',v.expectedOperationalDate ? showDate(v.expectedOperationalDate) : 'Not set'])};
   }
   if(view==='daily_status'){
     exportReport.subtitle=`Current status ${data.today} ${new Date(data.generatedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})} IST | ${exportScope}`;
