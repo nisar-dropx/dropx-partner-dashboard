@@ -842,7 +842,7 @@ export function FleetControlDashboard({
             </div>
           </section> : null}
 
-          {section === "assignments" ? <FleetDAMapping/> : null}
+          {section === "assignments" ? <FleetDAMapping surface="fleet"/> : null}
           {section === "tracking" ? <section className="fc-section"><FleetTrackingWorkspace data={{ ...data, vehicles }} exceptionEntry={exceptionEntry} onReviewed={(review)=>{setReviewUpdates(previous=>[...previous,review]);router.refresh();}} /></section> : null}
           {section === "fuel" ? <section className="fc-section"><DailyFleetReportView focus="fuel" stationOptions={data.stationOptions} /></section> : null}
 
