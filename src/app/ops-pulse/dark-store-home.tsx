@@ -44,7 +44,7 @@ async function StoreCommand({ authorization: a, locations, month, today }: Props
   const actions: { key: string; title: string; detail: string; label: string; href: string }[] = [];
   const missingUnits = stores.filter(s => s.units?.status === 'missing');
   const behindUnits = stores.filter(s => s.units?.status === 'behind');
-  if (missingUnits.length) actions.push({ key: 'units', title: `${missingUnits.length} store${missingUnits.length === 1 ? '' : 's'} need unit counts`, detail: `${missingUnits.map(s => s.code).join(', ')} · CPU needs processed units for this month.`, label: canUpdateUnits ? 'Update units' : 'Review CPU', href: unitHref });
+  if (missingUnits.length) actions.push({ key: 'units', title: `${missingUnits.length} store${missingUnits.length === 1 ? ' needs' : 's need'} unit counts`, detail: `${missingUnits.map(s => s.code).join(', ')} · CPU needs processed units for this month.`, label: canUpdateUnits ? 'Update units' : 'Review CPU', href: unitHref });
   if (behindUnits.length) actions.push({ key: 'behind', title: `Refresh ${behindUnits.length} unit report${behindUnits.length === 1 ? '' : 's'}`, detail: `${behindUnits.map(s => s.code).join(', ')} · Last entry is before ${date(data.expectedThrough)}.`, label: canUpdateUnits ? 'Update reports' : 'Review CPU', href: unitHref });
   for (const s of stores) {
     const p = s.people;
@@ -57,7 +57,7 @@ async function StoreCommand({ authorization: a, locations, month, today }: Props
   return <>
     {(data.peopleError || data.unitError) && <div className={styles.notice} role="alert">{data.peopleError ? 'Attendance could not be loaded. ' : ''}{data.unitError ? 'Unit reports could not be loaded. ' : ''}Unavailable data is not counted as zero. <Link href="/">Refresh this view</Link></div>}
     <section className={styles.metrics} aria-label="Store summary">
-      <article><Store size={19} /><span>Stores in view</span><strong>{stores.length}</strong><small>{new Set(stores.map(s => s.city)).size} cities · authorized locations</small></article>
+      <article><Store size={19} /><span>Stores in view</span><strong>{stores.length}</strong><small>{new Set(stores.map(s => s.city)).size} {new Set(stores.map(s => s.city)).size === 1 ? 'city' : 'cities'} · authorized locations</small></article>
       {showPeople && <article><Users size={19} /><span>People reported today</span><strong>{data.peopleError ? '—' : count(reported)}<em>{data.peopleError ? '' : ` / ${count(active)}`}</em></strong><small>{data.peopleError ? 'Attendance unavailable' : `${working} open shifts · ${upcoming} scheduled later`}</small></article>}
       {showUnits && <article><Package size={19} /><span>Processed units · {new Date(month + '-02').toLocaleDateString('en-IN', { month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}</span><strong>{data.unitError || !entered ? '—' : count(units)}</strong><small>{data.unitError ? 'Unit reports unavailable' : `${entered} of ${stores.length} stores have entered units`}</small></article>}
     </section>
