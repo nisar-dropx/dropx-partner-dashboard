@@ -1,0 +1,157 @@
+/* Fleet phone/tablet contract. Kept after the workspace styles so individual
+   desktop panels cannot shrink mobile text or restore fixed-width form grids. */
+.fc-mobile-report-picker,.fc-mobile-search-toggle{display:none}
+.fc-app :is(button,a,input,select,textarea,summary):focus-visible{outline:3px solid #368dce;outline-offset:3px}
+@media(max-width:880px){
+ .fc-app{width:100%;min-height:100dvh}
+ .fc-sidebar{visibility:hidden;overflow-y:auto;overscroll-behavior:contain;max-height:100dvh;padding-top:max(18px,env(safe-area-inset-top))}
+ .fc-sidebar.open{visibility:visible}
+ .fc-topbar{padding:10px max(12px,env(safe-area-inset-right)) 10px max(12px,env(safe-area-inset-left));gap:8px;min-height:66px;flex-wrap:wrap}
+ .fc-topbar>div:first-of-type{width:auto;min-width:0;flex:1}
+ .fc-topbar>div:first-of-type strong{font-size:14px;line-height:1.3;overflow-wrap:anywhere}
+ .fc-topbar .fc-mobile-sign-out{display:none}
+ .fc-topbar .fc-mobile-search-toggle{display:grid;flex-shrink:0}
+ .fc-topbar .fc-search{display:none;order:5;flex:1 1 100%;width:100%;min-width:0;margin:0;padding:0 10px}
+ .fc-topbar .fc-search.mobile-open{display:flex}
+ .fc-topbar .fc-search input{min-height:44px;font-size:16px}
+ .fc-topbar .owner-preview-switcher{order:4;margin-left:0}
+ .fc-topbar .owner-preview-switcher>button{min-height:44px;font-size:12px;padding:8px 10px}
+ .fc-topbar .owner-preview-menu{position:fixed;left:12px;right:12px;top:118px;width:auto;max-width:none;max-height:calc(100dvh - 200px);overflow:auto}
+ .fc-app :is(.fc-menu,.fc-icon-button,.fc-nav-close,.fc-modal-close){min-width:44px;min-height:44px;flex-shrink:0}
+ .fc-content{padding:18px max(14px,env(safe-area-inset-right)) calc(98px + env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
+ .fc-app .fc-section-head{align-items:flex-start;flex-wrap:wrap}
+ .fc-app .fc-section-head>div{min-width:0;max-width:100%}
+ .fc-app .fc-hero{align-items:stretch;flex-direction:column;gap:14px}
+ .fc-app .fc-hero-actions{flex-wrap:wrap}
+ .fc-app .fc-bottom-nav{padding-bottom:calc(7px + env(safe-area-inset-bottom));gap:2px}
+ .fc-app .fc-bottom-nav button{min-width:0;min-height:50px;touch-action:manipulation}
+ .fc-app .fc-bottom-nav button span{font-size:11px}
+ .fc-app :is(.fc-scope,.fc-filter-row,.fc-report-filters){max-width:100%}
+ .fc-app :is(.fc-panel,.fc-panel-head,.fc-table-toolbar,.fc-report-builder>header){min-width:0}
+ .fc-app :is(.fc-panel-head,.fc-table-toolbar,.fc-report-builder>header){flex-wrap:wrap;gap:12px}
+ .fc-app :is(input,select,textarea){max-width:100%;min-width:0}
+ .fc-app :is(.fc-button,.fc-export-buttons button,.fc-view-switch button,.fc-inline-actions button,.fc-master-actions button){min-height:44px}
+ .fc-app :is(.fc-view-switch,.fc-master-tabs){max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;flex-wrap:nowrap}
+ .fc-app :is(.fc-view-switch,.fc-master-tabs)>button{flex-shrink:0;white-space:nowrap;font-size:13px;min-height:44px}
+ .fc-app :is(.fc-table-scroll,.fc-live-table-wrap){max-width:100%;overscroll-behavior-inline:contain}
+ .fc-app :is(.fc-modal,.fc-health-report,.fc-lifecycle-shell){max-width:100vw;overscroll-behavior:contain}
+}
+@media(max-width:700px){
+ .fc-app .fc-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .fc-app .fc-kpis article{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:15px;min-width:0;min-height:170px}
+ .fc-app .fc-kpis article>span{width:34px;height:34px;flex-shrink:0}
+ .fc-app .fc-kpis article>div{width:100%;min-width:0;display:flex;flex-direction:column;gap:5px}
+ .fc-app .fc-kpis article small{font-size:12px!important;line-height:1.4;white-space:normal;overflow:visible;text-overflow:clip}
+ .fc-app .fc-kpis article strong{font-size:clamp(22px,6vw,28px);line-height:1.15;overflow-wrap:anywhere;white-space:normal}
+ .fc-app .fc-kpis article p{font-size:12px;line-height:1.45;margin:0;white-space:normal;overflow:visible;text-overflow:clip}
+ .fc-app .fc-kpis article>b{position:absolute;top:17px;right:12px;font-size:9px;max-width:calc(100% - 60px);white-space:normal;text-align:right}
+ .fc-app :is(.fc-hero p,.fc-section-head p,.fc-panel-foot,.fc-report-preview-note){font-size:13px;line-height:1.6}
+ .fc-app .fc-mobile-report-picker{display:grid;gap:8px;margin-bottom:16px;font-size:13px;font-weight:650}
+ .fc-mobile-report-picker select{width:100%;padding:12px;border:1px solid #d6dfe5;border-radius:12px;background:white;color:#263642;font-size:16px;min-height:48px}
+ .fc-mobile-report-picker a{font-size:12px;color:#166f64;text-decoration:underline;text-underline-offset:3px;min-height:32px;display:flex;align-items:center}
+ .fc-app .fc-report-catalog{display:none}
+ .fc-app .fc-report-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:14px}
+ .fc-app .fc-report-filters>:is(label,div){min-width:0;max-width:100%;width:auto}
+ .fc-app .fc-report-filters>label:first-child{min-width:0}
+ .fc-app .fc-report-filters .fc-filter-search{grid-column:1/-1}
+ .fc-app .fc-report-filters :is(input,select){width:100%;font-size:16px;min-height:44px}
+ .fc-app .fc-report-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .fc-app .fc-report-summary article{min-width:0;padding:10px;align-items:start}
+ .fc-app .fc-report-summary strong{font-size:13px;overflow-wrap:anywhere}
+ .fc-app .fc-report-builder header h2{font-size:18px}
+ .fc-app .fc-report-builder header p{font-size:12px;line-height:1.5}
+ .fc-app .fc-export-buttons button{font-size:12px;padding:10px;min-width:44px}
+ .fc-app .fc-report-preview-note button{min-height:44px;margin:4px;padding:8px}
+ .fc-app .fc-vehicle-meta{font-size:12px!important;line-height:1.5}
+ .fc-app :is(.fc-health-report,.fc-lifecycle-shell){width:100%;height:100dvh;max-height:100dvh;border-radius:0}
+ .fc-app .fc-health-header{flex-wrap:wrap;padding:16px;gap:12px}
+ .fc-app .fc-health-header>div:last-child{width:100%;justify-content:space-between}
+ .fc-app .fc-health-body{padding:14px 14px calc(20px + env(safe-area-inset-bottom))}
+ .fc-app :is(.fc-status-update,.fc-placement-grid,.fc-settings-grid,.fc-evidence-config){grid-template-columns:minmax(0,1fr)}
+ .fc-app .fc-settings-form{grid-template-columns:1fr}
+ .fc-app .fc-settings-form>*{min-width:0;grid-column:1}
+ .fc-app .fc-settings-form fieldset{min-width:0;max-width:100%}
+ .fc-app .fc-master-actions button{min-width:44px;min-height:44px}
+ .fc-app .fc-source-row{grid-template-columns:50px minmax(0,1fr) 44px}
+ .fc-app .fc-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .fc-app .fc-detail-grid>div{min-width:0;overflow-wrap:anywhere}
+ .fc-app .fc-map-toolbar{flex-wrap:wrap;gap:8px}
+ .fc-app .fc-journey-map-card{max-height:60%;overflow:auto}
+ .fc-app .fc-journey-events li{font-size:13px}
+ .fc-app .fc-journey-events li>button{min-height:44px;font-size:14px}
+ .fc-app .fc-journey :is(.fc-journey-location,.fc-journey-endpoints a){min-height:44px;overflow-wrap:anywhere}
+ .fc-app .fc-journey-summary small{font-size:12px!important}
+ .fc-app .fc-audit-calendar{overflow:auto}
+ .fc-app .fc-calendar-weekdays,.fc-app .fc-calendar-grid{min-width:700px}
+ .fc-app .fc-calendar-grid>div>button{min-height:44px}
+ .fc-app .fc-calendar-grid button span{font-size:12px}
+ .fc-app .fc-modal-title h2{overflow-wrap:anywhere}
+ .fc-app .fc-modal{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+ .fc-app .fc-photo-slot{max-width:100%;overflow-wrap:anywhere}
+ .fc-app .fc-source-quick-filters{display:flex;flex-wrap:nowrap;overflow:auto;padding-bottom:5px}
+ .fc-app .fc-source-quick-filters>button{flex-shrink:0;min-height:44px}
+ .fc-app .fc-live-status-kpis :is(span,small){font-size:12px!important;line-height:1.5}
+ .fc-app .fc-live-status-kpis strong{font-size:24px}
+ .fc-app .fc-live-station header :is(p,small,b),.fc-app .fc-live-status-note{font-size:12px!important;line-height:1.5}
+ .fc-app .fc-live-station h3{font-size:16px}
+ .fc-app .fc-live-station>header>div{min-width:0;flex-wrap:wrap}
+ .fc-app .fc-attention-banner{gap:10px;align-items:center}
+ .fc-app .fc-attention-banner>div{min-width:0}
+}
+@media(max-width:360px){
+ .fc-app .fc-kpis article{padding:12px;gap:10px}
+ .fc-app .fc-kpis article>b{font-size:8px;right:9px}
+ .fc-app .fc-report-filters,.fc-app .fc-detail-grid{grid-template-columns:1fr}
+ .fc-app .fc-health-photos{grid-template-columns:1fr}
+ .fc-app .fc-topbar .owner-preview-switcher{flex-basis:100%}
+}
+@media(prefers-reduced-motion:reduce){.fc-app *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+@media(max-width:880px){
+ .fc-app .fc-multi-select>button{height:auto;min-height:44px;font-size:14px;padding:10px}
+ .fc-app .fc-filter-label,.fc-app .fc-report-filters>label>span{font-size:11px;line-height:1.5}
+ .fc-app .fc-multi-select>button>span{white-space:normal;overflow-wrap:anywhere}
+ .fc-app .fc-multi-menu{max-width:calc(100vw - 28px)}
+ .fc-app .fc-multi-menu button{min-height:44px}
+ .fc-app .fc-multi-menu :is(strong,span){font-size:13px}
+ .fc-app .fc-multi-menu small{font-size:12px}
+}
+@media(max-width:700px){.fc-app .fc-reports-workspace>.fc-section-head>.fc-export-buttons{display:none}}
+@media(max-width:700px){
+ .fc-app .fc-manage-card-head strong{font-size:14px;line-height:1.4}
+ .fc-app .fc-manage-card-head small{font-size:12px;line-height:1.5}
+ .fc-app .fc-document-kpis :is(small,span){font-size:12px;white-space:normal;overflow:visible;line-height:1.45}
+ .fc-app .fc-empty strong{font-size:15px}
+ .fc-app .fc-modal-close{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:15;background:#fff;box-shadow:0 2px 8px #20243214}
+ .fc-app .fc-lifecycle-open{min-height:44px;font-size:13px}
+ .fc-app .fc-availability-statuses label{min-height:44px;font-size:13px}
+}
+@media(max-width:700px){
+ .fc-app .fc-tracking-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .fc-app .fc-tracking-kpis article{min-width:0;padding:14px;gap:7px;grid-template-columns:1fr}
+ .fc-app .fc-tracking-kpis article>*{grid-column:1;grid-row:auto}
+ .fc-app .fc-tracking-kpis article>span{font-size:12px;line-height:1.5}
+ .fc-app .fc-tracking-kpis article>strong{font-size:23px}
+ .fc-app .fc-tracking-kpis article>small{font-size:12px!important;line-height:1.5}
+ .fc-app .fc-day-presets button{min-height:44px;padding:9px 12px}
+ .fc-app .fc-day-heading{flex-wrap:wrap}
+ .fc-app .fc-day-heading>.fc-button{width:100%}
+ .fc-app .fc-day-overlay{padding:0}
+ .fc-app .fc-day-dialog{height:100dvh;width:100%;max-height:100dvh;border-radius:0}
+ .fc-app .fc-day-dialog>header{padding:14px;gap:12px;flex-shrink:0}
+ .fc-app .fc-day-dialog>header h2{font-size:20px;overflow-wrap:anywhere}
+ .fc-app .fc-day-detail-body{padding:14px 14px calc(20px + env(safe-area-inset-bottom))}
+}
+@media(max-width:880px){
+ .fc-app :is(.fc-panel-head>button,.fc-section-actions>button,.fc-master-toolbar>button){min-height:44px;font-size:13px;padding:10px}
+ .fc-app .fc-kpis article small{font-size:12px!important;white-space:normal;line-height:1.4;overflow:visible}
+ .fc-app .fc-kpis article p{font-size:12px;white-space:normal;line-height:1.5;overflow:visible}
+ .fc-app .fc-kpis article strong{font-size:26px}
+ .fc-app .fc-kpis article>div{min-width:0}
+ .fc-app :is(.fc-hero p,.fc-section-head p,.fc-empty p,.fc-empty small,.fc-panel-foot,.fc-panel-head small,.fc-command-audits small){font-size:12px!important;line-height:1.5}
+ .fc-app .fc-panel-head h2{font-size:17px}
+ .fc-app .fc-panel-head strong,.fc-app .fc-empty strong{font-size:14px}
+ .fc-app :is(.fc-button,.fc-export-buttons button){font-size:13px}
+ .fc-app :is(input,select,textarea){font-size:16px!important;min-height:44px}
+ .fc-app input[type=checkbox],.fc-app input[type=radio]{min-height:20px}
+ .fc-app:has(input:focus,textarea:focus,select:focus) .fc-bottom-nav{display:none}
+}

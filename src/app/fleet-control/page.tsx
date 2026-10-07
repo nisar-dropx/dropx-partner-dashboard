@@ -7,6 +7,7 @@ import { fleetAccessPageCodes } from "@/lib/access-surface";
 import { signOut } from "@/app/login/actions";
 import { approveFleetPayment, rejectFleetPayment, returnFleetPayment } from "./actions";
 import "./fleet-control.css";
+import "./fleet-mobile.css";
 
 export const dynamic = "force-dynamic";
 

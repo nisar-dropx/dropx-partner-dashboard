@@ -213,6 +213,7 @@ export function FleetControlDashboard({
   const [section, setSection] = useState<Section>(visibleSectionSet.has(requestedSection) ? requestedSection : firstVisibleSection);
   const [auditToOpen, setAuditToOpen] = useState<string | null>(initialAuditId || null);
   const [mobileNav, setMobileNav] = useState(false);
+  const [mobileSearch, setMobileSearch] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [stations, setStations] = useState<string[]>([]);
@@ -317,6 +318,27 @@ export function FleetControlDashboard({
     setExpectedOperationalDate(selectedVehicle.expectedOperationalDate ?? "");
     setSourceDraft(selectedVehicle.sourceId??sources.find(s=>s.ownershipType===selectedVehicle.ownershipType)?.id??"");
   }, [selectedVehicle?.vehicleNo]);
+
+  // Each menu opens at its beginning, including the body scroll container on phones.
+  useEffect(() => { window.scrollTo(0, 0); document.body.scrollTo(0, 0); }, [section]);
+  useEffect(() => {
+    if (!mobileNav || !window.matchMedia("(max-width: 880px)").matches) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const drawer = document.getElementById("fleet-navigation");
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const controls = () => Array.from(drawer?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled)') ?? []).filter(element => element.getClientRects().length > 0);
+    controls()[0]?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setMobileNav(false); return; }
+      if (event.key !== "Tab") return;
+      const items = controls(); const first = items[0]; const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    drawer?.addEventListener("keydown", keydown);
+    return () => { document.body.style.overflow = overflow; drawer?.removeEventListener("keydown", keydown); previous?.focus({preventScroll:true}); };
+  }, [mobileNav]);
 
   useEffect(() => setVehicles(data.vehicles), [data.vehicles]);
   useEffect(() => setMovements(data.movements), [data.movements]);
@@ -613,7 +635,7 @@ export function FleetControlDashboard({
 
   return (
     <FleetVehicleMetadataProvider vehicles={vehicles}><main className="fc-app"><FleetResponsive />
-      <aside className={`fc-sidebar ${mobileNav ? "open" : ""}`}>
+      <aside id="fleet-navigation" className={`fc-sidebar ${mobileNav ? "open" : ""}`} onKeyDown={(event) => { if (event.key === "Escape") setMobileNav(false); }}>
         <button aria-label="Close navigation" className="fc-nav-close" onClick={() => setMobileNav(false)} type="button"><X size={20} /></button>
         <div className="fc-brand"><FleetBrand compact /></div>
         <div className="fc-nav-label">Workspace</div>
@@ -666,9 +688,10 @@ export function FleetControlDashboard({
 
       <section className="fc-workspace">
         <header className="fc-topbar">
-          <button aria-label="Open navigation" className="fc-menu" onClick={() => setMobileNav(true)} type="button"><Menu size={20} /></button>
+          <button aria-label="Open navigation" aria-controls="fleet-navigation" aria-expanded={mobileNav} className="fc-menu" onClick={() => setMobileNav(true)} type="button"><Menu size={20} /></button>
           <div><span>Fleet Control</span><strong>{title}</strong></div>
-          <label className="fc-search"><Search size={17} /><input onChange={(event) => setQuery(event.target.value)} placeholder="Search vehicle, station or request" value={query} /></label>
+          <button type="button" className="fc-mobile-search-toggle fc-icon-button" aria-label={mobileSearch ? "Close search" : "Search Fleet"} aria-expanded={mobileSearch} aria-controls="fleet-search" onClick={() => setMobileSearch(open => !open)}>{mobileSearch ? <X size={19}/> : <Search size={19}/>}</button>
+          <label id="fleet-search" className={`fc-search ${mobileSearch ? "mobile-open" : ""}`}><Search size={17} /><input aria-label="Search Fleet vehicles, stations or requests" onChange={(event) => setQuery(event.target.value)} placeholder="Search vehicle, station or request" value={query} /></label>
           {data.preview?.canPreview ? <OwnerPreviewSwitcher active={data.preview.active} name={data.preview.name}/> : null}
           <form action={signOutAction} className="fc-mobile-sign-out"><button aria-label="Sign out" title="Sign out" type="submit"><LogOut size={18} /><span>Sign out</span></button></form>
           <button aria-label="Need Attention" className="fc-icon-button" onClick={() => changeSection(visibleSectionSet.has("attention") ? "attention" : firstVisibleSection)} type="button"><Bell size={18} />{pendingPayments.length ? <i /> : null}</button>

@@ -12,6 +12,7 @@ export function GET() {
     background_color: "#f7f7f8",
     theme_color: "#202432",
     orientation: "any",
+    shortcuts: [{name:"Vehicles",url:"/fleet-control?section=vehicles"},{name:"My audits",url:"/fleet-control?section=audits"},{name:"Tracking",url:"/fleet-control?section=tracking"}],
     icons: [
       { src: "/fleet-control/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/fleet-control/icon-512.png", sizes: "512x512", type: "image/png" },

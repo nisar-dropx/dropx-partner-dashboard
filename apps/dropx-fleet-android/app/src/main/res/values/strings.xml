@@ -1,0 +1,6 @@
+<resources>
+<string name="app_name">DropX Fleet</string>
+<string name="home">Home</string><string name="vehicles">Vehicles</string><string name="audits">My audits</string>
+<string name="asset_statements">[{\"relation\":[\"delegate_permission/common.handle_all_urls\"],\"target\":{\"namespace\":\"web\",\"site\":\"https://fleet.dropxlogistics.com\"}}]</string>
+<color name="navy">#202432</color><color name="paper">#F7F7F8</color>
+</resources>

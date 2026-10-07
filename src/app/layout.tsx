@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { OpsPwaRegister } from "@/components/ops-pwa-register";
@@ -20,6 +20,10 @@ function isFleetHost() {
 function isPeopleHost() {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
   return isPeopleHostName(host);
+}
+
+export function generateViewport(): Viewport {
+  return isFleetHost() ? {width:"device-width",initialScale:1,viewportFit:"cover",themeColor:"#202432"} : {width:"device-width",initialScale:1};
 }
 
 export function generateMetadata(): Metadata {

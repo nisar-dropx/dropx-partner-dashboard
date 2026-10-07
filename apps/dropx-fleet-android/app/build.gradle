@@ -1,0 +1,32 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.dropxlogistics.fleet'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.dropxlogistics.fleet'
+        minSdk 23
+        targetSdk 35
+        versionCode 3000
+        versionName '3.0.0'
+    }
+    signingConfigs {
+        release {
+            def keyPath = System.getenv('FLEET_KEYSTORE')
+            if (keyPath) storeFile file(keyPath)
+            storePassword System.getenv('FLEET_STORE_PASSWORD')
+            keyAlias System.getenv('FLEET_KEY_ALIAS')
+            keyPassword System.getenv('FLEET_KEY_PASSWORD')
+        }
+    }
+    buildTypes { release { signingConfig signingConfigs.release; debuggable false; minifyEnabled false } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+}
+tasks.register('verifyReleaseSigning') {
+    doLast {
+        ['FLEET_KEYSTORE','FLEET_STORE_PASSWORD','FLEET_KEY_ALIAS','FLEET_KEY_PASSWORD'].each {
+            if (!System.getenv(it)) throw new GradleException("Missing release signing variable: " + it)
+        }
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn 'verifyReleaseSigning' }
+dependencies { implementation 'androidx.browser:browser:1.9.0'; implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2' }
