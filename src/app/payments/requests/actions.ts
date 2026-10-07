@@ -1077,7 +1077,7 @@ async function resubmitExpenseRequestWithContext(formData: FormData) {
       throw new Error("Only returned requests can be resubmitted.");
     }
 
-    const approvalSteps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+    const approvalSteps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id, request.id) : [];
 
     let approver: ApproverTarget;
     let currentApprovalRoleIds: string[];
@@ -1324,7 +1324,7 @@ async function resubmitPaymentRequestWithContext(formData: FormData) {
     let currentApprovalRoleIds: string[] = [];
     let currentApprovalStep = 1;
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
-    const approvalSteps: ApprovalStepRow[] = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+    const approvalSteps: ApprovalStepRow[] = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id, request.id) : [];
 
     const returnedRoleId = latestReturnedApproval?.approver_role_id ?? null;
     const returnedByProcessor = String(latestReturnedApproval?.role_code ?? "").toUpperCase() === "BANK" ||

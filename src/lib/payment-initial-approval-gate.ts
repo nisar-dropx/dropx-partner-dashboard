@@ -8,7 +8,7 @@ export async function initialApprovalReadyIds(companyId: string, requestIds: str
   for (let offset = 0; offset < requestIds.length; offset += 100) {
     const ids = requestIds.slice(offset, offset + 100);
     const requests = await supabaseAdmin.from("payment_requests")
-      .select("id,payment_head_id,current_step_order,total_steps")
+      .select("id,payment_head_id,current_step_order,total_steps,adhoc_approval_steps")
       .eq("company_id", companyId).in("id", ids);
     if (requests.error) throw new Error(requests.error.message);
     const heads = [...new Set((requests.data ?? []).map(row => row.payment_head_id).filter(Boolean))];
@@ -28,7 +28,9 @@ export async function initialApprovalReadyIds(companyId: string, requestIds: str
       if ((logs.data?.length ?? 0) < 1000) break;
     }
     for (const request of requests.data ?? []) {
-      const configuredSteps = (steps.data ?? []).filter(step => step.payment_head_id === request.payment_head_id) as ApprovalStage[];
+      const configuredSteps = (Array.isArray(request.adhoc_approval_steps)
+        ? request.adhoc_approval_steps
+        : (steps.data ?? []).filter(step => step.payment_head_id === request.payment_head_id)) as ApprovalStage[];
       const recordedApprovals = approvals.filter(log => log.payment_request_id === request.id);
       if (hasInitialApprovalForPersistedRequest(
         configuredSteps,

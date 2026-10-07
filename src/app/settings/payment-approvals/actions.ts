@@ -61,7 +61,8 @@ export async function saveApprovalSteps(formData: FormData) {
       .from("payment_requests")
       .select("id, location_id, status, approval_status, approval_cycle")
       .eq("company_id", companyId)
-      .eq("payment_head_id", paymentHeadId);
+      .eq("payment_head_id", paymentHeadId)
+      .is("adhoc_approval_steps", null);
     if (requestsResult.error) throw new Error(requestsResult.error.message);
 
     const requestIds = (requestsResult.data ?? []).map(request => request.id);
