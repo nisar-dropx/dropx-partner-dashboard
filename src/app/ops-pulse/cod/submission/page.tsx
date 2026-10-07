@@ -23,7 +23,8 @@ import {
   loadCodLocations,
   loadCodSubmissions,
   locationLabel,
-  formTypeLabel
+  formTypeLabel,
+  requiresRemittanceCheck
 } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin, isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import { CodSubmissionForm } from "./cod-submission-form";
@@ -104,7 +105,8 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
       label: locationLabel(location),
       helper: [location.state, inferred ? formTypeLabel(inferred) : "Client from Location Master"].filter(Boolean).join(" / "),
       stationCode: String(location.station_code ?? "").trim().toUpperCase(),
-      formType: inferred || ""
+      formType: inferred || "",
+      remittanceCheck: requiresRemittanceCheck(location)
     };
   });
   const defaultLocationId = searchParams?.location && stationOptions.some((o) => o.value === searchParams.location)
@@ -158,7 +160,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
       <PageHead
         eyebrow="Ops Pulse"
         title="COD Submission"
-        subtitle="Upload your deposit slip and record the daily COD update. Review and reconciliation happen separately."
+        subtitle="Upload your deposit slip and record the daily COD update. Amazon EDSP/XPT remittances are verified against the portal on upload."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
       <CodSectionTabs active="submission" />
@@ -186,7 +188,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
             <div className="panel-head toolbar">
               <div>
                 <h2>Submit COD deposit</h2>
-                <p className="subtle">Save the deposit details and slip without waiting for Amazon/SCC. Uploading records the daily update; it does not mark the cash as verified.</p>
+                <p className="subtle">Amazon EDSP/XPT submissions are checked against the portal for remittance code, deposit date, and amount before saving. If the portal cannot be reached the slip is still saved, and the remittance can be verified later from Edit.</p>
               </div>
             </div>
             <div className="panel-body">

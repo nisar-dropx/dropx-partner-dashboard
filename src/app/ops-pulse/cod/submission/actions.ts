@@ -11,11 +11,17 @@ import {
   inferFormTypeFromLocation,
   numberFromForm,
   required,
+  requiresRemittanceCheck,
+  submitterLooksLikePortalLogin,
   clientForFormType,
   type CodAttachment,
   type CodFormType,
   type CodLocationRow
 } from "@/lib/ops-pulse/cod";
+import {
+  isCashReconWorkerConfigured,
+  verifyRemittance
+} from "@/lib/ops-pulse/cash-recon-worker";
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -65,21 +71,152 @@ function readCodSubmissionFields(formData: FormData) {
   return fields;
 }
 
-// Recording a bank slip must never depend on a third-party portal session.
 // A saved upload is evidence received, not confirmation that cash reconciles.
-function pendingRemittanceValidation() {
+function pendingRemittanceValidation(reason: string, extra: Record<string, unknown> = {}) {
   return {
     validation_status: "Pending",
-    validated_amount: null,
-    validated_at: null,
-    remittance_creation_date: null,
-    remittance_submission_date: null,
+    validated_amount: null as number | null,
+    validated_at: null as string | null,
+    remittance_creation_date: null as string | null,
+    remittance_submission_date: null as string | null,
     validation_payload: {
       source: "cod_submission",
       verification: "pending",
-      reason: "Deposit slip saved independently. Remittance verification is separate."
+      reason,
+      ...extra
+    } as Record<string, unknown>
+  };
+}
+
+// Leaves room for the slip upload and the save inside the route's maxDuration
+// when the portal check hangs.
+const REMITTANCE_VERIFY_BUDGET_MS = 70_000;
+
+function withVerifyBudget<T>(work: Promise<T>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Amazon portal check did not finish within ${REMITTANCE_VERIFY_BUDGET_MS / 1000}s.`)),
+      REMITTANCE_VERIFY_BUDGET_MS
+    );
+  });
+  return Promise.race([work, budget]).finally(() => clearTimeout(timer));
+}
+
+type RemittanceOutcome = "verified" | "unavailable" | "not_required";
+
+/**
+ * Amazon EDSP/XPT remittances are checked against the portal on every save.
+ * A portal answer that does not match blocks the save. Not being able to
+ * reach the portal does not: recording a bank slip must never depend on a
+ * third-party session, so the slip is saved as Pending and re-checked the
+ * next time the row is saved from Edit.
+ */
+async function remittanceValidation(
+  station: CodLocationRow,
+  fields: ReturnType<typeof readCodSubmissionFields>
+): Promise<{ outcome: RemittanceOutcome; columns: ReturnType<typeof pendingRemittanceValidation> }> {
+  if (!requiresRemittanceCheck(station)) {
+    return {
+      outcome: "not_required",
+      columns: pendingRemittanceValidation("Remittance is not checked on the Amazon portal for this station.", {
+        portal_check: "not_required"
+      })
+    };
+  }
+
+  const stationCode = String(station.station_code ?? "").trim().toUpperCase();
+  if (!stationCode) throw new Error("Selected station is missing a station code.");
+
+  let verify: Awaited<ReturnType<typeof verifyRemittance>>;
+  try {
+    if (!isCashReconWorkerConfigured()) throw new Error("Cash recon worker is not configured.");
+    verify = await withVerifyBudget(
+      verifyRemittance({
+        stationCode,
+        date: fields.depositDate,
+        remittanceCode: fields.remittanceCode,
+        amount: fields.amount,
+        codPeriodFrom: fields.codPeriodFrom,
+        codPeriodTo: fields.codPeriodTo,
+        fresh: true
+      })
+    );
+  } catch (error) {
+    return {
+      outcome: "unavailable",
+      columns: pendingRemittanceValidation("Amazon portal could not be reached when this slip was saved.", {
+        portal_check: "unavailable",
+        portal_error: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        attempted_at: new Date().toISOString()
+      })
+    };
+  }
+
+  if (!verify.verified) {
+    throw new Error(
+      verify.failureReason ||
+        (!verify.codeFound
+          ? `Remittance code ${fields.remittanceCode} was not found on Amazon portal.`
+          : `Remittance code found but details do not match for deposit ${fields.depositDate}.`)
+    );
+  }
+
+  // The portal's submittedBy/createdBy is a login handle (e.g. "dliraja"),
+  // not a person. Typing it into "Submitted By" would record a login as the
+  // depositor, so it is blocked like a code/amount mismatch.
+  const match = verify.matches[0] ?? null;
+  if (submitterLooksLikePortalLogin(fields.submitterName, [match?.submittedBy, match?.createdBy])) {
+    throw new Error(
+      `"${fields.submitterName}" looks like the Amazon portal login, not a person's name. Enter the full name of the person who actually submitted this cash.`
+    );
+  }
+
+  const checkedAt = new Date().toISOString();
+  return {
+    outcome: "verified",
+    columns: {
+      validation_status: "Matched",
+      validated_amount: fields.amount,
+      validated_at: checkedAt,
+      remittance_creation_date: match?.creationDateIst ?? null,
+      remittance_submission_date: match?.submissionDateIst ?? null,
+      validation_payload: {
+        remittance_verify: {
+          verified: verify.verified,
+          codeFound: verify.codeFound,
+          amountMatched: verify.amountMatched,
+          depositDateMatched: verify.depositDateMatched,
+          creationPeriodMatched: verify.creationPeriodMatched,
+          submitterMatched: verify.submitterMatched,
+          failureReason: verify.failureReason,
+          remittanceCode: verify.remittanceCode,
+          amount: verify.amount,
+          matches: verify.matches,
+          nearMisses: verify.nearMisses,
+          checkedAt,
+          source: "executive/remittance/verify"
+        }
+      }
     }
   };
+}
+
+function savedNotice(outcome: RemittanceOutcome, verb: "uploaded" | "updated") {
+  if (outcome === "verified") {
+    return `COD slip ${verb} and remittance verified on the Amazon portal. Your daily update is recorded; slip review is pending.`;
+  }
+  if (outcome === "unavailable") {
+    return `COD slip ${verb} and your daily update is recorded, but the Amazon portal could not be reached, so the remittance is not verified yet. Open Edit on this row and use Verify & save once the portal is back.`;
+  }
+  return `COD slip ${verb}. Your daily update is recorded; slip review is pending.`;
+}
+
+function hasSlipFile(formData: FormData) {
+  return depositSlipAttachmentFields.some(([field]) => {
+    const file = formData.get(field);
+    return typeof file === "object" && file !== null && file.size > 0;
+  });
 }
 
 function buildFormPayload(fields: {
@@ -172,6 +309,11 @@ export async function createCodSubmission(
     const station = await stationDetails(companyId, fields.locationId);
     const formType = resolveFormType(station, fields.clientHint);
 
+    // Checked before the portal call and the upload so a blocked remittance
+    // neither wastes a portal lookup nor leaves an orphaned slip in storage.
+    if (!hasSlipFile(formData)) throw new Error("Upload a photo of the deposit slip (JPG or PNG).");
+    const remittance = await remittanceValidation(station, fields);
+
     const submissionId = randomUUID();
     const depositAttachments = await uploadSlipPhotos(companyId, submissionId, formData);
 
@@ -225,7 +367,7 @@ export async function createCodSubmission(
         submission_no: `COD-${Date.now().toString(36).toUpperCase()}`,
         submitter_name: fields.submitterName,
         updated_at: nowIso,
-        ...pendingRemittanceValidation()
+        ...remittance.columns
       },
       companyId
     );
@@ -239,7 +381,7 @@ export async function createCodSubmission(
     return {
       ok: true,
       submissionId,
-      notice: "COD slip uploaded. Your daily update is recorded; slip review and remittance verification are pending."
+      notice: savedNotice(remittance.outcome, "uploaded")
     };
   } catch (error) {
     return {
@@ -294,6 +436,9 @@ export async function updateCodSubmission(
         ? (existing.attachments as CodAttachment[])
         : [];
 
+    if(existing.returned_at&&!hasSlipFile(formData))throw new Error('Upload a replacement photo for this returned slip.');
+    const remittance = await remittanceValidation(station, fields);
+
     const uploaded = await uploadSlipPhotos(companyId, submissionId, formData);
 
     if(existing.returned_at&&!uploaded.length)throw new Error('Upload a replacement photo for this returned slip.');
@@ -337,7 +482,7 @@ export async function updateCodSubmission(
       source: COD_SUBMISSION_SOURCE,
       station_code: station.station_code,
       submitter_name: fields.submitterName,
-      ...pendingRemittanceValidation(),
+      ...remittance.columns,
       updated_at: new Date().toISOString()
     };
     let query=supabaseAdmin.from('cod_submissions').update(updateRow).eq('company_id',companyId).eq('id',submissionId).eq('proof_version',version);
@@ -351,7 +496,7 @@ export async function updateCodSubmission(
     return {
       ok: true,
       submissionId,
-      notice: "COD slip updated. Your daily update is recorded; slip review and remittance verification are pending."
+      notice: savedNotice(remittance.outcome, "updated")
     };
   } catch (error) {
     return {

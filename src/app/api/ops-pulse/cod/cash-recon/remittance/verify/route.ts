@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     });
 
     // Same login-vs-name check the actual submit path enforces (see
-    // verifyAmazonRemittance in submission/actions.ts) — surfaced here too so
+    // remittanceValidation in submission/actions.ts) — surfaced here too so
     // the manual "Check remittance" button catches it before a full submit.
     const match = result.matches[0] ?? null;
     if (submittedBy && submitterLooksLikePortalLogin(submittedBy, [match?.submittedBy, match?.createdBy])) {

@@ -516,6 +516,19 @@ export function isAmazonSccCodLocation(location: CodLocationRow | null | undefin
   return text.includes("amazon") || text.includes("edsp") || text.includes("xpt");
 }
 
+/**
+ * Only Amazon EDSP and XPT stations create remittances on the Amazon portal,
+ * so only their COD uploads are checked against it. Amazon Now / AMXL,
+ * Flipkart and every other provider upload the slip directly.
+ */
+export function requiresRemittanceCheck(location: CodLocationRow | null | undefined) {
+  const provider = firstRelation(location?.providers);
+  const model = firstRelation(location?.location_models);
+  const providerText = `${provider?.code ?? ""} ${provider?.name ?? ""}`.toLowerCase();
+  const modelCodes = [model?.code, model?.name].map((value) => String(value ?? "").trim().toUpperCase());
+  return providerText.includes("amazon") && modelCodes.some((code) => code === "EDSP" || code === "XPT");
+}
+
 export function locationLabel(location: CodLocationRow | null | undefined) {
   if (!location) return "-";
   return location.station_name ? `${location.station_code} - ${location.station_name}` : location.station_code;

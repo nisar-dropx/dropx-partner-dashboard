@@ -6,6 +6,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { createCodSubmission, type CodSubmissionActionState } from "./actions";
 import { CodSubmitPendingOverlay } from "./cod-submit-overlay";
+import { RemittanceVerifyButton } from "./remittance-verify-button";
 import { useCodFormState } from "./use-cod-form-state";
 
 type StationOption = {
@@ -14,6 +15,7 @@ type StationOption = {
   helper?: string;
   stationCode: string;
   formType: string;
+  remittanceCheck: boolean;
 };
 
 const initialState: CodSubmissionActionState = { ok: false };
@@ -38,6 +40,7 @@ export function CodSubmissionForm({
     () => stationOptions.find((option) => option.value === locationId) ?? null,
     [locationId, stationOptions]
   );
+  const remittanceCheck = selected?.remittanceCheck ?? false;
 
   useEffect(() => {
     if (state?.ok) router.refresh();
@@ -64,7 +67,10 @@ export function CodSubmissionForm({
 
       <form action={formAction} className="form-grid three" encType="multipart/form-data" style={{ position: "relative" }}>
         <CodSubmitPendingOverlay
-          detail="Uploading your slip and recording the daily update."
+          savingLabel={remittanceCheck ? "Verifying remittance & saving…" : undefined}
+          detail={remittanceCheck
+            ? "Sidebar stays available. This can take a few seconds while we check Amazon portal."
+            : "Uploading your slip and recording the daily update."}
         />
         {client ? <input type="hidden" name="client" value={client} /> : null}
         <input type="hidden" name="station_code" value={selected?.stationCode ?? ""} />
@@ -122,10 +128,15 @@ export function CodSubmissionForm({
         <label className="span-3">Remarks
           <textarea className="field" name="remarks" placeholder="Exception notes, if any" rows={3} />
         </label>
-        <p className="subtle span-3">Your slip is saved immediately. Slip review and remittance verification are separate; Amazon/SCC availability does not block this upload.</p>
+        {remittanceCheck ? <RemittanceVerifyButton /> : null}
+        <p className="subtle span-3">
+          {remittanceCheck
+            ? "The remittance is checked on the Amazon portal when you submit. If the portal cannot be reached, your slip is still saved and the remittance can be verified later from Edit."
+            : "Your slip is saved immediately; no Amazon portal check applies to this station. Slip review happens separately."}
+        </p>
         <div className="form-actions span-3 align-right">
-          <SubmitButton disabled={!canAdd} pendingText="Uploading slip…">
-            Upload COD slip
+          <SubmitButton disabled={!canAdd} pendingText={remittanceCheck ? "Verifying remittance…" : "Uploading slip…"}>
+            {remittanceCheck ? "Verify & submit COD" : "Upload COD slip"}
           </SubmitButton>
         </div>
       </form>
