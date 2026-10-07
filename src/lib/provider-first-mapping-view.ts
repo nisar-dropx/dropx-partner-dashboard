@@ -24,6 +24,7 @@ export type ProviderFirstWorkerView = {
 };
 
 export type ProviderFirstMappingRowView = {
+  outboundMonths?: string[];
   providerMemberId: string;
   providerMemberName: string;
   stationId: string;
@@ -110,6 +111,7 @@ export type ProviderFirstPaymentMethodView = {
 };
 
 export type ProviderFirstFilters = {
+  outboundMonths?: string[];
   query: string;
   stationIds: string[];
   paymentMethodIds: string[];
@@ -126,6 +128,8 @@ export type ProviderFirstSourceMember = {
   providerMemberName: string;
   stationCode: string;
   workDate?: string;
+  shipmentMonths?: string[];
+  outboundMonths?: string[];
 };
 
 export function isScientificProviderMemberId(value: string) {
@@ -215,11 +219,22 @@ export function canonicalizeProviderFirstMembers<T extends ProviderFirstSourceMe
       }
     }
     const canonicalExactMembers = Array.from(newestExactById.values());
-    const unresolvedScientific = scientificMembers.filter((member) =>
-      protectedSourceKeys.has(providerSourceMemberKey(member.stationCode, member.providerMemberId))
-      || protectedSourceKeys.has(providerSourceMemberKey("*", member.providerMemberId))
-      || canonicalExactMembers.filter((candidate) => scientificProviderIdCouldRepresent(member.providerMemberId, candidate.providerMemberId)).length !== 1
-    );
+    const unresolvedScientific = scientificMembers.filter((member) => {
+      const matches = canonicalExactMembers.filter((candidate) => scientificProviderIdCouldRepresent(member.providerMemberId, candidate.providerMemberId));
+      if (protectedSourceKeys.has(providerSourceMemberKey(member.stationCode, member.providerMemberId))
+        || protectedSourceKeys.has(providerSourceMemberKey("*", member.providerMemberId))
+        || matches.length !== 1) return true;
+      // Keep historical activity when an old rounded ID is suppressed in favour
+      // of its unambiguous full ID. Do not merge ambiguous or protected mappings.
+      const position = canonicalExactMembers.indexOf(matches[0]);
+      const exact = canonicalExactMembers[position];
+      canonicalExactMembers[position] = {
+        ...exact,
+        ...(member.shipmentMonths ? { shipmentMonths: [...new Set([...(exact.shipmentMonths ?? []), ...member.shipmentMonths])] } : {}),
+        ...(member.outboundMonths ? { outboundMonths: [...new Set([...(exact.outboundMonths ?? []), ...member.outboundMonths])] } : {})
+      };
+      return false;
+    });
     canonical.push(...canonicalExactMembers, ...unresolvedScientific);
   }
   return canonical;
@@ -360,6 +375,7 @@ export function filterProviderFirstRowIndexes({
     const mappingStatus = row.workforceId ? "mapped" : "unmapped";
     const validationStatus = providerFirstValidationStatus(row, worker, method);
     const matches = (!query || searchable.includes(query))
+      && (!filters.outboundMonths?.length || filters.outboundMonths.some((month) => row.outboundMonths?.includes(month)))
       && (!filters.stationIds.length || filters.stationIds.includes(row.stationId))
       && (!filters.paymentMethodIds.length || filters.paymentMethodIds.includes(row.paymentMethodId || "unassigned"))
       && (!filters.mappingStatuses.length || filters.mappingStatuses.includes(mappingStatus))
@@ -382,4 +398,12 @@ export function providerFirstPageWindow(totalRows: number, requestedPage: number
     shownFrom: totalRows ? fromIndex + 1 : 0,
     shownTo: toIndex
   };
+}
+
+/** Month/year labels keep the same calendar month in different years distinct. */
+export function providerMappingMonthOptions(months: string[]) {
+  return [...new Set(months)].filter((month) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month)).sort().reverse().map((value) => {
+    const label = new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T00:00:00Z`));
+    return { value, label, searchText: `${label} ${value}` };
+  });
 }
