@@ -46,6 +46,7 @@ const fleetAdminNavItems: NavItem[] = [
     { code: "users", label: "User Roles", href: "/users?section=roles" }
   ] },
   { code: "fleet_masters", label: "Masters", icon: "M", children: [
+    { code: "fleet_masters", label: "Default DA master", href: "/fleet-control?section=masters&master=default_da" },
     { code: "fleet_masters", label: "Vehicle Audit", href: "/fleet-control?section=masters&master=vehicle_audit" },
     { code: "fleet_masters", label: "Vehicle Documents", href: "/fleet-control?section=masters&master=vehicle_documents" },
     { code: "fleet_masters", label: "Vehicle Statuses", href: "/fleet-control?section=masters&master=vehicle_statuses" }

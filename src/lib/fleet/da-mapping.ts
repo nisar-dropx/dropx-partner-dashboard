@@ -14,3 +14,10 @@ export function assignmentCounts(rows:{provider_employee_id:string;total_deliver
  for(const row of rows){const id=riderKey(row.provider_employee_id);const total=map.get(id)||{delivered:0,cReturn:0,swa:0};for(const [key,source] of [['delivered','total_delivery'],['cReturn','c_return'],['swa','swa_delivery']] as const){const v=row[source];total[key]=v==null||total[key]==null?null:total[key]!+Number(v);}map.set(id,total);}
  return map;
 }
+
+/** Current daily operations follow the configurable status master and station deployment. */
+export function isMappingVehicleActive(v:{status:string;deployment_status?:string|null},statuses:{status_key:string;is_operational:boolean;is_active:boolean}[]){
+ const status=statuses.find(s=>s.status_key===v.status);
+ return (v.deployment_status==null||v.deployment_status==='deployed')&&(status?status.is_active&&status.is_operational:v.status==='active');
+}
+export const isODCD=(v:VehicleDA)=>v.sourceCode.toUpperCase()==='ODCD'||v.ownership_type.toLowerCase()==='odcd';

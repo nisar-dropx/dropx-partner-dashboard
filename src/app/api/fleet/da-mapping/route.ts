@@ -1,15 +1,15 @@
-import {getAuthorization,hasPermission} from '@/lib/authorization';
+import {getAuthorization} from '@/lib/authorization';
 import {mappingAdmin as supabaseAdmin} from '@/lib/fleet/da-mapping-client';
 import {requireCompanyId} from '@/lib/company-scope';
 import {FleetReportError} from '@/lib/fleet/report-data';
-import {loadMapping} from '@/lib/fleet/da-mapping-server';
+import {loadMapping,mappingScope} from '@/lib/fleet/da-mapping-server';
 import {riderKey} from '@/lib/fleet/da-mapping';
 import {istDate,validDate} from '@/lib/fleet/daily-report';
 import {withFleetSystemLog} from '@/lib/fleet/system-log';
 export const dynamic='force-dynamic';
 function fail(e:unknown){return Response.json({error:e instanceof FleetReportError?e.message:'Mapping could not be saved. Retry; your selection is still on screen.'},{status:e instanceof FleetReportError?e.status:500});}
 export async function GET(request:Request){
- try{const auth=await getAuthorization();if(!auth)return Response.json({error:'Login required.'},{status:401});const p=new URL(request.url).searchParams,date=p.get('date')||istDate();if(!validDate(date)||date>istDate())throw new FleetReportError('Choose today or a past date.',400);return Response.json(await loadMapping(auth,date,p.get('station')||''),{headers:{'Cache-Control':'private, no-store'}});}catch(e){return fail(e);}
+ try{const auth=await getAuthorization();if(!auth)return Response.json({error:'Login required.'},{status:401});const p=new URL(request.url).searchParams;if(p.get('eligibility')==='1'){const scope=await mappingScope(auth);return Response.json({available:scope.stations.length>0},{headers:{'Cache-Control':'private, no-store'}});}const date=p.get('date')||istDate();if(!validDate(date)||date>istDate())throw new FleetReportError('Choose today or a past date.',400);return Response.json(await loadMapping(auth,date,p.get('station')||''),{headers:{'Cache-Control':'private, no-store'}});}catch(e){return fail(e);}
 }
 export const POST=withFleetSystemLog(async(request:Request)=>{
  try{
@@ -19,11 +19,12 @@ export const POST=withFleetSystemLog(async(request:Request)=>{
  const d=await loadMapping(auth,b.date,b.station),company=requireCompanyId(auth);
  if(auth.readOnly)throw new FleetReportError('Daily mapping edit permission is required.',403);
  if(b.action==='mapping.policy'){
-  if(!(auth.isMasterOwner||hasPermission(auth,'fleet_masters','edit')||hasPermission(auth,'fleet_settings','edit'))||!Number.isInteger(b.recentDays)||b.recentDays<3||b.recentDays>30)throw new FleetReportError('Fleet master permission and a window of 3–30 days are required.',400);
+  if(!d.canPolicy)throw new FleetReportError('Default DA settings are managed in Fleet Masters.',403);
+  if(!Number.isInteger(b.recentDays)||b.recentDays<3||b.recentDays>30)throw new FleetReportError('Fleet master permission and a window of 3–30 days are required.',400);
   const r=await supabaseAdmin!.from('fleet_control_settings').update({assignment_recent_days:b.recentDays}).eq('company_id',company).select('company_id');if(r.error||!r.data?.length)throw new FleetReportError('Could not save the rider window.');return Response.json({ok:true});
  }
  if(b.action==='mapping.default'){
-  if(!d.canDefaults)throw new FleetReportError('Fleet master or vehicle edit permission is required.',403);
+  if(!d.canDefaults)throw new FleetReportError('Default DA setup is managed with Fleet Masters edit permission.',403);
   const v=d.vehicles.find(v=>v.id===b.vehicleId);if(!v)throw new FleetReportError('Vehicle is outside this station.',403);
   const existing=d.defaults.find(x=>x.vehicle_id===v.id);
   if((existing?.updated_at??null)!==(b.expectedUpdatedAt??null))throw new FleetReportError('Default changed. Refresh before saving.',409);
