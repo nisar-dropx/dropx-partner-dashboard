@@ -93,7 +93,7 @@ function fallbackBody(overrides = {}) {
 
 test("uses the exact IDSPAY primary and fallback endpoints", () => {
   assert.equal(PAN_PRIMARY_ENDPOINT, "/pan/verification");
-  assert.equal(PAN_FALLBACK_ENDPOINT, "/srv2/validation/pan");
+  assert.equal(PAN_FALLBACK_ENDPOINT, "/srv2/validation/pan/father-details");
 });
 
 test("extracts holder names only from each provider's documented location", () => {
