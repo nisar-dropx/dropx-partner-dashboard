@@ -207,8 +207,9 @@ export async function POST(request: Request) {
       ? await supabaseAdmin.from("workforce_amazon_email_pilot_registrations").upsert({
         candidate_id: account.id,
         company_id: account.companyId,
-        draft_data: draftData,
-        verification_results: parseVerificationRows(formData.getAll("profile_verification_results")),
+        draft_data: { ...draftData, _beta_verification_status: "pending_review" },
+        // Beta submissions remain unverified; never trust a copied/client-supplied KYC result.
+        verification_results: [],
         file_paths: nextPaths,
         status: submitted ? "submitted" : (current && "status" in current ? current.status : "draft"),
         submitted_at: submitted ? now : (current && "submittedAt" in current ? current.submittedAt : null),

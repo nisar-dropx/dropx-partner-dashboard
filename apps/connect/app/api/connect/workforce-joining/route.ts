@@ -1,3 +1,4 @@
+import { acknowledgedBetaExitNote } from "@/lib/beta-exit-notice";
 import { betaJourney } from "@/lib/beta-journey";
 import {pilotStatus,withLiveAmazonEvidence,type Pilot} from '@/lib/amazon-pilot';
 import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
@@ -168,19 +169,25 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request:NextRequest){
  try{
-  const body=await request.json() as {accountId?:string;profileType?:ConnectAccount["profileType"];action?:string;reasonId?:string;note?:string};
+  const body=await request.json() as {accountId?:string;profileType?:ConnectAccount["profileType"];action?:string;reasonId?:string;note?:string;trainingPayoutAcknowledged?:boolean;trainingPayoutNoticeVersion?:string};
   const account=await requireConnectAccount(body.profileType as ConnectAccount["profileType"],body.accountId??"",{allowActivationOnly:true});
   if(account.workspace!=="workforce"||!["not_continuing","continue_amazon"].includes(body.action??""))return NextResponse.json({error:"This action is unavailable."},{status:403,headers});
   if(!supabaseAdmin)throw new Error("Onboarding is temporarily unavailable.");
   const note=String(body.note??"").trim();
   if(body.action==="not_continuing"&&(!body.reasonId||note.length>1000))return NextResponse.json({error:"Choose a reason and keep the note under 1,000 characters."},{status:400,headers});
   if(account.onboardingBeta&&account.activationStage?.startsWith("amazon_email_pilot:")){
+   let betaNote=note;
+   if(body.action==="not_continuing"){
+    const reason=await supabaseAdmin.from("workforce_onboarding_exit_reasons").select("id,requires_note").eq("company_id",account.companyId).eq("client_code","AMAZON").eq("is_active",true).eq("id",body.reasonId).maybeSingle();
+    if(reason.error||!reason.data)throw new Error("Choose an available reason for leaving.");
+    betaNote=acknowledgedBetaExitNote({acknowledged:body.trainingPayoutAcknowledged,version:body.trainingPayoutNoticeVersion,note,requiresNote:reason.data.requires_note});
+   }
    if(body.action==="continue_amazon"){
     const candidate=await supabaseAdmin.from("workforce_amazon_email_pilot_candidates").select("continuation_status").eq("company_id",account.companyId).eq("id",account.id).is("closed_at",null).maybeSingle();
     if(candidate.error||!candidate.data)throw new Error("Private beta candidate is unavailable.");
     if(candidate.data.continuation_status==="not_continuing")throw new Error("Ask your station team to review your existing request before continuing.");
    }
-   const result=await supabaseAdmin.rpc("workforce_update_isolated_amazon_email_pilot_decision",{p_company:account.companyId,p_candidate:account.id,p_action:body.action,p_reason:body.reasonId??null,p_note:note});
+   const result=await supabaseAdmin.rpc("workforce_update_isolated_amazon_email_pilot_decision",{p_company:account.companyId,p_candidate:account.id,p_action:body.action,p_reason:body.reasonId??null,p_note:betaNote});
    if(result.error)throw new Error(result.error.message);
    return NextResponse.json({ok:true,result:result.data},{headers});
   }

@@ -700,7 +700,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   </section></div>;
 
   const isolatedBetaJourney = Boolean(account?.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
-  return <div className={`dx-app ${loggedIn ? "logged-in" : ""}`}>
+  return <div className={`dx-app ${loggedIn ? "logged-in" : ""}${isolatedBetaJourney && (step === "activation" || step === "profile") ? " dx-private-beta" : ""}`}>
     {loggedIn && account ? <aside className="dx-desktop-nav" aria-label="DropX One navigation">
       <div className="dx-desktop-brand">
         <Image alt="DropX" height={44} priority src="/dropx-logo.png" width={126} />
@@ -827,7 +827,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       </section>
     </div> : <main className="dx-content" data-screen={step} key={account ? accountKey(account) : "accounts"}>
       {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
-      {error ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
+      {error && !(isolatedBetaJourney && error === "Complete the required work setup to unlock this workspace.") ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
       {step === "accounts" ? <section className="dx-accounts">{accounts.map((row) => <button className={isWorkforceWorkspace(row) ? "workforce" : "people"} key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.name || row.reference}</strong><em>{row.role || "-"}</em><small>{row.companyName || "-"}{row.reference ? ` · ${row.reference}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
       {account && active(account) && allowed(account, "attendance") ? (
         <AttendanceLocationMonitor account={account} />
