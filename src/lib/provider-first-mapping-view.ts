@@ -375,11 +375,13 @@ export function providerFirstValidationStatus(
 
 export function filterProviderFirstRowIndexes({
   rows,
+  savedRows = rows,
   workerById,
   paymentMethodById,
   filters
 }: {
   rows: ProviderFirstMappingRowView[];
+  savedRows?: ProviderFirstMappingRowView[];
   workerById: Map<string, ProviderFirstWorkerView>;
   paymentMethodById: Map<string, ProviderFirstPaymentMethodView>;
   filters: ProviderFirstFilters;
@@ -391,7 +393,8 @@ export function filterProviderFirstRowIndexes({
     const searchable = [row.providerMemberId, row.providerMemberName, row.dropxId, row.dropxName, row.stationLabel]
       .join(" ")
       .toLocaleLowerCase();
-    const mappingStatus = row.workforceId ? "mapped" : "unmapped";
+    // Draft selections must remain in their saved status until the server confirms a save.
+    const mappingStatus = savedRows[index]?.workforceId ? "mapped" : "unmapped";
     const validationStatus = providerFirstValidationStatus(row, worker, method);
     const matches = (!query || searchable.includes(query))
       && (!filters.outboundMonths?.length || filters.outboundMonths.some((month) => row.outboundMonths?.includes(month)))
