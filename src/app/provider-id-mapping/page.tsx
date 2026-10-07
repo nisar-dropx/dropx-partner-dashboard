@@ -6,6 +6,7 @@ import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type Provi
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { dashboardDateInputValue } from "@/lib/date-format";
 import { canonicalizeProviderFirstMembers, providerMemberKey, providerSourceMemberKey } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
@@ -141,6 +142,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet initialMonth={dashboardDateInputValue().slice(0, 7)} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }
