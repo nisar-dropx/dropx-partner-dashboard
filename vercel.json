@@ -70,6 +70,10 @@
     {
       "path": "/api/cron/fleet-audit-programme",
       "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/fleet-journey-locations",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

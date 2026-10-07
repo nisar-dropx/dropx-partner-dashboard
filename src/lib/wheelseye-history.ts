@@ -1,3 +1,4 @@
+import type {JourneyEndpoints} from "./fleet/journey-endpoints";
 import {defaultGpsPolicy,normalizeGpsPolicy,isAfterHours as outsideWindow,type FleetGpsPolicy} from "./fleet/gps-policy";
 export type WheelseyeHistoryPoint = {
   longitude?: number | null;
@@ -10,6 +11,7 @@ export type WheelseyeHistoryPoint = {
 };
 export type WheelseyeMovementSummary = {
   gpsPolicy?: FleetGpsPolicy;
+  journeyEndpoints?: JourneyEndpoints;
   km: number;
   rawKm: number;
   maxSpeed: number;
@@ -178,6 +180,19 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
     else { if (!segment.length) segment.push({lat:a.lat,lng:a.lng}); segment.push({lat:b.lat,lng:b.lng}); }
   }
   if (segment.length) routeSegments.push(segment);
+  // Only a stationary fix contiguous with departure/arrival proves an endpoint.
+  // A first moving sample can already be kilometres from the base.
+  const first=moving[0],last=moving.at(-1);
+  const before=first?timelinePoints.filter(p=>p.epoch<first.epoch).at(-1):null;
+  const tail=last?timelinePoints.filter(p=>p.epoch>last.epoch):[];
+  const continuousTail=!!last&&tail.length>=2&&tail.every((p,i)=>p.speed===0&&p.epoch-(i?tail[i-1].epoch:last.epoch)<=300&&plausible(i?tail[i-1]:last,p)&&haversineKm(tail[0],p)<=0.05);
+  const fix=(p:Point)=>({at:new Date(p.epoch*1000).toISOString(),lat:p.lat,lng:p.lng});
+  const journeyEndpoints:JourneyEndpoints={
+    start:distanceReliable&&before&&first&&before.speed===0&&first.epoch-before.epoch<=300&&plausible(before,first)?fix(before):null,
+    end:distanceReliable&&continuousTail&&tail.at(-1)!.epoch>=fromTime+Number(policy.afterHoursStart.slice(0,2))*3600+Number(policy.afterHoursStart.slice(3))*60&&tail.at(-1)!.epoch-tail[0].epoch>=policy.minimumStopMinutes*60?fix(tail[0]):null,
+    observedThrough:timelinePoints.length?new Date(timelinePoints.at(-1)!.epoch*1000).toISOString():null,
+    reason:!moving.length?'No confirmed movement':!distanceReliable?'GPS trail incomplete or needs review':'Departure / final stop not confirmed by GPS'
+  };
   // The same cleaned coordinates feed Tracking and the report, avoiding the old back-and-forth map spikes.
   const displayPoints = parked ? unique.slice(0, 1) : moving;
   return {
@@ -187,7 +202,7 @@ export function calculateWheelseyeMovement(raw: WheelseyeHistoryPoint[], vehicle
     points: displayPoints.map(({ lat, lng }) => ({ lat, lng })),
     afterHours: moving.filter(point=>isAfterHours(point.epoch)&&(point.speed??0)>policy.exceptionMinSpeedKph).map(point=>({lat:point.lat,lng:point.lng,speed:point.speed,at:new Date(point.epoch*1000).toISOString()})),
     summary: {
-      gpsPolicy:policy,
+      gpsPolicy:policy,journeyEndpoints,
       km: rounded(km), rawKm: rounded(rawKm), maxSpeed: unique.reduce((max, point) => Math.max(max, point.speed ?? 0), 0),
       movingMinutes: Math.round(secondsByKind.moving / 60), idleMinutes: Math.round(secondsByKind.idle / 60), stoppedMinutes: Math.round(secondsByKind.stopped / 60), stopUnknownMinutes: Math.round(secondsByKind.stop_unknown / 60), unknownMinutes: Math.round(secondsByKind.gap / 60), pointCount: unique.length,
       acceptedPointCount: parked ? unique.length : moving.length, rejectedPointCount, stationaryPointCount,

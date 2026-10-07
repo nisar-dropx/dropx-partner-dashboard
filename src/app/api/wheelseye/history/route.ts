@@ -1,3 +1,4 @@
+import {loadJourneyLocationCheck} from "@/lib/fleet/journey-endpoints-server";
 import {loadGpsPolicy} from "@/lib/fleet/gps-policy-server";
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,9 @@ export async function GET(request: Request) {
   try {
     const movement = await loadWheelseyeMovement(token, vehicle, date, await loadGpsPolicy(companyId));
     if (!authorization.readOnly) await saveDailyWheelseyeKm(companyId, vehicle, date, movement.summary);
+    const locationCheck=await loadJourneyLocationCheck(companyId,vehicle,date,movement.summary.journeyEndpoints);
     const {progress,...base}=movement;
-    return Response.json(url.searchParams.get("detail")==="day"?movement:base, {headers:{"Cache-Control":"private, no-store"}});
+    return Response.json(url.searchParams.get("detail")==="day"?{...movement,locationCheck}:base, {headers:{"Cache-Control":"private, no-store"}});
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load Wheelseye movement." }, { status: 400 });
   }

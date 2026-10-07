@@ -58,10 +58,10 @@ const isoToday = () => new Date(Date.now() + 330 * 60_000).toISOString().slice(0
 const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 
-export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { data: FleetControlData; exceptionEntry?: {target?:ExceptionTarget; key:number}|null; onReviewed?:(review:GpsExceptionReview)=>void }) {
+export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { data: FleetControlData; exceptionEntry?: {target?:ExceptionTarget; day?:boolean; key:number}|null; onReviewed?:(review:GpsExceptionReview)=>void }) {
   const stationOptions = data.stationOptions;
-  const [view, setView] = useState<"live" | "day" | "mileage" | "exceptions">(exceptionEntry ? "exceptions" : "live");
-  useEffect(() => { if(exceptionEntry) setView("exceptions"); }, [exceptionEntry]);
+  const [view, setView] = useState<"live" | "day" | "mileage" | "exceptions">(exceptionEntry ? exceptionEntry.day?"day":"exceptions" : "live");
+  useEffect(() => { if(exceptionEntry) setView(exceptionEntry.day?"day":"exceptions"); }, [exceptionEntry]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -162,7 +162,7 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
       <button className={view === "exceptions" ? "active" : ""} onClick={() => setView("exceptions")} type="button"><ShieldAlert size={16} /> Exceptions</button>
     </nav>
 
-    {view === "day" ? <FleetDayTracking data={data} gpsVehicles={(summary?.gpsLive??[]).map(row=>row.vehicle_no)} /> : view === "exceptions" ? <FleetGpsExceptions data={data} initialException={exceptionEntry?.target} onReviewed={onReviewed} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
+    {view === "day" ? <FleetDayTracking key={exceptionEntry?.day?exceptionEntry.key:"default"} initialDay={exceptionEntry?.day?exceptionEntry.target:undefined} data={data} gpsVehicles={(summary?.gpsLive??[]).map(row=>row.vehicle_no)} /> : view === "exceptions" ? <FleetGpsExceptions data={data} initialException={exceptionEntry?.target} onReviewed={onReviewed} /> : view !== "live" ? <DailyFleetReportView focus={view} stationOptions={stationOptions} /> : <>
       <div className="fc-section-head fc-tracking-heading"><div><span className="fc-eyebrow">WheelsEye live feed</span><h1>Vehicle tracking</h1><p>Current GPS position and historical movement for vehicles that have tracking configured.</p></div><button className="fc-button secondary" disabled={refreshing} onClick={() => loadLive(true)} type="button"><RefreshCw className={refreshing ? "spin" : ""} size={16} /> Refresh live</button></div>
       {summary?.error ? <div className="fc-flash error"><span>{summary.error}{summary.gpsLive?.length ? " Showing the last loaded positions; check GPS timestamps." : " Use Refresh live to retry."}</span></div> : null}
       <section className="fc-tracking-kpis">

@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+function compile(file,deps={}){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>deps[id]??{},m.exports,m);return m.exports;}
+const endpoints=compile('src/lib/fleet/journey-endpoints.ts');
+const gps=compile('src/lib/fleet/gps-policy.ts');
+const movement=compile('src/lib/wheelseye-history.ts',{'./fleet/gps-policy':gps});
+const day='2026-10-06',epoch=Date.parse(`${day}T00:00:00+05:30`)/1000;
+const point=(minute,lon=75,speed=0)=>({latitude:11,longitude:lon,speed,ignition:speed>0,vehicleName:'TEST',dttimeInEpoch:epoch+minute*60});
+const route=[point(1310),point(1311,75.001,20),point(1312,75.002,20),...Array.from({length:12},(_,i)=>point(1313+i,75.003))];
+const calculate=(rows)=>movement.calculateWheelseyeMovement(rows,'TEST',day).summary;
+const full=calculate(route);assert.ok(full.distanceReliable);assert.equal(full.journeyEndpoints.start.lng,75);assert.equal(full.journeyEndpoints.end.lng,75.003);
+assert.equal(calculate(route.slice(1)).journeyEndpoints.start,null,'Moving first sample does not prove departure origin');
+assert.equal(calculate(route.slice(0,4)).journeyEndpoints.end,null,'Brief stop must not become final stop');
+assert.equal(calculate(route.map(p=>({...p,dttimeInEpoch:p.dttimeInEpoch-36000}))).journeyEndpoints.end,null,'Early truncated history is not an end-of-day destination');
+assert.equal(calculate([point(0),point(1),point(2)]).journeyEndpoints.start,null,'Parked all day is not a departure');
+const base={code:'TEST',label:'TEST',lat:11,lng:75,radiusM:50};
+const checked=endpoints.checkJourneyLocations(day,full.journeyEndpoints,{start:base,end:base},new Date('2026-10-07T01:00:00Z'));
+assert.equal(checked.start.state,'inside');assert.equal(checked.end.state,'outside');assert.ok(checked.end.distanceM>300);assert.match(endpoints.endpointLabel('end',checked),/m from TEST/);
+const live=endpoints.checkJourneyLocations(day,full.journeyEndpoints,{start:base,end:base},new Date('2026-10-06T17:00:00Z'));assert.equal(live.end.state,'pending');assert.deepEqual(endpoints.endpointAlerts(live),[]);
+assert.equal(endpoints.checkJourneyLocations(day,full.journeyEndpoints,{start:null,end:base},new Date('2026-10-07')).start.state,'unverified');
+assert.equal(endpoints.checkJourneyLocations(day,full.journeyEndpoints,{start:base,end:{...base,radiusM:1000}},new Date('2026-10-07')).end.state,'inside','Configured radius respected');
+assert.equal(endpoints.stationAt('B','2026-10-06T01:00:00Z',[{created_at:'2026-10-06T02:00:00Z',metadata:{from_station:'A',to_station:'B'}}]),'A');
+assert.equal(endpoints.stationAt('B','2026-10-06T03:00:00Z',[{created_at:'2026-10-06T02:00:00Z',metadata:{from_station:'A',to_station:'B'}}]),'B');
+assert.equal(endpoints.stationAt('C','2026-10-06T01:00:00Z',[{created_at:'2026-10-06T02:00:00Z',metadata:{from_station:'A',to_station:'B'}}]),null,'Inconsistent transfer history stays unverified');
+// Optional location source failures never throw into the GPS saver or transaction forms.
+const server=compile('src/lib/fleet/journey-endpoints-server.ts',{'./journey-endpoints':endpoints,'@/lib/supabase-admin':{supabaseAdmin:{from(){throw Error('offline')}}}});
+assert.equal(await server.loadJourneyLocationCheck('company','TEST',day,full.journeyEndpoints),null);
+const attention=compile('src/lib/fleet/attention.ts',{'./journey-endpoints.ts':endpoints,'./source-policy.ts':{documentApplies:()=>false},'./gps-exceptions.ts':{gpsExceptions:()=>[],isOwnedVehicle:()=>true}});
+const fixture={today:day,vehicles:[{id:'v',vehicleNo:'TEST',stationCode:'TEST'}],dailyKm:[{vehicleNo:'TEST',date:day,locationCheck:checked}],findings:[],audits:[],payments:[],documentTypes:[],settings:{},capabilities:{visibleSections:['tracking']}};
+const alerts=attention.fleetAttention(fixture);assert.equal(alerts.length,1);assert.ok(alerts[0].endpoint);assert.equal(alerts[0].due,day);
+assert.equal(attention.fleetAttention({...fixture,vehicles:[]}).length,0,'No alerts for out-of-scope vehicles');
+assert.equal(attention.fleetAttention({...fixture,capabilities:{visibleSections:[]}}).length,0,'Tracking permission respected');
+const cron=compile('src/app/api/cron/fleet-journey-locations/route.ts');const prior=process.env.CRON_SECRET;process.env.CRON_SECRET='fixture-secret';assert.equal((await cron.GET(new Request('https://fixture/api/cron'))).status,401);if(prior===undefined)delete process.env.CRON_SECRET;else process.env.CRON_SECRET=prior;
+console.log('Journey endpoints: origin evidence, final-stop coverage, live-day suppression, distance, radius, historical assignment, optional failure, scoped attention and cron authorization passed.');

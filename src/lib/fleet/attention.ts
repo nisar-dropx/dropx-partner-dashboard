@@ -1,7 +1,8 @@
+import {endpointAlerts,endpointLabel} from "./journey-endpoints.ts";
 import { documentApplies } from "./source-policy.ts";
 import {gpsExceptions,isOwnedVehicle} from './gps-exceptions.ts';
 import type { FleetControlData } from '../fleet-control';
-export type AttentionItem={id:string;title:string;detail:string;station:string;vehicle:string;vehicleId:string;due:string|null;priority:number;category:string;section:string;documentType?:string;findingId?:string;auditId?:string;resolved?:boolean};
+export type AttentionItem={id:string;title:string;detail:string;station:string;vehicle:string;vehicleId:string;due:string|null;priority:number;category:string;section:string;endpoint?:boolean;documentType?:string;findingId?:string;auditId?:string;resolved?:boolean};
 export function fleetAttention(data:FleetControlData):AttentionItem[]{
  const ownedIds=new Set(data.vehicles.filter(isOwnedVehicle).map(v=>v.id));
  const rows:AttentionItem[]=[];const can=(s:string)=>data.capabilities.visibleSections.includes(s);
@@ -20,6 +21,10 @@ export function fleetAttention(data:FleetControlData):AttentionItem[]{
  }
  if(can('audits'))for(const a of data.audits)if(ownedIds.has(a.vehicleId)&&['scheduled','in_progress'].includes(a.status)&&a.scheduledFor<=data.today)rows.push({id:`audit-${a.id}`,title:`${a.auditMode==='physical'?'Physical':'Virtual'} audit ${a.status==='in_progress'?'in progress':'due'}`,detail:'Complete the scheduled checklist.',station:a.stationCode,vehicle:a.vehicleNo,vehicleId:a.vehicleId,due:a.scheduledFor,priority:2,category:'Audits due',section:'audits',auditId:a.id});
  if(can('tracking'))for(const k of gpsExceptions(data,data.today.slice(0,7)+'-01',data.today)){const v=data.vehicles.find(v=>v.vehicleNo===k.vehicleNo);if(v)rows.push({id:`gps-${v.id}-${k.date}`,title:'Movement outside operating hours',detail:'Review the recorded route and operating times.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:k.date,priority:1,category:'Tracking exceptions',section:'tracking'});}
+ if(can('tracking'))for(const k of data.dailyKm){
+  const v=data.vehicles.find(v=>v.vehicleNo===k.vehicleNo);if(!v)continue;
+  for(const kind of endpointAlerts(k.locationCheck))rows.push({id:`endpoint-${v.id}-${k.date}-${kind}`,endpoint:true,title:endpointLabel(kind,k.locationCheck),detail:`${k.locationCheck![kind].reason}. Review the recorded ${kind==='start'?'departure':'last stop'} and route.`,station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:k.date,priority:1,category:'Tracking exceptions',section:'tracking'});
+ }
  if(can('approvals'))for(const p of data.payments)if(p.canApprove)rows.push({id:`payment-${p.id}`,title:`${p.head} · ₹${p.amount.toLocaleString('en-IN')}`,detail:p.remarks,station:p.stationCode,vehicle:'',vehicleId:'',due:p.workDate||p.requestedAt.slice(0,10),priority:2,category:'Approvals',section:'approvals'});
  return rows.sort((a,b)=>Number(a.resolved)-Number(b.resolved)||a.priority-b.priority||(a.due||'9999').localeCompare(b.due||'9999'));
 }

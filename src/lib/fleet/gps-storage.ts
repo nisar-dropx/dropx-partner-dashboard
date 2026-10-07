@@ -1,3 +1,4 @@
+import {loadJourneyLocationCheck} from "./journey-endpoints-server";
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import type { WheelseyeMovementSummary } from '@/lib/wheelseye-history';
 
@@ -7,7 +8,9 @@ export async function saveDailyWheelseyeKm(companyId: string, vehicle: string, d
   if (!supabaseAdmin) return 'save_failed';
   const existing = await supabaseAdmin.from('fleet_daily_km').select('id,calculated_at').eq('company_id', companyId).eq('vehicle_no', vehicle).eq('movement_date', date).eq('source', 'wheelseye').maybeSingle();
   if (existing.error) return 'save_failed';
+  const journeyLocationCheck=await loadJourneyLocationCheck(companyId,vehicle,date,summary.journeyEndpoints);
   const values = {
+    ...(journeyLocationCheck?{journey_location_check:journeyLocationCheck}:{}),
     gps_policy: summary.gpsPolicy ?? null,
     km: summary.km, raw_km: summary.rawKm, point_count: summary.pointCount,
     accepted_point_count: summary.acceptedPointCount, rejected_point_count: summary.rejectedPointCount,

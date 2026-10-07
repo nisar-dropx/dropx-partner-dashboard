@@ -1,7 +1,7 @@
 import type { DailyFleetRow } from './daily-report';
 export type DayAssignment = {id:string;vehicle_no:string;station_code:string;work_date:string;provider_employee_id:string|null;workforce_id:string|null;name:string;purpose:'delivery'|'shipment_drop'|'other';source:string;remarks:string;delivered?:number|null};
 export type AssignmentOption = {key:string;providerId:string|null;workforceId:string|null;name:string;source:'workforce'|'shipment';registeredVehicle?:string|null};
-export type TrackingDay = DailyFleetRow & {movingMinutes:number|null;idleMinutes:number|null;stoppedMinutes:number|null;stopUnknownMinutes:number|null;unknownMinutes:number|null;firstMovingAt:string|null;lastMovingAt:string|null;maxSpeed:number|null;assignments:DayAssignment[];delivered:number|null;estimatedLitres:number;fuelQuantityMissing:boolean};
+export type TrackingDay = DailyFleetRow & {locationCheck?:import("./journey-endpoints").JourneyLocationCheck|null;movingMinutes:number|null;idleMinutes:number|null;stoppedMinutes:number|null;stopUnknownMinutes:number|null;unknownMinutes:number|null;firstMovingAt:string|null;lastMovingAt:string|null;maxSpeed:number|null;assignments:DayAssignment[];delivered:number|null;estimatedLitres:number;fuelQuantityMissing:boolean};
 export type TrackingDayReport = {from:string;to:string;generatedAt:string;rows:TrackingDay[];canAssign:boolean;assignmentWarning?:string};
 export type ShipmentDaily = {station_code:string;work_date:string;provider_employee_id:string;total_delivery:number|string|null};
 export function matchAssignmentDeliveries(assignments:DayAssignment[], shipments:ShipmentDaily[]):DayAssignment[] {

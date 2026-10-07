@@ -208,7 +208,7 @@ export function FleetControlDashboard({
   const router = useRouter();
   const [reviewUpdates,setReviewUpdates] = useState<GpsExceptionReview[]>([]);
   const data = {...serverData,gpsExceptionReviews:[...(serverData.gpsExceptionReviews||[]),...reviewUpdates]};
-  const [exceptionEntry,setExceptionEntry] = useState<{target?:{vehicleNo:string;date:string};key:number}|null>(null);
+  const [exceptionEntry,setExceptionEntry] = useState<{target?:{vehicleNo:string;date:string};day?:boolean;key:number}|null>(null);
   const openGpsAlerts=gpsExceptions(data,data.today.slice(0,7)+"-01",data.today);
   function openExceptions(target?:{vehicleNo:string;date:string}) { setExceptionEntry({target,key:Date.now()}); changeSection("tracking"); }
   const visibleSectionSet = new Set(data.capabilities.visibleSections as Section[]);
@@ -705,7 +705,7 @@ export function FleetControlDashboard({
           {flash ? <div className={`fc-flash ${flash.type}`}><span>{flash.type === "notice" ? <Check size={17} /> : <AlertTriangle size={17} />}{flash.text}</span><button aria-label="Dismiss" onClick={() => setFlash(null)} type="button"><X size={16} /></button></div> : null}
           {data.errors.length ? <div className="fc-flash error"><span><AlertTriangle size={17} />Some live data could not load. Totals may be incomplete. <button type="button" className="fc-row-action" onClick={()=>router.refresh()}>Retry data</button><details><summary>Show details</summary>{data.errors.map((error,index)=><p key={index}>{error}</p>)}</details></span></div> : null}
 
-          {section === "attention" ? <FleetAttentionWorkspace data={{...data,vehicles}} onRentSaved={(id,values)=>setVehicles(current=>current.map(v=>v.id===id?{...v,...values}:v))} onChanged={() => router.refresh()} onNavigate={(item) => { setAttentionTarget({vehicle:item.vehicle,documentType:item.documentType}); if(item.section === "vehicles") setSelectedVehicle(vehicles.find(v=>v.id===item.vehicleId) || null); else if(item.section === "tracking") openExceptions({vehicleNo:item.vehicle,date:item.due||data.today}); else { if(item.auditId) setAuditToOpen(item.auditId); changeSection(item.section as Section); } }} /> : null}
+          {section === "attention" ? <FleetAttentionWorkspace data={{...data,vehicles}} onRentSaved={(id,values)=>setVehicles(current=>current.map(v=>v.id===id?{...v,...values}:v))} onChanged={() => router.refresh()} onNavigate={(item) => { setAttentionTarget({vehicle:item.vehicle,documentType:item.documentType}); if(item.section === "vehicles") setSelectedVehicle(vehicles.find(v=>v.id===item.vehicleId) || null); else if(item.section === "tracking"){if(item.endpoint){setExceptionEntry({target:{vehicleNo:item.vehicle,date:item.due||data.today},day:true,key:Date.now()});changeSection("tracking");}else openExceptions({vehicleNo:item.vehicle,date:item.due||data.today});} else { if(item.auditId) setAuditToOpen(item.auditId); changeSection(item.section as Section); } }} /> : null}
           {section === "overview" ? <>
             {visibleSectionSet.has("attention") ? <button type="button" className="fc-attention-banner" onClick={() => changeSection("attention")}><AlertTriangle size={22}/><span><strong>{fleetAttention({...data,vehicles}).filter(r=>!r.resolved).length} actions need attention</strong><small>Repair follow-ups, overdue returns, documents and audits</small></span><ArrowRight size={20}/></button> : null}
             <section className="fc-hero">

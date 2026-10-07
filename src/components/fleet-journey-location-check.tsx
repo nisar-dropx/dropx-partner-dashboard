@@ -1,0 +1,7 @@
+'use client';
+import {endpointAlerts,endpointLabel,type JourneyLocationCheck} from '@/lib/fleet/journey-endpoints';
+import {dayTime} from '@/lib/fleet/day-tracking';
+export function FleetJourneyLocationCheck({check,compact=false}:{check?:JourneyLocationCheck|null;compact?:boolean}){
+ if(compact)return <small className={endpointAlerts(check).length?'fc-day-warn':'fc-endpoint-muted'}>{endpointAlerts(check).length?endpointAlerts(check).map(k=>endpointLabel(k,check)).join(' · '):!check?'Location unverified':check.start.state==='inside'&&check.end.state==='inside'?'Start / end at assigned location':`${endpointLabel('start',check)} · ${endpointLabel('end',check)}`}</small>;
+ return <section className="fc-endpoint-panel" aria-label="Start and end location checks"><header><strong>Start & end location</strong><small>Straight-line distance · assigned station geofence</small></header><div className="fc-endpoint-grid">{(['start','end'] as const).map(kind=>{const c=check?.[kind];return <article key={kind} data-state={c?.state||'unverified'}><strong>{endpointLabel(kind,check)}</strong><span>{c?.reason||'Not checked yet · refresh GPS for this day'}</span>{c?.point&&<a href={`https://www.google.com/maps?q=${c.point.lat},${c.point.lng}`} target="_blank" rel="noopener noreferrer">{dayTime(c.point.at)} IST · View location ↗</a>}{c?.base&&<small>Expected: {c.base.label} · {c.base.radiusM} m radius</small>}</article>;})}</div><small>Checks the first recorded departure and last confirmed stop. Gaps remain unverified; today’s end remains provisional.</small></section>;
+}

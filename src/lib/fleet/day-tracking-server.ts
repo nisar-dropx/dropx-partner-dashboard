@@ -11,7 +11,7 @@ export async function loadDayTracking(auth:AuthorizationContext,from:string,to:s
  if(!report.vehicles.length)return {...report,rows:[],canAssign:canAssignDay(auth)};
  const plates=report.vehicles.map(v=>v.vehicle_no);
  const [gps,assignments,fuel]=await Promise.all([
-  readAllRows(supabaseAdmin!.from('fleet_daily_km').select('id,vehicle_no,movement_date,moving_minutes,idle_minutes,stopped_minutes,stop_unknown_minutes,unknown_minutes,first_moving_at,last_moving_at,max_speed,point_count').eq('company_id',scope.companyId).in('vehicle_no',plates).eq('source','wheelseye').gte('movement_date',from).lte('movement_date',to).order('id')),
+  readAllRows(supabaseAdmin!.from('fleet_daily_km').select('journey_location_check,id,vehicle_no,movement_date,moving_minutes,idle_minutes,stopped_minutes,stop_unknown_minutes,unknown_minutes,first_moving_at,last_moving_at,max_speed,point_count').eq('company_id',scope.companyId).in('vehicle_no',plates).eq('source','wheelseye').gte('movement_date',from).lte('movement_date',to).order('id')),
   readAllRows(supabaseAdmin!.from('fleet_day_assignments').select('id,vehicle_no,station_code,work_date,provider_employee_id,workforce_id,name,purpose,source,remarks').eq('company_id',scope.companyId).in('vehicle_no',plates).eq('is_active',true).gte('work_date',from).lte('work_date',to).order('id')),
   readAllRows(supabaseAdmin!.from('fleet_fuel_transactions').select('id,vehicle_no,transaction_date,fuel_quantity,fuel_amount,rate').eq('company_id',scope.companyId).in('vehicle_no',plates).gte('transaction_date',from).lte('transaction_date',to).order('id'))
  ]);
@@ -29,7 +29,7 @@ export async function loadDayTracking(auth:AuthorizationContext,from:string,to:s
  return {from,to,generatedAt:report.generatedAt,canAssign:canAssignDay(auth),assignmentWarning:shipments.error?'Package feed is temporarily unavailable. Assignments remain visible.':undefined,rows:report.rows.map(r=>{
   const key=`${r.vehicle_no}|${r.date}`,g=gpsMap.get(key),a=assignmentMap.get(key)??[],f=trackingFuel(fuelMap.get(key)??[]);
   const usable=g&&(g.point_count??0)>=2;
-  return {...r,litres:/^(diesel|petrol)$/i.test(r.fuel_type)?f.litres:null,estimatedLitres:f.estimatedLitres,fuelQuantityMissing:f.missing,movingMinutes:usable?g.moving_minutes:null,idleMinutes:usable?g.idle_minutes:null,stoppedMinutes:usable?g.stopped_minutes:null,stopUnknownMinutes:usable?g.stop_unknown_minutes:null,unknownMinutes:usable?g.unknown_minutes:null,firstMovingAt:usable?g.first_moving_at:null,lastMovingAt:usable?g.last_moving_at:null,maxSpeed:usable?g.max_speed:null,assignments:a,delivered:assignmentPackageTotal(a)};
+  return {...r,locationCheck:g?.journey_location_check??null,litres:/^(diesel|petrol)$/i.test(r.fuel_type)?f.litres:null,estimatedLitres:f.estimatedLitres,fuelQuantityMissing:f.missing,movingMinutes:usable?g.moving_minutes:null,idleMinutes:usable?g.idle_minutes:null,stoppedMinutes:usable?g.stopped_minutes:null,stopUnknownMinutes:usable?g.stop_unknown_minutes:null,unknownMinutes:usable?g.unknown_minutes:null,firstMovingAt:usable?g.first_moving_at:null,lastMovingAt:usable?g.last_moving_at:null,maxSpeed:usable?g.max_speed:null,assignments:a,delivered:assignmentPackageTotal(a)};
  })};
 }
 export async function assignmentOptions(companyId:string,station:string,date:string):Promise<AssignmentOption[]>{

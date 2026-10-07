@@ -7,7 +7,7 @@ import {dayDuration,dayHours,dayTime} from '@/lib/fleet/day-tracking';
 import {journeyOverview,locationLink,sampleProgress,traceTime} from '@/lib/fleet/journey-progress';
 import {RouteMap} from './fleet-dashboard';
 import {FleetExportButtons} from './fleet-export-buttons';
-export type DayJourney={points:Array<{lat:number;lng:number}>;routeSegments:Array<Array<{lat:number;lng:number}>>;timeline:MovementEvent[];summary:WheelseyeMovementSummary;progress?:MovementProgressPoint[]};
+export type DayJourney={locationCheck?:import("@/lib/fleet/journey-endpoints").JourneyLocationCheck|null;points:Array<{lat:number;lng:number}>;routeSegments:Array<Array<{lat:number;lng:number}>>;timeline:MovementEvent[];summary:WheelseyeMovementSummary;progress?:MovementProgressPoint[]};
 const number=(v:number|null|undefined,digits=2)=>v==null?'—':v.toLocaleString('en-IN',{maximumFractionDigits:digits});
 const names={moving:'Moving',idle:'Idling · engine on',stopped:'Parked · engine off',stop_unknown:'Stopped · ignition unknown',gap:'GPS gap',start:'First recorded point'};
 function Place({lat,lng,label}:{lat:number;lng:number;label?:string}){return <a className="fc-journey-location" href={locationLink(lat,lng)} target="_blank" rel="noopener noreferrer" aria-label={`${label||'Location'}: ${lat.toFixed(5)}, ${lng.toFixed(5)}. Open in maps`}><MapPin size={13}/>{label||`${lat.toFixed(5)}, ${lng.toFixed(5)}`}<ExternalLink size={12}/></a>;}

@@ -39,6 +39,7 @@ export async function GET() {
     return {
       ...vehicle,
       km,
+      locationCheck: todayMovement?.journey_location_check ?? null,
       todayKm: Number(todayMovement?.km) || 0,
       todayMaxSpeed: Number(todayMovement?.max_speed) || 0,
       todayMovingMinutes: Number(todayMovement?.moving_minutes) || 0,
@@ -214,7 +215,7 @@ async function loadTodayKm(companyId: string, today: string) {
   if (!supabaseAdmin) return { rows: [], error: "Supabase service role is not configured." };
   const { data, error } = await supabaseAdmin
     .from("fleet_daily_km")
-    .select("vehicle_no,movement_date,km,max_speed,moving_minutes,first_moving_at,last_moving_at,first_moving_latitude,first_moving_longitude,calculated_at")
+    .select("journey_location_check,vehicle_no,movement_date,km,max_speed,moving_minutes,first_moving_at,last_moving_at,first_moving_latitude,first_moving_longitude,calculated_at")
     .eq("company_id", companyId)
     .eq("movement_date", today)
     .neq("review_status", "needs_review")

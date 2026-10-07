@@ -93,7 +93,7 @@ const saveDb = { from(table) {
     then(resolve) { return Promise.resolve(resolve({ data: [{ id: 'record-1' }], error: null })); }
   }; return query;
 } };
-const gpsStorage = compile('src/lib/fleet/gps-storage.ts', { '@/lib/supabase-admin': { supabaseAdmin: saveDb } });
+const gpsStorage = compile('src/lib/fleet/gps-storage.ts', { './journey-endpoints-server':{loadJourneyLocationCheck:async()=>null}, '@/lib/supabase-admin': { supabaseAdmin: saveDb } });
 const refresh = compile('src/app/api/fleet/daily-report/refresh/route.ts', { '@/lib/fleet/system-log': {withFleetSystemLog:fn=>fn}, '@/lib/authorization': { getAuthorization: async () => auth }, '@/lib/fleet/gps-storage': gpsStorage, '@/lib/wheelseye': { getWheelseyeAccessToken: async () => 'test' }, '@/lib/wheelseye-history': { loadWheelseyeMovement: async () => { gpsCalls++; return { summary: { pointCount: samples, km: 25, rawKm: 100, acceptedPointCount: 8, rejectedPointCount: 2, stationaryPointCount: 0, algorithmVersion: 'gps-moving-fixes-v2', quality: distanceReliable ? 'filtered' : 'needs_review', distanceReliable, rejectedSegments: distanceReliable ? 0 : 5 } }; } }, '@/lib/fleet/daily-report': p, '@/lib/fleet/report-data': { FleetReportError: scope.FleetReportError, reportScope: async a => { if (!a.allowed) throw new scope.FleetReportError('Denied', 403); return { companyId: 'company-A', vehicles: [v] }; } } });
 const post = (pairs, origin = 'https://ops.dropxlogistics.com') => new Request('https://ops.dropxlogistics.com/api/fleet/daily-report/refresh', { method: 'POST', headers: { origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ pairs }) });
 const pair = { vehicle: v.vehicle_no, date: p.shiftDay(p.istDate(), -1) };
