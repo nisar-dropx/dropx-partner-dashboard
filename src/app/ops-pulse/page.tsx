@@ -16,7 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { OpsStationManpowerBoard } from "@/components/ops-station-manpower-board";
 
-type SearchParams = { station?: string; month?: string; date?: string; from?: string; to?: string; shift?: string; view?: string; location?: string };
+type SearchParams = { station?: string; month?: string; city?: string; date?: string; from?: string; to?: string; shift?: string; view?: string; location?: string };
 type ShipmentFact = {
   station_code: string;
   shipment_type: string | null;
