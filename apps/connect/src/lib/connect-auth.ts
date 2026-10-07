@@ -1,4 +1,3 @@
-import { loadPartnerOnboardingStates, partnerReportStillBlocksWorkspace } from "@/lib/partner-onboarding";
 import { createHash, randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { normalizeMobile } from "@/lib/connect-otp";
@@ -14,7 +13,6 @@ import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 import { enforceAccessCutoffIfDueForWorker } from "./access-cutoff";
-import { requiresProviderMappingActivation } from "./provider-mapping-policy";
 
 export type ConnectAccount = {
   id: string;
@@ -869,7 +867,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     throw new Error(designationResult.error.message);
   }
   const pageAccessByDesignationId = new Map<string, string[] | null>();
-  const activationGateByDesignationId = new Map<string, boolean>();
   const providerMappingRequiredByDesignationId = new Map<string, boolean>();
   const designationNameById = new Map<string, string>();
   const designationCodeById = new Map<string, string | null>();
@@ -896,7 +893,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       ? (designation as { app_page_access: unknown[] }).app_page_access.map(String)
       : null;
     pageAccessByDesignationId.set(String(designation.id), pages);
-    activationGateByDesignationId.set(String(designation.id), Boolean(designation.dropx_one_activation_gate));
     providerMappingRequiredByDesignationId.set(String(designation.id), Boolean(designation.provider_mapping_required));
     designationNameById.set(String(designation.id), String(designation.name || designation.code));
     designationCodeById.set(String(designation.id), designation.code ? String(designation.code) : null);
@@ -1007,30 +1003,12 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         pageAccess.push("business_trip");
       }
 
-      let activationOnly = false;
-      let onboardingBeta = false;
-      let activationStage: string | null = null;
+      // Canonical accounts keep their existing registration and designation access.
+      // Report pendencies and legacy pilots must never turn a real profile into beta.
+      // Only isolatedPilotAccounts below may receive activation-only access.
       const providerMappingRequired = designationId
         ? Boolean(providerMappingRequiredByDesignationId.get(designationId))
         : false;
-      if (workspace === "workforce" && account.profile_type === "workforce") {
-        const state=(await loadPartnerOnboardingStates(supabaseAdmin!,account.company_id,[account.id])).get(account.id);
-        const todayIst = todayInIndia();
-        activationOnly = partnerReportStillBlocksWorkspace({
-          accountStatus: account.status,
-          mappingConfirmed: Boolean(state?.mapping_confirmed),
-          registrationReady: Boolean(state?.registration_ready),
-          reportDate: state?.report_date,
-          restrictDropxOne: Boolean(state?.restrict_dropx_one),
-          today: todayIst
-        });
-        activationStage=state?.stage??null;
-        const pilot=await supabaseAdmin!.from("workforce_amazon_pilots").select("workforce_id,closed_at").eq("company_id",account.company_id).eq("workforce_id",account.id).maybeSingle();
-        // Additive pilot schema may be deployed independently of DropX One.
-        if(pilot.error && !["42P01","PGRST205"].includes(pilot.error.code)) throw new Error("Onboarding status is temporarily unavailable.");
-        if(pilot.data){activationOnly=true;onboardingBeta=true;activationStage=pilot.data.closed_at?"closed":"amazon_pilot";}
-
-      }
 
       return {
       id: account.id,
@@ -1038,7 +1016,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       profileType: account.profile_type,
       name: account.full_name,
       email: account.email ?? null,
-      reference: activationOnly ? null : account.employee_id || account.dropx_id || null,
+      reference: account.employee_id || account.dropx_id || null,
       role: account.profile_type === "user"
         ? account.role ?? null
         : account.designation_id
@@ -1049,21 +1027,19 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       status: account.status ?? null,
       biometricId: account.biometric_id ?? null,
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),
-      pageAccess: activationOnly ? ["activation"] : pageAccess,
+      pageAccess,
       isDefault: defaultPreference?.default_company_id === account.company_id &&
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,
       companyName: companyNameById.get(account.company_id) ?? "Company",
-      label: activationOnly
-        ? [companyNameById.get(account.company_id) ?? "Company", account.full_name].filter(Boolean).join(" - ")
-        : accountLabel(account, companyNameById),
+      label: accountLabel(account, companyNameById),
       workspace,
       workspaceLabel: workspace === "people" ? "People workspace" : "Workforce workspace",
       designationCode: designationId ? designationCodeById.get(designationId) ?? null : null,
       providerMappingRequired,
-      activationOnly,
-      onboardingBeta,
-      activationStage
+      activationOnly: false,
+      onboardingBeta: false,
+      activationStage: null
       };
     }));
   const isolatedPilotAccounts: ConnectAccount[] = isolatedPilotRows
