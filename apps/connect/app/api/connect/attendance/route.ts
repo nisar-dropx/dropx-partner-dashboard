@@ -423,11 +423,20 @@ export async function GET(request: NextRequest) {
       const [year, month] = date.split("-").map(Number);
       return new Date(Date.UTC(year, month, closeDay)).toISOString().slice(0, 10);
     };
+    // Custom dates from the person's rule set: extra attendance days kept open
+    // until their own closing date, on top of the window above.
+    const customFrom = personRule?.custom_from ? String(personRule.custom_from).slice(0, 10) : null;
+    const customTo = personRule?.custom_to ? String(personRule.custom_to).slice(0, 10) : null;
+    const customClosesOn = personRule?.custom_closes_on ? String(personRule.custom_closes_on).slice(0, 10) : null;
     const withWindow = responseRows.map((row) => {
       const closeDate = closesOn(row.date);
       // With a close day set, the month rule alone decides; otherwise the backdate window.
-      const open = row.date <= todayIst && (closeDate ? todayIst <= closeDate : row.date >= earliestDate);
-      return { ...row, regularizationOpen: open, regularizationClosesOn: closeDate };
+      const baseOpen = closeDate ? todayIst <= closeDate : row.date >= earliestDate;
+      const inCustom = Boolean(customFrom && customTo && customClosesOn && row.date >= customFrom && row.date <= customTo);
+      const open = row.date <= todayIst && (baseOpen || (inCustom && todayIst <= customClosesOn!));
+      // The later of the two deadlines is the one the person sees.
+      const closesOnDate = inCustom && (!closeDate || customClosesOn! > closeDate) ? customClosesOn : closeDate;
+      return { ...row, regularizationOpen: open, regularizationClosesOn: closesOnDate };
     });
 
     return NextResponse.json({
