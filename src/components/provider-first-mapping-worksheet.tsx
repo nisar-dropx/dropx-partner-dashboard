@@ -9,6 +9,7 @@ import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@
 import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import {
   filterProviderFirstRowIndexes,
+  providerMappingMonthOptions,
   isScientificProviderMemberId,
   providerFirstNamesMatch,
   providerFirstLocationRemap,
@@ -73,7 +74,8 @@ function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches || busy} onClick={() => onSave(index)} type="button">{busy ? "Saving..." : dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", canEdit, mappings, workers, paymentMethods }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+  shipmentMonths: string[];
   initialQuery?: string;
   initialStationId?: string;
   canEdit: boolean;
@@ -87,6 +89,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [query, setQuery] = useState(initialQuery);
   const deferredQuery = useDeferredValue(query);
   const [stationFilters, setStationFilters] = useState<string[]>(initialStationId ? [initialStationId] : []);
+  const [monthFilters, setMonthFilters] = useState<string[]>([]);
+  const monthOptions = useMemo(() => providerMappingMonthOptions(shipmentMonths), [shipmentMonths]);
   const [methodFilters, setMethodFilters] = useState<string[]>([]);
   const [mappingFilters, setMappingFilters] = useState<string[]>([]);
   const [validationFilters, setValidationFilters] = useState<string[]>([]);
@@ -131,22 +135,24 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     workerById,
     paymentMethodById,
     filters: {
+      outboundMonths: monthFilters,
       query: deferredQuery,
       stationIds: stationFilters,
       paymentMethodIds: methodFilters,
       mappingStatuses: mappingFilters,
       validationStatuses: validationFilters
     }
-  }), [rows, workerById, paymentMethodById, deferredQuery, stationFilters, methodFilters, mappingFilters, validationFilters]);
+  }), [rows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
-  const hasFilters = Boolean(query || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
+  const hasFilters = Boolean(query || monthFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
 
   function resetPage() { setCurrentPage(1); }
 
   function clearFilters() {
     setQuery("");
     setStationFilters([]);
+    setMonthFilters([]);
     setMethodFilters([]);
     setMappingFilters([]);
     setValidationFilters([]);
@@ -390,6 +396,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       </div>
       <div className="provider-first-filters">
         <label className="provider-first-search"><span>Search</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); resetPage(); }} placeholder="Provider member, DropX ID or name" /></label>
+        <MappingMultiFilter allLabel="All months" label="Outbound month" options={monthOptions} selected={monthFilters} setSelected={(values) => { setMonthFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
