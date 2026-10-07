@@ -28,6 +28,20 @@ test('available month options are unique, searchable by name or year/month, and 
   ]);
 });
 
+test('region and People cluster/AOM filters intersect month, status and location filters', () => {
+  const rows = [
+    { ...row, region: 'North', clusterKeys: ['cm:1'], outboundMonths: ['2026-10'] },
+    { ...row, stationId: 'b', region: 'South', clusterKeys: ['aom:2'], outboundMonths: ['2026-10'] },
+    { ...row, region: 'North', clusterKeys: ['cm:3'], outboundMonths: ['2026-09'] },
+    { ...row, region: 'North', clusterKeys: ['cm:1'], outboundMonths: ['2026-10'], workforceId: 'mapped' },
+    { ...row, region: 'Unassigned', clusterKeys: ['unmapped'], outboundMonths: [] }
+  ];
+  assert.deepEqual(visible(rows, { regions: ['North', 'South'], clusterKeys: ['cm:1', 'aom:2'], outboundMonths: ['2026-10'], mappingStatuses: ['unmapped'] }), [0, 1]);
+  assert.deepEqual(visible(rows, { regions: ['South'], clusterKeys: ['aom:2'], stationIds: ['b'] }), [1]);
+  assert.deepEqual(visible(rows, { regions: ['North'], clusterKeys: ['aom:2'] }), []);
+  assert.deepEqual(visible(rows, { regions: ['Unassigned'], clusterKeys: ['unmapped'] }), [4]);
+});
+
 test('rounded legacy IDs contribute months only to an unambiguous canonical ID', () => {
   const exact = { providerMemberId: '12345678901', providerMemberName: 'Asha', stationCode: 'A', outboundMonths: ['2026-10'] };
   const rounded = { ...exact, providerMemberId: '1.234568E+10', outboundMonths: ['2026-09'] };
