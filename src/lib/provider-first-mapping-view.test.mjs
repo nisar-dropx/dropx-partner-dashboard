@@ -327,6 +327,32 @@ test("combines filter groups with AND and selections within a group with OR", ()
   assert.deepEqual(unassigned, [1]);
 });
 
+test("mapping status follows confirmed saves, not draft selections or validation failures", () => {
+  const unmapped = { ...row, workforceId: "", mappingId: "", dropxId: "", dropxName: "", paymentMethodId: "" };
+  const filter = (drafts, saved, status) => filterProviderFirstRowIndexes({
+    rows: drafts, savedRows: saved,
+    workerById: new Map([[worker.id, worker]]),
+    paymentMethodById: new Map([[method.id, method]]),
+    filters: { query: "", stationIds: [], paymentMethodIds: [], mappingStatuses: [status], validationStatuses: [] }
+  });
+  // Choosing an ID, including one with incomplete fields, never moves an unsaved row.
+  const draft = { ...row, mappingId: "", paymentMethodId: "", effectiveFrom: "" };
+  assert.deepEqual(filter([draft], [unmapped], "unmapped"), [0]);
+  assert.deepEqual(filter([draft], [unmapped], "mapped"), []);
+  // Completed edits and failed/pending saves still use the unchanged saved baseline.
+  assert.deepEqual(filter([row], [unmapped], "unmapped"), [0]);
+  assert.deepEqual(filter([row], [unmapped], "mapped"), []);
+  // Only the confirmed response updates the baseline and moves the row.
+  assert.deepEqual(filter([row], [row], "unmapped"), []);
+  assert.deepEqual(filter([row], [row], "mapped"), [0]);
+  // Clearing an existing selection without saving does not erase its saved mapping.
+  assert.deepEqual(filter([unmapped], [row], "mapped"), [0]);
+  assert.deepEqual(filter([unmapped], [row], "unmapped"), []);
+  // Partial success changes only the successfully saved rows.
+  assert.deepEqual(filter([row, row], [row, unmapped], "mapped"), [0]);
+  assert.deepEqual(filter([row, row], [row, unmapped], "unmapped"), [1]);
+});
+
 test("paginates 1,103 filtered rows with every supported size", () => {
   assert.deepEqual(providerFirstPageWindow(1103, 1, 50), { page: 1, totalPages: 23, fromIndex: 0, toIndex: 50, shownFrom: 1, shownTo: 50 });
   assert.equal(providerFirstPageWindow(1103, 99, 100).page, 12);

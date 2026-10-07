@@ -139,6 +139,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
 
   const visibleIndexes = useMemo(() => filterProviderFirstRowIndexes({
     rows,
+    savedRows: baselineRows,
     workerById,
     paymentMethodById,
     filters: {
@@ -151,7 +152,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       mappingStatuses: mappingFilters,
       validationStatuses: validationFilters
     }
-  }), [rows, workerById, paymentMethodById, deferredQuery, monthFilters, regionFilters, clusterFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
+  }), [rows, baselineRows, workerById, paymentMethodById, deferredQuery, monthFilters, regionFilters, clusterFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
   const hasFilters = Boolean(query || monthFilters.length || regionFilters.length || clusterFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
