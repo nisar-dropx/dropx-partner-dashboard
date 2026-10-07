@@ -1,4 +1,5 @@
 'use client';
+import { FleetMobileSection } from "./fleet-mobile-section";
 import { FleetVehicleMeta } from "@/components/fleet-vehicle-meta";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -129,7 +130,7 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
       <div><span className="daily-eyebrow">{focus === 'fuel' ? 'FUEL CONTROL' : 'FLEET PERFORMANCE'}</span><h2>{focus === 'fuel' ? 'Fuel log' : 'Distance & mileage'}</h2><p>{focus === 'fuel' ? 'BPCL, IOCL and PayTap fuel activity with vehicle and station views.' : 'Daily kilometres and estimated mileage by vehicle or station.'}</p></div>
       <FleetExportButtons report={{ title: focus === 'fuel' ? 'Fleet fuel report' : 'Fleet distance and mileage report', subtitle: `${range.from} to ${range.to} · active filters applied`, fileName: `fleet-${focus}-${range.from}-${range.to}`, headers: ['Date', 'Vehicle', 'Station', 'Model', 'Fuel type', 'Distance km', 'Fuel litres', 'Fuel amount', 'Mileage km/L', 'Cost/km', 'Transactions', 'Status', 'Providers'], rows: rows.map(row => [row.date, row.vehicle_no, row.station_code, row.model, row.fuel_type, row.km, row.litres, row.fuelAmount, row.mileage, row.costPerKm, row.fuelTransactions, statusLabel[row.dataStatus], row.fuelSources.join(', ')]) }} />
     </header>
-    <section className="daily-filter-card" aria-label="Daily fleet report filters">
+    <FleetMobileSection title="Dates & filters" summary={`${dateLabel(range.from)}–${dateLabel(range.to)} · ${stations.join(", ") || "All stations"}`} className="fc-mobile-filters"><section className="daily-filter-card" aria-label="Daily fleet report filters">
       <div className="daily-quick-ranges" aria-label="Quick date ranges">{[['yesterday', 'Yesterday'], ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'MTD'], ['year', 'YTD']].map(([value, label]) => <button key={value} type="button" disabled={syncing} onClick={() => quickRange(value)}>{label}</button>)}<span>All dates in IST</span></div>
       <form className="daily-date-range" onSubmit={event => { event.preventDefault(); if (!draftError) { setRange({ ...draft }); setSyncMessage(''); } }}>
         <label>From date<input type="date" required max={today} value={draft.from} disabled={syncing} onInput={e => setDraft({ ...draft, from: e.currentTarget.value })} /></label>
@@ -148,7 +149,7 @@ export function DailyFleetReportView({ focus = 'mileage', stationOptions: master
         <button className="daily-clear" type="button" disabled={syncing} onClick={() => { setSearch(''); setStations([]); setClusters([]); setRegions([]); setSelectedVehicles([]); setFuelTypes([]); setStatuses([]); }}>Clear filters</button>
       </div>
       {focus === 'fuel' ? <div className="daily-source-switch"><span>Fuel source</span>{([['all','All'],['iocl','IOCL'],['bpcl','BPCL'],['paytap','PayTap']] as const).map(([value, text]) => <button className={fuelSource === value ? 'active' : ''} key={value} onClick={() => setFuelSource(value)} type="button">{text}</button>)}</div> : null}<div className="daily-group-switch"><span>Summarise by</span><button className={groupBy === 'vehicle' ? 'active' : ''} onClick={() => setGroupBy('vehicle')} type="button">Vehicle-wise</button><button className={groupBy === 'station' ? 'active' : ''} onClick={() => setGroupBy('station')} type="button">Station-wise</button></div>
-    </section>
+    </section></FleetMobileSection>
     {error ? <div className="daily-error" role="alert">{error} <button type="button" onClick={() => setVersion(v => v + 1)}>Retry</button></div> : null}
     {loading ? <div className="daily-loading" role="status">Loading daily distance and fuel records…</div> : report ? <>
       <section className="daily-metrics" aria-label="Filtered report totals">

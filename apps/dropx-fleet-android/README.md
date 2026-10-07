@@ -6,7 +6,7 @@ The Android app opens the complete Fleet workspace in a verified Trusted Web Act
 
 JDK 17, Android SDK 36, Gradle wrapper 8.11.1. Set ANDROID_HOME and JAVA_HOME. Supply FLEET_KEYSTORE, FLEET_STORE_PASSWORD, FLEET_KEY_ALIAS and FLEET_KEY_PASSWORD through secure environment variables, then run `./gradlew :app:assembleRelease :app:lintRelease`. No signing material belongs in Git.
 
-Version 3.0.0 (3000) retains package com.dropxlogistics.fleet and the certificate of the previously distributed 2.1.0 APK for in-place upgrades. That legacy certificate has an Android Debug subject; this release itself is non-debuggable. Do not regenerate/change the key: Android would reject updates. Any future signing-key migration requires a separately planned upgrade path.
+Version 3.0.1 (3001) retains package com.dropxlogistics.fleet and the certificate of the previously distributed 2.1.0 APK for in-place upgrades. That legacy certificate has an Android Debug subject; this release itself is non-debuggable. Do not regenerate/change the key: Android would reject updates. Any future signing-key migration requires a separately planned upgrade path.
 
 The public signing fingerprint is published on Fleet only at /.well-known/assetlinks.json. Verify it against apksigner before each release. Verify APK version, signature, debuggable flag and SHA-256, then update public/downloads/fleet-android.json and the versioned APK. Deployment must follow the workspace GitHub-first policy. Never publish unsigned builds. Existing Flutter source is retained for history; the login download points to this complete-workspace client.
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "dropx-portals-static-v6";
+const CACHE_NAME = "dropx-portals-static-v7";
 const PRE_CACHE = [
   "/fleet-offline.html",
   "/manifest.webmanifest",

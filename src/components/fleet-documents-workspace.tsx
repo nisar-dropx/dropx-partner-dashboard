@@ -1,4 +1,5 @@
 "use client";
+import { FleetMobileSection } from "./fleet-mobile-section";
 import { FleetVehicleMeta } from "@/components/fleet-vehicle-meta";
 import { documentApplies } from "@/lib/fleet/source-policy";
 
@@ -149,7 +150,7 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
       <button className={states.length === 1 && states[0] === "linked" ? "active linked" : "linked"} onClick={() => { setWorkspaceMode("register"); setStates(["linked"]); }} type="button"><small>Linked validity</small><strong>{counts.linked}</strong><span>RC follows Fitness</span></button>
     </div>
 
-    <div className="fc-document-filters">
+    <FleetMobileSection title="Search & filters" summary={[query,...regions,...clusters,...stations,...vehicleNos,...documentTypes,...states].filter(Boolean).join(" · ") || "All stations · all vehicles"} className="fc-mobile-filters"><div className="fc-document-filters">
       <label className="fc-document-search"><span>Search</span><div><Search size={15} /><input onChange={(event) => setQuery(event.target.value)} placeholder="Vehicle, station, file or document" value={query} /></div></label>
       <FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={uniqueRegions.map((value) => ({ value, label: value }))} values={regions} />
       <FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={uniqueClusters.map((value) => ({ value, label: value }))} values={clusters} />
@@ -157,7 +158,7 @@ export function FleetDocumentsWorkspace({ data, vehicles, initialVehicle, initia
       <FleetMultiSelect allLabel="All vehicles" label="Vehicle" onChange={setVehicleNos} options={vehicles.map((vehicle) => ({ value: vehicle.vehicleNo, label: vehicle.vehicleNo, helper: `${vehicle.stationCode} · ${vehicle.model}` }))} values={vehicleNos} />
       <FleetMultiSelect allLabel="All document types" label="Document" onChange={setDocumentTypes} options={data.documentTypes.filter(type => { const v=vehicles.find(v=>v.vehicleNo===uploadVehicle); return !v || documentApplies(type,v); }).map((type) => ({ value: type.value, label: type.label }))} values={documentTypes} />
       <FleetMultiSelect allLabel="All states" label="Status" onChange={setStates} options={Object.entries(stateLabels).map(([value, label]) => ({ value, label }))} values={states} />
-    </div>
+    </div></FleetMobileSection>
 
     <div className="fc-table-panel">
       <div className="fc-table-toolbar"><span>{filteredRows.length} controls</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setSort(event.target.value)} value={sort}><option value="urgency">Action priority</option><option value="expiry">Validity date</option><option value="vehicle">Vehicle</option><option value="station">Station</option></select></label><FleetExportButtons compact report={{ title: "Vehicle document compliance report", subtitle: `Generated ${data.today} · active filters applied`, fileName: `fleet-documents-${data.today}`, headers: ["Vehicle", "Model", "Station", "Document", "Validity", "Status", "Days", "File"], rows: filteredRows.map((row) => [row.vehicle.vehicleNo, row.vehicle.model, row.vehicle.stationCode, row.type.label, row.expiryDate, stateLabels[row.state], row.days, row.document?.fileName]) }} /></div></div>

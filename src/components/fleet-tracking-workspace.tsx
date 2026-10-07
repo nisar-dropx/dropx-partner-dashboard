@@ -1,4 +1,5 @@
 "use client";
+import { FleetMobileSection } from "./fleet-mobile-section";
 
 import { Activity, AlertTriangle, ArrowDownUp, Clock3, Gauge, MapPin, RefreshCw, Route, Search, ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -172,13 +173,13 @@ export function FleetTrackingWorkspace({ data, exceptionEntry, onReviewed }: { d
       </section>
       <section className="fc-tracking-layout">
         <aside className="fc-panel fc-gps-list">
-          <div className="fc-gps-filters">
+          <FleetMobileSection title="Find vehicle & filters" summary={[search,...regions,...clusters,...placements,...ignition].filter(Boolean).join(" · ") || "All tracked vehicles"} className="fc-mobile-filters"><div className="fc-gps-filters">
             <label><span>Find vehicle</span><div><Search size={15} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Vehicle or model" value={search} /></div></label>
             <FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={option(stationOptions.map((station) => station.region))} values={regions} />
             <FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={option(stationOptions.map((station) => station.cluster))} values={clusters} />
             <FleetMultiSelect allLabel="All placements" label="Current placement" onChange={setPlacements} options={visiblePlacements.map((value) => ({ value, label: value, helper: stationByCode.get(value)?.name }))} values={placements} />
             <FleetMultiSelect allLabel="All states" label="Ignition" onChange={setIgnition} options={[{ value: "on", label: "On" }, { value: "off", label: "Off" }]} searchable={false} values={ignition} />
-          </div>
+          </div></FleetMobileSection>
           <div className="fc-gps-list-head"><button onClick={() => changeSort("vehicle")} type="button">Vehicle <ArrowDownUp size={12} /></button><button onClick={() => changeSort("speed")} type="button">Speed <ArrowDownUp size={12} /></button><FleetExportButtons compact report={{ title: "Fleet live GPS report", subtitle: `Generated ${isoToday()} · active filters applied`, fileName: `fleet-live-gps-${isoToday()}`, headers: ["Vehicle", "Model", "Current placement", "Speed km/h", "Ignition", "GPS time", "Latitude", "Longitude"], rows: rows.map((row) => [row.vehicle_no, modelByVehicle.get(row.vehicle_no) || "Model not recorded", stationByVehicle.get(row.vehicle_no) ?? "Unmapped", row.speed, row.ignition ? "ON" : "OFF", row.gps_time ?? "", row.latitude, row.longitude]) }} /></div>
           <div className="fc-gps-rows">{loading ? <div className="fc-empty compact">Loading tracked vehicles…</div> : rows.map((row) => <button className={selected?.vehicle_no === row.vehicle_no ? "active" : ""} key={row.vehicle_no} onClick={() => { setSelectedVehicle(row.vehicle_no); setRoute(null); }} type="button"><span className={row.ignition ? "online" : "offline"}><i /></span><div><strong>{row.vehicle_no}</strong><small>{stationByVehicle.get(row.vehicle_no) ?? "Unmapped"} · {modelByVehicle.get(row.vehicle_no) ?? "Vehicle"}</small></div><b>{number(row.speed)} km/h</b></button>)}{!loading && !rows.length ? <div className="fc-empty compact">No GPS vehicle matches the filters.</div> : null}</div>
         </aside>

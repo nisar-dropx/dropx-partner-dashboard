@@ -1,8 +1,8 @@
 {
-  "version": "3.0.0",
-  "versionCode": 3000,
+  "version": "3.0.1",
+  "versionCode": 3001,
   "packageName": "com.dropxlogistics.fleet",
-  "url": "/downloads/DropX-Fleet-v3.0.0.apk",
-  "bytes": 3828736,
-  "sha256": "dcafb7540d47658dea5a9591a1b9932ab584349a6ef94837c8dc74d5f193d101"
+  "url": "/downloads/DropX-Fleet-v3.0.1.apk",
+  "bytes": 3828741,
+  "sha256": "21c5ac91868bc4c6add00213253cadcf58c67468e21ae2f4e462d1cfc1edb3d2"
 }
