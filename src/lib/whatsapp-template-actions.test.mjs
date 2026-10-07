@@ -33,7 +33,8 @@ function harness({denied=false,profileCompany="company-a",metaError=false}={}){
   "@/lib/whatsapp-template-meta":{
    templateGraphRequest:async()=>{providerCalls++;if(metaError)throw Error("Meta permission denied");return {id:"12345",status:"PENDING",category:"UTILITY"};},
    listMetaTemplates:async()=>[{id:"12345",name:draft.name,language:"en",status:"APPROVED",category:"UTILITY",components:[{type:"BODY",text:draft.body}]}]
-  }
+  },
+  "@/lib/whatsapp-template-sync":{syncWhatsAppTemplateCache:async()=>[{template_id:"12345",whatsapp_profile_id:"sender-a",name:draft.name,language:"en",status:"APPROVED",category:"UTILITY",components:[{type:"BODY",text:draft.body}],synced_at:new Date().toISOString(),rejected_reason:""}]}
  };
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};

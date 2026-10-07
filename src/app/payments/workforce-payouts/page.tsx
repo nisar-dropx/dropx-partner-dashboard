@@ -10,6 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { createWorkforcePayoutReviewToken, payoutReviewPresentation } from "@/lib/workforce-payout-review-token";
 
@@ -37,33 +38,67 @@ async function withPayoutReviewStatuses(
   audience: "workforce" | "helpers",
   fromDate: string,
   toDate: string,
-  rows: WorkforcePayoutRow[]
+  rows: WorkforcePayoutRow[],
+  dependencyHash: string
 ) {
   if (!supabaseAdmin) return { rows, error: null as string | null };
   const subjectType = audience === "helpers" ? "helper" : "workforce";
   const ids = [...new Set(rows.flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId] : []))];
   if (!ids.length) return { rows, error: null as string | null };
   const submissions: Array<{ subject_id: string; location_id: string; status: string }> = [];
+  const publications: Array<{ workforce_id: string; station_id: string; notification_status: string }> = [];
   for (let index = 0; index < ids.length; index += 100) {
-    const result = await supabaseAdmin
-      .from("workforce_payout_review_submissions")
-      .select("subject_id,location_id,status")
-      .eq("company_id", companyId)
-      .eq("subject_type", subjectType)
-      .eq("period_start", fromDate)
-      .eq("period_end", toDate)
-      .in("subject_id", ids.slice(index, index + 100));
+    const [result, publicationResult] = await Promise.all([
+      supabaseAdmin
+        .from("workforce_payout_review_submissions")
+        .select("subject_id,location_id,status")
+        .eq("company_id", companyId)
+        .eq("subject_type", subjectType)
+        .eq("period_start", fromDate)
+        .eq("period_end", toDate)
+        .in("subject_id", ids.slice(index, index + 100)),
+      audience === "workforce"
+        ? supabaseAdmin
+          .from("workforce_payout_publications")
+          .select("workforce_id,station_id,notification_status")
+          .eq("company_id", companyId)
+          .eq("publication_kind", "worksheet")
+          .eq("period_start", fromDate)
+          .eq("period_end", toDate)
+          .in("workforce_id", ids.slice(index, index + 100))
+          .order("revision", { ascending: false })
+        : Promise.resolve({ data: [], error: null })
+    ]);
     if (result.error) return { rows, error: result.error.message };
+    if (publicationResult.error) return { rows, error: publicationResult.error.message };
     submissions.push(...((result.data ?? []) as Array<{ subject_id: string; location_id: string; status: string }>));
+    publications.push(...((publicationResult.data ?? []) as Array<{ workforce_id: string; station_id: string; notification_status: string }>));
   }
   const statusBySubject = new Map(submissions.map((entry) => [`${String(entry.subject_id)}|${String(entry.location_id)}`, String(entry.status)]));
+  const publicationBySubject = new Map<string, string>();
+  publications.forEach((entry) => {
+    const key = `${String(entry.workforce_id)}|${String(entry.station_id)}`;
+    if (!publicationBySubject.has(key)) publicationBySubject.set(key, String(entry.notification_status));
+  });
+  const publishedStatus = (status: string | undefined) => status === "pending" || status === "sending"
+    ? "Notification queued"
+    : status === "sent" || status === "superseded"
+      ? "Payment published"
+      : status === "failed"
+        ? "Notification failed"
+        : status === "uncertain"
+          ? "Delivery needs review"
+          : null;
   return {
     rows: rows.map((row) => {
-      const reviewStatus = row.reviewSubjectId && row.locationId
-        ? statusBySubject.get(`${row.reviewSubjectId}|${row.locationId}`)
+      const subjectKey = row.reviewSubjectId && row.locationId
+        ? `${row.reviewSubjectId}|${row.locationId}`
         : null;
+      const reviewStatus = subjectKey ? statusBySubject.get(subjectKey) : null;
       const presentation = payoutReviewPresentation(row.status, reviewStatus);
-      const status = presentation.status;
+      const status = presentation.status === "Under Review" && subjectKey
+        ? publishedStatus(publicationBySubject.get(subjectKey)) ?? presentation.status
+        : presentation.status;
       const reviewToken = row.reviewSubjectId && row.reviewSubjectType && row.locationId
         && presentation.tokenStatus
         ? createWorkforcePayoutReviewToken({
@@ -73,7 +108,8 @@ async function withPayoutReviewStatuses(
           locationId: row.locationId,
           periodStart: fromDate,
           periodEnd: toDate,
-          status: presentation.tokenStatus
+          status: presentation.tokenStatus,
+          dependencyHash
         })
         : null;
       return { ...row, status, reviewToken };
@@ -90,12 +126,31 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const pageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
+  const dependencyBefore = audience === "workforce"
+    ? await workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate)
+    : { hash: "", error: null as string | null };
   const loaded = audience === "helpers"
     ? await loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
     : await loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate);
-  const reviewed = loaded.error
-    ? { rows: loaded.rows, error: loaded.error }
-    : await withPayoutReviewStatuses(companyId, audience, period.fromDate, period.toDate, loaded.rows);
+  const dependencyAfter = audience === "workforce"
+    ? await workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate)
+    : dependencyBefore;
+  const dependencyError = audience === "workforce"
+    ? dependencyBefore.error || dependencyAfter.error
+      || (dependencyBefore.hash !== dependencyAfter.hash
+        ? "Payout inputs changed while this worksheet was loading. Refresh to review the latest amounts."
+        : null)
+    : null;
+  const reviewed = loaded.error || dependencyError || (audience === "workforce" && !dependencyAfter.hash)
+    ? { rows: loaded.rows, error: loaded.error || dependencyError || "Payout worksheet version is unavailable." }
+    : await withPayoutReviewStatuses(
+      companyId,
+      audience,
+      period.fromDate,
+      period.toDate,
+      loaded.rows,
+      audience === "workforce" ? dependencyAfter.hash ?? "" : ""
+    );
   const rows = reviewed.rows;
   const error = reviewed.error;
   const canEdit = hasPermission(authorization, pageCode, "edit");
@@ -128,7 +183,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       {canEdit && audience === "workforce" ? <WorkforcePayoutBulkUpload fromDate={period.fromDate} toDate={period.toDate} /> : null}
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
-        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} canDeductAdvances={canDeductAdvances} canEdit={canEdit} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
+        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} canDeductAdvances={canDeductAdvances} canEdit={canEdit} canPublishNotifications={authorization.hasAllLocationAccess} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
     </div>
   </AppShell>;
 }

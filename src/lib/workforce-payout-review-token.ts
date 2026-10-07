@@ -8,6 +8,7 @@ type ReviewTokenPayload = {
   f: string;
   e: string;
   st: "ready" | "returned";
+  h: string;
   iat: number;
 };
 
@@ -32,6 +33,7 @@ export function createWorkforcePayoutReviewToken(input: {
   periodStart: string;
   periodEnd: string;
   status: "Ready for review" | "Returned";
+  dependencyHash?: string | null;
 }) {
   if (!secret()) return null;
   const payload: ReviewTokenPayload = {
@@ -42,6 +44,7 @@ export function createWorkforcePayoutReviewToken(input: {
     f: input.periodStart,
     e: input.periodEnd,
     st: input.status === "Returned" ? "returned" : "ready",
+    h: String(input.dependencyHash ?? ""),
     iat: Math.floor(Date.now() / 1000)
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -64,13 +67,14 @@ export function payoutReviewPresentation(calculatedStatus: string, persistedStat
   return { status, tokenStatus };
 }
 
-export function workforcePayoutReviewTokenStatus(token: unknown, expected: {
+export function workforcePayoutReviewTokenDetails(token: unknown, expected: {
   companyId: string;
   subjectType: "workforce" | "helper";
   subjectId: string;
   locationId: string;
   periodStart: string;
   periodEnd: string;
+  dependencyHash?: string | null;
 }) {
   if (!secret() || typeof token !== "string" || token.length > 2_000) return null;
   const [encoded, suppliedSignature, extra] = token.split(".");
@@ -89,13 +93,22 @@ export function workforcePayoutReviewTokenStatus(token: unknown, expected: {
       && payload.f === expected.periodStart
       && payload.e === expected.periodEnd
       && (payload.st === "ready" || payload.st === "returned")
+      && typeof payload.h === "string"
+      && (expected.dependencyHash == null || payload.h === expected.dependencyHash)
       && Number.isInteger(payload.iat)
       && payload.iat <= now + 60
       && payload.iat >= now - TOKEN_TTL_SECONDS;
-    return valid ? payload.st : null;
+    return valid ? { status: payload.st, dependencyHash: payload.h } : null;
   } catch {
     return null;
   }
+}
+
+export function workforcePayoutReviewTokenStatus(
+  token: unknown,
+  expected: Parameters<typeof workforcePayoutReviewTokenDetails>[1]
+) {
+  return workforcePayoutReviewTokenDetails(token, expected)?.status ?? null;
 }
 
 export function verifyWorkforcePayoutReviewToken(token: unknown, expected: Parameters<typeof workforcePayoutReviewTokenStatus>[1]) {

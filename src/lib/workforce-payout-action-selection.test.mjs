@@ -26,13 +26,14 @@ test("advance selection also rejects duplicate loader rows for the same Workforc
   assert.deepEqual([...duplicates], ["workforce-1"]);
 });
 
-test("payout UI blocks ambiguous advance recovery without changing review selection", () => {
+test("payout UI separates one-row advance recovery from complete-location notification selection", () => {
   assert.match(payoutTable, /advanceSelectionConflictIds\s*=\s*useMemo\(\(\)\s*=>\s*duplicateAdvanceWorkforceIds\(advanceSelectedRows\)/);
   assert.match(payoutTable, /if\s*\(hasAdvanceSelectionConflict\)[\s\S]*?Select one location row per Workforce member[\s\S]*?return;/);
   assert.match(payoutTable, /disabled=\{!advanceSelectedRows\.length\s*\|\|\s*hasAdvanceSelectionConflict/);
-  assert.match(payoutTable, /title=\{hasAdvanceSelectionConflict\s*\?\s*["']Select one location row per Workforce member\./);
-  assert.match(payoutTable, /review selection is unchanged/i);
-  assert.match(payoutTable, /actionSelectionTarget\s*=\s*useMemo\(\(\)\s*=>\s*selectable\.slice\(0,\s*MAX_REVIEW_SELECTION\)/);
+  assert.match(payoutTable, /title=\{hasAdvanceSelectionConflict\s*\?\s*["']Advance deduction requires one location row per Workforce member\./);
+  assert.match(payoutTable, /Send Notification requires every Ready for review or Returned location row/i);
+  assert.match(payoutTable, /maxActionSelection\s*=\s*audience\s*===\s*["']workforce["']\s*\?\s*MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION\s*:\s*MAX_REVIEW_SELECTION/);
+  assert.match(payoutTable, /actionSelectionTarget\s*=\s*useMemo\(\(\)\s*=>\s*selectable\.slice\(0,\s*maxActionSelection\)/);
   assert.match(payoutTable, /setSelected\(new Set\(actionSelectionTarget\.map\(\(row\)\s*=>\s*row\.id\)\)\)/);
   assert.match(payoutTable, /items:\s*reviewSelectedRows\.map/);
 });

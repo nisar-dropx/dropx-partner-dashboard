@@ -163,12 +163,12 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
     </div> : <>
       {monthPayouts.length > 1 ? <label className={styles.period}>Pay period
         <select value={payout.id} onChange={(event) => { setSelected(event.target.value); setTab("summary"); setDisputeAreas([]); }}>
-          {monthPayouts.map((item) => <option key={item.id} value={item.id}>{periodLabel(item.from, item.to)} · {item.status}</option>)}
+          {monthPayouts.map((item) => <option key={item.id} value={item.id}>{periodLabel(item.from, item.to)} · {item.station || "Station not recorded"} · {item.status}</option>)}
         </select>
       </label> : null}
       <div className={styles.total}>
         <div><small>{periodLabel(payout.from, payout.to)} · {payout.status}</small><span>Final net earnings for this period</span><strong>{money(payout.net)}</strong></div>
-        <a href={`/api/connect/payout-slip?${query}&runId=${encodeURIComponent(payout.id)}`} target="_blank" rel="noreferrer">View PDF</a>
+        {payout.payoutSlipAvailable ? <a href={`/api/connect/payout-slip?${query}&runId=${encodeURIComponent(payout.id)}`} target="_blank" rel="noreferrer">View PDF</a> : null}
       </div>
       <p className={`${styles.reviewMessage} ${payout.canDispute ? styles.reviewOpen : ""}`}>{reviewMessage}</p>
       <nav className={styles.tabs} aria-label="Finalized payout details">
@@ -184,7 +184,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
         <dl>{[["Base & attendance pay", payout.base], ["Incentives", payout.incentive], ["Allowances / additions", payout.additions], ["Deductions", -payout.deductions], ["Final net earnings", payout.net]].map(([label, value]) => <div key={label}>
           <dt>{label === "Deductions" ? <button type="button" onClick={() => setTab("deductions")}>Deductions →</button> : label}</dt><dd>{money(value)}</dd>
         </div>)}</dl>
-        <div className={styles.identitySummary}><div><small>Employee code</small><strong>{payout.dropxId}</strong></div><div><small>Name</small><strong>{payout.name}</strong></div><div><small>Station</small><strong>{payout.station || "—"}</strong></div><div><small>Bank account</small><strong>{payout.bankAccount} · {payout.ifsc || "IFSC not recorded"}</strong></div></div>
+        <div className={styles.identitySummary}><div><small>Employee code</small><strong>{payout.dropxId}</strong></div><div><small>Name</small><strong>{payout.name}</strong></div><div><small>Station</small><strong>{payout.station || "—"}</strong></div>{payout.bankDestinationAvailable ? <div><small>Bank account</small><strong>{payout.bankAccount} · {payout.ifsc || "IFSC not recorded"}</strong></div> : null}</div>
         <small>Provider IDs: {payout.providerIds.join(", ") || "Training / attendance"}</small>
         {payout.paymentReference ? <p>Payment reference: {payout.paymentReference} · {payout.paymentDate}</p> : null}
       </> : null}

@@ -40,6 +40,14 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  assert.match(payouts,/onMonthLockChange\?\.\(loading \|\| busy\)/);
  assert.match(payouts,/generation !== loadGeneration\.current/);
  assert.match(payouts,/setPayouts\(\[\]\)/);
+ assert.match(payouts,/item\.station \|\| "Station not recorded"/);
+ assert.match(payouts,/payout\.payoutSlipAvailable \? <a/);
+ const payoutLoader=readFileSync(new URL('./associate-payouts.ts',import.meta.url),'utf8');
+ const reviewRoute=readFileSync(new URL('../../app/api/connect/payout-review/route.ts',import.meta.url),'utf8');
+ assert.match(payoutLoader,/publication\.publication_kind !== "worksheet"/);
+ assert.match(payoutLoader,/payoutSlipAvailable: false/);
+ assert.match(reviewRoute,/publication\.data\.publication_kind==='worksheet'/);
+ assert.match(reviewRoute,/newer payout revision is available/i);
  const detailsRoute=readFileSync(new URL('../../app/api/connect/workforce-payments/route.ts',import.meta.url),'utf8');
  assert.match(detailsRoute,/workforcePaymentReadPeriod\(month, today\)/);
  assert.match(detailsRoute,/hasPaymentMapping: mappings\.length > 0 \|\| direct\.allocations\.length > 0/);
@@ -53,4 +61,9 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  assert.match(source,/setError\(details.error\);setEstimateError\(estimate.error\)/);
  assert.match(source,/if\(version!==generation.current\)return;/);
  assert.match(source,/setEstimateError\(''\);setData\(null\);setCalculated\(null\)/);
+ assert.match(source,/normalizePayoutMonth\(searchParams\.get\("payoutMonth"\)\)/);
+ assert.match(source,/searchParams\.get\("tab"\) === "payouts" && earningsAllowed/);
+ assert.match(source,/useState\(linkedPayoutMonth \?\? currentPayoutMonth\(\)\)/);
+ assert.match(payoutLoader,/bankDestinationAvailable: publication\?\.publication_kind !== "worksheet"[\s\S]+Object\.prototype\.hasOwnProperty\.call\(item, "bank_account_no"\)/);
+ assert.match(payouts,/payout\.bankDestinationAvailable \? <div><small>Bank account<\/small>/);
 });

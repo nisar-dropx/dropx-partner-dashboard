@@ -9,20 +9,66 @@ const migration = readFileSync(
 const pgliteMigration = migration.replace(/create extension if not exists pgcrypto\s*;/gi, "");
 const tableSource = readFileSync(new URL("../src/components/workforce-payout-table.tsx", import.meta.url), "utf8");
 const routeSource = readFileSync(new URL("../src/app/api/payments/workforce-payouts/send-review/route.ts", import.meta.url), "utf8");
+const pageSource = readFileSync(new URL("../src/app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
+const reviewActionSource = readFileSync(new URL("../src/lib/payout-review-actions.ts", import.meta.url), "utf8");
+const reviewDeskSource = readFileSync(new URL("../src/components/payout-review-desk.tsx", import.meta.url), "utf8");
+const publicationMigration = readFileSync(new URL("../supabase/migrations/20261008004000_workforce_payout_notification_publication.sql", import.meta.url), "utf8");
+const connectLoader = readFileSync(new URL("../apps/connect/src/lib/associate-payouts.ts", import.meta.url), "utf8");
+const connectRoute = readFileSync(new URL("../apps/connect/app/api/connect/payout-review/route.ts", import.meta.url), "utf8");
 
-assert.match(tableSource, /Send for review/);
+assert.match(tableSource, /Send Notification/);
 assert.match(tableSource, /type="checkbox"/);
 assert.match(tableSource, /MAX_REVIEW_SELECTION = 1000/);
-assert.match(tableSource, /selectable\.slice\(0, MAX_REVIEW_SELECTION\)/);
-assert.match(tableSource, /Up to \{MAX_REVIEW_SELECTION\.toLocaleString\("en-IN"\)\} payouts per action/);
+assert.match(tableSource, /MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION/);
+assert.match(tableSource, /selectable\.slice\(0, maxActionSelection\)/);
+assert.match(tableSource, /Up to \{maxActionSelection\.toLocaleString\("en-IN"\)\} payouts per action/);
 assert.match(routeSource, /ops_workforce_payouts/);
 assert.match(routeSource, /hasPermission\(authorization, pageCode, "edit"\)/);
 assert.match(routeSource, /if \(!sameOrigin\(request\)\)/);
 assert.doesNotMatch(tableSource, /snapshot:\s*\{\s*dropxId/);
 assert.doesNotMatch(routeSource, /item\?\.snapshot/);
 assert.match(routeSource, /selected more than once/);
-assert.match(routeSource, /workforcePayoutReviewTokenStatus/);
+assert.match(routeSource, /workforcePayoutReviewTokenDetails/);
 assert.match(routeSource, /expected_status/);
+assert.match(routeSource, /companyWide\.rows/);
+assert.match(routeSource, /Select every Ready for review or Returned location row/);
+assert.match(routeSource, /if \(!authorization\.hasAllLocationAccess\)/);
+assert.match(pageSource, /canPublishNotifications=\{authorization\.hasAllLocationAccess\}/);
+assert.match(tableSource, /Send Notification requires all-location access/);
+assert.match(reviewActionSource, /publication\.data\.publication_kind===['"]worksheet['"]&&!auth\.hasAllLocationAccess/);
+assert.match(reviewActionSource, /Company-wide location access is required to retry this payout notification/);
+assert.match(reviewDeskSource, /p\.publication_kind!==['"]worksheet['"]\|\|auth\.hasAllLocationAccess/);
+assert.match(routeSource, /notification_primary/);
+assert.match(routeSource, /recipient/);
+assert.match(routeSource, /chunkValues\(uniqueIds, WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK\)/);
+assert.doesNotMatch(routeSource, /\.in\("id", snapshots\.map/);
+assert.match(routeSource, /normalized\.length > MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION/);
+assert.match(routeSource, /serializedJsonByteLength\(publicationArguments\)/);
+assert.match(routeSource, /publicationBytes > MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES/);
+assert.ok(
+  routeSource.indexOf("publicationBytes > MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES")
+    < routeSource.indexOf('rpc("workforce_publish_payout_notifications"'),
+  "The generated payload must be size-checked before the atomic publication RPC."
+);
+assert.match(routeSource, /waitUntil\(processPayoutReviewNotifications/);
+assert.match(routeSource, /subjectTypes\.has\(["']helper["']\)/);
+assert.match(routeSource, /workforce_send_payouts_for_review/);
+assert.match(tableSource, /audience === "workforce" \? "Send Notification" : "Send for review"/);
+assert.match(tableSource, /const canReviewHelpers = canEdit && audience === "helpers"/);
+assert.match(tableSource, /canPublish \|\| canReviewHelpers/);
+assert.match(pageSource, /audience === "workforce" && !dependencyAfter\.hash/);
+assert.match(publicationMigration, /workforce_publish_payout_notifications/);
+assert.match(publicationMigration, /guard_published_workforce_provider_mapping/);
+assert.match(publicationMigration, /guard_published_workforce_direct_allocation/);
+assert.match(publicationMigration, /notification_config_snapshot/);
+assert.match(publicationMigration, /template_components'\s*=\s*template\.components/);
+assert.match(publicationMigration, /Exactly one WhatsApp notification must be queued for each DropX ID/);
+assert.match(publicationMigration, /case when item_notification_primary then 'pending' else 'superseded' end/);
+assert.match(connectLoader, /publication_kind\s*!==\s*["']worksheet["']/);
+assert.match(connectLoader, /payoutSlipAvailable:\s*false/);
+assert.match(connectLoader, /publicationIdsForPeriod/);
+assert.match(connectLoader, /publicationIdsForPeriod\.includes\(dispute\.publication_id\)/);
+assert.match(connectRoute, /publication\.data\.publication_kind===['"]worksheet['"]/);
 
 const db = new PGlite();
 await db.exec(`

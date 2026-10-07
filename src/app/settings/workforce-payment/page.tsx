@@ -43,6 +43,15 @@ export default async function WorkforcePaymentSettingsHubPage() {
               <span className="button secondary compact">Configure</span>
             </span>
           </PendingLink>
+          <PendingLink className="settings-tile actionable" href="/settings/workforce-payment/payout-notification">
+            <div>
+              <h3>Payout WhatsApp Notification</h3>
+              <p className="subtle">Select an approved template, map its payout variables, and sync templates directly from Meta.</p>
+            </div>
+            <span className="settings-tile-actions">
+              <span className="button secondary compact">Configure</span>
+            </span>
+          </PendingLink>
         </div>
       </section>
     </AppShell>

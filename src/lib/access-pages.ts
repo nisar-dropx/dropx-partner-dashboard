@@ -90,7 +90,8 @@ export const accessPages = [
   { code: "payment_process", name: "Payment Process", sort_order: 108 },
   { code: "payment_reports", name: "Payment Report", sort_order: 109 },
   { code: "workforce_payouts", name: "Workforce Payouts", sort_order: 110 },
-  { code: "workforce_advances", name: "Workforce Advance Register", sort_order: 111 },
+  { code: "workforce_payout_disputes", name: "Workforce Payout Disputes", sort_order: 111 },
+  { code: "workforce_advances", name: "Workforce Advance Register", sort_order: 112 },
   { code: "trash", name: "Trash", sort_order: 107 },
   { code: "notifications_whatsapp", name: "WhatsApp Notifications", sort_order: 108 },
   { code: "notifications_history", name: "Notification History", sort_order: 109 },
@@ -541,6 +542,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["designations"], "workforce_whatsapp");
     await seedTargetPermissionsFromSources(supabase, companyId, ["imports"], "master_imports");
     await seedTargetPermissionsFromSources(supabase, companyId, ["attendance_reports"], "raw_punch_reports");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "workforce_payout_disputes");
   }
 
   const activePages = Array.from(currentPageByCode.values()).filter((page) => expectedCodes.has(page.code) && page.is_active !== false);

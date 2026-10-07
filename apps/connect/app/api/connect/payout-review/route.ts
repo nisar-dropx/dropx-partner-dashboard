@@ -10,9 +10,17 @@ function text(value:unknown){return typeof value==='string'?value.trim():'';}
 function validReason(value:unknown,min:number){const reason=text(value);if(reason.length<min||reason.length>2000)throw new Error(`Enter between ${min} and 2000 characters.`);return reason;}
 async function ownReviewPublication(company:string,worker:string,publicationId:string){
  const db=supabaseAdmin!;
- const publication=await db.from('workforce_payout_publications').select('id,payroll_run_id,source_calculated_at,review_until').eq('company_id',company).eq('workforce_id',worker).eq('id',publicationId).maybeSingle();
+ const publication=await db.from('workforce_payout_publications').select('id,payroll_run_id,source_calculated_at,review_until,publication_kind,period_start,period_end,station_id,revision').eq('company_id',company).eq('workforce_id',worker).eq('id',publicationId).maybeSingle();
  if(publication.error)throw new Error('Payout review details could not be verified. Refresh and try again.');
  if(!publication.data)throw new Error('This published payout is unavailable for your account.');
+ if(publication.data.publication_kind==='worksheet'){
+  const latest=await db.from('workforce_payout_publications').select('id').eq('company_id',company).eq('workforce_id',worker).eq('publication_kind','worksheet').eq('period_start',publication.data.period_start).eq('period_end',publication.data.period_end).eq('station_id',publication.data.station_id).order('revision',{ascending:false,nullsFirst:false}).order('published_at',{ascending:false,nullsFirst:false}).order('id',{ascending:false}).limit(1).maybeSingle();
+  if(latest.error)throw new Error('Payout review details could not be verified. Refresh and try again.');
+  if(latest.data?.id!==publication.data.id)throw new Error('A newer payout revision is available. Refresh before raising a dispute.');
+  const deadline=Date.parse(String(publication.data.review_until??''));
+  if(!Number.isFinite(deadline)||deadline<=Date.now())throw new Error('The review window for this payout has ended.');
+  return publication.data;
+ }
  const [run,latest]=await Promise.all([
   db.from('workforce_payroll_runs').select('id,status,calculated_at').eq('company_id',company).eq('id',publication.data.payroll_run_id).maybeSingle(),
   db.from('workforce_payout_publications').select('id').eq('company_id',company).eq('workforce_id',worker).eq('payroll_run_id',publication.data.payroll_run_id).order('revision',{ascending:false,nullsFirst:false}).order('published_at',{ascending:false,nullsFirst:false}).order('id',{ascending:false}).limit(1).maybeSingle(),

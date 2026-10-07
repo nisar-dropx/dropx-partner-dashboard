@@ -72,7 +72,7 @@ assert.doesNotMatch(workforceExport, /paymentMethodBreakdown/, "Export must not 
 assert.match(workforceExport, /componentType === "production"[\s\S]*Count[\s\S]*Rate \(INR\)[\s\S]*Amount \(INR\)/, "Only production components must export Count, Rate, and Amount");
 assert.match(workforceExport, /Reported Units[\s\S]*Threshold \/ Excluded Units[\s\S]*Payable Units/, "Thresholded production must export reported, excluded and payable units separately");
 assert.match(workforceExport, /:\s*\[`\$\{item\.exportLabel\} Rate \(INR\)`, `\$\{item\.exportLabel\} Amount \(INR\)`\]/, "Attendance and fixed components must omit misleading Count columns");
-assert.match(workforceTable, /const tableColumnCount = canEdit \? 13 : 12/, "Workforce detail and empty rows must span the compact totals worksheet, including the permission-gated selection column");
+assert.match(workforceTable, /const tableColumnCount = showSelection \? 13 : 12/, "Workforce detail and empty rows must span the compact totals worksheet, including the action-gated selection column");
 assert.match(workforceTable, /Payment totals[\s\S]*Deduction totals/, "Workforce breakup must show period payment and deduction totals");
 assert.match(workforceTable, /row\.productionBreakdown\.filter\(\(item\) => item\.amount !== 0 \|\| item\.reportedCount !== undefined\)/, "Workforce breakup must retain zero-pay threshold lines for auditability");
 assert.match(workforceTable, />Payment<\/th><th className="payout-money" scope="col">Units<\/th><th className="payout-money" scope="col">Rate<\/th><th className="payout-money" scope="col">Amount<\/th>/, "Workforce breakup must show right-aligned payment units, rate, and amount");

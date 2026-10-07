@@ -6,6 +6,7 @@ const {
   createWorkforcePayoutReviewToken,
   payoutReviewPresentation,
   verifyWorkforcePayoutReviewToken,
+  workforcePayoutReviewTokenDetails,
   workforcePayoutReviewTokenStatus
 } = await import("./workforce-payout-review-token.ts");
 
@@ -19,10 +20,15 @@ const expected = {
 };
 
 test("review tokens bind a server-calculated ready row to its company, location and period", () => {
-  const token = createWorkforcePayoutReviewToken({ ...expected, status: "Ready for review" });
+  const token = createWorkforcePayoutReviewToken({ ...expected, status: "Ready for review", dependencyHash: "worksheet-version-a" });
   assert.equal(typeof token, "string");
   assert.equal(verifyWorkforcePayoutReviewToken(token, expected), true);
   assert.equal(workforcePayoutReviewTokenStatus(token, expected), "ready");
+  assert.deepEqual(workforcePayoutReviewTokenDetails(token, expected), {
+    status: "ready",
+    dependencyHash: "worksheet-version-a"
+  });
+  assert.equal(workforcePayoutReviewTokenDetails(token, { ...expected, dependencyHash: "worksheet-version-b" }), null);
   assert.equal(verifyWorkforcePayoutReviewToken(token, { ...expected, locationId: "00000000-0000-4000-8000-000000000004" }), false);
   assert.equal(verifyWorkforcePayoutReviewToken(`${token}x`, expected), false);
 });

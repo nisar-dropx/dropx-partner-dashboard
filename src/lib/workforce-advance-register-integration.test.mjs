@@ -446,7 +446,7 @@ test("advance deduction and review submission use separate row eligibility", () 
   assert.match(payoutTable, /advanceSelectedRows\s*=\s*useMemo\(\(\)\s*=>\s*selectedRows\.filter\(canDeductAdvanceFromPayout\)/);
   assert.match(payoutTable, /hasNonReviewSelection\s*=\s*reviewSelectedRows\.length\s*!==\s*selectedRows\.length/);
   assert.match(payoutTable, /if\s*\(hasNonReviewSelection\)[\s\S]*?not Ready for review or Returned/);
-  assert.match(payoutTable, /disabled=\{!selectedRows\.length\s*\|\|\s*hasNonReviewSelection/);
+  assert.match(payoutTable, /disabled=\{\(audience === "workforce" && !canPublish\)\s*\|\|\s*!selectedRows\.length\s*\|\|\s*hasNonReviewSelection/);
   assert.match(payoutTable, /items:\s*advanceSelectedRows\.map/);
   assert.match(payoutTable, /Available for advance deduction only\./);
 });

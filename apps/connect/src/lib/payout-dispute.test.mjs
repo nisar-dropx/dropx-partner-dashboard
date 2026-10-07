@@ -6,6 +6,7 @@ import {
   encodePayoutDisputeReason,
   isCompleteCalendarMonth,
   legacyPayoutDisputeCategory,
+  normalizePayoutMonth,
   normalizePayoutDisputeAreas,
   payoutMonthForPeriod,
   payoutMonthLabel,
@@ -58,6 +59,9 @@ test("uses Attendance-style month navigation in India time", () => {
   assert.equal(shiftPayoutMonth("2026-12", 1), "2027-01");
   assert.equal(payoutMonthLabel("2026-09"), "Sep-26");
   assert.equal(payoutMonthLongLabel("2026-09"), "September 2026");
+  assert.equal(normalizePayoutMonth("2026-09"), "2026-09");
+  assert.equal(normalizePayoutMonth("2026-13"), null);
+  assert.equal(normalizePayoutMonth("../../admin"), null);
 });
 
 test("files a payout under the month in which its pay period ends", () => {

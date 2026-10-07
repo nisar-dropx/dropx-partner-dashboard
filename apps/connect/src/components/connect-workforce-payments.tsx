@@ -2,6 +2,7 @@
 
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, IndianRupee, ReceiptText, RefreshCw, Route, WalletCards } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAdvances } from "./connect-advances";
 import { ConnectWorkforceJoining } from "./connect-workforce-joining";
@@ -15,7 +16,7 @@ import {ConnectProductionBreakdown} from './connect-production-breakdown';
 import {ConnectDailyPaymentBreakdown,type DailyPaymentProvider} from './connect-daily-payment-breakdown';
 import paymentStyles from './connect-workforce-payments.module.css';
 import {AssociatePayouts} from './associate-payouts';
-import {currentPayoutMonth,payoutMonthLabel,payoutMonthLongLabel,shiftPayoutMonth} from '@/lib/payout-dispute';
+import {currentPayoutMonth,normalizePayoutMonth,payoutMonthLabel,payoutMonthLongLabel,shiftPayoutMonth} from '@/lib/payout-dispute';
 import monthStyles from './payout-month-control.module.css';
 
 type PaymentData = {
@@ -47,11 +48,15 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
 }
 
 function WorkforcePayments({ account }: { account: AppAccount }) {
+  const searchParams = useSearchParams();
   const access = account.pageAccess ?? [];
   const earningsAllowed = access.includes("earnings");
   const advancesAllowed = access.includes("advances");
   const rateCardAllowed = access.includes("rate_card");
-  const firstTab: Tab = earningsAllowed ? "earnings" : advancesAllowed ? "advances" : "rate-card";
+  const linkedPayoutMonth = normalizePayoutMonth(searchParams.get("payoutMonth"));
+  const firstTab: Tab = searchParams.get("tab") === "payouts" && earningsAllowed
+    ? "statements"
+    : earningsAllowed ? "earnings" : advancesAllowed ? "advances" : "rate-card";
   const [tab, setTab] = useState<Tab>(firstTab);
   const [data, setData] = useState<PaymentData | null>(null);
   const [error, setError] = useState("");
@@ -59,7 +64,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
   const [loading, setLoading] = useState(true);
   const [expandedDate, setExpandedDate] = useState("");
   const [calculated,setCalculated]=useState<EarningsData|null>(null);
-  const [month,setMonth]=useState(currentPayoutMonth);
+  const [month,setMonth]=useState(linkedPayoutMonth ?? currentPayoutMonth());
   const [payoutLocked,setPayoutLocked]=useState(false);
   const generation=useRef(0);
   const load = useCallback(async () => {

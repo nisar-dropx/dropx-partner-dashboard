@@ -85,6 +85,14 @@ export function currentPayoutMonth(now = new Date()) {
   return year && month ? `${year}-${month}` : now.toISOString().slice(0, 7);
 }
 
+export function normalizePayoutMonth(value: unknown) {
+  const text = String(value ?? "").trim();
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(text);
+  if (!match) return null;
+  const year = Number(match[1]);
+  return year >= 2000 && year <= 2100 ? text : null;
+}
+
 export function shiftPayoutMonth(value: string, amount: number) {
   const match = /^(\d{4})-(\d{2})$/.exec(value);
   if (!match) return currentPayoutMonth();

@@ -1,15 +1,40 @@
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { waitUntil } from "@vercel/functions";
+
 import { currentAdminAccessSurface } from "@/lib/access-surface";
+import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { processPayoutReviewNotifications } from "@/lib/payout-review-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { workforcePayoutReviewTokenStatus } from "@/lib/workforce-payout-review-token";
+import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
+import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
+import {
+  buildWorkforcePayoutPublicationSnapshot,
+  workforcePayoutPublicationSnapshotHash
+} from "@/lib/workforce-payout-publication";
+import {
+  chunkValues,
+  MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION,
+  MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES,
+  serializedJsonByteLength,
+  WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK
+} from "@/lib/workforce-payout-publication-limits";
+import { workforcePayoutReviewTokenDetails } from "@/lib/workforce-payout-review-token";
+import {
+  buildWorkforcePayoutTemplateComponents,
+  normalizeWorkforceWhatsAppRecipient,
+  workforcePayoutWhatsAppValues,
+  WORKFORCE_PAYOUT_WHATSAPP_EVENT
+} from "@/lib/workforce-payout-whatsapp";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const noStore = { "Cache-Control": "private, no-store" };
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REVIEW_WINDOW_DAYS = 7;
+type PublicationSnapshot = ReturnType<typeof buildWorkforcePayoutPublicationSnapshot>;
 
 function responseError(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
@@ -20,16 +45,157 @@ function validDate(value: unknown) {
   return DATE.test(text) && !Number.isNaN(Date.parse(`${text}T00:00:00Z`));
 }
 
+function completeCalendarMonth(periodStart: string, periodEnd: string) {
+  if (!validDate(periodStart) || !validDate(periodEnd) || !periodStart.endsWith("-01")) return false;
+  const end = new Date(`${periodStart}T00:00:00Z`);
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  end.setUTCDate(0);
+  return end.toISOString().slice(0, 10) === periodEnd;
+}
+
 function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   return !origin || origin === new URL(request.url).origin;
+}
+
+async function loadNotificationRecipients(companyId: string, workforceIds: string[]) {
+  const recipients: Array<{
+    id: string;
+    full_name: string | null;
+    dropx_id: string | null;
+    mobile: string | null;
+    mobile_country_code: string | null;
+  }> = [];
+  const uniqueIds = [...new Set(workforceIds)];
+  for (const idChunk of chunkValues(uniqueIds, WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK)) {
+    const page = await supabaseAdmin!
+      .from("workforce")
+      .select("id,full_name,dropx_id,mobile,mobile_country_code")
+      .eq("company_id", companyId)
+      .in("id", idChunk);
+    if (page.error) return { data: recipients, error: page.error, expected: uniqueIds.length };
+    recipients.push(...(page.data ?? []));
+  }
+  return { data: recipients, error: null, expected: uniqueIds.length };
+}
+
+async function notificationPreflight(
+  companyId: string,
+  snapshots: Array<{ workforceId: string; snapshot: PublicationSnapshot }>,
+  reviewUntil: string
+) {
+  const config = await supabaseAdmin!
+    .from("whatsapp_notification_configs")
+    .select("id,is_enabled,whatsapp_profile_id,template_id,template_name,template_language,variable_mappings,updated_at")
+    .eq("company_id", companyId)
+    .eq("event_code", WORKFORCE_PAYOUT_WHATSAPP_EVENT)
+    .maybeSingle();
+  if (config.error || !config.data?.is_enabled) {
+    throw new Error("Enable and save the Workforce payout WhatsApp notification before publishing payouts.");
+  }
+  if (!config.data.whatsapp_profile_id || !config.data.template_id || !config.data.template_name || !config.data.template_language) {
+    throw new Error("Select an approved WhatsApp template and sending profile before publishing payouts.");
+  }
+
+  const [globalSettings, profile, template, people, accessToken] = await Promise.all([
+    supabaseAdmin!.from("whatsapp_settings").select("is_enabled").eq("company_id", companyId).maybeSingle(),
+    supabaseAdmin!.from("whatsapp_profiles")
+      .select("id,phone_number_id,graph_api_version,is_active")
+      .eq("company_id", companyId)
+      .eq("id", config.data.whatsapp_profile_id)
+      .maybeSingle(),
+    supabaseAdmin!.from("whatsapp_template_cache")
+      .select("template_id,name,language,status,components,whatsapp_profile_id,synced_at")
+      .eq("company_id", companyId)
+      .eq("whatsapp_profile_id", config.data.whatsapp_profile_id)
+      .eq("template_id", config.data.template_id)
+      .eq("name", config.data.template_name)
+      .eq("language", config.data.template_language)
+      .eq("status", "APPROVED")
+      .maybeSingle(),
+    loadNotificationRecipients(companyId, snapshots.map((entry) => entry.workforceId)),
+    supabaseAdmin!.rpc("get_whatsapp_profile_access_token", { profile_id: config.data.whatsapp_profile_id })
+  ]);
+  if (globalSettings.error || !globalSettings.data?.is_enabled) {
+    throw new Error("Enable WhatsApp messaging before publishing payouts.");
+  }
+  if (profile.error || !profile.data?.is_active || !profile.data.phone_number_id || accessToken.error || !accessToken.data) {
+    throw new Error("The selected WhatsApp sending profile is not ready.");
+  }
+  if (template.error || !template.data) {
+    throw new Error("The selected WhatsApp template is no longer approved. Sync templates and save the setting again.");
+  }
+  if (people.error || people.data.length !== people.expected) {
+    throw new Error("One or more selected Workforce recipients are unavailable.");
+  }
+
+  const activeProfile = profile.data;
+  const approvedTemplate = template.data;
+  const personById = new Map((people.data ?? []).map((person) => [String(person.id), person]));
+  const mappings = config.data.variable_mappings as Record<string, string>;
+  const notifications = new Map<string, Record<string, unknown>>();
+  snapshots.forEach(({ workforceId, snapshot }) => {
+    const person = personById.get(workforceId);
+    const recipient = normalizeWorkforceWhatsAppRecipient(person?.mobile, person?.mobile_country_code);
+    if (!recipient) {
+      throw new Error(`${person?.dropx_id || person?.full_name || "A selected Workforce member"} does not have a valid WhatsApp mobile number.`);
+    }
+    const values = workforcePayoutWhatsAppValues({ snapshot, person: person ?? {}, reviewUntil });
+    buildWorkforcePayoutTemplateComponents(
+      Array.isArray(approvedTemplate.components) ? approvedTemplate.components : [],
+      mappings,
+      values
+    );
+    notifications.set(workforceId, {
+      schema_version: 1,
+      event_code: WORKFORCE_PAYOUT_WHATSAPP_EVENT,
+      whatsapp_profile_id: activeProfile.id,
+      template_id: approvedTemplate.template_id,
+      template_name: approvedTemplate.name,
+      template_language: approvedTemplate.language,
+      variable_mappings: mappings,
+      template_components: approvedTemplate.components,
+      resolved_values: values,
+      recipient
+    });
+  });
+  return { config: config.data, notifications };
+}
+
+function aggregateNotificationSnapshot(snapshots: PublicationSnapshot[]): PublicationSnapshot {
+  const first = snapshots[0];
+  if (!first) throw new Error("A selected Workforce payout is unavailable.");
+  const amount = (key: "gross_amount" | "deduction_amount" | "net_amount") => snapshots
+    .reduce((sum, snapshot) => sum + Number(snapshot.item[key] ?? 0), 0);
+  const stations = [...new Set(snapshots.map((snapshot) => String(snapshot.item.station_code ?? "").trim()).filter(Boolean))];
+  const dayUnits = new Map<string, number>();
+  snapshots.flatMap((snapshot) => snapshot.lines).forEach((line) => {
+    const date = String(line.work_date ?? "");
+    const calculation = line.calculation_snapshot as { workDayUnits?: unknown };
+    const units = Number(calculation?.workDayUnits ?? 0);
+    if (date && Number.isFinite(units) && units > 0) dayUnits.set(date, Math.max(dayUnits.get(date) ?? 0, units));
+  });
+  const workDays = dayUnits.size
+    ? [...dayUnits.values()].reduce((sum, units) => sum + units, 0)
+    : snapshots.reduce((sum, snapshot) => sum + Number(snapshot.item.work_days ?? 0), 0);
+  return {
+    ...first,
+    item: {
+      ...first.item,
+      station_code: stations.join(", ") || first.item.station_code,
+      work_days: workDays,
+      gross_amount: amount("gross_amount"),
+      deduction_amount: amount("deduction_amount"),
+      net_amount: amount("net_amount")
+    }
+  };
 }
 
 export async function POST(request: Request) {
   try {
     if (!sameOrigin(request)) return responseError("Invalid request origin.", 403);
     const authorization = await getAuthorization();
-    if (!authorization) return responseError("Sign in to submit payouts for review.", 401);
+    if (!authorization) return responseError("Sign in to publish Workforce payouts.", 401);
     const pageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
     if (!hasPermission(authorization, pageCode, "edit")) {
       return responseError("Edit access to Workforce Payouts is required.", 403);
@@ -43,7 +209,7 @@ export async function POST(request: Request) {
     if (!validDate(periodStart) || !validDate(periodEnd) || periodEnd < periodStart) {
       return responseError("Select a valid payout period.", 400);
     }
-    if (!items.length) return responseError("Select at least one payout.", 400);
+    if (!items.length) return responseError("Select at least one Workforce payout.", 400);
     if (items.length > 1000) return responseError("Submit at most 1000 payouts at a time.", 400);
     if (JSON.stringify(items).length > 1_000_000) return responseError("The selected payout request is too large.", 413);
 
@@ -57,38 +223,202 @@ export async function POST(request: Request) {
       };
     });
     if (normalized.some((item) => !item.subject_type || !UUID.test(item.subject_id) || !item.location_id || !UUID.test(item.location_id))) {
-      return responseError("One or more selected payouts cannot be submitted for review.", 400);
+      return responseError("One or more selected payouts cannot be submitted.", 400);
     }
-    const uniqueSubjects = new Set(normalized.map((item) => `${item.subject_type}:${item.subject_id.toLowerCase()}:${item.location_id!.toLowerCase()}`));
-    if (uniqueSubjects.size !== normalized.length) {
-      return responseError("A payout subject was selected more than once.", 400);
+    const uniqueSelections = new Set(normalized.map((item) => `${item.subject_id.toLowerCase()}|${item.location_id!.toLowerCase()}`));
+    if (uniqueSelections.size !== normalized.length) {
+      return responseError("The same Workforce payout location was selected more than once.", 400);
     }
-    const verified = normalized.map((item) => ({
-      ...item,
-      expected_status: workforcePayoutReviewTokenStatus(item.review_token, {
+    const subjectTypes = new Set(normalized.map((item) => item.subject_type));
+    if (subjectTypes.size !== 1) return responseError("Submit Workforce and Helper payouts separately.", 400);
+
+    if (subjectTypes.has("workforce") && normalized.length > MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION) {
+      return responseError(
+        `Send Notification supports at most ${MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION} payout rows in one atomic batch. Narrow the filters and try again.`,
+        400
+      );
+    }
+
+    if (subjectTypes.has("helper")) {
+      const helperItems = normalized.map((item) => ({
+        ...item,
+        expected_status: workforcePayoutReviewTokenDetails(item.review_token, {
+          companyId,
+          subjectType: "helper",
+          subjectId: item.subject_id,
+          locationId: item.location_id!,
+          periodStart,
+          periodEnd
+        })?.status ?? null
+      }));
+      if (helperItems.some((item) => !item.expected_status)) {
+        return responseError("One or more Helper payouts are no longer ready for review. Refresh the page and select them again.", 409);
+      }
+      const helperResult = await supabaseAdmin.rpc("workforce_send_payouts_for_review", {
+        p_company: companyId,
+        p_actor: authorization.userId,
+        p_period_start: periodStart,
+        p_period_end: periodEnd,
+        p_items: helperItems.map(({ review_token: _reviewToken, ...item }) => item),
+        p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
+      });
+      if (helperResult.error) return responseError(helperResult.error.message, 400);
+      return Response.json({
+        submitted: Number(helperResult.data ?? helperItems.length),
+        status: "Under Review"
+      }, { headers: noStore });
+    }
+
+    if (!authorization.hasAllLocationAccess) {
+      return responseError("Send Notification requires all-location access so every payout row for the DropX ID can be published and frozen together.", 403);
+    }
+
+    if (!completeCalendarMonth(periodStart, periodEnd)) {
+      return responseError("Send Notification is available only for one complete calendar month.", 400);
+    }
+
+    const verified = normalized.map((item) => {
+      const token = workforcePayoutReviewTokenDetails(item.review_token, {
         companyId,
-        subjectType: item.subject_type as "workforce" | "helper",
+        subjectType: "workforce",
         subjectId: item.subject_id,
         locationId: item.location_id!,
         periodStart,
         periodEnd
-      })
-    }));
-    if (verified.some((item) => !item.expected_status)) {
-      return responseError("One or more payouts are no longer ready for review. Refresh the page and select them again.", 409);
+      });
+      return { ...item, token };
+    });
+    if (verified.some((item) => !item.token?.dependencyHash)) {
+      return responseError("One or more payouts are no longer ready. Refresh the page and review the recalculated amounts.", 409);
+    }
+    const dependencyHashes = new Set(verified.map((item) => item.token!.dependencyHash));
+    if (dependencyHashes.size !== 1) {
+      return responseError("The selected payouts came from different worksheet versions. Refresh the page and select them again.", 409);
+    }
+    const expectedDependencyHash = [...dependencyHashes][0];
+    const dependencyBefore = await workforcePayoutDependencyHash(companyId, periodStart, periodEnd);
+    if (dependencyBefore.error || dependencyBefore.hash !== expectedDependencyHash) {
+      return responseError("Payout inputs changed after this worksheet was displayed. Refresh and review the recalculated amounts.", 409);
     }
 
-    const result = await supabaseAdmin.rpc("workforce_send_payouts_for_review", {
+    const loaded = await loadWorkforcePayoutRows(companyId, authorization, periodStart, periodEnd);
+    if (loaded.error) return responseError(loaded.error, 400);
+    const companyWide = authorization.hasAllLocationAccess
+      ? loaded
+      : await loadWorkforcePayoutRows(companyId, {
+        ...authorization,
+        hasAllLocationAccess: true,
+        locationScopeIds: []
+      }, periodStart, periodEnd);
+    if (companyWide.error) return responseError(companyWide.error, 400);
+    const dependencyAfter = await workforcePayoutDependencyHash(companyId, periodStart, periodEnd);
+    if (dependencyAfter.error || dependencyAfter.hash !== expectedDependencyHash) {
+      return responseError("Payout inputs changed while publishing. Refresh and review the recalculated amounts.", 409);
+    }
+
+    const rowBySubjectLocation = new Map(loaded.rows.map((row) => [
+      `${row.reviewSubjectId}|${row.locationId}`,
+      row
+    ]));
+    const selected = verified.map((item) => ({
+      item,
+      row: rowBySubjectLocation.get(`${item.subject_id}|${item.location_id}`)
+    }));
+    if (selected.some(({ row }) => !row?.paymentDetailsAvailable || !["Ready for review", "Returned"].includes(row?.status ?? ""))) {
+      return responseError("One or more payouts are no longer ready. Refresh and review the recalculated amounts.", 409);
+    }
+
+    const selectedSubjects = new Set(verified.map((item) => item.subject_id));
+    for (const subjectId of selectedSubjects) {
+      const expectedLocations = new Set(companyWide.rows
+        .filter((row) => row.reviewSubjectId === subjectId
+          && row.locationId
+          && row.paymentDetailsAvailable
+          && (row.status === "Ready for review" || row.status === "Returned"))
+        .map((row) => String(row.locationId)));
+      const submittedLocations = new Set(verified
+        .filter((item) => item.subject_id === subjectId)
+        .map((item) => String(item.location_id)));
+      if (expectedLocations.size !== submittedLocations.size
+        || [...expectedLocations].some((locationId) => !submittedLocations.has(locationId))) {
+        return responseError("Select every Ready for review or Returned location row for each DropX ID before sending its notification.", 409);
+      }
+    }
+
+    const reviewUntil = new Date(Date.now() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const snapshots = selected.map(({ item, row }) => ({
+      workforceId: item.subject_id,
+      snapshot: buildWorkforcePayoutPublicationSnapshot(row!, periodStart, periodEnd, expectedDependencyHash)
+    }));
+    const snapshotsByWorkforce = new Map<string, PublicationSnapshot[]>();
+    snapshots.forEach(({ workforceId, snapshot }) => {
+      snapshotsByWorkforce.set(workforceId, [...(snapshotsByWorkforce.get(workforceId) ?? []), snapshot]);
+    });
+    const notificationSnapshots = [...snapshotsByWorkforce].map(([workforceId, grouped]) => ({
+      workforceId,
+      snapshot: aggregateNotificationSnapshot(grouped)
+    }));
+    const notification = await notificationPreflight(companyId, notificationSnapshots, reviewUntil);
+    const notificationPrimary = new Map<string, string>();
+    for (const subjectId of selectedSubjects) {
+      notificationPrimary.set(subjectId, verified
+        .filter((item) => item.subject_id === subjectId)
+        .map((item) => item.location_id!)
+        .sort()[0]);
+    }
+    const publicationItems = selected.map(({ item }, index) => {
+      const snapshot = snapshots[index].snapshot;
+      return {
+        subject_type: "workforce",
+        subject_id: item.subject_id,
+        location_id: item.location_id,
+        expected_status: item.token!.status,
+        calculation_snapshot: snapshot,
+        snapshot_hash: workforcePayoutPublicationSnapshotHash(snapshot),
+        notification_config_snapshot: notification.notifications.get(item.subject_id),
+        notification_primary: notificationPrimary.get(item.subject_id) === item.location_id
+      };
+    });
+
+    const publicationArguments = {
       p_company: companyId,
       p_actor: authorization.userId,
       p_period_start: periodStart,
       p_period_end: periodEnd,
-      p_items: verified.map(({ review_token: _reviewToken, ...item }) => item),
-      p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
-    });
-    if (result.error) return responseError(result.error.message, 400);
-    return Response.json({ submitted: Number(result.data ?? verified.length), status: "Under Review" }, { headers: noStore });
+      p_items: publicationItems,
+      p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds,
+      p_expected_dependency_hash: expectedDependencyHash,
+      p_review_until: reviewUntil,
+      p_notify_at: new Date().toISOString(),
+      p_notification_config_id: notification.config.id,
+      p_notification_config_updated_at: notification.config.updated_at
+    };
+    const publicationBytes = serializedJsonByteLength(publicationArguments);
+    if (publicationBytes > MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES) {
+      return responseError(
+        "The selected payout details are too large to publish safely in one atomic batch. Select fewer payout rows and try again; no payouts were published.",
+        413
+      );
+    }
+
+    const result = await supabaseAdmin.rpc("workforce_publish_payout_notifications", publicationArguments);
+    if (result.error) {
+      const stale = /changed|refresh|version/i.test(result.error.message);
+      return responseError(result.error.message, stale ? 409 : 400);
+    }
+    const publicationIds = Array.isArray(result.data?.publication_ids)
+      ? result.data.publication_ids.map(String)
+      : [];
+    if (publicationIds.length) {
+      waitUntil(processPayoutReviewNotifications({ publicationIds }).then(() => undefined));
+    }
+    return Response.json({
+      submitted: Number(result.data?.published ?? publicationIds.length),
+      notifications: publicationIds.length,
+      publicationIds,
+      status: "Notification queued"
+    }, { headers: noStore });
   } catch (error) {
-    return responseError(error instanceof Error ? error.message : "Unable to send payouts for review.", 500);
+    return responseError(error instanceof Error ? error.message : "Unable to publish Workforce payouts.", 500);
   }
 }

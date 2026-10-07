@@ -4,7 +4,8 @@ import {requirePagePermission} from "@/lib/authorization";
 import {requireCompanyId} from "@/lib/company-scope";
 import {supabaseAdmin} from "@/lib/supabase-admin";
 import {buildTemplatePayload, type TemplateDraft} from "@/lib/whatsapp-template-builder";
-import {listMetaTemplates, templateGraphRequest} from "@/lib/whatsapp-template-meta";
+import {templateGraphRequest} from "@/lib/whatsapp-template-meta";
+import {syncWhatsAppTemplateCache} from "@/lib/whatsapp-template-sync";
 
 export type TemplateRow = {template_id:string;whatsapp_profile_id:string|null;name:string;language:string;category:string|null;status:string;components:Array<{type?:string;text?:string;format?:string;buttons?:Array<{text?:string;url?:string}>}>;synced_at?:string;rejected_reason?:string};
 export type SenderRow = {id:string;profile_name:string;is_default:boolean};
@@ -36,31 +37,12 @@ function invalidate() {
   revalidatePath("/settings/meta");
 }
 export async function refreshTemplateLibrary(profileId:string):Promise<{templates?:TemplateRow[];error?:string;notice?:string}> {
-  const context=await sender(profileId);
+  const auth=await requirePagePermission("app_settings","edit");
+  const companyId=requireCompanyId(auth);
   try {
-    const {companyId,profile,token}=context;
-    const rows=await listMetaTemplates(profile.graph_api_version||"v25.0",profile.business_account_id,token);
-    const templates=rows.filter(row=>row.id).map(row=>({
-      company_id:companyId,template_id:String(row.id),whatsapp_profile_id:profileId,
-      name:String(row.name||""),language:String(row.language||""),category:row.category?String(row.category):null,
-      status:String(row.status||"UNKNOWN"),components:Array.isArray(row.components)?row.components:[],
-      synced_at:new Date().toISOString()
-    }));
-    if (templates.length) {
-      const saved=await supabaseAdmin!.from("whatsapp_template_cache").upsert(templates,{onConflict:"company_id,template_id"});
-      if(saved.error) throw new Error("Meta responded, but templates could not be saved. Please refresh again.");
-    }
-    // Only reconcile this sender after a complete, successful paginated fetch.
-    const cached=await supabaseAdmin!.from("whatsapp_template_cache").select("template_id").eq("company_id",companyId).eq("whatsapp_profile_id",profileId);
-    if(cached.error) throw new Error("Could not reconcile the saved template list.");
-    const liveIds=new Set(templates.map(row=>row.template_id));
-    const removed=(cached.data||[]).filter(row=>!liveIds.has(row.template_id)).map(row=>row.template_id);
-    if(removed.length) {
-      const updated=await supabaseAdmin!.from("whatsapp_template_cache").update({status:"DELETED",synced_at:new Date().toISOString()}).eq("company_id",companyId).eq("whatsapp_profile_id",profileId).in("template_id",removed);
-      if(updated.error) throw new Error("Could not reconcile removed templates. Please refresh again.");
-    }
+    const templates=await syncWhatsAppTemplateCache(companyId,profileId);
     invalidate();
-    return {templates:templates.map(row=>({...row,rejected_reason:String(rows.find(item=>String(item.id)===row.template_id)?.rejected_reason||"")})) as TemplateRow[],notice:`Checked with Meta · ${templates.length} templates`};
+    return {templates:templates as TemplateRow[],notice:`Checked with Meta · ${templates.length} templates`};
   } catch(error) {return {error:error instanceof Error?error.message:"Template refresh failed."};}
 }
 export async function submitWhatsAppTemplate(profileId:string,draft:TemplateDraft):Promise<{template?:TemplateRow;error?:string;notice?:string}> {
