@@ -5,6 +5,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { getAuthorization } from "@/lib/authorization";
+import { isProviderMappingLocation } from "@/lib/provider-mapping-location-scope";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { isScientificProviderMemberId, providerFirstNamesMatch, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
@@ -1291,9 +1292,14 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
     if (!Number.isInteger(rowCount) || rowCount < 1 || rowCount > 5000) {
       return { ok: false, message: "The selected mapping rows are invalid. Reload the page and try again.", savedRows };
     }
-    const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
-      ? null
-      : new Set(authorization.locationScopeIds);
+    const locationResult = await supabaseAdmin.from("stations")
+      .select("id, providers(code,name), location_models(code,name)")
+      .eq("company_id", companyId).eq("is_active", true);
+    if (locationResult.error) throw new Error(locationResult.error.message);
+    const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
+    const allowedLocationIds = new Set((locationResult.data ?? [])
+      .filter((station) => isProviderMappingLocation(station) && (allLocations || authorization.locationScopeIds.includes(station.id)))
+      .map((station) => station.id));
 
     for (let index = 0; index < rowCount; index += 1) {
       currentClientKey = rowValue(formData, index, "client_key") ?? String(index);
