@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_CALCULATION_ATTEMPTS = 2;
 const noStore = { "Cache-Control": "private, no-store" };
 
 function errorResponse(error: string, status: number) {
@@ -74,45 +75,49 @@ export async function POST(request: Request) {
       return errorResponse("Select each Workforce member only once per recovery batch.", 400);
     }
 
-    const snapshotBefore = await payoutSnapshotHash(companyId, periodStart, periodEnd);
-    const loaded = await loadWorkforcePayoutRows(companyId, authorization, periodStart, periodEnd);
-    if (loaded.error) return errorResponse(loaded.error, 400);
-    const snapshotAfter = await payoutSnapshotHash(companyId, periodStart, periodEnd);
-    if (!snapshotBefore || snapshotAfter !== snapshotBefore) {
-      return errorResponse("Payout inputs changed while the selected rows were being calculated. Refresh the page and try again.", 409);
+    for (let attempt = 0; attempt < MAX_CALCULATION_ATTEMPTS; attempt += 1) {
+      const snapshotBefore = await payoutSnapshotHash(companyId, periodStart, periodEnd);
+      const loaded = await loadWorkforcePayoutRows(companyId, authorization, periodStart, periodEnd);
+      if (loaded.error) return errorResponse(loaded.error, 400);
+      const snapshotAfter = await payoutSnapshotHash(companyId, periodStart, periodEnd);
+      if (!snapshotBefore || snapshotAfter !== snapshotBefore) continue;
+
+      const payoutByIdentity = new Map(loaded.rows.flatMap((row) => row.reviewSubjectId && row.locationId
+        ? [[identity(row.reviewSubjectId, row.locationId), row] as const]
+        : []));
+      const rpcItems = selected.map((item) => {
+        const row = payoutByIdentity.get(identity(item.workforceId, item.stationId));
+        if (!row || !row.paymentDetailsAvailable) throw new Error("A selected payout is no longer available. Refresh the page and try again.");
+        const currentAdvance = row.deductionBreakdown
+          .filter((line) => line.code.trim().toUpperCase() === "ADVANCE")
+          .reduce((sum, line) => sum + Math.max(0, Number(line.amount) || 0), 0);
+        const otherDeductions = Math.max(0, row.deductions - currentAdvance);
+        const maxAmount = Math.max(0, Math.round((row.grossPayment - otherDeductions + Number.EPSILON) * 100) / 100);
+        return { workforce_id: item.workforceId, station_id: item.stationId, max_amount: maxAmount, snapshot_hash: snapshotAfter };
+      });
+      const applied = await supabaseAdmin.rpc("workforce_apply_advance_recoveries", {
+        p_company_id: companyId,
+        p_actor_user_id: authorization.userId,
+        p_period_start: periodStart,
+        p_period_end: periodEnd,
+        p_items: rpcItems,
+        p_allowed_location_ids: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
+      });
+      if (applied.error) {
+        const changedDuringApply = /Payout inputs changed while advances were being (?:prepared|applied)/i.test(applied.error.message);
+        if (changedDuringApply) continue;
+        const conflict = /approved|paid|changed|outside|cannot be replaced|later advance deductions|recalculating this earlier period/i.test(applied.error.message);
+        return errorResponse(applied.error.message, conflict ? 409 : 400);
+      }
+      const results = Array.isArray(applied.data) ? applied.data : [];
+      const deducted = results.reduce((sum, item) => sum + Math.max(0, Number(item?.deducted ?? 0)), 0);
+      return Response.json({
+        updated: results.filter((item) => Number(item?.deducted ?? 0) > 0).length,
+        deducted: Math.round((deducted + Number.EPSILON) * 100) / 100,
+        selected: selected.length
+      }, { headers: noStore });
     }
-    const payoutByIdentity = new Map(loaded.rows.flatMap((row) => row.reviewSubjectId && row.locationId
-      ? [[identity(row.reviewSubjectId, row.locationId), row] as const]
-      : []));
-    const rpcItems = selected.map((item) => {
-      const row = payoutByIdentity.get(identity(item.workforceId, item.stationId));
-      if (!row || !row.paymentDetailsAvailable) throw new Error("A selected payout is no longer available. Refresh the page and try again.");
-      const currentAdvance = row.deductionBreakdown
-        .filter((line) => line.code.trim().toUpperCase() === "ADVANCE")
-        .reduce((sum, line) => sum + Math.max(0, Number(line.amount) || 0), 0);
-      const otherDeductions = Math.max(0, row.deductions - currentAdvance);
-      const maxAmount = Math.max(0, Math.round((row.grossPayment - otherDeductions + Number.EPSILON) * 100) / 100);
-      return { workforce_id: item.workforceId, station_id: item.stationId, max_amount: maxAmount, snapshot_hash: snapshotAfter };
-    });
-    const applied = await supabaseAdmin.rpc("workforce_apply_advance_recoveries", {
-      p_company_id: companyId,
-      p_actor_user_id: authorization.userId,
-      p_period_start: periodStart,
-      p_period_end: periodEnd,
-      p_items: rpcItems,
-      p_allowed_location_ids: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
-    });
-    if (applied.error) {
-      const conflict = /approved|paid|changed|outside|cannot be replaced|later advance deductions|recalculating this earlier period/i.test(applied.error.message);
-      return errorResponse(applied.error.message, conflict ? 409 : 400);
-    }
-    const results = Array.isArray(applied.data) ? applied.data : [];
-    const deducted = results.reduce((sum, item) => sum + Math.max(0, Number(item?.deducted ?? 0)), 0);
-    return Response.json({
-      updated: results.filter((item) => Number(item?.deducted ?? 0) > 0).length,
-      deducted: Math.round((deducted + Number.EPSILON) * 100) / 100,
-      selected: selected.length
-    }, { headers: noStore });
+    return errorResponse("The selected payout period is still updating. Please try again in a moment.", 409);
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Unable to deduct pending advances.", 500);
   }

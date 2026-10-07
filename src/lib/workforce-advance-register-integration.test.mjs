@@ -17,6 +17,8 @@ const payoutLoader = source("./workforce-payout-loader.ts");
 const deductAdvancesRoute = source("../app/api/payments/workforce-payouts/deduct-advances/route.ts");
 const recoveryHardeningMigration = source("../../supabase/migrations/20261007110000_workforce_advance_recovery_hardening.sql");
 const finalSafetyMigration = source("../../supabase/migrations/20261007112000_workforce_advance_recovery_overlap_lock_order.sql");
+const allPendingRecoveryMigration = source("../../supabase/migrations/20261007170000_workforce_advance_recovery_all_pending.sql");
+const periodDependencyMigration = source("../../supabase/migrations/20261007171000_workforce_payout_period_dependency_revisions.sql");
 const accessPages = source("./access-pages.ts");
 const accessSurface = source("./access-surface.ts");
 const importHardeningMigration = source("../../supabase/migrations/20261007111000_workforce_advance_import_hardening.sql");
@@ -155,13 +157,13 @@ test("recovery hashes every payout dependency, respects scope, and caps ADVANCE 
   assert.doesNotMatch(deductAdvancesRoute, /rpc\(["']workforce_payout_input_snapshot_hash["']/);
   assert.match(
     deductAdvancesRoute,
-    /const snapshotBefore\s*=\s*await payoutSnapshotHash\(companyId,\s*periodStart,\s*periodEnd\)[\s\S]*?await loadWorkforcePayoutRows\(companyId,\s*authorization,\s*periodStart,\s*periodEnd\)[\s\S]*?const snapshotAfter\s*=\s*await payoutSnapshotHash\(companyId,\s*periodStart,\s*periodEnd\)/
+    /const snapshotBefore\s*=\s*await payoutSnapshotHash\(companyId,\s*periodStart,\s*periodEnd\)[\s\S]*?const loaded\s*=\s*await loadWorkforcePayoutRows\(companyId,\s*authorization,\s*periodStart,\s*periodEnd\)[\s\S]*?const snapshotAfter\s*=\s*await payoutSnapshotHash\(companyId,\s*periodStart,\s*periodEnd\)/
   );
-  assert.match(
-    deductAdvancesRoute,
-    /if\s*\(!snapshotBefore\s*\|\|\s*snapshotAfter\s*!==\s*snapshotBefore\)[\s\S]*?Payout inputs changed while the selected rows were being calculated[\s\S]*?409/
-  );
-  assert.match(deductAdvancesRoute, /await loadWorkforcePayoutRows\(companyId,\s*authorization,\s*periodStart,\s*periodEnd\)/);
+  assert.match(deductAdvancesRoute, /MAX_CALCULATION_ATTEMPTS\s*=\s*2/);
+  assert.match(deductAdvancesRoute, /snapshotAfter\s*!==\s*snapshotBefore\)\s*continue/);
+  assert.match(deductAdvancesRoute, /if\s*\(changedDuringApply\)\s*continue/);
+  assert.doesNotMatch(deductAdvancesRoute, /Payout inputs changed while the selected rows were being calculated/);
+  assert.match(deductAdvancesRoute, /selected payout period is still updating/i);
   assert.match(deductAdvancesRoute, /row\.deductionBreakdown[\s\S]*?line\.code\.trim\(\)\.toUpperCase\(\)\s*===\s*["']ADVANCE["']/);
   assert.match(deductAdvancesRoute, /otherDeductions\s*=\s*Math\.max\(0,\s*row\.deductions\s*-\s*currentAdvance\)/);
   assert.match(deductAdvancesRoute, /maxAmount\s*=\s*Math\.max\(0,[\s\S]*?row\.grossPayment\s*-\s*otherDeductions/);
@@ -172,6 +174,37 @@ test("recovery hashes every payout dependency, respects scope, and caps ADVANCE 
     /p_allowed_location_ids:\s*authorization\.hasAllLocationAccess\s*\?\s*null\s*:\s*authorization\.locationScopeIds/
   );
   assert.match(deductAdvancesRoute, /later advance deductions|recalculating this earlier period/i);
+});
+
+test("high-frequency attendance and shipment revisions are scoped to the payout month", () => {
+  assert.match(periodDependencyMigration, /create table public\.workforce_payout_period_dependency_revisions/i);
+  assert.match(
+    periodDependencyMigration,
+    /primary key \(company_id, period_month\)[\s\S]*?period_month = date_trunc\('month', period_month\)::date/i
+  );
+  assert.match(
+    periodDependencyMigration,
+    /foreach v_table in array array\['attendance_daily', 'cps_shipment_daily'\][\s\S]*?drop trigger if exists workforce_payout_dependency_revision_insert[\s\S]*?create trigger workforce_payout_period_dependency_revision_insert/i
+  );
+  assert.match(periodDependencyMigration, /punch_date[\s\S]*?work_date/);
+  assert.match(periodDependencyMigration, /payout_period_old_rows[\s\S]*?union[\s\S]*?payout_period_new_rows/i);
+  assert.match(
+    periodDependencyMigration,
+    /perform public\.lock_workforce_payment_allocation_company\(p_company_id\)[\s\S]*?on conflict \(company_id, period_month\) do update/i
+  );
+  assert.match(
+    periodDependencyMigration,
+    /generate_series\([\s\S]*?p_period_start[\s\S]*?p_period_end[\s\S]*?workforce_payout_period_dependency_revisions/i
+  );
+  assert.match(
+    periodDependencyMigration,
+    /coalesce\(company_revision\.revision, 0\)[\s\S]*?period_material\.value/i
+  );
+  assert.match(
+    periodDependencyMigration,
+    /create policy workforce_payout_period_dependency_revisions_service_role_select[\s\S]*?to service_role using \(true\)/i
+  );
+  assert.match(periodDependencyMigration, /grant execute on function public\.workforce_advance_recovery_snapshot_hash[\s\S]*?to service_role/i);
 });
 
 test("recovery hardening versions all loader inputs and preserves FIFO audit history", () => {
@@ -244,6 +277,37 @@ test("final recovery safety rejects period overlap and keeps import lock order d
     finalSafetyMigration,
     /if v_plan_is_identical then[\s\S]*?continue;[\s\S]*?recovery\.period_start > p_period_end/i
   );
+});
+
+test("advance recovery includes every linked pending advance without a payment-date cutoff", () => {
+  assert.match(allPendingRecoveryMigration, /create or replace function public\.workforce_apply_advance_recoveries/i);
+  assert.doesNotMatch(allPendingRecoveryMigration, /advance\.advance_date\s*<=\s*p_period_end/i);
+  assert.ok(
+    (allPendingRecoveryMigration.match(/advance\.workforce_id\s*=\s*v_workforce_id/gi) ?? []).length >= 2,
+    "only advances linked to the selected canonical Workforce identity may enter locking and FIFO planning"
+  );
+  assert.match(
+    allPendingRecoveryMigration,
+    /from public\.workforce_advances advance[\s\S]*?advance\.workforce_id = v_workforce_id[\s\S]*?order by advance\.advance_date, advance\.created_at, advance\.id[\s\S]*?for update/i
+  );
+  assert.match(
+    allPendingRecoveryMigration,
+    /with fifo as \([\s\S]*?where advance\.company_id = p_company_id[\s\S]*?advance\.workforce_id = v_workforce_id[\s\S]*?order by fifo\.advance_date, fifo\.created_at, fifo\.id/i
+  );
+  assert.match(
+    allPendingRecoveryMigration,
+    /recovery\.recovery_type = 'payout'[\s\S]*?\(recovery\.period_start, recovery\.period_end\)[\s\S]*?<> \(p_period_start, p_period_end\)/i
+  );
+  assert.doesNotMatch(allPendingRecoveryMigration, /onboarding_status|lifecycle_status|advance\.link_status\s*=\s*['"]pending['"]/i);
+  assert.match(allPendingRecoveryMigration, /workforce_additional_payment_location_is_authorized/);
+  assert.match(allPendingRecoveryMigration, /if v_plan_is_identical then[\s\S]*?continue;/i);
+  assert.match(allPendingRecoveryMigration, /idempotency_key[\s\S]*?p_period_start::text[\s\S]*?p_period_end::text/i);
+  assert.ok(
+    (allPendingRecoveryMigration.match(/v_current_snapshot_hash\s*:=\s*public\.workforce_advance_recovery_snapshot_hash/gi) ?? []).length >= 2,
+    "snapshot validation must remain before and after recovery mutation"
+  );
+  assert.match(allPendingRecoveryMigration, /revoke all on function public\.workforce_apply_advance_recoveries/i);
+  assert.match(allPendingRecoveryMigration, /grant execute on function public\.workforce_apply_advance_recoveries[\s\S]*?to service_role/i);
 });
 
 test("the payout table exposes a confirmed ADVANCE deduction action for selected payouts", () => {

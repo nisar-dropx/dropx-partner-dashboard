@@ -23,6 +23,14 @@ const pendingIdentityMigration = readFileSync(
   new URL("20261007160000_workforce_advance_pending_identity_link.sql", migrationsUrl),
   "utf8"
 );
+const allPendingRecoveryMigration = readFileSync(
+  new URL("20261007170000_workforce_advance_recovery_all_pending.sql", migrationsUrl),
+  "utf8"
+);
+const periodDependencyMigration = readFileSync(
+  new URL("20261007171000_workforce_payout_period_dependency_revisions.sql", migrationsUrl),
+  "utf8"
+);
 
 assert.match(migration, /create table public\.workforce_advance_import_batches/i);
 assert.match(migration, /create table public\.workforce_advances/i);
@@ -110,6 +118,28 @@ assert.match(pendingIdentityMigration, /create trigger workforce_advances_10_mat
 assert.match(pendingIdentityMigration, /'opening-balance:' \|\| new\.id::text/i);
 assert.match(pendingIdentityMigration, /'WAI2-' \|\| pg_catalog\.md5/i);
 assert.match(pendingIdentityMigration, /WAI1 and WAI2 references are reserved/i);
+assert.doesNotMatch(allPendingRecoveryMigration, /advance\.advance_date\s*<=\s*p_period_end/i);
+assert.match(
+  allPendingRecoveryMigration,
+  /recovery\.recovery_type = 'payout'[\s\S]*?\(recovery\.period_start, recovery\.period_end\)[\s\S]*?<> \(p_period_start, p_period_end\)/i,
+  "all other active recoveries must reduce the current pending balance while exact-period retries remain idempotent"
+);
+assert.match(periodDependencyMigration, /create table public\.workforce_payout_period_dependency_revisions/i);
+assert.match(
+  periodDependencyMigration,
+  /foreach v_table in array array\['attendance_daily', 'cps_shipment_daily'\][\s\S]*?drop trigger if exists workforce_payout_dependency_revision_insert[\s\S]*?create trigger workforce_payout_period_dependency_revision_insert/i,
+  "high-frequency dated facts must stop invalidating every payout month"
+);
+assert.match(
+  periodDependencyMigration,
+  /perform public\.lock_workforce_payment_allocation_company\(p_company_id\)[\s\S]*?on conflict \(company_id, period_month\) do update/i,
+  "period revisions must use the same company mutex as recovery"
+);
+assert.match(
+  periodDependencyMigration,
+  /generate_series\([\s\S]*?p_period_start[\s\S]*?p_period_end[\s\S]*?workforce_payout_period_dependency_revisions/i,
+  "the recovery snapshot must include only the requested payout months"
+);
 
 const db = new PGlite();
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -128,6 +158,8 @@ const providerMapping = id(12);
 const openingBalanceWorker = id(21);
 const laterAdvance = id(22);
 const pendingWorker = id(23);
+const futureAdvanceWorker = id(24);
+const futureDatedAdvance = id(25);
 
 await db.exec(`
   create schema if not exists auth;
@@ -239,7 +271,9 @@ await db.exec(`
   create table public.provider_production_metrics (id uuid primary key, company_id uuid not null);
   create table public.workforce_payment_settings (id uuid primary key, company_id uuid not null);
   create table public.workforce_attendance_capture_settings (id uuid primary key, company_id uuid not null);
-  create table public.cps_shipment_daily (id uuid primary key, company_id uuid not null);
+  create table public.cps_shipment_daily (
+    id uuid primary key, company_id uuid not null, work_date date not null
+  );
   create table public.contractors (
     id uuid primary key, company_id uuid not null, full_name text, dropx_id text
   );
@@ -266,7 +300,9 @@ await db.exec(`
   create table public.workforce_payout_attendance_values (id uuid primary key, company_id uuid not null);
   create table public.workforce_payment_field_overrides (id uuid primary key, company_id uuid not null);
   create table public.workforce_custom_production_inputs (id uuid primary key, company_id uuid not null);
-  create table public.attendance_daily (id uuid primary key, company_id uuid not null);
+  create table public.attendance_daily (
+    id uuid primary key, company_id uuid not null, punch_date date not null
+  );
   create table public.workforce_additional_payment_fields (id uuid primary key, company_id uuid not null);
   create table public.workforce_additional_payment_values (id uuid primary key, company_id uuid not null);
   create table public.providers (id uuid primary key, company_id uuid not null);
@@ -443,7 +479,8 @@ await db.exec(`
   values
     ('${worker}', '${company}', 'DX1001', 'Advance Worker', '${station}', null),
     ('${reclassifiedWorker}', '${company}', 'DX-OLD', 'Reclassified Worker', '${station}', 'reclassified'),
-    ('${openingBalanceWorker}', '${company}', 'DX-OPENING', 'Opening Balance Worker', '${station}', null);
+    ('${openingBalanceWorker}', '${company}', 'DX-OPENING', 'Opening Balance Worker', '${station}', null),
+    ('${futureAdvanceWorker}', '${company}', 'DX-FUTURE', 'Future Advance Worker', '${station}', null);
   insert into public.workforce_deduction_heads(
     id, company_id, code, name, calculation_type, is_system, is_active
   ) values
@@ -465,6 +502,79 @@ await db.exec(`
 `);
 
 await db.exec(migration);
+await db.exec(periodDependencyMigration.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""));
+
+const septemberSnapshotBeforeLiveAttendance = await db.query(`
+  select public.workforce_advance_recovery_snapshot_hash(
+    $1::uuid, '2026-09-01'::date, '2026-09-30'::date
+  ) as value
+`, [company]);
+const octoberSnapshotBeforeLiveAttendance = await db.query(`
+  select public.workforce_advance_recovery_snapshot_hash(
+    $1::uuid, '2026-10-01'::date, '2026-10-31'::date
+  ) as value
+`, [company]);
+await db.query(`
+  insert into public.attendance_daily(id, company_id, punch_date)
+  values ($1,$2,'2026-10-07')
+`, [id(90), company]);
+const septemberSnapshotAfterLiveAttendance = await db.query(`
+  select public.workforce_advance_recovery_snapshot_hash(
+    $1::uuid, '2026-09-01'::date, '2026-09-30'::date
+  ) as value
+`, [company]);
+const octoberSnapshotAfterLiveAttendance = await db.query(`
+  select public.workforce_advance_recovery_snapshot_hash(
+    $1::uuid, '2026-10-01'::date, '2026-10-31'::date
+  ) as value
+`, [company]);
+assert.equal(
+  septemberSnapshotAfterLiveAttendance.rows[0].value,
+  septemberSnapshotBeforeLiveAttendance.rows[0].value,
+  "an October attendance write must not invalidate a September recovery calculation"
+);
+assert.notEqual(
+  octoberSnapshotAfterLiveAttendance.rows[0].value,
+  octoberSnapshotBeforeLiveAttendance.rows[0].value,
+  "an October attendance write must invalidate an October recovery calculation"
+);
+await db.query(`
+  update public.attendance_daily set punch_date='2026-09-20' where id=$1
+`, [id(90)]);
+const septemberSnapshotAfterMovedAttendance = await db.query(`
+  select public.workforce_advance_recovery_snapshot_hash(
+    $1::uuid, '2026-09-01'::date, '2026-09-30'::date
+  ) as value
+`, [company]);
+const octoberSnapshotAfterMovedAttendance = await db.query(`
+  select public.workforce_advance_recovery_snapshot_hash(
+    $1::uuid, '2026-10-01'::date, '2026-10-31'::date
+  ) as value
+`, [company]);
+assert.notEqual(
+  septemberSnapshotAfterMovedAttendance.rows[0].value,
+  septemberSnapshotAfterLiveAttendance.rows[0].value,
+  "moving attendance into September must invalidate September"
+);
+assert.notEqual(
+  octoberSnapshotAfterMovedAttendance.rows[0].value,
+  octoberSnapshotAfterLiveAttendance.rows[0].value,
+  "moving attendance out of October must invalidate October"
+);
+await db.query(`
+  insert into public.cps_shipment_daily(id, company_id, work_date)
+  values ($1,$2,'2026-09-15')
+`, [id(91), company]);
+const septemberSnapshotAfterShipment = await db.query(`
+  select public.workforce_advance_recovery_snapshot_hash(
+    $1::uuid, '2026-09-01'::date, '2026-09-30'::date
+  ) as value
+`, [company]);
+assert.notEqual(
+  septemberSnapshotAfterShipment.rows[0].value,
+  septemberSnapshotAfterMovedAttendance.rows[0].value,
+  "a September shipment write must invalidate a September recovery calculation"
+);
 
 const pageCodes = await db.query(`
   select code from public.app_pages where company_id=$1 order by code
@@ -737,6 +847,37 @@ const applyRecovery = async (
   `, [company, actor, from, to, targetWorker, payoutStation, cap, effectiveSnapshotHash, allowed]);
 };
 
+await db.query(`
+  insert into public.workforce_advances(
+    id, company_id, workforce_id, station_id, advance_number, advance_date,
+    amount, payment_mode, source_type, created_by, updated_by
+  ) values ($1,$2,$3,$4,'WA-AFTER-PERIOD','2026-10-03',250,'cash','manual',$5,$5)
+`, [futureDatedAdvance, company, futureAdvanceWorker, station, actor]);
+const septemberFutureAdvanceRecovery = await applyRecovery(
+  "2026-09-01",
+  "2026-09-30",
+  9999,
+  [station],
+  station,
+  undefined,
+  futureAdvanceWorker
+);
+assert.equal(Number(septemberFutureAdvanceRecovery.rows[0].result[0].deducted), 250,
+  "a pending linked advance paid after the work period must be recoverable from the payout processed now");
+const futureAdvanceRecovery = await db.query(`
+  select recovery.amount::numeric amount, recovery.status, recovery.period_start::text period_start,
+    recovery.period_end::text period_end, recovery.station_id::text station_id
+  from public.workforce_advance_recoveries recovery
+  where recovery.advance_id=$1
+`, [futureDatedAdvance]);
+assert.deepEqual(futureAdvanceRecovery.rows, [{
+  amount: "250.00",
+  status: "deducted",
+  period_start: "2026-09-01",
+  period_end: "2026-09-30",
+  station_id: station
+}], "future-dated recovery must retain the selected payout period and authorized location");
+
 await assert.rejects(
   applyRecovery("2026-01-01", "2026-01-31", 120, [station], station, null),
   /snapshot is missing or inconsistent/i,
@@ -860,7 +1001,8 @@ const balances = await db.query(`
 `);
 assert.deepEqual(balances.rows, [
   { total: "100.00", deducted: "100.00" },
-  { total: "80.00", deducted: "80.00" }
+  { total: "80.00", deducted: "80.00" },
+  { total: "250.00", deducted: "250.00" }
 ], "no advance may be recovered beyond its original amount");
 
 await assert.rejects(
