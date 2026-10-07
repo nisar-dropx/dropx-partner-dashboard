@@ -201,6 +201,15 @@ export default async function SettingsPage() {
               <span className="button secondary compact">Configure</span>
             </span>
           </PendingLink>
+          <PendingLink className="settings-tile actionable" href="/settings/dropx-one-devices">
+            <div>
+              <h3>DropX One Devices</h3>
+              <p className="subtle">Find a person by employee ID and reset the phone bound to their DropX One login.</p>
+            </div>
+            <span className="settings-tile-actions">
+              <span className="button secondary compact">Manage</span>
+            </span>
+          </PendingLink>
           {canManageAmazonConnectors ? (
             <PendingLink className="settings-tile actionable" href="/settings/amazon">
               <div>
