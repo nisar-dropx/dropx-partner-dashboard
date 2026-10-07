@@ -206,6 +206,8 @@ export async function createEmployee(formData: FormData) {
         if (documentField) {
           const file = formData.get(documentField.formKey);
           if (!(file instanceof File) || file.size === 0) throw new Error(`${documentField.label} is required.`);
+        } else if (key === "pf_uan" || key === "pf_account_no" || key === "esi_no") {
+          continue;
         } else if (!String(profileValues[key] ?? "").trim()) {
           throw new Error(`${key.replaceAll("_", " ")} is required.`);
         }
@@ -376,8 +378,8 @@ export async function updateEmployee(formData: FormData) {
     if (extraPayload.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(extraPayload.ifsc)) throw new Error("IFSC format is invalid.");
     if (extraPayload.bank_account_no && !/^[A-Z0-9]+$/.test(extraPayload.bank_account_no)) throw new Error("Bank account number can contain only letters and numbers.");
     if (extraPayload.pf_uan && !/^\d{12}$/.test(extraPayload.pf_uan)) throw new Error("PF UAN must contain exactly 12 digits.");
-    if (extraPayload.pf_account_no && !/^[A-Z0-9]+$/.test(extraPayload.pf_account_no)) throw new Error("PF Account No can contain only letters and numbers.");
-    if (extraPayload.esi_no && !/^[A-Z0-9]+$/.test(extraPayload.esi_no)) throw new Error("ESI No can contain only letters and numbers.");
+    if (extraPayload.pf_account_no && !/^[A-Z0-9/-]+$/.test(extraPayload.pf_account_no)) throw new Error("PF Account No can contain only letters, numbers, / and -.");
+    if (extraPayload.esi_no && !/^[A-Z0-9/-]+$/.test(extraPayload.esi_no)) throw new Error("ESI No can contain only letters, numbers, / and -.");
     if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
     if (extraPayload.date_of_birth && Number.isNaN(Date.parse(extraPayload.date_of_birth))) throw new Error("Enter a valid date of birth.");
     for (const [label, value] of [
@@ -409,8 +411,9 @@ export async function updateEmployee(formData: FormData) {
       "employees"
     )).dashboard;
     const dashboardEnabled = new Set(dashboardRules.enabled);
+    const statutoryIdentityFields = new Set(["pf_uan", "pf_account_no", "esi_no"]);
     const filteredExtraPayload = Object.fromEntries(
-      Object.entries(extraPayload).filter(([key]) => dashboardEnabled.has(key))
+      Object.entries(extraPayload).filter(([key]) => dashboardEnabled.has(key) || statutoryIdentityFields.has(key))
     );
     const existingResult = await supabaseAdmin
       .from("employees")

@@ -249,6 +249,9 @@ export async function DynamicWorkforceCategoryPageContent({
     ).dashboard
     : { enabled: [], required: [] };
   const enabledFields = workforceProfileFields.filter((field) => dashboardRules.enabled.includes(field.key));
+  const statutoryIdentityKeys = new Set(["pf_uan", "pf_account_no", "esi_no"]);
+  const viewFields = workforceProfileFields.filter((field) => dashboardRules.enabled.includes(field.key) || statutoryIdentityKeys.has(field.key));
+  const editFields = viewFields;
   const requiredFields = new Set(dashboardRules.required);
   const canEdit = hasPermission(authorization, pageCode, "edit");
   const entityLabel = singularCategoryLabel(category.name);
@@ -343,9 +346,9 @@ export async function DynamicWorkforceCategoryPageContent({
                 <div className="executive-detail-item"><dt>Designation</dt><dd>{displayValue(selectedProfile.designation)}</dd></div>
                 <div className="executive-detail-item"><dt>Status</dt><dd>{statusLabel(selectedProfile)}</dd></div>
               </dl></section>
-              {Array.from(new Set(enabledFields.map((field) => field.group))).map((group) => (
+              {Array.from(new Set(viewFields.map((field) => field.group))).map((group) => (
                 <section key={group}><h3>{group}</h3><dl className="executive-detail-grid">
-                  {enabledFields.filter((field) => field.group === group).map((field) => {
+                  {viewFields.filter((field) => field.group === group).map((field) => {
                     const pathColumn = uploadColumns[field.key];
                     if (pathColumn) return <div className="executive-detail-item" key={field.key}><dt>{field.label}</dt><dd>{selectedProfile[pathColumn] ? <a className="button secondary compact" href={`/api/people/category-document?code=${encodeURIComponent(code)}&id=${encodeURIComponent(selectedProfile.id)}&field=${encodeURIComponent(field.key)}`} target="_blank" rel="noreferrer">View</a> : "-"}</dd></div>;
                     const fieldValue = selectedProfile[fieldColumnNames[field.key] ?? field.key as keyof ProfileRow];
@@ -373,13 +376,14 @@ export async function DynamicWorkforceCategoryPageContent({
               <label>Date of join<input className="field" defaultValue={selectedProfile.date_of_join ?? ""} name="date_of_join" type="date" /></label>
               <ScopedDesignationFields designationName="designation" designationOptions={designationOptions} initialDesignation={selectedProfile.designation ?? undefined} initialLocationId={selectedProfile.location_id} locationName="location_id" locationOptions={locationOptions} required={false} />
               {category.statutory_enabled ? <fieldset className="span-3 statutory-fieldset"><legend>Statutory applicability</legend>{[["not_applicable","Not Applicable"],["pf","PF"],["esi","ESI"]].map(([value,label]) => <label className="checkbox-line" key={value}><input defaultChecked={(selectedProfile.statutory_applicability ?? ["not_applicable"]).includes(value)} name="statutory_applicability" type="checkbox" value={value} />{label}</label>)}</fieldset> : null}
-              {enabledFields.map((field) => {
+              {editFields.map((field) => {
                 const name = fieldColumnNames[field.key] ?? field.key;
                 const pathColumn = uploadColumns[field.key];
-                if (pathColumn) return <label key={field.key}>{field.label}<input className="field" name={`${field.key === "profile_photo" ? "profile_photo" : field.key}_file`} required={requiredFields.has(field.key) && !selectedProfile[pathColumn]} type="file" />{selectedProfile[pathColumn] ? <small>Current file available</small> : null}</label>;
-                if (field.key === "gender") return <label key={field.key}>{field.label}<select className="field" defaultValue={selectedProfile.gender ?? ""} name={name} required={requiredFields.has(field.key)}><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></label>;
-                if (field.key === "is_handicapped") return <label key={field.key}>{field.label}<select className="field" defaultValue={typeof selectedProfile.is_handicapped === "boolean" ? String(selectedProfile.is_handicapped) : ""} name={name} required={requiredFields.has(field.key)}><option value="">Select</option><option value="false">No</option><option value="true">Yes</option></select></label>;
-                return <label className={field.key === "address" ? "span-3" : undefined} key={field.key}>{field.label}<input className="field" defaultValue={displayValue(selectedProfile[name as keyof ProfileRow]) === "-" ? "" : String(selectedProfile[name as keyof ProfileRow])} name={name} required={requiredFields.has(field.key)} type={field.kind === "date" ? "date" : "text"} /></label>;
+                const fieldRequired = statutoryIdentityKeys.has(field.key) ? false : requiredFields.has(field.key);
+                if (pathColumn) return <label key={field.key}>{field.label}<input className="field" name={`${field.key === "profile_photo" ? "profile_photo" : field.key}_file`} required={fieldRequired && !selectedProfile[pathColumn]} type="file" />{selectedProfile[pathColumn] ? <small>Current file available</small> : null}</label>;
+                if (field.key === "gender") return <label key={field.key}>{field.label}<select className="field" defaultValue={selectedProfile.gender ?? ""} name={name} required={fieldRequired}><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></label>;
+                if (field.key === "is_handicapped") return <label key={field.key}>{field.label}<select className="field" defaultValue={typeof selectedProfile.is_handicapped === "boolean" ? String(selectedProfile.is_handicapped) : ""} name={name} required={fieldRequired}><option value="">Select</option><option value="false">No</option><option value="true">Yes</option></select></label>;
+                return <label className={field.key === "address" ? "span-3" : undefined} key={field.key}>{field.label}<input className="field" defaultValue={displayValue(selectedProfile[name as keyof ProfileRow]) === "-" ? "" : String(selectedProfile[name as keyof ProfileRow] ?? "")} name={name} required={fieldRequired} type={field.kind === "date" ? "date" : "text"} />{statutoryIdentityKeys.has(field.key) ? <small>Leave blank to remove.</small> : null}</label>;
               })}
               <label>Status<select className="field" defaultValue={String(selectedProfile.is_active)} name="is_active"><option value="true">Active</option><option value="false">Inactive</option></select></label>
               <div className="form-actions span-3 align-right"><SubmitButton>Save changes</SubmitButton></div>

@@ -249,13 +249,13 @@ function EmployeeDetails({
           {enabled.has("landmark") ? <EmployeeDetail label="Landmark" value={employee.landmark} /> : null}
         </dl>
       </section> : null}
-      {hasAny("eshram_uan", "pf_uan", "pf_account_no", "esi_no") ? <section>
+      {hasAny("eshram_uan", "pf_uan", "pf_account_no", "esi_no") || employee.pf_uan || employee.pf_account_no || employee.esi_no ? <section>
         <h3>Statutory</h3>
         <dl className="executive-detail-grid">
           {enabled.has("eshram_uan") ? <EmployeeDetail label="eShram UAN" value={employee.eshram_uan} /> : null}
-          {enabled.has("pf_uan") ? <EmployeeDetail label="PF UAN" value={employee.pf_uan} /> : null}
-          {enabled.has("pf_account_no") ? <EmployeeDetail label="PF Account No" value={employee.pf_account_no} /> : null}
-          {enabled.has("esi_no") ? <EmployeeDetail label="ESI No" value={employee.esi_no} /> : null}
+          {enabled.has("pf_uan") || employee.pf_uan ? <EmployeeDetail label="PF UAN" value={employee.pf_uan} /> : null}
+          {enabled.has("pf_account_no") || employee.pf_account_no ? <EmployeeDetail label="PF Account No" value={employee.pf_account_no} /> : null}
+          {enabled.has("esi_no") || employee.esi_no ? <EmployeeDetail label="ESI No" value={employee.esi_no} /> : null}
         </dl>
       </section> : null}
       {hasAny("driving_license_no", "driving_license_exp_date", "vehicle_reg_no", "vehicle_reg_exp_date", "vehicle_insurance_exp_date", "vehicle_pollution_exp_date") ? <section>
