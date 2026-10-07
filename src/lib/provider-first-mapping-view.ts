@@ -24,6 +24,8 @@ export type ProviderFirstWorkerView = {
 };
 
 export type ProviderFirstMappingRowView = {
+  region?: string;
+  clusterKeys?: string[];
   outboundMonths?: string[];
   providerMemberId: string;
   providerMemberName: string;
@@ -111,6 +113,8 @@ export type ProviderFirstPaymentMethodView = {
 };
 
 export type ProviderFirstFilters = {
+  regions?: string[];
+  clusterKeys?: string[];
   outboundMonths?: string[];
   query: string;
   stationIds: string[];
@@ -376,6 +380,8 @@ export function filterProviderFirstRowIndexes({
     const validationStatus = providerFirstValidationStatus(row, worker, method);
     const matches = (!query || searchable.includes(query))
       && (!filters.outboundMonths?.length || filters.outboundMonths.some((month) => row.outboundMonths?.includes(month)))
+      && (!filters.regions?.length || filters.regions.includes(row.region || "Unassigned"))
+      && (!filters.clusterKeys?.length || filters.clusterKeys.some((key) => row.clusterKeys?.includes(key)))
       && (!filters.stationIds.length || filters.stationIds.includes(row.stationId))
       && (!filters.paymentMethodIds.length || filters.paymentMethodIds.includes(row.paymentMethodId || "unassigned"))
       && (!filters.mappingStatuses.length || filters.mappingStatuses.includes(mappingStatus))

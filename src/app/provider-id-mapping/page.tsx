@@ -7,6 +7,8 @@ import type { PaymentMethodOption } from "@/components/provider-mapping-workshee
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { dashboardDateInputValue } from "@/lib/date-format";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
 import { canonicalizeProviderFirstMembers, providerMemberKey, providerSourceMemberKey } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
@@ -38,16 +40,19 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode={pageCode}><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
   const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult, designationsResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, region").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
     supabaseAdmin.from("payment_methods").select("id, code, name, is_active, production_threshold_config, payment_method_components(component_code, component_type, label, sort_order, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("designations").select("id, code, name, is_field_operations, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
-  const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error;
   const allStations = stationsResult.data ?? [];
   const stations = allStations.filter((station) => allowed(station.id));
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, stations.map((station) => station.id), { includeStationResponsibilities: true });
+  const clusters = nlPeopleClusters(stations, hierarchy.byLocation);
+  const regionByStation = new Map(stations.map((station) => [station.id, String(station.region ?? "").trim() || "Unassigned"]));
+  const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error || (hierarchy.error ? { message: hierarchy.error } : null);
   const stationByCode = new Map(stations.map((station) => [String(station.station_code ?? "").trim().toUpperCase(), station]));
   const stationCodeById = new Map(allStations.map((station) => [String(station.id), String(station.station_code ?? "").trim()]));
   const allMappingHistory = (mappingsResult.data ?? []) as Mapping[];
@@ -130,7 +135,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
       ? historyByWorkforce.get(link.workforce_id) ?? []
       : historyByMember.get(providerMemberKey(member.stationId, member.id)) ?? [];
     const thresholdSnapshot = parseProductionThresholdSnapshot(link?.production_threshold_config);
-    return { outboundMonths: member.outboundMonths, providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
+    return { region: regionByStation.get(member.stationId), clusterKeys: clusters.byStation.get(member.stationId)?.clusterKeys ?? [], outboundMonths: member.outboundMonths, providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
   });
   const shipmentMonths = [...new Set(providerMembers.filter((member) => stationByCode.has(member.stationCode.toUpperCase())).flatMap((member) => member.shipmentMonths))];
   const requestedStation = String(searchParams?.station ?? "").trim();
@@ -142,6 +147,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet initialMonth={dashboardDateInputValue().slice(0, 7)} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet clusterOptions={clusters.options} initialMonth={dashboardDateInputValue().slice(0, 7)} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }
