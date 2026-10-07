@@ -4,96 +4,12 @@ import { cache } from "react";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { loadEffectivePositionAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
-import { loadPeopleDesignations } from "@/lib/people-designation";
+import { loadActiveRoles, loadCompanyAccessRow, loadPeopleDesignation, loadRolePageGrants } from "@/lib/access-cache";
 import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from "@/lib/portal-preview";
 import { enforceAccessCutoffIfDue } from "@/lib/access-cutoff";
-import { TimeoutError, withTimeout } from "@/lib/with-timeout";
-
-const AUTH_TIMEOUT_MS = 5000;
-const AUTH_CLAIMS_TIMEOUT_MS = 3000;
-
-type AuthenticatedUser = {
-  id: string;
-  email: string | null | undefined;
-};
-
-type AuthenticatedUserResult = {
-  data: {
-    user: AuthenticatedUser | null;
-  };
-};
-
-function isTransientAuthFailure(error: unknown) {
-  if (error instanceof TimeoutError) return true;
-  const candidate = error as { name?: unknown; message?: unknown; status?: unknown } | null;
-  const name = String(candidate?.name ?? "").toLowerCase();
-  const message = String(candidate?.message ?? "").toLowerCase();
-  const status = Number(candidate?.status ?? 0);
-  return name === "aborterror" ||
-    status >= 500 ||
-    message.includes("abort") ||
-    message.includes("timeout") ||
-    message.includes("network") ||
-    message.includes("fetch failed");
-}
-
-async function getVerifiedClaimsUser(supabase: NonNullable<ReturnType<typeof createServerSupabaseClient>>): Promise<AuthenticatedUser | null> {
-  const getClaims = (supabase.auth as {
-    getClaims?: () => Promise<{ data?: { claims?: Record<string, unknown> | null } | null }>;
-  }).getClaims;
-  if (typeof getClaims !== "function") return null;
-
-  try {
-    const result = await withTimeout(getClaims.call(supabase.auth), AUTH_CLAIMS_TIMEOUT_MS, "Session claim check");
-    const claims = result.data?.claims;
-    const id = typeof claims?.sub === "string" ? claims.sub : "";
-    if (!id) return null;
-    return {
-      id,
-      email: typeof claims?.email === "string" ? claims.email : null
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * A single slow-but-alive Supabase response (common under sustained DB load)
- * should never be indistinguishable from "you're not signed in." Before a
- * timeout can reach the normal sign-in path, verify the locally held JWT
- * claims. That preserves a valid signed session during a transient Auth API
- * delay while still rejecting missing, expired, or invalid sessions.
- */
-async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabaseClient>): Promise<AuthenticatedUserResult> {
-  if (!supabase) return { data: { user: null } };
-  try {
-    const result = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check");
-    if (result.data.user) {
-      return { data: { user: { id: result.data.user.id, email: result.data.user.email } } };
-    }
-    if (!isTransientAuthFailure(result.error)) return { data: { user: null } };
-  } catch (error) {
-    if (!isTransientAuthFailure(error)) return { data: { user: null } };
-  }
-
-  const verifiedClaimsUser = await getVerifiedClaimsUser(supabase);
-  if (verifiedClaimsUser) return { data: { user: verifiedClaimsUser } };
-
-  try {
-    const retry = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check (retry)");
-    return {
-      data: {
-        user: retry.data.user
-          ? { id: retry.data.user.id, email: retry.data.user.email }
-          : null
-      }
-    };
-  } catch {
-    return { data: { user: null } };
-  }
-}
+import { getSessionUser, legacySessionProfileColumns, loadSessionProfile, sessionProfileColumns } from "@/lib/session-user";
+import { TimeoutError } from "@/lib/with-timeout";
 
 export type PermissionAction = "access" | "view" | "add" | "edit";
 
@@ -272,29 +188,15 @@ const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string)
 }, ["current-access-pages-v8"], { revalidate: 3600 });
 
 export const getAuthorization = cache(async (): Promise<AuthorizationContext | null> => {
-  const supabase = createServerSupabaseClient();
-  const { data } = await getUserWithRetry(supabase);
-  if (!data.user || !supabaseAdmin) return null;
+  const user = await getSessionUser();
+  if (!user || !supabaseAdmin) return null;
+  const data = { user };
   const signedInEmail = normalizeEmail(data.user.email);
 
-  const profileColumns = "id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner";
-  const legacyProfileColumns = "id, email, full_name, role_id, location_scope_ids, is_active";
+  const profileColumns = sessionProfileColumns;
+  const legacyProfileColumns = legacySessionProfileColumns;
 
-  let { data: profileById, error: profileByIdError } = await supabaseAdmin
-    .from("profiles")
-    .select(profileColumns)
-    .eq("id", data.user.id)
-    .maybeSingle();
-
-  if (profileByIdError && isMissingColumnError(profileByIdError)) {
-    const legacyResult = await supabaseAdmin
-      .from("profiles")
-      .select(legacyProfileColumns)
-      .eq("id", data.user.id)
-      .maybeSingle();
-    profileById = legacyResult.data as typeof profileById;
-    profileByIdError = legacyResult.error;
-  }
+  const { data: profileById, error: profileByIdError } = await loadSessionProfile(data.user.id);
 
   if (profileByIdError) return null;
 
@@ -359,11 +261,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   if (!companyId) return null;
 
   if (companyId) {
-    const { data: company } = await supabaseAdmin
-      .from("companies")
-      .select("id, code, name, is_master, is_active")
-      .eq("id", companyId)
-      .maybeSingle();
+    const company = await loadCompanyAccessRow(companyId).catch(() => null);
     if (!company?.is_active) return null;
     if (company) {
       companyId = company.id;
@@ -417,14 +315,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   }
 
   if (effectiveRoleIds.length) {
-    const rolesResult = await supabaseAdmin
-      .from("user_roles")
-      .select("id, name, code, location_access_mode, is_system, is_active")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .in("id", effectiveRoleIds);
-    if (rolesResult.error) return null;
-    const roles = rolesResult.data ?? [];
+    const roles = await loadActiveRoles(companyId as string, effectiveRoleIds).catch(() => null);
+    if (!roles) return null;
     effectiveRoleCodes = roles.map(role => String(role.code ?? "").trim().toUpperCase());
     const primaryRole = roles.find((role) => role.id === primaryRoleId) ?? roles[0] ?? null;
     roleName = primaryRole?.name ?? null;
@@ -455,41 +347,11 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       hasAllLocationAccess = true;
       grantFullAccess(permissions);
     } else {
-      let pagesResult = await supabaseAdmin
-        .from("app_pages")
-        .select("id, code")
-        .eq("company_id", companyId)
-        .eq("is_active", true);
+      const access = await loadRolePageGrants(companyId as string, effectiveRoleIds).catch(() => null);
+      if (!access) return null;
+      const codeByPageId = new Map(access.pages.map((page) => [page.id, page.code]));
 
-      if (pagesResult.error && isMissingColumnError(pagesResult.error)) {
-        pagesResult = await supabaseAdmin.from("app_pages").select("id, code").eq("is_active", true);
-      }
-      if (!pagesResult.error && !(pagesResult.data ?? []).length) {
-        pagesResult = await supabaseAdmin
-          .from("app_pages")
-          .select("id, code")
-          .in("code", accessPages.map((page) => page.code))
-          .is("company_id", null)
-          .eq("is_active", true);
-      }
-
-      let grantsResult = await supabaseAdmin
-        .from("role_page_permissions")
-        .select("page_id, can_view, can_add, can_edit")
-        .eq("company_id", companyId)
-        .in("role_id", effectiveRoleIds);
-
-      if (grantsResult.error && isMissingColumnError(grantsResult.error)) {
-        grantsResult = await supabaseAdmin
-          .from("role_page_permissions")
-          .select("page_id, can_view, can_add, can_edit")
-          .in("role_id", effectiveRoleIds);
-      }
-
-      if (pagesResult.error || grantsResult.error) return null;
-      const codeByPageId = new Map((pagesResult.data ?? []).map((page) => [page.id, page.code]));
-
-      (grantsResult.data ?? []).forEach((grant) => {
+      access.grants.forEach((grant) => {
         const code = codeByPageId.get(grant.page_id);
         if (!code) return;
         const current = permissions[code] ?? noPermission;
@@ -512,7 +374,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     permissions.company_master = { ...noPermission };
   }
 
-  const designation = companyId ? (await loadPeopleDesignations(companyId, [profile.id])).get(profile.id) : undefined;
+  const designation = companyId ? await loadPeopleDesignation(companyId, profile.id) : undefined;
   return {
     designationName: designation?.name ?? null,
     canPreviewUsers: Boolean(previewViewer),

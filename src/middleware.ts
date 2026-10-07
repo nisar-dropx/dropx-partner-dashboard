@@ -353,21 +353,28 @@ export async function middleware(request: NextRequest) {
     }
   });
 
+  // Verify the signed access token locally first. This runs for every page
+  // navigation and link prefetch, so asking the Auth API (and the database
+  // behind it) each time is the single largest source of background load. The
+  // Auth API is only consulted when the token cannot be verified locally.
   let needsClaimVerification = false;
-  try {
-    const { data, error } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
-    if (!data.user) {
-      if (isTransientAuthFailure(error)) {
-        needsClaimVerification = true;
-      } else {
-        const loginUrl = new URL("/login", request.url);
-        loginUrl.searchParams.set("next", request.nextUrl.pathname);
-        return NextResponse.redirect(loginUrl);
+  const hasLocallyVerifiedSession = await hasVerifiedSessionClaims(supabase);
+  if (!hasLocallyVerifiedSession) {
+    try {
+      const { data, error } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
+      if (!data.user) {
+        if (isTransientAuthFailure(error)) {
+          needsClaimVerification = true;
+        } else {
+          const loginUrl = new URL("/login", request.url);
+          loginUrl.searchParams.set("next", request.nextUrl.pathname);
+          return NextResponse.redirect(loginUrl);
+        }
       }
+    } catch (error) {
+      if (!isTransientAuthFailure(error)) throw error;
+      needsClaimVerification = true;
     }
-  } catch (error) {
-    if (!isTransientAuthFailure(error)) throw error;
-    needsClaimVerification = true;
   }
 
   // A transient Auth API failure is not proof that a browser session is

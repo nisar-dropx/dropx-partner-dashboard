@@ -1,6 +1,22 @@
 import "server-only";
 
+import { unstable_cache } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+
+const WEB_CUTOFF_RECHECK_SECONDS = 600;
+
+async function runWebAccessCutoff(profileId: string): Promise<boolean> {
+  const result = await supabaseAdmin!.rpc("hr_enforce_access_cutoff", { p_profile_id: profileId });
+  if (result.error) throw new Error(result.error.message);
+  const row = Array.isArray(result.data) ? result.data[0] : result.data;
+  return row?.web_active ?? true;
+}
+
+const runWebAccessCutoffCached = unstable_cache(
+  runWebAccessCutoff,
+  ["hr-web-access-cutoff-v1"],
+  { revalidate: WEB_CUTOFF_RECHECK_SECONDS }
+);
 
 /**
  * Lazy offboarding-access enforcement: call this before trusting is_active on any
@@ -15,13 +31,19 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
  * heavier one-time cleanup (Auth ban, Google Workspace suspend, audit trail) is HRMS's
  * responsibility, triggered from its own login path or its existing 5-minute cron;
  * this call only needs the fast boolean.
+ *
+ * The cutoff is a calendar date, so the RPC runs at most once every ten minutes per
+ * profile rather than on every request. Only "still allowed" is reused: a "no longer
+ * allowed" answer is always confirmed live, so reinstating someone is never delayed.
  */
 export async function enforceAccessCutoffIfDue(profileId: string): Promise<boolean> {
   if (!supabaseAdmin) return true;
-  const result = await supabaseAdmin.rpc("hr_enforce_access_cutoff", { p_profile_id: profileId });
-  if (result.error) return true;
-  const row = Array.isArray(result.data) ? result.data[0] : result.data;
-  return row?.web_active ?? true;
+  try {
+    if (await runWebAccessCutoffCached(profileId)) return true;
+    return await runWebAccessCutoff(profileId);
+  } catch {
+    return true;
+  }
 }
 
 /**

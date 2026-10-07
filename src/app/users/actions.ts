@@ -1,13 +1,21 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
+import { ACCESS_CACHE_TAG } from "@/lib/access-cache";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { currentAdminAccessSurface, pageBelongsToSurface, type AdminAccessSurface } from "@/lib/access-surface";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+
+// Role and permission edits must reach signed-in users on their next request,
+// not after the shared access cache expires.
+function revalidateUsersAndAccess() {
+  revalidatePath("/users");
+  revalidateTag(ACCESS_CACHE_TAG);
+}
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -347,7 +355,7 @@ export async function configureSurfaceDesignationRole(formData: FormData) {
     }
     const reconciled = await supabaseAdmin.rpc("reconcile_designation_product_memberships", { p_company_id: companyId, p_designation_id: designationId, p_actor_user_id: authorization.userId });
     if (reconciled.error) throw new Error(reconciled.error.message);
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
   } catch (error) {
     usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Designation access could not be prepared." });
   }
@@ -394,7 +402,7 @@ export async function configureSurfaceLocationRole(formData: FormData) {
       if (created.error || !created.data) throw new Error(created.error?.message ?? "Location menu role could not be created.");
       roleId = created.data.id;
     }
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
     usersRedirect({ section: "roles", editRole: roleId });
   } catch (error) {
     usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Location menu access could not be prepared." });
@@ -524,7 +532,7 @@ export async function saveLocationPortalAccess(formData: FormData) {
       .filter((value): value is LocationPortalProduct => locationPortalProducts.includes(value as LocationPortalProduct));
     const context = await prepareLocationPortalSave(companyId);
     await applyLocationPortalAccess(authorization, companyId, context, locationId, selectedProducts);
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
   } catch (error) {
     usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Location portal access could not be saved." });
   }
@@ -601,7 +609,7 @@ export async function reconcilePeopleAccessArchitecture() {
       new_values: counts,
       reason: "Apply editable pre-cutover defaults to enabled People designation portals"
     });
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
     successNotice = `Defaults applied: ${counts.roles_created ?? 0} editable roles created, ${counts.policies_configured ?? 0} portal policies configured, ${counts.shared_permissions_copied ?? 0} permissions restored.`;
   } catch (error) {
     usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Default portal access could not be applied." });
@@ -674,7 +682,7 @@ export async function createUserRole(formData: FormData) {
       if (permissionsError) throw new Error(permissionsError.message);
     }
 
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
   } catch (error) {
     usersRedirect({ section: "roles", addRole: "1", userError: error instanceof Error ? error.message : "Unable to save role." });
   }
@@ -772,7 +780,7 @@ export async function updateUserRole(formData: FormData) {
       if (permissionsError) throw new Error(permissionsError.message);
     }
 
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
   } catch (error) {
     usersRedirect({
       section: "roles",
@@ -850,7 +858,7 @@ async function performDeleteUserRole(formData: FormData, companyId: string) {
     .eq("company_id", companyId);
 
   if (error) throw new Error(error.message);
-  revalidatePath("/users");
+  revalidateUsersAndAccess();
 }
 
 export async function deleteUserRole(formData: FormData) {
@@ -947,7 +955,7 @@ export async function createUser(formData: FormData) {
       throw new Error(error.message);
     }
 
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
   } catch (error) {
     usersRedirect({ section: "users", addUser: "1", userError: error instanceof Error ? error.message : "Unable to save user." });
   }
@@ -1007,7 +1015,7 @@ export async function updateUser(formData: FormData) {
     .eq("company_id", companyId);
 
   if (error) throw new Error(error.message);
-  revalidatePath("/users");
+  revalidateUsersAndAccess();
   redirect(returnHref);
 }
 
@@ -1052,7 +1060,7 @@ export async function resendUserInvitation(formData: FormData) {
         .eq("company_id", companyId);
     }
 
-    revalidatePath("/users");
+    revalidateUsersAndAccess();
   } catch (error) {
     usersRedirect({ section: "users", userError: error instanceof Error ? error.message : "Unable to resend invitation." });
   }
@@ -1186,7 +1194,7 @@ async function performDeleteUser(formData: FormData, companyId: string) {
   if (authError && !authError.message.toLowerCase().includes("not found")) {
     throw new Error(authError.message);
   }
-  revalidatePath("/users");
+  revalidateUsersAndAccess();
   revalidatePath("/master/location");
 }
 

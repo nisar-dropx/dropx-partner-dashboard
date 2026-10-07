@@ -1,9 +1,9 @@
 import { cache } from "react";
 import { cookies, headers } from "next/headers";
-import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { loadActiveRoles, loadCompanyAccessRow, loadPeopleDesignation } from "@/lib/access-cache";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { canPreviewPortalUsers, loadPeopleDesignations } from "@/lib/people-designation";
-import { withTimeout } from "@/lib/with-timeout";
+import { getSessionUser, loadSessionProfile } from "@/lib/session-user";
 
 export const portalPreviewCookieName = "dropx_portal_preview_v1";
 export const previewNoStoreHeaders = { "Cache-Control": "private, no-store, max-age=0", "Vary": "Cookie" };
@@ -31,15 +31,13 @@ export const hasPreviewProductAccess = cache(async (companyId: string, userId: s
 });
 
 export const getSignedInPreviewProfile = cache(async () => {
-  const client = createServerSupabaseClient();
-  if (!client || !supabaseAdmin) return null;
-  // Preview resolution runs while rendering every authenticated page. It must
-  // not keep the page's loading boundary open when Supabase auth is degraded.
-  const { data } = await withTimeout(client.auth.getUser(), 5000, "Preview session check")
-    .catch(() => ({ data: { user: null } }));
-  if (!data.user) return null;
-  const { data: profile, error } = await supabaseAdmin.from("profiles")
-    .select("id,company_id,full_name,is_master_owner,role_id,is_active").eq("id", data.user.id).maybeSingle();
+  if (!supabaseAdmin) return null;
+  // Preview resolution runs while rendering every authenticated page. It shares
+  // the request's single session check and profile read with authorization, and
+  // that check gives up on its own when Supabase auth is degraded.
+  const user = await getSessionUser();
+  if (!user) return null;
+  const { data: profile, error } = await loadSessionProfile(user.id);
   if (error || !profile?.is_active || !profile.company_id) return null;
   return profile;
 });
@@ -47,13 +45,13 @@ export const getSignedInPreviewProfile = cache(async () => {
 export const getPreviewViewer = cache(async () => {
   const profile = await getSignedInPreviewProfile();
   if (!profile || !supabaseAdmin) return null;
-  const [company, role, designations] = await Promise.all([
-    supabaseAdmin.from("companies").select("is_active").eq("id", profile.company_id).maybeSingle(),
-    profile.role_id ? supabaseAdmin.from("user_roles").select("code,is_active").eq("company_id", profile.company_id).eq("id", profile.role_id).maybeSingle() : Promise.resolve({ data: null }),
-    loadPeopleDesignations(profile.company_id, [profile.id])
+  const [company, roles, designation] = await Promise.all([
+    loadCompanyAccessRow(profile.company_id).catch(() => null),
+    profile.role_id ? loadActiveRoles(profile.company_id, [profile.role_id]).catch(() => []) : Promise.resolve([]),
+    loadPeopleDesignation(profile.company_id, profile.id)
   ]);
-  if (!company.data?.is_active) return null;
-  const eligible = canPreviewPortalUsers(Boolean(profile.is_master_owner), role.data?.is_active ? role.data.code : null, designations.get(profile.id));
+  if (!company?.is_active) return null;
+  const eligible = canPreviewPortalUsers(Boolean(profile.is_master_owner), roles[0]?.code ?? null, designation);
   return eligible && await hasPreviewProductAccess(profile.company_id, profile.id, Boolean(profile.is_master_owner)) ? profile : null;
 });
 

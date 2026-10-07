@@ -599,7 +599,29 @@ function resolveConnectPageAccess(
   ])];
 }
 
+// The app fires several API calls at once when it opens, and each one resolves
+// the same login's accounts. Calls that arrive while an identical lookup has
+// only just started share its result instead of repeating every query. The
+// window is kept very short so a lookup never answers for a later change.
+const ACCOUNT_LOOKUP_SHARE_MS = 300;
+const recentAccountLookups = new Map<string, { startedAt: number; accounts: Promise<ConnectAccount[]> }>();
+
 export async function findConnectAccounts(countryCode: string, mobile: string) {
+  const key = `${countryCode}:${mobile}`;
+  const recent = recentAccountLookups.get(key);
+  if (recent && Date.now() - recent.startedAt < ACCOUNT_LOOKUP_SHARE_MS) {
+    return structuredClone(await recent.accounts);
+  }
+  const lookup = { startedAt: Date.now(), accounts: loadConnectAccounts(countryCode, mobile) };
+  recentAccountLookups.set(key, lookup);
+  try {
+    return structuredClone(await lookup.accounts);
+  } finally {
+    if (recentAccountLookups.get(key) === lookup) recentAccountLookups.delete(key);
+  }
+}
+
+async function loadConnectAccounts(countryCode: string, mobile: string): Promise<ConnectAccount[]> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
   type ProfileMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null };
@@ -620,6 +642,10 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
 
   const nonEmployeeTypes: NonEmployeeProfileType[] = ["workforce", "contractor", "vendor", "worker"];
   async function loadNonEmployee(profileType: NonEmployeeProfileType): Promise<MatchResult<NonEmployeeMatch>> {
+    // helpers has no lifecycle_status column, so this lookup has always failed
+    // with a missing-column error and resolved to "no accounts". Skip the doomed
+    // query; the outcome is unchanged.
+    if (profileType === "worker") return { data: [], error: null };
     const table = workforceTable(profileType);
     let query = supabaseAdmin!
       .from(table)
