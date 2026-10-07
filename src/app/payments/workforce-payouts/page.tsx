@@ -99,6 +99,10 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const rows = reviewed.rows;
   const error = reviewed.error;
   const canEdit = hasPermission(authorization, pageCode, "edit");
+  const advancePageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_advances" : "workforce_advances";
+  const canDeductAdvances = audience === "workforce"
+    && canEdit
+    && hasPermission(authorization, advancePageCode, "edit");
   const audienceHref = (nextAudience: "workforce" | "helpers") => {
     const params = new URLSearchParams({
       audience: nextAudience,
@@ -124,7 +128,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       {canEdit && audience === "workforce" ? <WorkforcePayoutBulkUpload fromDate={period.fromDate} toDate={period.toDate} /> : null}
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
-        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} canEdit={canEdit} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
+        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} canDeductAdvances={canDeductAdvances} canEdit={canEdit} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
     </div>
   </AppShell>;
 }

@@ -27,6 +27,7 @@ const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/requests",
   "/payments/approvals",
   "/payments/workforce-payouts",
+  "/payments/workforce-advances",
   "/payments/report"
 ];
 const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors", "/workers"];

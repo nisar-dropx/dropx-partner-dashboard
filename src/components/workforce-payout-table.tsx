@@ -5,6 +5,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactEleme
 import { useRouter } from "next/navigation";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "@/lib/workforce-payout-filters";
+import { duplicateAdvanceWorkforceIds } from "@/lib/workforce-payout-action-selection";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 
@@ -66,9 +67,14 @@ function dateLabel(value: string) { return value.split("-").reverse().join("/");
 function workDaysValue(value: number, source: string) { return source.toLowerCase().includes("unavailable") ? "" : value; }
 function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
 const MAX_REVIEW_SELECTION = 1000;
+const ADVANCE_DEDUCTION_LOCKED_STATUSES = new Set(["approved", "paid", "finalized", "finalised"]);
 function canSendPayoutForReview(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.reviewToken && row.paymentDetailsAvailable)
     && (row.status === "Ready for review" || row.status === "Returned");
+}
+function canDeductAdvanceFromPayout(row: WorkforcePayoutRow) {
+  return Boolean(row.reviewSubjectId && row.locationId && row.paymentDetailsAvailable)
+    && !ADVANCE_DEDUCTION_LOCKED_STATUSES.has(row.status.trim().toLowerCase());
 }
 function statusTone(status: string) {
   if (status === "Ready for review" || status === "Approved") return "good";
@@ -167,7 +173,7 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
   </div>;
 }
 
-export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; canEdit?: boolean; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances = false, canEdit = false, periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; canDeductAdvances?: boolean; canEdit?: boolean; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
   const router = useRouter();
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
@@ -185,6 +191,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
   const [stickyScrollFrame, setStickyScrollFrame] = useState({ left: 0, width: 0, visible: false });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [reviewState, setReviewState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
+  const [advanceState, setAdvanceState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -200,28 +207,35 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const selectable = useMemo(() => filtered.filter(canSendPayoutForReview), [filtered]);
+  const selectable = useMemo(() => filtered.filter((row) => (canEdit && canSendPayoutForReview(row))
+    || (canDeductAdvances && canDeductAdvanceFromPayout(row))), [canDeductAdvances, canEdit, filtered]);
+  const selectableIds = useMemo(() => new Set(selectable.map((row) => row.id)), [selectable]);
   const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
-  const reviewSelectionTarget = useMemo(() => selectable.slice(0, MAX_REVIEW_SELECTION), [selectable]);
-  const reviewSelectionFull = reviewSelectionTarget.length > 0 && reviewSelectionTarget.every((row) => selected.has(row.id));
-  const reviewSelectionLimitReached = selectedRows.length >= MAX_REVIEW_SELECTION;
+  const reviewSelectedRows = useMemo(() => selectedRows.filter(canSendPayoutForReview), [selectedRows]);
+  const advanceSelectedRows = useMemo(() => selectedRows.filter(canDeductAdvanceFromPayout), [selectedRows]);
+  const advanceSelectionConflictIds = useMemo(() => duplicateAdvanceWorkforceIds(advanceSelectedRows), [advanceSelectedRows]);
+  const hasAdvanceSelectionConflict = advanceSelectionConflictIds.size > 0;
+  const hasNonReviewSelection = reviewSelectedRows.length !== selectedRows.length;
+  const actionSelectionTarget = useMemo(() => selectable.slice(0, MAX_REVIEW_SELECTION), [selectable]);
+  const actionSelectionFull = actionSelectionTarget.length > 0 && actionSelectionTarget.every((row) => selected.has(row.id));
+  const actionSelectionLimitReached = selectedRows.length >= MAX_REVIEW_SELECTION;
   const activeFilterCount = locations.length + designations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
   const tableColumnCount = canEdit ? 13 : 12;
 
   useEffect(() => {
-    const selectableIds = new Set(selectable.map((row) => row.id));
     setSelected((current) => new Set([...current].filter((id) => selectableIds.has(id))));
-  }, [selectable]);
+  }, [selectableIds]);
 
   useEffect(() => {
     setSelected(new Set());
     setReviewState({ busy: false, error: "", notice: "" });
+    setAdvanceState({ busy: false, error: "", notice: "" });
   }, [periodStart, periodEnd]);
 
   useEffect(() => {
     if (!selectAllRef.current) return;
-    selectAllRef.current.indeterminate = selectedRows.length > 0 && !reviewSelectionFull;
-  }, [reviewSelectionFull, selectedRows.length]);
+    selectAllRef.current.indeterminate = selectedRows.length > 0 && !actionSelectionFull;
+  }, [actionSelectionFull, selectedRows.length]);
 
   useEffect(() => {
     const tableWrap = tableWrapRef.current;
@@ -291,7 +305,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
   }
 
   function toggleSelected(rowId: string) {
-    if (!selected.has(rowId) && reviewSelectionLimitReached) {
+    if (!selected.has(rowId) && actionSelectionLimitReached) {
       setReviewState({ busy: false, error: `Submit at most ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts at a time. Deselect one or narrow the filters.`, notice: "" });
       return;
     }
@@ -304,12 +318,12 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
   }
 
   function toggleAll() {
-    if (reviewSelectionFull) {
+    if (actionSelectionFull) {
       setSelected(new Set());
       setReviewState((current) => ({ ...current, error: "", notice: "" }));
       return;
     }
-    setSelected(new Set(reviewSelectionTarget.map((row) => row.id)));
+    setSelected(new Set(actionSelectionTarget.map((row) => row.id)));
     setReviewState((current) => ({
       ...current,
       error: "",
@@ -321,6 +335,10 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
 
   async function sendForReview() {
     if (!selectedRows.length || reviewState.busy) return;
+    if (hasNonReviewSelection) {
+      setReviewState({ busy: false, error: "Some selected payouts are not Ready for review or Returned. Deselect them before sending for review.", notice: "" });
+      return;
+    }
     setReviewState({ busy: true, error: "", notice: "" });
     try {
       const response = await fetch("/api/payments/workforce-payouts/send-review", {
@@ -329,7 +347,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
         body: JSON.stringify({
           periodStart,
           periodEnd,
-          items: selectedRows.map((row) => ({
+          items: reviewSelectedRows.map((row) => ({
             subjectType: row.reviewSubjectType,
             subjectId: row.reviewSubjectId,
             locationId: row.locationId,
@@ -347,6 +365,49 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
     }
   }
 
+  async function deductPendingAdvances() {
+    if (!advanceSelectedRows.length || advanceState.busy) return;
+    if (hasAdvanceSelectionConflict) {
+      setAdvanceState({
+        busy: false,
+        error: "Select one location row per Workforce member before deducting advances.",
+        notice: ""
+      });
+      return;
+    }
+    const confirmed = window.confirm(
+      `Deduct pending advances from ${advanceSelectedRows.length} selected payout${advanceSelectedRows.length === 1 ? "" : "s"}? `
+      + "The ADVANCE deduction will use the oldest pending advances first and will never reduce net pay below zero."
+    );
+    if (!confirmed) return;
+    setAdvanceState({ busy: true, error: "", notice: "" });
+    setReviewState((current) => ({ ...current, error: "", notice: "" }));
+    try {
+      const response = await fetch("/api/payments/workforce-payouts/deduct-advances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          periodStart,
+          periodEnd,
+          items: advanceSelectedRows.map((row) => ({ workforceId: row.reviewSubjectId, stationId: row.locationId }))
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error ?? "Unable to deduct pending advances.");
+      setSelected(new Set());
+      setAdvanceState({
+        busy: false,
+        error: "",
+        notice: payload.updated
+          ? `${money(Number(payload.deducted ?? 0))} deducted from ${payload.updated} payout${payload.updated === 1 ? "" : "s"} under ADVANCE.`
+          : "No pending advance could be deducted from the selected payouts."
+      });
+      router.refresh();
+    } catch (error) {
+      setAdvanceState({ busy: false, error: error instanceof Error ? error.message : "Unable to deduct pending advances.", notice: "" });
+    }
+  }
+
   return <>
     <div className="payout-search-strip">
       <label>
@@ -355,12 +416,15 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
       </label>
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
-        {canEdit ? <span className="payout-result-count">Up to {MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts per review batch.</span> : null}
-        {canEdit ? <button className="button" disabled={!selectedRows.length || reviewState.busy} onClick={sendForReview} type="button">{reviewState.busy ? "Sending…" : `Send for review${selectedRows.length ? ` (${selectedRows.length})` : ""}`}</button> : null}
+        {canEdit ? <span className="payout-result-count">Up to {MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts per action.</span> : null}
+        {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || reviewState.busy || advanceState.busy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Select one location row per Workforce member. Send for review can still use the full selection." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
+        {canEdit ? <button className="button" disabled={!selectedRows.length || hasNonReviewSelection || reviewState.busy || advanceState.busy} onClick={sendForReview} title={hasNonReviewSelection ? "Deselect payouts that are not Ready for review or Returned." : undefined} type="button">{reviewState.busy ? "Sending…" : `Send for review${selectedRows.length ? ` (${selectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" type="button" onClick={exportRows}>Export full CSV</button>
       </div>
     </div>
     {reviewState.error || reviewState.notice ? <div aria-live="polite" className={`payout-inline-message ${reviewState.error ? "error" : "success"}`}>{reviewState.error || reviewState.notice}</div> : null}
+    {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
+    {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Deselect the extra row or continue with Send for review; review selection is unchanged.</div> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
       <PayoutMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />
@@ -374,7 +438,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
       <table className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
         <caption className="sr-only">{subjectLabel} payout totals</caption>
         <thead><tr>
-          {canEdit ? <th className="payout-select-cell" scope="col"><input aria-label={`Select up to ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} matching ${subjectLabelLower} payouts`} checked={reviewSelectionFull} disabled={!selectable.length} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
+          {canEdit ? <th className="payout-select-cell" scope="col"><input aria-label={`Select up to ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} matching ${subjectLabelLower} payouts for available actions`} checked={actionSelectionFull} disabled={!selectable.length} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
           <th className="payout-sticky-id" scope="col">DropX ID</th>
           <th className="payout-sticky-worker" scope="col">{subjectLabel} / payment source</th>
           <th scope="col">Designation</th>
@@ -395,13 +459,21 @@ export function WorkforcePayoutTable({ audience = "workforce", canEdit = false, 
             const reviewDays = row.dailyBreakdown.filter(day => day.deliveryReview);
             const paymentTotals = row.productionBreakdown.filter((item) => item.amount !== 0 || item.reportedCount !== undefined);
             const deductionTotals = row.deductionBreakdown.filter((item) => item.amount !== 0);
+            const hasRowAdvanceSelectionConflict = Boolean(row.reviewSubjectId && advanceSelectionConflictIds.has(row.reviewSubjectId));
+            const selectionTitle = actionSelectionLimitReached && !selected.has(row.id)
+              ? `Maximum ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts selected`
+              : hasRowAdvanceSelectionConflict
+                ? "More than one selected location row belongs to this Workforce member. Keep one row to deduct advances; review selection is unaffected."
+                : !canSendPayoutForReview(row) && canDeductAdvances && canDeductAdvanceFromPayout(row)
+                  ? "Available for advance deduction only."
+                  : undefined;
             const attendanceRanges = [...new Map(row.dailyBreakdown.flatMap((day) => day.attendanceRange ? [[
               `${day.attendanceRange.basis}|${day.attendanceRange.effectiveFrom}|${day.attendanceRange.effectiveTo}`,
               day.attendanceRange
             ] as const] : [])).values()];
             return [
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
-                {canEdit ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for review`} checked={selected.has(row.id)} disabled={!canSendPayoutForReview(row) || (reviewSelectionLimitReached && !selected.has(row.id))} onChange={() => toggleSelected(row.id)} title={reviewSelectionLimitReached && !selected.has(row.id) ? `Maximum ${MAX_REVIEW_SELECTION.toLocaleString("en-IN")} payouts selected` : undefined} type="checkbox" /></td> : null}
+                {canEdit ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for payout actions`} checked={selected.has(row.id)} disabled={!selectableIds.has(row.id) || (actionSelectionLimitReached && !selected.has(row.id))} onChange={() => toggleSelected(row.id)} title={selectionTitle} type="checkbox" /></td> : null}
                 <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={`DropX ID status: ${row.dropxStatus}`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
                 <td>{row.designation ? <strong>{row.designation}</strong> : <span aria-hidden="true">—</span>}</td>

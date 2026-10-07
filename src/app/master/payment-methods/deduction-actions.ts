@@ -85,7 +85,7 @@ export async function createDeductionHead(formData: FormData) {
     const code = text(formData, "code").toUpperCase().replace(/[^A-Z0-9_]/g, "_");
     const name = text(formData, "name");
     if (!code || !name) throw new Error("Deduction code and name are required.");
-    if (code === "TDS") throw new Error("TDS is a protected system deduction head.");
+    if (code === "TDS" || code === "ADVANCE") throw new Error(`${code} is a protected system deduction head.`);
     const deduction = deductionValues(formData);
     const { error } = await supabaseAdmin.from("workforce_deduction_heads").insert({
       company_id: companyId,
@@ -117,6 +117,7 @@ export async function updateDeductionHead(formData: FormData) {
     .maybeSingle();
     if (existingResult.error) throw new Error(existingResult.error.message);
     if (!existingResult.data) throw new Error("Deduction head was not found.");
+    if (existingResult.data.code === "ADVANCE") throw new Error("ADVANCE is managed by the Workforce Advance Register and cannot be edited here.");
     const isSystemTds = existingResult.data.is_system && existingResult.data.code === "TDS";
     if (existingResult.data.is_system && !isSystemTds) throw new Error("Unsupported system deduction head.");
     const deduction = deductionValues(formData, isSystemTds);

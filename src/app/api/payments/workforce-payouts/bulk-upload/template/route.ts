@@ -55,6 +55,7 @@ export async function GET(request: Request) {
         .eq("is_active", true)
         .eq("calculation_type", "manual")
         .eq("is_system", false)
+        .neq("code", "ADVANCE")
         .order("code"),
       supabaseAdmin
         .from("stations")

@@ -413,12 +413,12 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
             </div>
             {pagePermission.canAdd ? <DeductionHeadForm action={createDeductionHead} /> : null}
             <div className="deduction-head-list">
-              {deductionHeads.length ? deductionHeads.map((head) => pagePermission.canEdit
+              {deductionHeads.length ? deductionHeads.map((head) => pagePermission.canEdit && head.code !== "ADVANCE"
                 ? <DeductionHeadForm action={updateDeductionHead} compact head={head} key={head.id} workforceCategories={workforceCategories} />
                 : <div className="deduction-head-summary" key={head.id}>
                     <strong>{head.name}</strong>
                     <span>{head.code}</span>
-                    <span>{head.is_system && head.code === "TDS" ? `${head.default_value}% with PAN · ${head.percentage_without_pan}% without PAN` : head.calculation_type === "percentage" ? `${head.default_value}% of Gross Earnings` : `Rs ${head.default_value}`}</span>
+                    <span>{head.code === "ADVANCE" ? "Managed by Workforce Advance Register" : head.is_system && head.code === "TDS" ? `${head.default_value}% with PAN · ${head.percentage_without_pan}% without PAN` : head.calculation_type === "percentage" ? `${head.default_value}% of Gross Earnings` : `Rs ${head.default_value}`}</span>
                     {head.is_system && head.code === "TDS" ? <span>{head.workforce_category_codes.length ? head.workforce_category_codes.map((code) => workforceCategories.find((category) => category.code === code)?.name ?? code).join(", ") : "No workforce categories selected"}</span> : null}
                     <span>{head.applies_to_all ? "Applies to all workers" : "Individual assignment"}</span>
                   </div>)
