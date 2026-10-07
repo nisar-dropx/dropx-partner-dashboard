@@ -20,6 +20,7 @@ export const accessPages = [
   { code: "provider_mapping", name: "ID Mapping", sort_order: 40 },
   { code: "fleet", name: "Fleet", sort_order: 45 },
   { code: "fleet_action_center", name: "Action Center", sort_order: 46 },
+  { code: "fleet_da_mapping", name: "Vehicle DA mapping", sort_order: 48 },
   { code: "fleet_vehicle_view", name: "Vehicles", sort_order: 47 },
   { code: "fleet_date_view", name: "Documents", sort_order: 48 },
   { code: "fleet_station_view", name: "Station View", sort_order: 50 },

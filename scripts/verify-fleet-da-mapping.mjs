@@ -57,3 +57,27 @@ assert.equal((await post('MAPPED',{rows:[{vehicleId:'not-permitted',ids:['A1'],e
 assert.equal((await post('MAPPED',{rows:[{vehicleId:'v',ids:['unknown'],expectedIds:[]}]})).status,409);
 assert.equal((await post()).status,200,'Missing optional counts do not block known rider confirmation');assert.equal(called,1);
 console.log('DA mapping API: out-of-scope stations/vehicles, preview writes and unknown IDs rejected; missing counts do not block confirmation.');
+// Current operational eligibility follows the status master, including custom statuses.
+const statuses=[{status_key:'active',is_operational:true,is_active:true},{status_key:'ready_for_route',is_operational:true,is_active:true},{status_key:'breakdown',is_operational:false,is_active:true}];
+assert.equal(model.isMappingVehicleActive({status:'active',deployment_status:'deployed'},statuses),true);
+assert.equal(model.isMappingVehicleActive({status:'ready_for_route',deployment_status:'deployed'},statuses),true);
+assert.equal(model.isMappingVehicleActive({status:'breakdown',deployment_status:'deployed'},statuses),false);
+assert.equal(model.isMappingVehicleActive({status:'active',deployment_status:'not_deployed'},statuses),false);
+assert.equal(model.isMappingVehicleActive({status:'unknown',deployment_status:'deployed'},statuses),false);
+let surface='ops';
+const access=compile('src/lib/fleet/da-mapping-server.ts',{
+ 'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{}},'@/lib/supabase-pagination':{},
+ '@/lib/authorization':{hasPermission:(a,p,action)=>Boolean(a.permissions?.[p]?.[action])},'@/lib/company-scope':{},
+ '@/lib/access-surface':{currentAdminAccessSurface:()=>surface},'./report-data':{FleetReportError:E},'./vehicle-sources-server':{},'./daily-report':{},'./da-mapping':model
+});
+const stationRole={readOnly:false,permissions:{fleet_da_mapping:{access:true,edit:true}}};
+assert.equal(access.mappingCanView(stationRole),true);assert.equal(access.mappingCanEdit(stationRole),true);
+assert.equal(access.mappingCanEdit({...stationRole,readOnly:true}),false);
+assert.equal(access.mappingCanEdit({permissions:{expense_requests:{add:true,access:true}}}),false,'Payment access alone never grants vehicle mapping');
+assert.equal(access.mappingCanDefaults({isMasterOwner:true}),false,'Even owners cannot update defaults via OpsPulse');
+surface='fleet';assert.equal(access.mappingCanDefaults({isMasterOwner:true}),true);
+assert.equal(access.mappingCanDefaults({permissions:{fleet_vehicle_view:{edit:true}}}),false,'Vehicle editors do not implicitly edit Masters');
+assert.equal(access.mappingCanDefaults({permissions:{fleet_masters:{edit:true}}}),true);
+assert.equal((await post('MAPPED',{action:'mapping.default',vehicleId:'v',providerId:'A1'})).status,403);
+assert.equal((await post('MAPPED',{action:'mapping.policy',recentDays:7})).status,403);
+console.log('Mapping correction: active/deployed eligibility, custom statuses, scoped role editing, preview protection and Fleet-only master/policy barriers passed.');
