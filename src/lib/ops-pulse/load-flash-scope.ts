@@ -47,6 +47,8 @@ export type FlashParcel = {
   driverId: string;
   driverName: string;
   isAccessPoint: boolean;
+  /** Amazon's last-handler ID on a parcel that is not counted against a driver (see attributeFlashParcels). */
+  handlerId?: string;
 };
 
 export type FlashDriver = {
@@ -156,8 +158,34 @@ export function flashParcelPosition(parcel: FlashParcel) {
   return parcel.buckets[0] || "Morning list";
 }
 
+/** Amazon's own driver names carry a suffix ("HEMRAJ SINGH /SPVAN_ DROP / 204729137"); keep the person's name. */
+export function flashCleanName(name: string) {
+  return name.split("/")[0].trim() || name.trim();
+}
+
 export function flashDriverLabel(driver: { driverId: string; driverName: string }) {
-  return driver.driverName || driver.driverId || "No driver recorded";
+  return flashCleanName(driver.driverName) || driver.driverId || "Not with a driver";
+}
+
+/**
+ * Amazon stamps an ID on almost every parcel, including stock sitting at the
+ * station whose last handler was a line-haul or another station's associate.
+ * Those IDs are not this station's drivers: they are in neither the station's
+ * driver list nor the workforce roster, and they never dispatched anything
+ * today. Counting each as a "driver" buried the real ones under hundreds of
+ * one-parcel rows. A parcel is credited to a driver only when that ID has a
+ * known name or has parcels out on road or delivered today; otherwise it is
+ * station stock with no driver, and the ID is kept as `handlerId`.
+ */
+export function attributeFlashParcels(parcels: FlashParcel[]): FlashParcel[] {
+  const drivers = new Set<string>();
+  for (const parcel of parcels) {
+    if (!parcel.driverId) continue;
+    if (parcel.driverName || parcel.isAccessPoint || flashParcelMatches(parcel, "delivered") || flashParcelMatches(parcel, "road")) drivers.add(`${parcel.stationCode}|${parcel.driverId}`);
+  }
+  return parcels.map((parcel) => !parcel.driverId || drivers.has(`${parcel.stationCode}|${parcel.driverId}`)
+    ? parcel
+    : { ...parcel, handlerId: parcel.driverId, driverId: "", driverName: "", isAccessPoint: false });
 }
 
 /** Per-driver roll-up, biggest workload first; parcels with no driver come last. */

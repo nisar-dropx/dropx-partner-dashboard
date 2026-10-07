@@ -1,5 +1,5 @@
 import type { LoadFlashNetworkPayload, LoadFlashStation, LoadFlashTrackingRow } from "@/lib/ops-pulse/edd-worker";
-import { collapseFlashParcels, flashDriverLabel, flashParcelMatches, flashParcelPosition, sumFlashHourly, summarizeFlashDrivers, type FlashKind, type FlashParcel } from "@/lib/ops-pulse/load-flash-scope";
+import { attributeFlashParcels, collapseFlashParcels, flashDriverLabel, flashParcelMatches, flashParcelPosition, sumFlashHourly, summarizeFlashDrivers, type FlashKind, type FlashParcel } from "@/lib/ops-pulse/load-flash-scope";
 
 export const LOAD_FLASH_REPORTS = {
   load: "Total load",
@@ -103,8 +103,9 @@ function parcelRows(parcels: FlashParcel[], date: string, names: Record<string, 
       "Amazon status": parcel.state,
       EDD: parcel.edd,
       "Driver ID": parcel.driverId,
-      "Driver name": parcel.driverName,
+      "Driver name": parcel.driverId ? flashDriverLabel(parcel) : "",
       "Delivered via": parcel.driverId ? (parcel.isAccessPoint ? "Store / locker" : "Driver") : "",
+      "Last handler ID": parcel.handlerId ?? "",
       "Morning census": parcel.morning ? "Yes" : "No",
       Delivered: flashParcelMatches(parcel, "delivered") ? "Yes" : "No",
       Lists: parcel.buckets.join(", ")
@@ -120,7 +121,7 @@ function driverRows(parcels: FlashParcel[], date: string, names: Record<string, 
       "Station name": names[driver.stationCode] ?? "",
       "Driver ID": driver.driverId,
       "Driver name": flashDriverLabel(driver),
-      Type: !driver.driverId ? "No driver recorded" : driver.isAccessPoint ? "Store / locker" : "Driver",
+      Type: !driver.driverId ? "Not with a driver" : driver.isAccessPoint ? "Store / locker" : "Driver",
       "Tracking IDs": driver.parcels,
       Delivered: driver.delivered,
       "Out on road": driver.onRoad,
@@ -138,7 +139,7 @@ export function loadFlashReportSheets(
   scope: LoadFlashReportScope = {}
 ): Sheet[] {
   const names = scope.stationNames ?? {};
-  const everyParcel = collapseFlashParcels(tracking);
+  const everyParcel = attributeFlashParcels(collapseFlashParcels(tracking));
   const byDriver = scope.driverId !== undefined;
   const parcels = byDriver ? everyParcel.filter((parcel) => parcel.driverId === scope.driverId) : everyParcel;
   const date = payload.businessDate;

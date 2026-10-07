@@ -5,7 +5,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, ChevronRi
 import type { EddNetworkRunStatus, LoadFlashNetworkPayload, LoadFlashStation, LoadFlashTrackingRow } from "@/lib/ops-pulse/edd-worker";
 import type { LoadFlashCluster } from "@/lib/ops-pulse/load-flash-access";
 import type { LoadFlashReportKind } from "@/lib/ops-pulse/load-flash-report";
-import { collapseFlashParcels, flashDriverLabel, flashPercent as percent, flashStationBase as baseOf, flashTotalsFromParcels, flashTotalsFromStations, sumFlashHourly, summarizeFlashDrivers } from "@/lib/ops-pulse/load-flash-scope";
+import { attributeFlashParcels, collapseFlashParcels, flashDriverLabel, flashPercent as percent, flashStationBase as baseOf, flashTotalsFromParcels, flashTotalsFromStations, sumFlashHourly, summarizeFlashDrivers } from "@/lib/ops-pulse/load-flash-scope";
 import { FlashDrivers, FlashParcels } from "./flash-drilldown";
 import s from "./flash.module.css";
 
@@ -219,7 +219,7 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
   // Keep showing the previous fetch of the same station while a fresher one loads.
   const trackingRows = tracking && stationRow && tracking.key.startsWith(`${payload.businessDate}|${stationRow.stationCode}|`) ? tracking.rows : null;
   const trackingState = trackingRows ? "ready" as const : trackingFailed === trackingKey ? "error" as const : "loading" as const;
-  const parcels = useMemo(() => collapseFlashParcels(trackingRows ?? []), [trackingRows]);
+  const parcels = useMemo(() => attributeFlashParcels(collapseFlashParcels(trackingRows ?? [])), [trackingRows]);
   const drivers = useMemo(() => summarizeFlashDrivers(parcels), [parcels]);
   const driverRow = driver !== null ? drivers.find((row) => row.driverId === driver) ?? null : null;
   const driverParcels = useMemo(() => driver !== null ? parcels.filter((parcel) => parcel.driverId === driver) : parcels, [parcels, driver]);
@@ -419,10 +419,20 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
             {[...scopeStations].sort((a, b) => a.stationCode.localeCompare(b.stationCode)).map((row) => <option key={row.stationCode} value={row.stationCode}>{row.stationCode}{stationNames[row.stationCode] ? ` — ${stationNames[row.stationCode]}` : ""}</option>)}
           </select>
         </label>
+        {stationRow && trackingState === "ready" && drivers.length ? (
+          <label className={s.scopeField}>
+            <span>Driver</span>
+            <select value={driver === null ? "all" : driver || NO_DRIVER} onChange={(event) => setDriver(event.target.value === "all" ? null : event.target.value === NO_DRIVER ? "" : event.target.value)}>
+              <option value="all">All {drivers.filter((row) => row.driverId).length} drivers</option>
+              {[...drivers].filter((row) => row.driverId).sort((a, b) => flashDriverLabel(a).localeCompare(flashDriverLabel(b))).map((row) => <option key={row.driverId} value={row.driverId}>{flashDriverLabel(row)}</option>)}
+              {drivers.some((row) => !row.driverId) ? <option value={NO_DRIVER}>Not with a driver</option> : null}
+            </select>
+          </label>
+        ) : null}
         <ol className={s.crumbs} aria-label="Current view">
           <li><button type="button" disabled={!stationRow} onClick={() => openStation("")}>{clusterOption ? clusterOption.label : "All stations"}</button></li>
           {stationRow ? <li><ChevronRight size={13} /><button type="button" disabled={driver === null} onClick={() => setDriver(null)}>{stationRow.stationCode}{stationNames[stationRow.stationCode] ? ` · ${stationNames[stationRow.stationCode]}` : ""}</button></li> : null}
-          {stationRow && driver !== null ? <li><ChevronRight size={13} /><span>{driverRow ? flashDriverLabel(driverRow) : driver || "No driver recorded"}</span></li> : null}
+          {stationRow && driver !== null ? <li><ChevronRight size={13} /><span>{driverRow ? flashDriverLabel(driverRow) : driver || "Not with a driver"}</span></li> : null}
         </ol>
         {cluster || stationRow ? <button type="button" className={s.clear} onClick={() => { setCluster(""); openStation(""); }}><X size={13} /> Clear</button> : null}
       </section>
@@ -452,11 +462,11 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
         ))}
       </section>
 
-      <div className={s.split}>
+      {stationRow && driver !== null ? null : <div className={s.split}>
         {stationRow ? (
           <section className={s.panel} aria-label="Drivers">
-            <header className={s.panelHead}><h3>Drivers <span className={s.countTag}>{count(drivers.filter((row) => row.driverId).length)}</span></h3><span>{driver !== null ? "Select the driver again to show everyone" : "Select a driver to see only their parcels"}</span></header>
-            <FlashDrivers drivers={drivers} selected={driver} onSelect={setDriver} state={trackingState} />
+            <header className={s.panelHead}><h3>Drivers <span className={s.countTag}>{count(drivers.filter((row) => row.driverId).length)}</span></h3><span>Open a driver to see their tracking IDs</span></header>
+            <FlashDrivers drivers={drivers} onOpen={setDriver} state={trackingState} />
           </section>
         ) : (
           <section className={s.panel} aria-label="What needs attention">
@@ -507,12 +517,12 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
             </details>
           </section>
         ) : null}
-      </div>
+      </div>}
 
-      {stationRow ? (
+      {stationRow ? driver === null ? null : (
         <section className={s.panel} aria-label="Tracking IDs">
           {trackingState === "ready"
-            ? <FlashParcels parcels={driverParcels} showDriver={driver === null} onSelectDriver={setDriver} />
+            ? <FlashParcels parcels={driverParcels} title={driverRow ? flashDriverLabel(driverRow) : "Not with a driver"} subtitle={driver ? `${driverRow?.isAccessPoint ? "Store / locker" : driver} · ${count(driverParcels.length)} tracking IDs` : `${count(driverParcels.length)} tracking IDs at ${stationRow.stationCode} that no driver has dispatched today`} showHandler={driver === ""} onBack={() => setDriver(null)} />
             : <><header className={s.panelHead}><h3>Tracking IDs</h3></header>{trackingState === "loading" ? <div className={s.skeletonRows} role="status" aria-label="Loading tracking IDs">{Array.from({ length: 8 }, (_, index) => <span key={index} className={s.skeleton} />)}</div> : <p className={s.empty}>Tracking IDs could not be loaded for this station.</p>}</>}
         </section>
       ) : (
@@ -598,7 +608,7 @@ export function LoadFlashView({ initial, stationNames = {}, clusters = [], initi
       <details className={`${s.panel} ${s.more}`}>
         <summary>How to read this report</summary>
         <p>Morning load is the parcel list taken at the first check of the day. Delivered is measured against it, and includes parcels whose history shows Delivered even if Amazon later moved them back to Received. The line on each station’s delivery bar is the average for the stations shown ({networkPct}%). At station is inducted plus retained. Past EDD is stock whose delivery date has already passed.</p>
-        <p>Open a station to see its drivers and tracking IDs; select a driver to narrow every figure to them. A driver’s percentage is delivered out of what they were dispatched with (delivered plus still on road). Driver names come from the station’s Amazon driver list, then the workforce roster. Every Excel download follows the view on screen and includes the tracking IDs.</p>
+        <p>Open a station to see its drivers; open a driver to narrow every figure to them and list their tracking IDs. Parcels sitting at the station whose last handler is not one of its drivers are grouped as “Not with a driver”. A driver’s percentage is delivered out of what they were dispatched with (delivered plus still on road). Driver names come from the workforce roster, then the station’s Amazon driver list. Every Excel download follows the view on screen and includes the tracking IDs.</p>
       </details>
     </div>
   );
