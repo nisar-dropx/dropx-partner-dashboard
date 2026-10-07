@@ -51,7 +51,7 @@ let actor = "owner", selected = null, revoked = false;
 const mocks = {
   "@/lib/with-timeout": moduleAt("src/lib/with-timeout.ts", {}),
   "next/navigation": { redirect: (url) => { throw new Error(url); } },
-  "next/cache": { unstable_cache: () => async () => null },
+  "next/cache": { unstable_cache: fn => fn },
   "next/headers": { cookies: () => ({ get: () => null }) },
   react: { cache: fn => fn },
   "@/lib/access-pages": { accessPages: [{ code: "people_all" }], ensureAccessPages: async () => {} },
@@ -63,21 +63,30 @@ const mocks = {
   "@/lib/people-designation": { loadPeopleDesignations: async (_, ids) => new Map(ids.map(id => [id, { name: id === "owner" ? "Managing Partner" : "Station lead" }])) },
   "@/lib/portal-preview": { getPreviewViewer: async () => actor === "owner" ? tables.profiles[0] : null, selectedPreviewUserId: () => selected, hasPreviewProductAccess: async () => !revoked }
 };
-const auth = moduleAt("src/lib/authorization.ts", mocks);
+// Authorization reads the session and the cached access rows through two shared
+// modules; load the real ones against the same mocks so their logic is exercised.
+function withSharedModules(base) {
+  return {
+    ...base,
+    "@/lib/session-user": moduleAt("src/lib/session-user.ts", base),
+    "@/lib/access-cache": moduleAt("src/lib/access-cache.ts", base)
+  };
+}
+const auth = moduleAt("src/lib/authorization.ts", withSharedModules(mocks));
 class ImmediateTimeout extends Error { constructor() { super("timed out"); this.name = "TimeoutError"; } }
-const timeoutAuth = moduleAt("src/lib/authorization.ts", {
+const timeoutAuth = moduleAt("src/lib/authorization.ts", withSharedModules({
   ...mocks,
   "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new ImmediateTimeout(); } },
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
-});
+}));
 assert.equal(await timeoutAuth.getAuthorization(), null, "two consecutive sign-in timeouts resolve as an unavailable session instead of a server exception");
-const unavailableAuth = moduleAt("src/lib/authorization.ts", {
+const unavailableAuth = moduleAt("src/lib/authorization.ts", withSharedModules({
   ...mocks,
   "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new Error("Supabase auth is unavailable"); } },
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
-});
+}));
 assert.equal(await unavailableAuth.getAuthorization(), null, "an upstream auth error fails closed as an unavailable session instead of leaving the route unresolved");
-const claimsFallbackAuth = moduleAt("src/lib/authorization.ts", {
+const claimsFallbackAuth = moduleAt("src/lib/authorization.ts", withSharedModules({
   ...mocks,
   "@/lib/supabase-server": {
     createServerSupabaseClient: () => ({
@@ -91,10 +100,24 @@ const claimsFallbackAuth = moduleAt("src/lib/authorization.ts", {
       }
     })
   }
-});
+}));
 const claimsFallbackAuthorization = await claimsFallbackAuth.getAuthorization();
 assert.equal(claimsFallbackAuthorization?.userId, "owner", "a valid signed session survives a transient Auth API failure");
 assert.equal(claimsFallbackAuthorization?.email, "nisar@dropxlogistics.com");
+let authApiCalls = 0;
+const localClaimsAuth = moduleAt("src/lib/authorization.ts", withSharedModules({
+  ...mocks,
+  "@/lib/supabase-server": {
+    createServerSupabaseClient: () => ({
+      auth: {
+        getUser: async () => { authApiCalls += 1; return { data: { user: tables.profiles[0] } }; },
+        getClaims: async () => ({ data: { claims: { sub: "owner", email: "nisar@dropxlogistics.com" } } })
+      }
+    })
+  }
+}));
+assert.equal((await localClaimsAuth.getAuthorization())?.userId, "owner");
+assert.equal(authApiCalls, 0, "a locally verified session never calls the Auth API");
 const ownerBefore = await auth.getAuthorization();
 assert.equal(ownerBefore.designationName, "Managing Partner");
 assert.equal(ownerBefore.roleCode, "OWNER");
@@ -134,8 +157,11 @@ assert.match(route, /getPreviewViewer/);
 assert.match(route, /Same-origin request required/);
 assert.match(route, /users.some\(user => user.id === userId\)/);
 const helper = fs.readFileSync("src/lib/portal-preview.ts", "utf8");
-assert.match(helper, /auth.getUser\(\)/);
-assert.match(helper, /Preview session check/);
+assert.match(helper, /getSessionUser\(\)/);
+const sessionUser = fs.readFileSync("src/lib/session-user.ts", "utf8");
+assert.match(sessionUser, /auth.getUser\(\)/);
+assert.match(sessionUser, /Session claim check/);
+assert.match(sessionUser, /Sign-in check/);
 assert.match(helper, /eq\("company_id", viewer.company_id\)/);
 assert.match(helper, /eq\("product_code", product\)/);
 assert.match(helper, /actor === viewerId/);
@@ -148,14 +174,16 @@ assert.match(login, /Login session check/);
 assert.match(login, /catch\(\(\) => \(\{ data: \{ user: null \} \}\)\)/);
 console.log("Portal preview tests passed: designation display, unchanged owner privileges, target permission and location parity, read-only, company/active/actor boundaries.");
 let previewCookie = null;
-const realPreview = moduleAt("src/lib/portal-preview.ts", {
+const realPreview = moduleAt("src/lib/portal-preview.ts", withSharedModules({
   react: { cache: fn => fn },
+  "next/cache": mocks["next/cache"],
   "next/headers": { cookies: () => ({ get: () => previewCookie ? { value: previewCookie } : undefined }), headers: () => ({ get: () => "ops.dropxlogistics.com" }) },
   "@/lib/with-timeout": moduleAt("src/lib/with-timeout.ts", {}),
+  "@/lib/access-pages": mocks["@/lib/access-pages"],
   "@/lib/supabase-admin": { supabaseAdmin: admin },
   "@/lib/supabase-server": mocks["@/lib/supabase-server"],
   "@/lib/people-designation": { ...mocks["@/lib/people-designation"], canPreviewPortalUsers: people.canPreviewPortalUsers }
-});
+}));
 actor = "owner";
 assert.equal((await realPreview.getPreviewViewer()).id, "owner");
 const allowedUsers = await realPreview.listPreviewUsers(tables.profiles[0]);
