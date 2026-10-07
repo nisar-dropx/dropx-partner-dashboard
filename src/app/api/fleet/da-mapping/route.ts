@@ -3,7 +3,7 @@ import {mappingAdmin as supabaseAdmin} from '@/lib/fleet/da-mapping-client';
 import {requireCompanyId} from '@/lib/company-scope';
 import {FleetReportError} from '@/lib/fleet/report-data';
 import {loadMapping,mappingScope,mappingStationScope} from '@/lib/fleet/da-mapping-server';
-import {riderKey} from '@/lib/fleet/da-mapping';
+import {riderKey,riderAvailableAt} from '@/lib/fleet/da-mapping';
 import {istDate,validDate} from '@/lib/fleet/daily-report';
 import {withFleetSystemLog} from '@/lib/fleet/system-log';
 export const dynamic='force-dynamic';
@@ -38,13 +38,13 @@ export const POST=withFleetSystemLog(async(request:Request)=>{
   const existing=d.defaults.find(x=>x.vehicle_id===v.id);
   if((existing?.updated_at??null)!==(b.expectedUpdatedAt??null))throw new FleetReportError('Default changed. Refresh before saving.',409);
   if(!b.providerId){let q=supabaseAdmin!.from('fleet_vehicle_da_defaults').delete().eq('company_id',company).eq('vehicle_id',v.id);if(existing)q=q.eq('updated_at',existing.updated_at);const r=await q.select('id');if(r.error||(existing&&!r.data?.length))throw new FleetReportError('Default changed. Refresh before saving.',409);return Response.json({ok:true});}
-  const o=d.options.find(o=>o.id===riderKey(String(b.providerId)));if(!o)throw new FleetReportError('Choose a recent station rider ID.',400);
+  const o=d.options.find(o=>o.id===riderKey(String(b.providerId))&&riderAvailableAt(o,v.station_code));if(!o)throw new FleetReportError('Choose a recent station rider ID.',400);
   const value={company_id:company,vehicle_id:v.id,vehicle_no:v.vehicle_no,station_code:v.station_code,provider_employee_id:o.id,name:o.name,updated_by:auth.userId,updated_at:new Date().toISOString()};
   const r=existing?await supabaseAdmin!.from('fleet_vehicle_da_defaults').update(value).eq('company_id',company).eq('id',existing.id).eq('updated_at',existing.updated_at).select('id'):await supabaseAdmin!.from('fleet_vehicle_da_defaults').insert({...value,created_by:auth.userId}).select('id');
   if(r.error||!r.data?.length)throw new FleetReportError('Default changed or could not be saved. Refresh and retry.',409);return Response.json({ok:true});
  }
  if(!d.canEdit)throw new FleetReportError('Daily mapping edit permission is required.',403);
- if(b.action!=='mapping.confirm'||!Array.isArray(b.rows)||!b.rows.length||b.rows.length>200)throw new FleetReportError('Select vehicles to confirm.',400);
+ if(b.action!=='mapping.confirm'||!Array.isArray(b.rows)||!b.rows.length||b.rows.length>200)throw new FleetReportError('Select between 1 and 200 vehicles to confirm together.',400);
  const seen=new Set<string>(),seenVehicles=new Set<string>();
  const rows=b.rows.map((r:Record<string,unknown>)=>{
   const v=d.vehicles.find(v=>v.id===r.vehicleId);if(!v)throw new FleetReportError('Vehicle is outside this station.',403);
@@ -54,7 +54,7 @@ export const POST=withFleetSystemLog(async(request:Request)=>{
   const remarks=typeof r.remarks==='string'?r.remarks.trim():'';
   const unchanged=[...r.ids].map(String).map(riderKey).sort().join('|')===existing.map(a=>riderKey(a.provider_employee_id)).sort().join('|');
   if((!r.ids.length||(!unchanged&&existing.length))&&remarks.length<3)throw new FleetReportError('Add a short reason when clearing or correcting an assignment.',400);
-  const associates=r.ids.map((id:unknown)=>{if(typeof id!=='string')throw new FleetReportError('Invalid rider ID.',400);const o=d.options.find(o=>o.id===riderKey(id));if(!o)throw new FleetReportError('Rider is no longer available. Refresh the list.',409);if(seen.has(o.id))throw new FleetReportError('The same rider cannot be assigned to two vans on one day.',409);seen.add(o.id);return{provider_id:o.id,name:o.name};});
+  const associates=r.ids.map((id:unknown)=>{if(typeof id!=='string')throw new FleetReportError('Invalid rider ID.',400);const o=d.options.find(o=>o.id===riderKey(id)&&riderAvailableAt(o,v.station_code));if(!o)throw new FleetReportError('Rider is no longer available. Refresh the list.',409);if(seen.has(o.id))throw new FleetReportError('The same rider cannot be assigned to two vans on one day.',409);seen.add(o.id);return{provider_id:o.id,name:o.name};});
   return{vehicle_id:v.id,station_code:v.station_code,expected_ids:[...r.expectedIds].sort(),expected_revision:r.expectedRevision??null,associates,remarks};
  });
  const result=await supabaseAdmin!.rpc('fleet_confirm_da_day',{p_company:company,p_actor:auth.userId,p_date:b.date,p_rows:rows});
