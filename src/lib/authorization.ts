@@ -9,90 +9,13 @@ import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { loadPeopleDesignations } from "@/lib/people-designation";
 import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from "@/lib/portal-preview";
 import { enforceAccessCutoffIfDue } from "@/lib/access-cutoff";
-import { TimeoutError, withTimeout } from "@/lib/with-timeout";
+import { TimeoutError } from "@/lib/with-timeout";
+import { verifySession } from "@/lib/session-verification";
 
-const AUTH_TIMEOUT_MS = 5000;
-const AUTH_CLAIMS_TIMEOUT_MS = 3000;
-
-type AuthenticatedUser = {
-  id: string;
-  email: string | null | undefined;
-};
-
-type AuthenticatedUserResult = {
-  data: {
-    user: AuthenticatedUser | null;
-  };
-};
-
-function isTransientAuthFailure(error: unknown) {
-  if (error instanceof TimeoutError) return true;
-  const candidate = error as { name?: unknown; message?: unknown; status?: unknown } | null;
-  const name = String(candidate?.name ?? "").toLowerCase();
-  const message = String(candidate?.message ?? "").toLowerCase();
-  const status = Number(candidate?.status ?? 0);
-  return name === "aborterror" ||
-    status >= 500 ||
-    message.includes("abort") ||
-    message.includes("timeout") ||
-    message.includes("network") ||
-    message.includes("fetch failed");
-}
-
-async function getVerifiedClaimsUser(supabase: NonNullable<ReturnType<typeof createServerSupabaseClient>>): Promise<AuthenticatedUser | null> {
-  const getClaims = (supabase.auth as {
-    getClaims?: () => Promise<{ data?: { claims?: Record<string, unknown> | null } | null }>;
-  }).getClaims;
-  if (typeof getClaims !== "function") return null;
-
-  try {
-    const result = await withTimeout(getClaims.call(supabase.auth), AUTH_CLAIMS_TIMEOUT_MS, "Session claim check");
-    const claims = result.data?.claims;
-    const id = typeof claims?.sub === "string" ? claims.sub : "";
-    if (!id) return null;
-    return {
-      id,
-      email: typeof claims?.email === "string" ? claims.email : null
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * A single slow-but-alive Supabase response (common under sustained DB load)
- * should never be indistinguishable from "you're not signed in." Before a
- * timeout can reach the normal sign-in path, verify the locally held JWT
- * claims. That preserves a valid signed session during a transient Auth API
- * delay while still rejecting missing, expired, or invalid sessions.
- */
-async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabaseClient>): Promise<AuthenticatedUserResult> {
+async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabaseClient>) {
   if (!supabase) return { data: { user: null } };
-  try {
-    const result = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check");
-    if (result.data.user) {
-      return { data: { user: { id: result.data.user.id, email: result.data.user.email } } };
-    }
-    if (!isTransientAuthFailure(result.error)) return { data: { user: null } };
-  } catch (error) {
-    if (!isTransientAuthFailure(error)) return { data: { user: null } };
-  }
-
-  const verifiedClaimsUser = await getVerifiedClaimsUser(supabase);
-  if (verifiedClaimsUser) return { data: { user: verifiedClaimsUser } };
-
-  try {
-    const retry = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check (retry)");
-    return {
-      data: {
-        user: retry.data.user
-          ? { id: retry.data.user.id, email: retry.data.user.email }
-          : null
-      }
-    };
-  } catch {
-    return { data: { user: null } };
-  }
+  const result = await verifySession(supabase.auth);
+  return { data: { user: result.user } };
 }
 
 export type PermissionAction = "access" | "view" | "add" | "edit";

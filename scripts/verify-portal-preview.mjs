@@ -7,6 +7,7 @@ function moduleAt(path, mocks) {
   new Function("require", "module", "exports", js)((id) => { if (!(id in mocks)) throw new Error("Unexpected dependency " + id); return mocks[id]; }, mod, mod.exports);
   return mod.exports;
 }
+const verifySessionModule = (timeouts) => moduleAt("src/lib/session-verification.ts", { "./with-timeout": timeouts ?? moduleAt("src/lib/with-timeout.ts", {}) });
 const company = "company-a";
 const tables = {
   profiles: [
@@ -50,6 +51,7 @@ assert.equal(people.canPreviewPortalUsers(false, "TECH"), false);
 let actor = "owner", selected = null, revoked = false;
 const mocks = {
   "@/lib/with-timeout": moduleAt("src/lib/with-timeout.ts", {}),
+  "@/lib/session-verification": verifySessionModule(),
   "next/navigation": { redirect: (url) => { throw new Error(url); } },
   "next/cache": { unstable_cache: () => async () => null },
   "next/headers": { cookies: () => ({ get: () => null }) },
@@ -67,13 +69,13 @@ const auth = moduleAt("src/lib/authorization.ts", mocks);
 class ImmediateTimeout extends Error { constructor() { super("timed out"); this.name = "TimeoutError"; } }
 const timeoutAuth = moduleAt("src/lib/authorization.ts", {
   ...mocks,
-  "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new ImmediateTimeout(); } },
+  "@/lib/session-verification": verifySessionModule({ TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new ImmediateTimeout(); } }),
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
 });
 assert.equal(await timeoutAuth.getAuthorization(), null, "two consecutive sign-in timeouts resolve as an unavailable session instead of a server exception");
 const unavailableAuth = moduleAt("src/lib/authorization.ts", {
   ...mocks,
-  "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new Error("Supabase auth is unavailable"); } },
+  "@/lib/session-verification": verifySessionModule({ TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new Error("Supabase auth is unavailable"); } }),
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
 });
 assert.equal(await unavailableAuth.getAuthorization(), null, "an upstream auth error fails closed as an unavailable session instead of leaving the route unresolved");
@@ -152,6 +154,7 @@ const realPreview = moduleAt("src/lib/portal-preview.ts", {
   react: { cache: fn => fn },
   "next/headers": { cookies: () => ({ get: () => previewCookie ? { value: previewCookie } : undefined }), headers: () => ({ get: () => "ops.dropxlogistics.com" }) },
   "@/lib/with-timeout": moduleAt("src/lib/with-timeout.ts", {}),
+  "@/lib/session-verification": verifySessionModule(),
   "@/lib/supabase-admin": { supabaseAdmin: admin },
   "@/lib/supabase-server": mocks["@/lib/supabase-server"],
   "@/lib/people-designation": { ...mocks["@/lib/people-designation"], canPreviewPortalUsers: people.canPreviewPortalUsers }

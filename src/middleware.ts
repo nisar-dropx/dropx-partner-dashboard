@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
 import { timeoutFetch } from "@/lib/timeout-fetch";
-import { TimeoutError, withTimeout } from "@/lib/with-timeout";
+import { verifySession } from "@/lib/session-verification";
+import { sessionRecoveryHtml } from "@/lib/session-recovery";
 import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
 import { providerMappingPageCodeForHost } from "@/lib/provider-mapping-host";
-
-const AUTH_TIMEOUT_MS = 5000;
-const AUTH_CLAIMS_TIMEOUT_MS = 3000;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -119,45 +117,6 @@ function decodeCookieValue(value: string) {
   const binary = atob(padded);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return new TextDecoder().decode(bytes);
-}
-
-function isTransientAuthFailure(error: unknown) {
-  if (error instanceof TimeoutError) return true;
-  const candidate = error as { name?: unknown; message?: unknown; status?: unknown } | null;
-  const name = String(candidate?.name ?? "").toLowerCase();
-  const message = String(candidate?.message ?? "").toLowerCase();
-  const status = Number(candidate?.status ?? 0);
-  return name === "aborterror" ||
-    status >= 500 ||
-    message.includes("abort") ||
-    message.includes("timeout") ||
-    message.includes("network") ||
-    message.includes("fetch failed");
-}
-
-async function hasVerifiedSessionClaims(supabase: {
-  auth: {
-    getClaims?: () => Promise<{ data?: { claims?: Record<string, unknown> | null } | null }>;
-  };
-}) {
-  const getClaims = supabase.auth.getClaims;
-  if (typeof getClaims !== "function") return false;
-  try {
-    const result = await withTimeout(getClaims.call(supabase.auth), AUTH_CLAIMS_TIMEOUT_MS, "Session claim check");
-    return typeof result.data?.claims?.sub === "string";
-  } catch {
-    return false;
-  }
-}
-
-function unavailableSessionResponse() {
-  return new NextResponse("We could not verify your signed-in session. Please reload this page.", {
-    status: 503,
-    headers: {
-      "content-type": "text/plain; charset=utf-8",
-      "retry-after": "5"
-    }
-  });
 }
 
 export async function middleware(request: NextRequest) {
@@ -350,61 +309,47 @@ export async function middleware(request: NextRequest) {
     }
   });
 
-  let needsClaimVerification = false;
-  try {
-    const { data, error } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
-    if (!data.user) {
-      if (isTransientAuthFailure(error)) {
-        needsClaimVerification = true;
-      } else {
-        const loginUrl = new URL("/login", request.url);
-        loginUrl.searchParams.set("next", request.nextUrl.pathname);
-        return NextResponse.redirect(loginUrl);
-      }
-    }
-  } catch (error) {
-    if (!isTransientAuthFailure(error)) throw error;
-    needsClaimVerification = true;
+  // Preserve refreshed/expired cookies on every outcome, including redirects.
+  const finish = (target: NextResponse) => {
+    response.cookies.getAll().forEach((cookie) => target.cookies.set(cookie));
+    target.headers.set("Cache-Control", "private, no-store");
+    return target;
+  };
+  const session = await verifySession(supabase.auth);
+  if (session.status === "missing") {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
+    return finish(NextResponse.redirect(loginUrl));
   }
-
-  // A transient Auth API failure is not proof that a browser session is
-  // invalid. Verify its signed JWT claims before allowing the request through;
-  // otherwise return a retryable response instead of logging the user out or
-  // treating an unverified request as authenticated.
-  if (needsClaimVerification && !(await hasVerifiedSessionClaims(supabase))) {
-    try {
-      const { data, error } = await withTimeout(
-        supabase.auth.getUser(),
-        AUTH_TIMEOUT_MS,
-        "Session check (retry)"
-      );
-      if (!data.user) {
-        if (isTransientAuthFailure(error)) return unavailableSessionResponse();
-        const loginUrl = new URL("/login", request.url);
-        loginUrl.searchParams.set("next", request.nextUrl.pathname);
-        return NextResponse.redirect(loginUrl);
+  if (session.status === "unavailable") {
+    console.warn("Portal session verification unavailable", { host, path });
+    return finish(new NextResponse(sessionRecoveryHtml(
+      request.nextUrl.pathname + request.nextUrl.search,
+      isFinanceHost ? "Finance · by DropX" : "DropX"
+    ), {
+      status: 503,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Retry-After": "5",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        "X-Content-Type-Options": "nosniff"
       }
-    } catch (error) {
-      if (!isTransientAuthFailure(error)) throw error;
-      return unavailableSessionResponse();
-    }
+    }));
   }
 
   if (isPlatformAdminHost && path === "/") {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = "/platform-admin";
-    return NextResponse.rewrite(rewriteUrl);
+    return finish(NextResponse.rewrite(rewriteUrl, { request: { headers: request.headers } }));
   }
 
   if (isOpsHost && path !== "/unauthorized" && isCleanOpsPath(path)) {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = path === "/" ? "/ops-pulse" : `/ops-pulse${path}`;
-    const rewriteResponse = NextResponse.rewrite(rewriteUrl);
-    response.cookies.getAll().forEach((cookie) => rewriteResponse.cookies.set(cookie));
-    return rewriteResponse;
+    return finish(NextResponse.rewrite(rewriteUrl, { request: { headers: request.headers } }));
   }
 
-  return response;
+  return finish(NextResponse.next({ request: { headers: request.headers } }));
 }
 
 export const config = {
