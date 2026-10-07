@@ -6,3 +6,6 @@
 .da-extra-filters{padding:8px 0;color:#306768;font-size:12px}.da-extra-filters summary{cursor:pointer;min-height:24px}.da-extra-filters label{margin-top:6px}@media(max-width:700px){.da-mapping header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:8px}.da-mapping header p,.da-mapping .da-eyebrow{display:none}.da-mapping header>button{font-size:0;min-width:42px;justify-content:center}.da-mapping header h1{font-size:19px}.da-extra-filters{grid-column:1/-1;padding:0}.da-mapping nav{margin:6px 0}.da-filters{margin:8px 0}.da-summary{padding:8px}.da-mapping .da-bulk{margin:8px 0}}
 
 .fc-app .da-mapping{max-width:none;padding:0}.fc-app .da-mapping h1{color:var(--fc-ink)}.fc-app .da-mapping .da-row{border-color:var(--fc-line)}
+
+/* OpsPulse embeds the two direct export actions without Fleet's dropdown shell. */
+.da-mapping .fc-export-toggle{display:none}
