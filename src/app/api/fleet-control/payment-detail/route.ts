@@ -1,5 +1,6 @@
 import {loadPaymentVolume,paymentVolumeToday} from '@/lib/payment-volume-data';
 import {adhocApprovalContext} from '@/lib/payment-volume';
+import {isPendingPaymentApproval} from "@/lib/payment-stage-policy";
 import {estimatedShipments} from '@/lib/expense-variance';
 import { NextResponse, type NextRequest } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -78,14 +79,14 @@ export async function GET(request: NextRequest) {
     const requester = profiles.get(payment.requested_by) as any;
 
     const history = [
-      {
+      ...(!logs.some(item => text(item.action).toLowerCase() === "created") ? [{
         id: `created-${payment.id}`,
         action: "created",
         actor: text(requester?.full_name || requester?.email) || "Requester",
         role: "Requester",
         comments: text(payment.remarks) || "Payment request created.",
         createdAt: payment.created_at
-      },
+      }] : []),
       ...logs.map((item) => {
         const actor = profiles.get(item.approver_user_id) as any;
         const role = roles.get(item.approver_role_id) as any;
@@ -107,7 +108,9 @@ export async function GET(request: NextRequest) {
     });
     const currentRoleNames = [payment.current_approver_role_id, ...(payment.current_approver_role_ids ?? [])].map((id) => roles.get(id) as any).filter(Boolean).map((role) => text(role.name || role.code));
     const currentProfile = profiles.get(payment.current_approver_user_id) as any;
-    const currentStage = text(currentProfile?.full_name || currentProfile?.email) || currentRoleNames.join(", ") || null;
+    const currentRole = [...new Set(currentRoleNames)].join(", ") || null;
+    const awaitingApproval = isPendingPaymentApproval(payment.status, payment.approval_status);
+    const currentStage = awaitingApproval ? text(currentProfile?.full_name || currentProfile?.email) || currentRole || null : null;
 
     const rawAnswers=(answersResult.data??[]).map((a:any)=>({...a,payment_head_questions:firstRelation(a.payment_head_questions)}));
     const volumeDate=adhocApprovalContext(headResult.data.code,rawAnswers);
@@ -118,7 +121,8 @@ export async function GET(request: NextRequest) {
       answers: answers.filter((item) => item.value && !item.hasFile),
       attachments: answers.filter((item) => item.hasFile).map((item) => ({ id: item.id, label: item.label, fileName: item.fileName || "Attachment" })),
       history,
-      currentStage
+      currentStage,
+      currentRole: awaitingApproval ? currentRole : null
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load Fleet payment detail." }, { status: 500 });
