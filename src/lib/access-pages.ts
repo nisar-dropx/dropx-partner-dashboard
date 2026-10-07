@@ -42,6 +42,7 @@ export const accessPages = [
   { code: "ops_reports", name: "Ops Reports", sort_order: 84 },
   { code: "ops_attendance_reports", name: "Attendance Reports", sort_order: 85 },
   { code: "ops_unplanned_leaves", name: "Attendance · Unplanned Leaves (read-only)", sort_order: 85 },
+  { code: "ops_my_team", name: "Team Ops · My Team & Org", sort_order: 85 },
   { code: "ops_offboarding_checklist", name: "Team Ops · Offboarding Checklist", sort_order: 85 },
   { code: "ops_salary_hold", name: "Team Ops · Salary Hold", sort_order: 86 },
   { code: "ops_workforce_losses", name: "Team Ops · Workforce Loss Claims", sort_order: 87 },

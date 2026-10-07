@@ -37,6 +37,7 @@ const commonStart: NavItem[] = [
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
 const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Team Ops", icon: "T", children: [
+  { code: "ops_my_team", label: "My Team & Org", href: "/attendance/my-team" },
   { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
   { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" },
   { code: "ops_offboarding_checklist", label: "Offboarding", href: "/attendance/offboarding" },
