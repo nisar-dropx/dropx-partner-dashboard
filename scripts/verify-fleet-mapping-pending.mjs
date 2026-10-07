@@ -52,7 +52,7 @@ const query={select(){return this},eq(){return this},in(){return this},order(){r
 const api=compile('src/app/api/fleet/da-mapping/pending/route.ts',{
  '@/lib/authorization':{getAuthorization:async()=>({userId:'fixture'})},
  '@/lib/fleet/da-mapping-server':{mappingStationScope:async()=>{if(!allow)throw new ReportError('Denied',403);return{companyId:c,stations:[{code:'AAA',name:'Alpha'}]}}},
- '@/lib/fleet/da-mapping-client':{mappingAdmin:{from:()=>query,rpc:async(name,args)=>{calls++;assert.equal(args.p_company,c);assert.deepEqual(args.p_stations,['AAA']);return fail?{error:{message:'isolated failure'}}:{data:{totalGroups:0,totalPending:0,rows:[]}}}}},
+ '@/lib/fleet/da-mapping-client':{mappingAdmin:{from:()=>query,rpc:async(name,args)=>{calls++;assert.equal(args.p_from,null);assert.equal(args.p_to,null);assert.equal(args.p_company,c);assert.deepEqual(args.p_stations,['AAA']);return fail?{error:{message:'isolated failure'}}:{data:{totalGroups:0,totalPending:0,rows:[]}}}}},
  '@/lib/supabase-pagination':{readAllRows:async()=>({data:[{station_code:'AAA'}],error:null})},
  '@/lib/fleet/report-data':{FleetReportError:ReportError},
  '@/lib/fleet/daily-report':{istDate:()=>today,validDate:d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)}
@@ -61,5 +61,5 @@ const get=q=>api.GET(new Request('https://fleet.example/api/fleet/da-mapping/pen
 assert.equal((await get('station=OTHER')).status,403);assert.equal(calls,0);
 assert.equal((await get('offset=-1')).status,400);assert.equal(calls,0);
 assert.equal((await get('from=broken')).status,400);assert.equal(calls,0);
-assert.equal((await get('')).status,200);fail=true;assert.equal((await get('')).status,503);allow=false;assert.equal((await get('')).status,403);
+assert.equal((await get('')).status,200);assert.equal((await get('station=&from=&to=&offset=0')).status,200);fail=true;assert.equal((await get('')).status,503);allow=false;assert.equal((await get('')).status,403);
 console.log('Pending endpoint: unauthorized station, malformed filters, permission denial and optional data failure handled without writes.');

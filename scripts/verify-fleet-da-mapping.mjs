@@ -37,6 +37,10 @@ await db.exec(`insert into fleet_control_settings(company_id) values('${c}');`);
 await db.query("select set_config('request.headers',$1,false)",[JSON.stringify({'x-fleet-audit':JSON.stringify({actorId:actor,route:'/api/fleet/da-mapping'})})]);
 await db.exec(`update fleet_control_settings set assignment_recent_days=8 where company_id='${c}';`);
 assert.equal((await db.query('select actor_user_id from fleet_system_logs')).rows[0].actor_user_id,actor);
+await db.exec(`insert into stations values('${c}','BBB');update fleet_vehicles set station_code='BBB' where id='${v2}';`);
+const multiRows=[{...row(v,'BATCH-A'),station_code:'KOZA'},{...row(v2,'BATCH-B'),station_code:'BBB'}];
+await db.query('select fleet_confirm_da_day($1,$2,$3,$4::jsonb)',[c,actor,'2026-10-07',JSON.stringify(multiRows)]);
+assert.deepEqual((await db.query("select station_code from fleet_vehicle_day_confirmations where work_date='2026-10-07' order by station_code")).rows.map(r=>r.station_code),['BBB','KOZA'],'One atomic save confirms vehicles across locations');
 await db.close();
 const layout=compile('src/lib/fleet/compact-report.ts');const pages=layout.compactPages('Daily station status','KL | All models',{headers:['Station','Own','ODCD','Rented','Ad hoc'],widths:[1,1.6,1.6,1.6,.8],notes:['TOTAL / OPERATIONAL / NON-OPERATIONAL'],rows:Array.from({length:95},(_,i)=>['ST'+i,'5 / 4 / 1','2 / 2 / 0','1 / 1 / 0',0])});
 assert.ok(pages.length>1);assert.equal(pages.flatMap(p=>p.lines).filter(l=>/^ST\d+$/.test(l.text)).length,95);assert.ok(pages.every(p=>p.width===900&&p.height<=1275));
@@ -81,3 +85,34 @@ assert.equal(access.mappingCanDefaults({permissions:{fleet_masters:{edit:true}}}
 assert.equal((await post('MAPPED',{action:'mapping.default',vehicleId:'v',providerId:'A1'})).status,403);
 assert.equal((await post('MAPPED',{action:'mapping.policy',recentDays:7})).status,403);
 console.log('Mapping correction: active/deployed eligibility, custom statuses, scoped role editing, preview protection and Fleet-only master/policy barriers passed.');
+
+// All-station loading remains scoped, and rider choices remain tied to each vehicle's station.
+const fixtureTables={
+ stations:[{id:'s1',station_code:'AAA',station_name:'Alpha'},{id:'s2',station_code:'BBB',station_name:'Beta'},{id:'s3',station_code:'HIDDEN',station_name:'Hidden'}],
+ fleet_vehicles:[{id:'va',vehicle_no:'VA',model:'Van',station_code:'AAA',status:'active',deployment_status:'deployed',ownership_type:'own'},{id:'vb',vehicle_no:'VB',model:'Van',station_code:'BBB',status:'active',deployment_status:'deployed',ownership_type:'own'},{id:'vh',vehicle_no:'VH',station_code:'HIDDEN',status:'active',deployment_status:'deployed'}],
+ fleet_vehicle_status_master:[{status_key:'active',is_active:true,is_operational:true}],
+ fleet_vehicle_da_defaults:[{id:'def-a',vehicle_id:'va',station_code:'AAA',provider_employee_id:'A1',name:'Alpha DA'}],
+ fleet_day_assignments:[],fleet_vehicle_day_confirmations:[],fleet_control_settings:[{assignment_recent_days:7}],
+ cps_shipment_daily:[{id:'r1',station_code:'AAA',provider_employee_id:'A1',provider_employee_name:'Alpha DA',work_date:'2026-10-06'},{id:'r2',station_code:'BBB',provider_employee_id:'B1',provider_employee_name:'Beta DA',work_date:'2026-10-06'},{id:'r3',station_code:'HIDDEN',provider_employee_id:'H1',provider_employee_name:'Hidden DA',work_date:'2026-10-06'}],company_product_memberships:[{id:'member',role_id:'role'}]
+};
+const queries=[];
+function fixtureQuery(table){let rows=[...(fixtureTables[table]||[])];const q={select(){return q},eq(){return q},gte(){return q},lte(){return q},gt(){return q},order(){return q},in(col,values){queries.push({table,col,values});rows=rows.filter(r=>values.includes(r[col]));return q},maybeSingle:async()=>({data:rows[0]??null,error:null}),then(resolve){return Promise.resolve({data:rows,error:null}).then(resolve)}};return q;}
+const scoped=compile('src/lib/fleet/da-mapping-server.ts',{
+ 'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{from:fixtureQuery}},'@/lib/supabase-pagination':{readAllRows:async q=>await q},
+ '@/lib/authorization':{hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/access-surface':{currentAdminAccessSurface:()=> 'fleet'},'./report-data':{FleetReportError:E},'./vehicle-sources-server':{loadVehicleSources:async()=>({sources:[]})},'./daily-report':{istDate:()=> '2026-10-07'},'./da-mapping':model
+});
+const manager={userId:actor,isMasterOwner:false,hasAllLocationAccess:false,locationScopeIds:['s1','s2']};
+const all=await scoped.loadMapping(manager,'2026-10-07','*');assert.equal(all.station,'*');assert.deepEqual(all.vehicles.map(v=>v.id),['va','vb']);assert.deepEqual(all.options.map(o=>o.id),['A1','B1']);assert.ok(model.riderAvailableAt(all.options[0],'AAA'));assert.equal(model.riderAvailableAt(all.options[0],'BBB'),false);
+assert.deepEqual((await scoped.loadMapping(manager,'2026-10-07','')).vehicles.map(v=>v.id),['va','vb']);
+assert.deepEqual((await scoped.loadMapping(manager,'2026-10-07','AAA')).vehicles.map(v=>v.id),['va']);
+await assert.rejects(scoped.loadMapping(manager,'2026-10-07','HIDDEN'),/outside your scope/);
+let allSaved;
+const bulkApi=compile('src/app/api/fleet/da-mapping/route.ts',{
+ '@/lib/authorization':{getAuthorization:async()=>manager},'@/lib/fleet/da-mapping-client':{mappingAdmin:{rpc:async(name,args)=>{allSaved=args.p_rows;return{data:args.p_rows.length}}}},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/fleet/report-data':{FleetReportError:E},'@/lib/fleet/da-mapping-server':{loadMapping:async()=>({...all,canEdit:true})},'@/lib/fleet/da-mapping':model,'@/lib/fleet/daily-report':{istDate:()=> '2026-10-07',validDate:()=>true},'@/lib/fleet/system-log':{withFleetSystemLog:f=>f}
+});
+const bulk=rows=>bulkApi.POST(new Request('https://fleet.example/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'mapping.confirm',station:'*',date:'2026-10-07',rows})}));
+assert.equal((await bulk([{vehicleId:'vb',ids:['A1'],expectedIds:[]}])).status,409,'A rider from another station cannot be assigned through All stations');
+assert.equal(allSaved,undefined);
+assert.equal((await bulk([{vehicleId:'va',ids:['A1'],expectedIds:[]},{vehicleId:'vb',ids:['B1'],expectedIds:[]}])).status,200);
+assert.deepEqual(allSaved.map(r=>r.station_code),['AAA','BBB']);
+console.log('All stations: scoped load, per-station rider choices, cross-station assignment rejection and single atomic bulk save passed.');
