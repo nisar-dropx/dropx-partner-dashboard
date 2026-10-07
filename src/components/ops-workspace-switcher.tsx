@@ -1,6 +1,26 @@
-import {switchOperatingContext} from '@/app/ops-pulse/actions';
-import type {OperatingMode} from '@/lib/ops-pulse/operating-context';
-export function OpsWorkspaceSwitcher({modes,mode}:{modes:{code:OperatingMode;label:string}[];mode:OperatingMode}){
- const lm=modes.find(m=>m.code===mode&&m.code!=='amazon_now')||modes.find(m=>m.code!=='amazon_now'),ds=modes.find(m=>m.code==='amazon_now');
- return <div style={{display:'flex',gap:6,padding:'8px 4px 14px'}} aria-label="Business workspace">{[[lm,'LM','Last Mile'],[ds,'DS','Dark Store']].map(([entry,short,label])=>{const m=entry as typeof lm;if(!m)return null;const active=(mode==='amazon_now')===(m.code==='amazon_now');return <form key={String(short)} action={switchOperatingContext} style={{flex:1}}><input type="hidden" name="mode" value={m.code}/><button aria-pressed={active} title={String(label)} style={{width:'100%',minHeight:46,borderRadius:10,background:active?'#202b43':'#f3f6fa',color:active?'white':'#30415f',border:'1px solid #dfe5ee'}}><b>{String(short)}</b><small style={{display:'block',fontSize:10}}>{String(label)}</small></button></form>})}</div>;
+'use client';
+import { useFormStatus } from 'react-dom';
+import { Store, Truck, Loader2 } from 'lucide-react';
+import { switchOperatingContext } from '@/app/ops-pulse/actions';
+import type { OperatingMode } from '@/lib/ops-pulse/operating-context';
+import styles from './ops-workspace-switcher.module.css';
+
+type Props = { modes: { code: OperatingMode; label: string }[]; mode: OperatingMode };
+function WorkspaceButtons({ modes, mode }: Props) {
+  const { pending, data } = useFormStatus();
+  const lm = modes.find(m => m.code === mode && m.code !== 'amazon_now') || modes.find(m => m.code !== 'amazon_now');
+  const ds = modes.find(m => m.code === 'amazon_now');
+  const entries = [{ entry: lm, short: 'LM', label: 'Last Mile', Icon: Truck }, { entry: ds, short: 'DS', label: 'Dark Store', Icon: Store }].filter(item => item.entry);
+  if (entries.length === 1) {
+    const item = entries[0];
+    return <div className={styles.single}><item.Icon size={18} /><div><small>WORKSPACE</small><strong>{item.label}</strong></div><span>{item.short}</span></div>;
+  }
+  return <><div className={styles.switcher} aria-label="Business workspace" aria-busy={pending}>{entries.map(({ entry, short, label, Icon }) => {
+    const active = (mode === 'amazon_now') === (entry!.code === 'amazon_now');
+    const switching = pending && data?.get('mode') === entry!.code;
+    return <button type="submit" name="mode" value={entry!.code} key={short} aria-pressed={active} disabled={pending || active} title={label} className={active ? styles.active : ''}>{switching ? <Loader2 className={styles.spinner} size={17} /> : <Icon size={17} />}<span><b>{short}</b><small>{label}</small></span></button>;
+  })}</div><span className={styles.status} role="status">{pending ? `Opening ${data?.get('mode') === 'amazon_now' ? 'Dark Store' : 'Last Mile'}…` : ''}</span></>;
+}
+export function OpsWorkspaceSwitcher(props: Props) {
+  return <form action={switchOperatingContext} className={styles.form}><WorkspaceButtons {...props} /></form>;
 }

@@ -67,6 +67,7 @@ export const accessPages = [
   { code: "edd_dashboard", name: "Delivery Performance", sort_order: 95 },
   { code: "station_edd", name: "EDD", sort_order: 96 },
   { code: "cps", name: "CPS", sort_order: 73 },
+  { code: "cpu_overview", name: "CPU · Dark Store", sort_order: 74 },
   { code: "cps_overview", name: "CPS Overview", sort_order: 74 },
   { code: "cps_daily", name: "Daily CPS", sort_order: 75 },
   { code: "cps_monthly", name: "Monthly CPS", sort_order: 76 },

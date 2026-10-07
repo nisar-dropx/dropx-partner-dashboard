@@ -43,6 +43,7 @@ export const opsAccessPageCodes = [
   "station_edd",
   "cps",
   "cps_overview",
+  "cpu_overview",
   "cps_daily",
   "cps_monthly",
   "cps_cost_breakup",

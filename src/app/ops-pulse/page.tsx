@@ -1,4 +1,4 @@
-import { DarkStoreHome } from "./dark-store-home";
+import { DarkStoreHome, CommandLoading } from "./dark-store-home";
 import { Suspense } from "react";
 import { AuditCommandCard } from "./audits/audit-command-card";
 import Link from "next/link";
@@ -16,7 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { OpsStationManpowerBoard } from "@/components/ops-station-manpower-board";
 
-type SearchParams = { date?: string; from?: string; to?: string; shift?: string; view?: string; location?: string };
+type SearchParams = { station?: string; month?: string; date?: string; from?: string; to?: string; shift?: string; view?: string; location?: string };
 type ShipmentFact = {
   station_code: string;
   shipment_type: string | null;
@@ -147,14 +147,19 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
     authorization.hasAllLocationAccess
   );
   const context = resolveOperatingContext(locationsResult.locations);
-  if(context.mode==='amazon_now')return <DarkStoreHome authorization={authorization} locations={context.modeLocations}/>;
+  if(context.mode==='amazon_now' && searchParams?.view!=='manpower')return <DarkStoreHome authorization={authorization} locations={context.modeLocations} searchParams={searchParams}/>;
+  return <AppShell active="Command Center" pageCode="ops_pulse"><Suspense fallback={<CommandLoading label="Loading your command center" />}><OperationsContent authorization={authorization} companyId={companyId} locationsResult={locationsResult} context={context} searchParams={searchParams}/></Suspense></AppShell>;
+}
+
+async function OperationsContent({authorization,companyId,locationsResult,context,searchParams}:{authorization:Awaited<ReturnType<typeof requirePagePermission>>;companyId:string;locationsResult:Awaited<ReturnType<typeof loadCodLocations>>;context:ReturnType<typeof resolveOperatingContext>;searchParams?:SearchParams}) {
   const selectedLocations = context.selectedLocations;
   const date = selectedDate(searchParams?.date);
   const dashboardView = searchParams?.view === "manpower" ? "manpower" : "operations";
   if (dashboardView === "manpower") {
     const requestedLocation = String(searchParams?.location ?? "");
-    const requestedStation = locationsResult.locations.find((location) => location.id === requestedLocation);
-    const selectedManpowerLocation = requestedStation ?? selectedLocations[0] ?? locationsResult.locations[0] ?? null;
+    const manpowerLocationsAvailable = context.mode==='amazon_now' ? context.modeLocations : locationsResult.locations;
+    const requestedStation = manpowerLocationsAvailable.find((location) => location.id === requestedLocation);
+    const selectedManpowerLocation = requestedStation ?? selectedLocations[0] ?? manpowerLocationsAvailable[0] ?? null;
     const manpowerLocations = selectedManpowerLocation ? [selectedManpowerLocation] : [];
     let manpower: Awaited<ReturnType<typeof loadOpsStationManpower>> = { asOf: date, people: [] };
     let manpowerError = locationsResult.error;
@@ -165,10 +170,10 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
         manpowerError = error instanceof Error ? error.message : "Station manpower could not be loaded.";
       }
     }
-    return <AppShell active="Dashboard" pageCode="ops_pulse">
+    return <>
       <div className="ops-command-center">
         <PageHead eyebrow="Live workforce · scope controlled" title="Shift Attendance" subtitle="See each authorised office, station or store roster, reporting times and attendance exceptions." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
-        <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>
+        {context.mode!=="amazon_now" && <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>}
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link href="/ops-pulse">Operations view</Link>
           <Link className="active" href="/ops-pulse?view=manpower">Shift attendance</Link>
@@ -178,13 +183,13 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
           <input name="view" type="hidden" value="manpower" />
           <label>Date<input name="date" type="date" defaultValue={date} max={todayIst()} /></label>
           <label>Office, station or store<select name="location" defaultValue={selectedManpowerLocation?.id ?? ""}>
-            {locationsResult.locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || location.station_code}</option>)}
+            {manpowerLocationsAvailable.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || location.station_code}</option>)}
           </select></label>
           <button type="submit">Apply location</button>
         </form>
         <OpsStationManpowerBoard canExport={!authorization.readOnly && hasPermission(authorization, "ops_reports", "access")} asOf={manpower.asOf} locations={manpowerLocations} people={manpower.people} />
       </div>
-    </AppShell>;
+    </>;
   }
   const range = selectedRange(searchParams?.from, searchParams?.to, date);
   const { monthEnd, monthStart, yearStart } = ranges(date);
@@ -302,7 +307,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
     : context.location ? locationLabel(context.location) : "No mapped location";
 
   return (
-    <AppShell active="Dashboard" pageCode="ops_pulse">
+    <>
       <div className={`ops-command-center ${accent}`}>
         <PageHead
           eyebrow={`${operatingModeLabel(context.mode)} · ${scopeLabel}`}
@@ -313,7 +318,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
           action={<span className="ops-live-badge"><i /> {isNow ? "LIVE MODE" : "OPERATIONAL"}</span>}
         />
 
-        <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>
+        {context.mode!=="amazon_now" && <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>}
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link className="active" href="/ops-pulse">Operations view</Link>
           <Link href="/ops-pulse?view=manpower">Shift attendance</Link>
@@ -459,6 +464,6 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
           </section>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }

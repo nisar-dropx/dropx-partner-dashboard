@@ -65,6 +65,7 @@ const opsGroups: PermissionGroup[] = [
   { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"], hiddenCodes: ["station_edd"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_reports"], hiddenCodes: ["payments"] },
+  { key: "cpu", label: "Dark Store CPU", codes: ["cpu_overview"] },
   { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },
   { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"], hiddenCodes: ["fleet"] },
   { key: "ops_reports", label: "Reports", codes: ["ops_reports"] },

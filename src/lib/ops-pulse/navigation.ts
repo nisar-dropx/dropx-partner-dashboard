@@ -160,10 +160,10 @@ const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performa
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   if (mode === "amazon_now") return [
-    {code:'ops_pulse',label:'Dark Store',href:'/',icon:'DS'},
+    {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
     businessDocuments,payments,
-    {code:'cps_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,
+    {code:'cpu_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,
     administration[0],
     {code:'master_data',label:'Ops Masters',icon:'*',children:[
       {code:'cps_inputs',label:'CPU Master & units',href:'/cpu/master'},
