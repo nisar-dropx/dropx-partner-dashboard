@@ -13,8 +13,61 @@ export function stationGuidanceLanguage(state?:string|null):GuidanceLanguage {
   return guidanceLanguages.find(language=>language.states.includes(normalized))?.code??"en";
 }
 
+export const betaJourneyCopy: Record<GuidanceLanguage,{
+  guidanceTitle:string;buddyLabel:string;buddyTitle:string;buddyBody:string;
+  helpTitle:string;helpBody:string;leaveAction:string;leaveTitle:string;leaveBody:string;
+}> = {
+  en:{
+    guidanceTitle:"Your next steps",buddyLabel:"GET STARTED WITH YOUR STATION BUDDY",buddyTitle:"Build confidence, one day at a time",
+    buddyBody:"Your buddy is here to help you learn the role over 1–2 days. Ask questions, practise together, and take the next step with confidence. When you’re ready, continue to DropX registration—with your station team’s guidance, you can start earlier too.",
+    helpTitle:"Need support from your station team?",helpBody:"For help with training or registration, speak with your station team. If you’ve decided not to continue, let them know using the button below.",
+    leaveAction:"I’m not continuing",leaveTitle:"Tell your station team why",leaveBody:"Choose a reason and confirm below. This stops only this beta onboarding. If you change your mind, your Workforce team can reactivate it."
+  },
+  ml:{
+    guidanceTitle:"അടുത്തതായി ചെയ്യേണ്ടത്",buddyLabel:"സ്റ്റേഷനിലെ ബഡ്ഡിയോടൊപ്പം തുടങ്ങാം",buddyTitle:"ഓരോ ദിവസവും കൂടുതൽ ആത്മവിശ്വാസത്തോടെ",
+    buddyBody:"ഒന്നോ രണ്ടോ ദിവസം ബഡ്ഡിയോടൊപ്പം ജോലി പഠിക്കാം. സംശയങ്ങൾ ചോദിക്കൂ, ഒരുമിച്ച് പരിശീലിക്കൂ, ആത്മവിശ്വാസത്തോടെ മുന്നോട്ട് പോകാം. തയ്യാറായാൽ DropX രജിസ്ട്രേഷൻ തുടരാം. സ്റ്റേഷൻ ടീമിന്റെ സഹായത്തോടെ നേരത്തെയും അടുത്ത ഘട്ടത്തിലേക്ക് കടക്കാം.",
+    helpTitle:"സ്റ്റേഷൻ ടീമിന്റെ സഹായം വേണോ?",helpBody:"പരിശീലനത്തിലോ രജിസ്ട്രേഷനിലോ സഹായം വേണമെങ്കിൽ സ്റ്റേഷൻ ടീമിനെ സമീപിക്കൂ. തുടരേണ്ടതില്ലെന്ന് തീരുമാനിച്ചിട്ടുണ്ടെങ്കിൽ, താഴെയുള്ള ബട്ടൺ വഴി ടീമിനെ അറിയിക്കാം.",
+    leaveAction:"ഞാൻ തുടരുന്നില്ല",leaveTitle:"തുടരാത്തതിന്റെ കാരണം ടീമിനെ അറിയിക്കൂ",leaveBody:"കാരണം തിരഞ്ഞെടുത്ത് താഴെ സ്ഥിരീകരിക്കുക. ഈ ബീറ്റ ഓൺബോർഡിംഗ് മാത്രം നിർത്തും. പിന്നീട് മനസ്സ് മാറിയാൽ Workforce ടീമിന് ഇത് വീണ്ടും സജീവമാക്കാം."
+  },
+  ta:{
+    guidanceTitle:"அடுத்து செய்ய வேண்டியவை",buddyLabel:"நிலையத்தில் உங்கள் பயிற்சித் துணையுடன் தொடங்குங்கள்",buddyTitle:"ஒவ்வொரு நாளும் நம்பிக்கையுடன் முன்னேறுங்கள்",
+    buddyBody:"ஒன்று அல்லது இரண்டு நாட்கள் உங்கள் பயிற்சித் துணையுடன் வேலையைக் கற்றுக்கொள்ளுங்கள். கேள்விகள் கேளுங்கள், சேர்ந்து பயிற்சி செய்யுங்கள், நம்பிக்கையுடன் முன்னேறுங்கள். தயாரானதும் DropX பதிவைத் தொடருங்கள். நிலையக் குழுவின் வழிகாட்டுதலுடன் முன்பே அடுத்த படிக்குச் செல்லலாம்.",
+    helpTitle:"நிலையக் குழுவின் உதவி வேண்டுமா?",helpBody:"பயிற்சி அல்லது பதிவுக்கு உதவி தேவைப்பட்டால் நிலையக் குழுவை அணுகுங்கள். தொடர வேண்டாம் என்று முடிவு செய்திருந்தால் கீழே உள்ள பொத்தான் மூலம் தெரிவிக்கலாம்.",
+    leaveAction:"நான் தொடரவில்லை",leaveTitle:"காரணத்தை நிலையக் குழுவிடம் தெரிவியுங்கள்",leaveBody:"காரணத்தைத் தேர்ந்தெடுத்து கீழே உறுதிப்படுத்துங்கள். இந்த பீட்டா சேர்க்கை மட்டும் நிறுத்தப்படும். மனம் மாறினால் Workforce குழு மீண்டும் செயல்படுத்தலாம்."
+  },
+  te:{
+    guidanceTitle:"మీ తదుపరి దశలు",buddyLabel:"స్టేషన్‌లో మీ సహోద్యోగితో ప్రారంభించండి",buddyTitle:"రోజురోజుకూ నమ్మకంతో ముందుకు సాగండి",
+    buddyBody:"ఒకటి లేదా రెండు రోజులు మీ సహోద్యోగితో పని నేర్చుకోండి. సందేహాలు అడగండి, కలిసి సాధన చేయండి, నమ్మకంతో ముందుకు సాగండి. సిద్ధమైనప్పుడు DropX రిజిస్ట్రేషన్ కొనసాగించండి. స్టేషన్ బృందం సూచనతో ముందుగానే తదుపరి దశకు వెళ్లవచ్చు.",
+    helpTitle:"స్టేషన్ బృందం సహాయం కావాలా?",helpBody:"శిక్షణ లేదా రిజిస్ట్రేషన్‌లో సహాయం కోసం స్టేషన్ బృందాన్ని సంప్రదించండి. కొనసాగించకూడదని నిర్ణయించుకుంటే కింది బటన్ ద్వారా తెలియజేయండి.",
+    leaveAction:"నేను కొనసాగించడం లేదు",leaveTitle:"కారణాన్ని స్టేషన్ బృందానికి తెలియజేయండి",leaveBody:"కారణాన్ని ఎంచుకుని కింద నిర్ధారించండి. ఈ బీటా ఆన్‌బోర్డింగ్ మాత్రమే ఆగుతుంది. మనసు మార్చుకుంటే Workforce బృందం మళ్లీ ప్రారంభించగలదు."
+  },
+  kn:{
+    guidanceTitle:"ನಿಮ್ಮ ಮುಂದಿನ ಹಂತಗಳು",buddyLabel:"ಸ್ಟೇಷನ್‌ನ ಸಹೋದ್ಯೋಗಿಯೊಂದಿಗೆ ಆರಂಭಿಸಿ",buddyTitle:"ಪ್ರತಿದಿನ ಆತ್ಮವಿಶ್ವಾಸದಿಂದ ಮುಂದೆ ಸಾಗಿ",
+    buddyBody:"ಒಂದು ಅಥವಾ ಎರಡು ದಿನ ನಿಮ್ಮ ಸಹೋದ್ಯೋಗಿಯೊಂದಿಗೆ ಕೆಲಸ ಕಲಿಯಿರಿ. ಪ್ರಶ್ನೆಗಳನ್ನು ಕೇಳಿ, ಒಟ್ಟಿಗೆ ಅಭ್ಯಾಸ ಮಾಡಿ, ಆತ್ಮವಿಶ್ವಾಸದಿಂದ ಮುಂದುವರಿಯಿರಿ. ಸಿದ್ಧರಾದಾಗ DropX ನೋಂದಣಿ ಮುಂದುವರಿಸಿ. ಸ್ಟೇಷನ್ ತಂಡದ ಮಾರ್ಗದರ್ಶನದೊಂದಿಗೆ ಬೇಗನೆಯೂ ಮುಂದಿನ ಹಂತಕ್ಕೆ ಹೋಗಬಹುದು.",
+    helpTitle:"ಸ್ಟೇಷನ್ ತಂಡದ ಸಹಾಯ ಬೇಕೇ?",helpBody:"ತರಬೇತಿ ಅಥವಾ ನೋಂದಣಿಗೆ ಸಹಾಯ ಬೇಕಾದರೆ ಸ್ಟೇಷನ್ ತಂಡವನ್ನು ಸಂಪರ್ಕಿಸಿ. ಮುಂದುವರಿಯಬಾರದೆಂದು ನಿರ್ಧರಿಸಿದ್ದರೆ ಕೆಳಗಿನ ಬಟನ್ ಮೂಲಕ ತಿಳಿಸಿ.",
+    leaveAction:"ನಾನು ಮುಂದುವರಿಯುವುದಿಲ್ಲ",leaveTitle:"ಕಾರಣವನ್ನು ಸ್ಟೇಷನ್ ತಂಡಕ್ಕೆ ತಿಳಿಸಿ",leaveBody:"ಕಾರಣವನ್ನು ಆಯ್ಕೆಮಾಡಿ ಕೆಳಗೆ ಖಚಿತಪಡಿಸಿ. ಈ ಬೀಟಾ ಆನ್‌ಬೋರ್ಡಿಂಗ್ ಮಾತ್ರ ನಿಲ್ಲುತ್ತದೆ. ಮನಸ್ಸು ಬದಲಾದರೆ Workforce ತಂಡ ಮತ್ತೆ ಸಕ್ರಿಯಗೊಳಿಸಬಹುದು."
+  },
+  hi:{
+    guidanceTitle:"आपके अगले कदम",buddyLabel:"स्टेशन के साथी के साथ शुरुआत करें",buddyTitle:"हर दिन बढ़ते आत्मविश्वास के साथ आगे बढ़ें",
+    buddyBody:"एक या दो दिन अपने साथी के साथ काम सीखें। सवाल पूछें, साथ में अभ्यास करें और आत्मविश्वास बढ़ाएँ। तैयार होने पर DropX रजिस्ट्रेशन पूरा करें। स्टेशन टीम की मदद से आप अगले चरण में पहले भी जा सकते हैं।",
+    helpTitle:"स्टेशन टीम की मदद चाहिए?",helpBody:"ट्रेनिंग या रजिस्ट्रेशन में मदद के लिए स्टेशन टीम से बात करें। अगर आपने आगे नहीं बढ़ने का फैसला किया है, तो नीचे दिए बटन से टीम को बताएँ।",
+    leaveAction:"मैं आगे नहीं बढ़ रहा/रही हूँ",leaveTitle:"स्टेशन टीम को कारण बताएँ",leaveBody:"कारण चुनें और नीचे पुष्टि करें। केवल यह बीटा ऑनबोर्डिंग रुकेगी। अगर आपका फैसला बदलता है, तो Workforce टीम इसे फिर शुरू कर सकती है।"
+  },
+  or:{
+    guidanceTitle:"ଆପଣଙ୍କ ପରବର୍ତ୍ତୀ ପଦକ୍ଷେପ",buddyLabel:"ଷ୍ଟେସନ୍‌ର ସହକର୍ମୀଙ୍କ ସହ ଆରମ୍ଭ କରନ୍ତୁ",buddyTitle:"ପ୍ରତିଦିନ ଆତ୍ମବିଶ୍ୱାସ ସହ ଆଗକୁ ବଢ଼ନ୍ତୁ",
+    buddyBody:"ଗୋଟିଏ କିମ୍ବା ଦୁଇ ଦିନ ସହକର୍ମୀଙ୍କ ସହ କାମ ଶିଖନ୍ତୁ। ପ୍ରଶ୍ନ ପଚାରନ୍ତୁ, ଏକାଠି ଅଭ୍ୟାସ କରନ୍ତୁ ଓ ଆତ୍ମବିଶ୍ୱାସ ବଢ଼ାନ୍ତୁ। ପ୍ରସ୍ତୁତ ହେଲେ DropX ପଞ୍ଜୀକରଣ କରନ୍ତୁ। ଷ୍ଟେସନ୍ ଟିମ୍‌ର ସାହାଯ୍ୟରେ ଆଗରୁ ମଧ୍ୟ ପରବର୍ତ୍ତୀ ପଦକ୍ଷେପ ନେଇପାରିବେ।",
+    helpTitle:"ଷ୍ଟେସନ୍ ଟିମ୍‌ର ସାହାଯ୍ୟ ଦରକାର କି?",helpBody:"ତାଲିମ କିମ୍ବା ପଞ୍ଜୀକରଣରେ ସାହାଯ୍ୟ ପାଇଁ ଷ୍ଟେସନ୍ ଟିମ୍‌କୁ କୁହନ୍ତୁ। ଆଗକୁ ନ ବଢ଼ିବାକୁ ନିଷ୍ପତ୍ତି ନେଇଥିଲେ, ତଳ ବଟନ୍‌ରେ ଟିମ୍‌କୁ ଜଣାନ୍ତୁ।",
+    leaveAction:"ମୁଁ ଆଗକୁ ବଢ଼ୁନାହିଁ",leaveTitle:"ଷ୍ଟେସନ୍ ଟିମ୍‌କୁ କାରଣ ଜଣାନ୍ତୁ",leaveBody:"କାରଣ ବାଛି ତଳେ ନିଶ୍ଚିତ କରନ୍ତୁ। କେବଳ ଏହି ବିଟା ଅନ୍‌ବୋର୍ଡିଂ ବନ୍ଦ ହେବ। ମତ ବଦଳିଲେ Workforce ଟିମ୍ ଏହାକୁ ପୁଣି ଆରମ୍ଭ କରିପାରିବ।"
+  }
+};
+
 // Guidance only. Registration field names and the values submitted stay unchanged.
-export const betaGuidance: Record<Exclude<GuidanceLanguage,"en">,Record<"attendance"|"registration"|"amazon",string[]>> = {
+export const betaGuidance: Record<GuidanceLanguage,Record<"attendance"|"registration"|"amazon",string[]>> = {
+  en:{
+    attendance:["Ask your station team to enrol the biometric ID shown here on the device. Punch IN when you arrive and OUT when you leave, every day.","Learn the role with your station buddy over 1–2 days, then continue to DropX registration. Your station team can help you take the next step earlier."],
+    registration:["Enter your name as shown on your driving licence and PAN card. If the names differ, ask your station team before submitting.","Submit your details and required documents for DropX registration. Then complete Amazon registration in the third milestone."],
+    amazon:["Copy your email and invitation link separately. Sign out of any Amazon account already open, or paste the link into a private/incognito window.","Accept the invitation using your name as shown on your documents. Create a password you can remember and keep it private.","Download Amazon Flex and sign in with the same email and password. Complete the details and documents requested in the app."]
+  },
   ml:{
     attendance:["സ്റ്റേഷനിലെ ടീമിനെ സമീപിച്ച് ഇവിടെ കാണുന്ന ബയോമെട്രിക് ഐഡി ഉപകരണത്തിൽ രജിസ്റ്റർ ചെയ്യുക. ദിവസവും എത്തുമ്പോൾ IN, മടങ്ങുമ്പോൾ OUT പഞ്ച് ചെയ്യുക.","സ്റ്റേഷനിലെ ബഡ്ഡിയോടൊപ്പം ഒന്നോ രണ്ടോ ദിവസം ജോലി പഠിക്കാം. തയ്യാറായാൽ ‘Continue to registration’ തിരഞ്ഞെടുക്കുക."],
     registration:["ഡ്രൈവിങ് ലൈസൻസിലും PAN കാർഡിലും ഉള്ളതുപോലെ പേര് നൽകുക. പേരുകൾ വ്യത്യസ്തമാണെങ്കിൽ സമർപ്പിക്കുന്നതിന് മുമ്പ് സ്റ്റേഷൻ ടീമിന്റെ സഹായം തേടുക.","വിവരങ്ങളും ആവശ്യമായ രേഖകളും നൽകി DropX രജിസ്ട്രേഷൻ സമർപ്പിക്കുക. തുടർന്ന് മൂന്നാം ഘട്ടത്തിൽ Amazon രജിസ്ട്രേഷൻ പൂർത്തിയാക്കാം."],
