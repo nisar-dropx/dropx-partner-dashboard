@@ -92,7 +92,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [monthFilters, setMonthFilters] = useState<string[]>([]);
   const monthOptions = useMemo(() => providerMappingMonthOptions(shipmentMonths), [shipmentMonths]);
   const [methodFilters, setMethodFilters] = useState<string[]>([]);
-  const [mappingFilters, setMappingFilters] = useState<string[]>([]);
+  const [mappingFilters, setMappingFilters] = useState<string[]>(["unmapped"]);
   const [validationFilters, setValidationFilters] = useState<string[]>([]);
   const [pageSize, setPageSize] = useState<ProviderFirstPageSize>(50);
   const [currentPage, setCurrentPage] = useState(1);
