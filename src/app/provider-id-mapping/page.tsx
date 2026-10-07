@@ -9,6 +9,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { nlPeopleClusters } from "@/lib/ops-pulse/nl-loss-clusters";
+import { isProviderMappingLocation } from "@/lib/provider-mapping-location-scope";
 import { canonicalizeProviderFirstMembers, providerMemberKey, providerSourceMemberKey } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
@@ -40,7 +41,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode={pageCode}><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
   const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult, designationsResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, region").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, region, providers(code,name), location_models(code,name)").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
@@ -48,7 +49,8 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     supabaseAdmin.from("designations").select("id, code, name, is_field_operations, provider_mapping_required").eq("company_id", companyId).eq("is_active", true)
   ]);
   const allStations = stationsResult.data ?? [];
-  const stations = allStations.filter((station) => allowed(station.id));
+  const stations = allStations.filter((station) => allowed(station.id) && isProviderMappingLocation(station));
+  const mappingStationIds = new Set(stations.map((station) => station.id));
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, stations.map((station) => station.id), { includeStationResponsibilities: true });
   const clusters = nlPeopleClusters(stations, hierarchy.byLocation);
   const regionByStation = new Map(stations.map((station) => [station.id, String(station.region ?? "").trim() || "Unassigned"]));
@@ -104,7 +106,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   }
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => {
     const designation = designationById.get(String(worker.designation_id ?? "")) ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
-    return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
+    return mappingStationIds.has(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
   }).map((worker) => {
     const mapping = mappingByWorkforce.get(worker.id);
     const thresholdSnapshot = parseProductionThresholdSnapshot(mapping?.production_threshold_config);
