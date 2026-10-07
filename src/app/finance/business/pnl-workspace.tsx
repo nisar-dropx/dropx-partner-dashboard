@@ -398,7 +398,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
         </div>
       </header>
       <nav className="pnl-tabs" aria-label="Business performance">
-        <Link href="/finance/business?tab=revenue">Revenue & billing</Link>
+        <Link prefetch={false} href="/finance/business?tab=revenue">Revenue & billing</Link>
         <span aria-current="page">Profit & loss</span>
       </nav>
       <form
@@ -612,7 +612,7 @@ export function PnlWorkspace({ report }: { report: LivePnl }) {
           <button className="pnl-btn primary" disabled={pending}>
             {pending ? "Loading…" : "Apply"}
           </button>
-          <Link className="pnl-reset" href="/finance/business?tab=pnl">
+          <Link prefetch={false} className="pnl-reset" href="/finance/business?tab=pnl">
             Reset
           </Link>
         </div>

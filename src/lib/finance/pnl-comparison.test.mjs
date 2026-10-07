@@ -64,17 +64,18 @@ test("invalid query and prototype keys cannot select unexpected groupings", () =
   assert.deepEqual(c.comparisonOptions({view:"__proto__",focus:"toString",sort:"constructor",direction:"bad"}),options);
 });
 test("loader expands a requested parent or child only within authorized locations", async () => {
-  let seen;
+  let seen,parentReads=0;
   const query = {}; for (const method of ["select", "eq", "in", "lte", "order"]) query[method] = () => query;
-  query.range = async () => ({ data: [] });
+  query.range = async () => {parentReads++;return { data: [] };};
   const loader = compile("./pnl-data.ts", { "server-only": {}, "./data": { loadPricing: async () => [], effectiveCards: () => [] }, "./performance": { buildBusinessRows: () => [] }, "./pnl": pnl, "./pricing": pricing, "./pnl-comparison": c, "../ops-pulse/cps-data": { loadCpsSnapshot: async (company, from, to, selected) => { assert.deepEqual(selected.map(l=>l.station_code),seen); return {daily:[],breakup:[]}; } } });
-  const context = { companyId: "company", locations, db: { from: () => query, rpc: async (name,args) => { seen=args.p_station_codes; return {data:{daily_shipments:[],read_at:"2026-10-06",availability:{}}}; } } };
+  const context = { companyId: "company", authorization:{hasAllLocationAccess:false}, locations, db: { from: () => query, rpc: async (name,args) => { seen=args.p_station_codes; return {data:{daily_shipments:[],read_at:"2026-10-06",availability:{}}}; } } };
   for (const location of ["P","X"]) {
     await loader.loadPnl(context,{location,region:"South",period:"month",month:"2026-09",includeXpts:"0"});
     assert.deepEqual(seen,["P","X"]);
   }
+  assert.equal(parentReads,0);
   await loader.loadPnl({...context,locations:[locations[1]]},{location:"P",period:"month",month:"2026-09"});
-  assert.deepEqual(seen,["X"]);
+  assert.deepEqual(seen,["X"]);assert.equal(parentReads,1);
 });
 test("Excel preserves numbers, nulls and filtered evidence without formula injection",async()=>{
   const XLSX=require("xlsx");

@@ -122,7 +122,7 @@ export default async function FinanceDashboardPage() {
         action={hasPermission(authorization, "payment_process", "access") ? <Link className="button" href="/payments/process">Open payment process</Link> : null}
       />
 
-      {hasPermission(authorization, "finance_pnl", "access") && <section className="finance-home-feature"><div><span className="finance-kicker">THE BIG PICTURE</span><h2>Know what drives your profit.</h2><p>Explore revenue, costs and margin. From the whole business to every station.</p></div><Link href="/finance/business?tab=pnl">Explore live P&L →</Link></section>}
+      {hasPermission(authorization, "finance_pnl", "access") && <section className="finance-home-feature"><div><span className="finance-kicker">THE BIG PICTURE</span><h2>Know what drives your profit.</h2><p>Explore revenue, costs and margin. From the whole business to every station.</p></div><Link prefetch={false} href="/finance/business?tab=pnl">Explore live P&L →</Link></section>}
       {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load Finance data</strong><p className="subtle">{loadError}</p></div></section> : <>
 
       <section className="summary-grid">
@@ -147,7 +147,7 @@ export default async function FinanceDashboardPage() {
       <section className="panel">
         <div className="panel-head"><div><h2>Finance administration</h2><p className="subtle">Payment heads, methods, banks, contacts, settings, users and Finance roles are owned here.</p></div></div>
         <div className="panel-body finance-admin-links">
-          {adminLinks.map((item) => <Link className="button secondary" href={item.href} key={`${item.href}-${item.label}`}>{item.label}</Link>)}
+          {adminLinks.map((item) => <Link prefetch={item.href.startsWith("/finance/business") ? false : undefined} className="button secondary" href={item.href} key={`${item.href}-${item.label}`}>{item.label}</Link>)}
         </div>
       </section>
       </>}

@@ -185,6 +185,22 @@ export function buildPnl(
   from: string,
   to: string,
 ) {
+  // A caller may share a company-scoped snapshot with several reports. Apply
+  // this report's authorized station scope before deriving coverage or details.
+  const stationCodes = new Set(locations.map(l => l.station_code));
+  cps = {
+    ...cps,
+    daily: cps.daily.filter(d => stationCodes.has(d.station_code)),
+    breakup: cps.breakup.filter(d => stationCodes.has(d.station_code)),
+    staff: cps.staff?.filter(d => stationCodes.has(d.station_code)),
+    gaps: cps.gaps?.filter(d => stationCodes.has(d.station_code)),
+    associates: cps.associates?.filter(d => stationCodes.has(d.station_code)),
+    people: cps.people?.filter(d => stationCodes.has(d.station_code)),
+    da_details: cps.da_details?.filter(d => stationCodes.has(d.station_code)),
+    expense_periods: cps.expense_periods?.filter(d => stationCodes.has(d.station_code)),
+    vehicles: cps.vehicles?.filter(d => stationCodes.has(d.station_code)),
+    advertising: cps.advertising?.filter(d => stationCodes.has(d.station_code)),
+  };
   const revenueDays = new Map<string, BusinessRow["daily"]>();
   for (const row of revenue)
     for (const day of row.daily) {

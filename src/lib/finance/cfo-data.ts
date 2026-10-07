@@ -8,6 +8,8 @@ import {loadFinanceCpsEvidence} from '../ops-pulse/cps-data';
 import {nowRevenue,dateRange,effectiveOn,accrueMonthly,contractDaily,roundMoney,type NowRate,type NowStore,type CostContract,type OverheadRule} from './now';
 import {equalShares,type CfoDay,type OverheadLine,type CfoLine} from './cfo';
 import {stationGroupKey} from './pnl-comparison';
+import {createHash} from 'node:crypto';
+import {createReportCache} from './report-cache';
 export async function loadHoCosts(c:FinanceContext,from:string,to:string){
  if(!c.authorization.hasAllLocationAccess)return {data:{breakup:[]},error:null};
  const codes=c.locations.filter(l=>l.is_ho).map(l=>l.station_code);
@@ -20,14 +22,31 @@ export async function loadHoCosts(c:FinanceContext,from:string,to:string){
  }
  return {data:{breakup},error:null};
 }
+const readCfo=createReportCache<Awaited<ReturnType<typeof calculateCfo>>>();
 export async function loadCfo(c:FinanceContext,query:PnlQuery){
+ const filters=pnlFilters(query);
+ // financeContext rechecks access on every request. Include the effective user,
+ // permissions and complete location metadata so revoked/changed scope never
+ // inherits a cached report, including while previewing another user.
+ const key=createHash('sha256').update(JSON.stringify([
+  c.companyId,c.authorization.userId,c.authorization.viewerUserId,
+  c.authorization.hasAllLocationAccess,c.authorization.permissions,
+  [...c.locations].sort((a,b)=>a.station_code.localeCompare(b.station_code)),
+  filters.from,filters.to,
+ ])).digest('hex');
+ const result=await readCfo(key,async()=>{try{return await calculateCfo(c,{period:'custom',from:filters.from,to:filters.to});}catch(error){console.error('Finance report refresh failed',{from:filters.from,to:filters.to,stations:c.locations.length,message:error instanceof Error?error.message:'Source unavailable'});throw error;}});
+ return {...result.value,filters,refreshDelayed:result.refreshDelayed,
+  viewFilters:{model:typeof query.model==='string'?query.model.slice(0,100):'',region:filters.region,cluster:filters.cluster,station:filters.location,includeOverhead:query.overhead==='1'}};
+}
+async function calculateCfo(c:FinanceContext,query:PnlQuery){
  const filters=pnlFilters(query),from=filters.from,to=filters.to;
  const viewFilters={model:typeof query.model==='string'?query.model.slice(0,100):'',region:filters.region,cluster:filters.cluster,station:filters.location,includeOverhead:query.overhead==='1'};
  const operating=c.locations.filter(l=>!l.is_ho&&!l.hide_from_location_list),normal=operating.filter(l=>locationModel(l)!=='NOW'),now=operating.filter(l=>locationModel(l)==='NOW');
+ const sourcePromise=operating.length?loadFinanceCpsEvidence(c.companyId,from,to,operating.map(l=>l.station_code)):Promise.resolve({report:{daily:[],breakup:[],gaps:[],generated_at:new Date().toISOString()},evidence:{staff:[],associates:[]}});
  const [masters,volumes,rents,pnl,source,ho,hoCosts]=await Promise.all([
   loadBusinessMaster(c),loadNowVolumes(c,from,to),loadRent(c),
-  loadPnl({...c,locations:normal},{period:'custom',from,to}),
-  operating.length?loadFinanceCpsEvidence(c.companyId,from,to,operating.map(l=>l.station_code)):Promise.resolve({report:{daily:[],breakup:[],gaps:[]},evidence:{staff:[],associates:[]}}),
+  loadPnl({...c,locations:normal},{period:'custom',from,to},sourcePromise.then(source=>source.report)),
+  sourcePromise,
   c.authorization.hasAllLocationAccess?c.db.rpc('finance_ho_people',{p_company:c.companyId,p_from:from,p_through:to}):Promise.resolve({data:{people:[],salaries:[],assignments:[]},error:null}),
   loadHoCosts(c,from,to),
  ]);

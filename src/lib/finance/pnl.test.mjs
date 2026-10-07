@@ -414,3 +414,11 @@ test("station without any delivery data never contributes unmatched fixed costs 
  const r=p.buildPnl([{station:"A",daily:[day]}],{...snapshot,advertising},[place],"2026-09-01","2026-09-05");
  assert.deepEqual(r.advertising,[advertising[0]]);
  });
+
+test('shared CFO cost evidence cannot leak another model or unauthorized station into P&L detail',()=>{
+ const line={station_code:'A',work_date:cday.work_date,head:'DA',sub_head:'Pay',source:'Workforce',amount:50};
+ const common={...snapshot,daily:[cday,{...cday,station_code:'DS'}],breakup:[line,{...line,station_code:'DS',amount:99999}],staff:[{station_code:'A',group:'Team'},{station_code:'DS',group:'Private store'}]};
+ const out=p.buildPnl([] ,common,[place],'2026-09-01','2026-09-01');
+ assert.equal(out.total.cost,100);assert.deepEqual(out.costs,[line]);assert.equal(out.staffGroups.length,1);
+ assert.ok(!JSON.stringify(out).includes('Private store'));assert.equal(common.daily.length,2);
+});

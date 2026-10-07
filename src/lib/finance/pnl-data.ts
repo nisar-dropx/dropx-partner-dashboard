@@ -15,7 +15,7 @@ export type SourceAvailability = Record<
   string,
   { from: string | null; to: string | null; updated_at: string | null }
 >;
-export async function loadPnl(context: FinanceContext, query: PnlQuery) {
+export async function loadPnl(context: FinanceContext, query: PnlQuery, sharedCosts?: Promise<CpsSnapshot>) {
   const filters = pnlFilters(query);
   // P&L treats an EDSP parent and its XPTs as one business unit.
   filters.includeXpts = true;
@@ -52,7 +52,7 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery) {
       p_station_codes: codes,
     }),
     loadPricing(context, filters.to.slice(0, 7), undefined, true),
-    loadCpsSnapshot(context.companyId, filters.from, filters.to, locations)
+    (sharedCosts ?? loadCpsSnapshot(context.companyId, filters.from, filters.to, locations))
       .then((data) => ({ data, error: "" }))
       .catch((error: unknown) => {
         console.error(
@@ -93,15 +93,18 @@ export async function loadPnl(context: FinanceContext, query: PnlQuery) {
     effective_month: string;
     revision: number;
     rates: Record<string, string | null>;
-  }[] = [];
-  if (parents.length) {
+  }[] = history.filter(card => card.provider === "Amazon" && parents.includes(card.station_code));
+  // Authorized parents are already in the complete pricing history. Only an
+  // XPT-only scope needs the separate, unit-rate-only parent lookup.
+  const extraParents = parents.filter(code => !context.authorization.hasAllLocationAccess && !context.locations.some(l => l.station_code === code));
+  if (extraParents.length) {
     for (let offset = 0; ; offset += 1000) {
       const result = await context.db
         .from("finance_pricing_revisions")
         .select("station_code,effective_month,revision,rates")
         .eq("company_id", context.companyId)
         .eq("provider", "Amazon")
-        .in("station_code", parents)
+        .in("station_code", extraParents)
         .lte("effective_month", `${filters.to.slice(0, 7)}-01`)
         .order("effective_month", { ascending: false })
         .order("revision", { ascending: false })

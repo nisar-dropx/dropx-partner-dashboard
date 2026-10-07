@@ -32,7 +32,7 @@ export async function PnlPage({
                 : "P&L could not be loaded."}
             </p>
             <LiveRefresh />{" "}
-            <Link href="/finance/business?tab=pnl">Reset filters</Link>
+            <Link prefetch={false} href="/finance/business?tab=pnl">Reset filters</Link>
           </div>
         </div>
       </AppShell>
@@ -40,7 +40,7 @@ export async function PnlPage({
   }
   return (
     <AppShell active="Profit & Loss" pageCode="finance_pnl">
-      <div className="pnl-notice"><Link href="/finance/profitability">Open business P&L: Amazon Now, model & region analysis, and HO costs →</Link></div>
+      <div className="pnl-notice"><Link prefetch={false} href="/finance/profitability">Open business P&L: Amazon Now, model & region analysis, and HO costs →</Link></div>
       <PnlWorkspace key={JSON.stringify(report.filters)} report={report} />
     </AppShell>
   );

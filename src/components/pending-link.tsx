@@ -21,6 +21,7 @@ type PendingLinkProps = {
    * forcing a fresh server render every time.
    */
   refresh?: boolean;
+  prefetch?: boolean;
 };
 
 export function PendingLink({
@@ -30,6 +31,7 @@ export function PendingLink({
   disableWhenCurrent = false,
   href,
   refresh = true,
+  prefetch = true,
   scroll,
   title
 }: PendingLinkProps) {
@@ -78,9 +80,9 @@ export function PendingLink({
       className={`${className ?? ""} ${loading ? "loading" : ""} ${isCurrent ? "current disabled-current" : ""}`.trim()}
       href={href}
       onClick={handleClick}
-      onFocus={() => router.prefetch(href)}
-      onMouseEnter={() => router.prefetch(href)}
-      prefetch
+      onFocus={() => { if (prefetch) router.prefetch(href); }}
+      onMouseEnter={() => { if (prefetch) router.prefetch(href); }}
+      prefetch={prefetch}
       scroll={scroll}
       title={title}
     >
