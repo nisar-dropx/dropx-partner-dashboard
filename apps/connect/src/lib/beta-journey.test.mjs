@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { betaJourney } from './beta-journey.ts';
-import { betaGuidance, guidanceLanguages, stationGuidanceLanguage } from './beta-guidance.ts';
+import { betaGuidance, betaJourneyCopy, guidanceLanguages, stationGuidanceLanguage } from './beta-guidance.ts';
 
 test('an early Amazon email does not skip buddy training or DropX registration',()=>{
   let state=betaJourney({invitationAvailable:true});
@@ -26,5 +26,6 @@ test('a BGC email cannot push a new candidate past the first steps',()=>{
 });
 test('station state names and codes suggest guidance with a safe English fallback',()=>{
   for(const [state,code] of [['Kerala','ml'],[' KL ','ml'],['TN','ta'],['Tamil Nadu','ta'],['AP','te'],['TS','te'],['Andhra Pradesh','te'],['OD','or'],['Odisha','or'],['CG','hi'],['UP','hi'],['Karnataka','kn'],['unknown','en'],[null,'en']]) assert.equal(stationGuidanceLanguage(state),code);
-  for(const lang of guidanceLanguages.filter(x=>x.code!=='en')) for(const stage of ['attendance','registration','amazon']) assert.ok(betaGuidance[lang.code][stage].length>=2);
+  for(const lang of guidanceLanguages) for(const text of Object.values(betaJourneyCopy[lang.code])) assert.ok(text.trim());
+  for(const lang of guidanceLanguages) for(const stage of ['attendance','registration','amazon']) assert.ok(betaGuidance[lang.code][stage].length>=2);
 });
