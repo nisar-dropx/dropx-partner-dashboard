@@ -125,6 +125,21 @@ export type ProviderFirstFilters = {
 
 export type ProviderFirstPageSize = 50 | 100 | 500 | 1000 | "all";
 
+export function providerFirstScopeOptions(
+  rows: ProviderFirstMappingRowView[],
+  regions: string[],
+  clusterKeys: string[],
+  clusterOptions: Array<{ value: string; label: string }>
+) {
+  const regionRows = rows.filter((row) => !regions.length || regions.includes(row.region || "Unassigned"));
+  const validClusters = new Set(regionRows.flatMap((row) => row.clusterKeys ?? []));
+  const locationRows = regionRows.filter((row) => !clusterKeys.length || clusterKeys.some((key) => row.clusterKeys?.includes(key)));
+  return {
+    clusters: clusterOptions.filter((option) => validClusters.has(option.value)),
+    stations: [...new Map(locationRows.map((row) => [row.stationId, row.stationLabel])).entries()]
+  };
+}
+
 const SCIENTIFIC_ID_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/;
 
 export type ProviderFirstSourceMember = {

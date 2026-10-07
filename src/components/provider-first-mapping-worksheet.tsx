@@ -10,6 +10,7 @@ import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-sna
 import {
   filterProviderFirstRowIndexes,
   providerMappingMonthOptions,
+  providerFirstScopeOptions,
   isScientificProviderMemberId,
   providerFirstNamesMatch,
   providerFirstLocationRemap,
@@ -116,7 +117,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       ? `Mapped: ${worker.locationLabel} · Profile: ${worker.profileLocationLabel ?? "No location"}`
       : worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
   })), [workerRows]);
-  const stations = useMemo(() => Array.from(new Map(rows.map((row) => [row.stationId, row.stationLabel])).entries()), [rows]);
+  const scopeOptions = useMemo(() => providerFirstScopeOptions(rows, regionFilters, clusterFilters, clusterOptions), [rows, regionFilters, clusterFilters, clusterOptions]);
+  const stations = scopeOptions.stations;
   const dirtyRows = useMemo(() => rows.map((row, index) => {
     const thresholdConfig = row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig ?? null;
     const minimumUnits = Number(row.productionThresholdMinimumUnits);
@@ -155,6 +157,23 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const hasFilters = Boolean(query || monthFilters.length || regionFilters.length || clusterFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
 
   function resetPage() { setCurrentPage(1); }
+
+  function changeRegions(values: string[]) {
+    const available = providerFirstScopeOptions(rows, values, [], clusterOptions);
+    const nextClusters = clusterFilters.filter((key) => available.clusters.some((option) => option.value === key));
+    const next = providerFirstScopeOptions(rows, values, nextClusters, clusterOptions);
+    setRegionFilters(values);
+    setClusterFilters(nextClusters);
+    setStationFilters((current) => current.filter((id) => next.stations.some(([value]) => value === id)));
+    resetPage();
+  }
+
+  function changeClusters(values: string[]) {
+    const next = providerFirstScopeOptions(rows, regionFilters, values, clusterOptions);
+    setClusterFilters(values);
+    setStationFilters((current) => current.filter((id) => next.stations.some(([value]) => value === id)));
+    resetPage();
+  }
 
   function clearFilters() {
     setQuery("");
@@ -406,8 +425,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       <div className="provider-first-filters">
         <label className="provider-first-search"><span>Search</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); resetPage(); }} placeholder="Provider member, DropX ID or name" /></label>
         <MappingMultiFilter allLabel="All months" label="Outbound month" options={monthOptions} selected={monthFilters} setSelected={(values) => { setMonthFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All regions" label="Region" options={regionOptions} selected={regionFilters} setSelected={(values) => { setRegionFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All clusters / AOMs" label="Cluster / AOM" options={clusterOptions} selected={clusterFilters} setSelected={(values) => { setClusterFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All regions" label="Region" options={regionOptions} selected={regionFilters} setSelected={changeRegions} />
+        <MappingMultiFilter allLabel="All clusters / AOMs" label="Cluster / AOM" options={scopeOptions.clusters} selected={clusterFilters} setSelected={changeClusters} />
         <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
