@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {pilotStatus,withLiveAmazonEvidence} from './amazon-pilot.ts';
+import {amazonInvitationUrl,idfyActionUrl} from './onboarding-action-url.ts';
 const now=Date.parse('2026-10-02T12:00:00Z');
 const status=(evidence={},extra={})=>pilotStatus({evidence,trial_completed_at:null,closed_at:null,...extra},now);
 test('invitation does not imply registration or BGC completion',()=>{
@@ -24,6 +25,12 @@ test('live invitation evidence replaces a stale queued snapshot immediately',()=
  assert.equal(evidence.invitationStatus,'sent');
  assert.equal(evidence.providerId,'amzn1.flex.provider.live');
  assert.equal(status(evidence).stage,'registration_pending');
+});
+test('associate action links are cleaned and restricted to Amazon invitation or IDfy',()=>{
+ assert.equal(amazonInvitationUrl('https://logistics.amazon.in/account-management/invitation?providerId=provider-1]'),'https://logistics.amazon.in/account-management/invitation?providerId=provider-1');
+ assert.equal(idfyActionUrl('https://verify.idfy.com/session/token).'),'https://verify.idfy.com/session/token');
+ assert.equal(amazonInvitationUrl('https://example.com/account-management/invitation'),null);
+ assert.equal(idfyActionUrl('http://verify.idfy.com/session/token'),null);
 });
 test('activation-only registration is reachable and submits to beta draft storage',()=>{
  const flow=readFileSync(new URL('../components/connect-login-flow.tsx',import.meta.url),'utf8');
@@ -89,7 +96,7 @@ test('isolated pilot treats the generated address as the Amazon Flex sign-in ID'
  assert.match(beta,/Complete DropX registration first/);
  assert.match(joining,/workforce_amazon_email_pilot_registrations/);
  assert.match(joining,/workforce_update_isolated_amazon_email_pilot_decision/);
- assert.match(joining,/host\.endsWith\("\.idfy\.com"\)/);
+ assert.match(joining,/idfyActionUrl/);
  assert.match(draft,/workforce_amazon_email_pilot_registrations/);
  assert.match(draft,/amazon-email-pilot/);
  assert.doesNotMatch(pilotProfile,/\.from\("workforce"\)/);
