@@ -20,15 +20,18 @@ export async function GET() {
   ]);
   if(fallbacks.error||fallbacks.data?.length===1000||attendance.error||components.error||fields.error||components.data?.length===1000||fields.data?.length===1000||people.error||expenses.error||designations.error||people.data?.length===1000||expenses.data?.length===1000||designations.data?.length===1000)return reply({error:'Settings could not be loaded completely.'},503);
   const newRoles=(designations.data??[]).filter(d=>!people.data?.some(p=>p.designation_code===d.code)).map(d=>({designation_code:d.code,designation_name:d.name,mode:'excluded',head:'UTR',label:'Station staff CTC',allocation:'equal',effective_from:''}));
-  return reply({fallbacks:fallbacks.data??[],attendance:attendance.data??[],people:[...(people.data??[]),...newRoles],expenses:expenses.data,components:components.data,fields:fields.data,canEdit:!auth.readOnly&&auth.hasAllLocationAccess&&hasPermission(auth,'cps_inputs','edit')});
+  return reply({fallbacks:fallbacks.data??[],attendance:attendance.data??[],people:[...(people.data??[]),...newRoles],expenses:expenses.data,components:components.data,fields:fields.data,canEdit:!auth.readOnly&&auth.hasAllLocationAccess&&hasPermission(auth,'cps_inputs','edit'),canEditAttendance:!auth.readOnly&&auth.hasAllLocationAccess&&hasPermission(auth,'payment_settings','edit')});
 }
 export async function POST(request:Request) {
   try {
     const auth=await getAuthorization();
-    if(!auth||auth.readOnly||!hasPermission(auth,'cps_inputs','edit'))return reply({error:'CPS setup edit access required. Exit preview before saving.'},403);
-    if(!supabaseAdmin)return reply({error:'Database unavailable.'},503);
-    const scope=await cpsScope(auth,{}),body=await request.json();
+    if(!auth||auth.readOnly)return reply({error:'Settings edit access required. Exit preview before saving.'},403);
+    const body=await request.json();
     if(!body||typeof body!=='object'||Array.isArray(body))return reply({error:'Invalid settings.'},400);
+    const attendanceMutation=body.kind==='attendance';
+    if(!hasPermission(auth,attendanceMutation?'payment_settings':'cps_inputs','edit'))return reply({error:attendanceMutation?'Payment settings edit access required.':'CPS setup edit access required.'},403);
+    if(!supabaseAdmin)return reply({error:'Database unavailable.'},503);
+    const scope=await cpsScope(auth,{});
     if(body.kind==='period') {
       if(!['payment','cashbook'].includes(body.source)||!/^[-a-f0-9]{36}$/i.test(body.source_id)||!isoDate(body.period_from)||!isoDate(body.period_to)||body.period_to<body.period_from||Date.parse(body.period_to)-Date.parse(body.period_from)>366*86400000||String(body.reason||'').trim().length<3)return reply({error:'Enter valid billing dates and a correction reason.'},400);
       const row=await supabaseAdmin.from(body.source==='payment'?'payment_requests':'cps_cashbook_daily').select(body.source==='payment'?'id,station_code,location_id,location_code':'id,station_code').eq('company_id',scope.companyId).eq('id',body.source_id).maybeSingle();

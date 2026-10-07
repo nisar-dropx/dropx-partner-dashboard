@@ -21,6 +21,15 @@ await db.exec(`
     calculated_at timestamptz,
     direct_allocation_snapshot_hash text
   );
+  create table public.workforce_payout_review_submissions (
+    id uuid primary key,
+    company_id uuid not null references public.companies(id),
+    subject_type text not null,
+    subject_id uuid not null,
+    period_start date not null,
+    period_end date not null,
+    status text not null
+  );
   create or replace function public.lock_workforce_payment_allocation_company(p_company_id uuid)
   returns void language plpgsql as $$ begin perform p_company_id; end; $$;
   insert into public.companies(id) values ('${companyId}');
@@ -30,13 +39,26 @@ await db.exec(`
 for (const migrationName of [
   "20260929150000_workforce_payment_settings.sql",
   "20260929180000_workforce_payment_policy_editability.sql",
-  "20260930134308_workforce_attendance_capture_settings.sql"
+  "20260930134308_workforce_attendance_capture_settings.sql",
+  "20261007141553_workforce_attendance_policy_processing_lock.sql",
+  "20261007153000_workforce_delivery_review_threshold.sql"
 ]) {
   await db.exec(readFileSync(
     new URL(`../supabase/migrations/${migrationName}`, import.meta.url),
     "utf8"
   ));
 }
+
+// Production already has the later review-threshold column when the new lock
+// migration is deployed. Reapplying it verifies that conditional upgrade path
+// as well as the normal fresh-database ordering above.
+await db.exec(readFileSync(
+  new URL(
+    "../supabase/migrations/20261007141553_workforce_attendance_policy_processing_lock.sql",
+    import.meta.url
+  ),
+  "utf8"
+));
 
 const insertPolicy = ({
   method = "fixed_paid_offs",
@@ -314,7 +336,7 @@ await assert.rejects(() => db.exec(`
     '${attendanceCompanyId}','shipment_data',12,'2025-03-01',
     'Attempt to change finalized attendance capture','${actorId}'
   )
-`), /this month is finalized/i);
+`), /under review or processed/i);
 
 await db.exec(`
   select public.save_workforce_attendance_capture_setting(
@@ -341,6 +363,12 @@ await db.exec(`
   update public.workforce_payroll_runs set status='review'
   where id='00000000-0000-4000-8000-000000000012';
 `);
+await assert.rejects(() => db.exec(`
+  select public.save_workforce_attendance_capture_setting(
+    '${attendanceCompanyId}','shipment_data',10,'2025-04-01',
+    'Attempt to change attendance after payroll review','${actorId}'
+  )
+`), /under review or processed/i);
 
 const { rows: captureAudit } = await db.query(`
   select operation,count(*)::int as count
@@ -353,6 +381,129 @@ assert.deepEqual(captureAudit, [
   { operation: "insert", count: 4 },
   { operation: "update", count: 1 }
 ]);
+await assert.rejects(() => db.exec(`
+  update public.workforce_attendance_capture_setting_history
+  set changed_at=clock_timestamp()
+  where company_id='${attendanceCompanyId}'
+`), /history is immutable/i);
+await assert.rejects(() => db.exec(`
+  delete from public.workforce_attendance_capture_setting_history
+  where company_id='${attendanceCompanyId}'
+`), /history is immutable/i);
+
+// A Workforce review submission locks only its overlapping period. An earlier
+// open month remains editable because the writer materializes the prior policy
+// at the first locked month. Returned/cancelled submissions no longer lock.
+const reviewAttendanceCompanyId = "43866344-b550-4e8a-9a2d-9d23f3d8a995";
+const reviewSubjectId = "00000000-0000-4000-8000-000000000201";
+await db.exec(`
+  insert into public.companies(id) values ('${reviewAttendanceCompanyId}');
+  select public.save_workforce_attendance_capture_setting_v2(
+    '${reviewAttendanceCompanyId}','biometric',null,15,'2025-06-01',
+    'Configure June attendance review','${actorId}'
+  );
+  insert into public.workforce_payout_review_submissions(
+    id,company_id,subject_type,subject_id,period_start,period_end,status
+  ) values (
+    '00000000-0000-4000-8000-000000000202','${reviewAttendanceCompanyId}',
+    'workforce','${reviewSubjectId}','2025-08-01','2025-08-31','under_review'
+  );
+`);
+
+await db.exec(`
+  select public.save_workforce_attendance_capture_setting_v2(
+    '${reviewAttendanceCompanyId}','shipment_data',6,12,'2025-07-01',
+    'Change only the open July month','${actorId}'
+  )
+`);
+const { rows: preservedReviewPolicies } = await db.query(`
+  select
+    capture_method,
+    minimum_daily_deliveries,
+    review_below_deliveries,
+    effective_from::text
+  from public.workforce_attendance_capture_settings
+  where company_id='${reviewAttendanceCompanyId}'
+    and effective_from in ('2025-07-01','2025-08-01')
+  order by effective_from
+`);
+assert.deepEqual(preservedReviewPolicies, [
+  {
+    capture_method: "shipment_data",
+    minimum_daily_deliveries: 6,
+    review_below_deliveries: 12,
+    effective_from: "2025-07-01"
+  },
+  {
+    capture_method: "biometric",
+    minimum_daily_deliveries: null,
+    review_below_deliveries: 15,
+    effective_from: "2025-08-01"
+  }
+]);
+
+await assert.rejects(() => db.exec(`
+  select public.save_workforce_attendance_capture_setting_v2(
+    '${reviewAttendanceCompanyId}','shipment_data',7,11,'2025-08-01',
+    'Attempt to change an under review period','${actorId}'
+  )
+`), /under review or processed/i);
+await assert.rejects(() => db.exec(`
+  update public.workforce_attendance_capture_settings
+  set review_below_deliveries=14,change_reason='Direct locked change attempt'
+  where company_id='${reviewAttendanceCompanyId}' and effective_from='2025-08-01'
+`), /under review or processed/i);
+await assert.rejects(() => db.exec(`
+  insert into public.workforce_attendance_capture_settings(
+    company_id,capture_method,minimum_daily_deliveries,review_below_deliveries,
+    effective_from,change_reason,created_by,updated_by
+  ) values (
+    '${reviewAttendanceCompanyId}','biometric',null,14,
+    '2025-08-15','Direct locked boundary attempt','${actorId}','${actorId}'
+  )
+`), /under review or processed/i);
+
+await db.exec(`
+  update public.workforce_payout_review_submissions
+  set status='returned'
+  where id='00000000-0000-4000-8000-000000000202';
+  select public.save_workforce_attendance_capture_setting_v2(
+    '${reviewAttendanceCompanyId}','shipment_data',7,11,'2025-08-01',
+    'Returned payout permits correction','${actorId}'
+  );
+`);
+const { rows: [atomicReviewAudit] } = await db.query(`
+  select count(*)::int as count
+  from public.workforce_attendance_capture_setting_history
+  where company_id='${reviewAttendanceCompanyId}'
+    and effective_from='2025-08-01'
+    and operation='update'
+`);
+assert.equal(atomicReviewAudit.count, 1);
+
+await db.exec(`
+  update public.workforce_payout_review_submissions
+  set status='under_review'
+  where id='00000000-0000-4000-8000-000000000202';
+  update public.workforce_payout_review_submissions
+  set status='approved'
+  where id='00000000-0000-4000-8000-000000000202'
+`);
+await assert.rejects(() => db.exec(`
+  delete from public.workforce_attendance_capture_settings
+  where company_id='${reviewAttendanceCompanyId}' and effective_from='2025-08-01'
+`), /under review or processed/i);
+
+const { rows: [helperLocks] } = await db.query(`
+  select
+    public.workforce_attendance_capture_interval_is_locked(
+      '${reviewAttendanceCompanyId}','2025-08-01','2025-09-01'
+    ) as august,
+    public.workforce_attendance_capture_interval_is_locked(
+      '${reviewAttendanceCompanyId}','2025-09-01','2025-10-01'
+    ) as september
+`);
+assert.deepEqual(helperLocks, { august: true, september: false });
 
 const { rows: security } = await db.query(`
   select
@@ -414,7 +565,27 @@ const { rows: [captureSecurity] } = await db.query(`
       'service_role',
       'public.save_workforce_attendance_capture_setting(uuid,text,integer,date,text,uuid)',
       'execute'
-    ) as service_save_execute
+    ) as service_save_execute,
+    has_function_privilege(
+      'public',
+      'public.save_workforce_attendance_capture_setting_internal(uuid,text,integer,integer,boolean,date,text,uuid)',
+      'execute'
+    ) as public_internal_execute,
+    has_function_privilege(
+      'service_role',
+      'public.save_workforce_attendance_capture_setting_internal(uuid,text,integer,integer,boolean,date,text,uuid)',
+      'execute'
+    ) as service_internal_execute,
+    has_function_privilege(
+      'public',
+      'public.workforce_attendance_capture_interval_is_locked(uuid,date,date)',
+      'execute'
+    ) as public_lock_check_execute,
+    has_function_privilege(
+      'service_role',
+      'public.workforce_attendance_capture_interval_is_locked(uuid,date,date)',
+      'execute'
+    ) as service_lock_check_execute
 `);
 assert.deepEqual(captureSecurity, {
   settings_rls: true,
@@ -425,7 +596,11 @@ assert.deepEqual(captureSecurity, {
   service_insert: true,
   service_update: true,
   public_save_execute: false,
-  service_save_execute: true
+  service_save_execute: true,
+  public_internal_execute: false,
+  service_internal_execute: true,
+  public_lock_check_execute: false,
+  service_lock_check_execute: true
 });
 
 const pageSource = readFileSync(
@@ -497,9 +672,14 @@ const attendanceActionSource = readFileSync(
   "utf8"
 );
 assert.match(attendancePageSource, /from\("workforce_attendance_capture_settings"\)/);
+assert.match(attendancePageSource, /from\("workforce_attendance_capture_setting_history"\)/);
+assert.match(attendancePageSource, /from\("workforce_payout_review_submissions"\)/);
+assert.match(attendancePageSource, /\.in\("status", \["under_review", "approved"\]\)/);
+assert.match(attendancePageSource, /<h2>Change history<\/h2>/);
 assert.match(attendancePageSource, /requirePagePermission\("payment_settings", "access"\)/);
 assert.match(attendanceFormSource, /disabled=\{formDisabled \|\| !usesShipmentData\}/);
 assert.match(attendanceFormSource, /workforcePaymentMonthIsFinalized/);
+assert.match(attendanceFormSource, /lockedPeriods/);
 assert.match(attendanceFormSource, /disabledText=\{!canEdit \? "View only" : "Month locked"\}/);
 assert.match(attendanceFormSource, /\[isEditing, setIsEditing\] = useState\(false\)/);
 assert.match(attendanceFormSource, /const formDisabled = !canEdit \|\| !isEditing \|\| isSubmitting \|\| locked/);

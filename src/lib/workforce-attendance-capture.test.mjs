@@ -96,10 +96,14 @@ test("shipment threshold is inclusive and always resolves to one whole attendanc
  assert.equal(shipmentAttendanceReview(1,{...setting,review_below_deliveries:null}),null);
  });
 
-test("shipment fallback preserves recorded P/HD and uses activity for missing attendance",()=>{
+test("shipment policy is authoritative and does not fall back to biometric attendance",()=>{
  const policy={capture_method:"shipment_data",minimum_daily_deliveries:1,effective_from:"2026-09-01"};
  const recorded={punch_date:"2026-09-01",status:"HD",work_minutes:240};
- assert.deepEqual(shipmentAttendanceRecord("2026-09-01",0,policy,recorded),recorded);
- assert.deepEqual(shipmentAttendanceRecord("2026-09-01",30,policy,recorded),recorded);
- assert.equal(shipmentAttendanceRecord("2026-09-01",2,policy,{...recorded,status:"A"}).status,"P");
+ assert.deepEqual(shipmentAttendanceRecord("2026-09-01",0,policy),{
+  punch_date:"2026-09-01",status:"A",work_minutes:0
+ });
+ assert.deepEqual(shipmentAttendanceRecord("2026-09-01",30,policy),{
+  punch_date:"2026-09-01",status:"P",work_minutes:0
+ });
+ assert.equal(recorded.status,"HD");
 });

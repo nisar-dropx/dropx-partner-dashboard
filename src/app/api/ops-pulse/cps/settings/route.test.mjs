@@ -4,8 +4,11 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 function compile(auth,permission=true,station='A',fieldType='fixed_daily'){
  const writes=[];
+ const grants=typeof permission==='boolean'
+  ?{cpsAccess:permission,cpsEdit:permission,paymentEdit:permission}
+  :{cpsAccess:true,cpsEdit:true,paymentEdit:true,...permission};
  const mocks={
- '@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:()=>permission},
+ '@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:(_auth,code,action)=>code==='cps_inputs'&&action==='access'?grants.cpsAccess:code==='cps_inputs'&&action==='edit'?grants.cpsEdit:code==='payment_settings'&&action==='edit'?grants.paymentEdit:false},
  '@/lib/ops-pulse/cps-data':{cpsScope:async()=>({companyId:'company',all:[{id:'station-a',station_code:'A'}]})},
  '@/lib/ops-pulse/cps':{isoDate:v=>typeof v==='string'&&/^20\d\d-\d\d-\d\d$/.test(v)&&Number.isFinite(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v},
  '@/lib/supabase-admin':{supabaseAdmin:{rpc(name,args){writes.push({rpc:name,args});return Promise.resolve({data:1,error:null})},from(table){return {select(){return this},eq(){return this},order(){return this},limit(){return this},maybeSingle(){return Promise.resolve({data:table==='designations'?{code:'CLM',name:'Cluster Manager'}:table==='payment_fields'?{code:'VAN_RENT_PER_DAY',label:'Van rental',calculation_type:fieldType,is_custom_production:fieldType==='count_x_rate'}:{id:'bill',station_code:station},error:null})},upsert(value){writes.push({table,value});return Promise.resolve({error:null})},insert(value){writes.push({table,value});return this},update(value){writes.push({table,value});return this},then(resolve){return Promise.resolve(resolve({data:[{id:'saved'}],error:null}))}}}}}
@@ -17,6 +20,32 @@ const req=body=>new Request('https://ops.dropxlogistics.com/api/ops-pulse/cps/se
 const rule={kind:'people',designation_code:'CLM',mode:'managed',head:'UTR',label:'Manager share',allocation:'equal',effective_from:'2026-09-01'};
 test('CPS rules reject signed-out, preview, unauthorized and station-only editors',async()=>{
  for(const [a,allowed] of [[null,true],[{...auth,readOnly:true},true],[auth,false],[{...auth,hasAllLocationAccess:false},true]]){const r=compile(a,allowed);assert.equal((await r.POST(req(rule))).status,403);assert.equal(r.writes.length,0)}
+});
+test('attendance and CPS mutations enforce their own edit permissions',async()=>{
+ const attendance={kind:'attendance',capture_method:'shipment_data',minimum_daily_deliveries:1,review_below_deliveries:15,effective_from:'2026-09-01',change_reason:'Use shipment attendance'};
+ const paymentEditor=compile(auth,{cpsEdit:false,paymentEdit:true});
+ assert.equal((await paymentEditor.POST(req(attendance))).status,200);
+ assert.equal(paymentEditor.writes[0].rpc,'save_workforce_attendance_capture_setting_v2');
+ assert.equal((await paymentEditor.POST(req(rule))).status,403);
+ const cpsEditor=compile(auth,{cpsEdit:true,paymentEdit:false});
+ assert.equal((await cpsEditor.POST(req(attendance))).status,403);
+ assert.equal(cpsEditor.writes.length,0);
+ assert.equal((await cpsEditor.POST(req(rule))).status,200);
+ assert.equal(cpsEditor.writes[0].table,'ops_cps_people_policies');
+});
+test('GET exposes independent edit capabilities and the UI uses the attendance capability',async()=>{
+ const paymentEditor=compile(auth,{cpsAccess:true,cpsEdit:false,paymentEdit:true});
+ const paymentData=await (await paymentEditor.GET()).json();
+ assert.equal(paymentData.canEdit,false);
+ assert.equal(paymentData.canEditAttendance,true);
+ const cpsEditor=compile(auth,{cpsAccess:true,cpsEdit:true,paymentEdit:false});
+ const cpsData=await (await cpsEditor.GET()).json();
+ assert.equal(cpsData.canEdit,true);
+ assert.equal(cpsData.canEditAttendance,false);
+ const source=readFileSync(new URL('../../../../../components/cps-allocation-settings.tsx',import.meta.url),'utf8');
+ const attendanceSection=source.slice(source.indexOf('DA attendance'),source.indexOf('People cost inclusion'));
+ assert.match(attendanceSection,/data\.canEditAttendance&&<button/);
+ assert.doesNotMatch(attendanceSection,/data\.canEdit&&<button/);
 });
 test('effective rules use authenticated company and actor; invalid dates fail',async()=>{
  const r=compile(auth);assert.equal((await r.POST(req({...rule,company_id:'forged',updated_by:'forged'}))).status,200);assert.equal(r.writes[0].value.company_id,'company');assert.equal(r.writes[0].value.updated_by,'owner');

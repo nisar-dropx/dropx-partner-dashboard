@@ -90,5 +90,5 @@ export async function saveWorkforceAttendanceCaptureSetting(formData: FormData) 
     });
   }
 
-  settingsRedirect({ notice: "Attendance capture policy saved." });
+  settingsRedirect({ notice: "Attendance capture policy saved. Workforce payout estimates now use this effective-dated setting." });
 }

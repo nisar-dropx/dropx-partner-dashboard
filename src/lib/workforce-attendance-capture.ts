@@ -109,12 +109,10 @@ export function shipmentAttendanceUnit(
 export function shipmentAttendanceRecord(
   date: string,
   totalDeliveries: unknown,
-  setting?: Partial<WorkforceAttendanceCaptureSetting> | null,
-  recorded?: DirectPayAttendance | null
+  setting?: Partial<WorkforceAttendanceCaptureSetting> | null
 ): DirectPayAttendance {
-  // Shipment activity fills missing work evidence; it must never erase a
-  // recorded present/half-day or the actual minutes needed by hourly heads.
-  if (recorded && ["P", "HD"].includes(String(recorded.status ?? "").toUpperCase())) return recorded;
+  // The effective-dated company policy is authoritative. When shipment data
+  // is selected, biometric punches cannot silently change eligibility.
   const unit = shipmentAttendanceUnit(totalDeliveries, setting);
   return {
     punch_date: date,

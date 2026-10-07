@@ -270,12 +270,14 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const identities=[...new Set(matches.map(m=>m.worker?.id).filter(Boolean))];
     return identities.length===1 ? [{workforce_id:identities[0],work_date:String(row.work_date),total_delivery:num(row.total_delivery)}] : [];
   }));
-  for(const [workerDate,totalDeliveries] of shipmentDeliveries) {
-    const date=workerDate.slice(workerDate.lastIndexOf('|')+1);
+  const attendanceDates=new Set(dates);
+  for(const workerDate of shipmentDeliveries.keys()) attendanceDates.add(workerDate.slice(workerDate.lastIndexOf('|')+1));
+  for(const workerDate of attendanceByWorkerDate.keys()) attendanceDates.add(workerDate.slice(workerDate.lastIndexOf('|')+1));
+  for(const worker of attendanceWorkforceRows) for(const date of attendanceDates) {
     const capture=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
-    if(capture.capture_method==='shipment_data') {
-      attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,totalDeliveries,capture,attendanceByWorkerDate.get(workerDate) as DirectPayAttendance|undefined) as RecordRow);
-    }
+    if(capture.capture_method!=='shipment_data') continue;
+    const workerDate=`${worker.id}|${date}`;
+    attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,shipmentDeliveries.get(workerDate)??0,capture) as RecordRow);
   }
   attendanceByWorkerDate=new Map(overlayWorkforcePayoutAttendance(attendanceByWorkerDate as Map<string,DirectPayAttendance>,inputMaps.attendanceByWorkforceDate));
   const paymentCard=(card:RecordRow,cs:RecordRow[],workerId:string,date:string,stationId=card.station_id):RecordRow=>({ ...card,exclude_seller_costs:sellerExcludedOn(date),
@@ -643,7 +645,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       // A rental-only card is covered by Fleet and is not a missing pay setup.
       if(allDirectComponents.length && !directComponents.length) continue;
       const workerDateKey=`${w.id}|${date}`;
-      const captureSetting={...workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date),capture_method:'biometric' as const};
+      const captureSetting=workforceAttendanceCaptureSettingForDate(facts.attendance_capture_history,date);
       const directRange=rangeInput(w.id,latest.station_id,date);
       if(directRange&&!directRange.complete)gap(directRange.valid?'Uploaded attendance range needs full-period view':'Uploaded attendance range crosses payment setup changes',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce attendance');
       const result=directPayForDay(

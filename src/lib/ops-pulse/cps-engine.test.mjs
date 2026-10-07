@@ -531,11 +531,11 @@ test('low-delivery flag is configurable and never removes an eligible day pay',(
  f.attendance_capture_history[0].review_below_deliveries=10;r=rebuildCps(base(),f);assert.equal(r.daily[0].da,700);assert.ok(!r.gaps.some(g=>/Low deliveries/.test(g.kind)));
 });
 
-test('providerless direct employees retain biometric pay when DAs use shipment attendance',()=>{
+test('providerless direct employees follow the configured shipment attendance method',()=>{
  const f=facts();f.mappings=[];f.shipments=[];f.workforce[0].provider_mapping_required=false;
  f.allocations=[{id:'direct',workforce_id:'w1',station_id:'station-a',effective_from:'2026-09-01',payment_values:{DAILY:600},payment_components:[{component_code:'DAILY',component_type:'amount',pay_schedule:'per_day',calculation_source:'attendance_eligibility'}]}];
  f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P'}];f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
- const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,600);
+ const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,0);
 });
 
 test('configured P&L-only seller heads are removed from CPS costs, counts and rates; customer returns remain',()=>{
@@ -562,12 +562,12 @@ test('P&L-only exclusion ignores incomplete seller rates without suppressing kno
 });
 
 
-test('shipment fallback preserves actual attendance on days with no delivery and keeps hourly minutes',()=>{
+test('shipment attendance ignores biometric minutes and leaves hourly pay incomplete',()=>{
  const f=facts();f.shipments[0].total_delivery=0;f.shipments[0].total_activity=0;
  f.attendance=[{workforce_id:'w1',punch_date:'2026-09-01',status:'P',work_minutes:480}];
  f.attendance_capture_history=[{capture_method:'shipment_data',minimum_daily_deliveries:1,effective_from:'2026-09-01'}];
  f.mappings[0].payment_values={HOUR:100};f.components=[{payment_method_id:'per-packet',component_code:'HOUR',component_type:'fixed',pay_schedule:'per_hour',calculation_type:'fixed',calculation_source:'attendance_eligibility'}];
- const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,800);
+ const r=rebuildCps(base([day('A','2026-09-01',0)]),f);assert.equal(r.daily[0].da,0);assert.ok(r.gaps.some(g=>g.kind==='Rate values or production source missing'));
 });
 
 test('missing configured kilometre input is visible while known pay remains counted',()=>{

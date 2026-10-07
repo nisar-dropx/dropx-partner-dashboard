@@ -1,4 +1,5 @@
 import { workforceProfileStatus } from "./workforce-register-policy.ts";
+import { aggregateShipmentDeliveriesByWorkforceDay } from "./workforce-attendance-capture.ts";
 
 export type WorkforcePayoutShipmentIdentity = {
   provider_employee_id?: string | null;
@@ -6,6 +7,10 @@ export type WorkforcePayoutShipmentIdentity = {
   work_date?: string | null;
   station_code?: string | null;
   client?: string | null;
+};
+
+export type WorkforcePayoutShipmentDelivery = WorkforcePayoutShipmentIdentity & {
+  total_delivery?: number | string | null;
 };
 
 export type WorkforcePayoutMappingIdentity = {
@@ -102,6 +107,27 @@ export function resolveShipmentPayoutMapping(
     return { kind: "conflict", workforceId: "", matches };
   }
   return { kind: "mapped", workforceId: workforceIds[0], matches };
+}
+
+/**
+ * Aggregates shipment attendance only after each row has resolved to one
+ * canonical workforce person. Callers can supply all-station evidence without
+ * exposing those rows in the location-scoped payout result.
+ */
+export function aggregateResolvedShipmentDeliveriesByWorkforceDay<T extends WorkforcePayoutShipmentDelivery>(
+  shipments: readonly T[],
+  resolutionFor: (shipment: T) => WorkforcePayoutMappingResolution | undefined
+) {
+  return aggregateShipmentDeliveriesByWorkforceDay(shipments.flatMap((shipment) => {
+    const resolution = resolutionFor(shipment);
+    return resolution?.kind === "mapped"
+      ? [{
+        workforce_id: resolution.workforceId,
+        work_date: String(shipment.work_date ?? ""),
+        total_delivery: shipment.total_delivery
+      }]
+      : [];
+  }));
 }
 
 export function workforcePayoutDropxStatus(source?: WorkforcePayoutStatusSource | null) {

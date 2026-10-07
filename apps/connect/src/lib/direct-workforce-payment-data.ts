@@ -100,7 +100,7 @@ export async function loadWorkforcePaymentPolicyHistory(companyId: string, throu
 
 export async function loadWorkforceAttendanceCaptureHistory(companyId: string, through: string) {
   const result = await db().from("workforce_attendance_capture_settings")
-    .select("id,capture_method,minimum_daily_deliveries,effective_from")
+    .select("id,capture_method,minimum_daily_deliveries,review_below_deliveries,effective_from")
     .eq("company_id", companyId)
     .lte("effective_from", through)
     .order("effective_from");
@@ -139,24 +139,6 @@ export async function loadDirectPaymentContext(input: {
   const accrualFrom = [input.from, input.employmentFrom || input.from].sort().at(-1)!;
   const accrualTo = [input.to, input.employmentTo || input.to].sort()[0];
   if (accrualFrom > accrualTo) return { ...setup, attendance: [] as DirectAttendanceDay[], days: [] };
-  const methodsById = new Map(setup.methods.map((method) => [method.id, method]));
-  const needsAttendanceSource = setup.allocations.some((allocation) => {
-    const components = allocation.payment_components?.length
-      ? allocation.payment_components
-      : methodsById.get(allocation.payment_method_id)?.payment_method_components ?? [];
-    return components.some((component) => {
-      const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
-      return String(field?.calculation_source ?? component.calculation_source ?? "").trim().toLowerCase() === "attendance_eligibility";
-    });
-  });
-  if (needsAttendanceSource) {
-    for (let cursor = new Date(`${accrualFrom}T00:00:00Z`); cursor <= new Date(`${accrualTo}T00:00:00Z`); cursor.setUTCDate(cursor.getUTCDate() + 1)) {
-      const date = cursor.toISOString().slice(0, 10);
-      if (workforceAttendanceCaptureSettingForDate(setup.attendanceCaptureHistory, date).capture_method === "shipment_data") {
-        throw new Error("Shipment attendance requires a provider mapping. Direct-pay workforce must use biometric attendance or a separately supported attendance source.");
-      }
-    }
-  }
   const attendanceResult = await db().from("attendance_daily")
     .select("id,punch_date,status,in_time,out_time,work_minutes")
     .eq("company_id", input.companyId)
@@ -167,7 +149,9 @@ export async function loadDirectPaymentContext(input: {
     .limit(1000);
   if (attendanceResult.error) throw new Error("We could not load the attendance used for your direct earnings. Please try again.");
   if ((attendanceResult.data ?? []).length >= 1000) throw new Error("Too many attendance records to reconcile safely. Contact Workforce.");
-  const attendance = (attendanceResult.data ?? []) as DirectAttendanceDay[];
+  const attendance = (attendanceResult.data ?? []).filter((row) =>
+    workforceAttendanceCaptureSettingForDate(setup.attendanceCaptureHistory, String(row.punch_date)).capture_method === "biometric"
+  ) as DirectAttendanceDay[];
   const days = calculateDirectWorkforcePayments({ ...setup, attendance, from: accrualFrom, to: accrualTo });
   return { ...setup, attendance, days };
 }

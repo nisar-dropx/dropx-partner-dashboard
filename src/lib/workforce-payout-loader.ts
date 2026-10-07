@@ -12,7 +12,6 @@ import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { workforcePaymentMonthStart, workforcePaymentPolicyForDate, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
 import {
-  aggregateShipmentDeliveriesByWorkforceDay,
   shipmentAttendanceRecord,
   shipmentAttendanceReview,
   workforceAttendanceCaptureSettingForDate,
@@ -52,6 +51,7 @@ import {
 } from "@/lib/workforce-payout-input-calculation";
 import { groupPayoutItemsBySubjectLocation, payoutSubjectLocationKey } from "@/lib/workforce-payout-location-groups";
 import {
+  aggregateResolvedShipmentDeliveriesByWorkforceDay,
   mappingsForAuthorizedWorkforce,
   normalizePayoutIdentity,
   payoutMappingMatchesShipment,
@@ -341,13 +341,14 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
   for (const row of metricsResult.data ?? []) shipmentResolutionByRow.set(row, resolveShipmentPayoutMapping(row, payoutMappingIdentities));
   const thresholdShipmentResolutionByRow = new Map<any, ReturnType<typeof resolveShipmentPayoutMapping>>();
   for (const row of thresholdMetricRows) thresholdShipmentResolutionByRow.set(row, resolveShipmentPayoutMapping(row, thresholdPayoutMappingIdentities));
-  const shipmentDeliveriesByWorkerDate = aggregateShipmentDeliveriesByWorkforceDay((metricsResult.data ?? []).flatMap((row: any) => {
-    const date = String(row.work_date ?? "");
-    const resolution = shipmentResolutionByRow.get(row);
-    return resolution?.kind === "mapped"
-      ? [{ workforce_id: resolution.workforceId, work_date: date, total_delivery: Number(row.total_delivery ?? 0) }]
-      : [];
-  }));
+  const authorizedShipmentDeliveriesByWorkerDate = aggregateResolvedShipmentDeliveriesByWorkforceDay(
+    metricsResult.data ?? [],
+    (row) => shipmentResolutionByRow.get(row)
+  );
+  const attendanceShipmentDeliveriesByWorkerDate = aggregateResolvedShipmentDeliveriesByWorkforceDay(
+    thresholdMetricRows,
+    (row) => thresholdShipmentResolutionByRow.get(row)
+  );
   for (const worker of canonicalWorkers) {
     const cursor = new Date(`${workforcePaymentMonthStart(fromDate)}T00:00:00Z`);
     const lastDate = new Date(`${toDate}T00:00:00Z`);
@@ -355,9 +356,8 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
       const date = cursor.toISOString().slice(0, 10);
       const capture = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
       if (capture.capture_method !== "shipment_data") continue;
-      if (!allMappings.some((mapping: any) => workerBySource.get(mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id)?.id === worker.id && allocationActiveOn(mapping, date))) continue;
       const key = `${worker.id}|${date}`;
-      attendanceByWorkerDate.set(key, shipmentAttendanceRecord(date, shipmentDeliveriesByWorkerDate.get(key) ?? 0, capture, attendanceByWorkerDate.get(key)));
+      attendanceByWorkerDate.set(key, shipmentAttendanceRecord(date, attendanceShipmentDeliveriesByWorkerDate.get(key) ?? 0, capture));
     }
   }
   attendanceByWorkerDate = new Map(overlayWorkforcePayoutAttendance(attendanceByWorkerDate, payoutInputMaps.attendanceByWorkforceDate));
@@ -912,8 +912,8 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
         lines,
         baseAmount,
         workDayUnits,
-        deliveryReview: workDayUnits > 0 || (shipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0) > 0
-          ? shipmentAttendanceReview(shipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0, captureSetting) ?? undefined : undefined,
+        deliveryReview: workDayUnits > 0 || (authorizedShipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0) > 0
+          ? shipmentAttendanceReview(authorizedShipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0, captureSetting) ?? undefined : undefined,
         attendanceSource: aggregateAttendance?.period.attendance_basis === "days"
           && !aggregateAttendance.issue
           ? "Bulk upload range"
@@ -1093,7 +1093,7 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
       );
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
         const workerDateKey = `${workforceId}|${date}`;
-        const captureSetting = { ...workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date), capture_method: "biometric" as const };
+        const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
         const aggregateAttendance = aggregateAttendanceForDate(workforceId, String(allocation.station_id), date, attendanceSourceKey);
         const hasImportedAttendance = hasImportedAttendanceForDate(workforceId, String(allocation.station_id), date, attendanceSourceKey);
         const hasImportedDayAttendance = hasWorkforcePayoutAttendanceOverride(payoutInputMaps, workforceId, date)

@@ -33,12 +33,12 @@ function FormPendingState({ setPending }: { setPending: Dispatch<SetStateAction<
 export function WorkforceAttendanceCaptureForm({
   canEdit,
   currentMonth,
-  finalizedPeriods,
+  lockedPeriods,
   settings
 }: {
   canEdit: boolean;
   currentMonth: string;
-  finalizedPeriods: WorkforcePaymentFinalizedPeriod[];
+  lockedPeriods: WorkforcePaymentFinalizedPeriod[];
   settings: WorkforceAttendanceCaptureSetting[];
 }) {
   const initialSetting = workforceAttendanceCaptureSettingForDate(settings, `${currentMonth}-01`);
@@ -57,7 +57,7 @@ export function WorkforceAttendanceCaptureForm({
   const [reviewBelow, setReviewBelow] = useState(String(initialSetting.review_below_deliveries ?? ""));
   const effectiveFrom = `${effectiveMonth}-01`;
   const usesShipmentData = captureMethod === "shipment_data";
-  const locked = workforcePaymentMonthIsFinalized(effectiveFrom, finalizedPeriods);
+  const locked = workforcePaymentMonthIsFinalized(effectiveFrom, lockedPeriods);
   const formDisabled = !canEdit || !isEditing || isSubmitting || locked;
 
   useEffect(() => {
@@ -121,7 +121,7 @@ export function WorkforceAttendanceCaptureForm({
         >
           {captureMethodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <span className="subtle">Biometric uses recorded attendance punches. Shipment data fills missing attendance from completed deliveries; recorded present and half-days are preserved.</span>
+        <span className="subtle">The selected source is authoritative for the effective month. Shipment data ignores biometric punches and qualifies a day only when completed deliveries meet the threshold; an explicit payout attendance upload can still override the captured source.</span>
       </label>
       <label>Minimum daily deliveries
         <input
@@ -154,7 +154,7 @@ export function WorkforceAttendanceCaptureForm({
           value={effectiveMonth}
         />
         <span className="subtle">Applies from the selected month until another attendance capture policy takes effect.</span>
-        {locked ? <span className="subtle" role="status"><strong>Locked:</strong> payroll for this month is finalized.</span> : null}
+        {locked ? <span className="subtle" role="status"><strong>Locked:</strong> Workforce payouts for this month are under review or processed.</span> : null}
       </label>
       <label className="span-2">Change reason
         <input

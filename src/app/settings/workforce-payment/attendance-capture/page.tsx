@@ -28,6 +28,22 @@ type AttendanceCaptureSettingRow = {
   updated_at: string | null;
 };
 
+type AttendanceCaptureHistoryRow = {
+  id: string | number;
+  effective_from: string;
+  operation: "insert" | "update" | "delete";
+  before_data: Record<string, unknown> | null;
+  after_data: Record<string, unknown> | null;
+  changed_by: string | null;
+  changed_at: string;
+};
+
+type HistoryActorRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+};
+
 const methodCopy: Record<WorkforceAttendanceCaptureMethod, { label: string; description: string }> = {
   biometric: {
     label: "Biometric attendance",
@@ -68,28 +84,66 @@ async function loadSettings(companyId: string) {
   if (!supabaseAdmin) {
     return {
       settings: [] as AttendanceCaptureSettingRow[],
-      finalizedPeriods: [] as WorkforcePaymentFinalizedPeriod[],
+      history: [] as AttendanceCaptureHistoryRow[],
+      historyActors: new Map<string, HistoryActorRow>(),
+      lockedPeriods: [] as WorkforcePaymentFinalizedPeriod[],
       error: "Supabase service role key is not configured."
     };
   }
-  const [settingsResult, payrollResult] = await Promise.all([
+  const [settingsResult, historyResult, payrollResult, reviewResult] = await Promise.all([
     readAllRows(supabaseAdmin
       .from("workforce_attendance_capture_settings")
       .select("capture_method,minimum_daily_deliveries,review_below_deliveries,effective_from,change_reason,updated_at")
       .eq("company_id", companyId)
       .order("effective_from", { ascending: false })),
     readAllRows(supabaseAdmin
+      .from("workforce_attendance_capture_setting_history")
+      .select("id,effective_from,operation,before_data,after_data,changed_by,changed_at")
+      .eq("company_id", companyId)
+      .order("changed_at", { ascending: false })),
+    readAllRows(supabaseAdmin
       .from("workforce_payroll_runs")
       .select("period_start,period_end")
       .eq("company_id", companyId)
-      .or("status.ilike.approved,status.ilike.paid")
+      .or("status.ilike.review,status.ilike.approved,status.ilike.paid")
+      .order("period_start", { ascending: true })),
+    readAllRows(supabaseAdmin
+      .from("workforce_payout_review_submissions")
+      .select("period_start,period_end")
+      .eq("company_id", companyId)
+      .eq("subject_type", "workforce")
+      .in("status", ["under_review", "approved"])
       .order("period_start", { ascending: true }))
   ]);
-  if (settingsResult.error || payrollResult.error) {
+  if (settingsResult.error || historyResult.error || payrollResult.error || reviewResult.error) {
     return {
       settings: [] as AttendanceCaptureSettingRow[],
-      finalizedPeriods: [] as WorkforcePaymentFinalizedPeriod[],
-      error: settingsResult.error?.message ?? payrollResult.error?.message ?? "Unable to load attendance capture settings."
+      history: [] as AttendanceCaptureHistoryRow[],
+      historyActors: new Map<string, HistoryActorRow>(),
+      lockedPeriods: [] as WorkforcePaymentFinalizedPeriod[],
+      error: settingsResult.error?.message ?? historyResult.error?.message ?? payrollResult.error?.message ?? reviewResult.error?.message ?? "Unable to load attendance capture settings."
+    };
+  }
+  const historyRows = (historyResult.data ?? []).map((row) => ({
+    id: row.id,
+    effective_from: String(row.effective_from),
+    operation: row.operation as AttendanceCaptureHistoryRow["operation"],
+    before_data: row.before_data as Record<string, unknown> | null,
+    after_data: row.after_data as Record<string, unknown> | null,
+    changed_by: row.changed_by ? String(row.changed_by) : null,
+    changed_at: String(row.changed_at)
+  })) as AttendanceCaptureHistoryRow[];
+  const actorIds = [...new Set(historyRows.map((row) => row.changed_by).filter((id): id is string => Boolean(id)))];
+  const actorsResult = actorIds.length
+    ? await supabaseAdmin.from("profiles").select("id,full_name,email").in("id", actorIds)
+    : { data: [] as HistoryActorRow[], error: null };
+  if (actorsResult.error) {
+    return {
+      settings: [] as AttendanceCaptureSettingRow[],
+      history: [] as AttendanceCaptureHistoryRow[],
+      historyActors: new Map<string, HistoryActorRow>(),
+      lockedPeriods: [] as WorkforcePaymentFinalizedPeriod[],
+      error: actorsResult.error.message
     };
   }
   return {
@@ -98,7 +152,9 @@ async function loadSettings(companyId: string) {
       change_reason: String(row.change_reason ?? ""),
       updated_at: row.updated_at
     })) as AttendanceCaptureSettingRow[],
-    finalizedPeriods: (payrollResult.data ?? []).map((row) => ({
+    history: historyRows,
+    historyActors: new Map(((actorsResult.data ?? []) as HistoryActorRow[]).map((actor) => [actor.id, actor])),
+    lockedPeriods: [...(payrollResult.data ?? []), ...(reviewResult.data ?? [])].map((row) => ({
       period_start: String(row.period_start),
       period_end: String(row.period_end)
     })),
@@ -112,6 +168,25 @@ function formatMonth(value: string) {
     year: "numeric",
     timeZone: "Asia/Kolkata"
   });
+}
+
+function formatChangedAt(value: string) {
+  return new Date(value).toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata"
+  });
+}
+
+function historyPolicySummary(value: Record<string, unknown> | null) {
+  if (!value) return "—";
+  const policy = normalizeWorkforceAttendanceCaptureSetting(value);
+  const parts = [methodCopy[policy.capture_method].label];
+  if (policy.capture_method === "shipment_data") parts.push(`minimum ${policy.minimum_daily_deliveries} deliveries`);
+  if (policy.review_below_deliveries) parts.push(`review below ${policy.review_below_deliveries}`);
+  const reason = String(value.change_reason ?? "").trim();
+  if (reason) parts.push(reason);
+  return parts.join(" · ");
 }
 
 export default async function WorkforceAttendanceCaptureSettingsPage() {
@@ -173,7 +248,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
             <WorkforceAttendanceCaptureForm
               canEdit={canEdit}
               currentMonth={currentMonth}
-              finalizedPeriods={data.finalizedPeriods}
+              lockedPeriods={data.lockedPeriods}
               key={formRevision}
               settings={data.settings.map((setting): WorkforceAttendanceCaptureSetting => ({
                 capture_method: setting.capture_method,
@@ -189,7 +264,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
               <div>
                 <h2>How each source works</h2>
                 <p className="subtle">Only the shipment source uses a minimum daily delivery threshold.</p>
-                <p className="subtle">Shipment data can identify only workforce with an active provider-member mapping. Providerless direct-pay workforce must use biometric attendance.</p>
+                <p className="subtle">The effective-dated setting applies to every Workforce payment path. When shipment data is selected, a person without matched delivery data is absent unless an explicit payout attendance upload covers the period.</p>
               </div>
             </div>
             <div className="settings-grid">
@@ -207,8 +282,8 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <h2>Policy history</h2>
-                <p className="subtle">Effective-dated records preserve the attendance source used for each period.</p>
+                <h2>Effective policies</h2>
+                <p className="subtle">This timeline shows the attendance source that applies to each period.</p>
               </div>
             </div>
             <div className="table-wrap">
@@ -226,7 +301,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
                   {data.settings.length ? data.settings.map((setting) => {
                     const isScheduled = setting.effective_from > currentMonthStart;
                     const isActive = activeSetting === setting;
-                    const isLocked = workforcePaymentMonthIsFinalized(setting.effective_from, data.finalizedPeriods);
+                    const isLocked = workforcePaymentMonthIsFinalized(setting.effective_from, data.lockedPeriods);
                     return (
                       <tr key={setting.effective_from}>
                         <td><strong>{formatMonth(setting.effective_from)}</strong></td>
@@ -240,6 +315,44 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
                     <tr>
                       <td className="empty-cell" colSpan={6}>No saved policy yet. Biometric attendance remains the default.</td>
                     </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>Change history</h2>
+                <p className="subtle">Every saved revision is retained with its previous and new values.</p>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Changed at</th>
+                    <th>Changed by</th>
+                    <th>Effective month</th>
+                    <th>Action</th>
+                    <th>Previous value</th>
+                    <th>New value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.history.length ? data.history.map((entry) => {
+                    const actor = entry.changed_by ? data.historyActors.get(entry.changed_by) : null;
+                    return <tr key={entry.id}>
+                      <td>{formatChangedAt(entry.changed_at)}</td>
+                      <td><strong>{actor?.full_name || "System"}</strong>{actor?.email ? <><br /><span className="subtle">{actor.email}</span></> : null}</td>
+                      <td><strong>{formatMonth(entry.effective_from)}</strong></td>
+                      <td>{entry.operation === "insert" ? "Created" : entry.operation === "update" ? "Updated" : "Deleted"}</td>
+                      <td>{historyPolicySummary(entry.before_data)}</td>
+                      <td>{historyPolicySummary(entry.after_data)}</td>
+                    </tr>;
+                  }) : (
+                    <tr><td className="empty-cell" colSpan={6}>No attendance-setting changes have been recorded yet.</td></tr>
                   )}
                 </tbody>
               </table>
