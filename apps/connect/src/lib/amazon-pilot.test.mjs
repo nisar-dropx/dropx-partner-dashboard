@@ -57,8 +57,8 @@ test('joining API uses only the later LSC Driver ID as operational identity',()=
 test('guided beta is limited to an explicitly enrolled pilot account',()=>{
  const auth=readFileSync(new URL('./connect-auth.ts',import.meta.url),'utf8');
  const activation=readFileSync(new URL('../components/connect-activation-status.tsx',import.meta.url),'utf8');
- assert.match(auth,/let onboardingBeta = false/);
- assert.match(auth,/if\(pilot\.data\)\{activationOnly=true;onboardingBeta=true;/);
+ assert.match(auth,/activationOnly: false,[\s\S]*onboardingBeta: false/);
+ assert.doesNotMatch(auth,/loadPartnerOnboardingStates|partnerReportStillBlocksWorkspace|from\("workforce_amazon_pilots"\)/);
   assert.match(activation,/if \(account\.onboardingBeta\) return <ConnectBetaOnboarding/);
 });
 test('isolated email pilot is visible without converting an active Workforce account',()=>{
