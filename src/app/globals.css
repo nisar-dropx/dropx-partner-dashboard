@@ -22009,7 +22009,7 @@ td strong,
 
 .provider-first-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(135px, 1fr)) minmax(76px, .45fr) auto;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(5, minmax(125px, 1fr)) minmax(76px, .45fr) auto;
   gap: 8px;
   align-items: end;
   padding: 10px 12px;
@@ -22323,7 +22323,7 @@ td strong,
   font-weight: 600;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1400px) {
   .provider-first-filters {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
