@@ -148,7 +148,8 @@ function modelOperations(mode: OperatingMode): NavItem {
 const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd", icon: "E" };
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
-  const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
+  const mappingCode=authorization&&["fleet_vehicle_view","fleet_station_view","fleet_tracking"].find(code=>hasPermission(authorization,code,"access"))||"expense_requests";
+  const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, {code:mappingCode,label:"Vehicle DA mapping",href:"/fleet/da-mapping",icon:"F"}, fleetNavItem, attendanceReports, reports, ...administration];
   return items.map(item=>item.children?{...item,children:item.children.filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))}:item);
 }
 

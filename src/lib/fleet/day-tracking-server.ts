@@ -2,7 +2,7 @@ import 'server-only';
 import {supabaseAdmin} from '@/lib/supabase-admin';
 import {readAllRows} from '@/lib/supabase-pagination';
 import {hasPermission,type AuthorizationContext} from '@/lib/authorization';
-import {buildDailyFleetRows} from './daily-report';
+import {buildDailyFleetRows,istDate} from './daily-report';
 import {FleetReportError,loadDailyReport,trackingScope} from './report-data';
 import {assignmentPackageTotal,matchAssignmentDeliveries,trackingFuel,type DayAssignment,type AssignmentOption,type TrackingDayReport} from './day-tracking';
 export const canAssignDay=(auth:AuthorizationContext)=>!auth.readOnly&&(auth.isMasterOwner||hasPermission(auth,'fleet_tracking','edit')||hasPermission(auth,'fleet_vehicle_view','edit'));
@@ -35,9 +35,11 @@ export async function loadDayTracking(auth:AuthorizationContext,from:string,to:s
 export async function assignmentOptions(companyId:string,station:string,date:string):Promise<AssignmentOption[]>{
  const location=await supabaseAdmin!.from('stations').select('id').eq('company_id',companyId).eq('station_code',station).maybeSingle();
  if(location.error||!location.data)throw new FleetReportError('Station is unavailable.',400);
+ const settings=await supabaseAdmin!.from('fleet_control_settings').select('assignment_recent_days').eq('company_id',companyId).maybeSingle();
+ const today=istDate(),windowDays=settings.data?.assignment_recent_days??7;
  const [people,shipments]=await Promise.all([
   readAllRows(supabaseAdmin!.from('workforce').select('id,full_name,provider_employee_id,vehicle_reg_no').eq('company_id',companyId).eq('location_id',location.data.id).eq('is_active',true).is('deleted_at',null).neq('migration_state','reclassified').order('id')),
-  readAllRows(supabaseAdmin!.from('cps_shipment_daily').select('id,provider_employee_id,provider_employee_name').eq('company_id',companyId).eq('station_code',station).eq('work_date',date).order('id'))
+  readAllRows(supabaseAdmin!.from('cps_shipment_daily').select('id,provider_employee_id,provider_employee_name').eq('company_id',companyId).eq('station_code',station).gte('work_date',new Date(Date.parse(`${today}T12:00:00Z`)-(windowDays-1)*86400000).toISOString().slice(0,10)).lte('work_date',today).order('work_date',{ascending:false}).order('id'))
  ]);
  if(people.error||shipments.error)throw new FleetReportError('Unable to load station associates.');
  const options:AssignmentOption[]=(people.data??[]).map(p=>({key:`workforce:${p.id}`,workforceId:p.id,name:p.full_name,providerId:p.provider_employee_id||null,source:'workforce',registeredVehicle:p.vehicle_reg_no}));

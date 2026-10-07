@@ -1,4 +1,6 @@
+import {compactPdf,downloadCompactImages,type CompactReport} from './compact-report';
 export type FleetReportTable = {
+  compactVisual?: CompactReport;
   title: string;
   subtitle?: string;
   fileName: string;
@@ -43,6 +45,7 @@ function fitImageText(context: CanvasRenderingContext2D, value: unknown, width: 
 }
 
 export async function downloadFleetImage(report: FleetReportTable) {
+  if(report.compactVisual)return downloadCompactImages(report.title,report.subtitle||'',report.fileName,report.compactVisual);
   const width = 1800;
   const edge = 48;
   const brandHeight = 126;
@@ -201,6 +204,7 @@ function wrapText(value: unknown, maxCharacters: number, maxLines = 2) {
 }
 
 export async function createFleetPdfBytes(report: FleetReportTable) {
+  if(report.compactVisual)return compactPdf(report.title,report.subtitle||'',report.compactVisual);
   const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
   const document = await PDFDocument.create();
   document.setTitle(pdfText(report.title));
@@ -295,5 +299,5 @@ export async function createFleetPdfBytes(report: FleetReportTable) {
 
 export async function downloadFleetPdf(report: FleetReportTable) {
   const bytes = await createFleetPdfBytes(report);
-  save(new Blob([bytes.buffer], { type: "application/pdf" }), `${report.fileName}.pdf`);
+  save(new Blob([new Uint8Array(bytes).buffer], { type: "application/pdf" }), `${report.fileName}.pdf`);
 }

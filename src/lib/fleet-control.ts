@@ -126,6 +126,7 @@ export async function loadFleetControlData(companyId: string, authorization: Aut
     ["overview", "fleet_action_center"],
     ["attention", "fleet_action_center"],
     ["vehicles", "fleet_vehicle_view"],
+    ["assignments", "fleet_vehicle_view"],
     ["documents", "fleet_date_view"],
     ["tracking", "fleet_tracking"],
     ["fuel", "fleet_tracking"],
