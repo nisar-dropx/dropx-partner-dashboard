@@ -1,3 +1,4 @@
+import { betaJourney } from "@/lib/beta-journey";
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     const account = await requirePilot(candidateId);
     const [candidate, registration] = await Promise.all([
       supabaseAdmin.from("workforce_amazon_email_pilot_candidates")
-        .select("id,full_name,mobile,alias_email,biometric_id,reported_on,stations(station_code,station_name),designations(code,name)")
+        .select("id,full_name,mobile,alias_email,biometric_id,reported_on,continuation_status,stations(station_code,station_name),designations(code,name)")
         .eq("company_id", account.companyId).eq("id", account.id).is("closed_at", null).maybeSingle(),
       supabaseAdmin.from("workforce_amazon_email_pilot_registrations")
         .select("status,return_note").eq("company_id", account.companyId).eq("candidate_id", account.id).maybeSingle()
@@ -50,6 +51,7 @@ export async function GET(request: Request) {
     const designation = Array.isArray(candidate.data.designations) ? candidate.data.designations[0] : candidate.data.designations;
     return NextResponse.json({ ok: true, profile: {
       id: candidate.data.id,
+      betaRegistrationReady: betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus:registration.data?.status}).ready,
       readOnly: {
         biometricId: candidate.data.biometric_id,
         fullName: candidate.data.full_name,

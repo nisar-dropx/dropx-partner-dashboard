@@ -90,9 +90,9 @@ test('isolated pilot treats the generated address as the Amazon Flex sign-in ID'
  const joining=readFileSync(new URL('../../app/api/connect/workforce-joining/route.ts',import.meta.url),'utf8');
  const draft=readFileSync(new URL('../../app/api/connect/profile-draft/route.ts',import.meta.url),'utf8');
  const pilotProfile=readFileSync(new URL('../../app/api/connect/pilot-profile/route.ts',import.meta.url),'utf8');
- assert.match(beta,/Amazon Flex sign-in ID/);
+ assert.match(beta,/Amazon Flex sign-in email/);
  assert.match(beta,/You do not need mailbox access/);
- assert.match(beta,/Continue with Amazon/);
+ assert.match(beta,/Continue to registration/);
  assert.match(beta,/Complete DropX registration first/);
  assert.match(joining,/workforce_amazon_email_pilot_registrations/);
  assert.match(joining,/workforce_update_isolated_amazon_email_pilot_decision/);

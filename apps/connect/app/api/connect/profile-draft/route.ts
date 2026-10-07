@@ -1,3 +1,4 @@
+import { betaJourney } from "@/lib/beta-journey";
 import { createHash } from "crypto";
 import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
@@ -175,6 +176,13 @@ export async function POST(request: Request) {
     const current = isolatedPilot
       ? await loadIsolatedPilotDraft(account.id, account.companyId)
       : await loadProfileDraft({ accountId: account.id, companyId: account.companyId, profileType: account.profileType });
+    if (isolatedPilot) {
+      const candidate = await supabaseAdmin.from("workforce_amazon_email_pilot_candidates")
+        .select("continuation_status").eq("company_id", account.companyId).eq("id", account.id).is("closed_at", null).maybeSingle();
+      if (candidate.error || !candidate.data) throw new Error("Private beta candidate is unavailable.");
+      const ready = betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus:current && "status" in current ? String(current.status) : null}).ready;
+      if (!ready) throw new Error("Start with your station buddy, then choose Continue to registration in Work setup.");
+    }
     const nextPaths = { ...(current?.filePaths ?? {}) };
     const replacedPaths: string[] = [];
 

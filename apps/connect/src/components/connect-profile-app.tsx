@@ -36,6 +36,7 @@ export type AppAccount = {
 };
 
 type Profile = {
+  betaRegistrationReady?: boolean;
   readOnly: Record<string, string>;
   editable: Record<string, string>;
   designationCode?: string;
@@ -703,6 +704,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
 
   if (!profile && !error) return <Spinner />;
   if (!profile) return <div className="dx-alert error">{error}</div>;
+  if (isolatedPilot && profile.betaRegistrationReady === false) return <section className="dx-main dx-beta-onboarding"><div className="dx-beta-card"><small>FIRST, GET STARTED</small><h2>Learn the role with your station buddy</h2><p>Enrol your biometric ID and spend up to 2 days learning the work. When ready, choose Continue to registration in Work setup.</p><a className="dx-beta-primary" href={`/activation?${new URLSearchParams({id:account.id,account:`${account.profileType}:${account.companyId}:${account.id}`})}`}>Open first milestone</a></div></section>;
 
   const supportsExit = ["employee", "user", "contractor", "field_executive", "workforce", "vendor", "worker"].includes(account.profileType);
   if (completed && supportsExit && exitOpen) {
