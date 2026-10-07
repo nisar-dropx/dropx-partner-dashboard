@@ -4,6 +4,7 @@ import {getVercelOidcToken} from '@vercel/oidc';
 import {financeContext} from '@/lib/finance/data';
 import {loadBusinessMaster} from '@/lib/finance/business-master';
 import {loadCfo} from '@/lib/finance/cfo-data';
+import {filterCfoDays} from '@/lib/finance/cfo-detail';
 import {groupCfo,totalCfo} from '@/lib/finance/cfo';
 import {dateRange} from '@/lib/finance/now';
 export const dynamic='force-dynamic';export const maxDuration=300;
@@ -18,10 +19,10 @@ export async function POST(req:NextRequest){
   const lease=await c.db.rpc('finance_claim_insight',{p_company:c.companyId,p_actor:c.authorization.userId});
   if(lease.error||!lease.data)return NextResponse.json({error:'Please wait one minute before generating another review.'},{status:429});
   const report=await loadCfo(c,{period:'custom',from:body.from,to:body.to});
-  const rows=report.days.filter(d=>(!body.model||d.model===body.model)&&(!body.region||d.region===body.region)&&(!body.city||d.city===body.city));
+  const rows=filterCfoDays(report.days,{model:body.model||'',region:body.region||'',cluster:body.cluster||'',station:body.station||''});
   // Allowlisted summaries only. No People names, salaries, IDs, free-text notes or payroll records leave Finance.
   const clean=(g:ReturnType<typeof totalCfo>)=>({revenue:g.revenue,expense:g.expense,profit:g.profit,margin:g.margin,volume:g.volume,unit:g.unit,costPerUnit:g.cpu,coverageNotes:g.issues.length});
-  const summary={period:{from:body.from,to:body.to,availableThrough:report.cutoff},total:clean(totalCfo(rows,!body.model&&!body.region&&!body.city?report.overhead.filter(x=>['corporate','unallocated'].includes(x.mode)).reduce((s,x)=>s+x.amount,0):0)),models:groupCfo(rows,'model').map(g=>({model:g.key,...clean(g)})),regions:groupCfo(rows,'region').map(g=>({region:g.key,...clean(g)})),days:groupCfo(rows,'day').map(g=>({date:g.key,...clean(g)})),inputNotesCount:report.issues.length};
+  const summary={period:{from:body.from,to:body.to,availableThrough:report.cutoff},total:clean(totalCfo(rows,!body.model&&!body.region&&!body.cluster&&!body.station?report.overhead.filter(x=>['corporate','unallocated'].includes(x.mode)).reduce((s,x)=>s+x.amount,0):0)),models:groupCfo(rows,'model').map(g=>({model:g.key,...clean(g)})),regions:groupCfo(rows,'region').map(g=>({region:g.key,...clean(g)})),days:groupCfo(rows,'day').map(g=>({date:g.key,...clean(g)})),inputNotesCount:report.issues.length};
   const hash=createHash('sha256').update(JSON.stringify({model:config.model,summary})).digest('hex');
   const cached=await c.db.from('finance_insight_cache').select('text').eq('company_id',c.companyId).eq('cache_key',hash).gte('created_at',new Date(Date.now()-3600000).toISOString()).maybeSingle();
   if(cached.data)return NextResponse.json({text:cached.data.text,cached:true});

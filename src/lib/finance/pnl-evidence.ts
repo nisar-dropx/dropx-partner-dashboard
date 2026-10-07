@@ -67,13 +67,14 @@ export function buildPnlEvidence(
   to: string,
   codes: string[],
   fuel: PnlFuel[] = [],
+  basis: 'shipments' | 'operating' = 'shipments',
 ) {
   const allowed = new Set(codes),
     cutoffs = new Map<string, string>();
   for (const d of snapshot.daily)
     if (
       allowed.has(d.station_code) &&
-      d.shipment_present &&
+      (basis === 'operating' || d.shipment_present) &&
       d.work_date >= from &&
       d.work_date <= to
     )

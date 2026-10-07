@@ -22,6 +22,7 @@ export async function loadHoCosts(c:FinanceContext,from:string,to:string){
 }
 export async function loadCfo(c:FinanceContext,query:PnlQuery){
  const filters=pnlFilters(query),from=filters.from,to=filters.to;
+ const viewFilters={model:typeof query.model==='string'?query.model.slice(0,100):'',region:filters.region,cluster:filters.cluster,station:filters.location};
  const operating=c.locations.filter(l=>!l.is_ho&&!l.hide_from_location_list),normal=operating.filter(l=>locationModel(l)!=='NOW'),now=operating.filter(l=>locationModel(l)==='NOW');
  const [masters,volumes,rents,pnl,source,ho,hoCosts]=await Promise.all([
   loadBusinessMaster(c),loadNowVolumes(c,from,to),loadRent(c),
@@ -33,6 +34,7 @@ export async function loadCfo(c:FinanceContext,query:PnlQuery){
  if(ho.error||hoCosts.error)throw Error('HO People costs could not be loaded. Please retry.');
  const locationByCode=new Map(operating.map(l=>[l.station_code,l]));
  const byKind=(kind:string)=>masters.filter(r=>r.kind===kind);
+ const reportingRegion=(l:typeof operating[number])=>masters.find(r=>r.kind==='reporting_region'&&r.data.station_code===l.station_code)?.data.region||l.region||'Unassigned';
  const issues:string[]=[];if(pnl.costError)issues.push(pnl.costError);
  if(!c.authorization.hasAllLocationAccess)issues.push('This location view excludes company-wide HO allocations; business net profit requires company-wide Finance access.');
  const lines:CfoLine[]=[],days:CfoDay[]=[],overhead:OverheadLine[]=[],nowDetails:any[]=[];
@@ -40,7 +42,7 @@ export async function loadCfo(c:FinanceContext,query:PnlQuery){
  // Use the same observed cutoff for newly accrued HO costs. Missing locations stay visible as gaps.
  const commonThrough=latestReports.at(-1)||volumes.map(v=>v.through_date).sort().at(-1)||to;
  const cutoff=commonThrough<to?commonThrough:to;
- for(const d of pnl.days){const l=locationByCode.get(d.station);if(!l)continue;const parent=locationByCode.get(stationGroupKey(l))||l;days.push({station:stationGroupKey(l),name:parent.station_name||parent.station_code,model:locationModel(parent),region:parent.region||parent.state||'Unassigned',city:parent.city||'Unassigned',date:d.date,unit:'shipments',volume:d.deliveries,revenue:d.revenue,cost:d.cost,regional:0,da:d.da,utr:d.utr,van:d.van,rent:d.rent,other:d.other,contracts:0,issues:d.issues});}
+ for(const d of pnl.days){const l=locationByCode.get(d.station);if(!l)continue;const parent=locationByCode.get(stationGroupKey(l))||l;days.push({station:stationGroupKey(l),name:parent.station_name||parent.station_code,model:locationModel(parent),sourceStation:d.station,cluster:parent.cluster||'Unassigned',region:reportingRegion(parent),city:parent.city||'Unassigned',date:d.date,unit:'shipments',volume:d.deliveries,revenue:d.revenue,cost:d.cost,regional:0,da:d.da,utr:d.utr,van:d.van,rent:d.rent,other:d.other,contracts:0,issues:d.issues});}
  const costs=new Map(source.report.daily.map(d=>[d.station_code+'/'+d.work_date,d]));
  for(const l of now)for(const slice of cpsMonthSlices(from,cutoff)){
   const maps=byKind('now_store').filter(r=>r.data.station_code===l.station_code);
@@ -53,7 +55,7 @@ export async function loadCfo(c:FinanceContext,query:PnlQuery){
    const r=calculated.get(date),cost=costs.get(l.station_code+'/'+date);
    if(volume&&date>volume.through_date)continue;
    const rowIssues=[...storeIssues];if(!r)rowIssues.push('No effective Amazon Now pricing');if(!cost)rowIssues.push('Operating cost source unavailable');
-   days.push({station:l.station_code,name:l.station_name||l.station_code,model:'Amazon Now '+(maps.find(m=>effectiveOn(m.data as NowStore,date))?.data.category||'Unclassified'),region:l.region||l.state||'Unassigned',city:l.city||'Unassigned',date,unit:'units',volume:r?.units??null,revenue:r?.revenue??null,cost:cost?.total??null,regional:0,da:cost?.da||0,utr:cost?.utr||0,van:cost?.van||0,rent:cost?.rent||0,other:(cost?.other||0)+(cost?.overhead||0),contracts:0,issues:rowIssues});
+   days.push({station:l.station_code,name:l.station_name||l.station_code,model:'Amazon Now '+(maps.find(m=>effectiveOn(m.data as NowStore,date))?.data.category||'Unclassified'),sourceStation:l.station_code,cluster:l.cluster||'Unassigned',region:reportingRegion(l),city:l.city||'Unassigned',date,unit:'units',volume:r?.units??null,revenue:r?.revenue??null,cost:cost?.total??null,regional:0,da:cost?.da||0,utr:cost?.utr||0,van:cost?.van||0,rent:cost?.rent||0,other:(cost?.other||0)+(cost?.overhead||0),contracts:0,issues:rowIssues});
   }
  }
  for(const l of now){if(!byKind('contract').some(r=>r.data.station_code===l.station_code&&effectiveOn(r.data as CostContract,cutoff)))issues.push(`${l.station_code}: outsourced contracts not entered; confirm security, housekeeping and other agreed costs`);}
@@ -93,6 +95,6 @@ export async function loadCfo(c:FinanceContext,query:PnlQuery){
  for(const line of hoCosts.data?.breakup||[]){if(line.work_date>cutoff||line.head==='Rent')continue;if(contracts.some(x=>x.station_code===line.station_code&&effectiveOn(x,line.work_date)&&x.settlement_heads.some(h=>h.toLowerCase()===line.sub_head.toLowerCase())))continue;addHo({station:line.station_code,date:line.work_date,head:line.sub_head,name:line.source,code:'',monthly:null,gross:line.amount,alreadyAllocated:0,amount:line.amount});}
  for(const l of c.locations.filter(l=>l.is_ho))if(!rents.some(r=>r.allocation_station_code===l.station_code&&effectiveOn(r,cutoff)))issues.push(`${l.station_code}: no effective HO rent record (confirm if rent-free)`);
  for(const d of source.report.gaps||[])if(d.kind!=='Shipment upload missing'&&now.some(l=>l.station_code===d.station_code))issues.push(`${d.station_code}: ${d.kind}`);
- return {days,lines,overhead,nowDetails,issues:[...new Set(issues)],filters,cutoff,allAccess:c.authorization.hasAllLocationAccess,readAt:new Date().toISOString(),insightsEnabled:byKind('insight').some(r=>r.data.enabled),locations:operating.map(l=>({code:l.station_code,name:l.station_name,model:locationModel(l),region:l.region||l.state||'Unassigned',city:l.city||'Unassigned'}))};
+ return {viewFilters,shipmentDetail:{pricing:pnl.pricing,revenueCalculations:pnl.revenueCalculations},days,lines,overhead,nowDetails,issues:[...new Set(issues)],filters,cutoff,allAccess:c.authorization.hasAllLocationAccess,readAt:new Date().toISOString(),insightsEnabled:byKind('insight').some(r=>r.data.enabled),locations:operating.map(l=>({code:l.station_code,name:l.station_name,model:locationModel(l),sourceStation:l.station_code,cluster:l.cluster||'Unassigned',region:reportingRegion(l),city:l.city||'Unassigned'}))};
 }
 export type CfoReport=Awaited<ReturnType<typeof loadCfo>>;

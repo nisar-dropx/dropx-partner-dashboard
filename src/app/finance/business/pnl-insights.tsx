@@ -6,11 +6,11 @@ const money = (value: number | null) => value === null ? "Unavailable" : `₹${v
 const shortMoney = (value: number) => `₹${new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 }).format(value)}`;
 const date = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
 
-export function PnlInsights({ daily, total }: { daily: PnlTotal[]; total: PnlTotal }) {
+export function PnlInsights({ daily, total, includeUnreportedDays=false, costItems }: { daily: PnlTotal[]; total: PnlTotal; includeUnreportedDays?:boolean; costItems?:{label:string;value:number;color:string}[] }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedCost, setSelectedCost] = useState<number | null>(null);
   const [view, setView] = useState("trend");
-  const days = daily.filter(day => day.deliveries !== null);
+  const days = daily.filter(day => includeUnreportedDays ? day.revenue !== null || day.cost !== null : day.deliveries !== null);
   const active = days.find(d => d.key === selected) ?? days.at(-1);
   const max = Math.max(1, ...days.flatMap(d => [d.revenue ?? 0, d.cost ?? 0]));
   const min = Math.min(0, ...days.flatMap(d => [d.revenue ?? 0, d.cost ?? 0]));
@@ -20,7 +20,7 @@ export function PnlInsights({ daily, total }: { daily: PnlTotal[]; total: PnlTot
   const x = (index: number) => 48 + (dateNumber(days[index].key) - firstDay) * 430 / Math.max(1, lastDay - firstDay);
   const y = (value: number) => 175 - (value - min) / (max - min) * 145;
   const series = (key: "revenue" | "cost") => days.map((day, i) => day[key] === null ? "" : `${i === 0 || days[i-1][key] === null || dateNumber(day.key) - dateNumber(days[i-1].key) > 1 ? "M" : "L"}${x(i).toFixed(1)},${y(day[key]!).toFixed(1)}`).join(" ");
-  const costs = [
+  const costs = costItems ?? [
     { label: "Delivery associates", value: total.da, color: "#3578cb" },
     { label: "Station team", value: total.utr, color: "#8b66c4" },
     { label: "Vehicles & fuel", value: total.van, color: "#168777" },

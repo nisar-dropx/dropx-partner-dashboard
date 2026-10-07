@@ -9,7 +9,7 @@ export type NowRate = {
 };
 export type NowStore = { station_code: string; category: string; city: string; rate_key: string; effective_from: string; effective_to?: string | null; monthly_mg_override?: string | null };
 export type NowVolume = { station_code: string; month: string; through_date: string; units: number; incentive_percent: number | null; note: string; revision?: number };
-export type BusinessMasterKind = 'now_rate' | 'now_store' | 'cost_head' | 'contract' | 'overhead' | 'insight';
+export type BusinessMasterKind = 'now_rate' | 'now_store' | 'cost_head' | 'contract' | 'overhead' | 'insight' | 'reporting_region';
 export type MasterRecord = { id: string; kind: BusinessMasterKind; key: string; label: string; data: Record<string, any>; revision: number; deleted_at: string | null; updated_at: string };
 export type CostContract = { head_key: string; station_code: string; vendor: string; amount: string; frequency: 'monthly' | 'annual' | 'once'; effective_from: string; effective_to?: string | null; settlement_heads: string[]; reference: string };
 export type OverheadRule = { station_code: string; mode: 'regional' | 'corporate'; recipient_codes: string[]; effective_from: string; effective_to?: string | null };
@@ -25,6 +25,7 @@ const integer=(v:unknown,label:string)=>{const n=Number(v);if(v===''||v==null||!
 export function validateMaster(kind:BusinessMasterKind,value:unknown):Record<string,any> {
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid master record.');
   const v=value as Record<string,any>;
+  if(kind==='reporting_region')return {station_code:text(v.station_code,'Station / store',40),region:text(v.region,'Region',100)};
   if(kind==='cost_head')return {description:String(v.description??'').slice(0,500)};
   if(kind==='insight')return {model:text(v.model,'Model',100),enabled:v.enabled===true};
   const effective_from=text(v.effective_from,'Effective from'),effective_to=v.effective_to?text(v.effective_to,'Effective through'):null;

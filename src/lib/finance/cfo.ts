@@ -1,5 +1,5 @@
 import {roundMoney} from './now';
-export type CfoDay={station:string;name:string;model:string;region:string;city:string;date:string;unit:'shipments'|'units';volume:number|null;revenue:number|null;cost:number|null;regional:number;da:number;utr:number;van:number;rent:number;other:number;contracts:number;issues:string[]};
+export type CfoDay={station:string;name:string;model:string;region:string;city:string;cluster?:string;sourceStation?:string;date:string;unit:'shipments'|'units';volume:number|null;revenue:number|null;cost:number|null;regional:number;da:number;utr:number;van:number;rent:number;other:number;contracts:number;issues:string[]};
 export type OverheadLine={station:string;date:string;head:string;name:string;code:string;monthly:number|null;gross:number;alreadyAllocated:number;amount:number;mode:string;recipients:string[];issue?:string};
 export type CfoLine={station:string;date:string;head:string;source:string;amount:number;basis:string};
 export function totalCfo(rows:CfoDay[],corporate=0){
@@ -11,6 +11,6 @@ export function totalCfo(rows:CfoDay[],corporate=0){
 }
 /** Split to paise, preserving the full group regardless of the report filter. */
 export function equalShares(amount:number,codes:string[]){const sorted=[...new Set(codes)].sort(),paise=Math.round(amount*100),base=Math.floor(paise/(sorted.length||1)),remainder=paise-base*sorted.length;return Object.fromEntries(sorted.map((s,i)=>[s,(base+(i<remainder?1:0))/100]));}
-export function groupCfo(rows:CfoDay[],by:'station'|'model'|'region'|'city'|'month'|'day'){
- const groups=new Map<string,CfoDay[]>();for(const row of rows){const key=by==='month'?row.date.slice(0,7):by==='day'?row.date:row[by];groups.set(key,[...(groups.get(key)||[]),row]);}return [...groups].map(([key,days])=>({key,...totalCfo(days),days}));
+export function groupCfo(rows:CfoDay[],by:'station'|'model'|'region'|'city'|'cluster'|'month'|'day'){
+ const groups=new Map<string,CfoDay[]>();for(const row of rows){const key=by==='month'?row.date.slice(0,7):by==='day'?row.date:row[by]||'Unassigned';groups.set(key,[...(groups.get(key)||[]),row]);}return [...groups].map(([key,days])=>({key,...totalCfo(days),days}));
 }

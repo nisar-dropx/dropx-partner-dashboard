@@ -11,6 +11,7 @@ export async function saveBusinessMaster(input:{kind:BusinessMasterKind;key:stri
   const data=validateMaster(input.kind,input.data),records=await loadBusinessMaster(c);
   const code=data.station_code;
   if(code&&!c.locations.some(l=>l.station_code===code))throw Error('Choose an existing location.');
+  if(input.kind==='reporting_region'&&input.key!==code)throw Error('Region mapping key must be the station code.');
   if(input.kind==='now_store'){
    if(!c.locations.some(l=>l.station_code===code&&locationModel(l)==='NOW'))throw Error('Choose an Amazon Now store.');
    const rate=records.find(r=>r.kind==='now_rate'&&r.key===data.rate_key);

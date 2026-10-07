@@ -66,7 +66,7 @@ export function RevenueCalculation({
 }: {
   kind: "base" | "xpt" | "variable" | "swa" | "mfn";
   rows: PnlDay[];
-  report: LivePnl;
+  report: Pick<LivePnl, 'pricing' | 'revenueCalculations'>;
 }) {
   const keys = new Set(rows.map((d) => `${d.station}/${d.date}`));
   const source = report.revenueCalculations.filter((d) =>
@@ -286,7 +286,7 @@ export function RevenueCalculation({
   );
 }
 
-export function useFinanceEvidence(rows: PnlDay[], version: string) {
+export function useFinanceEvidence(rows: PnlDay[], version: string, basis: 'shipments' | 'operating' = 'shipments') {
   const [enabled, setEnabled] = useState(false),
     [attempt, setAttempt] = useState(0);
   const dates = rows
@@ -297,6 +297,7 @@ export function useFinanceEvidence(rows: PnlDay[], version: string) {
     .sort();
   const q = new URLSearchParams({
     stations: [...new Set(rows.map((r) => r.station))].sort().join(","),
+    basis,
     from: dates[0] || "",
     to: dates.at(-1) || "",
   });

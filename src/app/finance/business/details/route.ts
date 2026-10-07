@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { financeContext, loadRent } from "@/lib/finance/data";
+import { locationModel } from '@/lib/finance/business-master';
 import { pnlFilters } from "@/lib/finance/pnl";
 import { evidenceStations, buildPnlEvidence } from "@/lib/finance/pnl-evidence";
 import { readAllRows } from "@/lib/supabase-pagination";
@@ -11,6 +12,7 @@ export async function GET(request: Request) {
   const context = await financeContext("finance_pnl");
   const query = Object.fromEntries(new URL(request.url).searchParams.entries());
   let filters, codes;
+  const basis=query.basis==='operating'?'operating':'shipments';
   try {
     filters = pnlFilters({ ...query, period: "custom" });
     codes = evidenceStations(
@@ -24,6 +26,7 @@ export async function GET(request: Request) {
         )
         .map((l) => l.station_code),
     );
+    if(basis==='operating'&&codes.some(code=>!context.locations.some(l=>l.station_code===code&&locationModel(l)==='NOW')))throw Error('Operating-unit detail is only available for Amazon Now stores.');
   } catch {
     return NextResponse.json(
       { error: "Choose valid dates and stations within your Finance access." },
@@ -68,6 +71,7 @@ export async function GET(request: Request) {
         filters.to,
         codes,
         fuel.data ?? [],
+        basis,
       ),
       { headers: { "Cache-Control": "private, no-store" } },
     );

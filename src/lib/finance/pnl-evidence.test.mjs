@@ -46,12 +46,14 @@ test('details API authorizes Finance before salary access and fails closed for f
   '@/lib/supabase-pagination':{readAllRows:async()=>({data:[],error:null})},
   'next/server':{NextResponse:{json:(body,init)=>({body,...init})}},
   '@/lib/finance/data':{financeContext:async code=>{assert.equal(code,'finance_pnl');if(!permitted)throw Error('denied');return {db:{from:()=>{const q=new Proxy({}, {get:()=>()=>q});return q;}},companyId:'tenant',locations:[{station_code:'A'}]};},loadRent:async()=>rents},
+  '@/lib/finance/business-master':{locationModel:l=>l.model||'EDSP'},
   '@/lib/finance/pnl':{pnlFilters:()=>({from:'2026-10-01',to:'2026-10-05'})},
   '@/lib/finance/pnl-evidence':{evidenceStations,buildPnlEvidence},
   '@/lib/ops-pulse/cps-data':{loadFinanceCpsEvidence:async(company,from,to,codes)=>{calls++;assert.equal(company,'tenant');assert.deepEqual(codes,['A']);return {report:snap,evidence};}},
  });
  const invalid=await GET(new Request('https://fin.dropxlogistics.com/finance/business/details?stations=A,B'));
  assert.equal(invalid.status,400);assert.equal(calls,0);
+ const wrongBasis=await GET(new Request('https://fin.dropxlogistics.com/finance/business/details?stations=A&basis=operating'));assert.equal(wrongBasis.status,400);assert.equal(calls,0);
  const good=await GET(new Request('https://fin.dropxlogistics.com/finance/business/details?stations=A'));
  assert.equal(calls,1);assert.equal(good.headers['Cache-Control'],'private, no-store');assert.equal(good.body.staff[0].name,'Finance staff');
  permitted=false;await assert.rejects(GET(new Request('https://fin.dropxlogistics.com/finance/business/details?stations=A')),/denied/);assert.equal(calls,1);
@@ -73,4 +75,12 @@ test('daily Fleet rent evidence uses the canonical ledger including rent-blocked
  {station_code:'A',work_date:'2026-10-03',source:'Fleet Vehicle Master',sub_head:'Vehicle rent · V1',amount:800}]};
  const v=buildPnlEvidence(snapshot,evidence,[],'2026-10-01','2026-10-05',['A']).vehicles[0];
  assert.equal(v.daily_rent,800);assert.equal(v.considered_days,2);assert.equal(v.rent_blocked_days,1);assert.equal(v.considered_amount,800);
+});
+
+test('Amazon Now operating evidence does not require a shipment event and stays within station/date scope',()=>{
+ const daily=snap.daily.map(d=>({...d,shipment_present:false}));
+ const out=buildPnlEvidence({...snap,daily},evidence,rents,'2026-10-01','2026-10-02',['A'],[],'operating');
+ assert.equal(out.staff[0].amount,2000);assert.equal(out.rents[0].amount,220);
+ assert.ok(!JSON.stringify(out).includes('Outside'));
+ assert.equal(buildPnlEvidence({...snap,daily},evidence,rents,'2026-10-01','2026-10-02',['A']).staff.length,0);
 });
