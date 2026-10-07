@@ -8,6 +8,7 @@ function source(relativePath) {
 
 const registerPage = source("../app/payments/workforce-advances/page.tsx");
 const registerComponent = source("../components/workforce-advance-register.tsx");
+const registerView = source("./workforce-advance-register-view.ts");
 const addAdvanceRoute = source("../app/api/payments/workforce-advances/route.ts");
 const bulkUploadComponent = source("../components/workforce-advance-bulk-upload.tsx");
 const bulkUploadRoute = source("../app/api/payments/workforce-advances/bulk-upload/route.ts");
@@ -96,7 +97,7 @@ test("bulk upload requires add permission and follows preview then explicit conf
   assert.match(bulkUploadComponent, /DEDUCTED_AMOUNT will be recorded as already recovered/i);
   assert.match(bulkUploadComponent, /Duplicate advances are blocked even if the workbook was re-saved/i);
   assert.match(bulkUploadComponent, /Already deducted/);
-  assert.match(registerComponent, /canAdd\s*\?\s*<div[^>]*>[\s\S]*?<WorkforceAdvanceBulkUpload\s*\/>/);
+  assert.match(registerComponent, /canAdd\s*\?\s*<>[\s\S]*?<WorkforceAdvanceBulkUpload\s*\/>/);
 });
 
 test("unregistered DropX IDs preview and render as non-deductible pending advances", () => {
@@ -135,7 +136,45 @@ test("manual advance entry has an accessible searchable Workforce selector and l
   assert.match(registerComponent, /role=["']listbox["']/);
   assert.match(registerComponent, /name=["']workforceId["'][^>]+type=["']hidden["']/);
   assert.match(registerComponent, /Select a Workforce member from the search results\./);
-  assert.match(registerComponent, /<span>Search advances<\/span>[\s\S]*?<span>Deduction status<\/span>/);
+  assert.match(registerComponent, /<span>Search advances<\/span>/);
+  assert.match(registerComponent, /label=["']Deduction status["']/);
+});
+
+test("advance register filters are searchable multi-check controls with an inclusive paid-on range", () => {
+  assert.match(registerComponent, /function\s+AdvanceMultiFilter/);
+  assert.match(registerComponent, /aria-haspopup=["']dialog["']/);
+  assert.match(registerComponent, /placeholder=\{`Search \$\{label\.toLowerCase\(\)\}`\}/);
+  assert.match(registerComponent, /visibleOptions\.map[\s\S]*?type=["']checkbox["']/);
+  for (const label of [
+    "Current location",
+    "Advance paid at",
+    "Designation",
+    "Payment mode",
+    "Deduction status",
+    "Registration status",
+    "Source"
+  ]) assert.match(registerComponent, new RegExp(`label=["']${label}["']`));
+  assert.match(registerComponent, /<span>Paid from<\/span>[\s\S]*?type=["']date["']/);
+  assert.match(registerComponent, /<span>Paid to<\/span>[\s\S]*?type=["']date["']/);
+  assert.match(registerComponent, /Paid from date must be on or before paid to date\./);
+  assert.match(registerComponent, /function\s+clearFilters\(\)[\s\S]*?setSearch\(["']["']\)[\s\S]*?setLocations\(\[\]\)[\s\S]*?setDateFrom\(["']["']\)[\s\S]*?setDateTo\(["']["']\)[\s\S]*?setPage\(1\)/);
+});
+
+test("filtered rows drive totals, table pagination and the view-scoped CSV export", () => {
+  assert.match(registerComponent, /filterWorkforceAdvanceRows\(rows,\s*search,\s*filters\)/);
+  assert.doesNotMatch(registerComponent, /useDeferredValue/);
+  assert.match(registerComponent, /summarizeWorkforceAdvanceRows\(filtered\)/);
+  assert.match(registerComponent, /money\(summary\.total\)/);
+  assert.match(registerComponent, /money\(summary\.deducted\)/);
+  assert.match(registerComponent, /money\(summary\.pending\)/);
+  assert.match(registerComponent, /const visible\s*=\s*filtered\.slice/);
+  assert.match(registerComponent, /buildWorkforceAdvanceCsv\(filtered\)/);
+  assert.match(registerComponent, /Export filtered CSV/);
+  assert.doesNotMatch(registerComponent, /fetch\([^)]*workforce-advances[^)]*export/i);
+  assert.match(registerView, /return "\\uFEFF"/);
+  assert.match(registerView, /numericIdentifierAtRisk/);
+  assert.match(registerView, /startsLikeFormula/);
+  assert.match(registerComponent, /Unassigned \/ unavailable/);
 });
 
 test("advance recovery requires edit access to both payout and advance pages", () => {
