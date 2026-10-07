@@ -18369,3 +18369,39 @@ img.dx-selfie-live {
 .dx-beta-support button{display:inline-flex;align-items:center;justify-content:center;gap:10px;flex:0 0 auto;min-height:54px;min-width:220px;max-width:100%;padding:14px 22px;border:1px solid #dce2e9;border-radius:10px;background:#fff6f9;color:#983251;font-size:16px;font-weight:700;cursor:pointer}.dx-beta-support button svg{flex-shrink:0}
 .dx-beta-language button:focus-visible,.dx-beta-support button:focus-visible{outline:2px solid #983251;outline-offset:3px}
 @media(max-width:620px){.dx-beta-language{padding:16px}.dx-beta-language-header button{width:100%}.dx-beta-support{align-items:stretch;flex-direction:column;gap:16px;padding:18px}.dx-beta-support button{width:100%}}
+
+/* Readable guidance and touch targets on the private-beta phone journey. */
+@media(max-width:620px){
+  .dx-beta-onboarding{min-width:0}
+  .dx-beta-heading p{font-size:14px;line-height:1.6}
+  .dx-beta-heading>button{width:44px;height:44px}
+  .dx-beta-stage-nav button{min-height:64px;padding:12px 10px}
+  .dx-beta-stage-nav span{font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+  .dx-beta-stage-nav b{font-size:11px}
+  .dx-beta-list strong,.dx-beta-checks article strong{font-size:14px}
+  .dx-beta-list small,.dx-beta-checks article small{font-size:13px;line-height:1.6}
+  .dx-beta-list>button{padding:15px 2px}
+  .dx-beta-primary{min-height:52px;padding:13px 16px;font-size:16px;line-height:1.5}
+  .dx-beta-primary svg{flex-shrink:0;width:18px}
+  .dx-beta-back,.dx-beta-store-link,.dx-beta-secondary-link{min-height:44px;font-size:14px;line-height:1.5}
+  .dx-beta-focus{gap:10px;padding:13px}
+  .dx-beta-focus small,.dx-beta-punches span,.dx-beta-email small,.dx-beta-identity dt{font-size:12px;line-height:1.5}
+  .dx-beta-focus p{font-size:14px;line-height:1.8}
+  .dx-beta-focus strong{font-size:18px;line-height:1.5}
+  .dx-beta-buddy p{font-size:15px}
+  .dx-beta-punches strong,.dx-beta-email strong{font-size:15px;line-height:1.5}
+  .dx-beta-identity dd{font-size:14px;line-height:1.6;white-space:normal;overflow-wrap:anywhere}
+  .dx-beta-email>button{min-height:44px;font-size:14px}
+  .dx-beta-invite-ready strong,.dx-beta-browser-safety strong,.dx-beta-empty strong{font-size:14px;line-height:1.5}
+  .dx-beta-invite-ready small,.dx-beta-browser-safety small,.dx-beta-empty span,.dx-beta-guide li{font-size:14px;line-height:1.7}
+  .dx-beta-checks article em,.dx-beta-soc{font-size:12px;line-height:1.6}
+  .dx-beta-support button{min-width:0}
+  .dx-beta-onboarding .dx-exit-dialog{padding:12px}
+  .dx-beta-onboarding .dx-exit-dialog>form{max-height:calc(100dvh - 90px);overflow-y:auto;padding:20px}
+  .dx-beta-onboarding .dx-exit-dialog p{font-size:14px!important;line-height:1.7}
+  .dx-beta-onboarding .dx-exit-dialog label{font-size:14px}
+  .dx-beta-onboarding .dx-exit-dialog select,.dx-beta-onboarding .dx-exit-dialog textarea{font-size:16px;min-height:44px}
+  .dx-beta-onboarding .dx-exit-dialog footer button{min-height:48px;padding:12px;font-size:15px}
+  .dx-beta-onboarding .dx-exit-close{width:44px;height:44px}
+}
+@media(max-width:620px){.dx-beta-list .dx-beta-state{display:inline-flex;grid-column:2;grid-row:2;justify-self:start;font-size:11px}.dx-beta-list>button>svg{grid-column:3;grid-row:1}.dx-beta-side p{font-size:14px;line-height:1.6}}
