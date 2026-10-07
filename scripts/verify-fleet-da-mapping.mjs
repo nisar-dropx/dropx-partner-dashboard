@@ -89,8 +89,8 @@ console.log('Mapping correction: active/deployed eligibility, custom statuses, s
 // All-station loading remains scoped, and rider choices remain tied to each vehicle's station.
 const fixtureTables={
  stations:[{id:'s1',station_code:'AAA',station_name:'Alpha'},{id:'s2',station_code:'BBB',station_name:'Beta'},{id:'s3',station_code:'HIDDEN',station_name:'Hidden'}],
- fleet_vehicles:[{id:'va',vehicle_no:'VA',model:'Van',station_code:'AAA',status:'active',deployment_status:'deployed',ownership_type:'own'},{id:'vb',vehicle_no:'VB',model:'Van',station_code:'BBB',status:'active',deployment_status:'deployed',ownership_type:'own'},{id:'vh',vehicle_no:'VH',station_code:'HIDDEN',status:'active',deployment_status:'deployed'}],
- fleet_vehicle_status_master:[{status_key:'active',is_active:true,is_operational:true}],
+ fleet_vehicles:[{id:'va',vehicle_no:'VA',model:'Van',station_code:'AAA',status:'active',deployment_status:'deployed',ownership_type:'own'},{id:'vb',vehicle_no:'VB',model:'Van',station_code:'BBB',status:'active',deployment_status:'deployed',ownership_type:'own'},{id:'vu',vehicle_no:'VU',model:'Jeeto',station_code:'AAA',status:'breakdown',deployment_status:'deployed',ownership_type:'own'},{id:'vh',vehicle_no:'VH',station_code:'HIDDEN',status:'active',deployment_status:'deployed'}],
+ fleet_vehicle_status_master:[{status_key:'active',label:'Active',is_active:true,is_operational:true},{status_key:'breakdown',label:'Breakdown',is_active:true,is_operational:false}],
  fleet_vehicle_da_defaults:[{id:'def-a',vehicle_id:'va',station_code:'AAA',provider_employee_id:'A1',name:'Alpha DA'}],
  fleet_day_assignments:[],fleet_vehicle_day_confirmations:[],fleet_control_settings:[{assignment_recent_days:7}],
  cps_shipment_daily:[{id:'r1',station_code:'AAA',provider_employee_id:'A1',provider_employee_name:'Alpha DA',work_date:'2026-10-06'},{id:'r2',station_code:'BBB',provider_employee_id:'B1',provider_employee_name:'Beta DA',work_date:'2026-10-06'},{id:'r3',station_code:'HIDDEN',provider_employee_id:'H1',provider_employee_name:'Hidden DA',work_date:'2026-10-06'}],company_product_memberships:[{id:'member',role_id:'role'}]
@@ -102,7 +102,7 @@ const scoped=compile('src/lib/fleet/da-mapping-server.ts',{
  '@/lib/authorization':{hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/access-surface':{currentAdminAccessSurface:()=> 'fleet'},'./report-data':{FleetReportError:E},'./vehicle-sources-server':{loadVehicleSources:async()=>({sources:[]})},'./daily-report':{istDate:()=> '2026-10-07'},'./da-mapping':model
 });
 const manager={userId:actor,isMasterOwner:false,hasAllLocationAccess:false,locationScopeIds:['s1','s2']};
-const all=await scoped.loadMapping(manager,'2026-10-07','*');assert.equal(all.station,'*');assert.deepEqual(all.vehicles.map(v=>v.id),['va','vb']);assert.deepEqual(all.options.map(o=>o.id),['A1','B1']);assert.ok(model.riderAvailableAt(all.options[0],'AAA'));assert.equal(model.riderAvailableAt(all.options[0],'BBB'),false);
+const all=await scoped.loadMapping(manager,'2026-10-07','*');assert.equal(all.station,'*');assert.equal(all.unavailableVehicles[0].id,'vu');assert.equal(all.dayStatuses[0].key,'breakdown');assert.deepEqual(all.vehicles.map(v=>v.id),['va','vb']);assert.deepEqual(all.options.map(o=>o.id),['A1','B1']);assert.ok(model.riderAvailableAt(all.options[0],'AAA'));assert.equal(model.riderAvailableAt(all.options[0],'BBB'),false);
 assert.deepEqual((await scoped.loadMapping(manager,'2026-10-07','')).vehicles.map(v=>v.id),['va','vb']);
 assert.deepEqual((await scoped.loadMapping(manager,'2026-10-07','AAA')).vehicles.map(v=>v.id),['va']);
 await assert.rejects(scoped.loadMapping(manager,'2026-10-07','HIDDEN'),/outside your scope/);
@@ -116,3 +116,5 @@ assert.equal(allSaved,undefined);
 assert.equal((await bulk([{vehicleId:'va',ids:['A1'],expectedIds:[]},{vehicleId:'vb',ids:['B1'],expectedIds:[]}])).status,200);
 assert.deepEqual(allSaved.map(r=>r.station_code),['AAA','BBB']);
 console.log('All stations: scoped load, per-station rider choices, cross-station assignment rejection and single atomic bulk save passed.');
+
+assert.equal((await bulk([{vehicleId:'va',ids:['A1'],expectedIds:[],dayStatus:'breakdown',remarks:'Before dispatch'}])).status,400);assert.equal((await bulk([{vehicleId:'va',ids:[],expectedIds:[],dayStatus:'breakdown',remarks:''}])).status,400);assert.equal((await bulk([{vehicleId:'va',ids:[],expectedIds:[],dayStatus:'unknown',remarks:'Before dispatch'}])).status,400);assert.equal((await bulk([{vehicleId:'va',ids:[],expectedIds:[],dayStatus:'breakdown',remarks:'Failed before dispatch'}])).status,200);assert.equal(allSaved[0].day_status,'breakdown');console.log('Dated exception API validation and Fleet unavailable summary passed.');

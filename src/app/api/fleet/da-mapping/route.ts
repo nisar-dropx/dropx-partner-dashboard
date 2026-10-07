@@ -52,10 +52,12 @@ export const POST=withFleetSystemLog(async(request:Request)=>{
   if(!Array.isArray(r.ids)||r.ids.length>10||!Array.isArray(r.expectedIds))throw new FleetReportError('Invalid rider selection.',400);
   const existing=d.assignments.filter(a=>a.vehicle_id===v.id);
   const remarks=typeof r.remarks==='string'?r.remarks.trim():'';
+  const dayStatus=typeof r.dayStatus==='string'?r.dayStatus:'';
+  if(dayStatus&&(!d.dayStatuses?.some(s=>s.key===dayStatus)||r.ids.length>0||remarks.length<3))throw new FleetReportError('Choose an unavailable status, remove rider assignments and add a reason for this date.',400);
   const unchanged=[...r.ids].map(String).map(riderKey).sort().join('|')===existing.map(a=>riderKey(a.provider_employee_id)).sort().join('|');
   if((!r.ids.length||(!unchanged&&existing.length))&&remarks.length<3)throw new FleetReportError('Add a short reason when clearing or correcting an assignment.',400);
   const associates=r.ids.map((id:unknown)=>{if(typeof id!=='string')throw new FleetReportError('Invalid rider ID.',400);const o=d.options.find(o=>o.id===riderKey(id)&&riderAvailableAt(o,v.station_code));if(!o)throw new FleetReportError('Rider is no longer available. Refresh the list.',409);if(seen.has(o.id))throw new FleetReportError('The same rider cannot be assigned to two vans on one day.',409);seen.add(o.id);return{provider_id:o.id,name:o.name};});
-  return{vehicle_id:v.id,station_code:v.station_code,expected_ids:[...r.expectedIds].sort(),expected_revision:r.expectedRevision??null,associates,remarks};
+  return{vehicle_id:v.id,station_code:v.station_code,expected_ids:[...r.expectedIds].sort(),expected_revision:r.expectedRevision??null,associates,remarks,day_status:dayStatus||null};
  });
  const result=await supabaseAdmin!.rpc('fleet_confirm_da_day',{p_company:company,p_actor:auth.userId,p_date:b.date,p_rows:rows});
  if(result.error){if(result.error.code==='23505')throw new FleetReportError('A selected rider already belongs to another vehicle on this date. Select both vehicles to move the mapping, or correct the existing mapping first.',409);if(result.error.message.includes('changed'))throw new FleetReportError('Assignments or vehicle placement changed. Refresh before saving.',409);throw new FleetReportError('Could not confirm mappings. Nothing in this batch was saved.');}
