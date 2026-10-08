@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {allocateCombinedProductionThresholds} from '../../../../src/lib/workforce-production-threshold.ts';
+import {reconcileOwnProduction} from './own-production-breakdown.ts';
 
 const compiled=ts.transpileModule(readFileSync(new URL('./workforce-own-adjustments.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {ownAdjustmentLedger,loadOwnAdjustmentLedger}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
@@ -211,6 +212,7 @@ test('route adds provider attendance heads once while production remains shipmen
  assert.equal(body.summary.baseAmount,1350);
  assert.equal(body.earnings[0].production.find(line=>line.label==='Delivery').amount,150);
  assert.equal(body.earnings[0].production.find(line=>line.label==='Fixed pay per day').amount,1200);
+ assert.doesNotThrow(()=>reconcileOwnProduction(body.earnings,body.summary));
 });
 
 test('route applies one monthly combined minimum across provider IDs and never falls back to a rate card',async()=>{

@@ -10,6 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadStablePayoutWorksheet } from "@/lib/stable-payout-worksheet";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { createWorkforcePayoutReviewToken, payoutReviewPresentation } from "@/lib/workforce-payout-review-token";
@@ -126,30 +127,21 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const pageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const dependencyBefore = audience === "workforce"
-    ? await workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate)
-    : { hash: "", error: null as string | null };
   const loaded = audience === "helpers"
-    ? await loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
-    : await loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate);
-  const dependencyAfter = audience === "workforce"
-    ? await workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate)
-    : dependencyBefore;
-  const dependencyError = audience === "workforce"
-    ? dependencyBefore.error || dependencyAfter.error
-      || (dependencyBefore.hash !== dependencyAfter.hash
-        ? "Payout inputs changed while this worksheet was loading. Refresh to review the latest amounts."
-        : null)
-    : null;
-  const reviewed = loaded.error || dependencyError || (audience === "workforce" && !dependencyAfter.hash)
-    ? { rows: loaded.rows, error: loaded.error || dependencyError || "Payout worksheet version is unavailable." }
+    ? { ...(await loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)), dependencyHash: "" }
+    : await loadStablePayoutWorksheet({
+      loadRows: () => loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate),
+      loadDependency: () => workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate)
+    });
+  const reviewed = loaded.error || (audience === "workforce" && !loaded.dependencyHash)
+    ? { rows: loaded.rows, error: loaded.error || "Payout worksheet version is unavailable." }
     : await withPayoutReviewStatuses(
       companyId,
       audience,
       period.fromDate,
       period.toDate,
       loaded.rows,
-      audience === "workforce" ? dependencyAfter.hash ?? "" : ""
+      audience === "workforce" ? loaded.dependencyHash ?? "" : ""
     );
   const rows = reviewed.rows;
   const error = reviewed.error;
