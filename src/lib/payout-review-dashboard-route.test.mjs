@@ -32,8 +32,12 @@ test("Dashboard exposes a minimal terminal payout-dispute decision flow", () => 
     accessPages,
     /seedTargetPermissionsFromSources\(supabase, companyId, \["workforce_payouts"\], "workforce_payout_disputes"\)/
   );
-  assert.match(authorization, /workforce_payouts", "workforce_payout_disputes", "workforce_advances/);
-  assert.match(permissionMatrix, /workforce_payouts", "workforce_payout_disputes", "workforce_advances/);
+  assert.match(
+    accessPages,
+    /seedTargetPermissionsFromSources\(supabase, companyId, \["workforce_payouts"\], "payment_recoveries", true\)/
+  );
+  assert.match(authorization, /workforce_payouts", "payment_recoveries", "workforce_payout_disputes", "workforce_advances/);
+  assert.match(permissionMatrix, /workforce_payouts", "payment_recoveries", "workforce_payout_disputes", "workforce_advances/);
   assert.match(desk, /auth\.hasAllLocationAccess \? null : auth\.locationScopeIds/);
   assert.match(page, /role=\{searchParams\.error \? "alert" : "status"\}/);
   assert.match(desk, /decodePayoutReviewReason\(dispute\.reason\)/);

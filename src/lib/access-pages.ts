@@ -93,6 +93,7 @@ export const accessPages = [
   { code: "workforce_payouts", name: "Workforce Payouts", sort_order: 110 },
   { code: "workforce_payout_disputes", name: "Workforce Payout Disputes", sort_order: 111 },
   { code: "workforce_advances", name: "Workforce Advance Register", sort_order: 112 },
+  { code: "payment_recoveries", name: "Payment Recovery", sort_order: 113 },
   { code: "trash", name: "Trash", sort_order: 107 },
   { code: "notifications_whatsapp", name: "WhatsApp Notifications", sort_order: 108 },
   { code: "notifications_history", name: "Notification History", sort_order: 109 },
@@ -352,7 +353,8 @@ async function seedTargetPermissionsFromSources(
   supabase: SupabaseClient,
   companyId: string,
   sourceCodes: string[],
-  targetCode: string
+  targetCode: string,
+  viewOnly = false
 ) {
   const pages = await getPagesByCodes(supabase, companyId, [...sourceCodes, targetCode]);
   const targetPage = pages.get(targetCode);
@@ -375,8 +377,8 @@ async function seedTargetPermissionsFromSources(
     const current = byRole.get(grant.role_id) ?? { can_view: false, can_add: false, can_edit: false };
     byRole.set(grant.role_id, {
       can_view: current.can_view || grant.can_view || grant.can_add || grant.can_edit,
-      can_add: current.can_add || grant.can_add,
-      can_edit: current.can_edit || grant.can_edit
+      can_add: viewOnly ? false : current.can_add || grant.can_add,
+      can_edit: viewOnly ? false : current.can_edit || grant.can_edit
     });
   });
 
@@ -543,6 +545,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["designations"], "workforce_whatsapp");
     await seedTargetPermissionsFromSources(supabase, companyId, ["imports"], "master_imports");
     await seedTargetPermissionsFromSources(supabase, companyId, ["attendance_reports"], "raw_punch_reports");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "payment_recoveries", true);
     await seedTargetPermissionsFromSources(supabase, companyId, ["workforce_payouts"], "workforce_payout_disputes");
   }
 
