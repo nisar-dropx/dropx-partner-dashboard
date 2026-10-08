@@ -27,13 +27,20 @@ test("advance selection also rejects duplicate loader rows for the same Workforc
 });
 
 test("payout UI separates one-row advance recovery from complete-location notification selection", () => {
+  assert.match(payoutTable, /import\s*\{\s*isWorkforcePayoutDisplayPublishable\s*\}\s*from\s*["']@\/lib\/workforce-payout-publication-eligibility["']/);
+  assert.match(
+    payoutTable,
+    /function\s+canSendPayoutForReview\(row:[^)]+,\s*audience:[^)]+\)[\s\S]*?audience\s*===\s*["']workforce["']\s*\?\s*isWorkforcePayoutDisplayPublishable\(row\.status\)\s*:\s*row\.status\s*===\s*["']Ready for review["']\s*\|\|\s*row\.status\s*===\s*["']Returned["']/,
+    "Workforce selection must use shared zero-payout eligibility while Helper selection remains Ready/Returned only."
+  );
   assert.match(payoutTable, /advanceSelectionConflictIds\s*=\s*useMemo\(\(\)\s*=>\s*duplicateAdvanceWorkforceIds\(advanceSelectedRows\)/);
   assert.match(payoutTable, /if\s*\(hasAdvanceSelectionConflict\)[\s\S]*?Select one location row per Workforce member[\s\S]*?return;/);
   assert.match(payoutTable, /disabled=\{!advanceSelectedRows\.length\s*\|\|\s*hasAdvanceSelectionConflict/);
   assert.match(payoutTable, /title=\{hasAdvanceSelectionConflict\s*\?\s*["']Advance deduction requires one location row per Workforce member\./);
-  assert.match(payoutTable, /Send Notification requires every Ready for review or Returned location row/i);
+  assert.match(payoutTable, /Send Notification requires every publishable location row/i);
   assert.match(payoutTable, /maxActionSelection\s*=\s*audience\s*===\s*["']workforce["']\s*\?\s*MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION\s*:\s*MAX_REVIEW_SELECTION/);
   assert.match(payoutTable, /actionSelectionTarget\s*=\s*useMemo\(\(\)\s*=>\s*selectable\.slice\(0,\s*maxActionSelection\)/);
   assert.match(payoutTable, /setSelected\(new Set\(actionSelectionTarget\.map\(\(row\)\s*=>\s*row\.id\)\)\)/);
+  assert.match(payoutTable, /selectedRows\.filter\(\(row\)\s*=>\s*canSendPayoutForReview\(row,\s*audience\)\)/);
   assert.match(payoutTable, /items:\s*reviewSelectedRows\.map/);
 });

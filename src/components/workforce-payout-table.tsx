@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "@/lib/workforce-payout-filters";
 import { duplicateAdvanceWorkforceIds } from "@/lib/workforce-payout-action-selection";
+import { isWorkforcePayoutDisplayPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import { MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION } from "@/lib/workforce-payout-publication-limits";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
@@ -70,9 +71,11 @@ function workDaysValue(value: number, source: string) { return source.toLowerCas
 function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
 const MAX_REVIEW_SELECTION = 1000;
 const ADVANCE_DEDUCTION_LOCKED_STATUSES = new Set(["approved", "paid", "finalized", "finalised"]);
-function canSendPayoutForReview(row: WorkforcePayoutRow) {
+function canSendPayoutForReview(row: WorkforcePayoutRow, audience: "workforce" | "helpers") {
   return Boolean(row.reviewSubjectId && row.locationId && row.reviewToken && row.paymentDetailsAvailable)
-    && (row.status === "Ready for review" || row.status === "Returned");
+    && (audience === "workforce"
+      ? isWorkforcePayoutDisplayPublishable(row.status)
+      : row.status === "Ready for review" || row.status === "Returned");
 }
 function canDeductAdvanceFromPayout(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.paymentDetailsAvailable)
@@ -221,11 +224,11 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const selectable = useMemo(() => filtered.filter((row) => ((canPublish || canReviewHelpers) && canSendPayoutForReview(row))
-    || (canDeductAdvances && canDeductAdvanceFromPayout(row))), [canDeductAdvances, canPublish, canReviewHelpers, filtered]);
+  const selectable = useMemo(() => filtered.filter((row) => ((canPublish || canReviewHelpers) && canSendPayoutForReview(row, audience))
+    || (canDeductAdvances && canDeductAdvanceFromPayout(row))), [audience, canDeductAdvances, canPublish, canReviewHelpers, filtered]);
   const selectableIds = useMemo(() => new Set(selectable.map((row) => row.id)), [selectable]);
   const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
-  const reviewSelectedRows = useMemo(() => selectedRows.filter(canSendPayoutForReview), [selectedRows]);
+  const reviewSelectedRows = useMemo(() => selectedRows.filter((row) => canSendPayoutForReview(row, audience)), [audience, selectedRows]);
   const advanceSelectedRows = useMemo(() => selectedRows.filter(canDeductAdvanceFromPayout), [selectedRows]);
   const advanceSelectionConflictIds = useMemo(() => duplicateAdvanceWorkforceIds(advanceSelectedRows), [advanceSelectedRows]);
   const hasAdvanceSelectionConflict = advanceSelectionConflictIds.size > 0;
@@ -350,7 +353,9 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   async function sendNotification() {
     if (!selectedRows.length || reviewState.busy) return;
     if (hasNonReviewSelection) {
-      setReviewState({ busy: false, error: `Some selected payouts are not Ready for review or Returned. Deselect them before ${audience === "workforce" ? "sending notifications" : "sending for review"}.`, notice: "" });
+      setReviewState({ busy: false, error: audience === "workforce"
+        ? "Some selected payouts do not have a complete payment setup. Deselect them before sending notifications."
+        : "Some selected payouts are not Ready for review or Returned. Deselect them before sending for review.", notice: "" });
       return;
     }
     if (audience === "workforce") {
@@ -452,15 +457,15 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
         {showSelection ? <span className="payout-result-count">Up to {maxActionSelection.toLocaleString("en-IN")} payouts per action.</span> : null}
-        {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || reviewState.busy || advanceState.busy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every Ready for review or Returned location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
-        {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !selectedRows.length || hasNonReviewSelection || reviewState.busy || advanceState.busy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : hasNonReviewSelection ? "Deselect payouts that are not Ready for review or Returned." : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${selectedRows.length ? ` (${selectedRows.length})` : ""}`}</button> : null}
+        {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || reviewState.busy || advanceState.busy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
+        {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !selectedRows.length || hasNonReviewSelection || reviewState.busy || advanceState.busy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : hasNonReviewSelection ? audience === "workforce" ? "Deselect payouts without a complete payment setup." : "Deselect payouts that are not Ready for review or Returned." : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${selectedRows.length ? ` (${selectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" type="button" onClick={exportRows}>Export full CSV</button>
       </div>
     </div>
     {reviewState.error || reviewState.notice ? <div aria-live="polite" className={`payout-inline-message ${reviewState.error ? "error" : "success"}`}>{reviewState.error || reviewState.notice}</div> : null}
-    {canEdit && audience === "workforce" && !canPublishNotifications ? <div className="payout-inline-message">Send Notification requires all-location access because every Ready for review or Returned location row for a DropX ID must be published and frozen together.</div> : null}
+    {canEdit && audience === "workforce" && !canPublishNotifications ? <div className="payout-inline-message">Send Notification requires all-location access because every publishable location row for a DropX ID must be published and frozen together.</div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
-    {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every Ready for review or Returned location row, so the extra row may be required for publication.</div> : null}
+    {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row, so the extra row may be required for publication.</div> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
       <PayoutMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />
@@ -499,8 +504,8 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
             const selectionTitle = actionSelectionLimitReached && !selected.has(row.id)
               ? `Maximum ${maxActionSelection.toLocaleString("en-IN")} payouts selected`
               : hasRowAdvanceSelectionConflict
-                ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all Ready for review or Returned location rows."
-                : !canSendPayoutForReview(row) && canDeductAdvances && canDeductAdvanceFromPayout(row)
+                ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all publishable location rows."
+                : !canSendPayoutForReview(row, audience) && canDeductAdvances && canDeductAdvanceFromPayout(row)
                   ? "Available for advance deduction only."
                   : undefined;
             const attendanceRanges = [...new Map(row.dailyBreakdown.flatMap((day) => day.attendanceRange ? [[

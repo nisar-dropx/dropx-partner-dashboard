@@ -33,8 +33,17 @@ assert.doesNotMatch(routeSource, /item\?\.snapshot/);
 assert.match(routeSource, /selected more than once/);
 assert.match(routeSource, /workforcePayoutReviewTokenDetails/);
 assert.match(routeSource, /expected_status/);
-assert.match(routeSource, /companyWide\.rows/);
-assert.match(routeSource, /Select every Ready for review or Returned location row/);
+assert.match(routeSource, /loadStablePayoutWorksheet/);
+assert.match(routeSource, /workforcePayoutCalculationHash/);
+assert.match(routeSource, /item\.token\?\.calculationHash/);
+assert.match(routeSource, /isWorkforcePayoutCalculationPublishable\(row\?\.status\)/);
+assert.match(routeSource, /loaded\.rows[\s\S]*?isWorkforcePayoutCalculationPublishable\(row\.status\)/);
+assert.match(routeSource, /Select every publishable location row/);
+assert.doesNotMatch(
+  routeSource,
+  /dependencyBefore\.hash\s*!==\s*expectedDependencyHash|dependencyAfter\.hash\s*!==\s*expectedDependencyHash/,
+  "Unrelated company-wide revision churn must not reject rows whose signed calculation hash is unchanged."
+);
 assert.match(routeSource, /if \(!authorization\.hasAllLocationAccess\)/);
 assert.match(pageSource, /canPublishNotifications=\{authorization\.hasAllLocationAccess\}/);
 assert.match(
@@ -71,6 +80,7 @@ assert.match(routeSource, /workforce_send_payouts_for_review/);
 assert.match(tableSource, /audience === "workforce" \? "Send Notification" : "Send for review"/);
 assert.match(tableSource, /const canReviewHelpers = canEdit && audience === "helpers"/);
 assert.match(tableSource, /canPublish \|\| canReviewHelpers/);
+assert.match(tableSource, /audience === "workforce"[\s\S]*?isWorkforcePayoutDisplayPublishable\(row\.status\)[\s\S]*?row\.status === "Ready for review" \|\| row\.status === "Returned"/);
 assert.match(pageSource, /loadStablePayoutWorksheet/);
 assert.match(pageSource, /audience === "workforce" && !loaded\.dependencyHash/);
 assert.match(publicationMigration, /workforce_publish_payout_notifications/);

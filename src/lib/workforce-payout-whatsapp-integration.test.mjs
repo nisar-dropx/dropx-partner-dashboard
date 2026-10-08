@@ -81,6 +81,27 @@ test("App-only payout publication does not require Meta readiness or a mobile nu
   assert.match(publisher, /whatsapp_notification_enabled: whatsappNotificationEnabled/);
 });
 
+test("Workforce publication accepts configured zero payouts without weakening stale-row protection", () => {
+  const publisher = read("../app/api/payments/workforce-payouts/send-review/route.ts");
+  assert.match(publisher, /loadStablePayoutWorksheet\(\{[\s\S]*?loadRows:\s*\(\)\s*=>\s*loadWorkforcePayoutRows[\s\S]*?loadDependency:\s*\(\)\s*=>\s*workforcePayoutDependencyHash/);
+  assert.match(
+    publisher,
+    /selected\.some\(\(\{\s*row\s*\}\)\s*=>\s*!row\?\.paymentDetailsAvailable\s*\|\|\s*!isWorkforcePayoutCalculationPublishable\(row\?\.status\)\)/,
+    "Configured Workforce rows must be gated by shared publishability, not positive amount or attendance."
+  );
+  assert.match(
+    publisher,
+    /selected\.some\(\(\{\s*item,\s*row\s*\}\)\s*=>\s*!item\.token\?\.calculationHash[\s\S]*?workforcePayoutCalculationHash\(row!,\s*periodStart,\s*periodEnd\)\s*!==\s*item\.token\.calculationHash/,
+    "The freshly loaded selected row must still match the calculation hash signed into its review token."
+  );
+  assert.match(publisher, /loaded\.rows[\s\S]*?isWorkforcePayoutCalculationPublishable\(row\.status\)[\s\S]*?Select every publishable location row/);
+  assert.doesNotMatch(
+    publisher,
+    /selected\.some\(\(\{\s*row\s*\}\)[\s\S]{0,240}(?:gross(?:Payment|Amount)|net(?:Pay|Amount)|workDays|attendance)\s*(?:>|===?)\s*0/,
+    "Zero amount, work days, and attendance must not independently block a configured Workforce payout."
+  );
+});
+
 test("delivery consumes frozen publication configuration and supports targeted processing", () => {
   const worker = read("./payout-review-notifications.ts");
   assert.match(worker, /notification_config_snapshot/);

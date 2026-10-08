@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadStablePayoutWorksheet } from "@/lib/stable-payout-worksheet";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
+import { workforcePayoutCalculationHash } from "@/lib/workforce-payout-publication";
 import { createWorkforcePayoutReviewToken, payoutReviewPresentation } from "@/lib/workforce-payout-review-token";
 
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -96,7 +97,7 @@ async function withPayoutReviewStatuses(
         ? `${row.reviewSubjectId}|${row.locationId}`
         : null;
       const reviewStatus = subjectKey ? statusBySubject.get(subjectKey) : null;
-      const presentation = payoutReviewPresentation(row.status, reviewStatus);
+      const presentation = payoutReviewPresentation(row.status, reviewStatus, subjectType);
       const status = presentation.status === "Under Review" && subjectKey
         ? publishedStatus(publicationBySubject.get(subjectKey)) ?? presentation.status
         : presentation.status;
@@ -110,7 +111,10 @@ async function withPayoutReviewStatuses(
           periodStart: fromDate,
           periodEnd: toDate,
           status: presentation.tokenStatus,
-          dependencyHash
+          dependencyHash,
+          calculationHash: audience === "workforce"
+            ? workforcePayoutCalculationHash(row, fromDate, toDate)
+            : null
         })
         : null;
       return { ...row, status, reviewToken };

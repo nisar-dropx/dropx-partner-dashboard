@@ -125,3 +125,13 @@ export function buildWorkforcePayoutPublicationSnapshot(
 export function workforcePayoutPublicationSnapshotHash(snapshot: ReturnType<typeof buildWorkforcePayoutPublicationSnapshot>) {
   return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
 }
+
+export function workforcePayoutCalculationHash(
+  row: WorkforcePayoutRow,
+  periodStart: string,
+  periodEnd: string
+) {
+  return workforcePayoutPublicationSnapshotHash(
+    buildWorkforcePayoutPublicationSnapshot(row, periodStart, periodEnd, "")
+  );
+}

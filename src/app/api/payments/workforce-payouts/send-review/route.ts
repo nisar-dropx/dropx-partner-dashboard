@@ -6,10 +6,13 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { processPayoutReviewNotifications } from "@/lib/payout-review-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { processWorkforcePayoutAppNotifications } from "@/lib/workforce-payout-app-notifications";
+import { loadStablePayoutWorksheet } from "@/lib/stable-payout-worksheet";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
+import { isWorkforcePayoutCalculationPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import {
   buildWorkforcePayoutPublicationSnapshot,
+  workforcePayoutCalculationHash,
   workforcePayoutPublicationSnapshotHash
 } from "@/lib/workforce-payout-publication";
 import {
@@ -325,26 +328,13 @@ export async function POST(request: Request) {
     if (dependencyHashes.size !== 1) {
       return responseError("The selected payouts came from different worksheet versions. Refresh the page and select them again.", 409);
     }
-    const expectedDependencyHash = [...dependencyHashes][0];
-    const dependencyBefore = await workforcePayoutDependencyHash(companyId, periodStart, periodEnd);
-    if (dependencyBefore.error || dependencyBefore.hash !== expectedDependencyHash) {
-      return responseError("Payout inputs changed after this worksheet was displayed. Refresh and review the recalculated amounts.", 409);
-    }
-
-    const loaded = await loadWorkforcePayoutRows(companyId, authorization, periodStart, periodEnd);
+    const loaded = await loadStablePayoutWorksheet({
+      loadRows: () => loadWorkforcePayoutRows(companyId, authorization, periodStart, periodEnd),
+      loadDependency: () => workforcePayoutDependencyHash(companyId, periodStart, periodEnd)
+    });
     if (loaded.error) return responseError(loaded.error, 400);
-    const companyWide = authorization.hasAllLocationAccess
-      ? loaded
-      : await loadWorkforcePayoutRows(companyId, {
-        ...authorization,
-        hasAllLocationAccess: true,
-        locationScopeIds: []
-      }, periodStart, periodEnd);
-    if (companyWide.error) return responseError(companyWide.error, 400);
-    const dependencyAfter = await workforcePayoutDependencyHash(companyId, periodStart, periodEnd);
-    if (dependencyAfter.error || dependencyAfter.hash !== expectedDependencyHash) {
-      return responseError("Payout inputs changed while publishing. Refresh and review the recalculated amounts.", 409);
-    }
+    const expectedDependencyHash = loaded.dependencyHash;
+    if (!expectedDependencyHash) return responseError("Payout worksheet version is unavailable.", 409);
 
     const rowBySubjectLocation = new Map(loaded.rows.map((row) => [
       `${row.reviewSubjectId}|${row.locationId}`,
@@ -354,24 +344,28 @@ export async function POST(request: Request) {
       item,
       row: rowBySubjectLocation.get(`${item.subject_id}|${item.location_id}`)
     }));
-    if (selected.some(({ row }) => !row?.paymentDetailsAvailable || !["Ready for review", "Returned"].includes(row?.status ?? ""))) {
-      return responseError("One or more payouts are no longer ready. Refresh and review the recalculated amounts.", 409);
+    if (selected.some(({ row }) => !row?.paymentDetailsAvailable || !isWorkforcePayoutCalculationPublishable(row?.status))) {
+      return responseError("One or more payouts no longer have a complete payment setup. Refresh and review the worksheet.", 409);
+    }
+    if (selected.some(({ item, row }) => !item.token?.calculationHash
+      || workforcePayoutCalculationHash(row!, periodStart, periodEnd) !== item.token.calculationHash)) {
+      return responseError("One or more selected payout amounts or payment details changed after this worksheet was displayed. Refresh and review the recalculated amounts.", 409);
     }
 
     const selectedSubjects = new Set(verified.map((item) => item.subject_id));
     for (const subjectId of selectedSubjects) {
-      const expectedLocations = new Set(companyWide.rows
+      const expectedLocations = new Set(loaded.rows
         .filter((row) => row.reviewSubjectId === subjectId
           && row.locationId
           && row.paymentDetailsAvailable
-          && (row.status === "Ready for review" || row.status === "Returned"))
+          && isWorkforcePayoutCalculationPublishable(row.status))
         .map((row) => String(row.locationId)));
       const submittedLocations = new Set(verified
         .filter((item) => item.subject_id === subjectId)
         .map((item) => String(item.location_id)));
       if (expectedLocations.size !== submittedLocations.size
         || [...expectedLocations].some((locationId) => !submittedLocations.has(locationId))) {
-        return responseError("Select every Ready for review or Returned location row for each DropX ID before sending its notification.", 409);
+        return responseError("Select every publishable location row for each DropX ID before sending its notification.", 409);
       }
     }
 

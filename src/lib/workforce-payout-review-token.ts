@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { isWorkforcePayoutCalculationPublishable } from "./workforce-payout-publication-eligibility.ts";
+
 type ReviewTokenPayload = {
   c: string;
   t: "workforce" | "helper";
@@ -9,6 +11,7 @@ type ReviewTokenPayload = {
   e: string;
   st: "ready" | "returned";
   h: string;
+  r: string;
   iat: number;
 };
 
@@ -34,6 +37,7 @@ export function createWorkforcePayoutReviewToken(input: {
   periodEnd: string;
   status: "Ready for review" | "Returned";
   dependencyHash?: string | null;
+  calculationHash?: string | null;
 }) {
   if (!secret()) return null;
   const payload: ReviewTokenPayload = {
@@ -45,13 +49,18 @@ export function createWorkforcePayoutReviewToken(input: {
     e: input.periodEnd,
     st: input.status === "Returned" ? "returned" : "ready",
     h: String(input.dependencyHash ?? ""),
+    r: String(input.calculationHash ?? ""),
     iat: Math.floor(Date.now() / 1000)
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${encoded}.${signature(encoded)}`;
 }
 
-export function payoutReviewPresentation(calculatedStatus: string, persistedStatus?: string | null): {
+export function payoutReviewPresentation(
+  calculatedStatus: string,
+  persistedStatus?: string | null,
+  subjectType: "workforce" | "helper" = "helper"
+): {
   status: string;
   tokenStatus: WorkforcePayoutReviewDisplayStatus | null;
 } {
@@ -60,9 +69,11 @@ export function payoutReviewPresentation(calculatedStatus: string, persistedStat
       : persistedStatus === "returned" ? "Returned"
         : persistedStatus === "cancelled" ? "Cancelled"
           : calculatedStatus;
-  const tokenStatus = calculatedStatus === "Ready for review"
-    && (status === "Ready for review" || status === "Returned")
-    ? status
+  const calculationPublishable = calculatedStatus === "Ready for review"
+    || (subjectType === "workforce" && isWorkforcePayoutCalculationPublishable(calculatedStatus));
+  const tokenStatus = calculationPublishable
+    && (status === calculatedStatus || status === "Ready for review" || status === "Returned")
+    ? status === "Returned" ? "Returned" : "Ready for review"
     : null;
   return { status, tokenStatus };
 }
@@ -94,11 +105,12 @@ export function workforcePayoutReviewTokenDetails(token: unknown, expected: {
       && payload.e === expected.periodEnd
       && (payload.st === "ready" || payload.st === "returned")
       && typeof payload.h === "string"
+      && typeof payload.r === "string"
       && (expected.dependencyHash == null || payload.h === expected.dependencyHash)
       && Number.isInteger(payload.iat)
       && payload.iat <= now + 60
       && payload.iat >= now - TOKEN_TTL_SECONDS;
-    return valid ? { status: payload.st, dependencyHash: payload.h } : null;
+    return valid ? { status: payload.st, dependencyHash: payload.h, calculationHash: payload.r } : null;
   } catch {
     return null;
   }
