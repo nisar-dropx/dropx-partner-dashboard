@@ -12,6 +12,7 @@ export function FleetMultiSelect({
   onChange,
   options,
   searchable = true,
+  alwaysSearch = false,
   values
 }: {
   allLabel: string;
@@ -20,6 +21,7 @@ export function FleetMultiSelect({
   onChange: (values: string[]) => void;
   options: FleetFilterOption[];
   searchable?: boolean;
+  alwaysSearch?: boolean;
   values: string[];
 }) {
   const [open, setOpen] = useState(false);
@@ -49,21 +51,21 @@ export function FleetMultiSelect({
     onChange(allSelected ? values.filter((value) => !visible.includes(value)) : [...new Set([...values, ...visible])]);
   }
 
-  const selectedOptions = options.filter((option) => selected.has(option.value));
+  const selectedOptions = values.map((value) => options.find((option) => option.value === value) ?? {value, label: "Unavailable selection"});
   const summary = !selectedOptions.length
     ? allLabel
     : selectedOptions.length <= 2
       ? selectedOptions.map((option) => option.label).join(", ")
       : `${selectedOptions.length} selected`;
 
-  return <div className="fc-multi-select" ref={root}>
+  return <div className="fc-multi-select" ref={root} onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); root.current?.querySelector<HTMLButtonElement>("button")?.focus(); } }}>
     <span className="fc-filter-label">{label}</span>
-    <button aria-expanded={open} className={open ? "open" : ""} disabled={disabled} onClick={() => setOpen((value) => !value)} type="button"><span title={summary}>{summary}</span><ChevronDown size={14} /></button>
+    <button aria-label={`${label}: ${summary}`} aria-expanded={open} className={open ? "open" : ""} disabled={disabled} onClick={() => { if (!open) setQuery(""); setOpen((value) => !value); }} type="button"><span title={summary}>{summary}</span><ChevronDown size={14} /></button>
     {open ? <div className="fc-multi-menu">
       <div className="fc-multi-menu-head"><strong>{label}</strong>{values.length ? <button onClick={() => onChange([])} type="button">Clear</button> : <button aria-label="Close" onClick={() => setOpen(false)} type="button"><X size={13} /></button>}</div>
-      {searchable && options.length > 6 ? <label className="fc-multi-search"><Search size={13} /><input autoFocus onChange={(event) => setQuery(event.target.value)} placeholder={`Find ${label.toLowerCase()}`} value={query} /></label> : null}
+      {searchable && (alwaysSearch || options.length > 6) ? <label className="fc-multi-search"><Search size={13} /><input autoFocus onChange={(event) => setQuery(event.target.value)} placeholder={`Find ${label.toLowerCase()}`} value={query} /></label> : null}
       <button className="fc-multi-all" onClick={toggleFiltered} type="button"><span>{filtered.length > 0 && filtered.every((option) => selected.has(option.value)) ? <Check size={12} /> : null}</span><div><strong>Select all shown</strong><small>{filtered.length} options</small></div></button>
-      <div className="fc-multi-options">{filtered.map((option) => <button className={selected.has(option.value) ? "selected" : ""} key={option.value} onClick={() => toggle(option.value)} type="button"><span>{selected.has(option.value) ? <Check size={12} /> : null}</span><div><strong>{option.label}</strong>{option.helper ? <small>{option.helper}</small> : null}</div></button>)}{!filtered.length ? <p>No matching option</p> : null}</div>
+      <div className="fc-multi-options">{filtered.map((option) => <button className={selected.has(option.value) ? "selected" : ""} aria-pressed={selected.has(option.value)} key={option.value} onClick={() => toggle(option.value)} type="button"><span>{selected.has(option.value) ? <Check size={12} /> : null}</span><div><strong>{option.label}</strong>{option.helper ? <small>{option.helper}</small> : null}</div></button>)}{!filtered.length ? <p>No matching option</p> : null}</div>
     </div> : null}
   </div>;
 }
