@@ -103,11 +103,33 @@ test("Workforce publication accepts configured zero payouts and verifies signed 
   );
   assert.match(
     publisher,
-    /result\.error\.message\.includes\(PAYOUT_DEPENDENCY_CHANGED\)[\s\S]*?revalidateWorkforcePayoutPublicationSelections/,
-    "Only the exact atomic dependency conflict should trigger selected-ID recalculation."
+    /const revalidatePublicationEntries = async \(\) => \{[\s\S]*?revalidateWorkforcePayoutPublicationSelections/,
+    "The bounded refresh helper must recalculate only the selected Workforce IDs."
+  );
+  assert.match(
+    publisher,
+    /result\.error\.message\.includes\(PAYOUT_DEPENDENCY_CHANGED\)[\s\S]*?await revalidatePublicationEntries\(\)/,
+    "An atomic dependency conflict must trigger selected-ID recalculation."
   );
   assert.match(revalidator, /loadWorkforcePayoutRows\([\s\S]*?\{ workforceIds \}/);
   assert.match(revalidator, /maxAttempts:\s*3/);
+});
+
+test("a continuously updating full worksheet remains usable but cannot publish before selected-ID revalidation", () => {
+  const page = read("../app/payments/workforce-payouts/page.tsx");
+  const publisher = read("../app/api/payments/workforce-payouts/send-review/route.ts");
+  assert.match(page, /loadStablePayoutWorksheet\(\{[\s\S]*?allowProvisionalOnChurn:\s*true/);
+  assert.match(page, /isProvisionalPayoutDependencyHash\(loaded\.dependencyHash\)/);
+  assert.match(page, /Every selected payout will be rechecked before its notification is sent/);
+
+  const guard = publisher.indexOf("if (isProvisionalPayoutDependencyHash(expectedDependencyHash))");
+  const refresh = publisher.indexOf("await revalidatePublicationEntries()", guard);
+  const preflight = publisher.indexOf("await notificationPreflight", guard);
+  const atomicPublish = publisher.indexOf('supabaseAdmin.rpc("workforce_publish_payout_notifications"', guard);
+  assert.ok(guard >= 0, "The publisher must recognize a provisional worksheet token.");
+  assert.ok(refresh > guard, "A provisional worksheet must trigger selected-ID revalidation.");
+  assert.ok(preflight > refresh, "Notification values must come from the revalidated selected rows.");
+  assert.ok(atomicPublish > preflight, "The atomic publication call must happen only after selected-ID revalidation.");
 });
 
 test("delivery consumes frozen publication configuration and supports targeted processing", () => {

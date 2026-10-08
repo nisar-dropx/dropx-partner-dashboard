@@ -1,12 +1,20 @@
+import { randomUUID } from "node:crypto";
+
 export type PayoutDependencyVersion = { hash: string | null; error: string | null };
 export type PayoutWorksheetRows<Row> = { rows: Row[]; error: string | null };
 
 export const MAX_PAYOUT_WORKSHEET_LOAD_ATTEMPTS = 2;
+export const PROVISIONAL_PAYOUT_DEPENDENCY_PREFIX = "revalidate:";
+
+export function isProvisionalPayoutDependencyHash(value: string | null | undefined) {
+  return String(value ?? "").startsWith(PROVISIONAL_PAYOUT_DEPENDENCY_PREFIX);
+}
 
 export async function loadStablePayoutWorksheet<Row>(input: {
   loadRows: () => Promise<PayoutWorksheetRows<Row>>;
   loadDependency: () => Promise<PayoutDependencyVersion>;
   maxAttempts?: number;
+  allowProvisionalOnChurn?: boolean;
 }) {
   const maxAttempts = Math.max(1, input.maxAttempts ?? MAX_PAYOUT_WORKSHEET_LOAD_ATTEMPTS);
   let latestRows: Row[] = [];
@@ -36,6 +44,14 @@ export async function loadStablePayoutWorksheet<Row>(input: {
     if (before.hash === after.hash) {
       return { rows: latestRows, error: null as string | null, dependencyHash: after.hash };
     }
+  }
+
+  if (input.allowProvisionalOnChurn) {
+    return {
+      rows: latestRows,
+      error: null as string | null,
+      dependencyHash: `${PROVISIONAL_PAYOUT_DEPENDENCY_PREFIX}${randomUUID()}`
+    };
   }
 
   return {

@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadStablePayoutWorksheet, MAX_PAYOUT_WORKSHEET_LOAD_ATTEMPTS } from "./stable-payout-worksheet.ts";
+import {
+  isProvisionalPayoutDependencyHash,
+  loadStablePayoutWorksheet,
+  MAX_PAYOUT_WORKSHEET_LOAD_ATTEMPTS
+} from "./stable-payout-worksheet.ts";
 
 function versionSequence(...hashes) {
   let index = 0;
@@ -32,18 +36,35 @@ test("a continuously changing worksheet stays blocked after the bounded retry", 
   assert.match(result.error, /still updating/i);
 });
 
+test("a display worksheet can show its latest bounded read while forcing selected-row revalidation", async () => {
+  let loads = 0;
+  const result = await loadStablePayoutWorksheet({
+    loadDependency: versionSequence("A", "B", "B", "C"),
+    loadRows: async () => ({ rows: [{ version: ++loads }], error: null }),
+    allowProvisionalOnChurn: true
+  });
+
+  assert.equal(loads, 2);
+  assert.deepEqual(result.rows, [{ version: 2 }]);
+  assert.equal(result.error, null);
+  assert.equal(isProvisionalPayoutDependencyHash(result.dependencyHash), true);
+  assert.match(result.dependencyHash, /^revalidate:[0-9a-f-]{36}$/i);
+});
+
 test("database and loader errors remain terminal instead of being retried", async () => {
   let loads = 0;
   const dependencyFailure = await loadStablePayoutWorksheet({
     loadDependency: async () => ({ hash: null, error: "Version unavailable" }),
-    loadRows: async () => ({ rows: [{ version: ++loads }], error: null })
+    loadRows: async () => ({ rows: [{ version: ++loads }], error: null }),
+    allowProvisionalOnChurn: true
   });
   assert.equal(loads, 0);
   assert.equal(dependencyFailure.error, "Version unavailable");
 
   const loaderFailure = await loadStablePayoutWorksheet({
     loadDependency: versionSequence("A"),
-    loadRows: async () => ({ rows: [{ version: ++loads }], error: "Unable to calculate payouts" })
+    loadRows: async () => ({ rows: [{ version: ++loads }], error: "Unable to calculate payouts" }),
+    allowProvisionalOnChurn: true
   });
   assert.equal(loads, 1);
   assert.equal(loaderFailure.error, "Unable to calculate payouts");

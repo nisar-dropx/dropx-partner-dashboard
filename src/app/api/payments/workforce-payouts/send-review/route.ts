@@ -20,6 +20,7 @@ import {
   WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK
 } from "@/lib/workforce-payout-publication-limits";
 import { workforcePayoutReviewTokenDetails } from "@/lib/workforce-payout-review-token";
+import { isProvisionalPayoutDependencyHash } from "@/lib/stable-payout-worksheet";
 import {
   buildWorkforcePayoutTemplateComponents,
   normalizeWorkforceWhatsAppRecipient,
@@ -391,14 +392,61 @@ export async function POST(request: Request) {
       }
     }
 
-    const reviewUntil = new Date(Date.now() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const snapshots = selected.map(({ item, snapshot }) => ({
-      workforceId: item.subject_id,
-      snapshot: snapshot!
+    let publicationEntries = selected.map(({ item, snapshot }) => ({
+      item,
+      snapshot: snapshot!,
+      snapshotHash: item.token!.publicationSnapshotHash
     }));
+    const revalidatePublicationEntries = async () => {
+      const refreshed = await revalidateWorkforcePayoutPublicationSelections({
+        authorization,
+        companyId,
+        periodEnd,
+        periodStart,
+        selections: verified.map((item) => ({
+          calculationHash: item.token!.calculationHash,
+          locationId: item.location_id!,
+          locationSetHash: item.token!.locationSetHash,
+          subjectId: item.subject_id
+        }))
+      });
+      if (refreshed.error || !refreshed.dependencyHash) {
+        return {
+          entries: null,
+          dependencyHash: null,
+          error: refreshed.error || "Payout inputs are updating. No notifications were sent; please try again in a moment.",
+          updating: refreshed.updating
+        };
+      }
+      const refreshedByIdentity = new Map(refreshed.entries.map((entry) => [
+        `${entry.subjectId.toLowerCase()}|${entry.locationId.toLowerCase()}`,
+        entry
+      ]));
+      return {
+        entries: verified.map((item) => {
+          const entry = refreshedByIdentity.get(`${item.subject_id.toLowerCase()}|${item.location_id!.toLowerCase()}`);
+          if (!entry) throw new Error("A revalidated Workforce payout is unavailable.");
+          return { item, snapshot: entry.snapshot, snapshotHash: entry.snapshotHash };
+        }),
+        dependencyHash: refreshed.dependencyHash,
+        error: null,
+        updating: false
+      };
+    };
+
+    if (isProvisionalPayoutDependencyHash(expectedDependencyHash)) {
+      const refreshed = await revalidatePublicationEntries();
+      if (refreshed.error || !refreshed.dependencyHash || !refreshed.entries) {
+        return responseError(refreshed.error || "Payout inputs are updating. No notifications were sent; please try again in a moment.", refreshed.updating ? 503 : 409);
+      }
+      publicationEntries = refreshed.entries;
+      expectedDependencyHash = refreshed.dependencyHash;
+    }
+
+    const reviewUntil = new Date(Date.now() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const snapshotsByWorkforce = new Map<string, PublicationSnapshot[]>();
-    snapshots.forEach(({ workforceId, snapshot }) => {
-      snapshotsByWorkforce.set(workforceId, [...(snapshotsByWorkforce.get(workforceId) ?? []), snapshot]);
+    publicationEntries.forEach(({ item, snapshot }) => {
+      snapshotsByWorkforce.set(item.subject_id, [...(snapshotsByWorkforce.get(item.subject_id) ?? []), snapshot]);
     });
     const notificationSnapshots = [...snapshotsByWorkforce].map(([workforceId, grouped]) => ({
       workforceId,
@@ -412,11 +460,6 @@ export async function POST(request: Request) {
         .map((item) => item.location_id!)
         .sort()[0]);
     }
-    let publicationEntries = selected.map(({ item, snapshot }) => ({
-      item,
-      snapshot: snapshot!,
-      snapshotHash: item.token!.publicationSnapshotHash
-    }));
     let publicationResult: any = null;
     let dependencyRevalidations = 0;
     while (true) {
@@ -467,33 +510,14 @@ export async function POST(request: Request) {
         );
       }
 
-      const refreshed = await revalidateWorkforcePayoutPublicationSelections({
-        authorization,
-        companyId,
-        periodEnd,
-        periodStart,
-        selections: verified.map((item) => ({
-          calculationHash: item.token!.calculationHash,
-          locationId: item.location_id!,
-          locationSetHash: item.token!.locationSetHash,
-          subjectId: item.subject_id
-        }))
-      });
-      if (refreshed.error || !refreshed.dependencyHash) {
+      const refreshed = await revalidatePublicationEntries();
+      if (refreshed.error || !refreshed.dependencyHash || !refreshed.entries) {
         return responseError(
           refreshed.error || "Payout inputs are updating. No notifications were sent; please try again in a moment.",
           refreshed.updating ? 503 : 409
         );
       }
-      const refreshedByIdentity = new Map(refreshed.entries.map((entry) => [
-        `${entry.subjectId.toLowerCase()}|${entry.locationId.toLowerCase()}`,
-        entry
-      ]));
-      publicationEntries = verified.map((item) => {
-        const entry = refreshedByIdentity.get(`${item.subject_id.toLowerCase()}|${item.location_id!.toLowerCase()}`);
-        if (!entry) throw new Error("A revalidated Workforce payout is unavailable.");
-        return { item, snapshot: entry.snapshot, snapshotHash: entry.snapshotHash };
-      });
+      publicationEntries = refreshed.entries;
       expectedDependencyHash = refreshed.dependencyHash;
       dependencyRevalidations += 1;
     }

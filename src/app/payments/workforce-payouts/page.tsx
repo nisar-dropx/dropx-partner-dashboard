@@ -10,7 +10,10 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { loadStablePayoutWorksheet } from "@/lib/stable-payout-worksheet";
+import {
+  isProvisionalPayoutDependencyHash,
+  loadStablePayoutWorksheet
+} from "@/lib/stable-payout-worksheet";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { isWorkforcePayoutCalculationPublishable } from "@/lib/workforce-payout-publication-eligibility";
@@ -174,8 +177,11 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     ? { ...(await loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)), dependencyHash: "" }
     : await loadStablePayoutWorksheet({
       loadRows: () => loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate),
-      loadDependency: () => workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate)
+      loadDependency: () => workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate),
+      allowProvisionalOnChurn: true
     });
+  const provisional = audience === "workforce"
+    && isProvisionalPayoutDependencyHash(loaded.dependencyHash);
   const reviewed = loaded.error || (audience === "workforce" && !loaded.dependencyHash)
     ? { rows: loaded.rows, error: loaded.error || "Payout worksheet version is unavailable." }
     : await withPayoutReviewStatuses(
@@ -216,6 +222,9 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         </nav>
       </div>
       {canEdit && audience === "workforce" ? <WorkforcePayoutBulkUpload fromDate={period.fromDate} toDate={period.toDate} /> : null}
+      {provisional && !error
+        ? <section className="panel message-panel warn"><div className="panel-body"><strong>Live payout updates are in progress</strong><p className="subtle">The latest worksheet is shown. Every selected payout will be rechecked before its notification is sent.</p></div></section>
+        : null}
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
         : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} canDeductAdvances={canDeductAdvances} canEdit={canEdit} canPublishNotifications={authorization.hasAllLocationAccess} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
