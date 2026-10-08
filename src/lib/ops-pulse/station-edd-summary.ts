@@ -1,12 +1,12 @@
 import "server-only";
-import { unstable_cache } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import type { EddPackage } from "./edd-worker";
-import { eddCurrentState, type EddVerification } from "./edd-verification";
+import { loadEddLedger } from "./edd-ledger";
 import { stationEddToday, summarizeStationEdd, type StationEddSummary } from "./station-edd";
 
-/** How long one station's counts are shared by every viewer before they are recalculated. */
-export const STATION_EDD_SUMMARY_TTL_SECONDS = 180;
+/** Stored counts older than this are recalculated on request. The background
+ * capture rewrites every station each 15 minutes, so this only happens when a
+ * capture is late or has not run yet (before 06:00 IST). */
+export const STATION_EDD_SUMMARY_MAX_AGE_MS = 20 * 60 * 1000;
 /** Stations read from the ledger at once, per server instance. Keeps the database load flat no matter how many tabs are open. */
 const MAX_PARALLEL_STATIONS = 3;
 
@@ -24,23 +24,6 @@ export type StationEddNetworkSummary = {
 
 type CachedStationSummary = { summary: StationEddSummary; computedAt: string };
 
-// Only the fields the counting rules read. The full `source` document is
-// ~2 KB a row; pulling it for ~215k rows on every page view and every
-// minute per open tab is what saturated the database (2026-09-29, 2026-10).
-const SUMMARY_COLUMNS = [
-  "tracking_id", "source_at", "verified_at", "verification",
-  "state:source->state", "ead:source->ead", "internalEAD:source->internalEAD",
-  "promisedDeliveryDate:source->promisedDeliveryDate", "packageType:source->packageType",
-  "shipOption:source->shipOption", "summaryCheckedAt:source->summaryCheckedAt",
-  "stateUpdatedAt:source->stateUpdatedAt"
-].join(",");
-
-type SummaryRow = {
-  tracking_id: string; source_at: string; verified_at: string | null; verification: EddVerification | null;
-  state: string | null; ead: string | null; internalEAD: string | null; promisedDeliveryDate: string | null;
-  packageType: string | null; shipOption: string | null; summaryCheckedAt: string | null; stateUpdatedAt: string | null;
-};
-
 let activeStations = 0;
 const waitingStations: Array<() => void> = [];
 async function withStationSlot<T>(task: () => Promise<T>): Promise<T> {
@@ -54,38 +37,23 @@ async function withStationSlot<T>(task: () => Promise<T>): Promise<T> {
   }
 }
 
+/** The counts for one station, from the fields the rules read. Shared by the
+ * background capture and the on-request fallback so both store the same numbers. */
+export function stationEddSummaryFromLedger(code: string, ledger: { packages: Parameters<typeof summarizeStationEdd>[1]; fetchedAt: string } | undefined, today: string) {
+  return ledger?.packages?.length ? summarizeStationEdd(code, ledger.packages, ledger.fetchedAt, today) : summarizeStationEdd(code, null, null, today);
+}
+/** Best effort: a failed write only means the next viewer or capture recalculates. */
+export async function saveStationEddSummaries(summaries: StationEddSummary[], computedAt = new Date().toISOString()) {
+  if (!supabaseAdmin || !summaries.length) return;
+  const { error } = await supabaseAdmin.from("edd_station_summaries").upsert(
+    summaries.map(summary => ({ station_code: summary.stationCode, edd_day: summary.today, summary, computed_at: computedAt })), { onConflict: "station_code" });
+  if (error) console.warn("[station-edd-summary] counts were not stored", error.message);
+}
 async function summarizeStationFromLedger(code: string, today: string): Promise<CachedStationSummary> {
-  if (!supabaseAdmin) throw new Error("EDD database is not configured.");
-  const since = new Date(Date.now() - 7 * 86400000).toISOString();
-  const packages: EddPackage[] = [];
-  let fetchedAt: string | null = null;
-  // Same keyset walk as loadEddLedger: one station, ordered by the primary key, no OFFSET and no sort.
-  for (let after = ""; ;) {
-    let query = supabaseAdmin.from("edd_package_ledger").select(SUMMARY_COLUMNS)
-      .eq("station_code", code).gte("last_seen_at", since).order("tracking_id").limit(1000);
-    if (after) query = query.gt("tracking_id", after);
-    const { data, error } = await query;
-    if (error) throw new Error(`Unable to load verified EDD records: ${error.message}`);
-    const page = (data ?? []) as unknown as SummaryRow[];
-    for (const row of page) {
-      const pkg = {
-        state: row.state, ead: row.ead, internalEAD: row.internalEAD, promisedDeliveryDate: row.promisedDeliveryDate,
-        packageType: row.packageType, shipOption: row.shipOption,
-        summaryCheckedAt: row.summaryCheckedAt ?? undefined, stateUpdatedAt: row.stateUpdatedAt,
-        observedStationCode: code, trackingId: row.tracking_id, sourceAt: row.source_at,
-        verifiedAt: row.verified_at, verification: row.verification
-      } as EddPackage;
-      pkg.state = eddCurrentState(pkg);
-      packages.push(pkg);
-      fetchedAt = [fetchedAt ?? row.source_at, row.source_at, row.verified_at || ""].sort().at(-1)!;
-    }
-    if (page.length < 1000) break;
-    after = page[page.length - 1].tracking_id;
-  }
-  return {
-    summary: packages.length ? summarizeStationEdd(code, packages, fetchedAt, today) : summarizeStationEdd(code, null, null, today),
-    computedAt: new Date().toISOString()
-  };
+  const summary = stationEddSummaryFromLedger(code, (await loadEddLedger([code], "counting")).get(code), today);
+  const computedAt = new Date().toISOString();
+  await saveStationEddSummaries([summary], computedAt);
+  return { summary, computedAt };
 }
 
 const inFlight = new Map<string, Promise<CachedStationSummary>>();
@@ -99,26 +67,40 @@ function computeStationSummary(code: string, today: string) {
   return job;
 }
 
-// Shared across every viewer and server instance. `today` is part of the key
-// so the IST day rollover never serves yesterday's cohort.
-const cachedStationSummary = unstable_cache(computeStationSummary, ["station-edd-summary-v1"], { revalidate: STATION_EDD_SUMMARY_TTL_SECONDS });
+/** Counts already stored for today, by station. A read failure is treated as "nothing stored". */
+async function storedStationSummaries(codes: string[], today: string) {
+  const stored = new Map<string, CachedStationSummary>();
+  if (!supabaseAdmin || !codes.length) return stored;
+  const { data, error } = await supabaseAdmin.from("edd_station_summaries").select("station_code,summary,computed_at").in("station_code", codes).eq("edd_day", today);
+  if (error) { console.warn("[station-edd-summary] stored counts could not be read", error.message); return stored; }
+  for (const row of data ?? []) stored.set(row.station_code, { summary: row.summary as StationEddSummary, computedAt: new Date(row.computed_at).toISOString() });
+  return stored;
+}
 
-/** Callers must resolve authorized station codes first. Returns whatever is
- * ready inside the time budget; the rest comes back as `pending` so the
- * caller can ask again instead of holding one long request open. */
+/** Callers must resolve authorized station codes first. Serves the stored
+ * counts; a station with none for today, or only stale ones, is recalculated
+ * inside the time budget and the rest comes back as `pending` so the caller
+ * can ask again instead of holding one long request open. */
 export async function loadStationEddNetworkSummary(authorizedCodes: string[], budgetMs = 20000): Promise<StationEddNetworkSummary> {
   const codes = [...new Set(authorizedCodes)];
   const today = stationEddToday();
   const deadline = Date.now() + budgetMs;
+  const stored = await storedStationSummaries(codes, today);
   const ready = new Map<string, CachedStationSummary>();
+  for (const [code, entry] of stored) if (Date.now() - Date.parse(entry.computedAt) <= STATION_EDD_SUMMARY_MAX_AGE_MS) ready.set(code, entry);
+  const due = codes.filter(code => !ready.has(code));
   const pending = new Set<string>(), failed = new Set<string>();
   let failure: unknown = null, cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_STATIONS, codes.length) }, async () => {
-    while (cursor < codes.length) {
-      const code = codes[cursor++];
+  await Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_STATIONS, due.length) }, async () => {
+    while (cursor < due.length) {
+      const code = due[cursor++];
       if (Date.now() > deadline) { pending.add(code); continue; }
-      try { ready.set(code, await cachedStationSummary(code, today)); }
-      catch (cause) { failure ??= cause; failed.add(code); }
+      try { ready.set(code, await computeStationSummary(code, today)); }
+      catch (cause) {
+        // Older counts from today are better than none; `computedAt` tells the viewer their age.
+        const earlier = stored.get(code);
+        if (earlier) ready.set(code, earlier); else { failure ??= cause; failed.add(code); }
+      }
     }
   }));
   if (!ready.size && failure) throw failure instanceof Error ? failure : new Error("Unable to load EDD backlog.");

@@ -37,34 +37,53 @@ async function eddStationsWithNewObservations() {
   }
   return [...codes];
 }
-export async function loadEddLedger(codes: string[]) {
+/** Everything the counting rules read, without the ~1 KB of address and order detail in `source`. */
+const COUNTING_COLUMNS = ["station_code", "tracking_id", "last_seen_at", "source_at", "verified_at", "verification",
+  ...["state", "ead", "internalEAD", "promisedDeliveryDate", "packageType", "shipOption", "summaryCheckedAt", "stateUpdatedAt", "driverId", "driverName"]
+    .map(field => `${field}:source->${field}`)].join(",");
+const quoted = (value: string) => `"${value.replace(/[\\"]/g, "\\$&")}"`;
+
+/** One station's rows seen in the last seven days.
+ *
+ * Pages follow (last_seen_at, tracking_id) so Postgres walks the
+ * (station_code, last_seen_at) index and only touches rows inside the window
+ * (~20 ms a page). Walking the primary key instead read and discarded every
+ * older row of the station, three of every four: ~4,000 pages from disk and
+ * ~800 ms per 1,000 rows returned, for every page of every station (outage
+ * 2026-10-08). */
+async function readStationLedger(code: string, columns: "full" | "counting"): Promise<LedgerRow[]> {
+  const since = new Date(Date.now()-7*86400000).toISOString();
+  const rows = new Map<string, LedgerRow>();
+  let after: { seen: string; id: string } | null = null;
+  for (;;) {
+    let query = supabaseAdmin!.from("edd_package_ledger")
+      .select(columns === "full" ? "station_code,tracking_id,last_seen_at,source,source_at,verification,verified_at" : COUNTING_COLUMNS)
+      .eq("station_code", code).gte("last_seen_at", after?.seen ?? since)
+      .order("last_seen_at").order("tracking_id").limit(1000);
+    // The database's own timestamp text keeps microseconds; a JS Date would not.
+    if (after) query = query.or(`last_seen_at.gt.${quoted(after.seen)},tracking_id.gt.${quoted(after.id)}`);
+    const { data, error } = await query;
+    if (error) throw new Error(`Unable to load verified EDD records: ${error.message}`);
+    const page = (data ?? []) as unknown as Array<Record<string, unknown> & { tracking_id: string; last_seen_at: string }>;
+    for (const row of page) {
+      const { state, ead, internalEAD, promisedDeliveryDate, packageType, shipOption, summaryCheckedAt, stateUpdatedAt, driverId, driverName, ...rest } = row;
+      // A row re-ingested mid-walk moves later and is read again; the later copy is current.
+      rows.set(row.tracking_id, (columns === "full" ? row : { ...rest, source: { state, ead, internalEAD, promisedDeliveryDate, packageType, shipOption,
+        summaryCheckedAt: summaryCheckedAt ?? undefined, stateUpdatedAt, driverId, driverName } }) as unknown as LedgerRow);
+    }
+    if (page.length < 1000) break;
+    const last = page[page.length - 1];
+    after = { seen: last.last_seen_at, id: last.tracking_id };
+  }
+  return [...rows.values()].sort((a, b) => a.tracking_id < b.tracking_id ? -1 : a.tracking_id > b.tracking_id ? 1 : 0);
+}
+/** `counting` returns only the fields the EDD rules read; use it wherever packages are counted, not listed. */
+export async function loadEddLedger(codes: string[], columns: "full" | "counting" = "full") {
   if (!supabaseAdmin) throw new Error("EDD database is not configured.");
   const result = new Map<string, { packages: EddPackage[]; fetchedAt: string }>();
   if (!codes.length) return result;
-  // One station at a time, paged by tracking_id after the last row (keyset),
-  // so Postgres walks the (station_code, tracking_id) primary key in order.
-  // The old all-stations "order by station_code, tracking_id" + OFFSET query
-  // sorted every matching row (with its large JSON columns) on each page; it
-  // spilled to disk and wrote ~14 GB of temp files an hour (2026-09-29),
-  // which is what hung the whole database.
-  const since = new Date(Date.now()-7*86400000).toISOString();
   const rows: LedgerRow[] = [];
-  for (const code of [...new Set(codes)]) {
-    let after = "";
-    for (;;) {
-      let query = supabaseAdmin.from("edd_package_ledger")
-        .select("station_code,tracking_id,source,source_at,verification,verified_at")
-        .eq("station_code", code).gte("last_seen_at", since)
-        .order("tracking_id").limit(1000);
-      if (after) query = query.gt("tracking_id", after);
-      const { data, error } = await query;
-      if (error) throw new Error(`Unable to load verified EDD records: ${error.message}`);
-      const page = (data ?? []) as LedgerRow[];
-      rows.push(...page);
-      if (page.length < 1000) break;
-      after = page[page.length - 1].tracking_id;
-    }
-  }
+  for (const code of [...new Set(codes)]) rows.push(...await readStationLedger(code, columns));
   {
     for (const row of rows) {
       if (!codes.includes(row.station_code)) continue;
@@ -118,10 +137,13 @@ export async function verifyEddBatch(codes?: string[]) {
   // starved every other query until the project fell over (2026-10-06).
   // A station whose snapshots have not changed has nothing to ingest, so the
   // cron only ingests the ones refreshed in the last few minutes.
-  if (codes) await ingestEddObservations(codes);
-  else {
-    const fresh = await eddStationsWithNewObservations();
-    if (fresh.length) await ingestEddObservations(fresh);
+  // One station per statement: a single large station can no longer push the
+  // whole batch past the API statement timeout, which rolled back every
+  // station's ingest and retried the same work a minute later (2026-10-08).
+  // A station that still fails is retried by the next run; verification goes on.
+  let ingestFailed = 0;
+  for (const code of codes ?? await eddStationsWithNewObservations()) {
+    try { await ingestEddObservations([code]); } catch { ingestFailed++; }
   }
   const token = randomUUID();
   const { data, error } = await supabaseAdmin.rpc("edd_claim_verification", { p_token: token, p_codes: codes ?? null, p_limit: 180 });
@@ -230,7 +252,7 @@ export async function verifyEddBatch(codes?: string[]) {
         } catch { failed++; }
       }
     }));
-    return { verified, reused, failed, enriched, enrichmentFailed, paginationKeys:[...paginationKeys], checked: verified+reused+failed, busy: rows.length === 0 };
+    return { verified, reused, failed, enriched, enrichmentFailed, ingestFailed, paginationKeys:[...paginationKeys], checked: verified+reused+failed, busy: rows.length === 0 };
   } finally {
     await supabaseAdmin.from("edd_verification_lease").update({ expires_at: new Date().toISOString(), token: null }).eq("id",1).eq("token",token);
   }

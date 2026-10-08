@@ -16,7 +16,7 @@ import { eddQueryFromRecord, type EddQuery } from "@/lib/ops-pulse/edd-table-con
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** The first paint waits this long for cached counts; anything slower is finished by the open tab. */
+/** The first paint waits this long for stations without stored counts; anything slower is finished by the open tab. */
 const FIRST_PAINT_BUDGET_MS = 4000;
 
 async function StationEddNetwork({ authorization, query }: { authorization: AuthorizationContext; query: EddQuery }) {
