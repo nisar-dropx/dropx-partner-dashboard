@@ -8,6 +8,7 @@ import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "@/lib
 import { duplicateAdvanceWorkforceIds } from "@/lib/workforce-payout-action-selection";
 import { isWorkforcePayoutDisplayPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import { MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION } from "@/lib/workforce-payout-publication-limits";
+import { buildWorkforcePayoutPublicationSnapshot } from "@/lib/workforce-payout-publication-snapshot";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 
@@ -36,7 +37,8 @@ export type WorkforcePayoutAttendanceRange = {
 
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
-  reviewSubjectType?: "workforce" | "helper"; reviewSubjectId?: string | null; reviewToken?: string | null;
+  reviewSubjectType?: "workforce" | "helper"; reviewSubjectId?: string | null; reviewToken?: string | null; publicationDependencyHash?: string | null;
+  publicationLocations?: Array<{ id: string; label: string }>;
   location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
   history: PaymentAllocationHistoryEntry[];
@@ -80,6 +82,37 @@ function canSendPayoutForReview(row: WorkforcePayoutRow, audience: "workforce" |
 function canDeductAdvanceFromPayout(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.paymentDetailsAvailable)
     && !ADVANCE_DEDUCTION_LOCKED_STATUSES.has(row.status.trim().toLowerCase());
+}
+function missingPayoutNotificationLocations(allRows: WorkforcePayoutRow[], selectedRows: WorkforcePayoutRow[]) {
+  const selectedLocations = new Set(selectedRows.map((row) => `${String(row.reviewSubjectId ?? "")}|${String(row.locationId ?? "")}`));
+  const missingBySubject = new Map<string, { dropxId: string; name: string; locations: Set<string> }>();
+  const selectedBySubject = new Map<string, WorkforcePayoutRow>();
+  selectedRows.forEach((row) => {
+    const subjectId = String(row.reviewSubjectId ?? "");
+    if (subjectId && !selectedBySubject.has(subjectId)) selectedBySubject.set(subjectId, row);
+  });
+  selectedBySubject.forEach((selectedRow, subjectId) => {
+    const requiredLocations = selectedRow.publicationLocations?.length
+      ? selectedRow.publicationLocations
+      : allRows.flatMap((row) => row.reviewSubjectId === subjectId && canSendPayoutForReview(row, "workforce") && row.locationId
+        ? [{ id: row.locationId, label: row.location || "Unassigned location" }]
+        : []);
+    requiredLocations.forEach((location) => {
+      if (selectedLocations.has(`${subjectId}|${location.id}`)) return;
+      const current = missingBySubject.get(subjectId) ?? {
+        dropxId: selectedRow.dropxId || subjectId,
+        name: selectedRow.name,
+        locations: new Set<string>()
+      };
+      current.locations.add(location.label || "Unassigned location");
+      missingBySubject.set(subjectId, current);
+    });
+  });
+  return [...missingBySubject.values()].map((entry) => ({
+    dropxId: entry.dropxId,
+    name: entry.name,
+    locations: [...entry.locations].sort((left, right) => left.localeCompare(right))
+  }));
 }
 function statusTone(status: string) {
   if (status === "Ready for review" || status === "Approved" || status === "Payment published") return "good";
@@ -359,6 +392,22 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
       return;
     }
     if (audience === "workforce") {
+      const missingLocations = missingPayoutNotificationLocations(rows, reviewSelectedRows);
+      if (missingLocations.length) {
+        const details = missingLocations
+          .map((entry) => `${entry.dropxId}${entry.name ? ` (${entry.name})` : ""}: ${entry.locations.join(", ")}`)
+          .join("; ");
+        setReviewState({
+          busy: false,
+          error: `Select every publishable location row for each DropX ID. Missing locations: ${details}. Clear or change the filters, then select those rows too.`,
+          notice: ""
+        });
+        return;
+      }
+      if (reviewSelectedRows.some((row) => !row.publicationDependencyHash)) {
+        setReviewState({ busy: false, error: "The payout worksheet version is unavailable. Refresh the page and select the payouts again.", notice: "" });
+        return;
+      }
       const confirmed = window.confirm(
         `Publish ${reviewSelectedRows.length} selected payout${reviewSelectedRows.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}?\n\n`
         + "This freezes each selected DropX ID's provider mapping, remapping and direct-pay allocation for the month, publishes the payment in DropX One, and queues the enabled App and WhatsApp notifications."
@@ -377,7 +426,15 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
             subjectType: row.reviewSubjectType,
             subjectId: row.reviewSubjectId,
             locationId: row.locationId,
-            reviewToken: row.reviewToken
+            reviewToken: row.reviewToken,
+            ...(audience === "workforce" ? {
+              calculationSnapshot: buildWorkforcePayoutPublicationSnapshot(
+                row,
+                periodStart,
+                periodEnd,
+                row.publicationDependencyHash ?? ""
+              )
+            } : {})
           }))
         })
       });

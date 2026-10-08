@@ -6,6 +6,7 @@ const {
   createWorkforcePayoutReviewToken,
   payoutReviewPresentation,
   verifyWorkforcePayoutReviewToken,
+  workforcePayoutLocationSetHash,
   workforcePayoutReviewTokenDetails,
   workforcePayoutReviewTokenStatus
 } = await import("./workforce-payout-review-token.ts");
@@ -19,17 +20,37 @@ const expected = {
   periodEnd: "2026-09-30"
 };
 
+test("review-token callers share the stable complete-location-set hash", () => {
+  const first = "00000000-0000-4000-8000-000000000003";
+  const second = "00000000-0000-4000-8000-000000000004";
+  assert.equal(
+    workforcePayoutLocationSetHash([second, first, second]),
+    workforcePayoutLocationSetHash([first, second])
+  );
+});
+
 test("review tokens bind a server-calculated ready row to its company, location and period", () => {
-  const token = createWorkforcePayoutReviewToken({ ...expected, status: "Ready for review", dependencyHash: "worksheet-version-a", calculationHash: "row-version-a" });
+  const token = createWorkforcePayoutReviewToken({
+    ...expected,
+    status: "Ready for review",
+    dependencyHash: "worksheet-version-a",
+    calculationHash: "row-version-a",
+    publicationSnapshotHash: "publication-version-a",
+    locationSetHash: "locations-version-a"
+  });
   assert.equal(typeof token, "string");
   assert.equal(verifyWorkforcePayoutReviewToken(token, expected), true);
   assert.equal(workforcePayoutReviewTokenStatus(token, expected), "ready");
   assert.deepEqual(workforcePayoutReviewTokenDetails(token, expected), {
     status: "ready",
     dependencyHash: "worksheet-version-a",
-    calculationHash: "row-version-a"
+    calculationHash: "row-version-a",
+    publicationSnapshotHash: "publication-version-a",
+    locationSetHash: "locations-version-a"
   });
   assert.equal(workforcePayoutReviewTokenDetails(token, { ...expected, dependencyHash: "worksheet-version-b" }), null);
+  assert.equal(workforcePayoutReviewTokenDetails(token, { ...expected, publicationSnapshotHash: "publication-version-b" }), null);
+  assert.equal(workforcePayoutReviewTokenDetails(token, { ...expected, locationSetHash: "locations-version-b" }), null);
   assert.equal(verifyWorkforcePayoutReviewToken(token, { ...expected, locationId: "00000000-0000-4000-8000-000000000004" }), false);
   assert.equal(verifyWorkforcePayoutReviewToken(`${token}x`, expected), false);
 });

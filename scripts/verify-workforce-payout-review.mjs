@@ -33,11 +33,11 @@ assert.doesNotMatch(routeSource, /item\?\.snapshot/);
 assert.match(routeSource, /selected more than once/);
 assert.match(routeSource, /workforcePayoutReviewTokenDetails/);
 assert.match(routeSource, /expected_status/);
-assert.match(routeSource, /loadStablePayoutWorksheet/);
-assert.match(routeSource, /workforcePayoutCalculationHash/);
-assert.match(routeSource, /item\.token\?\.calculationHash/);
-assert.match(routeSource, /isWorkforcePayoutCalculationPublishable\(row\?\.status\)/);
-assert.match(routeSource, /loaded\.rows[\s\S]*?isWorkforcePayoutCalculationPublishable\(row\.status\)/);
+assert.doesNotMatch(routeSource, /loadStablePayoutWorksheet|loadWorkforcePayoutRows|workforcePayoutDependencyHash/);
+assert.match(routeSource, /verifiedPublicationSnapshot\(item\.calculation_snapshot/);
+assert.match(routeSource, /item\.token!\.publicationSnapshotHash/);
+assert.match(routeSource, /workforcePayoutPublicationSnapshotHash/);
+assert.match(routeSource, /workforcePayoutLocationSetHash\(submittedLocations\)/);
 assert.match(routeSource, /Select every publishable location row/);
 assert.doesNotMatch(
   routeSource,
@@ -83,6 +83,9 @@ assert.match(tableSource, /canPublish \|\| canReviewHelpers/);
 assert.match(tableSource, /audience === "workforce"[\s\S]*?isWorkforcePayoutDisplayPublishable\(row\.status\)[\s\S]*?row\.status === "Ready for review" \|\| row\.status === "Returned"/);
 assert.match(pageSource, /loadStablePayoutWorksheet/);
 assert.match(pageSource, /audience === "workforce" && !loaded\.dependencyHash/);
+assert.match(pageSource, /publicationSnapshotHash/);
+assert.match(pageSource, /locationSetHash/);
+assert.match(tableSource, /calculationSnapshot/);
 assert.match(publicationMigration, /workforce_publish_payout_notifications/);
 assert.match(publicationMigration, /guard_published_workforce_provider_mapping/);
 assert.match(publicationMigration, /guard_published_workforce_direct_allocation/);

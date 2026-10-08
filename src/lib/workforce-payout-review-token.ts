@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { isWorkforcePayoutCalculationPublishable } from "./workforce-payout-publication-eligibility.ts";
 
+export { workforcePayoutLocationSetHash } from "./workforce-payout-publication.ts";
+
 type ReviewTokenPayload = {
   c: string;
   t: "workforce" | "helper";
@@ -12,6 +14,8 @@ type ReviewTokenPayload = {
   st: "ready" | "returned";
   h: string;
   r: string;
+  p: string;
+  g: string;
   iat: number;
 };
 
@@ -38,6 +42,8 @@ export function createWorkforcePayoutReviewToken(input: {
   status: "Ready for review" | "Returned";
   dependencyHash?: string | null;
   calculationHash?: string | null;
+  publicationSnapshotHash?: string | null;
+  locationSetHash?: string | null;
 }) {
   if (!secret()) return null;
   const payload: ReviewTokenPayload = {
@@ -50,6 +56,8 @@ export function createWorkforcePayoutReviewToken(input: {
     st: input.status === "Returned" ? "returned" : "ready",
     h: String(input.dependencyHash ?? ""),
     r: String(input.calculationHash ?? ""),
+    p: String(input.publicationSnapshotHash ?? ""),
+    g: String(input.locationSetHash ?? ""),
     iat: Math.floor(Date.now() / 1000)
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -86,6 +94,8 @@ export function workforcePayoutReviewTokenDetails(token: unknown, expected: {
   periodStart: string;
   periodEnd: string;
   dependencyHash?: string | null;
+  publicationSnapshotHash?: string | null;
+  locationSetHash?: string | null;
 }) {
   if (!secret() || typeof token !== "string" || token.length > 2_000) return null;
   const [encoded, suppliedSignature, extra] = token.split(".");
@@ -106,11 +116,21 @@ export function workforcePayoutReviewTokenDetails(token: unknown, expected: {
       && (payload.st === "ready" || payload.st === "returned")
       && typeof payload.h === "string"
       && typeof payload.r === "string"
+      && typeof payload.p === "string"
+      && typeof payload.g === "string"
       && (expected.dependencyHash == null || payload.h === expected.dependencyHash)
+      && (expected.publicationSnapshotHash == null || payload.p === expected.publicationSnapshotHash)
+      && (expected.locationSetHash == null || payload.g === expected.locationSetHash)
       && Number.isInteger(payload.iat)
       && payload.iat <= now + 60
       && payload.iat >= now - TOKEN_TTL_SECONDS;
-    return valid ? { status: payload.st, dependencyHash: payload.h, calculationHash: payload.r } : null;
+    return valid ? {
+      status: payload.st,
+      dependencyHash: payload.h,
+      calculationHash: payload.r,
+      publicationSnapshotHash: payload.p,
+      locationSetHash: payload.g
+    } : null;
   } catch {
     return null;
   }

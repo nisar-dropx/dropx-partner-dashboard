@@ -13,8 +13,17 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadStablePayoutWorksheet } from "@/lib/stable-payout-worksheet";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
-import { workforcePayoutCalculationHash } from "@/lib/workforce-payout-publication";
-import { createWorkforcePayoutReviewToken, payoutReviewPresentation } from "@/lib/workforce-payout-review-token";
+import { isWorkforcePayoutCalculationPublishable } from "@/lib/workforce-payout-publication-eligibility";
+import {
+  workforcePayoutCalculationHash,
+  workforcePayoutPublicationSnapshotHash
+} from "@/lib/workforce-payout-publication";
+import { buildWorkforcePayoutPublicationSnapshot } from "@/lib/workforce-payout-publication-snapshot";
+import {
+  createWorkforcePayoutReviewToken,
+  payoutReviewPresentation,
+  workforcePayoutLocationSetHash
+} from "@/lib/workforce-payout-review-token";
 
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
 
@@ -91,6 +100,19 @@ async function withPayoutReviewStatuses(
         : status === "uncertain"
           ? "Delivery needs review"
           : null;
+  const publishableLocationsBySubject = new Map<string, Array<{ id: string; label: string }>>();
+  if (audience === "workforce") {
+    rows.forEach((row) => {
+      const subjectId = String(row.reviewSubjectId ?? "");
+      const locationId = String(row.locationId ?? "");
+      if (!subjectId || !locationId || !row.paymentDetailsAvailable || !isWorkforcePayoutCalculationPublishable(row.status)) return;
+      const locations = publishableLocationsBySubject.get(subjectId) ?? [];
+      if (!locations.some((location) => location.id === locationId)) {
+        locations.push({ id: locationId, label: row.location || "Unassigned location" });
+      }
+      publishableLocationsBySubject.set(subjectId, locations);
+    });
+  }
   return {
     rows: rows.map((row) => {
       const subjectKey = row.reviewSubjectId && row.locationId
@@ -101,6 +123,9 @@ async function withPayoutReviewStatuses(
       const status = presentation.status === "Under Review" && subjectKey
         ? publishedStatus(publicationBySubject.get(subjectKey)) ?? presentation.status
         : presentation.status;
+      const publicationSnapshot = audience === "workforce"
+        ? buildWorkforcePayoutPublicationSnapshot(row, fromDate, toDate, dependencyHash)
+        : null;
       const reviewToken = row.reviewSubjectId && row.reviewSubjectType && row.locationId
         && presentation.tokenStatus
         ? createWorkforcePayoutReviewToken({
@@ -114,10 +139,24 @@ async function withPayoutReviewStatuses(
           dependencyHash,
           calculationHash: audience === "workforce"
             ? workforcePayoutCalculationHash(row, fromDate, toDate)
+            : null,
+          publicationSnapshotHash: publicationSnapshot
+            ? workforcePayoutPublicationSnapshotHash(publicationSnapshot)
+            : null,
+          locationSetHash: audience === "workforce"
+            ? workforcePayoutLocationSetHash((publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []).map((location) => location.id))
             : null
         })
         : null;
-      return { ...row, status, reviewToken };
+      return {
+        ...row,
+        status,
+        reviewToken,
+        publicationDependencyHash: audience === "workforce" ? dependencyHash : null,
+        publicationLocations: audience === "workforce"
+          ? publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []
+          : []
+      };
     }),
     error: null as string | null
   };

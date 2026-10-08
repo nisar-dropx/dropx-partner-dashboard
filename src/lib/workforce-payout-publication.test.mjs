@@ -5,8 +5,10 @@ import test from "node:test";
 import {
   buildWorkforcePayoutPublicationSnapshot,
   workforcePayoutCalculationHash,
+  workforcePayoutLocationSetHash,
   workforcePayoutPublicationSnapshotHash
 } from "./workforce-payout-publication.ts";
+import { buildWorkforcePayoutPublicationSnapshot as buildClientSnapshot } from "./workforce-payout-publication-snapshot.ts";
 
 const row = (overrides = {}) => ({
   id: "mapping-1",
@@ -68,6 +70,25 @@ test("the signed row hash ignores unrelated global version churn but detects pay
     calculationHash,
     workforcePayoutCalculationHash({ ...original, grossPayment: 1, netAmount: 1 }, "2026-09-01", "2026-09-30")
   );
+});
+
+test("the client-safe snapshot builder produces the same immutable publication payload", () => {
+  const input = row();
+  assert.deepEqual(
+    buildClientSnapshot(input, "2026-09-01", "2026-09-30", "version-a"),
+    buildWorkforcePayoutPublicationSnapshot(input, "2026-09-01", "2026-09-30", "version-a")
+  );
+  const source = readFileSync(new URL("./workforce-payout-publication-snapshot.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /node:crypto|server-only/);
+});
+
+test("location-set hashes are stable across order, case and duplicate IDs", () => {
+  const first = "00000000-0000-4000-8000-000000000003";
+  const second = "00000000-0000-4000-8000-000000000004";
+  const expected = workforcePayoutLocationSetHash([first, second]);
+  assert.match(expected, /^[a-f0-9]{64}$/);
+  assert.equal(workforcePayoutLocationSetHash([second.toUpperCase(), first, second]), expected);
+  assert.notEqual(workforcePayoutLocationSetHash([first]), expected);
 });
 
 test("automatic deduction inputs are ordered before they enter the signed row snapshot", () => {

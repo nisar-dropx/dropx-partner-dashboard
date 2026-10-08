@@ -6,15 +6,11 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { processPayoutReviewNotifications } from "@/lib/payout-review-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { processWorkforcePayoutAppNotifications } from "@/lib/workforce-payout-app-notifications";
-import { loadStablePayoutWorksheet } from "@/lib/stable-payout-worksheet";
-import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
-import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
-import { isWorkforcePayoutCalculationPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import {
-  buildWorkforcePayoutPublicationSnapshot,
-  workforcePayoutCalculationHash,
+  workforcePayoutLocationSetHash,
   workforcePayoutPublicationSnapshotHash
 } from "@/lib/workforce-payout-publication";
+import type { WorkforcePayoutPublicationSnapshot } from "@/lib/workforce-payout-publication-snapshot";
 import {
   chunkValues,
   MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION,
@@ -38,7 +34,7 @@ const noStore = { "Cache-Control": "private, no-store" };
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REVIEW_WINDOW_DAYS = 7;
-type PublicationSnapshot = ReturnType<typeof buildWorkforcePayoutPublicationSnapshot>;
+type PublicationSnapshot = WorkforcePayoutPublicationSnapshot;
 
 function responseError(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
@@ -60,6 +56,31 @@ function completeCalendarMonth(periodStart: string, periodEnd: string) {
 function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   return !origin || origin === new URL(request.url).origin;
+}
+
+function verifiedPublicationSnapshot(value: unknown, expected: {
+  dependencyHash: string;
+  locationId: string;
+  periodEnd: string;
+  periodStart: string;
+  snapshotHash: string;
+  workforceId: string;
+}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const snapshot = value as Partial<PublicationSnapshot>;
+  if (snapshot.schema_version !== 2
+    || snapshot.source !== "workforce_payout_worksheet"
+    || snapshot.dependency_hash !== expected.dependencyHash
+    || snapshot.run?.period_start !== expected.periodStart
+    || snapshot.run?.period_end !== expected.periodEnd
+    || snapshot.item?.workforce_id !== expected.workforceId
+    || snapshot.item?.station_id !== expected.locationId
+    || !Array.isArray(snapshot.lines)
+    || !snapshot.worksheet
+    || workforcePayoutPublicationSnapshotHash(snapshot as PublicationSnapshot) !== expected.snapshotHash) {
+    return null;
+  }
+  return snapshot as PublicationSnapshot;
 }
 
 async function loadNotificationRecipients(companyId: string, workforceIds: string[]) {
@@ -244,7 +265,9 @@ export async function POST(request: Request) {
     }
     if (!items.length) return responseError("Select at least one Workforce payout.", 400);
     if (items.length > 1000) return responseError("Submit at most 1000 payouts at a time.", 400);
-    if (JSON.stringify(items).length > 1_000_000) return responseError("The selected payout request is too large.", 413);
+    if (serializedJsonByteLength(body) > MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES) {
+      return responseError("The selected payout request is too large. Select fewer payout rows and try again.", 413);
+    }
 
     const normalized = items.map((source) => {
       const item = source as any;
@@ -252,7 +275,8 @@ export async function POST(request: Request) {
         subject_type: item?.subjectType === "helper" ? "helper" : item?.subjectType === "workforce" ? "workforce" : "",
         subject_id: String(item?.subjectId ?? ""),
         location_id: item?.locationId ? String(item.locationId) : null,
-        review_token: String(item?.reviewToken ?? "")
+        review_token: String(item?.reviewToken ?? ""),
+        calculation_snapshot: item?.calculationSnapshot ?? item?.calculation_snapshot ?? null
       };
     });
     if (normalized.some((item) => !item.subject_type || !UUID.test(item.subject_id) || !item.location_id || !UUID.test(item.location_id))) {
@@ -292,7 +316,11 @@ export async function POST(request: Request) {
         p_actor: authorization.userId,
         p_period_start: periodStart,
         p_period_end: periodEnd,
-        p_items: helperItems.map(({ review_token: _reviewToken, ...item }) => item),
+        p_items: helperItems.map(({
+          review_token: _reviewToken,
+          calculation_snapshot: _calculationSnapshot,
+          ...item
+        }) => item),
         p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
       });
       if (helperResult.error) return responseError(helperResult.error.message, 400);
@@ -321,58 +349,48 @@ export async function POST(request: Request) {
       });
       return { ...item, token };
     });
-    if (verified.some((item) => !item.token?.dependencyHash)) {
+    if (verified.some((item) => !item.token?.dependencyHash
+      || !item.token.publicationSnapshotHash
+      || !item.token.locationSetHash)) {
       return responseError("One or more payouts are no longer ready. Refresh the page and review the recalculated amounts.", 409);
     }
     const dependencyHashes = new Set(verified.map((item) => item.token!.dependencyHash));
     if (dependencyHashes.size !== 1) {
       return responseError("The selected payouts came from different worksheet versions. Refresh the page and select them again.", 409);
     }
-    const loaded = await loadStablePayoutWorksheet({
-      loadRows: () => loadWorkforcePayoutRows(companyId, authorization, periodStart, periodEnd),
-      loadDependency: () => workforcePayoutDependencyHash(companyId, periodStart, periodEnd)
-    });
-    if (loaded.error) return responseError(loaded.error, 400);
-    const expectedDependencyHash = loaded.dependencyHash;
-    if (!expectedDependencyHash) return responseError("Payout worksheet version is unavailable.", 409);
-
-    const rowBySubjectLocation = new Map(loaded.rows.map((row) => [
-      `${row.reviewSubjectId}|${row.locationId}`,
-      row
-    ]));
+    const expectedDependencyHash = [...dependencyHashes][0];
     const selected = verified.map((item) => ({
       item,
-      row: rowBySubjectLocation.get(`${item.subject_id}|${item.location_id}`)
+      snapshot: verifiedPublicationSnapshot(item.calculation_snapshot, {
+        dependencyHash: expectedDependencyHash,
+        locationId: item.location_id!,
+        periodEnd,
+        periodStart,
+        snapshotHash: item.token!.publicationSnapshotHash,
+        workforceId: item.subject_id
+      })
     }));
-    if (selected.some(({ row }) => !row?.paymentDetailsAvailable || !isWorkforcePayoutCalculationPublishable(row?.status))) {
-      return responseError("One or more payouts no longer have a complete payment setup. Refresh and review the worksheet.", 409);
-    }
-    if (selected.some(({ item, row }) => !item.token?.calculationHash
-      || workforcePayoutCalculationHash(row!, periodStart, periodEnd) !== item.token.calculationHash)) {
+    if (selected.some(({ snapshot }) => !snapshot)) {
       return responseError("One or more selected payout amounts or payment details changed after this worksheet was displayed. Refresh and review the recalculated amounts.", 409);
     }
 
     const selectedSubjects = new Set(verified.map((item) => item.subject_id));
     for (const subjectId of selectedSubjects) {
-      const expectedLocations = new Set(loaded.rows
-        .filter((row) => row.reviewSubjectId === subjectId
-          && row.locationId
-          && row.paymentDetailsAvailable
-          && isWorkforcePayoutCalculationPublishable(row.status))
-        .map((row) => String(row.locationId)));
-      const submittedLocations = new Set(verified
+      const subjectItems = verified.filter((item) => item.subject_id === subjectId);
+      const expectedLocationHashes = new Set(subjectItems.map((item) => item.token!.locationSetHash));
+      const submittedLocations = subjectItems
         .filter((item) => item.subject_id === subjectId)
-        .map((item) => String(item.location_id)));
-      if (expectedLocations.size !== submittedLocations.size
-        || [...expectedLocations].some((locationId) => !submittedLocations.has(locationId))) {
+        .map((item) => String(item.location_id));
+      if (expectedLocationHashes.size !== 1
+        || workforcePayoutLocationSetHash(submittedLocations) !== [...expectedLocationHashes][0]) {
         return responseError("Select every publishable location row for each DropX ID before sending its notification.", 409);
       }
     }
 
     const reviewUntil = new Date(Date.now() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const snapshots = selected.map(({ item, row }) => ({
+    const snapshots = selected.map(({ item, snapshot }) => ({
       workforceId: item.subject_id,
-      snapshot: buildWorkforcePayoutPublicationSnapshot(row!, periodStart, periodEnd, expectedDependencyHash)
+      snapshot: snapshot!
     }));
     const snapshotsByWorkforce = new Map<string, PublicationSnapshot[]>();
     snapshots.forEach(({ workforceId, snapshot }) => {
@@ -390,15 +408,14 @@ export async function POST(request: Request) {
         .map((item) => item.location_id!)
         .sort()[0]);
     }
-    const publicationItems = selected.map(({ item }, index) => {
-      const snapshot = snapshots[index].snapshot;
+    const publicationItems = selected.map(({ item, snapshot }) => {
       return {
         subject_type: "workforce",
         subject_id: item.subject_id,
         location_id: item.location_id,
         expected_status: item.token!.status,
-        calculation_snapshot: snapshot,
-        snapshot_hash: workforcePayoutPublicationSnapshotHash(snapshot),
+        calculation_snapshot: snapshot!,
+        snapshot_hash: item.token!.publicationSnapshotHash,
         notification_config_snapshot: notification.notifications.get(item.subject_id),
         notification_primary: notificationPrimary.get(item.subject_id) === item.location_id
       };
