@@ -118,3 +118,9 @@ assert.deepEqual(allSaved.map(r=>r.station_code),['AAA','BBB']);
 console.log('All stations: scoped load, per-station rider choices, cross-station assignment rejection and single atomic bulk save passed.');
 
 assert.equal((await bulk([{vehicleId:'va',ids:['A1'],expectedIds:[],dayStatus:'breakdown',remarks:'Before dispatch'}])).status,400);assert.equal((await bulk([{vehicleId:'va',ids:[],expectedIds:[],dayStatus:'breakdown',remarks:''}])).status,400);assert.equal((await bulk([{vehicleId:'va',ids:[],expectedIds:[],dayStatus:'unknown',remarks:'Before dispatch'}])).status,400);assert.equal((await bulk([{vehicleId:'va',ids:[],expectedIds:[],dayStatus:'breakdown',remarks:'Failed before dispatch'}])).status,200);assert.equal(allSaved[0].day_status,'breakdown');console.log('Dated exception API validation and Fleet unavailable summary passed.');
+
+fixtureTables.stations[0].region='KL';fixtureTables.stations[0].cluster_name='North';fixtureTables.stations[1].region='AP';
+const filteredMetadata=await scoped.loadMapping(manager,'2026-10-07','*');
+assert.equal(filteredMetadata.stations[0].region,'KL');assert.equal(filteredMetadata.stations[0].cluster,'North');assert.equal(filteredMetadata.stations[1].cluster,'');
+const registry=await scoped.loadMapping(manager,'2026-10-07','AAA',true);assert.ok(registry.vehicles.some(v=>v.id==='vu'),'Registry can maintain the default ID while a vehicle is unavailable');assert.ok(!filteredMetadata.vehicles.some(v=>v.id==='vu'),'Daily confirmation still excludes unavailable vehicles');
+console.log('Region/cluster metadata stays scoped; registry-only unavailable lookup does not change daily eligibility.');

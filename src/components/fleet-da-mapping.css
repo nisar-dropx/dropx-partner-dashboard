@@ -15,3 +15,7 @@
 .da-selection-review{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;margin-bottom:10px;background:#fff6e7;border-radius:8px;color:#88591b;font-size:12px}.da-mapping .da-row-review{border-color:#c99038}.da-selection-review button{margin-left:auto}
 
 .da-day-summary{display:flex;gap:8px 16px;flex-wrap:wrap;padding:10px 0;font-size:12px;color:#41616b}.da-day-summary>details{width:100%}.da-day-summary summary{cursor:pointer;color:#176b64}.da-day-summary details>div{display:flex;gap:10px;flex-wrap:wrap;padding:8px;border-bottom:1px solid #dfe8e6}.da-day-summary details>div>span:last-child{margin-left:auto}.da-mapping .mapping-pending header{margin:0}.da-mapping .mapping-pending{font-size:12px}
+
+.da-filter-options{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.da-filter-options .da-check{align-self:center}@media(max-width:700px){.da-filter-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:6px 0}.da-filter-panel summary{font-weight:600}}
+
+.fc-odcd-link{border-top:1px solid #dbe4e8;margin-top:12px;padding:12px 16px;display:grid;gap:9px}.fc-odcd-link>small{color:#647585}.fc-odcd-link .searchable-select{width:100%}
