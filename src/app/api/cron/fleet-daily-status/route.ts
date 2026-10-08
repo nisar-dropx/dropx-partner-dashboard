@@ -7,6 +7,7 @@ import { fleetAdHocRequestType } from "@/lib/fleet-control-adhoc-scope";
 import { buildFleetDailyStatusEmail, normalizeFleetDailyStatusEmailConfig, type FleetDailyStatusAdHocSummary, type FleetDailyStatusSummary as Summary, type FleetDailyStatusVehicle as Vehicle } from "@/lib/fleet/daily-status-email";
 import { loadFleetDailyStatusRecipients, resolveFleetDailyStatusDeliveryRecipients } from "@/lib/fleet/daily-status-recipients";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { fleetDailyStatusDue, deliverFleetStatusBatch } from "@/lib/fleet/daily-status-delivery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -30,17 +31,13 @@ function kolkataParts() {
   return { date: `${value.year}-${value.month}-${value.day}`, time: `${value.hour}:${value.minute}` };
 }
 
-function inWindow(now: string, configured: string) {
-  const minutes = (value: string) => { const [hour, minute] = value.slice(0, 5).split(":").map(Number); return hour * 60 + minute; };
-  const delta = minutes(now) - minutes(configured || "20:00");
-  return delta >= 0 && delta < 30;
-}
-
 async function processCompany(company: { id: string; name: string | null }, date: string, time: string, force = false) {
   if (!supabaseAdmin) return "failed";
+  const deliveryDeadline = Date.now() + 40_000;
   const database = supabaseAdmin;
   const setting = await supabaseAdmin.from("fleet_control_settings").select("daily_status_email_enabled,daily_status_send_time,daily_status_only_affected,daily_status_email_config").eq("company_id", company.id).eq("daily_status_email_enabled", true).order("updated_at", { ascending: false }).limit(1).maybeSingle();
-  if (setting.error || !setting.data?.daily_status_email_enabled || (!force && !inWindow(time, clean(setting.data.daily_status_send_time)))) return "disabled";
+  if (setting.error) throw new Error(setting.error.message);
+  if (!setting.data?.daily_status_email_enabled || (!force && !fleetDailyStatusDue(time, clean(setting.data.daily_status_send_time)))) return "disabled";
   const config = normalizeFleetDailyStatusEmailConfig(setting.data.daily_status_email_config);
   const locationsResult = await loadCodLocations(company.id, [], true);
   const excludedCodes = new Set(config.excludedStationCodes);
@@ -98,13 +95,14 @@ async function processCompany(company: { id: string; name: string | null }, date
   const existingStatus = new Map((existing.data ?? []).map((row) => [`${clean(row.recipient_email).toLowerCase()}|${row.region_key}`, clean(row.status).toLowerCase()]));
   const month = date.slice(0, 7); const monthLabel = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${month}-01T12:00:00+05:30`));
   const dailyLabel = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${date}T12:00:00+05:30`));
-  const deliveryResults = await Promise.all(deliveries.map(async (delivery) => {
+  const batch = await deliverFleetStatusBatch(deliveries, async (delivery) => {
     const deliveryEmail = clean(delivery.email).toLowerCase();
     const deliveryKey = `${deliveryEmail}|${delivery.region}`;
     if (["sent", "skipped"].includes(existingStatus.get(deliveryKey) || "")) return "skipped" as const;
     const stationScope = new Set(delivery.stationCodes); const scopedRows = rows.filter((row) => stationScope.has(row.station)); const scopedFleetRows = scopedRows.filter((row) => row.ownTotal + row.partnerTotal > 0);
     const scopedVehicles = vehicles.filter((row) => stationScope.has(clean(row.station_code).toUpperCase())); const scopedAdHocRows = adHocRows.filter((row) => stationScope.has(row.station)); const scopedAttention = attentionRows.filter((row) => stationScope.has(row.station));
     const totals = { ...summaryTotals(scopedFleetRows), adHoc: scopedAdHocRows.reduce((sum, row) => sum + row.todayCount, 0), adHocPending: scopedAdHocRows.reduce((sum, row) => sum + row.todayPendingCount, 0) };
+    let acceptedByMailServer = false;
     try {
       const claimPayload = { company_id: company.id, report_date: date, report_month: month, recipient_email: deliveryEmail, region_key: delivery.region, affected_station_codes: scopedAttention.map((row) => row.station), recipients: [deliveryEmail], subject: `${config.subjectPrefix} | ${delivery.region} | ${config.monthlyThread ? monthLabel : dailyLabel}`, status: "skipped", error_message: null };
       const claim = existingStatus.get(deliveryKey) === "failed"
@@ -117,19 +115,27 @@ async function processCompany(company: { id: string; name: string | null }, date
       const subject = prior.data?.subject || `${config.subjectPrefix} | ${delivery.region} | ${config.monthlyThread ? monthLabel : dailyLabel}`; const root = prior.data?.root_message_id || prior.data?.message_id || null; const last = prior.data?.message_id || null;
       const messageId = last ? `<dropx.fleet-status.${randomUUID()}@partner.dropxlogistics.com>` : `<dropx.fleet-status.${company.id}.${config.monthlyThread ? month : date}.${randomUUID()}@partner.dropxlogistics.com>`;
       const presentation = buildFleetDailyStatusEmail({ companyName: company.name, region: delivery.region, date, rows: scopedFleetRows, exceptions: scopedVehicles.filter((row) => own(row.ownership_type) && !active(row.status)), adHocRows: scopedAdHocRows, totals, config });
-      const result = await sendEmail({ companyId: company.id, to: [deliveryEmail], subject, body: presentation.text, html: presentation.html, messageId, inReplyTo: last || undefined, references: last ? [...new Set([root, last].filter((value): value is string => Boolean(value)))] : undefined });
+      const result = await sendEmail({ companyId: company.id, to: [deliveryEmail], subject, body: presentation.text, html: presentation.html, messageId, inReplyTo: last || undefined, references: last ? [...new Set([root, last].filter((value): value is string => Boolean(value)))] : undefined, timeoutMs: 8_000 });
+      acceptedByMailServer = true;
       const log = await database.from("fleet_status_report_logs").update({ affected_station_codes: scopedAttention.map((row) => row.station), recipients: [deliveryEmail], subject, status: "sent", message_id: result.messageId || messageId, root_message_id: root || result.messageId || messageId, error_message: null }).eq("company_id", company.id).eq("report_date", date).eq("recipient_email", deliveryEmail).eq("region_key", delivery.region).eq("status", "skipped");
       if (log.error) throw new Error(log.error.message); return "sent" as const;
     } catch (error) {
+      // An accepted email must not become retryable just because the delivery-log update failed.
+      if (acceptedByMailServer) {
+        console.error("Fleet daily status accepted but delivery log could not be finalized", { companyId: company.id, date, region: delivery.region });
+        return "failed" as const;
+      }
       await database.from("fleet_status_report_logs").update({ status: "failed", error_message: error instanceof Error ? error.message : "Unable to send report." }).eq("company_id", company.id).eq("report_date", date).eq("recipient_email", deliveryEmail).eq("region_key", delivery.region).eq("status", "skipped");
       return "failed" as const;
     }
-  }));
+  }, { deadline: deliveryDeadline });
+  const deliveryResults = batch.results;
   const sent = deliveryResults.filter((result) => result === "sent").length;
   const failed = deliveryResults.filter((result) => result === "failed").length;
   const skipped = deliveryResults.filter((result) => result === "skipped").length;
   if (failed && !sent) return "failed";
   if (failed) return "partial_failed";
+  if (batch.deferred) return "deferred";
   if (sent) return "sent";
   return skipped ? "already_sent" : "disabled";
 }
@@ -161,7 +167,8 @@ export async function GET(request: Request) {
       const outcome = await processCompany(company, date, time, force);
       totals[outcome] = (totals[outcome] || 0) + 1;
       details.push({ companyId: company.id, company: company.name, outcome });
-    } catch {
+    } catch (error) {
+      console.error("Fleet daily status failed", { companyId: company.id, date, error: error instanceof Error ? error.message : "Unknown failure" });
       totals.failed = (totals.failed || 0) + 1;
       details.push({ companyId: company.id, company: company.name, outcome: "failed" });
     }
