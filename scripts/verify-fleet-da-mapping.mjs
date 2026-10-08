@@ -68,9 +68,10 @@ assert.equal(model.isMappingVehicleActive({status:'ready_for_route',deployment_s
 assert.equal(model.isMappingVehicleActive({status:'breakdown',deployment_status:'deployed'},statuses),false);
 assert.equal(model.isMappingVehicleActive({status:'active',deployment_status:'not_deployed'},statuses),false);
 assert.equal(model.isMappingVehicleActive({status:'unknown',deployment_status:'deployed'},statuses),false);
+let peopleFixture={byLocation:new Map([['s1',{clusterManagers:[{personId:'manager-1',name:'Current manager'},{personId:'manager-2',name:'Second manager'}]}]]),error:null};
 let surface='ops';
 const access=compile('src/lib/fleet/da-mapping-server.ts',{
- 'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{}},'@/lib/supabase-pagination':{},
+ '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>peopleFixture},'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{}},'@/lib/supabase-pagination':{},
  '@/lib/authorization':{hasPermission:(a,p,action)=>Boolean(a.permissions?.[p]?.[action])},'@/lib/company-scope':{},
  '@/lib/access-surface':{currentAdminAccessSurface:()=>surface},'./report-data':{FleetReportError:E},'./vehicle-sources-server':{},'./daily-report':{},'./da-mapping':model
 });
@@ -98,7 +99,7 @@ const fixtureTables={
 const queries=[];
 function fixtureQuery(table){let rows=[...(fixtureTables[table]||[])];const q={select(){return q},eq(){return q},gte(){return q},lte(){return q},gt(){return q},order(){return q},in(col,values){queries.push({table,col,values});rows=rows.filter(r=>values.includes(r[col]));return q},maybeSingle:async()=>({data:rows[0]??null,error:null}),then(resolve){return Promise.resolve({data:rows,error:null}).then(resolve)}};return q;}
 const scoped=compile('src/lib/fleet/da-mapping-server.ts',{
- 'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{from:fixtureQuery}},'@/lib/supabase-pagination':{readAllRows:async q=>await q},
+ '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>peopleFixture},'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{from:fixtureQuery}},'@/lib/supabase-pagination':{readAllRows:async q=>await q},
  '@/lib/authorization':{hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/access-surface':{currentAdminAccessSurface:()=> 'fleet'},'./report-data':{FleetReportError:E},'./vehicle-sources-server':{loadVehicleSources:async()=>({sources:[]})},'./daily-report':{istDate:()=> '2026-10-07'},'./da-mapping':model
 });
 const manager={userId:actor,isMasterOwner:false,hasAllLocationAccess:false,locationScopeIds:['s1','s2']};
@@ -121,6 +122,12 @@ assert.equal((await bulk([{vehicleId:'va',ids:['A1'],expectedIds:[],dayStatus:'b
 
 fixtureTables.stations[0].region='KL';fixtureTables.stations[0].cluster_name='North';fixtureTables.stations[1].region='AP';
 const filteredMetadata=await scoped.loadMapping(manager,'2026-10-07','*');
-assert.equal(filteredMetadata.stations[0].region,'KL');assert.equal(filteredMetadata.stations[0].cluster,'North');assert.equal(filteredMetadata.stations[1].cluster,'');
+assert.equal(filteredMetadata.stations[0].region,'KL');assert.deepEqual(filteredMetadata.stations[0].clusters,[{id:'manager-1',name:'Current manager'},{id:'manager-2',name:'Second manager'}]);assert.deepEqual(filteredMetadata.stations[1].clusters,[]);assert.ok(!JSON.stringify(filteredMetadata.stations).includes('North'),'Legacy station clusters are never returned');
 const registry=await scoped.loadMapping(manager,'2026-10-07','AAA',true);assert.ok(registry.vehicles.some(v=>v.id==='vu'),'Registry can maintain the default ID while a vehicle is unavailable');assert.ok(!filteredMetadata.vehicles.some(v=>v.id==='vu'),'Daily confirmation still excludes unavailable vehicles');
 console.log('Region/cluster metadata stays scoped; registry-only unavailable lookup does not change daily eligibility.');
+
+peopleFixture={byLocation:new Map(),error:'Outage'};
+const peopleOutage=await scoped.loadMapping(manager,'2026-10-07','*');
+assert.equal(peopleOutage.stations[0].clusters,null);assert.ok(peopleOutage.clusterWarning);assert.equal(peopleOutage.vehicles.length,2);
+assert.equal((await scoped.loadMapping(manager,'2026-10-07','*',false,false)).clusterWarning,undefined,'Write validation does not load optional People metadata');
+console.log('People clusters: current managers, multiple assignments, no-manager stations, legacy removal and independent writes passed.');

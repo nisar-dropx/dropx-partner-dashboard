@@ -17,7 +17,7 @@ export const POST=withFleetSystemLog(async(request:Request)=>{
  const auth=await getAuthorization();if(!auth)return Response.json({error:'Login required.'},{status:401});
  if(request.headers.get('origin')&&request.headers.get('origin')!==new URL(request.url).origin)throw new FleetReportError('Invalid request origin.',403);
  const b=await request.json().catch(()=>null);if(!b||typeof b.station!=='string'||!validDate(b.date)||b.date>istDate())throw new FleetReportError('Choose a station and a valid date.',400);
- const d=await loadMapping(auth,b.date,b.station,b.action==='mapping.default'),company=requireCompanyId(auth);
+ const d=await loadMapping(auth,b.date,b.station,b.action==='mapping.default',false),company=requireCompanyId(auth);
  if(auth.readOnly)throw new FleetReportError('Daily mapping edit permission is required.',403);
  if(b.action==='mapping.alert-policy'){
   if(!d.canPolicy)throw new FleetReportError('Pending alert settings are managed in Fleet Masters.',403);

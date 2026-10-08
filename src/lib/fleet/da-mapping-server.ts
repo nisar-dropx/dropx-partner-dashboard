@@ -6,6 +6,7 @@ import {requireCompanyId} from '@/lib/company-scope';
 import {currentAdminAccessSurface} from '@/lib/access-surface';
 import {FleetReportError} from './report-data';
 import {loadVehicleSources} from './vehicle-sources-server';
+import {loadPeopleOperationalHierarchy} from '@/lib/people-operational-hierarchy';
 import {istDate} from './daily-report';
 import {recentRiders,riderKey,isMappingVehicleActive,type MappingData,type VehicleDA,type DefaultDA,type ConfirmedDA} from './da-mapping';
 const isFleetSurface=()=>String(currentAdminAccessSurface())==='fleet';
@@ -18,10 +19,10 @@ export async function mappingStationScope(auth:AuthorizationContext){
  const companyId=requireCompanyId(auth),surface=String(currentAdminAccessSurface());
  if(!['fleet','ops'].includes(surface))throw new FleetReportError('Open vehicle DA mapping in Fleet or OpsPulse.',403);
  if(!auth.isMasterOwner){const member=await supabaseAdmin.from('company_product_memberships').select('id,role_id').eq('company_id',companyId).eq('user_id',auth.userId).eq('product_code',surface==='fleet'?'fleet':'operations').eq('is_active',true).maybeSingle();if(member.error||!member.data?.role_id)throw new FleetReportError('Product access is required.',403);}
- let q=supabaseAdmin.from('stations').select('station_code,station_name,region,cluster,cluster_name').eq('company_id',companyId).eq('is_active',true).order('station_code');
+ let q=supabaseAdmin.from('stations').select('id,station_code,station_name,region').eq('company_id',companyId).eq('is_active',true).order('station_code');
  if(!auth.isMasterOwner&&!auth.hasAllLocationAccess){if(!auth.locationScopeIds.length)return{companyId,stations:[],vehicles:[]};q=q.in('id',auth.locationScopeIds);}
  const r=await readAllRows(q);if(r.error)throw new FleetReportError('Unable to check station access.');
- const stations=(r.data??[]).map(s=>({code:s.station_code,name:s.station_name||s.station_code,region:s.region?.trim()||'',cluster:s.cluster_name?.trim()||s.cluster?.trim()||''}));
+ const stations=(r.data??[]).map(s=>({id:s.id,code:s.station_code,name:s.station_name||s.station_code,region:s.region?.trim()||''}));
  return{companyId,stations};
 }
 export async function mappingScope(auth:AuthorizationContext,date?:string){
@@ -46,7 +47,7 @@ export async function mappingScope(auth:AuthorizationContext,date?:string){
  const codes=new Set([...vehicles,...unavailableVehicles].map(v=>v.station_code));
  return{companyId,stations:stations.filter(s=>codes.has(s.code)),vehicles,unavailableVehicles,placementRecorded,dayStatuses:(sr.data??[]).filter(s=>s.is_active&&!s.is_operational&&!['sold','disposed','returned'].includes(s.status_key)).map(s=>({key:s.status_key,label:s.status_key==='on_leave'?'Absent / On leave':s.label}))};
 }
-export async function loadMapping(auth:AuthorizationContext,date:string,requestedStation:string,registry=false):Promise<MappingData>{
+export async function loadMapping(auth:AuthorizationContext,date:string,requestedStation:string,registry=false,includeHierarchy=true):Promise<MappingData>{
  const scope=await mappingScope(auth,date),today=istDate();
  const station=requestedStation||'*';
  if(station!=='*'&&!scope.stations.some(s=>s.code===station))throw new FleetReportError('Station is outside your scope.',403);
@@ -64,14 +65,24 @@ export async function loadMapping(auth:AuthorizationContext,date:string,requeste
  if(defaults.error||assignments.error||settings.error||confirmations.error)throw new FleetReportError('Unable to load vehicle mappings. Retry; nothing has been changed.');
  const recentDays=settings.data?.assignment_recent_days??7;
  const from=new Date(Date.parse(`${date}T12:00:00Z`)-(recentDays-1)*86400000).toISOString().slice(0,10);
- const [recent,sources]=await Promise.all([
+ const [recent,sources,hierarchy]=await Promise.all([
  readAllRows(supabaseAdmin!.from('cps_shipment_daily').select('id,provider_employee_id,provider_employee_name,station_code,work_date').eq('company_id',scope.companyId).eq('client','Amazon').in('station_code',stationCodes).gte('work_date',from).lte('work_date',date).gt('total_activity',0).order('id')),
- loadVehicleSources(scope.companyId).catch(()=>({sources:[],designations:[]}))
+ loadVehicleSources(scope.companyId).catch(()=>({sources:[],designations:[]})),
+ includeHierarchy?mappingPeopleClusters(scope.companyId,scope.stations.map(s=>s.id)):Promise.resolve(null)
  ]);
  const options=recentRiders(recent.error?[]:recent.data??[]);
  // Saved identities remain usable during a late feed or outage. No name-only matching.
  for(const r of [...defaults.data??[],...assignments.data??[]]){let o=options.find(o=>o.id===riderKey(r.provider_employee_id));if(!o){o={id:riderKey(r.provider_employee_id),name:r.name,lastSeen:null,stationCodes:[]};options.push(o);}if(!o.stationCodes?.includes(r.station_code))(o.stationCodes??=[]).push(r.station_code);}
  const sourceMap=new Map(sources.sources.map(s=>[s.id,s]));
  const decorate=(v:typeof vehicles[number])=>({...v,sourceCode:(v as unknown as VehicleDA).sourceCode||sourceMap.get(v.source_id)?.code||v.ownership_type,sourceName:(v as unknown as VehicleDA).sourceName||sourceMap.get(v.source_id)?.name||v.ownership_type}) as VehicleDA;
- return{...empty,placementRecorded:scope.placementRecorded??false,unavailableVehicles:unavailableVehicles.map(decorate).filter(v=>!['VNV','VAN_VENDOR','VENDOR'].includes(v.sourceCode.toUpperCase())),dayStatuses:scope.dayStatuses??[],alertFrom:settings.data?.assignment_alert_from,recentDays,options,confirmations:confirmations.data??[],vehicles:vehicles.map(v=>({...v,sourceCode:(v as unknown as VehicleDA).sourceCode||sourceMap.get(v.source_id)?.code||v.ownership_type,sourceName:(v as unknown as VehicleDA).sourceName||sourceMap.get(v.source_id)?.name||v.ownership_type})) as VehicleDA[],defaults:defaults.data as DefaultDA[],assignments:(assignments.data??[]).map(a=>({...a,delivered:null,cReturn:null,swa:null})) as ConfirmedDA[],latestFeed:null,warning:recent.error?'Recent rider list unavailable. Saved rider IDs remain usable; refresh to load new associates.':undefined};
+ return{...empty,stations:scope.stations.map(s=>({...s,clusters:hierarchy?.error||!hierarchy?null:(hierarchy.byLocation.get(s.id)?.clusterManagers??[]).map(p=>({id:p.personId,name:p.name}))})),clusterWarning:hierarchy?.error?'People cluster mapping is temporarily unavailable. Refresh to retry; assignments can still be saved.':undefined,placementRecorded:scope.placementRecorded??false,unavailableVehicles:unavailableVehicles.map(decorate).filter(v=>!['VNV','VAN_VENDOR','VENDOR'].includes(v.sourceCode.toUpperCase())),dayStatuses:scope.dayStatuses??[],alertFrom:settings.data?.assignment_alert_from,recentDays,options,confirmations:confirmations.data??[],vehicles:vehicles.map(v=>({...v,sourceCode:(v as unknown as VehicleDA).sourceCode||sourceMap.get(v.source_id)?.code||v.ownership_type,sourceName:(v as unknown as VehicleDA).sourceName||sourceMap.get(v.source_id)?.name||v.ownership_type})) as VehicleDA[],defaults:defaults.data as DefaultDA[],assignments:(assignments.data??[]).map(a=>({...a,delivered:null,cReturn:null,swa:null})) as ConfirmedDA[],latestFeed:null,warning:recent.error?'Recent rider list unavailable. Saved rider IDs remain usable; refresh to load new associates.':undefined};
+}
+
+// Optional display metadata must never become a dependency of a mapping write.
+async function mappingPeopleClusters(companyId:string,stationIds:string[]):Promise<Awaited<ReturnType<typeof loadPeopleOperationalHierarchy>>>{
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try{return await Promise.race([
+  loadPeopleOperationalHierarchy(companyId,stationIds),
+  new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('People hierarchy timed out')),8000);})
+ ]);}catch{return{byLocation:new Map(),error:'People hierarchy unavailable'};}finally{if(timer)clearTimeout(timer);}
 }
