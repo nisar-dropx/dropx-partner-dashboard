@@ -52,21 +52,30 @@ function periodLabel(from: string, to: string) {
 
 function earningBasis(line: PublishedPayoutEarning) {
   if (line.basis === "per_month") return "Monthly amount prorated for eligible attendance";
-  if (line.basis === "per_day") return "Work days × per-day rate";
+  if (line.basis === "per_day") return "Work days × daily rate";
   if (line.basis === "per_hour") return "Work hours × hourly rate";
   if (line.basis === "per_unit") return line.reportedUnits === undefined
     ? "Production units × rate"
     : `${quantity(line.reportedUnits)} reported · ${quantity(line.excludedUnits ?? 0)} excluded`;
   if (line.basis === "additional") return "Additional payment";
-  return "Configured payment head";
+  return "Configured payment";
 }
 
-function rateLabel(line: PublishedPayoutEarning) {
-  if (line.rate === null) return "—";
-  if (line.basis === "per_month") return `${money(line.rate)} / month`;
-  if (line.basis === "per_day") return `${money(line.rate)} / day`;
-  if (line.basis === "per_hour") return `${money(line.rate)} / hour`;
-  return money(line.rate);
+function earningUnit(line: PublishedPayoutEarning, payoutDays: number) {
+  if (line.basis === "per_month") return { value: quantity(payoutDays), label: "Eligible days" };
+  if (line.units === null) return { value: "—", label: "" };
+  if (line.basis === "per_day") return { value: quantity(line.units), label: "Work days" };
+  if (line.basis === "per_hour") return { value: quantity(line.units), label: "Work hours" };
+  return { value: quantity(line.units), label: "Units" };
+}
+
+function earningRate(line: PublishedPayoutEarning) {
+  if (line.rate === null) return { value: "—", label: "" };
+  if (line.basis === "per_month") return { value: money(line.rate), label: "Per month" };
+  if (line.basis === "per_day") return { value: money(line.rate), label: "Per day" };
+  if (line.basis === "per_hour") return { value: money(line.rate), label: "Per hour" };
+  if (line.basis === "per_unit") return { value: money(line.rate), label: "Per unit" };
+  return { value: money(line.rate), label: "Configured rate" };
 }
 
 export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange }: { accountId: string; profileType: string; month: string; onMonthLockChange?: (locked: boolean) => void }) {
@@ -80,6 +89,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
   const [notice, setNotice] = useState("");
   const [disputeAreas, setDisputeAreas] = useState<PayoutDisputeArea[]>([]);
   const loadGeneration = useRef(0);
+  const disputeSectionRef = useRef<HTMLElement>(null);
   const query = new URLSearchParams({ accountId, profileType }).toString();
 
   const load = useCallback(async () => {
@@ -124,6 +134,15 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
     onMonthLockChange?.(loading || busy);
     return () => onMonthLockChange?.(false);
   }, [busy, loading, onMonthLockChange]);
+
+  useEffect(() => {
+    if (!showDisputes) return;
+    const frame = window.requestAnimationFrame(() => {
+      disputeSectionRef.current?.focus({ preventScroll: true });
+      disputeSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showDisputes]);
 
   async function send(event: React.FormEvent<HTMLFormElement>, payout: Payout) {
     event.preventDefault();
@@ -172,9 +191,8 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
           ? "This payout is confirmed. Its amount and payment status remain available here."
           : "This payout is not currently open for disputes.";
 
-  function openDeductionDispute() {
-    setDisputeAreas(["deduction"]);
-    setShowDisputes(true);
+  function toggleDisputeSection() {
+    setShowDisputes((current) => !current);
   }
 
   const visibleEarnings = (payout?.earnings ?? []).filter((line) => line.amount !== 0 || line.rate !== null || line.units !== null);
@@ -220,28 +238,40 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}><div><small>Earnings</small><h3>Payment heads</h3></div><strong>{money(payout.gross)}</strong></div>
-        <div className={styles.paymentLines}>
-          {visibleEarnings.map((line, index) => {
-            const unitLabel = line.basis === "per_hour" ? "Work hours" : line.basis === "per_day" ? "Work days" : line.basis === "per_month" ? "Eligible days" : "Units";
-            const unitValue = line.basis === "per_month" ? payout.days : line.units;
-            return <div className={styles.paymentLine} key={`${line.code}|${line.basis}|${line.rate ?? "none"}|${index}`}>
-              <div className={styles.lineIdentity}><strong>{line.label}</strong><small>{earningBasis(line)}</small></div>
-              {unitValue !== null ? <div><small>{unitLabel}</small><strong>{quantity(unitValue)}</strong></div> : null}
-              {line.rate !== null ? <div><small>{line.basis === "per_month" ? "Monthly amount" : "Rate"}</small><strong>{rateLabel(line)}</strong></div> : null}
-              <div className={styles.lineAmount}><small>{line.basis === "per_month" ? "Payable amount" : "Amount"}</small><strong>{money(line.amount)}</strong></div>
-            </div>;
-          })}
-          {!visibleEarnings.length ? <p className={styles.emptyLine}>No payment heads were included in this payout.</p> : null}
-        </div>
-        <div className={styles.sectionTotal}><span>Gross earnings</span><strong>{money(payout.gross)}</strong></div>
+        {visibleEarnings.length ? <div
+          className={styles.tableWrap}
+          role="region"
+          aria-label="Payment details table. Scroll horizontally to view all columns."
+          tabIndex={0}
+        >
+          <table className={styles.breakdownTable} aria-label="Payment heads breakdown">
+            <thead><tr><th scope="col">Payment head</th><th scope="col">Units</th><th scope="col">Rate</th><th scope="col">Amount</th></tr></thead>
+            <tbody>
+              {visibleEarnings.map((line, index) => {
+                const unit = earningUnit(line, payout.days);
+                const rate = earningRate(line);
+                return <tr key={`${line.code}|${line.basis}|${line.rate ?? "none"}|${index}`}>
+                  <th scope="row"><strong>{line.label}</strong><small className={styles.basisNote}>{earningBasis(line)}</small></th>
+                  <td><strong>{unit.value}</strong>{unit.label ? <small>{unit.label}</small> : null}</td>
+                  <td><strong>{rate.value}</strong>{rate.label ? <small>{rate.label}</small> : null}</td>
+                  <td className={styles.earningAmount}>{money(line.amount)}</td>
+                </tr>;
+              })}
+            </tbody>
+            <tfoot><tr><th scope="row" colSpan={3}>Gross earnings</th><td>{money(payout.gross)}</td></tr></tfoot>
+          </table>
+        </div> : <p className={styles.emptyLine}>No payment heads were included in this payout.</p>}
       </section>
 
       {visibleDeductions.length ? <section className={styles.section}>
-        <div className={styles.sectionHeading}><div><small>Deductions</small><h3>Deduction heads</h3></div>{payout.canDispute ? <button type="button" onClick={openDeductionDispute}>Dispute a deduction</button> : null}</div>
-        <div className={styles.deductionLines}>
-          {visibleDeductions.map((line) => <div key={line.code}><span>{line.label}</span><strong>− {money(line.amount)}</strong></div>)}
+        <div className={styles.sectionHeading}><div><small>Deductions</small><h3>Deduction heads</h3></div><strong className={styles.negative}>− {money(payout.deductions)}</strong></div>
+        <div className={styles.tableWrap}>
+          <table className={`${styles.breakdownTable} ${styles.deductionTable}`} aria-label="Deduction heads breakdown">
+            <thead><tr><th scope="col">Deduction</th><th scope="col">Amount</th></tr></thead>
+            <tbody>{visibleDeductions.map((line) => <tr key={line.code}><th scope="row">{line.label}</th><td>− {money(line.amount)}</td></tr>)}</tbody>
+            <tfoot><tr><th scope="row">Gross deductions</th><td>− {money(payout.deductions)}</td></tr></tfoot>
+          </table>
         </div>
-        <div className={`${styles.sectionTotal} ${styles.deductionTotal}`}><span>Gross deductions</span><strong>− {money(payout.deductions)}</strong></div>
       </section> : null}
 
       <div className={styles.total} aria-label="Final net payable">
@@ -249,18 +279,24 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
       </div>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeading}><div><small>Payout details</small><h3>Payment information</h3></div></div>
-        <div className={styles.identitySummary}><div><small>Employee code</small><strong>{payout.dropxId}</strong></div><div><small>Name</small><strong>{payout.name}</strong></div><div><small>Station</small><strong>{payout.station || "—"}</strong></div>{payout.bankDestinationAvailable ? <div><small>Bank account</small><strong>{payout.bankAccount} · {payout.ifsc || "IFSC not recorded"}</strong></div> : null}</div>
-        <small>Provider IDs: {payout.providerIds.join(", ") || "Training / attendance"}</small>
-        {payout.paymentReference ? <p>Payment reference: {payout.paymentReference} · {payout.paymentDate}</p> : null}
+        <div className={styles.sectionHeading}><div><small>Bank destination</small><h3>Payment information</h3></div></div>
+        {payout.bankDestinationAvailable ? <div className={styles.tableWrap}>
+          <table className={`${styles.breakdownTable} ${styles.bankTable}`} aria-label="Bank details">
+            <tbody>
+              <tr><th scope="row">Bank account</th><td>{payout.bankAccount || "Not recorded"}</td></tr>
+              <tr><th scope="row">IFSC</th><td>{payout.ifsc || "Not recorded"}</td></tr>
+            </tbody>
+          </table>
+        </div> : <p className={styles.emptyLine}>Bank details are not available for this payout.</p>}
       </section>
 
       {(payout.canDispute || payout.disputes.length) ? <div className={styles.disputeToggle}>
         <div><strong>{payout.canDispute ? "Something looks incorrect?" : "Dispute history"}</strong><small>{payout.canDispute ? "Raise one dispute and select every affected payment area." : `${payout.disputes.length} dispute${payout.disputes.length === 1 ? "" : "s"} recorded for this payout.`}</small></div>
-        <button type="button" aria-expanded={showDisputes} onClick={() => setShowDisputes((current) => !current)}>{showDisputes ? "Close" : payout.canDispute ? "Raise dispute" : "View disputes"}</button>
+        <button type="button" aria-expanded={showDisputes} aria-controls="payout-dispute-section" onClick={toggleDisputeSection}>{showDisputes ? "Close" : payout.canDispute ? "Raise dispute" : "View disputes"}</button>
       </div> : null}
 
-      {showDisputes ? <section className={styles.disputes}>
+      {showDisputes ? <section ref={disputeSectionRef} id="payout-dispute-section" className={styles.disputes} tabIndex={-1} aria-labelledby="payout-dispute-heading">
+        <header className={styles.disputeHeading}><small>Payout review</small><h3 id="payout-dispute-heading">{payout.canDispute ? "Raise a dispute" : "Dispute history"}</h3></header>
         {payout.canDispute ? <form onSubmit={(event) => void send(event, payout)} className={styles.form}>
           <div className={styles.disputeIdentity}><div><small>Month / pay period</small><strong>{periodLabel(payout.from, payout.to)}</strong></div><div><small>Employee code</small><strong>{payout.dropxId}</strong></div><div><small>Name</small><strong>{payout.name}</strong></div><div><small>Station</small><strong>{payout.station || "—"}</strong></div></div>
           <fieldset className={styles.areas}><legend>Select dispute for *</legend><div>
@@ -270,7 +306,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
           <button disabled={busy}>{busy ? "Sending…" : "Send dispute"}</button>
         </form> : <p>{reviewMessage} Contact Workforce if a later correction is required.</p>}
 
-        <section className={styles.history}><h3>Dispute history</h3>
+        <section className={styles.history}>{payout.canDispute ? <h3>Dispute history</h3> : null}
           {payout.disputes.map((dispute: Row) => {
             const decoded = decodePayoutDisputeReason(dispute.reason);
             return <article key={dispute.id}><header><div><b>{decoded.areas.length ? decoded.areas.join(" · ") : String(dispute.category).replaceAll("_", " ")}</b><small>Raised {localTime(dispute.created_at)} IST</small></div><strong>{String(dispute.status).replaceAll("_", " ")}</strong></header>

@@ -65,5 +65,11 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  assert.match(source,/searchParams\.get\("tab"\) === "payouts" && earningsAllowed/);
  assert.match(source,/useState\(linkedPayoutMonth \?\? currentPayoutMonth\(\)\)/);
  assert.match(payoutLoader,/bankDestinationAvailable: publication\?\.publication_kind !== "worksheet"[\s\S]+Object\.prototype\.hasOwnProperty\.call\(item, "bank_account_no"\)/);
- assert.match(payouts,/payout\.bankDestinationAvailable \? <div><small>Bank account<\/small>/);
+ const paymentInformationStart=payouts.indexOf('<h3>Payment information</h3>');
+ const paymentInformationEnd=payouts.indexOf('</section>',paymentInformationStart);
+ const paymentInformation=payouts.slice(paymentInformationStart,paymentInformationEnd);
+ assert.match(paymentInformation,/aria-label="Bank details"/);
+ assert.match(paymentInformation,/Bank account/);
+ assert.match(paymentInformation,/IFSC/);
+ assert.doesNotMatch(paymentInformation,/payout\.(?:dropxId|name|station|providerIds|paymentReference|paymentDate)/);
 });

@@ -57,24 +57,52 @@ test("legacy line snapshots aggregate payment heads without exposing a daily rep
 
 test("monthly payout UI is one consolidated view and does not duplicate live daily earnings", () => {
   const source = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../components/associate-payouts.module.css", import.meta.url), "utf8");
   assert.match(source, /Attendance used for this payout/);
   assert.match(source, /Payment heads/);
   assert.match(source, /Deduction heads/);
   assert.match(source, /Monthly amount/);
-  assert.match(source, /Payable amount/);
+  assert.match(source, /role="region"[\s\S]*aria-label="Payment details table\. Scroll horizontally to view all columns\."[\s\S]*tabIndex=\{0\}[\s\S]*aria-label="Payment heads breakdown"/);
+  assert.match(source, /aria-label="Payment heads breakdown"[\s\S]*<thead><tr><th scope="col">Payment head<\/th><th scope="col">Units<\/th><th scope="col">Rate<\/th><th scope="col">Amount<\/th><\/tr><\/thead>/);
+  assert.match(source, /aria-label="Payment heads breakdown"[\s\S]*<tfoot><tr><th scope="row" colSpan=\{3\}>Gross earnings<\/th><td>\{money\(payout\.gross\)\}<\/td><\/tr><\/tfoot>/);
+  assert.match(source, /aria-label="Deduction heads breakdown"[\s\S]*<th scope="col">Deduction<\/th><th scope="col">Amount<\/th>[\s\S]*Gross deductions/);
   assert.match(source, /aria-label="Payout totals"[\s\S]*Gross earnings[\s\S]*Gross deductions[\s\S]*Net payable/);
   assert.match(source, /aria-label="Final net payable"[\s\S]*Gross earnings minus gross deductions[\s\S]*Net payable/);
-  assert.doesNotMatch(source, /tab === ["']daily["']|Finalized payout details|<th>Date \/ ID<\/th>/);
+  assert.match(styles, /\.breakdownTable[\s\S]*table-layout:\s*fixed/);
+  assert.match(styles, /\.tableWrap:focus-visible[\s\S]*outline:/);
+  assert.match(styles, /@media \(max-width: 420px\)[\s\S]*\.breakdownTable/);
+  assert.doesNotMatch(styles, /@media \(max-width: 420px\)[\s\S]*\.basisNote\s*\{[\s\S]*display:\s*none/);
+  assert.match(source, /line\.basis === "per_unit"[\s\S]*label: "Per unit"[\s\S]*label: "Configured rate"/);
+  assert.doesNotMatch(source, /tab === ["']daily["']|Finalized payout details|<th>Date \/ ID<\/th>|className=\{styles\.paymentLine\}/);
+});
+
+test("payment information contains bank details only", () => {
+  const source = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("<h3>Payment information</h3>");
+  const end = source.indexOf("</section>", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const paymentInformation = source.slice(start, end);
+  assert.match(paymentInformation, /aria-label="Bank details"/);
+  assert.match(paymentInformation, /Bank account/);
+  assert.match(paymentInformation, /IFSC/);
+  assert.doesNotMatch(paymentInformation, /payout\.(?:dropxId|name|station|providerIds|paymentReference|paymentDate)/);
 });
 
 test("payout disputes stay with Workforce and the associate view has no conversation or reply controls", () => {
   const component = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../components/associate-payouts.module.css", import.meta.url), "utf8");
   const route = readFileSync(new URL("../../app/api/connect/payout-review/route.ts", import.meta.url), "utf8");
   const loader = readFileSync(new URL("./associate-payouts.ts", import.meta.url), "utf8");
 
   assert.match(component, /Dispute sent to Workforce for review\./);
   assert.match(component, /operation: ["']create["']/);
-  assert.doesNotMatch(component, /station team|Send reply|event\.actor_name|operation: disputeId \? ["']reply["']/i);
+  assert.match(component, /aria-controls="payout-dispute-section"[\s\S]*onClick=\{toggleDisputeSection\}/);
+  assert.match(component, /ref=\{disputeSectionRef\} id="payout-dispute-section"[\s\S]*tabIndex=\{-1\} aria-labelledby="payout-dispute-heading"/);
+  assert.match(component, /id="payout-dispute-heading"[\s\S]*Raise a dispute/);
+  assert.match(component, /useEffect\(\(\) => \{\s*if \(!showDisputes\) return;[\s\S]*disputeSectionRef\.current\?\.focus\(\{ preventScroll: true \}\)[\s\S]*scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)[\s\S]*\}, \[showDisputes\]\)/);
+  assert.match(styles, /\.disputes[\s\S]*scroll-margin-top:\s*88px/);
+  assert.doesNotMatch(component, /Dispute a deduction|openDeductionDispute|setDisputeAreas\(\["deduction"\]\)|station team|Send reply|event\.actor_name|operation: disputeId \? ["']reply["']/i);
 
   assert.match(route, /body\.operation\s*!==\s*["']create["']/);
   assert.doesNotMatch(route, /workforce_reply_payout_dispute|ownOpenDispute/);

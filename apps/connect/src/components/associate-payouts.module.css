@@ -178,8 +178,8 @@
 }
 
 .negative,
-.deductionLines strong,
-.deductionTotal strong {
+.deductionTable tbody td,
+.deductionTable tfoot td {
   color: #b42318;
 }
 
@@ -227,41 +227,135 @@
   font-size: 12px;
 }
 
-.paymentLines {
-  display: grid;
-  gap: 8px;
+.tableWrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e1e6ee;
+  border-radius: 12px;
+  background: #fff;
+  -webkit-overflow-scrolling: touch;
 }
 
-.paymentLine {
-  display: grid;
-  grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(95px, .7fr));
-  align-items: center;
-  gap: 12px;
-  padding: 13px 0;
-  border-top: 1px solid #edf0f5;
+.tableWrap:focus-visible {
+  outline: 3px solid #f16c43;
+  outline-offset: 2px;
 }
 
-.paymentLine:first-child {
-  border-top: 0;
+.breakdownTable {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: #1b263b;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
-.paymentLine > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
+.breakdownTable th,
+.breakdownTable td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #e8ecf2;
+  vertical-align: top;
 }
 
-.lineIdentity strong {
-  overflow-wrap: anywhere;
+.breakdownTable thead th {
+  background: #f6f8fb;
+  color: #647186;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .035em;
+  text-transform: uppercase;
 }
 
-.lineAmount {
+.breakdownTable thead th:first-child {
+  width: 40%;
+  text-align: left;
+}
+
+.breakdownTable thead th:nth-child(2) {
+  width: 16%;
+}
+
+.breakdownTable thead th:nth-child(3) {
+  width: 20%;
+}
+
+.breakdownTable thead th:nth-child(4) {
+  width: 24%;
+}
+
+.breakdownTable th:not(:first-child),
+.breakdownTable td {
   text-align: right;
 }
 
-.lineAmount strong {
+.breakdownTable tbody th {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.breakdownTable tbody th > strong,
+.breakdownTable tbody td > strong {
+  display: block;
+}
+
+.breakdownTable tbody small {
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.breakdownTable tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.breakdownTable tfoot > tr > * {
+  padding-top: 13px;
+  padding-bottom: 13px;
+  border-top: 2px solid #dbe2ec;
+  border-bottom: 0;
+  background: #f8fafc;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.breakdownTable tfoot th {
+  text-align: right;
+}
+
+.earningAmount {
   color: #176b3a;
-  font-size: 16px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.deductionTable {
+  min-width: 0;
+}
+
+.deductionTable thead th:first-child {
+  width: 70%;
+}
+
+.deductionTable tbody td,
+.deductionTable tfoot td {
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.bankTable {
+  min-width: 0;
+}
+
+.bankTable tbody th {
+  width: 38%;
+  background: #f8fafc;
+  color: #647186;
+}
+
+.bankTable tbody td {
+  text-align: left;
+  overflow-wrap: anywhere;
+  font-weight: 700;
 }
 
 .emptyLine {
@@ -273,32 +367,6 @@
   text-align: center;
 }
 
-.sectionTotal {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-  padding-top: 13px;
-  border-top: 1px solid #dce3ed;
-}
-
-.deductionLines {
-  display: grid;
-}
-
-.deductionLines > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid #edf0f5;
-}
-
-.deductionLines > div:first-child {
-  border-top: 0;
-}
-
-.identitySummary,
 .disputeIdentity {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -306,7 +374,6 @@
   margin: 12px 0;
 }
 
-.identitySummary > div,
 .disputeIdentity > div {
   display: grid;
   gap: 3px;
@@ -317,7 +384,6 @@
   background: #f7f8fa;
 }
 
-.identitySummary strong,
 .disputeIdentity strong {
   overflow-wrap: anywhere;
 }
@@ -341,6 +407,17 @@
   border: 1px solid #e3e8f0;
   border-radius: 14px;
   background: #fcfcfd;
+  scroll-margin-top: 88px;
+}
+
+.disputes:focus {
+  border-color: #e98a57;
+  outline: 3px solid rgb(233 138 87 / 18%);
+}
+
+.disputeHeading h3 {
+  margin: 2px 0 0;
+  font-size: 17px;
 }
 
 .card article {
@@ -447,21 +524,24 @@
     grid-template-columns: 1fr;
   }
 
-  .paymentLine {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    padding: 14px 0;
+  .section {
+    padding: 15px 12px;
   }
 
-  .lineIdentity {
-    grid-column: 1 / -1;
+  .breakdownTable {
+    min-width: 400px;
   }
 
-  .lineAmount {
-    text-align: left;
+  .deductionTable,
+  .bankTable {
+    min-width: 0;
   }
 
-  .identitySummary,
+  .breakdownTable th,
+  .breakdownTable td {
+    padding: 10px 8px;
+  }
+
   .disputeIdentity,
   .areas > div {
     grid-template-columns: 1fr;
@@ -474,11 +554,42 @@
 }
 
 @media (max-width: 420px) {
-  .paymentLine {
-    grid-template-columns: 1fr;
+  .card {
+    padding: 13px;
   }
 
-  .lineIdentity {
-    grid-column: auto;
+  .breakdownTable {
+    font-size: 11.5px;
+  }
+
+  .breakdownTable th,
+  .breakdownTable td {
+    padding: 9px 6px;
+  }
+
+  .breakdownTable thead th {
+    font-size: 9.5px;
+    letter-spacing: .015em;
+  }
+
+  .breakdownTable thead th:first-child {
+    width: 36%;
+  }
+
+  .breakdownTable thead th:nth-child(2) {
+    width: 14%;
+  }
+
+  .breakdownTable thead th:nth-child(3) {
+    width: 22%;
+  }
+
+  .breakdownTable thead th:nth-child(4) {
+    width: 28%;
+  }
+
+  .deductionTable thead th:first-child,
+  .bankTable tbody th {
+    width: 62%;
   }
 }
