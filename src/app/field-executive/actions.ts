@@ -28,7 +28,7 @@ import { loadClientIdPartnerStates } from "@/lib/workforce-client-id-partner";
 import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { loadOpsWorkforceLocations } from "@/lib/ops-workforce-locations";
-import { workforceStationPolicy, workforceStationEmailError } from "@/lib/workforce-register-policy";
+import { STATION_EMAIL_EXCEPTION_NOTE_FIELD, workforceStationPolicy, workforceStationEmailError, workforceStationEmailExceptionNote, workforceStationEmailNeedsException } from "@/lib/workforce-register-policy";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
 import {
@@ -141,6 +141,9 @@ function friendlyFieldExecutiveError(message: string) {
   const lower = message.toLowerCase();
   if (lower.includes("operation_mode_id")) {
     return "Database migration pending: remove operation_mode_id from workforce in Supabase.";
+  }
+  if (lower.includes(STATION_EMAIL_EXCEPTION_NOTE_FIELD)) {
+    return "Email exceptions are not enabled yet: the workforce station email exception migration is pending in Supabase.";
   }
   return message;
 }
@@ -331,6 +334,7 @@ export async function createFieldExecutive(formData: FormData) {
     });
     requireDesignationOnboardingAccess(designationRuleResult.data, authorization);
     const accessSurface = currentAccessSurface();
+    let stationEmailExceptionNote = "";
     requireDesignationPortalAccess(designationRuleResult.data, accessSurface, "add", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
     const dashboardRules = directActivate
       ? (await loadWorkforceCategoryRules(
@@ -380,8 +384,16 @@ export async function createFieldExecutive(formData: FormData) {
     if (!location) throw new Error("Selected location is not available for this company.");
     if (accessSurface === "ops") {
       if (!location.is_active || location.hide_from_location_list || workforceStationPolicy(location).excluded) throw new Error("This location is not available for workforce onboarding.");
-      const emailError = workforceStationEmailError(email, location.station_code, workforceStationPolicy(location).requiresStationEmail);
-      if (emailError) throw new Error(emailError);
+      const requiresStationEmail = workforceStationPolicy(location).requiresStationEmail;
+      const emailError = workforceStationEmailError(email, location.station_code, requiresStationEmail);
+      if (emailError) {
+        // A mailbox already registered with the partner may break the station-code
+        // rule, but only on the Workforce register and with a recorded reason.
+        if (table === "workforce" && workforceStationEmailNeedsException(email, location.station_code, requiresStationEmail)) {
+          stationEmailExceptionNote = workforceStationEmailExceptionNote(formData.get(STATION_EMAIL_EXCEPTION_NOTE_FIELD));
+        }
+        if (!stationEmailExceptionNote) throw new Error(emailError);
+      }
     }
     if (recruitmentLeadId) {
       if (table !== "workforce") throw new Error("Recruit candidates can only be invited to the Workforce Register.");
@@ -461,6 +473,7 @@ export async function createFieldExecutive(formData: FormData) {
       location_id: locationId,
       designation,
       ...(table === "workforce" ? { designation_id: designationRuleResult.data.id, recruitment_lead_id: recruitmentLeadId, ...workforceIdentityFields() } : {}),
+      ...(stationEmailExceptionNote ? { [STATION_EMAIL_EXCEPTION_NOTE_FIELD]: stationEmailExceptionNote } : {}),
       biometric_id: biometricId,
       dropx_id: dropxId,
       created_by: authorization.userId,
@@ -491,6 +504,17 @@ export async function createFieldExecutive(formData: FormData) {
       throw new Error(friendlyFieldExecutiveError(error.message));
     }
 
+    if (stationEmailExceptionNote) {
+      await supabaseAdmin.from("audit_logs").insert({
+        actor_id: authorization.userId,
+        action: "workforce_station_email_exception",
+        entity_table: table,
+        entity_id: executive.id,
+        old_values: null,
+        new_values: { email, station_code: location.station_code, location_id: locationId },
+        reason: stationEmailExceptionNote
+      });
+    }
 
     if (directActivate) {
       const documentPayload: Record<string, string> = {};
@@ -651,9 +675,16 @@ export async function updateFieldExecutive(formData: FormData) {
     if (locationError) throw new Error(locationError.message);
     if (!location) throw new Error("Selected location is not available for this company.");
 
+    let stationEmailExceptionNote = "";
     if (currentAccessSurface() === "ops" && (payload.email !== existingResult.data.email || payload.location_id !== existingResult.data.location_id)) {
-      const emailError = workforceStationEmailError(payload.email, location.station_code, workforceStationPolicy(location).requiresStationEmail);
-      if (emailError) throw new Error(emailError);
+      const requiresStationEmail = workforceStationPolicy(location).requiresStationEmail;
+      const emailError = workforceStationEmailError(payload.email, location.station_code, requiresStationEmail);
+      if (emailError) {
+        if (table === "workforce" && workforceStationEmailNeedsException(payload.email, location.station_code, requiresStationEmail)) {
+          stationEmailExceptionNote = workforceStationEmailExceptionNote(formData.get(STATION_EMAIL_EXCEPTION_NOTE_FIELD));
+        }
+        if (!stationEmailExceptionNote) throw new Error(emailError);
+      }
     }
     const designationResult = await supabaseAdmin
       .from("designations")
@@ -783,6 +814,7 @@ export async function updateFieldExecutive(formData: FormData) {
         ...corePayload,
         ...profilePayload,
         ...documentPayload,
+        ...(stationEmailExceptionNote ? { [STATION_EMAIL_EXCEPTION_NOTE_FIELD]: stationEmailExceptionNote } : {}),
         updated_at: new Date().toISOString()
       })
       .eq("id", executiveId)
@@ -794,6 +826,18 @@ export async function updateFieldExecutive(formData: FormData) {
         throw new Error("Field Executive ID is already registered.");
       }
       throw new Error(friendlyFieldExecutiveError(error.message));
+    }
+
+    if (stationEmailExceptionNote) {
+      await supabaseAdmin.from("audit_logs").insert({
+        actor_id: authorization.userId,
+        action: "workforce_station_email_exception",
+        entity_table: table,
+        entity_id: executiveId,
+        old_values: { email: existingResult.data.email, location_id: existingResult.data.location_id },
+        new_values: { email: payload.email, station_code: location.station_code, location_id: payload.location_id },
+        reason: stationEmailExceptionNote
+      });
     }
 
     await saveProfileVerifications({

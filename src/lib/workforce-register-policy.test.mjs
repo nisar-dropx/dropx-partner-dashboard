@@ -1,11 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { workforceProfileStatus, workforceRegisterLocations, workforceStationPolicy, workforceStationEmailError } from "./workforce-register-policy.ts";
+import { STATION_EMAIL_EXCEPTION_NOTE_MAX, workforceProfileStatus, workforceRegisterLocations, workforceStationPolicy, workforceStationEmailError, workforceStationEmailExceptionNote, workforceStationEmailNeedsException } from "./workforce-register-policy.ts";
 const station = (id, model, provider = "Amazon", parent) => ({ id, station_code: id, parent_station_id: parent, providers: { name: provider }, location_models: { code: model } });
 for (const model of ["EDSP", "XPT", "AMXL"]) test(`${model} requires station email, accepting any domain and case`, () => {
   assert.equal(workforceStationPolicy(station("KOZA", model)).requiresStationEmail, true);
   for (const email of ["Akshay.KOZA@outlook.com", "akshay.koza@gmail.com", "a.b.KoZa@example.org", "sujithlal.koza1996@gmail.com"]) assert.equal(workforceStationEmailError(email, "KOZA", true), null);
   for (const email of ["akshay@gmail.com", "akshay.ktub@gmail.com", "akshay.koza.other@gmail.com", ".koza@gmail.com", ".koza12@gmail.com", "akshay.koza1x@gmail.com", "a.koza@bad"]) assert.ok(workforceStationEmailError(email, "KOZA", true));
+});
+test("a valid mailbox that only breaks the station rule can be saved with a written reason", () => {
+  assert.equal(workforceStationEmailNeedsException("vishnuraj.peua123@gmail.com", "PEUA", true), false, "digits after the code already pass");
+  assert.equal(workforceStationEmailNeedsException("vishnuraj@gmail.com", "PEUA", true), true);
+  assert.equal(workforceStationEmailNeedsException("vishnuraj.koza@gmail.com", "PEUA", true), true);
+  assert.equal(workforceStationEmailNeedsException("not-an-email", "PEUA", true), false, "an invalid address is never an exception");
+  assert.equal(workforceStationEmailNeedsException("personal@example.com", "PHN", false), false);
+  assert.equal(workforceStationEmailExceptionNote("  already   onboarded\nin Amazon with this mailbox "), "already onboarded in Amazon with this mailbox");
+  for (const note of [null, undefined, "", "   ", "too short"]) assert.equal(workforceStationEmailExceptionNote(note), "");
+  assert.equal(workforceStationEmailExceptionNote("x".repeat(STATION_EMAIL_EXCEPTION_NOTE_MAX + 50)).length, STATION_EMAIL_EXCEPTION_NOTE_MAX);
 });
 test("Flipkart personal email remains valid", () => {
   for (const model of ["ODH", "MDH"]) assert.equal(workforceStationPolicy(station("PHN", model, "Flipkart")).requiresStationEmail, false);

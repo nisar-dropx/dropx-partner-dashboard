@@ -49,6 +49,18 @@ export function workforceStationEmailError(email: string, stationCode: string, r
   if (local.length > suffix.length && local.endsWith(suffix)) return null;
   return `use an email ending in .${stationCode.toLowerCase()} before @, for example akshay.${stationCode.toLowerCase()}@outlook.com. numbers after .${stationCode.toLowerCase()} and any email domain are allowed.`;
 }
+export const STATION_EMAIL_EXCEPTION_NOTE_FIELD = "station_email_exception_note";
+export const STATION_EMAIL_EXCEPTION_NOTE_MIN = 10;
+export const STATION_EMAIL_EXCEPTION_NOTE_MAX = 500;
+/** True when the address itself is valid and only the station-code rule is broken. */
+export function workforceStationEmailNeedsException(email: string, stationCode: string, required: boolean) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && workforceStationEmailError(email, stationCode, required) !== null;
+}
+/** A mailbox already registered with the partner may break the rule when a written reason is recorded. */
+export function workforceStationEmailExceptionNote(value: unknown) {
+  const note = String(value ?? "").replace(/\s+/g, " ").trim();
+  return note.length >= STATION_EMAIL_EXCEPTION_NOTE_MIN ? note.slice(0, STATION_EMAIL_EXCEPTION_NOTE_MAX) : "";
+}
 export function workforceRegisterLocations<T extends WorkforceStation>(stations: T[], auth: { hasAllLocationAccess: boolean; locationScopeIds: string[] }) {
   const ids = new Set(auth.hasAllLocationAccess ? stations.map(s => s.id) : auth.locationScopeIds);
   let changed = true;
