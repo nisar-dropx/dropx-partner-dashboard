@@ -1,5 +1,6 @@
 "use client";
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
+import { TriangleAlert } from 'lucide-react';
 import { shipmentPincodeBreakup, type ShipmentEvidence } from '@/lib/payment-shipment-evidence';
 import styles from './payment-shipment-evidence.module.css';
 
@@ -36,10 +37,15 @@ function ShipmentDetails({ rows, total, divisor }: { rows: ShipmentEvidence[]; t
   const filtered = rows.filter(row => `${row.trackingId} ${row.pincode ?? ''}`.toLowerCase().includes(search.toLowerCase()));
   const visible = filtered.slice(page * 10, page * 10 + 10);
   const breakup = shipmentPincodeBreakup(rows);
+  const fit = rows.reduce((counts, row) => { counts[row.suitability] += 1; return counts; }, { small: 0, bulky: 0, unknown: 0 });
   const selection = rows.find(row => row.trackingId === selected);
   const visualRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (selected) visualRef.current?.scrollIntoView({block: 'nearest', inline: 'nearest'}); }, [selected]);
   return <div className={styles.body}>
+      {rows.length > 0 ? <div className={styles.fitAlert} role="status" aria-label="Shipment fit summary">
+        <TriangleAlert size={16} aria-hidden="true" />
+        <span><strong>{fit.bulky} of {rows.length} van-needed</strong><span className={styles.fitDetail}> · {fit.small} small / bike · {fit.unknown} unclassified</span><small>Approx. fit{total > rows.length ? ` · First ${rows.length} of ${total} IDs` : ''}</small></span>
+      </div> : null}
       <small>{rows.filter(row => row.matched).length} of {total} IDs matched</small>
       {total > rows.length ? <p>Details cover the first {rows.length} of {total} IDs. The complete tracking list remains in Request details.</p> : null}
       <div className={styles.pins} aria-label="Pincode shipment breakup">{breakup.map(item => <span key={item.pincode}><strong>{item.pincode}</strong> {item.count}</span>)}</div>
