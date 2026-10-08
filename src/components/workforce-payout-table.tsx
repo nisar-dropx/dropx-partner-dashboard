@@ -355,7 +355,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
     if (audience === "workforce") {
       const confirmed = window.confirm(
         `Publish ${reviewSelectedRows.length} selected payout${reviewSelectedRows.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}?\n\n`
-        + "This freezes each selected DropX ID's provider mapping, remapping and direct-pay allocation for the month, publishes the payment in DropX One, and queues the WhatsApp notification."
+        + "This freezes each selected DropX ID's provider mapping, remapping and direct-pay allocation for the month, publishes the payment in DropX One, and queues the enabled App and WhatsApp notifications."
       );
       if (!confirmed) return;
     }
@@ -379,8 +379,17 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
       if (!response.ok) throw new Error(payload?.error ?? (audience === "workforce" ? "Unable to publish payouts and queue notifications." : "Unable to send Helper payouts for review."));
       setSelected(new Set());
       if (audience === "workforce") {
-        const notifications = Number(payload.notifications ?? payload.publicationIds?.length ?? 0);
-        setReviewState({ busy: false, error: "", notice: `${payload.submitted} payout${payload.submitted === 1 ? "" : "s"} published; ${notifications} WhatsApp notification${notifications === 1 ? "" : "s"} queued.` });
+        const appNotifications = Number(payload.appNotifications ?? 0);
+        const whatsappNotifications = Number(payload.whatsappNotifications ?? payload.notifications ?? 0);
+        const channelSummary = [
+          appNotifications ? `${appNotifications} App notification${appNotifications === 1 ? "" : "s"}` : "",
+          whatsappNotifications ? `${whatsappNotifications} WhatsApp notification${whatsappNotifications === 1 ? "" : "s"}` : ""
+        ].filter(Boolean).join(" and ");
+        setReviewState({
+          busy: false,
+          error: "",
+          notice: `${payload.submitted} payout${payload.submitted === 1 ? "" : "s"} published${channelSummary ? `; ${channelSummary} queued.` : "."}`
+        });
       } else {
         setReviewState({ busy: false, error: "", notice: `${payload.submitted} Helper payout${payload.submitted === 1 ? "" : "s"} sent for review.` });
       }

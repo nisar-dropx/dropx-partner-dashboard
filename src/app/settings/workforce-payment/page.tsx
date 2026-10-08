@@ -45,8 +45,8 @@ export default async function WorkforcePaymentSettingsHubPage() {
           </PendingLink>
           <PendingLink className="settings-tile actionable" href="/settings/workforce-payment/payout-notification">
             <div>
-              <h3>Payout WhatsApp Notification</h3>
-              <p className="subtle">Select an approved template, map its payout variables, and sync templates directly from Meta.</p>
+              <h3>Payout Notifications</h3>
+              <p className="subtle">Enable DropX One App alerts and configure the approved WhatsApp template used for published payouts.</p>
             </div>
             <span className="settings-tile-actions">
               <span className="button secondary compact">Configure</span>

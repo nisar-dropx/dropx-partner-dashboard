@@ -32,6 +32,7 @@ export type PayoutNotificationTemplate = {
 };
 
 export type PayoutNotificationConfig = {
+  app_notification_enabled: boolean;
   is_enabled: boolean;
   whatsapp_profile_id: string | null;
   template_id: string | null;
@@ -80,6 +81,7 @@ export function WorkforcePayoutNotificationForm({
   config: PayoutNotificationConfig;
 }) {
   const defaultProfileId = config.whatsapp_profile_id || profiles.find((profile) => profile.is_default)?.id || profiles[0]?.id || "";
+  const [appNotificationEnabled, setAppNotificationEnabled] = useState(config.app_notification_enabled);
   const [enabled, setEnabled] = useState(config.is_enabled);
   const [profileId, setProfileId] = useState(defaultProfileId);
   const [templateId, setTemplateId] = useState(config.template_id ?? "");
@@ -141,7 +143,7 @@ export function WorkforcePayoutNotificationForm({
         {!globalWhatsAppEnabled ? (
           <div className="inline-error" role="alert">
             <strong>WhatsApp messaging is disabled</strong>
-            <span>Enable it in Meta settings before turning on payout notifications. You can still prepare and save the template mapping.</span>
+            <span>Enable it in Meta settings before turning on the WhatsApp channel. The DropX One App notification can still be enabled independently.</span>
           </div>
         ) : null}
         {syncMessage.error || syncMessage.notice ? (
@@ -150,6 +152,17 @@ export function WorkforcePayoutNotificationForm({
             <span>{syncMessage.error ?? syncMessage.notice}</span>
           </div>
         ) : null}
+
+        <label className="toggle-field">
+          <input
+            checked={appNotificationEnabled}
+            disabled={!canEdit}
+            name="app_notification_enabled"
+            onChange={(event) => setAppNotificationEnabled(event.target.checked)}
+            type="checkbox"
+          />
+          <span>Send a DropX One App notification when a workforce payout is published for review</span>
+        </label>
 
         <label className="toggle-field">
           <input
@@ -162,11 +175,18 @@ export function WorkforcePayoutNotificationForm({
           <span>Send a WhatsApp notification when a workforce payout is published for review</span>
         </label>
 
+        {appNotificationEnabled ? (
+          <div className="message-panel success" role="status">
+            <strong>DropX One App preview</strong>
+            <span>Payment details available — opens the published month directly in the Payouts tab. A device push is also attempted when the associate has an active app token.</span>
+          </div>
+        ) : null}
+
         <div className="whatsapp-config-layout">
           <div className="whatsapp-config-fields">
             <label>Send from profile
               <SearchableSelect
-                disabled={!canEdit}
+                disabled={!canEdit || !enabled}
                 name="whatsapp_profile_id"
                 onValueChange={(value) => {
                   setProfileId(value);
@@ -181,13 +201,13 @@ export function WorkforcePayoutNotificationForm({
               />
             </label>
             <div className="form-actions" style={{ justifyContent: "flex-start", marginTop: 0 }}>
-              <button className="button secondary" disabled={!canEdit || !profileId || syncing} onClick={() => void syncTemplates()} type="button">
+              <button className="button secondary" disabled={!canEdit || !enabled || !profileId || syncing} onClick={() => void syncTemplates()} type="button">
                 {syncing ? "Syncing with Meta…" : "Sync templates now"}
               </button>
             </div>
             <label>Approved WhatsApp template
               <SearchableSelect
-                disabled={!canEdit || !profileId}
+                disabled={!canEdit || !enabled || !profileId}
                 name="template_id"
                 onValueChange={(value) => {
                   setTemplateId(value);
@@ -210,12 +230,12 @@ export function WorkforcePayoutNotificationForm({
                 {variables.length ? variables.map((variable) => (
                   <label key={variable.key}>{variable.label}
                     <SearchableSelect
-                      disabled={!canEdit}
+                      disabled={!canEdit || !enabled}
                       name={`mapping_${variable.key.replaceAll(".", "_")}`}
                       onValueChange={(value) => setMappings((current) => ({ ...current, [variable.key]: value }))}
                       options={WORKFORCE_PAYOUT_WHATSAPP_FIELDS.map((field) => ({ value: field.value, label: field.label }))}
                       placeholder="Map to payout data"
-                      required
+                      required={enabled}
                       value={mappings[variable.key] ?? ""}
                     />
                   </label>

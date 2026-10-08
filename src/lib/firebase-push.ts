@@ -80,7 +80,9 @@ function pushData(notification: PushNotification) {
     notificationId: notification.id,
     route: notification.route ?? "",
     profileType: notification.profileType,
-    accountId: notification.accountId
+    accountId: notification.accountId,
+    dropxTitle: notification.title,
+    dropxBody: notification.body
   };
   for (const [key, value] of Object.entries(notification.data ?? {})) {
     values[key] = typeof value === "string" ? value : JSON.stringify(value);
@@ -131,25 +133,21 @@ export async function deliverNotificationPush(notification: PushNotification) {
     const results = await Promise.all(tokens.map(async (row) => {
       const message: Record<string, unknown> = {
         token: row.push_token,
-        notification: {
-          title: notification.title,
-          body: notification.body
-        },
         data: pushData(notification)
       };
       if (row.platform === "ios") {
+        message.notification = {
+          title: notification.title,
+          body: notification.body
+        };
         message.apns = {
           headers: { "apns-priority": "10" },
           payload: { aps: { sound: "default", alert: { title: notification.title, body: notification.body } } }
         };
       } else {
-        message.android = {
-          priority: "high",
-          notification: {
-            channel_id: "dropx_one_notifications",
-            sound: "default"
-          }
-        };
+        // Android must remain data-only so DropxMessagingService receives background/killed-app
+        // pushes and builds the notification with the exact payout route and action buttons.
+        message.android = { priority: "high" };
       }
 
       const response = await fetch(

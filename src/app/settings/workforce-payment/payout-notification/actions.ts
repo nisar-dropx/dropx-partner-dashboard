@@ -45,6 +45,7 @@ export async function saveWorkforcePayoutWhatsAppConfiguration(formData: FormDat
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
     const isEnabled = formData.get("is_enabled") === "on";
+    const appNotificationEnabled = formData.get("app_notification_enabled") === "on";
     const profileId = clean(formData.get("whatsapp_profile_id")) || null;
     const templateId = clean(formData.get("template_id")) || null;
     let mappings: Record<string, string> = {};
@@ -73,8 +74,7 @@ export async function saveWorkforcePayoutWhatsAppConfiguration(formData: FormDat
 
     let templateName: string | null = null;
     let templateLanguage: string | null = null;
-    if (profileId || templateId) {
-      if (!profileId || !templateId) throw new Error("Select both the WhatsApp sender and its approved template.");
+    if (isEnabled && profileId && templateId) {
       const [profileResult, templateResult] = await Promise.all([
         supabaseAdmin
           .from("whatsapp_profiles")
@@ -91,12 +91,12 @@ export async function saveWorkforcePayoutWhatsAppConfiguration(formData: FormDat
           .maybeSingle()
       ]);
       if (profileResult.error || !profileResult.data) throw new Error("Select a WhatsApp sender in your company.");
-      if (isEnabled && !profileResult.data.is_active) throw new Error("Select an active WhatsApp sender in your company.");
+      if (!profileResult.data.is_active) throw new Error("Select an active WhatsApp sender in your company.");
       if (templateResult.error || !templateResult.data) throw new Error("The selected WhatsApp template is unavailable. Sync templates and choose it again.");
       if (templateResult.data.whatsapp_profile_id !== profileId) throw new Error("The selected template does not belong to the selected WhatsApp sender.");
-      if (isEnabled && templateResult.data.status !== "APPROVED") throw new Error("Only an approved WhatsApp template can be selected.");
+      if (templateResult.data.status !== "APPROVED") throw new Error("Only an approved WhatsApp template can be selected.");
       const components = (templateResult.data.components ?? []) as WhatsAppTemplateComponent[];
-      if (isEnabled && getWhatsAppTemplateHeaderMediaType(components)) throw new Error("Payout notifications currently support text-only WhatsApp templates.");
+      if (getWhatsAppTemplateHeaderMediaType(components)) throw new Error("Payout notifications currently support text-only WhatsApp templates.");
       const variables = extractWhatsAppTemplateVariables(components);
       const allowedFields = new Set<string>(WORKFORCE_PAYOUT_WHATSAPP_FIELDS.map((field) => field.value));
       const variableKeys = new Set(variables.map((variable) => variable.key));
@@ -108,21 +108,22 @@ export async function saveWorkforcePayoutWhatsAppConfiguration(formData: FormDat
       mappings = Object.fromEntries(variables.map((variable) => [variable.key, mappings[variable.key]]));
       templateName = templateResult.data.name;
       templateLanguage = templateResult.data.language;
-    } else {
-      mappings = {};
     }
 
     const saved = await supabaseAdmin.from("whatsapp_notification_configs").upsert({
       company_id: companyId,
       event_code: WORKFORCE_PAYOUT_WHATSAPP_EVENT,
+      app_notification_enabled: appNotificationEnabled,
       is_enabled: isEnabled,
-      whatsapp_profile_id: profileId,
-      template_id: templateId,
-      template_name: templateName,
-      template_language: templateLanguage,
-      variable_mappings: mappings,
       updated_by: authorization.userId,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      ...(isEnabled ? {
+        whatsapp_profile_id: profileId,
+        template_id: templateId,
+        template_name: templateName,
+        template_language: templateLanguage,
+        variable_mappings: mappings
+      } : {})
     }, { onConflict: "company_id,event_code" });
     if (saved.error) throw new Error(saved.error.message);
 
@@ -132,7 +133,7 @@ export async function saveWorkforcePayoutWhatsAppConfiguration(formData: FormDat
     if (isRedirectError(error)) throw error;
     settingsRedirect({ error: error instanceof Error ? error.message : "Unable to save payout notification settings." });
   }
-  settingsRedirect({ notice: "Workforce payout WhatsApp notification configuration saved." });
+  settingsRedirect({ notice: "Workforce payout notification configuration saved." });
 }
 
 export async function syncWorkforcePayoutWhatsAppTemplates(profileId: string) {

@@ -82,7 +82,7 @@ async function withPayoutReviewStatuses(
   });
   const publishedStatus = (status: string | undefined) => status === "pending" || status === "sending"
     ? "Notification queued"
-    : status === "sent" || status === "superseded"
+    : status === "sent" || status === "superseded" || status === "disabled"
       ? "Payment published"
       : status === "failed"
         ? "Notification failed"

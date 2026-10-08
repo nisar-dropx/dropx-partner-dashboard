@@ -34,6 +34,11 @@ assert.match(routeSource, /companyWide\.rows/);
 assert.match(routeSource, /Select every Ready for review or Returned location row/);
 assert.match(routeSource, /if \(!authorization\.hasAllLocationAccess\)/);
 assert.match(pageSource, /canPublishNotifications=\{authorization\.hasAllLocationAccess\}/);
+assert.match(
+  pageSource,
+  /status === "sent" \|\| status === "superseded" \|\| status === "disabled"[\s\S]*\? "Payment published"/,
+  "App-only publications must render as published instead of falling back to Under Review."
+);
 assert.match(tableSource, /Send Notification requires all-location access/);
 assert.match(reviewActionSource, /publication\.data\.publication_kind===['"]worksheet['"]&&!auth\.hasAllLocationAccess/);
 assert.match(reviewActionSource, /Company-wide location access is required to retry this payout notification/);
@@ -50,7 +55,8 @@ assert.ok(
     < routeSource.indexOf('rpc("workforce_publish_payout_notifications"'),
   "The generated payload must be size-checked before the atomic publication RPC."
 );
-assert.match(routeSource, /waitUntil\(processPayoutReviewNotifications/);
+assert.match(routeSource, /deliveryTasks\.push\(processPayoutReviewNotifications/);
+assert.match(routeSource, /waitUntil\(Promise\.allSettled\(deliveryTasks\)/);
 assert.match(routeSource, /subjectTypes\.has\(["']helper["']\)/);
 assert.match(routeSource, /workforce_send_payouts_for_review/);
 assert.match(tableSource, /audience === "workforce" \? "Send Notification" : "Send for review"/);

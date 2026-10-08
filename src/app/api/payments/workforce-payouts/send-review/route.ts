@@ -5,6 +5,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { processPayoutReviewNotifications } from "@/lib/payout-review-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { processWorkforcePayoutAppNotifications } from "@/lib/workforce-payout-app-notifications";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import {
@@ -86,80 +87,109 @@ async function notificationPreflight(
 ) {
   const config = await supabaseAdmin!
     .from("whatsapp_notification_configs")
-    .select("id,is_enabled,whatsapp_profile_id,template_id,template_name,template_language,variable_mappings,updated_at")
+    .select("id,app_notification_enabled,is_enabled,whatsapp_profile_id,template_id,template_name,template_language,variable_mappings,updated_at")
     .eq("company_id", companyId)
     .eq("event_code", WORKFORCE_PAYOUT_WHATSAPP_EVENT)
     .maybeSingle();
-  if (config.error || !config.data?.is_enabled) {
-    throw new Error("Enable and save the Workforce payout WhatsApp notification before publishing payouts.");
+  if (config.error || !config.data) {
+    throw new Error("Save the Workforce payout notification setting before publishing payouts.");
   }
-  if (!config.data.whatsapp_profile_id || !config.data.template_id || !config.data.template_name || !config.data.template_language) {
-    throw new Error("Select an approved WhatsApp template and sending profile before publishing payouts.");
+  const whatsappNotificationEnabled = Boolean(config.data.is_enabled);
+  const appNotificationEnabled = Boolean(config.data.app_notification_enabled);
+  if (!whatsappNotificationEnabled && !appNotificationEnabled) {
+    throw new Error("Enable App or WhatsApp notifications before publishing payouts.");
   }
 
-  const [globalSettings, profile, template, people, accessToken] = await Promise.all([
-    supabaseAdmin!.from("whatsapp_settings").select("is_enabled").eq("company_id", companyId).maybeSingle(),
-    supabaseAdmin!.from("whatsapp_profiles")
-      .select("id,phone_number_id,graph_api_version,is_active")
-      .eq("company_id", companyId)
-      .eq("id", config.data.whatsapp_profile_id)
-      .maybeSingle(),
-    supabaseAdmin!.from("whatsapp_template_cache")
-      .select("template_id,name,language,status,components,whatsapp_profile_id,synced_at")
-      .eq("company_id", companyId)
-      .eq("whatsapp_profile_id", config.data.whatsapp_profile_id)
-      .eq("template_id", config.data.template_id)
-      .eq("name", config.data.template_name)
-      .eq("language", config.data.template_language)
-      .eq("status", "APPROVED")
-      .maybeSingle(),
-    loadNotificationRecipients(companyId, snapshots.map((entry) => entry.workforceId)),
-    supabaseAdmin!.rpc("get_whatsapp_profile_access_token", { profile_id: config.data.whatsapp_profile_id })
-  ]);
-  if (globalSettings.error || !globalSettings.data?.is_enabled) {
-    throw new Error("Enable WhatsApp messaging before publishing payouts.");
-  }
-  if (profile.error || !profile.data?.is_active || !profile.data.phone_number_id || accessToken.error || !accessToken.data) {
-    throw new Error("The selected WhatsApp sending profile is not ready.");
-  }
-  if (template.error || !template.data) {
-    throw new Error("The selected WhatsApp template is no longer approved. Sync templates and save the setting again.");
-  }
+  const people = await loadNotificationRecipients(companyId, snapshots.map((entry) => entry.workforceId));
   if (people.error || people.data.length !== people.expected) {
     throw new Error("One or more selected Workforce recipients are unavailable.");
   }
 
-  const activeProfile = profile.data;
-  const approvedTemplate = template.data;
   const personById = new Map((people.data ?? []).map((person) => [String(person.id), person]));
-  const mappings = config.data.variable_mappings as Record<string, string>;
+  let activeProfile: { id: string } | null = null;
+  let approvedTemplate: {
+    template_id: string;
+    name: string;
+    language: string;
+    components: unknown;
+  } | null = null;
+  let mappings: Record<string, string> = {};
+
+  if (whatsappNotificationEnabled) {
+    if (!config.data.whatsapp_profile_id || !config.data.template_id || !config.data.template_name || !config.data.template_language) {
+      throw new Error("Select an approved WhatsApp template and sending profile before publishing payouts.");
+    }
+    const [globalSettings, profile, template, accessToken] = await Promise.all([
+      supabaseAdmin!.from("whatsapp_settings").select("is_enabled").eq("company_id", companyId).maybeSingle(),
+      supabaseAdmin!.from("whatsapp_profiles")
+        .select("id,phone_number_id,graph_api_version,is_active")
+        .eq("company_id", companyId)
+        .eq("id", config.data.whatsapp_profile_id)
+        .maybeSingle(),
+      supabaseAdmin!.from("whatsapp_template_cache")
+        .select("template_id,name,language,status,components,whatsapp_profile_id,synced_at")
+        .eq("company_id", companyId)
+        .eq("whatsapp_profile_id", config.data.whatsapp_profile_id)
+        .eq("template_id", config.data.template_id)
+        .eq("name", config.data.template_name)
+        .eq("language", config.data.template_language)
+        .eq("status", "APPROVED")
+        .maybeSingle(),
+      supabaseAdmin!.rpc("get_whatsapp_profile_access_token", { profile_id: config.data.whatsapp_profile_id })
+    ]);
+    if (globalSettings.error || !globalSettings.data?.is_enabled) {
+      throw new Error("Enable WhatsApp messaging before publishing payouts.");
+    }
+    if (profile.error || !profile.data?.is_active || !profile.data.phone_number_id || accessToken.error || !accessToken.data) {
+      throw new Error("The selected WhatsApp sending profile is not ready.");
+    }
+    if (template.error || !template.data) {
+      throw new Error("The selected WhatsApp template is no longer approved. Sync templates and save the setting again.");
+    }
+    activeProfile = profile.data;
+    approvedTemplate = template.data;
+    mappings = config.data.variable_mappings as Record<string, string>;
+  }
+
   const notifications = new Map<string, Record<string, unknown>>();
   snapshots.forEach(({ workforceId, snapshot }) => {
     const person = personById.get(workforceId);
-    const recipient = normalizeWorkforceWhatsAppRecipient(person?.mobile, person?.mobile_country_code);
-    if (!recipient) {
-      throw new Error(`${person?.dropx_id || person?.full_name || "A selected Workforce member"} does not have a valid WhatsApp mobile number.`);
-    }
     const values = workforcePayoutWhatsAppValues({ snapshot, person: person ?? {}, reviewUntil });
-    buildWorkforcePayoutTemplateComponents(
-      Array.isArray(approvedTemplate.components) ? approvedTemplate.components : [],
-      mappings,
-      values
-    );
-    notifications.set(workforceId, {
+    const notificationSnapshot: Record<string, unknown> = {
       schema_version: 1,
       event_code: WORKFORCE_PAYOUT_WHATSAPP_EVENT,
-      whatsapp_profile_id: activeProfile.id,
-      template_id: approvedTemplate.template_id,
-      template_name: approvedTemplate.name,
-      template_language: approvedTemplate.language,
-      variable_mappings: mappings,
-      template_components: approvedTemplate.components,
-      resolved_values: values,
-      recipient
-    });
+      app_notification_enabled: appNotificationEnabled,
+      whatsapp_notification_enabled: whatsappNotificationEnabled,
+      resolved_values: values
+    };
+    if (whatsappNotificationEnabled && activeProfile && approvedTemplate) {
+      const recipient = normalizeWorkforceWhatsAppRecipient(person?.mobile, person?.mobile_country_code);
+      if (!recipient) {
+        throw new Error(`${person?.dropx_id || person?.full_name || "A selected Workforce member"} does not have a valid WhatsApp mobile number.`);
+      }
+      buildWorkforcePayoutTemplateComponents(
+        Array.isArray(approvedTemplate.components) ? approvedTemplate.components : [],
+        mappings,
+        values
+      );
+      Object.assign(notificationSnapshot, {
+        whatsapp_profile_id: activeProfile.id,
+        template_id: approvedTemplate.template_id,
+        template_name: approvedTemplate.name,
+        template_language: approvedTemplate.language,
+        variable_mappings: mappings,
+        template_components: approvedTemplate.components,
+        recipient
+      });
+    }
+    notifications.set(workforceId, notificationSnapshot);
   });
-  return { config: config.data, notifications };
+  return {
+    appNotificationEnabled,
+    config: config.data,
+    notifications,
+    whatsappNotificationEnabled
+  };
 }
 
 function aggregateNotificationSnapshot(snapshots: PublicationSnapshot[]): PublicationSnapshot {
@@ -409,13 +439,28 @@ export async function POST(request: Request) {
     const publicationIds = Array.isArray(result.data?.publication_ids)
       ? result.data.publication_ids.map(String)
       : [];
-    if (publicationIds.length) {
-      waitUntil(processPayoutReviewNotifications({ publicationIds }).then(() => undefined));
+    const whatsappPublicationIds = Array.isArray(result.data?.whatsapp_publication_ids)
+      ? result.data.whatsapp_publication_ids.map(String)
+      : [];
+    const appNotificationIds = Array.isArray(result.data?.app_notification_ids)
+      ? result.data.app_notification_ids.map(String)
+      : [];
+    const deliveryTasks: Array<Promise<unknown>> = [];
+    if (whatsappPublicationIds.length) {
+      deliveryTasks.push(processPayoutReviewNotifications({ publicationIds: whatsappPublicationIds }));
+    }
+    if (appNotificationIds.length) {
+      deliveryTasks.push(processWorkforcePayoutAppNotifications({ notificationIds: appNotificationIds }));
+    }
+    if (deliveryTasks.length) {
+      waitUntil(Promise.allSettled(deliveryTasks).then(() => undefined));
     }
     return Response.json({
       submitted: Number(result.data?.published ?? publicationIds.length),
-      notifications: publicationIds.length,
+      appNotifications: appNotificationIds.length,
+      notifications: whatsappPublicationIds.length,
       publicationIds,
+      whatsappNotifications: whatsappPublicationIds.length,
       status: "Notification queued"
     }, { headers: noStore });
   } catch (error) {

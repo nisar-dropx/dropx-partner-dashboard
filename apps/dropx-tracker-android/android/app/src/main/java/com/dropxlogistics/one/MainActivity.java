@@ -33,6 +33,10 @@ public class MainActivity extends BridgeActivity {
   /** Covers the site's own "checking session" spinner on cold start; never blocks real content this long. */
   private static final long OVERLAY_MAX_MS = 4000;
   private static final long OVERLAY_POLL_MS = 150;
+  private static final String NOTIFICATION_ROUTE_EXTRA = "dropxNotificationRoute";
+  private static final String NOTIFICATION_ROUTE_SCHEME = "https";
+  private static final String NOTIFICATION_ROUTE_HOST = "one.dropxlogistics.com";
+  private static final String NOTIFICATION_ROUTE_PATH = "/payments";
 
   private ImageView startupOverlay;
   private final Handler overlayHandler = new Handler(Looper.getMainLooper());
@@ -79,6 +83,61 @@ public class MainActivity extends BridgeActivity {
     appendDeviceIdToUserAgent();
 
     showStartupOverlay();
+    openNotificationRoute(getIntent());
+  }
+
+  /**
+   * Handles a notification tap while this Activity is already open. DropxMessagingService uses
+   * FLAG_ACTIVITY_CLEAR_TOP, so Android delivers the new notification Intent here instead of
+   * creating a second Activity. setIntent() also keeps getIntent() consistent for lifecycle
+   * callbacks that run after this method.
+   */
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    openNotificationRoute(intent);
+  }
+
+  /**
+   * Opens the payout month frozen into an app-notification payload. The extra is treated as
+   * untrusted input: MainActivity is exported as the app launcher, so another app can construct
+   * an Intent containing the same key. Only the exact DropX One HTTPS origin and /payments path
+   * may reach the WebView; arbitrary origins, ports, credentials, paths, and schemes are ignored.
+   * Query parameters are intentionally retained because they select the payout tab, month, and
+   * workforce ID.
+   */
+  private void openNotificationRoute(Intent intent) {
+    if (intent == null) return;
+    String route = intent.getStringExtra(NOTIFICATION_ROUTE_EXTRA);
+    intent.removeExtra(NOTIFICATION_ROUTE_EXTRA);
+    if (!isAllowedNotificationRoute(route)) return;
+
+    WebView webView = bridge != null ? bridge.getWebView() : null;
+    if (webView == null) return;
+
+    // Posting lets Capacitor finish its own initial navigation on a cold start before this exact
+    // payout URL replaces it. onNewIntent follows the same path so foreground/background taps
+    // behave identically.
+    webView.post(() -> webView.loadUrl(route));
+  }
+
+  static boolean isAllowedNotificationRoute(String route) {
+    if (route == null || route.isEmpty()) return false;
+
+    Uri uri;
+    try {
+      uri = Uri.parse(route);
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+
+    int port = uri.getPort();
+    return NOTIFICATION_ROUTE_SCHEME.equalsIgnoreCase(uri.getScheme())
+      && NOTIFICATION_ROUTE_HOST.equalsIgnoreCase(uri.getHost())
+      && (port == -1 || port == 443)
+      && uri.getUserInfo() == null
+      && NOTIFICATION_ROUTE_PATH.equals(uri.getEncodedPath());
   }
 
   /**

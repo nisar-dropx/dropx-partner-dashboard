@@ -24,6 +24,7 @@ export function payoutNotificationStatusLabel(status: unknown) {
     case "sent": return "Accepted by WhatsApp";
     case "failed": return "WhatsApp send failed";
     case "uncertain": return "WhatsApp outcome needs verification";
+    case "disabled": return "WhatsApp disabled; App notification published";
     case "superseded": return "Included in the worker's combined notification";
     default: return "WhatsApp status unavailable";
   }

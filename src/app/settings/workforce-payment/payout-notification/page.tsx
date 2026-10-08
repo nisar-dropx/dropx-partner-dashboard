@@ -48,7 +48,7 @@ async function loadConfiguration(companyId: string) {
       .order("name"),
     supabaseAdmin
       .from("whatsapp_notification_configs")
-      .select("is_enabled,whatsapp_profile_id,template_id,template_name,template_language,variable_mappings")
+      .select("app_notification_enabled,is_enabled,whatsapp_profile_id,template_id,template_name,template_language,variable_mappings")
       .eq("company_id", companyId)
       .eq("event_code", WORKFORCE_PAYOUT_WHATSAPP_EVENT)
       .maybeSingle()
@@ -62,6 +62,7 @@ async function loadConfiguration(companyId: string) {
     profiles: (profileResult.data ?? []) as PayoutNotificationProfile[],
     templates: (templateResult.data ?? []) as PayoutNotificationTemplate[],
     config: {
+      app_notification_enabled: Boolean(config?.app_notification_enabled),
       is_enabled: Boolean(config?.is_enabled),
       whatsapp_profile_id: config?.whatsapp_profile_id ?? null,
       template_id: config?.template_id ?? null,
@@ -83,8 +84,8 @@ export default async function WorkforcePayoutNotificationSettingsPage() {
     <AppShell active="Settings" pageCode="payment_settings">
       <PageHead
         eyebrow="Configuration"
-        title="Payout WhatsApp Notification"
-        subtitle="Choose the approved WhatsApp template and map its variables to the frozen workforce payout details."
+        title="Payout Notifications"
+        subtitle="Configure WhatsApp and DropX One App notifications for frozen workforce payout details."
         action={(
           <span className="listing-head-actions">
             <span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>
@@ -118,7 +119,7 @@ export default async function WorkforcePayoutNotificationSettingsPage() {
           <div className="panel-head">
             <div>
               <h2>Notification configuration</h2>
-              <p className="subtle">Only active senders and approved cached templates can be saved. Sync checks Meta immediately without exposing provider credentials.</p>
+              <p className="subtle">App notifications open the exact payout month in DropX One. WhatsApp uses the approved template and sender configured below.</p>
             </div>
           </div>
           <WorkforcePayoutNotificationForm
