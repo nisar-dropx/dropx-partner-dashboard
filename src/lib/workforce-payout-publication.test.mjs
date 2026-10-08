@@ -9,6 +9,7 @@ import {
   workforcePayoutPublicationSnapshotHash
 } from "./workforce-payout-publication.ts";
 import { buildWorkforcePayoutPublicationSnapshot as buildClientSnapshot } from "./workforce-payout-publication-snapshot.ts";
+import { revalidateSelectedWorkforcePayoutRows } from "./workforce-payout-selection-revalidation.ts";
 
 const row = (overrides = {}) => ({
   id: "mapping-1",
@@ -54,22 +55,106 @@ test("a zero payout produces a valid frozen publication snapshot", () => {
   assert.deepEqual(snapshot.lines, []);
 });
 
-test("the signed row hash ignores unrelated global version churn but detects payout changes", () => {
-  const original = row();
-  const calculationHash = workforcePayoutCalculationHash(original, "2026-09-01", "2026-09-30");
+test("a selected row fingerprint ignores another payout changing but detects a change to the selected payout", () => {
+  const selected = row();
+  const unrelated = row({
+    id: "mapping-2",
+    reviewSubjectId: "00000000-0000-4000-8000-000000000012",
+    locationId: "00000000-0000-4000-8000-000000000013",
+    dropxId: "DROPX2"
+  });
+  const selectedFingerprint = (rows) => workforcePayoutCalculationHash(
+    rows.find((candidate) => candidate.reviewSubjectId === selected.reviewSubjectId),
+    "2026-09-01",
+    "2026-09-30"
+  );
+  const calculationHash = selectedFingerprint([selected, unrelated]);
   assert.match(calculationHash, /^[a-f0-9]{64}$/);
   assert.equal(
     calculationHash,
-    workforcePayoutCalculationHash({ ...original }, "2026-09-01", "2026-09-30")
+    selectedFingerprint([selected, { ...unrelated, grossPayment: 9999, netAmount: 9999 }]),
+    "An unrelated Workforce payout changing must not invalidate the selected row fingerprint."
   );
+  assert.notEqual(
+    calculationHash,
+    selectedFingerprint([{ ...selected, grossPayment: 1, netAmount: 1 }, unrelated]),
+    "A changed selected payout must invalidate its signed row fingerprint."
+  );
+});
+
+test("the frozen publication hash remains dependency-bound for atomic audit storage", () => {
+  const original = row();
   assert.notEqual(
     workforcePayoutPublicationSnapshotHash(buildWorkforcePayoutPublicationSnapshot(original, "2026-09-01", "2026-09-30", "version-a")),
     workforcePayoutPublicationSnapshotHash(buildWorkforcePayoutPublicationSnapshot(original, "2026-09-01", "2026-09-30", "version-b"))
   );
-  assert.notEqual(
-    calculationHash,
-    workforcePayoutCalculationHash({ ...original, grossPayment: 1, netAmount: 1 }, "2026-09-01", "2026-09-30")
+});
+
+test("selected payout revalidation accepts unrelated churn and binds the fresh dependency", () => {
+  const selected = row();
+  const unrelated = row({
+    id: "mapping-2",
+    reviewSubjectId: "00000000-0000-4000-8000-000000000012",
+    locationId: "00000000-0000-4000-8000-000000000013",
+    grossPayment: 9999,
+    netAmount: 9999
+  });
+  const result = revalidateSelectedWorkforcePayoutRows({
+    dependencyHash: "fresh-global-version",
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    rows: [selected, unrelated],
+    selections: [{
+      subjectId: selected.reviewSubjectId,
+      locationId: selected.locationId,
+      calculationHash: workforcePayoutCalculationHash(selected, "2026-09-01", "2026-09-30"),
+      locationSetHash: workforcePayoutLocationSetHash([selected.locationId])
+    }]
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.entries.length, 1);
+  assert.equal(result.entries[0].snapshot.dependency_hash, "fresh-global-version");
+  assert.equal(
+    result.entries[0].snapshotHash,
+    workforcePayoutPublicationSnapshotHash(result.entries[0].snapshot)
   );
+});
+
+test("selected payout revalidation rejects an actual selected-row change", () => {
+  const selected = row();
+  const result = revalidateSelectedWorkforcePayoutRows({
+    dependencyHash: "fresh-global-version",
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    rows: [{ ...selected, grossPayment: 1, netAmount: 1 }],
+    selections: [{
+      subjectId: selected.reviewSubjectId,
+      locationId: selected.locationId,
+      calculationHash: workforcePayoutCalculationHash(selected, "2026-09-01", "2026-09-30"),
+      locationSetHash: workforcePayoutLocationSetHash([selected.locationId])
+    }]
+  });
+  assert.match(result.error, /amounts or payment details changed/i);
+  assert.deepEqual(result.entries, []);
+});
+
+test("selected payout revalidation rejects a newly added payout location", () => {
+  const selected = row();
+  const secondLocation = row({ id: "mapping-2", locationId: "00000000-0000-4000-8000-000000000004" });
+  const result = revalidateSelectedWorkforcePayoutRows({
+    dependencyHash: "fresh-global-version",
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    rows: [selected, secondLocation],
+    selections: [{
+      subjectId: selected.reviewSubjectId,
+      locationId: selected.locationId,
+      calculationHash: workforcePayoutCalculationHash(selected, "2026-09-01", "2026-09-30"),
+      locationSetHash: workforcePayoutLocationSetHash([selected.locationId])
+    }]
+  });
+  assert.match(result.error, /payout locations changed/i);
+  assert.deepEqual(result.entries, []);
 });
 
 test("the client-safe snapshot builder produces the same immutable publication payload", () => {

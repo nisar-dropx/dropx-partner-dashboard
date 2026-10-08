@@ -83,6 +83,7 @@ test("App-only payout publication does not require Meta readiness or a mobile nu
 
 test("Workforce publication accepts configured zero payouts and verifies signed snapshots without a full worksheet reload", () => {
   const publisher = read("../app/api/payments/workforce-payouts/send-review/route.ts");
+  const revalidator = read("./workforce-payout-publication-revalidation.ts");
   assert.doesNotMatch(publisher, /loadStablePayoutWorksheet|loadWorkforcePayoutRows|workforcePayoutDependencyHash/);
   assert.match(
     publisher,
@@ -100,6 +101,13 @@ test("Workforce publication accepts configured zero payouts and verifies signed 
     /selected\.some\([\s\S]{0,240}(?:gross(?:Payment|Amount)|net(?:Pay|Amount)|workDays|attendance)\s*(?:>|===?)\s*0/,
     "Zero amount, work days, and attendance must not independently block a configured Workforce payout."
   );
+  assert.match(
+    publisher,
+    /result\.error\.message\.includes\(PAYOUT_DEPENDENCY_CHANGED\)[\s\S]*?revalidateWorkforcePayoutPublicationSelections/,
+    "Only the exact atomic dependency conflict should trigger selected-ID recalculation."
+  );
+  assert.match(revalidator, /loadWorkforcePayoutRows\([\s\S]*?\{ workforceIds \}/);
+  assert.match(revalidator, /maxAttempts:\s*3/);
 });
 
 test("delivery consumes frozen publication configuration and supports targeted processing", () => {

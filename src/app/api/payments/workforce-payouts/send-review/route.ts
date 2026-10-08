@@ -6,6 +6,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { processPayoutReviewNotifications } from "@/lib/payout-review-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { processWorkforcePayoutAppNotifications } from "@/lib/workforce-payout-app-notifications";
+import { revalidateWorkforcePayoutPublicationSelections } from "@/lib/workforce-payout-publication-revalidation";
 import {
   workforcePayoutLocationSetHash,
   workforcePayoutPublicationSnapshotHash
@@ -34,6 +35,8 @@ const noStore = { "Cache-Control": "private, no-store" };
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REVIEW_WINDOW_DAYS = 7;
+const PAYOUT_DEPENDENCY_CHANGED = "Payout inputs changed after this worksheet was displayed. Refresh the page and review the recalculated amounts.";
+const MAX_DEPENDENCY_REVALIDATION_ATTEMPTS = 2;
 type PublicationSnapshot = WorkforcePayoutPublicationSnapshot;
 
 function responseError(error: string, status: number) {
@@ -350,6 +353,7 @@ export async function POST(request: Request) {
       return { ...item, token };
     });
     if (verified.some((item) => !item.token?.dependencyHash
+      || !item.token.calculationHash
       || !item.token.publicationSnapshotHash
       || !item.token.locationSetHash)) {
       return responseError("One or more payouts are no longer ready. Refresh the page and review the recalculated amounts.", 409);
@@ -358,7 +362,7 @@ export async function POST(request: Request) {
     if (dependencyHashes.size !== 1) {
       return responseError("The selected payouts came from different worksheet versions. Refresh the page and select them again.", 409);
     }
-    const expectedDependencyHash = [...dependencyHashes][0];
+    let expectedDependencyHash = [...dependencyHashes][0];
     const selected = verified.map((item) => ({
       item,
       snapshot: verifiedPublicationSnapshot(item.calculation_snapshot, {
@@ -408,53 +412,100 @@ export async function POST(request: Request) {
         .map((item) => item.location_id!)
         .sort()[0]);
     }
-    const publicationItems = selected.map(({ item, snapshot }) => {
-      return {
+    let publicationEntries = selected.map(({ item, snapshot }) => ({
+      item,
+      snapshot: snapshot!,
+      snapshotHash: item.token!.publicationSnapshotHash
+    }));
+    let publicationResult: any = null;
+    let dependencyRevalidations = 0;
+    while (true) {
+      const publicationItems = publicationEntries.map(({ item, snapshot, snapshotHash }) => ({
         subject_type: "workforce",
         subject_id: item.subject_id,
         location_id: item.location_id,
         expected_status: item.token!.status,
-        calculation_snapshot: snapshot!,
-        snapshot_hash: item.token!.publicationSnapshotHash,
+        calculation_snapshot: snapshot,
+        snapshot_hash: snapshotHash,
         notification_config_snapshot: notification.notifications.get(item.subject_id),
         notification_primary: notificationPrimary.get(item.subject_id) === item.location_id
+      }));
+      const publicationArguments = {
+        p_company: companyId,
+        p_actor: authorization.userId,
+        p_period_start: periodStart,
+        p_period_end: periodEnd,
+        p_items: publicationItems,
+        p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds,
+        p_expected_dependency_hash: expectedDependencyHash,
+        p_review_until: reviewUntil,
+        p_notify_at: new Date().toISOString(),
+        p_notification_config_id: notification.config.id,
+        p_notification_config_updated_at: notification.config.updated_at
       };
-    });
+      const publicationBytes = serializedJsonByteLength(publicationArguments);
+      if (publicationBytes > MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES) {
+        return responseError(
+          "The selected payout details are too large to publish safely in one atomic batch. Select fewer payout rows and try again; no payouts were published.",
+          413
+        );
+      }
 
-    const publicationArguments = {
-      p_company: companyId,
-      p_actor: authorization.userId,
-      p_period_start: periodStart,
-      p_period_end: periodEnd,
-      p_items: publicationItems,
-      p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds,
-      p_expected_dependency_hash: expectedDependencyHash,
-      p_review_until: reviewUntil,
-      p_notify_at: new Date().toISOString(),
-      p_notification_config_id: notification.config.id,
-      p_notification_config_updated_at: notification.config.updated_at
-    };
-    const publicationBytes = serializedJsonByteLength(publicationArguments);
-    if (publicationBytes > MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES) {
-      return responseError(
-        "The selected payout details are too large to publish safely in one atomic batch. Select fewer payout rows and try again; no payouts were published.",
-        413
-      );
+      const result = await supabaseAdmin.rpc("workforce_publish_payout_notifications", publicationArguments);
+      if (!result.error) {
+        publicationResult = result.data;
+        break;
+      }
+      if (!result.error.message.includes(PAYOUT_DEPENDENCY_CHANGED)) {
+        const stale = /changed|refresh|version/i.test(result.error.message);
+        return responseError(result.error.message, stale ? 409 : 400);
+      }
+      if (dependencyRevalidations >= MAX_DEPENDENCY_REVALIDATION_ATTEMPTS) {
+        return responseError(
+          "Payout inputs are being updated right now. No notifications were sent; please try again in a moment.",
+          503
+        );
+      }
+
+      const refreshed = await revalidateWorkforcePayoutPublicationSelections({
+        authorization,
+        companyId,
+        periodEnd,
+        periodStart,
+        selections: verified.map((item) => ({
+          calculationHash: item.token!.calculationHash,
+          locationId: item.location_id!,
+          locationSetHash: item.token!.locationSetHash,
+          subjectId: item.subject_id
+        }))
+      });
+      if (refreshed.error || !refreshed.dependencyHash) {
+        return responseError(
+          refreshed.error || "Payout inputs are updating. No notifications were sent; please try again in a moment.",
+          refreshed.updating ? 503 : 409
+        );
+      }
+      const refreshedByIdentity = new Map(refreshed.entries.map((entry) => [
+        `${entry.subjectId.toLowerCase()}|${entry.locationId.toLowerCase()}`,
+        entry
+      ]));
+      publicationEntries = verified.map((item) => {
+        const entry = refreshedByIdentity.get(`${item.subject_id.toLowerCase()}|${item.location_id!.toLowerCase()}`);
+        if (!entry) throw new Error("A revalidated Workforce payout is unavailable.");
+        return { item, snapshot: entry.snapshot, snapshotHash: entry.snapshotHash };
+      });
+      expectedDependencyHash = refreshed.dependencyHash;
+      dependencyRevalidations += 1;
     }
 
-    const result = await supabaseAdmin.rpc("workforce_publish_payout_notifications", publicationArguments);
-    if (result.error) {
-      const stale = /changed|refresh|version/i.test(result.error.message);
-      return responseError(result.error.message, stale ? 409 : 400);
-    }
-    const publicationIds = Array.isArray(result.data?.publication_ids)
-      ? result.data.publication_ids.map(String)
+    const publicationIds = Array.isArray(publicationResult?.publication_ids)
+      ? publicationResult.publication_ids.map(String)
       : [];
-    const whatsappPublicationIds = Array.isArray(result.data?.whatsapp_publication_ids)
-      ? result.data.whatsapp_publication_ids.map(String)
+    const whatsappPublicationIds = Array.isArray(publicationResult?.whatsapp_publication_ids)
+      ? publicationResult.whatsapp_publication_ids.map(String)
       : [];
-    const appNotificationIds = Array.isArray(result.data?.app_notification_ids)
-      ? result.data.app_notification_ids.map(String)
+    const appNotificationIds = Array.isArray(publicationResult?.app_notification_ids)
+      ? publicationResult.app_notification_ids.map(String)
       : [];
     const deliveryTasks: Array<Promise<unknown>> = [];
     if (whatsappPublicationIds.length) {
@@ -467,7 +518,7 @@ export async function POST(request: Request) {
       waitUntil(Promise.allSettled(deliveryTasks).then(() => undefined));
     }
     return Response.json({
-      submitted: Number(result.data?.published ?? publicationIds.length),
+      submitted: Number(publicationResult?.published ?? publicationIds.length),
       appNotifications: appNotificationIds.length,
       notifications: whatsappPublicationIds.length,
       publicationIds,

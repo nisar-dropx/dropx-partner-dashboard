@@ -89,8 +89,33 @@ function workforceDesignation(worker: any) {
   return name || code;
 }
 
-export async function loadWorkforcePayoutRows(companyId: string, authorization: AuthorizationContext, fromDate: string, toDate: string) {
+export type WorkforcePayoutLoadScope = {
+  workforceIds?: readonly string[];
+};
+
+export async function loadWorkforcePayoutRows(
+  companyId: string,
+  authorization: AuthorizationContext,
+  fromDate: string,
+  toDate: string,
+  scope: WorkforcePayoutLoadScope = {}
+) {
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
+  const scopeEnabled = scope.workforceIds !== undefined;
+  const scopedWorkforceIds = [...new Set((scope.workforceIds ?? []).map(String).map((id) => id.trim()).filter(Boolean))];
+  if (scopeEnabled && !scopedWorkforceIds.length) return { rows: [] as WorkforcePayoutRow[], error: null as string | null };
+  const scopedWorkersResult = scopeEnabled
+    ? await supabaseAdmin
+      .from("workforce")
+      .select("id,source_profile_id")
+      .eq("company_id", companyId)
+      .in("id", scopedWorkforceIds)
+    : { data: [], error: null };
+  if (scopedWorkersResult.error) return { rows: [] as WorkforcePayoutRow[], error: scopedWorkersResult.error.message };
+  const scopedIdentityIds = new Set([
+    ...scopedWorkforceIds,
+    ...(scopedWorkersResult.data ?? []).flatMap((worker: any) => [worker.id, worker.source_profile_id]).filter(Boolean).map(String)
+  ]);
   let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   const [locationsResult, allLocationsResult, mappingsResult, directAllocationsResult, allocationResult, deductionHeadsResult, paymentPolicyResult, attendanceCaptureResult] = await Promise.all([
@@ -108,19 +133,46 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
   const locations = locationsResult.data ?? [];
   const allLocations = allLocationsResult.data ?? [];
   const allowed = new Set(locations.map((row) => row.id));
-  const authorizedStationCodes = [...new Set(locations.map((row) => String(row.station_code ?? "").trim()).filter(Boolean))];
   const allMappings = mappingsResult.data ?? [];
-  const authorizedMappings = allMappings.filter((row: any) => allowed.has(row.station_id));
+  const mappingBelongsToScope = (mapping: any) => [
+    mapping.workforce_id,
+    mapping.contractor_id,
+    mapping.employee_id,
+    mapping.field_executive_id
+  ].some((identity) => identity && scopedIdentityIds.has(String(identity)));
+  const primaryScopedMappings = scopeEnabled ? allMappings.filter(mappingBelongsToScope) : allMappings;
+  const scopedMappingIds = new Set(primaryScopedMappings.map((mapping: any) => String(mapping.id)));
+  const scopedProviderKeys = new Set(primaryScopedMappings.flatMap((mapping: any) => {
+    const providerMemberId = normalizePayoutIdentity(mapping.provider_member_id);
+    return providerMemberId ? [`${String(mapping.station_id)}|${providerMemberId}`] : [];
+  }));
+  // Keep competing mappings for the same station/provider identity so a
+  // selected-only recalculation still detects ambiguous ownership correctly.
+  const authorizedMappings = allMappings.filter((row: any) => allowed.has(row.station_id)
+    && (!scopeEnabled
+      || scopedMappingIds.has(String(row.id))
+      || scopedProviderKeys.has(`${String(row.station_id)}|${normalizePayoutIdentity(row.provider_member_id)}`)));
   const mappings = authorizedMappings.filter((row: any) => row.payment_method_id && String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
-  const allDirectAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
+  const allDirectAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id)
+    && (!scopeEnabled || scopedIdentityIds.has(String(row.workforce_id))));
   const directAllocations = allDirectAllocations.filter((row: any) => String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
+  const scopedStationIds = scopeEnabled
+    ? new Set([...authorizedMappings, ...allDirectAllocations].map((row: any) => String(row.station_id)).filter(Boolean))
+    : null;
+  const authorizedStationCodes = [...new Set(locations
+    .filter((row) => !scopedStationIds || scopedStationIds.has(String(row.id)))
+    .map((row) => String(row.station_code ?? "").trim())
+    .filter(Boolean))];
   const directWorkforceIds = Array.from(new Set(directAllocations.map((row: any) => row.workforce_id).filter(Boolean)));
   const sourceIds = Array.from(new Set([...authorizedMappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]), ...directWorkforceIds].filter(Boolean)));
   const contractorIds = Array.from(new Set(mappings.map((row: any) => row.contractor_id).filter(Boolean)));
   const employeeIds = Array.from(new Set(mappings.map((row: any) => row.employee_id).filter(Boolean)));
   const fieldExecutiveIds = Array.from(new Set(mappings.map((row: any) => row.field_executive_id).filter(Boolean)));
   const workforceIds = Array.from(new Set([...mappings.map((row: any) => row.workforce_id), ...directWorkforceIds].filter(Boolean)));
-  const paymentMethodIds = Array.from(new Set([...allMappings, ...allDirectAllocations].map((row: any) => row.payment_method_id).filter(Boolean)));
+  const paymentMethodIds = Array.from(new Set([
+    ...(scopeEnabled ? authorizedMappings : allMappings),
+    ...allDirectAllocations
+  ].map((row: any) => row.payment_method_id).filter(Boolean)));
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
@@ -1225,6 +1277,10 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
       additionalQuery = additionalQuery.in("station_id", [...allowed]);
       deductionQuery = deductionQuery.in("station_id", [...allowed]);
     }
+    if (scopeEnabled) {
+      additionalQuery = additionalQuery.in("workforce_id", scopedWorkforceIds);
+      deductionQuery = deductionQuery.in("workforce_id", scopedWorkforceIds);
+    }
     [additionalValuesResult, deductionValuesResult] = await Promise.all([
       readAllRows(additionalQuery),
       readAllRows(deductionQuery)
@@ -1406,6 +1462,11 @@ export async function loadWorkforcePayoutRows(companyId: string, authorization: 
       applied.add(identityKey);
     }
   }
-  return { rows: rowsWithPayoutValues, error: null };
+  return {
+    rows: scopeEnabled
+      ? rowsWithPayoutValues.filter((row) => scopedIdentityIds.has(String(row.reviewSubjectId ?? "")))
+      : rowsWithPayoutValues,
+    error: null
+  };
 }
 
