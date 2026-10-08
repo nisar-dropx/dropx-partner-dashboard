@@ -69,12 +69,15 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
  const codScopes=new Map<string,Promise<Awaited<ReturnType<typeof loadCodMailRecipients>>>>();
  const deadline=Date.now()+180_000;
  let attempted=0,retryLater=false;
+ const attemptedIds=new Set<string>();
  while(attempted<80&&Date.now()<deadline&&!retryLater){
  const claimed=await db.rpc(claimRpc,claimRpc==="portal_claim_digest"?{p_portal:portal,p_limit:2}:{p_limit:2});
  if(claimed.error)throw new Error(claimed.error.message);
- if(!claimed.data?.length)break;
- attempted+=claimed.data.length;
-  await Promise.all(claimed.data.map(async (delivery:DigestDelivery)=>{
+ const batch=(claimed.data||[]).filter((row:DigestDelivery)=>!attemptedIds.has(row.id));
+ if(!batch.length)break;
+ batch.forEach((row:DigestDelivery)=>attemptedIds.add(row.id));
+ attempted+=batch.length;
+  await Promise.all(batch.map(async (delivery:DigestDelivery)=>{
    let sending=false,accepted=false;
    let transport:ReturnType<typeof nodemailer.createTransport>|undefined;
    try {
