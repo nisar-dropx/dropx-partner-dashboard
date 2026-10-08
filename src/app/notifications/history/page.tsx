@@ -4,6 +4,10 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { Campaign } from "@/components/campaign-report";
+import {
+  payoutAppNotificationCampaigns,
+  type PayoutAppNotificationCampaignRow
+} from "@/lib/payout-app-notification-history";
 
 export const dynamic = "force-dynamic";
 
@@ -17,30 +21,46 @@ async function loadNotificationHistory(companyId: string) {
     };
   }
 
-  const [campaignProfiles, campaigns] = await Promise.all([
+  const [campaignProfiles, campaigns, appCampaigns] = await Promise.all([
     supabaseAdmin.from("whatsapp_profiles").select("id, profile_name").eq("company_id", companyId),
     supabaseAdmin
       .from("whatsapp_campaigns")
       .select("id, campaign_code, whatsapp_profile_id, whatsapp_profile_name, created_at, total_count, sent_count, failed_count, pending_count, status, whatsapp_campaign_recipients (id, row_no, recipient_name, recipient_mobile, country_code, status, provider_message_id, error_message, sent_at, updated_at)")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
+      .limit(100),
+    supabaseAdmin
+      .from("mob_app_notification_campaigns")
+      .select("id, campaign_code, created_at, mob_app_notifications!mob_app_notifications_campaign_id_fkey (id, recipient_profile_type, recipient_account_id, title, body, data, created_at, read_at, push_status, push_error)")
+      .eq("company_id", companyId)
+      .eq("event_code", "workforce_payout_review")
+      .order("created_at", { ascending: false })
       .limit(100)
   ]);
 
+  const appRows = (appCampaigns.data ?? []) as unknown as PayoutAppNotificationCampaignRow[];
+
   const profileNameById = new Map(((campaignProfiles.data ?? []) as Array<{ id: string; profile_name: string }>).map((profile) => [profile.id, profile.profile_name]));
   const campaignSetupMissing = campaigns.error?.message?.includes("whatsapp_campaigns") || campaigns.error?.message?.includes("whatsapp_campaign_recipients");
+  const appCampaignSetupMissing = appCampaigns.error?.message?.includes("mob_app_notification_campaigns")
+    || appCampaigns.error?.message?.includes("mob_app_notifications_campaign_id_fkey");
   const campaignError = campaignProfiles.error?.message
     ?? (campaignSetupMissing ? `${campaigns.error?.message} Run scripts/whatsapp_campaigns_v1.sql in Supabase SQL Editor.` : campaigns.error?.message)
+    ?? (appCampaignSetupMissing ? `${appCampaigns.error?.message} Apply the Workforce payout App notification history migration.` : appCampaigns.error?.message)
     ?? null;
+
+  const whatsappCampaigns = ((campaigns.data ?? []) as CampaignRow[]).map((campaign) => ({
+    ...campaign,
+    channel: "WhatsApp",
+    whatsapp_profile_name: campaign.whatsapp_profile_id ? profileNameById.get(campaign.whatsapp_profile_id) ?? campaign.whatsapp_profile_name : campaign.whatsapp_profile_name,
+    whatsapp_campaign_recipients: [...(campaign.whatsapp_campaign_recipients ?? [])].sort((left, right) => left.row_no - right.row_no)
+  }));
+  const payoutAppCampaigns = payoutAppNotificationCampaigns(appRows);
 
   return {
     campaignError,
-    campaigns: ((campaigns.data ?? []) as CampaignRow[]).map((campaign) => ({
-      ...campaign,
-      channel: "WhatsApp",
-      whatsapp_profile_name: campaign.whatsapp_profile_id ? profileNameById.get(campaign.whatsapp_profile_id) ?? campaign.whatsapp_profile_name : campaign.whatsapp_profile_name,
-      whatsapp_campaign_recipients: [...(campaign.whatsapp_campaign_recipients ?? [])].sort((left, right) => left.row_no - right.row_no)
-    }))
+    campaigns: [...whatsappCampaigns, ...payoutAppCampaigns]
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
   };
 }
 

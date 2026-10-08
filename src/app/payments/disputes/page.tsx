@@ -27,14 +27,13 @@ export default async function WorkforcePayoutDisputesPage({
       <PageHead
         eyebrow="Payments"
         title="Payout Disputes"
-        subtitle="Review associate concerns, record decisions, and track published payout notifications."
+        subtitle="Review associate payout concerns and record a final decision."
       />
       {message ? <p role={searchParams.error ? "alert" : "status"}>{message}</p> : null}
       <PayoutReviewDesk
         action={reviewPayout}
         auth={authorization}
         params={searchParams}
-        portal="workforce"
       />
     </AppShell>
   );

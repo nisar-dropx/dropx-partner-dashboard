@@ -7,8 +7,8 @@ import { performPayoutReview } from "@/lib/payout-review-actions";
 export async function reviewPayout(form: FormData) {
   const query = new URLSearchParams();
   try {
-    await performPayoutReview(form, "workforce");
-    query.set("notice", "Payout review saved.");
+    await performPayoutReview(form);
+    query.set("notice", "Dispute decision saved.");
     revalidatePath("/payments/disputes");
   } catch (error) {
     query.set("error", error instanceof Error ? error.message : "Unable to save payout review.");

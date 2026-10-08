@@ -23,6 +23,7 @@ export type PayoutBreakdownLine = {
   count: number;
   rate: number;
   amount: number;
+  schedule?: "per_unit" | "per_day" | "per_hour" | "per_month";
   sortOrder?: number;
   reportedCount?: number;
   thresholdDeducted?: number;
@@ -89,7 +90,7 @@ export function summarizePayoutBreakdownLines(lines: PayoutBreakdownLine[]) {
     const thresholdIdentity = line.reportedCount === undefined
       ? "standard"
       : `threshold|${line.thresholdPeriod ?? "unknown"}|${line.thresholdMinimum ?? "missing"}|${line.thresholdConfigurationMissing === true}`;
-    const key = `${line.code.trim().toUpperCase()}|${line.componentType}|${Number(line.rate)}|${thresholdIdentity}`;
+    const key = `${line.code.trim().toUpperCase()}|${line.componentType}|${line.schedule ?? "unspecified"}|${Number(line.rate)}|${thresholdIdentity}`;
     const current = values.get(key) ?? {
       ...line,
       count: 0,

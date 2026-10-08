@@ -3,6 +3,7 @@ import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentStatus } from "./workforce-payment-status";
 import { payoutReviewState } from "./payout-dispute";
+import { publishedPayoutBreakdown } from "./published-payout-breakdown";
 
 type Row = Record<string, any>;
 
@@ -71,8 +72,8 @@ function payoutOutput({
   paymentDate = null,
   paymentReference = null,
   disputes,
-  events,
   payoutSlipAvailable,
+  snapshot,
 }: {
   id: string;
   publication: Row | null;
@@ -86,10 +87,11 @@ function payoutOutput({
   paymentDate?: unknown;
   paymentReference?: unknown;
   disputes: Row[];
-  events: Row[];
   payoutSlipAvailable: boolean;
+  snapshot?: Row | null;
 }) {
   const detail = detailLines(lines);
+  const breakdown = publishedPayoutBreakdown(snapshot, lines, item);
   const reviewState = payoutReviewState({
     hasPublication: Boolean(publication),
     reviewUntil: publication?.review_until,
@@ -133,11 +135,12 @@ function payoutOutput({
       mfn: detail.reduce((sum, line) => sum + line.mfn, 0),
       mfnReturn: detail.reduce((sum, line) => sum + line.mfnReturn, 0),
     },
+    earnings: breakdown.earnings,
+    deductionLines: breakdown.deductions,
+    attendanceSource: breakdown.attendanceSource,
+    attendanceRanges: breakdown.attendanceRanges,
     lines: detail,
-    disputes: disputes.map((dispute) => ({
-      ...dispute,
-      events: events.filter((event) => event.dispute_id === dispute.id),
-    })),
+    disputes,
   };
 }
 
@@ -148,12 +151,8 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
   const disputes = await rows(db.from("workforce_payout_disputes").select("id,publication_id,payroll_run_id,category,reason,status,resolution,created_at,updated_at").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id"));
   const runIds = [...new Set([...publications, ...items].map((row) => row.payroll_run_id).filter(Boolean))];
   const runs: Row[] = [];
-  const events: Row[] = [];
   for (let index = 0; index < runIds.length; index += 100) {
     runs.push(...await rows(db.from("workforce_payroll_runs").select("id,run_number,period_start,period_end,status,payment_reference,payment_date,paid_at,calculated_at").eq("company_id", company).in("id", runIds.slice(index, index + 100)).order("id")));
-  }
-  for (let index = 0; index < disputes.length; index += 100) {
-    events.push(...await rows(db.from("workforce_payout_dispute_events").select("id,dispute_id,actor_name,portal,message,created_at").eq("company_id", company).in("dispute_id", disputes.slice(index, index + 100).map((dispute) => dispute.id)).order("created_at").order("id")));
   }
 
   const output: Row[] = [];
@@ -188,8 +187,8 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
       runStatus: "review",
       revisionPending: false,
       disputes: disputes.filter((dispute) => publicationIdsForPeriod.includes(dispute.publication_id)),
-      events,
       payoutSlipAvailable: false,
+      snapshot,
     }));
   }
 
@@ -229,8 +228,8 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
       paymentDate,
       paymentReference,
       disputes: disputes.filter((dispute) => dispute.payroll_run_id === run.id),
-      events,
       payoutSlipAvailable: true,
+      snapshot: publication?.snapshot ?? null,
     }));
   }
   return output.sort((left, right) => right.to.localeCompare(left.to));

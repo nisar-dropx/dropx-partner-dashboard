@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = readFileSync(
@@ -15,6 +15,9 @@ const reviewDeskSource = readFileSync(new URL("../src/components/payout-review-d
 const publicationMigration = readFileSync(new URL("../supabase/migrations/20261008004000_workforce_payout_notification_publication.sql", import.meta.url), "utf8");
 const connectLoader = readFileSync(new URL("../apps/connect/src/lib/associate-payouts.ts", import.meta.url), "utf8");
 const connectRoute = readFileSync(new URL("../apps/connect/app/api/connect/payout-review/route.ts", import.meta.url), "utf8");
+const disputeDecisionMigration = readFileSync(new URL("../supabase/migrations/20261008030604_simplify_workforce_payout_disputes.sql", import.meta.url), "utf8");
+const opsDisputePage = new URL("../src/app/ops-pulse/attendance/payout-review/page.tsx", import.meta.url);
+const opsDisputeActions = new URL("../src/app/ops-pulse/attendance/payout-review/actions.ts", import.meta.url);
 
 assert.match(tableSource, /Send Notification/);
 assert.match(tableSource, /type="checkbox"/);
@@ -40,9 +43,15 @@ assert.match(
   "App-only publications must render as published instead of falling back to Under Review."
 );
 assert.match(tableSource, /Send Notification requires all-location access/);
-assert.match(reviewActionSource, /publication\.data\.publication_kind===['"]worksheet['"]&&!auth\.hasAllLocationAccess/);
-assert.match(reviewActionSource, /Company-wide location access is required to retry this payout notification/);
-assert.match(reviewDeskSource, /p\.publication_kind!==['"]worksheet['"]\|\|auth\.hasAllLocationAccess/);
+assert.match(reviewActionSource, /workforce_decide_payout_dispute/);
+assert.match(reviewActionSource, /\["resolved", "rejected"\]/);
+assert.match(reviewDeskSource, />\s*Reject\s*</);
+assert.match(reviewDeskSource, />\s*Resolve\s*</);
+assert.doesNotMatch(reviewDeskSource, /Under review \/ reply|Save response|Correct a legacy payroll payout/);
+assert.equal(existsSync(opsDisputePage), false, "Ops Pulse must not expose the payout-dispute desk.");
+assert.equal(existsSync(opsDisputeActions), false, "Ops Pulse must not expose payout-dispute actions.");
+assert.match(disputeDecisionMigration, /p_decision not in \('resolved', 'rejected'\)/);
+assert.match(disputeDecisionMigration, /grant execute on function public\.workforce_decide_payout_dispute[\s\S]*to service_role/);
 assert.match(routeSource, /notification_primary/);
 assert.match(routeSource, /recipient/);
 assert.match(routeSource, /chunkValues\(uniqueIds, WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK\)/);

@@ -35,7 +35,7 @@ export function NotificationHistoryPanel({
       onRefresh={refreshHistory}
       recipientIdentifierLabel="User ID"
       showChannel
-      subtitle="Track WhatsApp campaign history here. Instagram and Facebook campaigns can use this same report when added."
+      subtitle="Track WhatsApp campaigns and grouped DropX One payout notifications in one report."
       title="Notification history"
     />
   );

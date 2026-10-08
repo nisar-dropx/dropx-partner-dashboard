@@ -17,6 +17,7 @@ export type WorkforcePayoutLine = {
   count: number;
   rate: number;
   amount: number;
+  schedule?: "per_unit" | "per_day" | "per_hour" | "per_month";
   sortOrder?: number;
   reportedCount?: number;
   thresholdDeducted?: number;
