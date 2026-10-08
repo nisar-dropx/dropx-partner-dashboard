@@ -306,6 +306,14 @@ export async function POST(request: Request) {
       const result = await recipientUpdate.select("id");
       const matchedRows = result.data?.length ?? 0;
       updated += matchedRows;
+      const logUpdate: Record<string, unknown> = { status: statusName };
+      if (statusName === "failed") logUpdate.error_message = errorText(status);
+      let payoutLogUpdate = supabaseAdmin
+        .from("whatsapp_message_logs")
+        .update(logUpdate)
+        .eq("provider_message_id", status.id);
+      if (companyId) payoutLogUpdate = payoutLogUpdate.eq("company_id", companyId);
+      await payoutLogUpdate;
       let inboxUpdate = supabaseAdmin
         .from("inbox_messages")
         .update({
