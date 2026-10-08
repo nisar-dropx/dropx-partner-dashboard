@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye } from "lucide-react";
+import { Download, Eye } from "lucide-react";
+import { paymentReportCsv, summarizePaymentReport } from "@/lib/payment-report-export";
 import { StatusPill } from "@/components/status-pill";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { paymentApprovalStatusTone, paymentStatusLabel } from "@/lib/payment-status-label";
@@ -315,6 +316,19 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
         (!toDate || createdDate <= toDate);
     });
   }, [requests, search, locationsSelected, headsSelected, externalIdsSelected, requestTypesSelected, statusesSelected, paymentModesSelected, requestersSelected, accountHoldersSelected, fromDate, toDate]);
+  const summary = useMemo(() => summarizePaymentReport(filteredRequests), [filteredRequests]);
+
+  function downloadCsv() {
+    const url = URL.createObjectURL(new Blob([paymentReportCsv(filteredRequests)], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `payment-report-${fromDate || "all"}-to-${toDate || "latest"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   const effectivePageSize = pageSize === "all" ? Math.max(filteredRequests.length, 1) : Number(pageSize);
   const totalPages = Math.max(1, Math.ceil(filteredRequests.length / effectivePageSize));
   const visibleRequests = pageSize === "all" ? filteredRequests : filteredRequests.slice((page - 1) * effectivePageSize, page * effectivePageSize);
@@ -324,6 +338,17 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
 
   return (
     <>
+      <div className="stat-grid four" aria-label="Filtered payment totals" aria-live="polite">
+        <div className="stat-card"><span>Total requests</span><strong>{summary.total}</strong></div>
+        <div className="stat-card"><span>Pending</span><strong>{summary.pending}</strong></div>
+        <div className="stat-card"><span>Approved</span><strong>{summary.approved}</strong></div>
+        <div className="stat-card"><span>Total amount</span><strong>Rs {summary.amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong></div>
+      </div>
+      <section className="panel">
+        <div className="panel-head">
+          <div><h2>Payment request report</h2><p className="subtle">{filteredRequests.length} matching records · Download includes all matching rows</p></div>
+          <button className="button secondary" disabled={!filteredRequests.length} onClick={downloadCsv} type="button"><Download size={16} aria-hidden="true" /> Download CSV</button>
+        </div>
       <div className="payment-report-filters">
         <label className="payment-report-search">Search<input className="field" onChange={(event) => setSearch(event.target.value)} placeholder="Request, person, account, IFSC, UTR..." type="search" value={search} /></label>
         <MultiCheckFilter allLabel="All locations" label="Location" options={locations} selected={locationsSelected} setSelected={setLocationsSelected} />
@@ -390,6 +415,8 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
         </table>
       </div>
       {filteredRequests.length > effectivePageSize ? <div className="panel-foot pagination"><button className="pager-button" disabled={page === 1} onClick={() => setPage((value) => value - 1)} type="button">Previous</button><span>Page {page} of {totalPages}</span><button className="pager-button" disabled={page === totalPages} onClick={() => setPage((value) => value + 1)} type="button">Next</button></div> : null}
+
+      </section>
 
       {selectedRequest ? (
         <div className="modal-backdrop">

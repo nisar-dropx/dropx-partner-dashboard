@@ -1,3 +1,4 @@
+import { readAllRows } from "@/lib/supabase-pagination";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentReportTable, type PaymentReportAnswer, type PaymentReportLog } from "@/components/payment-report-table";
@@ -110,12 +111,12 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
       .from("payment_requests")
       .select("id, request_no, category, location_id, location_code, payment_head_id, amount, amount_requested, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, current_step_order, total_steps, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }).order("id");
   if (!authorization.hasAllLocationAccess) {
     requestsQuery = requestsQuery.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [NO_LOCATION_SCOPE_ID]);
   }
   [requestsResult, headsResult] = await Promise.all([
-    requestsQuery,
+    readAllRows(requestsQuery),
     supabaseAdmin
       .from("payment_heads")
       .select("id, code, name, external_id")
@@ -127,11 +128,11 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
       .from("payment_requests")
       .select("id, request_no, category, location_id, location_code, payment_head_id, amount, amount_requested, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, current_step_order, total_steps, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }).order("id");
     if (!authorization.hasAllLocationAccess) {
       fallbackQuery = fallbackQuery.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [NO_LOCATION_SCOPE_ID]);
     }
-    requestsResult = await fallbackQuery;
+    requestsResult = await readAllRows(fallbackQuery);
   }
   const error = requestsResult.error?.message || headsResult.error?.message || null;
   if (error) {
@@ -271,7 +272,6 @@ export default async function PaymentReportPage() {
   const pagePermission = authorization.permissions.payment_reports;
   const { answersByRequestId, heads, logsByRequestId, profilesById, rolesById, requests, error } = await loadPaymentReport(companyId, authorization);
   const headById = new Map(heads.map((head) => [head.id, head]));
-  const totalAmount = requests.reduce((sum, request) => sum + Number(request.amount ?? request.amount_requested ?? 0), 0);
 
   return (
     <AppShell active="Payment Report" pageCode="payment_reports">
@@ -292,33 +292,6 @@ export default async function PaymentReportPage() {
       ) : null}
 
       {!error && pagePermission.canView ? (
-        <>
-          <div className="stat-grid four">
-            <div className="stat-card">
-              <span>Total requests</span>
-              <strong>{requests.length}</strong>
-            </div>
-            <div className="stat-card">
-              <span>Pending</span>
-              <strong>{requests.filter((request) => request.status === "pending").length}</strong>
-            </div>
-            <div className="stat-card">
-              <span>Approved</span>
-              <strong>{requests.filter((request) => request.status === "approved").length}</strong>
-            </div>
-            <div className="stat-card">
-              <span>Total amount</span>
-              <strong>Rs {totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</strong>
-            </div>
-          </div>
-
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <h2>Payment request report</h2>
-                <p className="subtle">{requests.length} records</p>
-              </div>
-            </div>
             <PaymentReportTable
               requests={requests.map((request) => {
                 const head = headById.get(request.payment_head_id);
@@ -368,8 +341,6 @@ export default async function PaymentReportPage() {
                 };
               })}
             />
-          </section>
-        </>
       ) : null}
     </AppShell>
   );
