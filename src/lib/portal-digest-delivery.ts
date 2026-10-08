@@ -46,7 +46,7 @@ export function digestThreadKey(company:string,portal:string,event:string,email:
  return createHash("sha256").update(JSON.stringify([company,portal,event,[email.toLowerCase()],[],month])).digest("hex");
 }
 
-export async function processPortalDigests(portal:"people"|"ops",eventKey:string,builder:DigestBuilder) {
+export async function processPortalDigests(portal:"people"|"ops",eventKey:string,builder:DigestBuilder,deliver=true) {
  const db=digestDatabase(), summary={queued:0,accepted:0,uncertain:0,skipped:0,errors:[] as string[]};
  const controls=await db.from("portal_notification_controls").select("*").eq("portal",portal).eq("event_key",eventKey);
  if(controls.error)throw new Error(controls.error.message);
@@ -61,17 +61,21 @@ export async function processPortalDigests(portal:"people"|"ops",eventKey:string
   if(queued.error)throw new Error(queued.error.message);
   if(queued.data)summary.queued+=batch.messages.length;
  }
- return deliverPortalDigestQueue(db,portal,summary);
+ return deliver?deliverPortalDigestQueue(db,portal,summary):summary;
 }
 
 /** Shared SMTP/thread/receipt handling; event queues have independent claim eligibility. */
 export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"|"ops",summary:DeliverySummary,claimRpc:"portal_claim_digest"|"portal_claim_ops_data_updates"="portal_claim_digest") {
  const codScopes=new Map<string,Promise<Awaited<ReturnType<typeof loadCodMailRecipients>>>>();
- const claimed=await db.rpc(claimRpc,claimRpc==="portal_claim_digest"?{p_portal:portal,p_limit:80}:{p_limit:80});
+ const deadline=Date.now()+180_000;
+ let attempted=0,retryLater=false;
+ while(attempted<80&&Date.now()<deadline&&!retryLater){
+ const claimed=await db.rpc(claimRpc,claimRpc==="portal_claim_digest"?{p_portal:portal,p_limit:2}:{p_limit:2});
  if(claimed.error)throw new Error(claimed.error.message);
- for(let offset=0;offset<(claimed.data||[]).length;offset+=4) {
-  await Promise.all(claimed.data.slice(offset,offset+4).map(async (delivery:DigestDelivery)=>{
-   let sending=false;
+ if(!claimed.data?.length)break;
+ attempted+=claimed.data.length;
+  await Promise.all(claimed.data.map(async (delivery:DigestDelivery)=>{
+   let sending=false,accepted=false;
    let transport:ReturnType<typeof nodemailer.createTransport>|undefined;
    try {
     const manualCod=delivery.event_key==='cod_pending_current';
@@ -137,14 +141,20 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     sending=true;
     const receipt=await transport.sendMail({from:'"'+String(smtp.from_name||"DropX Logistics").replace(/["\r\n]/g,"")+'" <'+smtp.smtp_from+">",to:[delivery.recipient_email],subject,html:delivery.html,text:delivery.body,attachments,messageId,inReplyTo:thread?.last_message_id,references:thread?[...new Set([thread.root_message_id,thread.last_message_id])]:undefined});
     if(!receipt.accepted?.includes(delivery.recipient_email))throw new Error("SMTP did not accept the recipient");
+    accepted=true;
     const finished=await db.rpc("portal_finish_digest",{p_id:delivery.id,p_message_id:receipt.messageId,p_root_id:root,p_response:receipt.response});
     if(finished.error||finished.data!==true)throw new Error("SMTP accepted but receipt persistence needs verification");
     summary.accepted++;
    }catch(error) {
     const message=error instanceof Error?error.message:"Delivery requires verification";
-    // Never requeue SMTP uncertainty automatically. Keep the exact payload and ID for audit.
-    const result=await db.from("portal_digest_deliveries").update({status:sending?"uncertain":"skipped",error:message.slice(0,400),completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
-    summary[sending?"uncertain":"skipped"]++;summary.errors.push(delivery.id+": "+(result.error?"Receipt write failed":message));
+    // Explicit transient SMTP rejection is safe to retry. Timeouts after DATA or
+    // accepted-but-unpersisted receipts remain held to prevent duplicate messages.
+    const responseCode=Number((error as {responseCode?:number})?.responseCode);
+    const retryable=sending&&!accepted&&responseCode>=400&&responseCode<500;
+    const status=retryable?"pending":sending?"uncertain":"skipped";
+    const result=await db.from("portal_digest_deliveries").update({status,error:message.slice(0,400),completed_at:retryable?null:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
+    if(retryable){retryLater=true;}else summary[sending?"uncertain":"skipped"]++;
+    summary.errors.push(delivery.id+": "+(result.error?"Receipt write failed":message));
    }finally{transport?.close();}
   }));
  }
