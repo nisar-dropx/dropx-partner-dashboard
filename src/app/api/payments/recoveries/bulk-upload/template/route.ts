@@ -15,7 +15,9 @@ export async function GET() {
     return Response.json({ error: "Add access to Payment Recovery is required." }, { status: 403, headers: noStore });
   }
 
-  const bytes = buildPaymentRecoveryImportTemplate({ exampleDate: new Date().toISOString().slice(0, 10) });
+  const bytes = buildPaymentRecoveryImportTemplate({
+    exampleMonth: `${new Date().toISOString().slice(0, 7)}-01`
+  });
   return new Response(Buffer.from(bytes), {
     headers: {
       ...noStore,

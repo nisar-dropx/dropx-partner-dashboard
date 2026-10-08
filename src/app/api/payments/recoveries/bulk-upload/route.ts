@@ -22,6 +22,11 @@ type ReferenceRow = {
   id: string;
 };
 
+type ProviderReferenceRow = ReferenceRow & {
+  code: string;
+  name: string;
+};
+
 type StationReferenceRow = ReferenceRow & {
   isActive: boolean;
   providerId: string | null;
@@ -207,11 +212,13 @@ export async function POST(request: Request) {
       || previousBatchResult.error?.message;
     if (referenceError) return errorResponse(referenceError, 400);
 
-    const providersByCode = new Map<string, ReferenceRow[]>();
+    const providersById = new Map<string, ProviderReferenceRow>();
     for (const provider of providersResult.data ?? []) {
-      const code = normalizeReferenceCode(provider.code);
-      addToMap(providersByCode, code, {
-        id: String(provider.id)
+      const id = String(provider.id);
+      providersById.set(id, {
+        id,
+        code: normalizeReferenceCode(provider.code),
+        name: String(provider.name ?? "").trim()
       });
     }
 
@@ -284,6 +291,7 @@ export async function POST(request: Request) {
       issues.push(issue);
     };
     const targetStatesByRow = new Map<number, TargetState[]>();
+    const inferredProvidersByRow = new Map<number, ProviderReferenceRow>();
 
     for (const row of parsed.rows) {
       const tid = row.normalizedTid || normalizePaymentRecoveryTid(row.tid);
@@ -297,15 +305,6 @@ export async function POST(request: Request) {
         }
       }
 
-      if (row.providerCode) {
-        const providerMatches = providersByCode.get(normalizeReferenceCode(row.providerCode)) ?? [];
-        if (!providerMatches.length) {
-          pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Provider ${row.providerCode} was not found.` });
-        } else if (providerMatches.length > 1) {
-          pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Provider code ${row.providerCode} matches more than one provider.` });
-        }
-      }
-
       if (row.locationCode) {
         const locationMatches = stationsByCode.get(normalizeReferenceCode(row.locationCode)) ?? [];
         if (!locationMatches.length) {
@@ -314,22 +313,29 @@ export async function POST(request: Request) {
           pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location code ${row.locationCode} matches more than one location.` });
         } else if (!hasCompanyWideAccess && !allowedLocationIds.has(locationMatches[0].id)) {
           pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location ${row.locationCode} is outside your assigned locations.` });
-        }
-      }
-
-      if (row.providerCode && row.locationCode) {
-        const providerMatches = providersByCode.get(normalizeReferenceCode(row.providerCode)) ?? [];
-        const locationMatches = stationsByCode.get(normalizeReferenceCode(row.locationCode)) ?? [];
-        if (
-          providerMatches.length === 1
-          && locationMatches.length === 1
-          && locationMatches[0].providerId !== providerMatches[0].id
-        ) {
+        } else if (!locationMatches[0].providerId) {
           pushIssue({
             rowNumber: row.rowNumber,
             tid: row.tid,
-            message: `Location ${row.locationCode} is not configured for provider ${row.providerCode}. Choose a location assigned to that provider.`
+            message: `Location ${row.locationCode} is not linked to a provider. Configure its provider before importing.`
           });
+        } else {
+          const provider = providersById.get(locationMatches[0].providerId);
+          if (!provider) {
+            pushIssue({
+              rowNumber: row.rowNumber,
+              tid: row.tid,
+              message: `Location ${row.locationCode} has an invalid provider link. Correct the location setup before importing.`
+            });
+          } else if (!provider.code) {
+            pushIssue({
+              rowNumber: row.rowNumber,
+              tid: row.tid,
+              message: `Location ${row.locationCode} is linked to a provider without a code. Complete the provider setup before importing.`
+            });
+          } else {
+            inferredProvidersByRow.set(row.rowNumber, provider);
+          }
         }
       }
 
@@ -423,12 +429,14 @@ export async function POST(request: Request) {
       issues,
       rows: parsed.rows.slice(0, 50).map((row) => {
         const states = targetStatesByRow.get(row.rowNumber) ?? [];
+        const provider = inferredProvidersByRow.get(row.rowNumber);
         return {
           rowNumber: row.rowNumber,
           tid: row.tid,
-          providerCode: row.providerCode,
+          providerCode: provider?.code ?? "",
+          providerName: provider?.name ?? "",
           location: row.locationCode,
-          debitDate: row.debitDate,
+          debitMonth: row.debitMonth,
           debitAmount: row.debitAmount,
           recoveryMethod: row.recoveryMethod,
           recoveryIds: row.recoveryIds,
@@ -453,9 +461,8 @@ export async function POST(request: Request) {
       p_rows: parsed.rows.map((row) => ({
         row_number: row.rowNumber,
         tid: row.tid,
-        provider_code: row.providerCode,
         location: row.locationCode,
-        debit_date: row.debitDate,
+        debit_month: row.debitMonth,
         debit_amount: row.debitAmount,
         recovery_method: rowRecoveryMethod(row),
         provider_reference: row.providerReference || null,

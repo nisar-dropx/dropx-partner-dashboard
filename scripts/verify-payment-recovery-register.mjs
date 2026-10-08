@@ -17,6 +17,12 @@ const indexMigrationPath = path.join(
   "migrations",
   "20261008160000_payment_recovery_fk_indexes.sql"
 );
+const debitMonthMigrationPath = path.join(
+  root,
+  "supabase",
+  "migrations",
+  "20261008162946_payment_recovery_debit_month_provider_inference.sql"
+);
 
 const db = new PGlite();
 const ids = {
@@ -37,7 +43,8 @@ const ids = {
   movedDuplicate: "00000000-0000-4000-8000-000000000015",
   inactiveStation: "00000000-0000-4000-8000-000000000016",
   inactiveStationEmployee: "00000000-0000-4000-8000-000000000017",
-  pendingInactiveStationEmployee: "00000000-0000-4000-8000-000000000018"
+  pendingInactiveStationEmployee: "00000000-0000-4000-8000-000000000018",
+  unmappedProviderStation: "00000000-0000-4000-8000-000000000019"
 };
 
 await db.exec(`
@@ -141,9 +148,10 @@ await db.query(`insert into public.companies(id) values ($1)`, [ids.company]);
 await db.query(`insert into auth.users(id) values ($1)`, [ids.actor]);
 await db.query(`insert into public.user_roles(id,company_id,code) values ($1,$2,'OWNER')`, [ids.owner, ids.company]);
 
-const [migration, indexMigration] = await Promise.all([
+const [migration, indexMigration, debitMonthMigration] = await Promise.all([
   readFile(migrationPath, "utf8"),
-  readFile(indexMigrationPath, "utf8")
+  readFile(indexMigrationPath, "utf8"),
+  readFile(debitMonthMigrationPath, "utf8")
 ]);
 await db.exec(migration);
 await db.exec(indexMigration);
@@ -166,6 +174,29 @@ await db.query(
    values ($1,$2,$3,'OLDLOC','Historical location',false)`,
   [ids.inactiveStation, ids.company, ids.provider]
 );
+await db.query(
+  `insert into public.stations(id,company_id,provider_id,station_code,station_name)
+   values ($1,$2,null,'NOPROV','Location without provider')`,
+  [ids.unmappedProviderStation, ids.company]
+);
+await db.query(
+  `insert into public.payment_recovery_cases(
+     company_id,tid,provider_id,station_id,debit_date,debit_amount,
+     recovery_method,status,provider_code_snapshot,provider_name_snapshot,
+     station_code_snapshot,source_type,created_by,updated_by
+   ) values ($1,'TID-HISTORICAL-MONTH',$2,$3,'2026-09-18',5,
+     'post_invoice_dispute','planned_provider_dispute','P1','Provider One',
+     'LOC1','manual',$4,$4)`,
+  [ids.company, ids.provider, ids.station, ids.actor]
+);
+await db.exec(debitMonthMigration);
+const migratedHistoricalMonth = await db.query(`
+  select debit_month::text debit_month
+  from public.payment_recovery_cases
+  where tid = 'TID-HISTORICAL-MONTH'
+`);
+assert.equal(migratedHistoricalMonth.rows[0].debit_month, "2026-09-01");
+
 await db.query(
   `insert into public.employees(id,company_id,employee_code,full_name,location_id)
    values ($1,$2,'EMP1','Employee One',$3)`,
@@ -221,9 +252,8 @@ const rows = [
   {
     row_number: 2,
     tid: "TID-001",
-    provider_code: "P1",
     location: "LOC1",
-    debit_date: "2026-10-08",
+    debit_month: "2026-10-01",
     debit_amount: 100.01,
     recovery_method: "payout_deduction",
     provider_reference: "REF-1",
@@ -234,9 +264,8 @@ const rows = [
   {
     row_number: 3,
     tid: "TID-002",
-    provider_code: "P1",
     location: "LOC1",
-    debit_date: "2026-10-08",
+    debit_month: "2026-10-01",
     debit_amount: 25,
     recovery_method: "post_invoice_dispute",
     targets: []
@@ -254,18 +283,22 @@ assert.equal(firstImport.rows[0].result.allocations, 3);
 const totals = await db.query(`
   select recovery.tid,
          recovery.status,
+         recovery.debit_month::text debit_month,
+         recovery.provider_code_snapshot,
+         recovery.provider_reference,
          recovery.debit_amount::text debit_amount,
          coalesce(sum(allocation.allocation_amount), 0)::text allocated
   from public.payment_recovery_cases recovery
   left join public.payment_recovery_allocations allocation
     on allocation.company_id = recovery.company_id
    and allocation.recovery_case_id = recovery.id
+  where recovery.tid in ('TID-001', 'TID-002')
   group by recovery.id
   order by recovery.tid
 `);
 assert.deepEqual(totals.rows, [
-  { tid: "TID-001", status: "ready_for_deduction", debit_amount: "100.01", allocated: "100.01" },
-  { tid: "TID-002", status: "planned_provider_dispute", debit_amount: "25.00", allocated: "0" }
+  { tid: "TID-001", status: "ready_for_deduction", debit_month: "2026-10-01", provider_code_snapshot: "P1", provider_reference: "REF-1", debit_amount: "100.01", allocated: "100.01" },
+  { tid: "TID-002", status: "planned_provider_dispute", debit_month: "2026-10-01", provider_code_snapshot: "P1", provider_reference: null, debit_amount: "25.00", allocated: "0" }
 ]);
 
 const allocations = await db.query(`
@@ -286,18 +319,79 @@ const replay = await db.query(
 );
 assert.equal(replay.rows[0].result.replayed, true);
 
-const providerMismatchRows = [{
+const providerInputIgnoredRows = [{
   ...rows[1],
   row_number: 2,
-  tid: "TID-PROVIDER-MISMATCH",
+  tid: "TID-PROVIDER-INFERRED",
   provider_code: "P2"
+}];
+await db.query(
+  `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
+  [ids.company, "provider-inferred.xlsx", "f".repeat(64), JSON.stringify(providerInputIgnoredRows), ids.actor]
+);
+const inferredProvider = await db.query(`
+  select provider_code_snapshot
+  from public.payment_recovery_cases
+  where tid = 'TID-PROVIDER-INFERRED'
+`);
+assert.equal(inferredProvider.rows[0].provider_code_snapshot, "P1");
+
+// Keep the database rollout compatible with the previously deployed API until
+// the matching application release is live. The legacy date is normalized to
+// its month and the provider input remains ignored in favor of LOCATION.
+const legacyDateRows = [{
+  row_number: 2,
+  tid: "TID-LEGACY-DATE",
+  provider_code: "P2",
+  location: "LOC1",
+  debit_date: "2026-08-19",
+  debit_amount: 12,
+  recovery_method: "post_invoice_dispute",
+  targets: []
+}];
+await db.query(
+  `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
+  [ids.company, "legacy-date.xlsx", "5".repeat(64), JSON.stringify(legacyDateRows), ids.actor]
+);
+const legacyDateImport = await db.query(`
+  select debit_date::text debit_date,
+         debit_month::text debit_month,
+         provider_code_snapshot
+  from public.payment_recovery_cases
+  where tid = 'TID-LEGACY-DATE'
+`);
+assert.deepEqual(legacyDateImport.rows[0], {
+  debit_date: "2026-08-01",
+  debit_month: "2026-08-01",
+  provider_code_snapshot: "P1"
+});
+
+const unmappedProviderRows = [{
+  ...rows[1],
+  row_number: 2,
+  tid: "TID-NO-PROVIDER",
+  location: "NOPROV"
 }];
 await assert.rejects(
   db.query(
     `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
-    [ids.company, "provider-mismatch.xlsx", "f".repeat(64), JSON.stringify(providerMismatchRows), ids.actor]
+    [ids.company, "no-provider.xlsx", "3".repeat(64), JSON.stringify(unmappedProviderRows), ids.actor]
   ),
-  /does not belong to provider/
+  /is not linked to a provider/
+);
+
+const nonCanonicalMonthRows = [{
+  ...rows[1],
+  row_number: 2,
+  tid: "TID-BAD-MONTH",
+  debit_month: "2026-10-08"
+}];
+await assert.rejects(
+  db.query(
+    `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
+    [ids.company, "bad-month.xlsx", "4".repeat(64), JSON.stringify(nonCanonicalMonthRows), ids.actor]
+  ),
+  /must be the first day of its month/
 );
 
 const historicalDebitStationRows = [{
@@ -412,9 +506,8 @@ await assert.rejects(
 const pendingRows = [{
   row_number: 2,
   tid: "TID-003",
-  provider_code: "P1",
   location: "LOC1",
-  debit_date: "2026-10-08",
+  debit_month: "2026-10-01",
   debit_amount: 10,
   recovery_method: "payout_deduction",
   targets: [{ dropx_id: "NEW1" }]

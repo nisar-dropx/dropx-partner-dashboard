@@ -14,9 +14,8 @@ export type PaymentRecoveryImportRow = {
   rowNumber: number;
   tid: string;
   normalizedTid: string;
-  providerCode: string;
   locationCode: string;
-  debitDate: string;
+  debitMonth: string;
   debitAmount: number | null;
   recoveryMethod: PaymentRecoveryMethod | "";
   recoveryIds: string[];
@@ -39,9 +38,8 @@ export type PaymentRecoveryEqualAllocation = {
 
 export const PAYMENT_RECOVERY_IMPORT_HEADERS = [
   "TID",
-  "PROVIDER_CODE",
   "LOCATION",
-  "DEBIT_DATE",
+  "DEBIT_MONTH",
   "DEBIT_AMOUNT",
   "RECOVERY_METHOD",
   "RECOVERY_IDS",
@@ -62,6 +60,22 @@ const MAX_REASON_LENGTH = 500;
 const MAX_REMARK_LENGTH = 1_000;
 const MAX_SAFE_EXCEL_IDENTIFIER = 999_999_999_999_999;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_MONTH_KEY_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])-01$/;
+const MONTH_TEXT_PATTERN = /^([A-Za-z]{3})-(\d{2})$/;
+const MONTH_NUMBERS: Record<string, number> = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+};
 const SCIENTIFIC_NOTATION_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+$/;
 
 function normalizeHeader(value: unknown) {
@@ -98,21 +112,32 @@ function isoDate(year: number, month: number, day: number) {
   return isValidPaymentRecoveryDate(value) ? value : "";
 }
 
-function spreadsheetDate(value: unknown, date1904: boolean) {
+export function isValidPaymentRecoveryMonth(value: string) {
+  return ISO_MONTH_KEY_PATTERN.test(value);
+}
+
+function isoMonth(year: number, month: number) {
+  const value = isoDate(year, month, 1);
+  return isValidPaymentRecoveryMonth(value) ? value : "";
+}
+
+function spreadsheetMonth(value: unknown, date1904: boolean) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return isoDate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
+    return isoMonth(value.getUTCFullYear(), value.getUTCMonth() + 1);
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30);
     const parsed = new Date(epoch + Math.floor(value) * 86_400_000);
     return Number.isNaN(parsed.getTime())
       ? ""
-      : isoDate(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
+      : isoMonth(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1);
   }
   const text = String(value ?? "").trim();
   if (!text) return "";
-  const match = text.match(/^(\d{2})([\/-])(\d{2})\2(\d{4})$/);
-  return match ? isoDate(Number(match[4]), Number(match[3]), Number(match[1])) : "";
+  const match = text.match(MONTH_TEXT_PATTERN);
+  if (!match) return "";
+  const month = MONTH_NUMBERS[match[1].toLowerCase()];
+  return month ? isoMonth(2000 + Number(match[2]), month) : "";
 }
 
 function money(value: unknown) {
@@ -284,9 +309,8 @@ export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRe
     const tidCell = identifierFromCell(source[indexes.tid], formatted[indexes.tid]);
     const tid = tidCell.value;
     const normalizedTid = normalizePaymentRecoveryTid(tid);
-    const providerCode = compactCode(formatted[indexes.providercode]);
     const locationCode = compactCode(formatted[indexes.location]);
-    const debitDate = spreadsheetDate(source[indexes.debitdate], date1904);
+    const debitMonth = spreadsheetMonth(source[indexes.debitmonth], date1904);
     const debitAmount = money(source[indexes.debitamount]);
     const rawMethod = textCell(formatted[indexes.recoverymethod]);
     const recoveryMethod = normalizeRecoveryMethod(rawMethod);
@@ -308,21 +332,16 @@ export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRe
     } else if (tid.length > MAX_TID_LENGTH) {
       issues.push({ rowNumber, tid, message: `TID cannot exceed ${MAX_TID_LENGTH} characters.` });
     }
-    if (!providerCode) {
-      issues.push({ rowNumber, tid: issueTid, message: "PROVIDER_CODE is required." });
-    } else if (providerCode.length > MAX_CODE_LENGTH) {
-      issues.push({ rowNumber, tid: issueTid, message: `PROVIDER_CODE cannot exceed ${MAX_CODE_LENGTH} characters.` });
-    }
     if (!locationCode) {
       issues.push({ rowNumber, tid: issueTid, message: "LOCATION is required." });
     } else if (locationCode.length > MAX_CODE_LENGTH) {
       issues.push({ rowNumber, tid: issueTid, message: `LOCATION cannot exceed ${MAX_CODE_LENGTH} characters.` });
     }
-    if (!debitDate) {
+    if (!debitMonth) {
       issues.push({
         rowNumber,
         tid: issueTid,
-        message: "DEBIT_DATE must be a real date written as DD-MM-YYYY or DD/MM/YYYY."
+        message: "DEBIT_MONTH must be a real Excel date or text written exactly as MMM-YY, for example Jul-26."
       });
     }
     if (debitAmount === null || !Number.isFinite(debitAmount)) {
@@ -425,9 +444,8 @@ export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRe
       rowNumber,
       tid,
       normalizedTid,
-      providerCode,
       locationCode,
-      debitDate,
+      debitMonth,
       debitAmount,
       recoveryMethod,
       recoveryIds,
@@ -455,38 +473,44 @@ export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRe
   return { fileSha256, rows, issues, canCommit: issues.length === 0 };
 }
 
-function displayDate(value: string | undefined) {
-  if (!value || !isValidPaymentRecoveryDate(value)) return "DD/MM/YYYY";
-  const [year, month, day] = value.split("-");
-  return `${day}/${month}/${year}`;
+function exampleMonthDate(value: string | undefined) {
+  if (!value || !ISO_DATE_PATTERN.test(value)) return null;
+  const [year, month] = value.split("-").map(Number);
+  return isoMonth(year, month) ? new Date(Date.UTC(year, month - 1, 1)) : null;
 }
 
-function prepareTextInputCells(sheet: XLSX.WorkSheet, columnsToFormat: number[]) {
+function prepareInputCells(
+  sheet: XLSX.WorkSheet,
+  textColumns: number[],
+  monthColumns: number[]
+) {
   for (let rowIndex = 1; rowIndex <= PAYMENT_RECOVERY_IMPORT_MAX_ROWS; rowIndex += 1) {
-    for (const columnIndex of columnsToFormat) {
+    for (const columnIndex of textColumns) {
       sheet[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })] = { t: "s", v: "", z: "@" };
     }
+    for (const columnIndex of monthColumns) {
+      sheet[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })] = { t: "s", v: "", z: "mmm-yy" };
+    }
   }
-  sheet["!ref"] = `A1:J${PAYMENT_RECOVERY_IMPORT_MAX_ROWS + 1}`;
+  sheet["!ref"] = `A1:I${PAYMENT_RECOVERY_IMPORT_MAX_ROWS + 1}`;
 }
 
-export function buildPaymentRecoveryImportTemplate(options: { exampleDate?: string } = {}) {
+export function buildPaymentRecoveryImportTemplate(options: { exampleMonth?: string } = {}) {
   const headers = [...PAYMENT_RECOVERY_IMPORT_HEADERS];
-  const widths = [24, 20, 16, 16, 18, 26, 42, 28, 44, 52].map((wch) => ({ wch }));
+  const widths = [24, 16, 16, 18, 26, 42, 28, 44, 52].map((wch) => ({ wch }));
   const upload = XLSX.utils.aoa_to_sheet([headers]);
   upload["!cols"] = widths;
-  upload["!autofilter"] = { ref: "A1:J1" };
-  prepareTextInputCells(upload, [0, 6]);
+  upload["!autofilter"] = { ref: "A1:I1" };
+  prepareInputCells(upload, [0, 5], [2]);
 
-  const exampleDate = displayDate(options.exampleDate);
+  const exampleMonth = exampleMonthDate(options.exampleMonth) ?? "MMM-YY";
   const examples = XLSX.utils.aoa_to_sheet([
     ["EXAMPLES ONLY - copy a row to Upload and replace every sample value. Do not upload this worksheet."],
     headers,
     [
       "TID-000001",
-      "AMAZON",
       "KOZA",
-      exampleDate,
+      exampleMonth,
       2000,
       "PAYOUT_DEDUCTION",
       "DROPX1001, DROPX1002",
@@ -496,9 +520,8 @@ export function buildPaymentRecoveryImportTemplate(options: { exampleDate?: stri
     ],
     [
       "TID-000002",
-      "AMAZON",
       "KOZA",
-      exampleDate,
+      exampleMonth,
       1500,
       "POST_INVOICE_DISPUTE",
       "",
@@ -508,9 +531,12 @@ export function buildPaymentRecoveryImportTemplate(options: { exampleDate?: stri
     ]
   ]);
   examples["!cols"] = widths;
-  examples["!autofilter"] = { ref: "A2:J4" };
-  for (const address of ["A3", "G3", "A4", "G4"]) {
+  examples["!autofilter"] = { ref: "A2:I4" };
+  for (const address of ["A3", "F3", "A4", "F4"]) {
     if (examples[address]) examples[address].z = "@";
+  }
+  for (const address of ["C3", "C4"]) {
+    if (examples[address]) examples[address].z = "mmm-yy";
   }
 
   const validValues = XLSX.utils.aoa_to_sheet([
@@ -524,9 +550,8 @@ export function buildPaymentRecoveryImportTemplate(options: { exampleDate?: stri
   const instructions = XLSX.utils.aoa_to_sheet([
     ["PAYMENT RECOVERY BULK UPLOAD"],
     ["TID", "Required and unique. Keep the exact transaction ID as Text, especially for long or numeric-only IDs. Scientific notation and formulas are rejected."],
-    ["PROVIDER_CODE", "Required. Enter the provider code exactly as configured in the dashboard."],
-    ["LOCATION", "Required. Enter the location code for the provider debit."],
-    ["DEBIT_DATE", "Required. Enter DD-MM-YYYY or DD/MM/YYYY. A genuine Excel date cell is also accepted."],
+    ["LOCATION", "Required. Enter the location code for the provider debit. The provider is identified automatically from this location."],
+    ["DEBIT_MONTH", "Required. Enter MMM-YY, for example Jul-26. A genuine Excel date cell is also accepted and is normalized to its month."],
     ["DEBIT_AMOUNT", "Required. Enter an amount greater than zero with no more than two decimal places."],
     ["RECOVERY_METHOD", "Required. Use PAYOUT_DEDUCTION or POST_INVOICE_DISPUTE exactly as shown on the Valid values worksheet."],
     ["RECOVERY_IDS", "For PAYOUT_DEDUCTION, enter one or more DropX IDs separated by commas, semicolons or new lines. The debit is split equally. Any remainder paise is assigned in ascending DropX ID order so the allocated total always equals DEBIT_AMOUNT. Leave blank for POST_INVOICE_DISPUTE."],

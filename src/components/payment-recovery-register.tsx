@@ -21,7 +21,7 @@ export type PaymentRecoveryRegisterRow = {
   providerCode: string;
   providerName: string;
   location: string;
-  debitDate: string;
+  debitMonth: string;
   debitAmount: number;
   recoveredAmount: number;
   pendingAmount: number;
@@ -63,6 +63,8 @@ const statusLabels: Record<PaymentRecoveryRegisterRow["status"], string> = {
   reversed: "Reversed"
 };
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 function money(value: number) {
   return `Rs ${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -70,6 +72,13 @@ function money(value: number) {
 function dateLabel(value: string) {
   const parts = value.slice(0, 10).split("-");
   return parts.length === 3 ? parts.reverse().join("/") : value;
+}
+
+function monthLabel(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})/);
+  if (!match) return value || "—";
+  const month = Number(match[2]);
+  return month >= 1 && month <= 12 ? `${MONTH_NAMES[month - 1]}-${match[1].slice(-2)}` : value;
 }
 
 function sentenceLabel(value: string) {
@@ -195,8 +204,8 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
   rows: PaymentRecoveryRegisterRow[];
 }) {
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [monthFrom, setMonthFrom] = useState("");
+  const [monthTo, setMonthTo] = useState("");
   const [providers, setProviders] = useState<string[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -220,14 +229,15 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
   const routeOptions = useMemo(() => uniqueOptions(rows.map((row) => row.recoveryMethod), (value) => routeLabels[value as PaymentRecoveryRegisterRow["recoveryMethod"]] ?? sentenceLabel(value)), [rows]);
   const statusOptions = useMemo(() => uniqueOptions(rows.map((row) => row.status), (value) => statusLabels[value as PaymentRecoveryRegisterRow["status"]] ?? sentenceLabel(value)), [rows]);
   const linkOptions = useMemo(() => uniqueOptions(rows.map(rowLinkStatus), (value) => value === "linked" ? "Linked" : value === "pending" ? "Awaiting registration" : "Not applicable"), [rows]);
-  const invalidDateRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
+  const invalidMonthRange = Boolean(monthFrom && monthTo && monthFrom > monthTo);
 
   const filtered = useMemo(() => {
-    if (invalidDateRange) return [];
+    if (invalidMonthRange) return [];
     const term = search.trim().toLowerCase();
     return rows.filter((row) => {
-      if (dateFrom && row.debitDate.slice(0, 10) < dateFrom) return false;
-      if (dateTo && row.debitDate.slice(0, 10) > dateTo) return false;
+      const debitMonth = row.debitMonth.slice(0, 7);
+      if (monthFrom && debitMonth < monthFrom) return false;
+      if (monthTo && debitMonth > monthTo) return false;
       if (providers.length && !providers.includes(row.providerCode)) return false;
       if (locations.length && !locations.includes(row.location)) return false;
       if (categories.length && !rowCategories(row).some((category) => categories.includes(category))) return false;
@@ -247,7 +257,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
       ];
       return searchable.some((value) => value.toLowerCase().includes(term));
     });
-  }, [categories, dateFrom, dateTo, invalidDateRange, links, locations, providers, routes, rows, search, statuses]);
+  }, [categories, invalidMonthRange, links, locations, monthFrom, monthTo, providers, routes, rows, search, statuses]);
 
   const totals = useMemo(() => filtered.reduce((summary, row) => {
     summary.debit += row.debitAmount;
@@ -256,7 +266,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
     else summary.pending += row.pendingAmount;
     return summary;
   }, { debit: 0, recovered: 0, dispute: 0, pending: 0 }), [filtered]);
-  const activeFilterCount = (search.trim() ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0)
+  const activeFilterCount = (search.trim() ? 1 : 0) + (monthFrom ? 1 : 0) + (monthTo ? 1 : 0)
     + providers.length + locations.length + categories.length + routes.length + statuses.length + links.length;
   const pageSize = size === "all" ? Math.max(1, filtered.length) : Number(size);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -265,8 +275,8 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
 
   function clearFilters() {
     setSearch("");
-    setDateFrom("");
-    setDateTo("");
+    setMonthFrom("");
+    setMonthTo("");
     setProviders([]);
     setLocations([]);
     setCategories([]);
@@ -277,13 +287,13 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
   }
 
   function exportRows() {
-    if (!filtered.length || invalidDateRange) return;
-    const headings = ["TID", "PROVIDER", "LOCATION", "DEBIT_DATE", "DEBIT_AMOUNT", "RECOVERY_ROUTE", "RECOVERY_IDS", "CATEGORIES", "RECOVERED", "UNDER_DISPUTE", "PENDING", "STATUS", "LINK_STATUS", "PROVIDER_REFERENCE", "REASON", "REMARK"];
+    if (!filtered.length || invalidMonthRange) return;
+    const headings = ["TID", "PROVIDER", "LOCATION", "DEBIT_MONTH", "DEBIT_AMOUNT", "RECOVERY_ROUTE", "RECOVERY_IDS", "CATEGORIES", "RECOVERED", "UNDER_DISPUTE", "PENDING", "STATUS", "LINK_STATUS", "PROVIDER_REFERENCE", "REASON", "REMARK"];
     const csv = [headings, ...filtered.map((row) => [
       row.tid,
       row.providerCode,
       row.location,
-      row.debitDate.slice(0, 10),
+      monthLabel(row.debitMonth),
       row.debitAmount.toFixed(2),
       routeLabels[row.recoveryMethod],
       row.allocations.map((allocation) => allocation.dropxId).join(", "),
@@ -300,7 +310,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
     const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `payment-recoveries-${dateFrom || "all"}-to-${dateTo || "all"}.csv`;
+    link.download = `payment-recoveries-${monthFrom || "all"}-to-${monthTo || "all"}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -317,7 +327,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
 
     <div className="workforce-advance-actions">
       {canAdd ? <PaymentRecoveryBulkUpload /> : null}
-      <button className="button secondary" disabled={!filtered.length || invalidDateRange} onClick={exportRows} type="button">Export filtered CSV ({filtered.length.toLocaleString("en-IN")})</button>
+      <button className="button secondary" disabled={!filtered.length || invalidMonthRange} onClick={exportRows} type="button">Export filtered CSV ({filtered.length.toLocaleString("en-IN")})</button>
     </div>
 
     <section className="panel">
@@ -327,8 +337,8 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
       </div>
       <div aria-label="Recovery register filters" className="workforce-advance-filter-panel">
         <label className="workforce-advance-filter-field workforce-advance-search-filter"><span>Search recoveries</span><input className="field" onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="TID, DropX ID, person or reference" type="search" value={search} /></label>
-        <label className="workforce-advance-filter-field"><span>Debited from</span><input className="field" max={dateTo || undefined} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} type="date" value={dateFrom} /></label>
-        <label className="workforce-advance-filter-field"><span>Debited to</span><input className="field" min={dateFrom || undefined} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} type="date" value={dateTo} /></label>
+        <label className="workforce-advance-filter-field"><span>Debit month from</span><input className="field" max={monthTo || undefined} onChange={(event) => { setMonthFrom(event.target.value); setPage(1); }} type="month" value={monthFrom} /></label>
+        <label className="workforce-advance-filter-field"><span>Debit month to</span><input className="field" min={monthFrom || undefined} onChange={(event) => { setMonthTo(event.target.value); setPage(1); }} type="month" value={monthTo} /></label>
         <RecoveryMultiFilter allLabel="All providers" label="Provider" onChange={(values) => { setProviders(values); setPage(1); }} options={providerOptions} selected={providers} />
         <RecoveryMultiFilter allLabel="All locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
         <RecoveryMultiFilter allLabel="All categories" label="People category" onChange={(values) => { setCategories(values); setPage(1); }} options={categoryOptions} selected={categories} />
@@ -337,15 +347,15 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
         <RecoveryMultiFilter allLabel="All link statuses" label="ID link" onChange={(values) => { setLinks(values); setPage(1); }} options={linkOptions} selected={links} />
         <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
       </div>
-      {invalidDateRange ? <div aria-live="polite" className="payout-inline-message error">Debited from date must be on or before debited to date.</div> : null}
-      <div className="table-wrap workforce-advance-table-wrap"><table className="workforce-advance-table"><thead><tr><th>TID</th><th>Provider</th><th>Location</th><th>Debited on</th><th className="payout-money">Provider debit</th><th>Recovery route</th><th>Recover from</th><th className="payout-money">Recovered</th><th className="payout-money">Pending</th><th>Status</th><th>Reference / reason</th></tr></thead>
+      {invalidMonthRange ? <div aria-live="polite" className="payout-inline-message error">Debit month from must be on or before debit month to.</div> : null}
+      <div className="table-wrap workforce-advance-table-wrap"><table className="workforce-advance-table"><thead><tr><th>TID</th><th>Provider (from location)</th><th>Location</th><th>Debit month</th><th className="payout-money">Provider debit</th><th>Recovery route</th><th>Recover from</th><th className="payout-money">Recovered</th><th className="payout-money">Pending</th><th>Status</th><th>Reference (optional) / reason</th></tr></thead>
         <tbody>{visible.length ? visible.map((row) => {
           const linkStatus = rowLinkStatus(row);
           return <tr className={linkStatus === "pending" ? "workforce-advance-pending-row" : undefined} key={row.id}>
             <td><strong>{row.tid}</strong><small>Added {dateLabel(row.createdAt)}</small></td>
             <td><strong>{row.providerCode}</strong><small>{row.providerName || row.providerCode}</small></td>
             <td><strong>{row.location}</strong></td>
-            <td>{dateLabel(row.debitDate)}</td>
+            <td>{monthLabel(row.debitMonth)}</td>
             <td className="payout-money"><strong>{money(row.debitAmount)}</strong></td>
             <td><strong>{routeLabels[row.recoveryMethod]}</strong><small>{row.recoveryMethod === "payout_deduction" ? "Planned for People payment" : "Planned against provider invoice"}</small></td>
             <td>{row.allocations.length ? <details className="workforce-advance-history"><summary>{row.allocations.length} {row.allocations.length === 1 ? "ID" : "IDs"} · equal allocation</summary><div>{row.allocations.map((allocation) => <p key={allocation.id}><strong>{allocation.dropxId} · {money(allocation.amount)}</strong><small>{allocation.personName} · {allocation.category}{allocation.location !== "—" ? ` · ${allocation.location}` : ""}</small><small>{allocation.linkStatus === "linked" ? "Linked" : "Awaiting registration"}</small></p>)}</div></details> : <span className="subtle">Provider dispute</span>}</td>
@@ -354,7 +364,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
             <td><span className={`status-pill ${row.status === "recovered" || row.status === "provider_credited" ? "good" : row.status === "awaiting_registration" || row.status === "planned_provider_dispute" || row.status === "under_provider_dispute" || row.status === "partially_recovered" ? "warn" : "payout-status-neutral"}`}>{statusLabels[row.status] ?? sentenceLabel(row.status)}</span>{linkStatus === "pending" ? <small>One or more IDs are awaiting registration</small> : null}</td>
             <td><strong>{row.providerReference || "No provider reference"}</strong><small>{row.reason || row.remark || "No reason or remark"}</small>{row.reason && row.remark ? <small>{row.remark}</small> : null}</td>
           </tr>;
-        }) : <tr><td className="empty-cell" colSpan={11}>{invalidDateRange ? "Correct the date range to view recoveries." : "No payment recoveries match this view."}</td></tr>}</tbody>
+        }) : <tr><td className="empty-cell" colSpan={11}>{invalidMonthRange ? "Correct the month range to view recoveries." : "No payment recoveries match this view."}</td></tr>}</tbody>
       </table></div>
       <div className="workforce-advance-pagination"><label>Rows <select className="field" onChange={(event) => { setSize(event.target.value); setPage(1); }} value={size}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="all">All</option></select></label><span>{filtered.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)} of ${filtered.length}` : "0 records"} · Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage(Math.max(1, safePage - 1))} type="button">Previous</button><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage(Math.min(pages, safePage + 1))} type="button">Next</button></div>
     </section>

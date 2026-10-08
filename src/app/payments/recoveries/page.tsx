@@ -42,9 +42,9 @@ export default async function PaymentRecoveriesPage() {
   } else {
     let casesQuery = supabaseAdmin
       .from("payment_recovery_cases")
-      .select("id,tid,provider_id,station_id,debit_date,debit_amount,recovery_method,status,provider_code_snapshot,provider_name_snapshot,station_code_snapshot,provider_reference,reason,remark,source_type,created_at,updated_at")
+      .select("id,tid,provider_id,station_id,debit_month,debit_amount,recovery_method,status,provider_code_snapshot,provider_name_snapshot,station_code_snapshot,provider_reference,reason,remark,source_type,created_at,updated_at")
       .eq("company_id", companyId)
-      .order("debit_date", { ascending: false })
+      .order("debit_month", { ascending: false })
       .order("created_at", { ascending: false });
     if (!allLocations) {
       casesQuery = casesQuery.in(
@@ -123,7 +123,7 @@ export default async function PaymentRecoveriesPage() {
             providerCode: String(recovery.provider_code_snapshot ?? ""),
             providerName: String(recovery.provider_name_snapshot ?? ""),
             location: String(recovery.station_code_snapshot ?? ""),
-            debitDate: String(recovery.debit_date),
+            debitMonth: String(recovery.debit_month),
             debitAmount,
             recoveredAmount,
             pendingAmount: Math.max(0, roundMoney(debitAmount - recoveredAmount)),
@@ -157,7 +157,7 @@ export default async function PaymentRecoveriesPage() {
     <PageHead
       eyebrow="Payments"
       title="Payment Recovery"
-      subtitle="Track provider-debited TIDs and plan recovery through People payouts or a post-invoice provider dispute."
+      subtitle="Track monthly provider-debited TIDs and plan recovery through People payouts or a post-invoice provider dispute."
     />
     {error
       ? <section className="panel message-panel error"><div className="panel-body"><strong>Recovery register unavailable</strong><p className="subtle">{error}</p></div></section>
