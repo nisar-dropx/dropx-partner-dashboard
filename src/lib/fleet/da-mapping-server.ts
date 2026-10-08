@@ -18,10 +18,10 @@ export async function mappingStationScope(auth:AuthorizationContext){
  const companyId=requireCompanyId(auth),surface=String(currentAdminAccessSurface());
  if(!['fleet','ops'].includes(surface))throw new FleetReportError('Open vehicle DA mapping in Fleet or OpsPulse.',403);
  if(!auth.isMasterOwner){const member=await supabaseAdmin.from('company_product_memberships').select('id,role_id').eq('company_id',companyId).eq('user_id',auth.userId).eq('product_code',surface==='fleet'?'fleet':'operations').eq('is_active',true).maybeSingle();if(member.error||!member.data?.role_id)throw new FleetReportError('Product access is required.',403);}
- let q=supabaseAdmin.from('stations').select('station_code,station_name').eq('company_id',companyId).eq('is_active',true).order('station_code');
+ let q=supabaseAdmin.from('stations').select('station_code,station_name,region,cluster,cluster_name').eq('company_id',companyId).eq('is_active',true).order('station_code');
  if(!auth.isMasterOwner&&!auth.hasAllLocationAccess){if(!auth.locationScopeIds.length)return{companyId,stations:[],vehicles:[]};q=q.in('id',auth.locationScopeIds);}
  const r=await readAllRows(q);if(r.error)throw new FleetReportError('Unable to check station access.');
- const stations=(r.data??[]).map(s=>({code:s.station_code,name:s.station_name||s.station_code}));
+ const stations=(r.data??[]).map(s=>({code:s.station_code,name:s.station_name||s.station_code,region:s.region?.trim()||'',cluster:s.cluster_name?.trim()||s.cluster?.trim()||''}));
  return{companyId,stations};
 }
 export async function mappingScope(auth:AuthorizationContext,date?:string){
@@ -46,14 +46,14 @@ export async function mappingScope(auth:AuthorizationContext,date?:string){
  const codes=new Set([...vehicles,...unavailableVehicles].map(v=>v.station_code));
  return{companyId,stations:stations.filter(s=>codes.has(s.code)),vehicles,unavailableVehicles,placementRecorded,dayStatuses:(sr.data??[]).filter(s=>s.is_active&&!s.is_operational&&!['sold','disposed','returned'].includes(s.status_key)).map(s=>({key:s.status_key,label:s.status_key==='on_leave'?'Absent / On leave':s.label}))};
 }
-export async function loadMapping(auth:AuthorizationContext,date:string,requestedStation:string):Promise<MappingData>{
+export async function loadMapping(auth:AuthorizationContext,date:string,requestedStation:string,registry=false):Promise<MappingData>{
  const scope=await mappingScope(auth,date),today=istDate();
  const station=requestedStation||'*';
  if(station!=='*'&&!scope.stations.some(s=>s.code===station))throw new FleetReportError('Station is outside your scope.',403);
  const empty:MappingData={date,today,station,stations:scope.stations,vehicles:[],options:[],assignments:[],confirmations:[],defaults:[],recentDays:7,latestFeed:null,canEdit:mappingCanEdit(auth),canDefaults:mappingCanDefaults(auth),canPolicy:mappingCanDefaults(auth)};
  const stationCodes=scope.stations.filter(s=>station==='*'||s.code===station).map(s=>s.code);
  if(!stationCodes.length)return empty;
- const vehicles=scope.vehicles.filter(v=>stationCodes.includes(v.station_code));
+ const vehicles=[...scope.vehicles,...(registry?(scope.unavailableVehicles??[]):[])].filter(v=>stationCodes.includes(v.station_code));
  const unavailableVehicles=(scope.unavailableVehicles??[]).filter(v=>stationCodes.includes(v.station_code));
  const [defaults,assignments,settings,confirmations]=await Promise.all([
  readAllRows(supabaseAdmin!.from('fleet_vehicle_da_defaults').select('id,vehicle_id,station_code,provider_employee_id,name,updated_at').eq('company_id',scope.companyId).in('station_code',stationCodes).order('id')),
