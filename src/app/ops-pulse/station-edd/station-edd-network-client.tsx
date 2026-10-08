@@ -74,8 +74,9 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
     else update({ focus, sort: focusCountKeys[focus] === "missingDate" ? controls.sort : focusCountKeys[focus], direction: "desc" });
   }
 
-  /** Counts come from a shared server cache. A cold cache is filled a few
-   * stations per request, so keep asking until nothing is left pending. */
+  /** Counts are stored by the 15-minute background capture. Stations it has
+   * not reached yet are calculated a few per request, so keep asking until
+   * nothing is left pending. */
   async function load(mode: Exclude<Phase, ""> | "quiet") {
     const version = ++requestVersion.current;
     const quiet = mode === "quiet";
@@ -86,7 +87,7 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "Verification failed.");
         if (version !== requestVersion.current) return;
-        setMessage((body.busy ? "Automatic verification is running, or no histories are due." : body.verified + " histories checked; " + body.failed + " could not be verified.") + " Counts update within a few minutes.");
+        setMessage((body.busy ? "Automatic verification is running, or no histories are due." : body.verified + " histories checked; " + body.failed + " could not be verified.") + " Counts update at the next 15-minute recalculation.");
       }
       let stalled = 0, remaining = Infinity;
       for (;;) {
@@ -196,7 +197,7 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
           <StationEddDownload href={pendingReport} label={exportMode === "pending" ? "Export pending TIDs" : "Export selected statuses"} disabled={!exportCount}/>
         </div>
       </div>
-      <div className={s.footer}>Counts are shared by everyone viewing this page and recalculated every few minutes. Exports use the same station filters and sort order. Timestamps are IST.</div>
+      <div className={s.footer}>Counts are shared by everyone viewing this page and recalculated every 15 minutes. Exports use the same station filters and sort order. Timestamps are IST.</div>
     </section>
     <div className={s.coverageCompact}><ShieldCheck size={18}/><div><strong>{n(sum("todayUnverified"))} TIDs need history checks · {n(sum("missingDate"))} records have unconfirmed EDD dates</strong><span>For the stations shown. Neither group is assumed to be confirmed pending; while history checks remain, a pending total is incomplete and a zero does not mean cleared.</span><details><summary>Counting rules and data coverage</summary><p>{STATION_EDD_RULE}</p><p>At station includes INDUCTED / RECEIVED returns. Only records seen within seven days are retained. Totals describe the known observed EDD cohort. A recent station observation does not mean every parcel has been refreshed.</p></details></div></div>
   </div>;

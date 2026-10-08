@@ -6,6 +6,7 @@ import { fetchEddStation, fetchEddPerformanceStation } from "./edd-worker";
 import { mergeReviewEddCohort } from "./review-edd-cohort";
 import { captureEddMovement } from "./edd-movement";
 import { summarizeStationEdd, stationEddToday } from "./station-edd";
+import { saveStationEddSummaries, stationEddSummaryFromLedger } from "./station-edd-summary";
 import { loadOpsStationManpower } from "./station-manpower";
 import { isPeopleDesignation } from "./station-opening-punches";
 import { buildReviewEddTimeline, buildUtrDiscipline, normalizeReviewRouteCounts, reviewEddSourceFresh, type ReviewEddPoint, type ReviewRouteSnapshot, type ReviewEddRefreshSource } from "./review-operations";
@@ -97,8 +98,10 @@ export async function captureReviewEddHistory(): Promise<{ captured: number; dat
     // over prior history verification only when its timestamp still validates
     // the new source package. A worker failure falls back to the ledger with
     // its stored snapshot timestamp, which the freshness gate will suppress.
+    let ledgerRead = true;
     const [ledger, liveResults, outcomeResults] = await Promise.all([
-      loadEddLedger(batchCodes).catch(() => { failedSources.push(...batchCodes.map(code => `${code}:ledger`)); return new Map(); }),
+      // Checkpoints only count and classify packages, so the address and order detail stays in the database.
+      loadEddLedger(batchCodes, "counting").catch(() => { ledgerRead = false; failedSources.push(...batchCodes.map(code => `${code}:ledger`)); return new Map(); }),
       Promise.all(batchCodes.map(code => fetchEddStation({ stationCode: code }).catch(() => { failedSources.push(`${code}:stock`); return null; }))),
       Promise.all(batchCodes.map(code => fetchEddPerformanceStation({ stationCode: code }).catch(() => { failedSources.push(`${code}:outcomes`); return null; })))
     ]);
@@ -106,6 +109,10 @@ export async function captureReviewEddHistory(): Promise<{ captured: number; dat
     const liveOutcomes = new Map(outcomeResults.flatMap((result, index) => result?.status === "ok" && result.payload.stationCode === batchCodes[index] && result.payload.window.from === date && result.payload.window.to === date ? [[result.payload.stationCode, result.payload] as const] : []));
     const observedAt = new Date();
     if (stationEddToday(observedAt) !== date) break; // Do not cross EOD with a mixed-day sample.
+    // The EDDs tab shows these stored counts, so viewers never read the ledger
+    // themselves. Ledger-only on purpose: the tab and its tracking-ID lists
+    // must agree, and the lists are read from the ledger.
+    if (ledgerRead) await saveStationEddSummaries(batchCodes.map(code => stationEddSummaryFromLedger(code, ledger.get(code), date)), observedAt.toISOString());
     const rows = batch.map(station => {
       const entry = ledger.get(station.station_code);
       const source = live.get(station.station_code);
