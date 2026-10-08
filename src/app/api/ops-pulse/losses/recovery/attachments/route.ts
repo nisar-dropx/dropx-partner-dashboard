@@ -2,7 +2,38 @@ import { randomUUID } from "crypto";
 import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
+import { disputeContext } from "@/lib/ops-pulse/nl-live";
 export const dynamic = "force-dynamic";
+
+/** Evidence belongs either to a recovery plan (re-dispute) or to a live-month dispute request. */
+async function attachmentScope(
+  purpose: string,
+  month: string,
+  key: string,
+  edit: boolean,
+  outcomeCode = "",
+) {
+  if (purpose === "dispute") {
+    const ctx = await disputeContext(month, key, edit ? "station" : "view");
+    if (edit && !ctx.gate.open)
+      throw Error(ctx.gate.reason || "The dispute window is closed.");
+    if (edit && !ctx.policy) throw Error("Attachment rules are not configured in Loss Recovery Master.");
+    return { userId: ctx.auth.userId, company: ctx.company, caseKey: ctx.caseKey, policy: ctx.policy!, label: "Dispute evidence", field: "dispute" };
+  }
+  const { auth, scope, settings, caseKey } = await recoveryContext(month, key, edit);
+  if (edit) {
+    const outcome = await supabaseAdmin!
+      .from("nl_recovery_outcomes")
+      .select("attachments_enabled")
+      .eq("company_id", scope.company)
+      .eq("code", outcomeCode)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!outcome.data?.attachments_enabled)
+      throw Error("Attachments are not enabled for this recovery action.");
+  }
+  return { userId: auth.userId, company: scope.company, caseKey, policy: settings!.recovery_policy, label: "Re-dispute evidence", field: "re-dispute" };
+}
 export async function POST(request: Request) {
   try {
     if (
@@ -12,22 +43,15 @@ export async function POST(request: Request) {
       throw Error("Invalid request origin.");
     const form = await request.formData();
     const month = String(form.get("month") || "");
-    const { auth, scope, settings, caseKey } = await recoveryContext(
-      month,
-      String(form.get("case") || ""),
-      true,
-    );
-    const outcome = await supabaseAdmin!
-      .from("nl_recovery_outcomes")
-      .select("attachments_enabled")
-      .eq("company_id", scope.company)
-      .eq("code", String(form.get("outcome") || ""))
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!outcome.data?.attachments_enabled)
-      throw Error("Attachments are not enabled for this recovery action.");
+    const { userId, company, caseKey, policy, label, field } =
+      await attachmentScope(
+        String(form.get("purpose") || ""),
+        month,
+        String(form.get("case") || ""),
+        true,
+        String(form.get("outcome") || ""),
+      );
     const file = form.get("file");
-    const policy = settings!.recovery_policy;
     if (
       !(file instanceof File) ||
       file.size === 0 ||
@@ -38,10 +62,10 @@ export async function POST(request: Request) {
       throw Error("This file type is not enabled in Loss Recovery Master.");
     const id = randomUUID();
     const attachment = await uploadOpsProof({
-      companyId: scope.company,
-      field: "re-dispute",
+      companyId: company,
+      field,
       file,
-      label: "Re-dispute evidence",
+      label,
       section: "nl-recovery",
       submissionId: id,
     });
@@ -50,7 +74,7 @@ export async function POST(request: Request) {
       .from("nl_recovery_attachments")
       .insert({
         id,
-        company_id: scope.company,
+        company_id: company,
         month,
         case_key: caseKey,
         file_name: attachment.file_name,
@@ -58,7 +82,7 @@ export async function POST(request: Request) {
         storage_path: attachment.storage_path,
         content_type: attachment.content_type,
         file_size: attachment.file_size,
-        created_by: auth.userId,
+        created_by: userId,
       });
     if (saved.error) {
       await supabaseAdmin!.storage
@@ -83,7 +107,8 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url),
       month = url.searchParams.get("month") || "";
-    const { scope, caseKey } = await recoveryContext(
+    const { company, caseKey } = await attachmentScope(
+      url.searchParams.get("purpose") || "",
       month,
       url.searchParams.get("case") || "",
       false,
@@ -91,7 +116,7 @@ export async function GET(request: Request) {
     const row = await supabaseAdmin!
       .from("nl_recovery_attachments")
       .select("file_name,storage_bucket,storage_path")
-      .eq("company_id", scope.company)
+      .eq("company_id", company)
       .eq("month", month)
       .eq("case_key", caseKey)
       .eq("id", url.searchParams.get("id") || "")

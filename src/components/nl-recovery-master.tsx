@@ -52,7 +52,7 @@ export function NlRecoveryMaster({
             experience.
           </p>
         </div>
-        <Link href="/attendance/losses/nl" className={styles.button}>
+        <Link href="/team-ops/losses/nl" className={styles.button}>
           Open NL loss →
         </Link>
       </header>

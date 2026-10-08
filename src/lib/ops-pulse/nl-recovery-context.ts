@@ -32,7 +32,7 @@ export async function recoveryContext(
     .maybeSingle();
   let row = await supabaseAdmin
     .from("nl_loss_month_cases")
-    .select("case_key,station_code,amount,source_status,source_present")
+    .select("*")
     .eq("company_id", scope.company)
     .eq("month", month)
     .eq("case_key", key)
@@ -41,7 +41,7 @@ export async function recoveryContext(
   if (!row.error && !row.data?.source_present && canonicalKey !== key) {
     row = await supabaseAdmin
       .from("nl_loss_month_cases")
-      .select("case_key,station_code,amount,source_status,source_present")
+      .select("*")
       .eq("company_id", scope.company)
       .eq("month", month)
       .eq("case_key", canonicalKey)
@@ -54,10 +54,12 @@ export async function recoveryContext(
     row.error ||
     !station ||
     !row.data?.source_present ||
-    !isRecoverable(
-      row.data.source_status,
-      settings.data?.recoverable_statuses ?? [],
-    )
+    // SLP recovery files only list amounts Amazon is recovering.
+    (row.data.report !== "slp" &&
+      !isRecoverable(
+        row.data.source_status,
+        settings.data?.recoverable_statuses ?? [],
+      ))
   )
     throw Error("Case is unavailable or outside your station access.");
   return {

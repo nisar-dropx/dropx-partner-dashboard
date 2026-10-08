@@ -46,7 +46,7 @@ const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Tea
   { code: "ops_workforce_losses", label: "Station Loss Claims", href: "/attendance/workforce-losses" },
   { code: "ops_workforce_mileage", label: "DA distance pilot", href: "/attendance/da-distance" },
   { code: "ops_workforce_mileage", label: "Mileage Claims", href: "/attendance/workforce-mileage" },
-  { code: "ops_losses", label: "Losses", href: "/attendance/losses/nl" }
+  { code: "ops_losses", label: "Losses", href: "/team-ops/losses/nl" }
 ] };
 
 const businessDocuments: NavItem = {

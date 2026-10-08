@@ -11,6 +11,8 @@ export type RecoveryOutcome = {
   allocation_required: boolean;
   remarks_required: boolean;
   is_active: boolean;
+  /** Needs the "Mark already recovered" permission on top of Losses edit access. */
+  restricted?: boolean;
   sort_order: number;
   updated_at: string;
 };
@@ -75,6 +77,8 @@ export type Recovery = {
   updated_at: string;
 };
 export type NlCase = {
+  /** "slp" cases come from Amazon’s SLP recovery files; they share the NL recovery ledger. */
+  report?: "nl" | "slp";
   case_key: string;
   month: string;
   station_code: string;
@@ -90,6 +94,12 @@ export type NlCase = {
     impact_date?: string;
     da_name?: string;
     remarks?: string;
+    period?: string;
+    case_status?: string;
+    closed_date?: string;
+    in_initial?: boolean;
+    in_final?: boolean;
+    final_published?: boolean;
     extra?: Record<string, string>;
   };
   recovery: Recovery | null;

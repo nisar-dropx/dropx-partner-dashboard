@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { refreshLiveWindow } from "@/lib/ops-pulse/cloak-client";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -126,6 +128,15 @@ export async function POST(request: Request) {
   } catch {
     /* HTML / empty */
   }
+  // The live pull just proved the session works: read this month’s dispute deadlines alongside it.
+  if (!filters && body.dataSource === "live" && res.ok && json)
+    waitUntil(
+      refreshLiveWindow(str(input.accountKey, "default"), session.cookie, {
+        country: body.country,
+        partner_shortcode: body.partner_shortcode,
+        case_with: body.case_with,
+      }),
+    );
   // Never echo upstream HTML or cookies back — status + a short marker is enough to act on.
   return NextResponse.json({
     status: res.status,

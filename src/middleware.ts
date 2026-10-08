@@ -14,7 +14,7 @@ const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env
 const COOKIE_CHUNK_SIZE = 3000;
 const MAX_COOKIE_CHUNKS = 8;
 const ENCODED_COOKIE_PREFIX = "b64-";
-const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/rostering", "/workforce", "/field-executive", "/work-force-register", "/cod", "/edd", "/station-edd", "/reports", "/client", "/access", "/audits", "/unauthorized"];
+const CLEAN_OPS_ROOTS = ["/attendance", "/team-ops", "/daily-submission", "/performance", "/capacity", "/service-network", "/rostering", "/workforce", "/field-executive", "/work-force-register", "/cod", "/edd", "/station-edd", "/reports", "/client", "/access", "/audits", "/unauthorized"];
 // Only these specific /master/* subpaths live under src/app/ops-pulse/master/* and need the
 // /ops-pulse prefix rewritten in; every other /master/* path (performance-targets, cod-master,
 // designations, ...) is a real top-level route under src/app/master/* already, so this list
@@ -221,6 +221,13 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = cleanOpsPath(path);
     return NextResponse.redirect(redirectUrl);
+  }
+
+  // Losses moved out of /attendance; old bookmarks and shared links keep working.
+  if (isOpsHost && (path === "/attendance/losses" || path.startsWith("/attendance/losses/"))) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = `/team-ops/losses${path.slice("/attendance/losses".length)}`;
+    return NextResponse.redirect(redirectUrl, 308);
   }
 
   if (isOpsHost && path.startsWith("/payments/") && !isMovedOpsPaymentPath(path)) {

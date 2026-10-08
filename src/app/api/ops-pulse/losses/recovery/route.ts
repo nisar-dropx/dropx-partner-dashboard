@@ -2,9 +2,28 @@ import { recoveryContext } from "@/lib/ops-pulse/nl-recovery-context";
 import { loadRecoveryPayables } from "@/lib/ops-pulse/nl-recovery-payables";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { deductionMonth } from "@/lib/ops-pulse/nl-loss-policy";
+import { hasPermission } from "@/lib/authorization";
 import { readAllRows } from "@/lib/supabase-pagination";
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
+/** A plan saved with a restricted outcome can only be replaced or removed by people who may set it. */
+async function lockedPlan(company: string, month: string, caseKey: string) {
+  const plan = await supabaseAdmin!
+    .from("nl_loss_recoveries")
+    .select("outcome_code,is_deleted")
+    .eq("company_id", company)
+    .eq("month", month)
+    .eq("case_key", caseKey)
+    .maybeSingle();
+  if (!plan.data || plan.data.is_deleted) return null;
+  const outcome = await supabaseAdmin!
+    .from("nl_recovery_outcomes")
+    .select("*")
+    .eq("company_id", company)
+    .eq("code", plan.data.outcome_code)
+    .maybeSingle();
+  return outcome.data?.restricted ? (outcome.data.label as string) : null;
+}
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {
     status,
@@ -81,11 +100,24 @@ export async function POST(request: Request) {
       return reply({ error: "Invalid recovery values." }, 400);
     const outcome = await supabaseAdmin!
       .from("nl_recovery_outcomes")
-      .select("allocation_required")
+      .select("*")
       .eq("company_id", scope.company)
       .eq("code", body.outcome)
       .maybeSingle();
     if (outcome.error) throw Error("Recovery outcome could not be loaded.");
+    if (
+      outcome.data?.restricted &&
+      !hasPermission(auth, "ops_loss_recovered", "edit")
+    )
+      return reply(
+        { error: `You do not have access to mark a case as “${outcome.data.label}”.` },
+        403,
+      );
+    if (!hasPermission(auth, "ops_loss_recovered", "edit")) {
+      const locked = await lockedPlan(scope.company, body.month, caseKey);
+      if (locked)
+        return reply({ error: `This case is marked “${locked}”. Only people with that access can change it.` }, 403);
+    }
     if (outcome.data?.allocation_required)
       await loadRecoveryPayables(
         auth,
@@ -147,6 +179,11 @@ export async function DELETE(request: Request) {
     );
     if (!Number.isInteger(b.version) || b.version < 1)
       return reply({ error: "Invalid recovery version." }, 400);
+    if (!hasPermission(auth, "ops_loss_recovered", "edit")) {
+      const locked = await lockedPlan(scope.company, b.month, caseKey);
+      if (locked)
+        return reply({ error: `This case is marked “${locked}”. Only people with that access can remove it.` }, 403);
+    }
     const r = await supabaseAdmin!.rpc("clear_nl_recovery", {
       p_company: scope.company,
       p_month: b.month,

@@ -32,11 +32,16 @@ export function NlLossCases({
   outcomes,
   settings,
   canEdit,
+  canRecovered = false,
+  showPeriod = false,
 }: {
   cases: NlCase[];
   outcomes: RecoveryOutcome[];
   settings: LossSettings | null;
   canEdit: boolean;
+  /** May use restricted outcomes such as "Already recovered". */
+  canRecovered?: boolean;
+  showPeriod?: boolean;
 }) {
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
@@ -162,9 +167,17 @@ export function NlLossCases({
                   {c.details.tid || c.case_key}
                 </strong>
                 <span>
+                  {showPeriod && c.details.period ? `${c.details.period} · ` : ""}
                   {c.details.category || "Unspecified reason"}
                   {c.details.sub_category ? ` · ${c.details.sub_category}` : ""}
                 </span>
+                {c.report === "slp" &&
+                c.details.final_published &&
+                !c.details.in_final ? (
+                  <span className={styles.pending}>
+                    Not in the Final file · confirm before recovering
+                  </span>
+                ) : null}
               </div>
               <div>
                 <strong>{money(c.amount)}</strong>
@@ -190,6 +203,7 @@ export function NlLossCases({
                 outcomes={outcomes}
                 settings={settings}
                 canEdit={canEdit}
+                canRecovered={canRecovered}
               />
             ) : null}
           </article>
@@ -232,12 +246,14 @@ function RecoveryForm({
   row,
   outcomes,
   settings,
-  canEdit,
+  canEdit: mayEdit,
+  canRecovered,
 }: {
   row: NlCase;
   outcomes: RecoveryOutcome[];
   settings: LossSettings | null;
   canEdit: boolean;
+  canRecovered: boolean;
 }) {
   const router = useRouter();
   const old = row.recovery && !row.recovery.is_deleted ? row.recovery : null;
@@ -309,6 +325,16 @@ function RecoveryForm({
     return () => controller.abort();
   }, [row.month, row.case_key, retry]);
   const option = outcomes.find((o) => o.code === outcome);
+  // A restricted plan (e.g. "Already recovered") can only be changed by people who may set it.
+  const savedOutcome =
+    recovery && !recovery.is_deleted
+      ? outcomes.find((o) => o.code === recovery.outcome_code)
+      : undefined;
+  const locked = !!savedOutcome?.restricted && !canRecovered;
+  const canEdit = mayEdit && !locked;
+  const quick = canRecovered
+    ? outcomes.find((o) => o.restricted && o.is_active && o.code !== outcome)
+    : undefined;
   const splits =
     mode === "equal"
       ? splitRecovery(row.amount, selected)
@@ -485,7 +511,7 @@ function RecoveryForm({
     <div className={styles.detail}>
       <div className={styles.sourceGrid}>
         <div>
-          <small>Amazon decision</small>
+          <small>{row.report === "slp" ? "Recovery file" : "Amazon decision"}</small>
           <strong>{row.source_status}</strong>
         </div>
         <div>
@@ -529,10 +555,35 @@ function RecoveryForm({
           {success}
         </p>
       ) : null}
+      {locked ? (
+        <p className={styles.notice}>
+          Marked “{savedOutcome?.label}” by {recovery?.updated_by_name}. Only
+          people with that access can change this plan.
+        </p>
+      ) : null}
       {loading ? (
         <p role="status">Loading station employees and recovery history…</p>
       ) : (
         <form onSubmit={save}>
+          {canEdit && quick ? (
+            <div className={styles.quick}>
+              <span>
+                Recovered earlier, outside this plan? No employee deduction is
+                created.
+              </span>
+              <button
+                type="button"
+                className={styles.button}
+                disabled={busy}
+                onClick={() => {
+                  setOutcome(quick.code);
+                  setSuccess("");
+                }}
+              >
+                {quick.label}
+              </button>
+            </div>
+          ) : null}
           <fieldset
             disabled={!canEdit || busy || uploading || !directoryReady}
             className={styles.fieldset}
@@ -549,7 +600,11 @@ function RecoveryForm({
               >
                 <option value="">Select an outcome</option>
                 {outcomes
-                  .filter((o) => o.is_active || o.code === outcome)
+                  .filter(
+                    (o) =>
+                      (o.is_active && (!o.restricted || canRecovered)) ||
+                      o.code === outcome,
+                  )
                   .map((o) => (
                     <option key={o.code} value={o.code} disabled={!o.is_active}>
                       {o.label}
@@ -846,8 +901,9 @@ function RecoveryForm({
               </button>
             ) : (
               <p className={styles.hint}>
-                Read-only access. A cluster manager with Losses edit access can
-                update this plan.
+                {locked
+                  ? "This plan is locked."
+                  : "Read-only access. A cluster manager with Losses edit access can update this plan."}
               </p>
             )}
             {canEdit && recovery && !recovery.is_deleted ? (
