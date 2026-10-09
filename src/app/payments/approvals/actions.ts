@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermissionOrThrow } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
-import { sendPaymentNotification } from "@/lib/payment-email-notifications";
+import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
@@ -14,11 +14,35 @@ import { effectiveApprovalStepOrder } from "@/lib/payment-stage-policy";
 
 
 function notifyAfterDecision(input: Parameters<typeof sendPaymentNotification>[0]) {
-  waitUntil(sendPaymentNotification(input).then(result => {
-    if (!result.sent) console.warn("Payment decision saved; notification not sent", { requestId: input.requestId, reason: result.reason });
-  }).catch(error => {
-    console.error("Payment decision saved; notification failed", { requestId: input.requestId, message: error instanceof Error ? error.message : String(error) });
-  }));
+  waitUntil((async () => {
+    try {
+      const result = await sendPaymentNotification(input);
+      if (!result.sent) console.warn("Payment decision saved; notification not sent", { requestId: input.requestId, reason: result.reason });
+    } catch (error) {
+      console.error("Payment decision saved; notification failed", { requestId: input.requestId, message: error instanceof Error ? error.message : String(error) });
+    }
+    if (input.eventType !== "payment_approve" || !supabaseAdmin) return;
+    try {
+      // Keep the station update in the same mail thread, after the approval email.
+      const finalState = await supabaseAdmin
+        .from("payment_requests")
+        .select("approval_status,current_approver_user_id")
+        .eq("company_id", input.companyId)
+        .eq("id", input.requestId)
+        .single();
+      if (finalState.error) throw new Error(finalState.error.message);
+      if (String(finalState.data?.approval_status ?? "").toUpperCase() === "FINAL_APPROVED" && !finalState.data?.current_approver_user_id) {
+        const result = await sendPaymentLocationNotification({
+          companyId: input.companyId,
+          eventType: "payment_details_required",
+          requestId: input.requestId
+        });
+        if (!result.sent) console.warn("Payment decision saved; station notification not sent", { requestId: input.requestId, reason: result.reason });
+      }
+    } catch (error) {
+      console.error("Payment decision saved; station notification failed", { requestId: input.requestId, message: error instanceof Error ? error.message : String(error) });
+    }
+  })());
 }
 
 function clean(value: FormDataEntryValue | null) {

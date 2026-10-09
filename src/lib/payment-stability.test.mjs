@@ -146,14 +146,14 @@ test('approval wrapper returns retryable session error without redirecting or sa
   assert.match(result.error,/not been signed out/);
 });
 test('two approval decisions save without waiting for SMTP; duplicate submission remains blocked', async()=>{
-  const saved=[], logs=[], background=[], mailResolvers=[];
+  const saved=[], logs=[], background=[], mailResolvers=[], locationMails=[];
   const admin={from:table=>{
     let id, requestId, update, insert;
     const q={
       select:()=>q, eq:(field,value)=>{if(field==='id')id=value; if(field==='request_id')requestId=value; return q;},
       or:value=>{requestId=value.split('.eq.')[1]?.split(',')[0];return q;},
       update:value=>{update=value;return q;}, insert:value=>{insert=value;return q;},
-      single:async()=>({data:{id,requested_by:'requester',location_id:'station',approval_cycle:1,current_step_order:1,current_approver_user_id:'owner'},error:null}),
+      single:async()=>({data:{id,requested_by:'requester',location_id:'station',approval_cycle:1,current_step_order:1,current_approver_user_id:'owner',...saved.find(row=>row.id===id)},error:null}),
       maybeSingle:async()=>({data:{code:'OWNER'},error:null}),
       then:resolve=>{
         if(update)saved.push({id,...update});
@@ -168,7 +168,7 @@ test('two approval decisions save without waiting for SMTP; duplicate submission
     '@/lib/company-scope':{requireCompanyId:()=> 'company',withCompany:(payload,company_id)=>({...payload,company_id})},
     '@/lib/payment-approval-scope':{canActOnPaymentRequest:async()=>true},
     '@/lib/supabase-admin':{supabaseAdmin:admin},
-    '@/lib/payment-email-notifications':{sendPaymentNotification:()=>new Promise(resolve=>mailResolvers.push(resolve))}
+    '@/lib/payment-email-notifications':{sendPaymentNotification:()=>new Promise(resolve=>mailResolvers.push(resolve)),sendPaymentLocationNotification:async input=>{locationMails.push(input);return {sent:true};}}
   });
   for(const id of ['request-one','request-two']) {
     const form=new FormData();form.set('request_id',id);
@@ -179,5 +179,8 @@ test('two approval decisions save without waiting for SMTP; duplicate submission
   const repeat=new FormData();repeat.set('request_id','request-one');
   await assert.rejects(approvePaymentRequest(repeat),/already acted/);
   assert.equal(saved.length,2);
+  assert.equal(locationMails.length,0);
   mailResolvers.forEach(resolve=>resolve({sent:true}));await Promise.all(background);
+  assert.equal(locationMails.length,2);
+  assert.ok(locationMails.every(row=>row.eventType==='payment_details_required'));
 });
