@@ -54,6 +54,30 @@ type PaymentRequestRow = {
   payment_history?: PaymentHistoryRow[];
 };
 
+function hasPaymentDetails(request: PaymentRequestRow) {
+  if (request.amount == null) return false;
+  if (request.payment_mode === "online_payment") return Boolean(request.payment_portal?.trim());
+  if (request.payment_mode === "upi_payment") return Boolean(request.payment_reference?.trim() && request.account_holder_name?.trim());
+  return Boolean(request.bank_account_no?.trim() && request.ifsc?.trim() && request.account_holder_name?.trim());
+}
+
+function isFinalApprovedForPayment(request: PaymentRequestRow) {
+  const status = String(request.status ?? "").toUpperCase();
+  const approvalStatus = String(request.approval_status ?? "").toUpperCase();
+  const hasCurrentApprover = Boolean(
+    request.current_approver_user_id ||
+    request.current_approver_role_id ||
+    request.current_approver_role_ids?.length
+  );
+  if (hasCurrentApprover) return false;
+  return status === "APPROVED" ||
+    status === "OWNER_APPROVED" ||
+    approvalStatus === "APPROVED" ||
+    approvalStatus === "FINAL_APPROVED" ||
+    approvalStatus === "OWNER_APPROVED" ||
+    approvalStatus === "RE_APPROVED";
+}
+
 type PaymentApprovalRow = {
   id: string;
   payment_request_id: string;
@@ -123,16 +147,28 @@ function isReadyForPaymentProcess(request: PaymentRequestRow) {
     (approvalStatus.endsWith("_APPROVED") && !hasCurrentApprover));
 }
 
+function canSeePaymentProcessRequest(
+  request: PaymentRequestRow,
+  userId: string | null,
+  effectiveRoleIds: string[],
+  canSeeAllFinalApproved: boolean
+) {
+  if (canSeeAllFinalApproved) return true;
+  const isReturnedToThisUser = String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id === userId;
+  return isReturnedToThisUser || (request.payment_process_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId));
+}
+
 async function loadPaymentProcess(companyId: string, userId: string | null, effectiveRoleIds: string[], canSeeAllFinalApproved: boolean) {
   if (!supabaseAdmin) {
     return {
       banks: [] as PaymentBankRow[],
       requests: [] as PaymentRequestRow[],
+      awaitingDetails: [] as PaymentRequestRow[],
       error: "Supabase service role key is not configured."
     };
   }
   if (!effectiveRoleIds.length && !canSeeAllFinalApproved) {
-    return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: "Payment process role is not available." };
+    return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], awaitingDetails: [] as PaymentRequestRow[], error: "Payment process role is not available." };
   }
   const admin = supabaseAdmin;
 
@@ -153,15 +189,13 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
   ]);
 
   const error = banksResult.error?.message || requestsResult.error?.message || null;
-  if (error) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error };
-  const requestRows = ((requestsResult.data ?? []) as unknown as PaymentRequestRow[])
+  if (error) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], awaitingDetails: [] as PaymentRequestRow[], error };
+  const visibleRows = ((requestsResult.data ?? []) as unknown as PaymentRequestRow[])
+    .filter((request) => canSeePaymentProcessRequest(request, userId, effectiveRoleIds, canSeeAllFinalApproved));
+  const requestRows = visibleRows
     .filter(isReadyForPaymentProcess)
-    .filter((request) => {
-      if (canSeeAllFinalApproved) return true;
-      const isReturnedToThisUser = String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id === userId;
-      return isReturnedToThisUser || (request.payment_process_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId));
-    })
     .filter((request) => canSeeAllFinalApproved || String(request.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || request.current_approver_user_id === userId || (request.current_approver_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId)));
+  const awaitingDetailsRows = visibleRows.filter((request) => isFinalApprovedForPayment(request) && !hasPaymentDetails(request));
   const requestIds = requestRows.map((request) => request.id);
   const requestIdBatches = chunkValues(requestIds, PROCESS_DETAIL_BATCH_SIZE);
   const [answerBatchResults, approvalBatchResults] = requestIds.length ? await Promise.all([
@@ -186,7 +220,7 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
     error: approvalBatchResults.find((result) => result.error)?.error ?? null
   };
   const relatedError = answersResult.error?.message || approvalsResult.error?.message;
-  if (relatedError) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: relatedError };
+  if (relatedError) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], awaitingDetails: [] as PaymentRequestRow[], error: relatedError };
   const detailsByRequest = new Map<string, PaymentRequestRow["payment_details"]>();
   ((answersResult.data ?? []) as unknown as PaymentAnswerRow[])
     .sort((a, b) => Number(firstRelation(a.payment_head_questions)?.sort_order ?? 0) - Number(firstRelation(b.payment_head_questions)?.sort_order ?? 0))
@@ -206,14 +240,14 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
     ...approvalRows.map((approval) => approval.approver_user_id)
   ].filter(Boolean))) as string[];
   const roleIds = Array.from(new Set(approvalRows.map((approval) => approval.approver_role_id).filter(Boolean))) as string[];
-  const locationCodes = Array.from(new Set(requestRows.map((request) => request.location_code).filter(Boolean)));
+  const locationCodes = Array.from(new Set([...requestRows, ...awaitingDetailsRows].map((request) => request.location_code).filter(Boolean)));
   const [profilesResult, rolesResult, locationsResult] = await Promise.all([
     profileIds.length ? supabaseAdmin.from("profiles").select("id, full_name, email").eq("company_id", companyId).in("id", profileIds) : { data: [], error: null },
     roleIds.length ? supabaseAdmin.from("user_roles").select("id, name, code").eq("company_id", companyId).in("id", roleIds) : { data: [], error: null },
     locationCodes.length ? supabaseAdmin.from("stations").select("station_code, station_name, city").eq("company_id", companyId).in("station_code", locationCodes) : { data: [], error: null }
   ]);
   const identityError = profilesResult.error?.message || rolesResult.error?.message || locationsResult.error?.message;
-  if (identityError) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: identityError };
+  if (identityError) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], awaitingDetails: [] as PaymentRequestRow[], error: identityError };
   const profilesById = new Map((profilesResult.data ?? []).map((profile) => [profile.id, profile]));
   const rolesById = new Map((rolesResult.data ?? []).map((role) => [role.id, role]));
   const locationsByCode = new Map((locationsResult.data ?? []).map((location) => [location.station_code, location.station_name || location.city || null]));
@@ -225,6 +259,13 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
   });
   return {
     banks: (banksResult.data ?? []) as PaymentBankRow[],
+    awaitingDetails: awaitingDetailsRows.map((request) => ({
+      ...request,
+      location_name: locationsByCode.get(request.location_code) ?? null,
+      payment_heads: firstRelation(request.payment_heads),
+      payment_details: [],
+      payment_history: []
+    })),
     requests: requestRows.map((request) => ({
         ...request,
         location_name: locationsByCode.get(request.location_code) ?? null,
@@ -286,7 +327,7 @@ export default async function PaymentProcessPage({
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_process;
   const canSeeAllFinalApproved = isCompanyOwner(authorization);
-  const { banks, requests, error } = await loadPaymentProcess(companyId, authorization.userId, authorization.effectiveRoleIds, canSeeAllFinalApproved);
+  const { banks, requests, awaitingDetails, error } = await loadPaymentProcess(companyId, authorization.userId, authorization.effectiveRoleIds, canSeeAllFinalApproved);
   let advanceContexts = new Map<string, PayAdvanceWorkerContext>();
   if (!error) {
     try {
@@ -327,6 +368,29 @@ export default async function PaymentProcessPage({
 
       {!error && pagePermission.canView ? (
         <PaymentProcessPanel
+          awaitingDetails={awaitingDetails.map((request) => ({
+            id: request.id,
+            request_no: request.request_no,
+            location_code: request.location_code,
+            location_name: request.location_name ?? null,
+            amount: request.amount,
+            amount_requested: request.amount_requested,
+            payment_mode: request.payment_mode,
+            payment_portal: request.payment_portal,
+            payment_reference: request.payment_reference,
+            bank_account_no: request.bank_account_no,
+            ifsc: request.ifsc,
+            account_holder_name: request.account_holder_name,
+            contact_no: request.contact_no,
+            email: request.email,
+            request_remarks: request.remarks,
+            payment_details: [],
+            payment_history: [],
+            status: request.status,
+            approval_status: request.approval_status,
+            created_at: request.created_at,
+            payment_head_name: request.payment_heads?.name ?? null
+          }))}
           banks={banks.map((bank) => ({
             id: bank.id,
             bank_code: bank.bank_code,
