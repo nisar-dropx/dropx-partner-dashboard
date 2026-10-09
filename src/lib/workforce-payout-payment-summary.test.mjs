@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { summarizeWorkforcePayoutPayments } from "./workforce-payout-payment-summary.ts";
+import {
+  isWorkforcePayoutPaymentBalanceAvailable,
+  summarizeWorkforcePayoutPayments,
+  workforcePayoutPaymentEligibilityLabel
+} from "./workforce-payout-payment-summary.ts";
 
 test("summarizes one person across locations without counting duplicate rows twice", () => {
   const summary = summarizeWorkforcePayoutPayments([
@@ -17,7 +21,10 @@ test("summarizes one person across locations without counting duplicate rows twi
     availableToPay: 1000,
     overpaidAmount: 0,
     historyCount: 0,
-    status: null
+    status: null,
+    eligible: null,
+    eligibilityCode: null,
+    eligibilityMessage: null
   });
 });
 
@@ -69,4 +76,28 @@ test("cancelled attempts remain in history but do not reduce the balance", () =>
   assert.equal(summary?.availableToPay, 500);
   assert.equal(summary?.historyCount, 1);
   assert.equal(summary?.status, null);
+});
+
+test("stale and pending publications expose an unavailable balance with an actionable label", () => {
+  const missing = { eligible: false, eligibilityCode: "publication_missing" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(missing), false);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(missing), "Publish before payment");
+
+  const stale = { eligible: false, eligibilityCode: "publication_stale_or_incomplete" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(stale), false);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(stale), "Republish required");
+
+  const pending = { eligible: false, eligibilityCode: "publication_refresh_pending" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(pending), false);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(pending), "Publication refresh pending");
+});
+
+test("computed balances remain visible when a separate payment constraint blocks selection", () => {
+  const processing = { eligible: false, eligibilityCode: "payment_processing" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(processing), true);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(processing), null);
+
+  const invalidBankDetails = { eligible: false, eligibilityCode: "beneficiary_bank_details_missing" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(invalidBankDetails), true);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(invalidBankDetails), "Payment details required");
 });

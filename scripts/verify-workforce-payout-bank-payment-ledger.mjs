@@ -11,9 +11,16 @@ const compatibilityMigrationUrl = new URL(
   "../supabase/migrations/20261009113937_workforce_payout_bank_legacy_publication_compat.sql",
   import.meta.url
 );
+const publishedSnapshotFreshnessMigrationUrl = new URL(
+  "../supabase/migrations/20261009125250_workforce_payout_bank_published_snapshot_freshness.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
-const executableMigration = [migration, compatibilityMigration]
+const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
+const executablePublishedSnapshotFreshnessMigration = publishedSnapshotFreshnessMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableMigration = [migration, compatibilityMigration, publishedSnapshotFreshnessMigration]
   .map((sql) => sql.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""))
   .join("\n");
 
@@ -79,6 +86,19 @@ assert.match(migration, /required_stations as \([\s\S]*?latest_relock\.active_lo
 assert.match(migration, /from required_stations required_station[\s\S]*?left join latest/i);
 assert.match(migration, /latest\.dependency_hash = v_current_dependency_hash/i);
 assert.match(migration, /workforce_advance_recovery_snapshot_hash\([\s\S]*?p_period_start, p_period_end/i);
+assert.match(
+  publishedSnapshotFreshnessMigration,
+  /Unexpected live dependency-hash structure in workforce_payout_payment_candidates/i
+);
+assert.match(
+  publishedSnapshotFreshnessMigration,
+  /v_definition := replace\(v_definition, v_predicate, ''\)/i,
+  "bank eligibility must stop comparing an immutable publication with the volatile live dependency hash"
+);
+assert.match(
+  publishedSnapshotFreshnessMigration,
+  /Unfinished publication refreshes and mapping relocks block payment/i
+);
 assert.match(migration, /v_amount_paise_text := btrim\(coalesce\(v_row ->> 'debit_amount_paise'/i);
 assert.match(migration, /v_remarks := btrim\(coalesce\(v_row ->> 'remarks'/i);
 assert.match(migration, /v_amount_paise <> round\(v_item\.instruction_amount \* 100, 0\)/i);
@@ -135,6 +155,7 @@ const ineligiblePublication = id(12);
 const unmarkedPublication = id(13);
 const mappingRelock = id(14);
 const legacyPublication = id(35);
+const refreshJob = id(36);
 const periodStart = "2026-09-01";
 const periodEnd = "2026-09-30";
 const dependencyHash = "dependency-september-2026";
@@ -255,6 +276,13 @@ await db.exec(`
     id uuid primary key default gen_random_uuid(),
     company_id uuid, workforce_id uuid, period_start date, period_end date
   );
+  create table public.verify_workforce_payout_mapping_revision_state(
+    company_id uuid not null,
+    workforce_id uuid not null,
+    period_start date not null,
+    period_end date not null,
+    revision_pending boolean not null
+  );
   create table public.field_executive_provider_mappings(
     id uuid primary key default gen_random_uuid(),
     company_id uuid not null,
@@ -287,7 +315,9 @@ await db.exec(`
   create function public.workforce_payout_mapping_revision_state(uuid,uuid)
   returns table(period_start date, period_end date, revision_pending boolean)
   language sql stable as $$
-    select date '${periodStart}', date '${periodEnd}', false
+    select state.period_start, state.period_end, state.revision_pending
+    from public.verify_workforce_payout_mapping_revision_state state
+    where state.company_id = $1 and state.workforce_id = $2
   $$;
   create function public.payment_recovery_eligible_payout_targets(uuid,date,uuid[])
   returns table(dropx_id text,payout_engine text,workforce_id uuid)
@@ -336,6 +366,23 @@ await db.exec(`
 `);
 
 await db.exec(executableMigration);
+await db.exec(executablePublishedSnapshotFreshnessMigration);
+
+const installedCandidateDefinition = await db.query(`
+  select pg_get_functiondef(
+    'public.workforce_payout_payment_candidates(uuid,date,date,uuid[])'::regprocedure
+  ) definition
+`);
+assert.doesNotMatch(
+  installedCandidateDefinition.rows[0].definition,
+  /latest\.dependency_hash\s*=\s*v_current_dependency_hash/i,
+  "the installed bank candidate must honor the published snapshot after unrelated live dependency changes"
+);
+assert.doesNotMatch(
+  installedCandidateDefinition.rows[0].definition,
+  /workforce_advance_recovery_snapshot_hash|v_current_dependency_hash/i,
+  "bank eligibility must not depend on live dependency-hash availability"
+);
 
 const reference = await db.query(
   "select public.workforce_payout_payment_reference('D-111',date '2026-09-01',1) reference_no"
@@ -446,12 +493,47 @@ await db.query(
   [secondPublication, company, workforce, secondStation, secondSnapshot, "d".repeat(64), dependencyHash,
     mappingRelock, secondReview, periodStart, periodEnd]
 );
+
+await db.exec(`
+  create or replace function public.workforce_advance_recovery_snapshot_hash(uuid,date,date)
+  returns text language sql stable as $$ select 'unrelated-live-dependency-change'::text $$
+`);
+await db.query(
+  `insert into public.workforce_payout_publication_refresh_jobs(
+    id,company_id,workforce_id,period_start,period_end,status
+  ) values ($1,$2,$3,$4,$5,'pending')`,
+  [refreshJob, company, workforce, periodStart, periodEnd]
+);
+const refreshBlockedPreview = await preview();
+assert.equal(refreshBlockedPreview.eligible, false);
+assert.equal(refreshBlockedPreview.eligibility_code, "publication_refresh_pending");
+await db.query("delete from public.workforce_payout_publication_refresh_jobs where id=$1", [refreshJob]);
+
+await db.query(
+  `insert into public.verify_workforce_payout_mapping_revision_state(
+    company_id,workforce_id,period_start,period_end,revision_pending
+  ) values ($1,$2,$3,$4,true)`,
+  [company, workforce, periodStart, periodEnd]
+);
+const mappingRelockBlockedPreview = await preview();
+assert.equal(mappingRelockBlockedPreview.eligible, false);
+assert.equal(mappingRelockBlockedPreview.eligibility_code, "mapping_relock_required");
+await db.query(
+  "delete from public.verify_workforce_payout_mapping_revision_state where company_id=$1 and workforce_id=$2",
+  [company, workforce]
+);
+
 const payablePreview = await preview();
 assert.equal(payablePreview.eligible, true);
 assert.equal(payablePreview.eligibility_code, "eligible");
 assert.equal(Number(payablePreview.current_target_amount), 11836);
 assert.equal(Number(payablePreview.paid_amount), 0);
 assert.equal(Number(payablePreview.available_to_pay), 11836);
+assert.notEqual(
+  dependencyHash,
+  "unrelated-live-dependency-change",
+  "the functional test must exercise a live hash that differs from the immutable publication hash"
+);
 const assertNoIdentifierFailureLock = async (operation) => {
   const result = await db.query(
     `select

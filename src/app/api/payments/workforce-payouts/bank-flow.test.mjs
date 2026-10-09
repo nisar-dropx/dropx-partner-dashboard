@@ -54,17 +54,24 @@ test("payment history is finance-restricted, company-scoped and masks account nu
   assert.match(historyRoute, /redownloadable: String\(batch\?\.status \?\? ""\) === "processing"/);
 });
 
-test("the UI pays complete profiles, displays ledger balances and blocks payout actions while processing", () => {
+test("the UI pays only eligible profiles, displays trustworthy ledger balances and explains blocked payouts", () => {
   assert.match(page, /rpc\("workforce_preview_payout_payments"/);
   assert.match(page, /reviewed\.error \|\| audience !== "workforce" \|\| !canProcessPayments/);
   assert.match(page, /canProcessPayments = audience === "workforce"[\s\S]*?period\.mode === "monthly"[\s\S]*?authorization\.hasAllLocationAccess[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
   assert.doesNotMatch(page, /from\("workforce_payout_payment_items"\)[\s\S]{0,300}instruction_amount/);
   assert.match(table, /publicationPaymentReady === true/);
+  assert.match(table, /row\.paymentSummary\?\.eligible === true/);
   assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
   assert.match(table, /requiredRows\.every\(\(row\) => selected\.has\(row\.id\)\)/);
   assert.match(table, /Select every published location row for each DropX ID/);
   assert.match(table, /Paid \{exactMoney\(row\.paymentSummary\.paidAmount\)\}/);
   assert.match(table, /Balance payable \{exactMoney\(row\.paymentSummary\.balancePayable\)\}/);
+  assert.match(table, /paymentBalanceAvailable \? <span>Balance payable[\s\S]*?<span>Balance payable —<\/span>/);
+  assert.match(table, /\{paymentEligibilityLabel\}/);
+  assert.match(page, /eligible: preview\.eligible === true/);
+  assert.match(page, /eligibilityCode: String\(preview\.eligibility_code/);
+  assert.match(page, /eligibilityMessage: String\(preview\.eligibility_message/);
+  assert.match(page, /status: summary\?\.status \?\? row\.status/);
   assert.match(table, /WorkforcePayoutPaymentHistoryButton/);
 });
 

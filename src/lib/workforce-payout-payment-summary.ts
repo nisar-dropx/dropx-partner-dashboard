@@ -20,7 +20,59 @@ export type WorkforcePayoutPaymentSummary = {
   overpaidAmount: number;
   historyCount: number;
   status: "Payment Processing" | "Paid" | "Partially paid" | null;
+  eligible: boolean | null;
+  eligibilityCode: string | null;
+  eligibilityMessage: string | null;
 };
+
+const PAYMENT_BALANCE_AVAILABLE_CODES = new Set([
+  "eligible",
+  "payment_processing",
+  "no_positive_balance",
+  "beneficiary_bank_details_missing",
+  "beneficiary_bank_account_invalid",
+  "beneficiary_ifsc_invalid",
+  "payment_reference_invalid",
+  "current_location_missing"
+]);
+
+export function isWorkforcePayoutPaymentBalanceAvailable(
+  summary: Pick<WorkforcePayoutPaymentSummary, "eligible" | "eligibilityCode">
+) {
+  if (summary.eligible !== false) return true;
+  return PAYMENT_BALANCE_AVAILABLE_CODES.has(String(summary.eligibilityCode ?? "").trim().toLowerCase());
+}
+
+export function workforcePayoutPaymentEligibilityLabel(
+  summary: Pick<WorkforcePayoutPaymentSummary, "eligible" | "eligibilityCode">
+) {
+  if (summary.eligible !== false) return null;
+  switch (String(summary.eligibilityCode ?? "").trim().toLowerCase()) {
+    case "publication_refresh_pending":
+      return "Publication refresh pending";
+    case "publication_missing":
+      return "Publish before payment";
+    case "publication_stale_or_incomplete":
+      return "Republish required";
+    case "mapping_relock_required":
+      return "Relock required";
+    case "profile_unavailable":
+      return "Payment profile unavailable";
+    case "no_positive_balance":
+      return "No positive balance";
+    case "beneficiary_bank_details_missing":
+    case "beneficiary_bank_account_invalid":
+    case "beneficiary_ifsc_invalid":
+    case "payment_reference_invalid":
+      return "Payment details required";
+    case "current_location_missing":
+      return "Current location required";
+    case "payment_processing":
+      return null;
+    default:
+      return "Payment unavailable";
+  }
+}
 
 function money(value: number) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
@@ -84,7 +136,10 @@ export function summarizeWorkforcePayoutPayments(
       availableToPay,
       overpaidAmount,
       historyCount: history.length,
-      status
+      status,
+      eligible: null,
+      eligibilityCode: null,
+      eligibilityMessage: null
     });
   });
   return summaries;

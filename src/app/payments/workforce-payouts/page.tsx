@@ -343,7 +343,10 @@ async function withPayoutPaymentSummaries(
         availableToPay: Number(preview.available_to_pay ?? 0),
         overpaidAmount: Math.max(0, Math.round((paidAmount - currentNetAmount) * 100) / 100),
         historyCount: Number(preview.history_count ?? 0),
-        status: preview.payment_status ?? null
+        status: preview.payment_status ?? null,
+        eligible: preview.eligible === true,
+        eligibilityCode: String(preview.eligibility_code ?? "").trim() || null,
+        eligibilityMessage: String(preview.eligibility_message ?? "").trim() || null
       } : undefined;
       return {
         ...row,
