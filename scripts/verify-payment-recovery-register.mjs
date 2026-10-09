@@ -23,6 +23,12 @@ const debitMonthMigrationPath = path.join(
   "migrations",
   "20261008162946_payment_recovery_debit_month_provider_inference.sql"
 );
+const configurationMigrationPath = path.join(
+  root,
+  "supabase",
+  "migrations",
+  "20261008173113_payment_recovery_post_upload_configuration.sql"
+);
 
 const db = new PGlite();
 const ids = {
@@ -44,7 +50,13 @@ const ids = {
   inactiveStation: "00000000-0000-4000-8000-000000000016",
   inactiveStationEmployee: "00000000-0000-4000-8000-000000000017",
   pendingInactiveStationEmployee: "00000000-0000-4000-8000-000000000018",
-  unmappedProviderStation: "00000000-0000-4000-8000-000000000019"
+  unmappedProviderStation: "00000000-0000-4000-8000-000000000019",
+  payrollRun: "00000000-0000-4000-8000-000000000020",
+  payrollEmployeePerson: "00000000-0000-4000-8000-000000000021",
+  payrollContractorPerson: "00000000-0000-4000-8000-000000000022",
+  workforcePaymentMethod: "00000000-0000-4000-8000-000000000023",
+  workforcePaymentAllocation: "00000000-0000-4000-8000-000000000024",
+  payrollInactiveStationPerson: "00000000-0000-4000-8000-000000000025",
 };
 
 await db.exec(`
@@ -148,10 +160,11 @@ await db.query(`insert into public.companies(id) values ($1)`, [ids.company]);
 await db.query(`insert into auth.users(id) values ($1)`, [ids.actor]);
 await db.query(`insert into public.user_roles(id,company_id,code) values ($1,$2,'OWNER')`, [ids.owner, ids.company]);
 
-const [migration, indexMigration, debitMonthMigration] = await Promise.all([
+const [migration, indexMigration, debitMonthMigration, configurationMigration] = await Promise.all([
   readFile(migrationPath, "utf8"),
   readFile(indexMigrationPath, "utf8"),
-  readFile(debitMonthMigrationPath, "utf8")
+  readFile(debitMonthMigrationPath, "utf8"),
+  readFile(configurationMigrationPath, "utf8")
 ]);
 await db.exec(migration);
 await db.exec(indexMigration);
@@ -619,5 +632,545 @@ assert.match(lockSourceByName.get("lock_payment_recovery_people_transition") ?? 
 assert.match(lockSourceByName.get("payment_recovery_apply_import") ?? "", /:dropx:/);
 assert.match(lockSourceByName.get("payment_recovery_apply_import") ?? "", /pg_advisory_xact_lock/);
 
+// Minimal canonical payout schemas used by the post-upload configuration
+// migration. The register tests above intentionally exercise the legacy state
+// first so this also verifies a forward migration with existing cases.
+await db.exec(`
+  create table public.workforce_deduction_heads(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references public.companies(id),
+    code text not null,
+    name text not null,
+    description text,
+    calculation_type text not null,
+    default_value numeric not null default 0,
+    is_active boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    applies_to_all boolean not null default false,
+    is_system boolean not null default false,
+    percentage_without_pan numeric not null default 0,
+    workforce_category_codes text[] not null default '{}',
+    unique(company_id, code)
+  );
+
+  create table public.workforce_payout_deduction_values(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references public.companies(id),
+    deduction_head_id uuid not null references public.workforce_deduction_heads(id),
+    workforce_id uuid not null,
+    station_id uuid not null,
+    head_code_snapshot text not null,
+    head_name_snapshot text not null,
+    effective_from date not null,
+    effective_to date not null,
+    amount numeric(18,2) not null,
+    source_type text not null,
+    source_batch_id uuid,
+    source_row_id uuid,
+    import_metadata jsonb not null default '{}',
+    created_by uuid,
+    updated_by uuid,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint workforce_payout_deduction_values_exact_period_unique
+      unique(company_id,deduction_head_id,workforce_id,effective_from,effective_to),
+    constraint workforce_payout_deduction_values_source_check
+      check(source_type in ('bulk_import','advance_register')),
+    constraint workforce_payout_deduction_values_source_shape_check
+      check(
+        (source_type='bulk_import' and source_batch_id is not null and source_row_id is not null)
+        or (source_type='advance_register' and source_batch_id is null and source_row_id is null)
+      )
+  );
+
+  create table public.workforce_payment_allocations(
+    id uuid primary key,
+    company_id uuid not null,
+    workforce_id uuid not null,
+    station_id uuid,
+    payment_method_id uuid not null,
+    effective_from date not null,
+    effective_to date,
+    status text not null
+  );
+  create table public.field_executive_provider_mappings(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null,
+    workforce_id uuid,
+    employee_id uuid,
+    contractor_id uuid,
+    field_executive_id uuid,
+    station_id uuid,
+    payment_method_id uuid,
+    effective_from date not null,
+    effective_to date,
+    status text not null
+  );
+  create table public.workforce_payroll_runs(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null,
+    period_start date not null,
+    period_end date not null,
+    station_id uuid,
+    status text not null
+  );
+  create table public.workforce_payout_review_submissions(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null,
+    subject_type text not null,
+    subject_id uuid not null,
+    location_id uuid not null,
+    period_start date not null,
+    period_end date not null,
+    status text not null
+  );
+  create table public.workforce_payout_publications(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null,
+    payroll_run_id uuid,
+    workforce_id uuid not null,
+    station_id uuid not null,
+    period_start date,
+    period_end date
+  );
+
+  create table public.hr_payroll_runs(
+    id uuid primary key,
+    company_id uuid not null,
+    period_start date not null,
+    period_end date not null,
+    status text not null,
+    published_at timestamptz,
+    deduction_total numeric not null default 0,
+    net_total numeric not null default 0,
+    calculated_by uuid,
+    calculated_at timestamptz,
+    updated_at timestamptz not null default now(),
+    unique(company_id,id)
+  );
+  create table public.hr_payroll_run_people(
+    id uuid primary key,
+    company_id uuid not null,
+    run_id uuid not null,
+    worker_type text not null,
+    worker_id uuid not null,
+    worker_code text,
+    worker_name text not null,
+    location_id uuid,
+    statutory_deductions numeric not null default 0,
+    attendance_deductions numeric not null default 0,
+    other_deductions numeric not null default 0,
+    net_pay numeric not null default 0,
+    adjusted_net_pay numeric,
+    is_adjusted boolean not null default false,
+    calculation_status text not null default 'ready',
+    calculation_snapshot jsonb not null default '{}',
+    unique(company_id,id),
+    unique(run_id,worker_type,worker_id)
+  );
+  create table public.hr_payroll_run_manual_entries(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null,
+    run_id uuid not null,
+    worker_type text not null,
+    worker_id uuid not null,
+    worker_code text,
+    exception_debit numeric,
+    exception_debit_reason text,
+    source_file_name text,
+    applied_by uuid,
+    applied_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique(company_id,run_id,worker_type,worker_id)
+  );
+  create table public.hr_payroll_run_items(
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null,
+    run_person_id uuid not null,
+    code text not null,
+    name text not null,
+    item_type text not null,
+    amount numeric not null,
+    source text not null,
+    display_order integer not null,
+    metadata jsonb not null default '{}'
+  );
+
+  create or replace function public.workforce_additional_payment_location_is_authorized(
+    p_company_id uuid,p_workforce_id uuid,p_station_id uuid,p_from date,p_to date
+  ) returns boolean language sql stable set search_path='' as $$ select true $$;
+  create or replace function public.lock_workforce_payment_allocation_company(p_company_id uuid)
+  returns void language plpgsql set search_path='' as $$ begin
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_company_id::text || ':allocation',0));
+  end $$;
+  create or replace function public.workforce_advance_recovery_snapshot_hash(
+    p_company_id uuid,p_period_start date,p_period_end date
+  ) returns text language sql stable security definer set search_path='' as $$
+    select 'recovery-test-snapshot'::text
+  $$;
+  create or replace function public.prepare_workforce_payout_deduction_value()
+  returns trigger language plpgsql set search_path='' as $$ begin return new; end $$;
+  create trigger workforce_payout_deduction_values_00_prepare
+    before insert or update on public.workforce_payout_deduction_values
+    for each row execute function public.prepare_workforce_payout_deduction_value();
+`);
+
+await db.exec(configurationMigration);
+
+const migratedLegacyCases = await db.query(`
+  select tid,recovery_method,status,payout_month::text payout_month,configured_at is not null configured
+  from public.payment_recovery_cases
+  where tid in ('TID-001','TID-002')
+  order by tid
+`);
+assert.deepEqual(migratedLegacyCases.rows, [
+  { tid: "TID-001", recovery_method: "payout_deduction", status: "ready_for_deduction", payout_month: "2026-10-01", configured: true },
+  { tid: "TID-002", recovery_method: "post_invoice_dispute", status: "planned_provider_dispute", payout_month: null, configured: true }
+]);
+
+await db.query(
+  `insert into public.workforce_payment_allocations(
+     id,company_id,workforce_id,station_id,payment_method_id,effective_from,effective_to,status
+   ) values ($1,$2,$3,$4,$5,'2026-10-01','2026-10-31','active')`,
+  [ids.workforcePaymentAllocation, ids.company, ids.workforce, ids.station, ids.workforcePaymentMethod]
+);
+// Historical month payout rows remain eligible after the profile itself is
+// inactive; the exact-month payment allocation is the source of truth.
+await db.query(`update public.workforce set is_active=false where id=$1`, [ids.workforce]);
+await db.query(
+  `insert into public.hr_payroll_runs(
+     id,company_id,period_start,period_end,status,deduction_total,net_total
+   ) values ($1,$2,'2026-10-01','2026-10-31','calculated',0,2000)`,
+  [ids.payrollRun, ids.company]
+);
+await db.query(
+  `insert into public.hr_payroll_run_people(
+     id,company_id,run_id,worker_type,worker_id,worker_code,worker_name,location_id,
+     net_pay,adjusted_net_pay,is_adjusted
+   ) values
+   ($1,$3,$4,'employee',$5,'EMP1','Employee One',$7,1000,2500,false),
+   ($2,$3,$4,'contractor',$6,'CON1','Contractor One',$7,1000,1200,true)`,
+  [ids.payrollEmployeePerson, ids.payrollContractorPerson, ids.company, ids.payrollRun, ids.employee, ids.contractor, ids.station]
+);
+
+const targetRows = await db.query(`
+  select dropx_id,target_type,payout_engine,is_editable,lock_reason
+  from public.payment_recovery_eligible_payout_targets($1,'2026-10-01',null)
+  where dropx_id in ('EMP1','CON1','WF1')
+  order by dropx_id
+`, [ids.company]);
+assert.deepEqual(targetRows.rows, [
+  { dropx_id: "CON1", target_type: "contractor", payout_engine: "people_payroll", is_editable: true, lock_reason: null },
+  { dropx_id: "EMP1", target_type: "employee", payout_engine: "people_payroll", is_editable: true, lock_reason: null },
+  { dropx_id: "WF1", target_type: "workforce", payout_engine: "workforce", is_editable: true, lock_reason: null }
+]);
+
+const peopleAvailableAmounts = await db.query(`
+  select dropx_id,available_amount::text available_amount
+  from public.payment_recovery_eligible_payout_targets($1,'2026-10-01',null)
+  where dropx_id in ('EMP1','CON1')
+  order by dropx_id
+`, [ids.company]);
+assert.deepEqual(peopleAvailableAmounts.rows, [
+  { dropx_id: "CON1", available_amount: "1200" },
+  { dropx_id: "EMP1", available_amount: "1000" }
+]);
+
+const availableMonths = await db.query(`
+  select payout_month::text payout_month,target_count::integer target_count
+  from public.payment_recovery_available_payout_months($1,null)
+`, [ids.company]);
+assert.deepEqual(availableMonths.rows, [{ payout_month: "2026-10-01", target_count: 3 }]);
+
+const scopedOutTargets = await db.query(`
+  select dropx_id
+  from public.payment_recovery_eligible_payout_targets($1,'2026-10-01',array[$2]::uuid[])
+`, [ids.company, ids.inactiveStation]);
+assert.deepEqual(scopedOutTargets.rows, []);
+
+const configurableRows = [{
+  row_number: 2,
+  tid: "TID-CONFIGURE",
+  location: "LOC1",
+  debit_month: "2026-10-01",
+  value: 100.01,
+  provider_reference: ""
+}];
+const configurableImport = await db.query(
+  `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null) result`,
+  [ids.company, "configure.xlsx", "6".repeat(64), JSON.stringify(configurableRows), ids.actor]
+);
+assert.deepEqual(configurableImport.rows[0].result, {
+  batch_id: configurableImport.rows[0].result.batch_id,
+  replayed: false,
+  cases: 1,
+  allocations: 0
+});
+
+const configurableCase = await db.query(`
+  select id::text id,recovery_method,status,payout_month
+  from public.payment_recovery_cases where tid='TID-CONFIGURE'
+`);
+assert.equal(configurableCase.rows[0].recovery_method, null);
+assert.equal(configurableCase.rows[0].status, "awaiting_configuration");
+assert.equal(configurableCase.rows[0].payout_month, null);
+
+const configured = await db.query(
+  `select public.payment_recovery_configure_case(
+     $1,$2,'PAYOUT_DEDUCTION','2026-10-01',array['WF1','EMP1','CON1'],$3::jsonb,$4,null
+   ) result`,
+  [ids.company, configurableCase.rows[0].id, JSON.stringify([{
+    dropx_id: 'WF1', workforce_id: ids.workforce, station_id: ids.station,
+    max_amount: 1000, snapshot_hash: 'recovery-test-snapshot'
+  }]), ids.actor]
+);
+assert.equal(configured.rows[0].result.status, "recovered");
+assert.equal(configured.rows[0].result.allocation_count, 3);
+assert.equal(String(configured.rows[0].result.deduction_total), "100.01");
+
+const configuredAllocations = await db.query(`
+  select imported_dropx_id,payout_engine,allocation_amount::text allocation_amount,
+         deduction_value_id is not null has_workforce_input,
+         payroll_manual_entry_id is not null has_people_input
+  from public.payment_recovery_allocations
+  where recovery_case_id=$1
+  order by allocation_order
+`, [configurableCase.rows[0].id]);
+assert.deepEqual(configuredAllocations.rows, [
+  { imported_dropx_id: "CON1", payout_engine: "people_payroll", allocation_amount: "33.34", has_workforce_input: false, has_people_input: true },
+  { imported_dropx_id: "EMP1", payout_engine: "people_payroll", allocation_amount: "33.34", has_workforce_input: false, has_people_input: true },
+  { imported_dropx_id: "WF1", payout_engine: "workforce", allocation_amount: "33.33", has_workforce_input: true, has_people_input: false }
+]);
+
+const workforceRecoveryInput = await db.query(`
+  select value.amount::text amount,value.source_type,head.code
+  from public.workforce_payout_deduction_values value
+  join public.workforce_deduction_heads head on head.id=value.deduction_head_id
+  where value.company_id=$1 and value.workforce_id=$2
+`, [ids.company, ids.workforce]);
+assert.deepEqual(workforceRecoveryInput.rows[0], {
+  amount: "33.33", source_type: "payment_recovery", code: "RECOVERY"
+});
+
+const peopleRecoveryInputs = await db.query(`
+  select worker_type,payment_recovery_amount::text payment_recovery_amount,
+         exception_debit::text exception_debit
+  from public.hr_payroll_run_manual_entries
+  order by worker_type
+`);
+assert.deepEqual(peopleRecoveryInputs.rows, [
+  { worker_type: "contractor", payment_recovery_amount: "33.34", exception_debit: "33.34" },
+  { worker_type: "employee", payment_recovery_amount: "33.34", exception_debit: "33.34" }
+]);
+
+const peoplePayrollAfterRecovery = await db.query(`
+  select worker_type,other_deductions::text other_deductions,
+         net_pay::text net_pay,
+         adjusted_net_pay::text adjusted_net_pay,is_adjusted,
+         calculation_snapshot->>'payment_recovery_amount' recovery_amount
+  from public.hr_payroll_run_people
+  order by worker_type
+`);
+assert.deepEqual(peoplePayrollAfterRecovery.rows, [
+  { worker_type: "contractor", other_deductions: "33.34", net_pay: "966.66", adjusted_net_pay: "1166.66", is_adjusted: true, recovery_amount: "33.34" },
+  { worker_type: "employee", other_deductions: "33.34", net_pay: "966.66", adjusted_net_pay: "2500", is_adjusted: false, recovery_amount: "33.34" }
+]);
+
+const peopleRecoveryItems = await db.query(`
+  select count(*)::integer count,sum(amount)::text amount
+  from public.hr_payroll_run_items
+  where code='RECOVERY' and source='payment_recovery'
+`);
+assert.deepEqual(peopleRecoveryItems.rows[0], { count: 2, amount: "66.68" });
+
+const payrollTotalsAfterRecovery = await db.query(`
+  select deduction_total::text deduction_total,net_total::text net_total
+  from public.hr_payroll_runs where id=$1
+`, [ids.payrollRun]);
+assert.deepEqual(payrollTotalsAfterRecovery.rows[0], { deduction_total: "66.68", net_total: "2133.32" });
+
+// Exact-month payroll remains visible when its historical station later closes;
+// authorization follows the stored location, but only ready calculations are editable.
+await db.query(`update public.stations set is_active=false where id=$1`, [ids.inactiveStation]);
+await db.query(
+  `insert into public.hr_payroll_run_people(
+     id,company_id,run_id,worker_type,worker_id,worker_code,worker_name,
+     location_id,net_pay,calculation_status
+   ) values ($1,$2,$3,'employee',$4,'INACTIVELOC','Inactive-station employee',$5,500,'ready')`,
+  [ids.payrollInactiveStationPerson, ids.company, ids.payrollRun, ids.inactiveStationEmployee, ids.inactiveStation]
+);
+const inactiveStationTarget = await db.query(`
+  select is_editable,lock_reason,available_amount::text available_amount
+  from public.payment_recovery_eligible_payout_targets($1,'2026-10-01',array[$2]::uuid[])
+  where dropx_id='INACTIVELOC'
+`, [ids.company, ids.inactiveStation]);
+assert.deepEqual(inactiveStationTarget.rows[0], {
+  is_editable: true,
+  lock_reason: null,
+  available_amount: "500"
+});
+await db.query(`
+  update public.hr_payroll_run_people set calculation_status='review'
+  where id=$1
+`, [ids.payrollInactiveStationPerson]);
+const blockedTarget = await db.query(`
+  select is_editable,lock_reason
+  from public.payment_recovery_eligible_payout_targets($1,'2026-10-01',array[$2]::uuid[])
+  where dropx_id='INACTIVELOC'
+`, [ids.company, ids.inactiveStation]);
+assert.equal(blockedTarget.rows[0].is_editable, false);
+assert.match(blockedTarget.rows[0].lock_reason, /calculation is not ready/);
+
+// A later general manual-entry replacement may clear its own exception debit,
+// but it must not erase the protected Recovery component or its explanation.
+await db.query(`
+  update public.hr_payroll_run_manual_entries
+  set exception_debit=null, exception_debit_reason=null
+  where worker_type='employee'
+`);
+const preservedPeopleRecovery = await db.query(`
+  select exception_debit::text exception_debit,exception_debit_reason
+  from public.hr_payroll_run_manual_entries
+  where worker_type='employee'
+`);
+assert.equal(preservedPeopleRecovery.rows[0].exception_debit, "33.34");
+assert.match(preservedPeopleRecovery.rows[0].exception_debit_reason, /Payment Recovery TID TID-CONFIGURE/);
+
+const replayedConfiguration = await db.query(
+  `select public.payment_recovery_configure_case(
+     $1,$2,'payout_deduction','2026-10-01',array['CON1','EMP1','WF1'],'[]'::jsonb,$3,null
+   ) result`,
+  [ids.company, configurableCase.rows[0].id, ids.actor]
+);
+assert.equal(replayedConfiguration.rows[0].result.replayed, true);
+const eventCount = await db.query(`
+  select count(*)::integer count,sum(amount)::text amount
+  from public.payment_recovery_events
+  where recovery_case_id=$1 and event_type='payout_deduction' and status='applied'
+`, [configurableCase.rows[0].id]);
+assert.deepEqual(eventCount.rows[0], { count: 3, amount: "100.01" });
+
+const aggregateRows = [{
+  row_number: 2, tid: "TID-CONFIGURE-WF-AGGREGATE", location: "LOC1",
+  debit_month: "2026-10-01", value: 10
+}];
+await db.query(
+  `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
+  [ids.company, "configure-workforce-aggregate.xlsx", "8".repeat(64), JSON.stringify(aggregateRows), ids.actor]
+);
+const aggregateCase = await db.query(`
+  select id::text id from public.payment_recovery_cases where tid='TID-CONFIGURE-WF-AGGREGATE'
+`);
+await db.query(
+  `select public.payment_recovery_configure_case(
+     $1,$2,'payout_deduction','2026-10-01',array['WF1'],$3::jsonb,$4,null
+   )`,
+  [ids.company, aggregateCase.rows[0].id, JSON.stringify([{
+    dropx_id: 'WF1', workforce_id: ids.workforce, station_id: ids.station,
+    max_amount: 100, snapshot_hash: 'recovery-test-snapshot'
+  }]), ids.actor]
+);
+const aggregatedWorkforceRecovery = await db.query(`
+  select amount::text amount,station_id::text station_id
+  from public.workforce_payout_deduction_values value
+  join public.workforce_deduction_heads head on head.id=value.deduction_head_id
+  where value.company_id=$1 and value.workforce_id=$2 and head.code='RECOVERY'
+`, [ids.company, ids.workforce]);
+assert.deepEqual(aggregatedWorkforceRecovery.rows[0], { amount: "43.33", station_id: ids.station });
+
+const insufficientRows = [{
+  row_number: 2, tid: "TID-CONFIGURE-WF-INSUFFICIENT", location: "LOC1",
+  debit_month: "2026-10-01", value: 10
+}];
+await db.query(
+  `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
+  [ids.company, "configure-workforce-insufficient.xlsx", "9".repeat(64), JSON.stringify(insufficientRows), ids.actor]
+);
+const insufficientCase = await db.query(`
+  select id::text id from public.payment_recovery_cases where tid='TID-CONFIGURE-WF-INSUFFICIENT'
+`);
+await assert.rejects(
+  db.query(
+    `select public.payment_recovery_configure_case(
+       $1,$2,'payout_deduction','2026-10-01',array['WF1'],$3::jsonb,$4,null
+     )`,
+    [ids.company, insufficientCase.rows[0].id, JSON.stringify([{
+      dropx_id: 'WF1', workforce_id: ids.workforce, station_id: ids.station,
+      max_amount: 5, snapshot_hash: 'recovery-test-snapshot'
+    }]), ids.actor]
+  ),
+  /does not have enough available Workforce payout/
+);
+const insufficientRollback = await db.query(`
+  select recovery.status,count(allocation.id)::integer allocation_count
+  from public.payment_recovery_cases recovery
+  left join public.payment_recovery_allocations allocation on allocation.recovery_case_id=recovery.id
+  where recovery.id=$1 group by recovery.id,recovery.status
+`, [insufficientCase.rows[0].id]);
+assert.deepEqual(insufficientRollback.rows[0], { status: "awaiting_configuration", allocation_count: 0 });
+
+await db.query(`
+  update public.workforce_payment_allocations set station_id=$1 where id=$2
+`, [ids.inactiveStation, ids.workforcePaymentAllocation]);
+const movedRows = [{
+  row_number: 2, tid: "TID-CONFIGURE-WF-MOVED", location: "LOC1",
+  debit_month: "2026-10-01", value: 10
+}];
+await db.query(
+  `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
+  [ids.company, "configure-workforce-moved.xlsx", "ab".repeat(32), JSON.stringify(movedRows), ids.actor]
+);
+const movedCase = await db.query(`
+  select id::text id from public.payment_recovery_cases where tid='TID-CONFIGURE-WF-MOVED'
+`);
+await assert.rejects(
+  db.query(
+    `select public.payment_recovery_configure_case(
+       $1,$2,'payout_deduction','2026-10-01',array['WF1'],$3::jsonb,$4,null
+     )`,
+    [ids.company, movedCase.rows[0].id, JSON.stringify([{
+      dropx_id: 'WF1', workforce_id: ids.workforce, station_id: ids.inactiveStation,
+      max_amount: 100, snapshot_hash: 'recovery-test-snapshot'
+    }]), ids.actor]
+  ),
+  /another payout location or source/
+);
+await db.query(`
+  update public.workforce_payment_allocations set station_id=$1 where id=$2
+`, [ids.station, ids.workforcePaymentAllocation]);
+const aggregateAfterRejectedMove = await db.query(`
+  select amount::text amount,station_id::text station_id
+  from public.workforce_payout_deduction_values value
+  join public.workforce_deduction_heads head on head.id=value.deduction_head_id
+  where value.company_id=$1 and value.workforce_id=$2 and head.code='RECOVERY'
+`, [ids.company, ids.workforce]);
+assert.deepEqual(aggregateAfterRejectedMove.rows[0], { amount: "43.33", station_id: ids.station });
+
+const disputeRows = [{
+  row_number: 2, tid: "TID-CONFIGURE-DISPUTE", location: "LOC1",
+  debit_month: "2026-10-01", value: 15
+}];
+await db.query(
+  `select public.payment_recovery_apply_import($1,$2,$3,$4::jsonb,$5,null)`,
+  [ids.company, "dispute-configure.xlsx", "7".repeat(64), JSON.stringify(disputeRows), ids.actor]
+);
+const disputeCase = await db.query(`select id::text id from public.payment_recovery_cases where tid='TID-CONFIGURE-DISPUTE'`);
+const configuredDispute = await db.query(
+  `select public.payment_recovery_configure_case($1,$2,'POST_INVOICE_DISPUTE',null,null,'[]'::jsonb,$3,null) result`,
+  [ids.company, disputeCase.rows[0].id, ids.actor]
+);
+assert.equal(configuredDispute.rows[0].result.status, "planned_provider_dispute");
+assert.equal(configuredDispute.rows[0].result.allocation_count, 0);
+
+await db.query(`update public.hr_payroll_runs set status='reviewed' where id=$1`, [ids.payrollRun]);
+const lockedTarget = await db.query(`
+  select is_editable,lock_reason
+  from public.payment_recovery_eligible_payout_targets($1,'2026-10-01',null)
+  where dropx_id='EMP1'
+`, [ids.company]);
+assert.equal(lockedTarget.rows[0].is_editable, false);
+assert.match(lockedTarget.rows[0].lock_reason, /reviewed, approved or locked/);
+
 await db.close();
-console.log("Payment Recovery register migration verified.");
+console.log("Payment Recovery register and post-upload configuration migrations verified.");

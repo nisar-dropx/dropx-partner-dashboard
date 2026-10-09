@@ -7,6 +7,7 @@
     { "path": "/api/cron/edd-stock-refresh", "schedule": "* * * * *" },
     { "path": "/api/cron/edd-verification", "schedule": "* * * * *" },
     { "path": "/api/cron/edd-ledger-retention", "schedule": "30 21 * * *" },
+    { "path": "/api/cron/report-import-retention", "schedule": "0 22 * * *" },
     {
       "path": "/api/cron/business-document-expiry",
       "schedule": "30 5 * * *"

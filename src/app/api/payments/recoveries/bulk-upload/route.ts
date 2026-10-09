@@ -1,11 +1,9 @@
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
-  normalizePaymentRecoveryPersonId,
   normalizePaymentRecoveryTid,
   parsePaymentRecoveryWorkbook,
-  type PaymentRecoveryImportIssue,
-  type PaymentRecoveryImportRow
+  type PaymentRecoveryImportIssue
 } from "@/lib/payment-recovery-import";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -18,29 +16,16 @@ const FILE_PATTERN = /\.(xlsx|xls|csv)$/i;
 const NO_LOCATION = "00000000-0000-0000-0000-000000000000";
 const noStore = { "Cache-Control": "private, no-store" };
 
-type ReferenceRow = {
+type ProviderReferenceRow = {
   id: string;
-};
-
-type ProviderReferenceRow = ReferenceRow & {
   code: string;
   name: string;
 };
 
-type StationReferenceRow = ReferenceRow & {
-  isActive: boolean;
+type StationReferenceRow = {
+  id: string;
   providerId: string | null;
 };
-
-type PersonRow = {
-  identityKey: string;
-  locationId: string | null;
-  preferCanonical: boolean;
-};
-
-type UnsupportedPersonRow = { dropx_id?: unknown };
-
-type TargetState = "linked" | "pending";
 
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
@@ -60,38 +45,8 @@ function addToMap<T>(map: Map<string, T[]>, key: string, value: T) {
   map.set(key, [...(map.get(key) ?? []), value]);
 }
 
-function addSupportedPerson(map: Map<string, PersonRow[]>, dropxId: unknown, person: PersonRow) {
-  const normalizedId = normalizePaymentRecoveryPersonId(dropxId);
-  if (!normalizedId) return;
-  const matches = map.get(normalizedId) ?? [];
-  const existingIndex = matches.findIndex((match) => match.identityKey === person.identityKey);
-  if (existingIndex < 0) {
-    map.set(normalizedId, [...matches, person]);
-    return;
-  }
-  if (!person.preferCanonical || matches[existingIndex].preferCanonical) return;
-  const collapsed = [...matches];
-  collapsed[existingIndex] = person;
-  map.set(normalizedId, collapsed);
-}
-
 function issueKey(issue: PaymentRecoveryImportIssue) {
   return `${issue.rowNumber ?? "file"}\u0000${issue.tid ?? ""}\u0000${issue.message}`;
-}
-
-function rowRecoveryMethod(row: PaymentRecoveryImportRow) {
-  if (row.recoveryMethod === "PAYOUT_DEDUCTION") return "payout_deduction" as const;
-  if (row.recoveryMethod === "POST_INVOICE_DISPUTE") return "post_invoice_dispute" as const;
-  return null;
-}
-
-function previewLinkStatus(row: PaymentRecoveryImportRow, states: TargetState[]) {
-  if (row.recoveryMethod === "POST_INVOICE_DISPUTE") return "not_required";
-  if (states.length !== row.recoveryIds.length) return "invalid";
-  if (!states.length) return "invalid";
-  if (states.every((state) => state === "linked")) return "linked";
-  if (states.every((state) => state === "pending")) return "pending";
-  return "mixed";
 }
 
 export async function POST(request: Request) {
@@ -132,60 +87,13 @@ export async function POST(request: Request) {
       return errorResponse(error instanceof Error ? error.message : "The workbook could not be read.", 400);
     }
 
-    const [
-      providersResult,
-      stationsResult,
-      employeesResult,
-      contractorsResult,
-      workforceResult,
-      helpersResult,
-      vendorsResult,
-      workforceHelpersResult,
-      workforcePickersResult,
-      existingCasesResult,
-      previousBatchResult
-    ] = await Promise.all([
+    const [providersResult, stationsResult, existingCasesResult, previousBatchResult] = await Promise.all([
       readAllRows(supabaseAdmin.from("providers")
         .select("id,code,name")
         .eq("company_id", companyId)
         .order("id")),
       readAllRows(supabaseAdmin.from("stations")
-        .select("id,station_code,station_name,provider_id,is_active")
-        .eq("company_id", companyId)
-        .order("id")),
-      readAllRows(supabaseAdmin.from("employees")
-        .select("id,employee_code,full_name,location_id")
-        .eq("company_id", companyId)
-        .eq("is_active", true)
-        .is("deleted_at", null)
-        .order("id")),
-      readAllRows(supabaseAdmin.from("contractors")
-        .select("id,dropx_id,full_name,location_id")
-        .eq("company_id", companyId)
-        .eq("is_active", true)
-        .is("deleted_at", null)
-        .order("id")),
-      readAllRows(supabaseAdmin.from("workforce")
-        .select("id,dropx_id,full_name,location_id,source_profile_type,source_profile_id")
-        .eq("company_id", companyId)
-        .eq("is_active", true)
-        .is("deleted_at", null)
-        .or("migration_state.is.null,migration_state.not.in.(reclassified,moved_to_vendor)")
-        .order("id")),
-      readAllRows(supabaseAdmin.from("helpers")
-        .select("id,dropx_id")
-        .eq("company_id", companyId)
-        .order("id")),
-      readAllRows(supabaseAdmin.from("vendors")
-        .select("id,dropx_id")
-        .eq("company_id", companyId)
-        .order("id")),
-      readAllRows(supabaseAdmin.from("workforce_helpers")
-        .select("id,dropx_id")
-        .eq("company_id", companyId)
-        .order("id")),
-      readAllRows(supabaseAdmin.from("workforce_pickers")
-        .select("id,dropx_id")
+        .select("id,station_code,provider_id")
         .eq("company_id", companyId)
         .order("id")),
       readAllRows(supabaseAdmin.from("payment_recovery_cases")
@@ -201,13 +109,6 @@ export async function POST(request: Request) {
 
     const referenceError = providersResult.error?.message
       || stationsResult.error?.message
-      || employeesResult.error?.message
-      || contractorsResult.error?.message
-      || workforceResult.error?.message
-      || helpersResult.error?.message
-      || vendorsResult.error?.message
-      || workforceHelpersResult.error?.message
-      || workforcePickersResult.error?.message
       || existingCasesResult.error?.message
       || previousBatchResult.error?.message;
     if (referenceError) return errorResponse(referenceError, 400);
@@ -223,58 +124,12 @@ export async function POST(request: Request) {
     }
 
     const stationsByCode = new Map<string, StationReferenceRow[]>();
-    const stationById = new Map<string, StationReferenceRow>();
     for (const station of stationsResult.data ?? []) {
-      const code = normalizeReferenceCode(station.station_code);
-      const reference = {
+      addToMap(stationsByCode, normalizeReferenceCode(station.station_code), {
         id: String(station.id),
-        isActive: station.is_active === true,
         providerId: station.provider_id ? String(station.provider_id) : null
-      };
-      addToMap(stationsByCode, code, reference);
-      stationById.set(reference.id, reference);
-    }
-
-    const supportedPeopleById = new Map<string, PersonRow[]>();
-    for (const employee of employeesResult.data ?? []) {
-      addSupportedPerson(supportedPeopleById, employee.employee_code, {
-        identityKey: `employee:${String(employee.id)}`,
-        locationId: employee.location_id ? String(employee.location_id) : null,
-        preferCanonical: false
       });
     }
-    for (const contractor of contractorsResult.data ?? []) {
-      addSupportedPerson(supportedPeopleById, contractor.dropx_id, {
-        identityKey: `contractor:${String(contractor.id)}`,
-        locationId: contractor.location_id ? String(contractor.location_id) : null,
-        preferCanonical: false
-      });
-    }
-    for (const worker of workforceResult.data ?? []) {
-      const sourceType = String(worker.source_profile_type ?? "").trim().toLowerCase();
-      const sourceId = String(worker.source_profile_id ?? "").trim();
-      const mirrorsSource = (sourceType === "employee" || sourceType === "contractor") && sourceId;
-      addSupportedPerson(supportedPeopleById, worker.dropx_id, {
-        identityKey: mirrorsSource ? `${sourceType}:${sourceId}` : `workforce:${String(worker.id)}`,
-        locationId: worker.location_id ? String(worker.location_id) : null,
-        preferCanonical: true
-      });
-    }
-
-    const unsupportedPeopleById = new Map<string, string[]>();
-    const addUnsupportedPeople = (rows: UnsupportedPersonRow[], category: string) => {
-      for (const row of rows) {
-        addToMap(
-          unsupportedPeopleById,
-          normalizePaymentRecoveryPersonId(row.dropx_id),
-          category
-        );
-      }
-    };
-    addUnsupportedPeople(helpersResult.data ?? [], "Helper");
-    addUnsupportedPeople(vendorsResult.data ?? [], "Vendor");
-    addUnsupportedPeople(workforceHelpersResult.data ?? [], "Legacy Helper");
-    addUnsupportedPeople(workforcePickersResult.data ?? [], "Legacy Picker");
 
     const existingTidByNormalized = new Map<string, string>();
     for (const recovery of existingCasesResult.data ?? []) {
@@ -290,119 +145,50 @@ export async function POST(request: Request) {
       issueKeys.add(key);
       issues.push(issue);
     };
-    const targetStatesByRow = new Map<number, TargetState[]>();
     const inferredProvidersByRow = new Map<number, ProviderReferenceRow>();
 
     for (const row of parsed.rows) {
       const tid = row.normalizedTid || normalizePaymentRecoveryTid(row.tid);
-      if (tid) {
-        if (existingTidByNormalized.has(tid)) {
-          pushIssue({
-            rowNumber: row.rowNumber,
-            tid: row.tid,
-            message: "This TID is already in the Recovery register."
-          });
-        }
+      if (tid && existingTidByNormalized.has(tid)) {
+        pushIssue({
+          rowNumber: row.rowNumber,
+          tid: row.tid,
+          message: "This TID is already in the Recovery register."
+        });
       }
 
-      if (row.locationCode) {
-        const locationMatches = stationsByCode.get(normalizeReferenceCode(row.locationCode)) ?? [];
-        if (!locationMatches.length) {
-          pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location ${row.locationCode} was not found.` });
-        } else if (locationMatches.length > 1) {
-          pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location code ${row.locationCode} matches more than one location.` });
-        } else if (!hasCompanyWideAccess && !allowedLocationIds.has(locationMatches[0].id)) {
-          pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location ${row.locationCode} is outside your assigned locations.` });
-        } else if (!locationMatches[0].providerId) {
+      if (!row.locationCode) continue;
+      const locationMatches = stationsByCode.get(normalizeReferenceCode(row.locationCode)) ?? [];
+      if (!locationMatches.length) {
+        pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location ${row.locationCode} was not found.` });
+      } else if (locationMatches.length > 1) {
+        pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location code ${row.locationCode} matches more than one location.` });
+      } else if (!hasCompanyWideAccess && !allowedLocationIds.has(locationMatches[0].id)) {
+        pushIssue({ rowNumber: row.rowNumber, tid: row.tid, message: `Location ${row.locationCode} is outside your assigned locations.` });
+      } else if (!locationMatches[0].providerId) {
+        pushIssue({
+          rowNumber: row.rowNumber,
+          tid: row.tid,
+          message: `Location ${row.locationCode} is not linked to a provider. Configure its provider before importing.`
+        });
+      } else {
+        const provider = providersById.get(locationMatches[0].providerId);
+        if (!provider) {
           pushIssue({
             rowNumber: row.rowNumber,
             tid: row.tid,
-            message: `Location ${row.locationCode} is not linked to a provider. Configure its provider before importing.`
+            message: `Location ${row.locationCode} has an invalid provider link. Correct the location setup before importing.`
+          });
+        } else if (!provider.code) {
+          pushIssue({
+            rowNumber: row.rowNumber,
+            tid: row.tid,
+            message: `Location ${row.locationCode} is linked to a provider without a code. Complete the provider setup before importing.`
           });
         } else {
-          const provider = providersById.get(locationMatches[0].providerId);
-          if (!provider) {
-            pushIssue({
-              rowNumber: row.rowNumber,
-              tid: row.tid,
-              message: `Location ${row.locationCode} has an invalid provider link. Correct the location setup before importing.`
-            });
-          } else if (!provider.code) {
-            pushIssue({
-              rowNumber: row.rowNumber,
-              tid: row.tid,
-              message: `Location ${row.locationCode} is linked to a provider without a code. Complete the provider setup before importing.`
-            });
-          } else {
-            inferredProvidersByRow.set(row.rowNumber, provider);
-          }
+          inferredProvidersByRow.set(row.rowNumber, provider);
         }
       }
-
-      const states: TargetState[] = [];
-      if (row.recoveryMethod === "PAYOUT_DEDUCTION") {
-        for (const recoveryId of row.recoveryIds) {
-          const normalizedId = normalizePaymentRecoveryPersonId(recoveryId);
-          const matches = supportedPeopleById.get(normalizedId) ?? [];
-          const unsupportedCategories = unsupportedPeopleById.get(normalizedId) ?? [];
-          if (matches.length > 1) {
-            pushIssue({
-              rowNumber: row.rowNumber,
-              tid: row.tid,
-              message: `Recovery ID ${recoveryId} matches more than one People profile. Correct the duplicate profile before importing.`
-            });
-            continue;
-          }
-          if (matches.length === 1) {
-            const person = matches[0];
-            const location = person.locationId ? stationById.get(person.locationId) : undefined;
-            if (!location) {
-              pushIssue({
-                rowNumber: row.rowNumber,
-                tid: row.tid,
-                message: `Recovery ID ${recoveryId} does not have a valid company location.`
-              });
-              continue;
-            }
-            if (!location.isActive) {
-              pushIssue({
-                rowNumber: row.rowNumber,
-                tid: row.tid,
-                message: `Recovery ID ${recoveryId} is assigned to an inactive location. Update the People profile to an active location before importing.`
-              });
-              continue;
-            }
-            if (!hasCompanyWideAccess && !allowedLocationIds.has(location.id)) {
-              pushIssue({
-                rowNumber: row.rowNumber,
-                tid: row.tid,
-                message: `Recovery ID ${recoveryId} is outside your assigned locations.`
-              });
-              continue;
-            }
-            states.push("linked");
-            continue;
-          }
-          if (unsupportedCategories.length) {
-            pushIssue({
-              rowNumber: row.rowNumber,
-              tid: row.tid,
-              message: `Recovery ID ${recoveryId} belongs to an unsupported category (${[...new Set(unsupportedCategories)].join(", ")}).`
-            });
-            continue;
-          }
-          if (!hasCompanyWideAccess) {
-            pushIssue({
-              rowNumber: row.rowNumber,
-              tid: row.tid,
-              message: `Recovery ID ${recoveryId} is not registered. Company-wide location access is required to retain it as awaiting registration.`
-            });
-            continue;
-          }
-          states.push("pending");
-        }
-      }
-      targetStatesByRow.set(row.rowNumber, states);
     }
 
     if (previousBatchResult.data) {
@@ -413,22 +199,15 @@ export async function POST(request: Request) {
       });
     }
 
-    const payoutRows = parsed.rows.filter((row) => row.recoveryMethod === "PAYOUT_DEDUCTION").length;
-    const disputeRows = parsed.rows.filter((row) => row.recoveryMethod === "POST_INVOICE_DISPUTE").length;
-    const linkedAllocations = [...targetStatesByRow.values()].flat().filter((state) => state === "linked").length;
-    const pendingAllocations = [...targetStatesByRow.values()].flat().filter((state) => state === "pending").length;
+    const totalValue = parsed.rows.reduce((sum, row) => sum + Number(row.value ?? 0), 0);
     const preview = {
       fileName: file.name,
       fileSha256: parsed.fileSha256,
       totalRows: parsed.rows.length,
-      payoutRows,
-      disputeRows,
-      linkedAllocations,
-      pendingAllocations,
+      totalValue: Math.round((totalValue + Number.EPSILON) * 100) / 100,
       canCommit: issues.length === 0,
       issues,
       rows: parsed.rows.slice(0, 50).map((row) => {
-        const states = targetStatesByRow.get(row.rowNumber) ?? [];
         const provider = inferredProvidersByRow.get(row.rowNumber);
         return {
           rowNumber: row.rowNumber,
@@ -437,11 +216,8 @@ export async function POST(request: Request) {
           providerName: provider?.name ?? "",
           location: row.locationCode,
           debitMonth: row.debitMonth,
-          debitAmount: row.debitAmount,
-          recoveryMethod: row.recoveryMethod,
-          recoveryIds: row.recoveryIds,
-          allocationCount: row.recoveryIds.length,
-          linkStatus: previewLinkStatus(row, states)
+          value: row.value,
+          providerReference: row.providerReference
         };
       })
     };
@@ -463,12 +239,10 @@ export async function POST(request: Request) {
         tid: row.tid,
         location: row.locationCode,
         debit_month: row.debitMonth,
-        debit_amount: row.debitAmount,
-        recovery_method: rowRecoveryMethod(row),
+        value: row.value,
         provider_reference: row.providerReference || null,
         reason: row.reason || null,
-        remark: row.remark || null,
-        targets: row.recoveryIds.map((dropxId) => ({ dropx_id: dropxId }))
+        remark: row.remark || null
       })),
       p_actor_user_id: authorization.userId,
       p_allowed_location_ids: hasCompanyWideAccess
@@ -496,7 +270,7 @@ export async function POST(request: Request) {
       ...preview,
       canCommit: false,
       batchId: typeof result.batch_id === "string" ? result.batch_id : null,
-      message: `${parsed.rows.length} TID recovery ${parsed.rows.length === 1 ? "case was" : "cases were"} imported as recovery plans. No payout deduction or provider dispute was submitted.`
+      message: `${parsed.rows.length} TID recovery ${parsed.rows.length === 1 ? "record was" : "records were"} imported. Select the recovery method from each register row before applying it to a payout or saving a provider dispute.`
     }, { headers: noStore });
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Unable to process the payment recovery workbook.", 500);

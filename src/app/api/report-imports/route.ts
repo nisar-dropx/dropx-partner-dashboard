@@ -1871,6 +1871,14 @@ async function auditParsedRows(companyId: string, sourceType: SourceType, parsed
   });
 }
 
+/** Table-style reports are cleaned into the same columns they arrived with.
+ * Every reader takes the cleaned value first and the raw one only as a
+ * fallback, so the second identical copy was pure storage (half of a 5.6 GB table). */
+function rawAddsNothing(raw: RawRecord, normalized: Record<string, unknown> | undefined) {
+  if (!normalized) return false;
+  return Object.entries(raw).every(([key, value]) => key in normalized && normalized[key] === value);
+}
+
 async function insertInChunks<T extends Record<string, unknown>>(table: string, rows: T[], chunkSize = 500) {
   if (!supabaseAdmin || !rows.length) return;
   for (let index = 0; index < rows.length; index += chunkSize) {
@@ -2411,7 +2419,7 @@ export async function POST(request: Request) {
       company_id: companyId,
       external_worker_id: row.normalized?.externalWorkerId ?? null,
       normalized_data: row.normalized?.normalizedData ?? {},
-      raw_data: row.raw,
+      raw_data: rawAddsNothing(row.raw, row.normalized?.normalizedData) ? {} : row.raw,
       row_hash: row.hash,
       row_number: row.rowNumber,
       shipment_count: row.normalized?.shipmentCount ?? null,

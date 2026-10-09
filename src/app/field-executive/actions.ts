@@ -20,7 +20,6 @@ import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
-import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityExceptionEventMetadata } from "@/lib/onboarding-identity";
 import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
 import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadClientIdMappings, needsClientId, providerMappingFor, type ClientIdWorker } from "@/lib/workforce-client-id-queue";
@@ -416,19 +415,7 @@ export async function createFieldExecutive(formData: FormData) {
       companyId,
       mobile,
       email,
-      excludeRegister: table,
-      allowDuplicateMobile: table === "workforce"
-    });
-    const identityEvaluation = await evaluateOnboardingIdentity({
-      client: supabaseAdmin,
-      companyId,
-      mobile,
-      designationId: designationRuleResult.data.id,
-      designationName: designation
-    });
-    assertOnboardingIdentityAllowed(identityEvaluation, {
-      allowDifferentWorkforceDesignation: table === "workforce",
-      allowDuplicateMobile: table === "workforce"
+      excludeRegister: table
     });
     const workerCategory = config.category;
     const biometricId = await generateConfiguredBiometricId({
@@ -560,7 +547,7 @@ export async function createFieldExecutive(formData: FormData) {
         to_status: "pending",
         actor_user_id: authorization.userId,
         source_portal: applicationSource,
-        metadata: { designation, location_id: locationId, onboarding_source: selectedOnboardingSource.source, onboarding_source_detail: selectedOnboardingSource.detail, ...identityExceptionEventMetadata(identityEvaluation) }
+        metadata: { designation, location_id: locationId, onboarding_source: selectedOnboardingSource.source, onboarding_source_detail: selectedOnboardingSource.detail }
       });
       if (reportedOn && table === "workforce") {
         const progressResult = await supabaseAdmin.rpc("workforce_record_partner_progress", {
@@ -764,8 +751,7 @@ export async function updateFieldExecutive(formData: FormData) {
       mobile: payload.mobile,
       email: payload.email,
       excludeId: executiveId,
-      excludeRegister: table,
-      allowDuplicateMobile: table === "workforce"
+      excludeRegister: table
     });
     const corePayload = {
       full_name: payload.full_name,
@@ -1059,7 +1045,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
   const authorization = await requirePagePermission(pageCodeForReturnPath(returnPath), "add");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
-  const inserted: { id: string; locationId: string; biometricId: string | null; dateOfJoin: string; identityExceptionMetadata: Record<string, unknown> }[] = [];
+  const inserted: { id: string; locationId: string; biometricId: string | null; dateOfJoin: string }[] = [];
   const requestHost = headers().get("host")?.split(":")[0].toLowerCase() ?? "";
   const applicationSource = requestHost === "ops.dropxlogistics.com" || requestHost.startsWith("ops-")
     ? "ops"
@@ -1129,22 +1115,6 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         throw new Error(`Row ${rowNumber}: You do not have access to location ${row.locationCode}.`);
       }
 
-      const identityEvaluation = await evaluateOnboardingIdentity({
-        client: supabaseAdmin,
-        companyId,
-        mobile: row.mobile,
-        designationId: designation.id,
-        designationName: designation.name
-      });
-      try {
-        assertOnboardingIdentityAllowed(identityEvaluation, {
-          allowDifferentWorkforceDesignation: table === "workforce",
-          allowDuplicateMobile: table === "workforce"
-        });
-      } catch (error) {
-        throw new Error(`Row ${rowNumber}: ${error instanceof Error ? error.message : "Mobile identity conflict."}`);
-      }
-
       const dropxId = row.dropxId || await generateConfiguredWorkerId({
         category: designation.workerCategory,
         companyId,
@@ -1182,7 +1152,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         is_active: config.profileType === "field_executive" ? false : true
       }, companyId)).select("id").single();
       if (insertResult.error) throw new Error(`Row ${rowNumber}: ${friendlyFieldExecutiveError(insertResult.error.message)}`);
-      inserted.push({ id: insertResult.data.id, locationId, biometricId, dateOfJoin: row.dateOfJoin, identityExceptionMetadata: identityExceptionEventMetadata(identityEvaluation) });
+      inserted.push({ id: insertResult.data.id, locationId, biometricId, dateOfJoin: row.dateOfJoin });
     }
 
     for (const row of inserted) {
@@ -1195,7 +1165,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
           to_status: "pending",
           actor_user_id: authorization.userId,
           source_portal: applicationSource,
-          metadata: { bulk_import: true, location_id: row.locationId, ...row.identityExceptionMetadata }
+          metadata: { bulk_import: true, location_id: row.locationId }
         });
         continue;
       }
