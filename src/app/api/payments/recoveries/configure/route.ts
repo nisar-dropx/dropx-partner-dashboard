@@ -136,7 +136,7 @@ function configurationResponse(
     const message = applied.error.message;
     const status = /not found/i.test(message)
       ? 404
-      : /already configured|cannot be changed|changed|locked|processed|paid|approved|outside|not eligible|does not have|matches more than one/i.test(message)
+      : /already configured|cannot be changed|changed|locked|processed|processing|paid|approved|outside|not eligible|does not have|matches more than one/i.test(message)
         ? 409
         : 400;
     return errorResponse(message, status);

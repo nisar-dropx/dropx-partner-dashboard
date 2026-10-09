@@ -500,7 +500,7 @@ export async function POST(request: Request) {
         break;
       }
       if (!result.error.message.includes(PAYOUT_DEPENDENCY_CHANGED)) {
-        const stale = /changed|refresh|version/i.test(result.error.message);
+        const stale = /changed|refresh|version|processing/i.test(result.error.message);
         return responseError(result.error.message, stale ? 409 : 400);
       }
       if (dependencyRevalidations >= MAX_DEPENDENCY_REVALIDATION_ATTEMPTS) {

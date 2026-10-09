@@ -22987,6 +22987,18 @@ td strong,
 .workforce-payout-table .payout-dropx-status { max-width: 100%; overflow: hidden; color: #68758a; text-overflow: ellipsis; }
 .workforce-payout-table .payout-money { text-align: right; }
 .workforce-payout-table .payout-net-pay strong { color: #0f6f51; font-size: 13px; }
+.workforce-payout-table .payout-payment-balance {
+  display: grid;
+  gap: 1px;
+  margin-top: 3px;
+  color: #68758a;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.workforce-payout-table .payout-payment-balance span { display: block; }
+.workforce-payout-table .payout-payment-balance .negative { color: var(--red); }
 .workforce-payout-table .payout-production-summary { min-width: 155px; text-align: right; }
 .workforce-payout-table .payout-production-summary small { text-align: right; }
 .workforce-payout-table .payout-status-stack { display: grid; justify-items: start; gap: 5px; }

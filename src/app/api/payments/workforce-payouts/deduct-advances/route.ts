@@ -106,7 +106,7 @@ export async function POST(request: Request) {
       if (applied.error) {
         const changedDuringApply = /Payout inputs changed while advances were being (?:prepared|applied)/i.test(applied.error.message);
         if (changedDuringApply) continue;
-        const conflict = /approved|paid|changed|outside|cannot be replaced|later advance deductions|recalculating this earlier period/i.test(applied.error.message);
+        const conflict = /approved|paid|changed|outside|cannot be replaced|later advance deductions|recalculating this earlier period|processing/i.test(applied.error.message);
         return errorResponse(applied.error.message, conflict ? 409 : 400);
       }
       const results = Array.isArray(applied.data) ? applied.data : [];

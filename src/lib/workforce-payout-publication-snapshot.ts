@@ -1,4 +1,5 @@
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
+import { isWorkforcePayoutCalculationPublishable } from "./workforce-payout-publication-eligibility.ts";
 
 function productionCounts(lines: WorkforcePayoutRow["productionBreakdown"]) {
   const count = (aliases: string[]) => lines
@@ -104,6 +105,9 @@ export function buildWorkforcePayoutPublicationSnapshot(
     lines,
     worksheet: {
       row_id: row.id,
+      payment_status: row.status,
+      payment_details_available: row.paymentDetailsAvailable,
+      payment_eligible: row.paymentDetailsAvailable && isWorkforcePayoutCalculationPublishable(row.status),
       dropx_status: row.dropxStatus,
       provider: row.provider,
       model: row.model,

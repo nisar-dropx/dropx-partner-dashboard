@@ -606,7 +606,7 @@ export async function POST(request: Request) {
       p_allowed_location_ids: allowedLocationIds ? [...allowedLocationIds] : null
     });
     if (applied.error) {
-      const conflict = /already imported|overlap|approved|paid|cancelled|review|notification|sending/i.test(applied.error.message);
+      const conflict = /already imported|overlap|approved|paid|cancelled|review|notification|sending|processing/i.test(applied.error.message);
       return errorResponse(applied.error.message, conflict ? 409 : 400);
     }
     const importId = String(applied.data);

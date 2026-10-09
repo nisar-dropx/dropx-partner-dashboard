@@ -82,7 +82,7 @@ function sameUuidSet(left: readonly unknown[], right: readonly unknown[]) {
 }
 
 function databaseErrorStatus(message: string) {
-  return /already|approved|paid|cancelled|published|notification|refresh|changed|changing|updating|unavailable|outside|no provider mapping|operation id|relock|unlock/i.test(message)
+  return /already|approved|paid|cancelled|published|notification|refresh|changed|changing|updating|unavailable|outside|no provider mapping|operation id|relock|unlock|processing/i.test(message)
     ? 409
     : 400;
 }
