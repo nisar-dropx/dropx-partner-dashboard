@@ -265,5 +265,8 @@ test("the bulk route validates attendance ranges and preserves FIELD_CODE/VALUE 
   assert.match(source, /published payout revision/);
   assert.match(source, /inputSource === "manual" \? manualOperationId : null/);
   assert.match(source, /Manual operation ID is valid only for manual payout edits/);
+  assert.match(source, /mode === "commit" && inputSource === "manual"/);
+  assert.match(source, /replayed: true/);
+  assert.match(source, /the retry was accepted safely/);
   assert.doesNotMatch(source, /workHours: row\.workHours|workDays: row\.workDays/);
 });

@@ -75,7 +75,18 @@ test("cancelled attempts remain in history but do not reduce the balance", () =>
   assert.equal(summary?.balancePayable, 500);
   assert.equal(summary?.availableToPay, 500);
   assert.equal(summary?.historyCount, 1);
-  assert.equal(summary?.status, null);
+  assert.equal(summary?.status, "Payment Cancelled");
+});
+
+test("failed attempts release the full balance for the next payment version", () => {
+  const summary = summarizeWorkforcePayoutPayments(
+    [{ rowId: "a", workforceId: "W1", netAmount: 500 }],
+    [{ workforceId: "W1", status: "failed", amount: 500 }]
+  ).get("w1");
+  assert.equal(summary?.balancePayable, 500);
+  assert.equal(summary?.availableToPay, 500);
+  assert.equal(summary?.historyCount, 1);
+  assert.equal(summary?.status, "Payment Failed");
 });
 
 test("stale and pending publications expose an unavailable balance with an actionable label", () => {
@@ -100,4 +111,12 @@ test("computed balances remain visible when a separate payment constraint blocks
   const invalidBankDetails = { eligible: false, eligibilityCode: "beneficiary_bank_details_missing" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(invalidBankDetails), true);
   assert.equal(workforcePayoutPaymentEligibilityLabel(invalidBankDetails), "Payment details required");
+
+  const held = { eligible: false, eligibilityCode: "payment_on_hold" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(held), true);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(held), "Payment on hold");
+
+  const panNotLinked = { eligible: false, eligibilityCode: "pan_not_linked" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(panNotLinked), true);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(panNotLinked), "PAN not linked");
 });

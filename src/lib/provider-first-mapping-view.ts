@@ -45,6 +45,7 @@ export type ProviderFirstMappingRowView = {
 
 export type ProviderFirstMappingReplacement = {
   kind: "owner" | "location";
+  allowKeepAll?: boolean;
   mappingId: string;
   providerMemberId: string;
   providerMemberName: string;
@@ -99,7 +100,7 @@ export function providerFirstLocationRemap(
 
 export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
   if (replacement.kind === "location") {
-    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nDo you want to move this mapping to ${replacement.newLocationLabel ?? "the selected location"} from ${replacement.effectiveFrom ?? "the selected effective date"}?\nThe old location will end on the preceding day and remain in History.`;
+    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nMove it to ${replacement.newLocationLabel ?? "the selected location"}, or keep both location mappings for the same DropX ID?\nMoving ends the old location on the preceding day. Keep all preserves both locations.`;
   }
   return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}.\nDo you want to replace this mapping?`;
 }
@@ -314,7 +315,7 @@ export function providerFirstRowIssue(
   method: ProviderFirstPaymentMethodView | undefined
 ) {
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
-  if (!row.workforceId) return "Select a DropX workforce ID.";
+  if (!row.workforceId) return row.mappingId ? null : "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
   if (worker.stationId !== row.stationId && !providerFirstLocationRemap(row, worker)) return "Location mismatch.";
   if (worker.mappedProviderMemberId && !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {

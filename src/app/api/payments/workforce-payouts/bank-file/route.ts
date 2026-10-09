@@ -13,8 +13,10 @@ export const maxDuration = 300;
 const noStore = { "Cache-Control": "private, no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_SELECTION = 50;
-const MAX_REQUEST_BYTES = 64 * 1024;
+// A user action may include every eligible row. Keep a transport guard so an
+// unbounded/chunked request still cannot consume arbitrary memory; the RPC
+// validates company ownership and eligibility transactionally.
+const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 
 type PaymentInstruction = {
   reference_no: string;
@@ -54,8 +56,20 @@ function completeCalendarMonth(periodStart: string, periodEnd: string) {
 function uniqueWorkforceIds(value: unknown) {
   if (!Array.isArray(value)) return null;
   const ids = value.map((item) => String(item ?? "").trim().toLowerCase());
-  if (!ids.length || ids.length > MAX_SELECTION || ids.some((id) => !UUID.test(id)) || new Set(ids).size !== ids.length) return null;
+  if (!ids.length || ids.some((id) => !UUID.test(id)) || new Set(ids).size !== ids.length) return null;
   return ids.sort();
+}
+
+async function jsonBody(request: Request) {
+  const declaredLength = Number(request.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BYTES) {
+    throw new Error("REQUEST_TOO_LARGE");
+  }
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_REQUEST_BYTES) {
+    throw new Error("REQUEST_TOO_LARGE");
+  }
+  return JSON.parse(raw) as unknown;
 }
 
 function paise(value: number | string) {
@@ -196,17 +210,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     if (!sameOrigin(request)) return errorResponse("Invalid request origin.", 403);
-    const declaredLength = Number(request.headers.get("content-length") ?? 0);
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BYTES) return errorResponse("The bank-file request is too large.", 413);
     const access = await authorize();
     if ("error" in access) return access.error;
 
     let body: Record<string, unknown>;
     try {
-      const parsed = await request.json();
+      const parsed = await jsonBody(request);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return errorResponse("Submit a valid bank-file request.", 400);
       body = parsed as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "REQUEST_TOO_LARGE") {
+        return errorResponse("The bank-file request is too large.", 413);
+      }
       return errorResponse("Submit a valid bank-file request.", 400);
     }
     const operationId = String(body.operationId ?? "").trim().toLowerCase();
@@ -218,7 +233,7 @@ export async function POST(request: Request) {
     if (!UUID.test(operationId) || !UUID.test(bankId)) return errorResponse("A valid operation and bank are required.", 400);
     if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Bank processing is available only for one complete calendar month.", 400);
     if (!validDate(valueDate)) return errorResponse("Choose a valid bank value date.", 400);
-    if (!workforceIds) return errorResponse(`Select between 1 and ${MAX_SELECTION} unique Workforce profiles.`, 400);
+    if (!workforceIds) return errorResponse("Select at least one unique Workforce profile.", 400);
 
     const requestFingerprint = createHash("sha256").update(JSON.stringify({ bankId, periodStart, periodEnd, valueDate, workforceIds })).digest("hex");
     const created = await supabaseAdmin!.rpc("workforce_create_payout_payment_batch", {

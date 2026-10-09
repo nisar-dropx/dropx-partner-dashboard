@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   applyWorkforcePayoutManualLineToAll,
   buildWorkforcePayoutManualCsv,
+  chunkWorkforcePayoutManualLines,
   createWorkforcePayoutManualLines,
   normalizeWorkforcePayoutManualLineType,
   validateWorkforcePayoutManualLines
@@ -70,6 +71,30 @@ test("reusing apply to all for another field always creates unique editable line
   assert.equal(secondCopy.length, 3);
   assert.equal(new Set(secondCopy.map((line) => line.id)).size, secondCopy.length);
   assert.deepEqual(secondCopy.filter((line) => line.dropxId === "DX-002").map((line) => line.fieldCode).sort(), ["FINE", "OTHER_FINE"]);
+});
+
+test("large manual edits use safe batches without splitting one payout profile", () => {
+  const lines = [
+    ...Array.from({ length: 4 }, (_, index) => completedLine({
+      id: `first-${index}`,
+      selectionKey: `profile-${index}`,
+      dropxId: `DX-${index}`
+    })),
+    completedLine({ id: "shared-1", selectionKey: "shared", fieldCode: "ONE" }),
+    completedLine({ id: "shared-2", selectionKey: "shared", fieldCode: "TWO" }),
+    ...Array.from({ length: 5 }, (_, index) => completedLine({
+      id: `last-${index}`,
+      selectionKey: `later-${index}`,
+      dropxId: `LATER-${index}`
+    }))
+  ];
+  const chunks = chunkWorkforcePayoutManualLines(lines, 5);
+
+  assert.equal(chunks.flat().length, lines.length);
+  assert.ok(chunks.every((chunk) => chunk.length <= 5));
+  assert.equal(chunks.filter((chunk) => chunk.some((line) => line.selectionKey === "shared")).length, 1);
+  assert.deepEqual(chunks.flat().map((line) => line.id), lines.map((line) => line.id));
+  assert.throws(() => chunkWorkforcePayoutManualLines(lines, 0), /positive whole number/);
 });
 
 test("CSV uses the bulk-upload schema, unambiguous dates, escaping and blank CLEAR values", () => {

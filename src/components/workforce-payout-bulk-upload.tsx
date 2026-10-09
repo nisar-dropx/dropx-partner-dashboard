@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { announceWorkforcePayoutInputsChanged } from "@/lib/workforce-payout-client-events";
 
 type PreviewIssue = {
   rowNumber: number | null;
@@ -99,7 +100,12 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
       const result = await readResponse(response);
       setPreview(result);
       if (!response.ok) throw new Error(result.error ?? "Unable to process this payout workbook.");
-      if (mode === "commit") router.refresh();
+      if (mode === "commit") {
+        announceWorkforcePayoutInputsChanged(result.message ?? "Bulk payout inputs were updated and the worksheet is refreshing.");
+        setOpen(false);
+        setFile(null);
+        router.refresh();
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to process this payout workbook.");
     } finally {

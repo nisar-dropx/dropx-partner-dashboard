@@ -26,21 +26,24 @@ test("manual editor exposes Set, Clear and apply-to-all actions", () => {
 });
 
 test("manual editor reuses bulk upload preview and commit with generated CSV", () => {
-  assert.match(source, /buildWorkforcePayoutManualCsv\(lines\)/);
+  assert.match(source, /chunkWorkforcePayoutManualLines\(lines, MANUAL_INPUT_REQUEST_CHUNK_SIZE\)/);
+  assert.match(source, /buildWorkforcePayoutManualCsv\(chunk\)/);
   assert.match(source, /new File\(\[csv\],[\s\S]*?\.csv/);
   assert.match(source, /body\.set\("mode", mode\)/);
   assert.match(source, /body\.set\("effective_from", fromDate\)/);
   assert.match(source, /body\.set\("effective_to", toDate\)/);
   assert.match(source, /body\.set\("input_source", "manual"\)/);
-  assert.match(source, /body\.set\("manual_operation_id", operationIdRef\.current\)/);
-  assert.match(source, /if \(!operationIdRef\.current\) operationIdRef\.current = crypto\.randomUUID\(\)/);
-  assert.match(source, /mode === "commit"[\s\S]*?operationIdRef\.current = ""/);
+  assert.match(source, /body\.set\("manual_operation_id", operationIdsRef\.current\[chunkIndex\]\)/);
+  assert.match(source, /operationIdsRef\.current = chunks\.map\(\(\) => crypto\.randomUUID\(\)\)/);
+  assert.match(source, /mode === "commit"[\s\S]*?operationIdsRef\.current = \[\]/);
   assert.match(source, /fetch\("\/api\/payments\/workforce-payouts\/bulk-upload", \{ method: "POST", body \}\)/);
   assert.match(source, /submit\("preview"\)/);
   assert.match(source, /submit\("commit"\)/);
   assert.match(source, /mode === "commit" && \(!preview\?\.canCommit \|\| preview\.importId\)/);
   assert.match(source, /Preview and validate the current input lines before applying them/);
   assert.match(source, /role="alertdialog"/);
+  assert.match(source, /announceWorkforcePayoutInputsChanged\(/);
+  assert.match(source, /closeEditor\(\);[\s\S]*?router\.refresh\(\)/);
 });
 
 test("manual editor loads its scoped field catalog and warns about published selections", () => {

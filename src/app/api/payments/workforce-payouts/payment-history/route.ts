@@ -53,17 +53,31 @@ export async function GET(request: Request) {
     if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
     const companyId = requireCompanyId(authorization);
 
-    const itemsResult = await supabaseAdmin
-      .from("workforce_payout_payment_items")
-      .select("id,batch_id,reference_no,payment_version,instruction_amount,status,bank_account_no_snapshot,utr_cin,bank_processing_remarks,created_at,finalized_at")
-      .eq("company_id", companyId)
-      .eq("workforce_id", workforceId)
-      .eq("period_start", periodStart)
-      .eq("period_end", periodEnd)
-      .order("payment_version", { ascending: false })
-      .limit(100);
+    const [itemsResult, holdEventsResult] = await Promise.all([
+      supabaseAdmin
+        .from("workforce_payout_payment_items")
+        .select("id,batch_id,reference_no,payment_version,instruction_amount,status,bank_account_no_snapshot,utr_cin,bank_processing_remarks,created_at,finalized_at")
+        .eq("company_id", companyId)
+        .eq("workforce_id", workforceId)
+        .eq("period_start", periodStart)
+        .eq("period_end", periodEnd)
+        .order("payment_version", { ascending: false })
+        .limit(100),
+      supabaseAdmin
+        .from("workforce_payout_payment_hold_events")
+        .select("id,action,remarks,created_at")
+        .eq("company_id", companyId)
+        .eq("workforce_id", workforceId)
+        .eq("period_start", periodStart)
+        .eq("period_end", periodEnd)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(100)
+    ]);
     if (itemsResult.error) return errorResponse(itemsResult.error.message, 400);
+    if (holdEventsResult.error) return errorResponse(holdEventsResult.error.message, 400);
     const items = itemsResult.data ?? [];
+    const holdEvents = holdEventsResult.data ?? [];
     const batchIds = [...new Set(items.map((item) => String(item.batch_id)).filter(Boolean))];
     const batchesResult = batchIds.length
       ? await supabaseAdmin
@@ -86,6 +100,16 @@ export async function GET(request: Request) {
     const bankNames = new Map((banksResult.data ?? []).map((bank) => [String(bank.id), String(bank.display_name ?? "Bank")]));
 
     return Response.json({
+      hold: {
+        onHold: String(holdEvents[0]?.action ?? "") === "hold",
+        latestRemark: String(holdEvents[0]?.remarks ?? ""),
+        events: holdEvents.map((event) => ({
+          id: String(event.id),
+          action: String(event.action),
+          remarks: String(event.remarks),
+          createdAt: String(event.created_at)
+        }))
+      },
       items: items.map((item) => {
         const batch = batches.get(String(item.batch_id));
         return {

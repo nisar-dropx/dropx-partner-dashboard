@@ -35,7 +35,14 @@ function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderF
   return Boolean(worker?.mappedProviderMemberId && providerMemberKey(row.stationId, worker.mappedProviderMemberId) !== providerMemberKey(row.stationId, row.providerMemberId));
 }
 
-function appendRow(formData: FormData, position: number, row: ProviderFirstMappingRow, replacementMappingId = "") {
+function appendRow(
+  formData: FormData,
+  position: number,
+  row: ProviderFirstMappingRow,
+  replacementMappingId = "",
+  replacementAction: "move" | "keep" | "" = "",
+  clearWorkforceId = ""
+) {
   const prefix = `rows[${position}]`;
   formData.set(`${prefix}[client_key]`, providerMemberKey(row.stationId, row.providerMemberId));
   formData.set(`${prefix}[id]`, row.workforceId);
@@ -54,6 +61,9 @@ function appendRow(formData: FormData, position: number, row: ProviderFirstMappi
   formData.set(`${prefix}[effective_to]`, row.effectiveTo);
   formData.set(`${prefix}[replace_mapping_id]`, replacementMappingId);
   formData.set(`${prefix}[replacement_confirmed]`, replacementMappingId ? "yes" : "");
+  formData.set(`${prefix}[replacement_action]`, replacementAction);
+  formData.set(`${prefix}[clear_mapping]`, !row.workforceId && row.mappingId ? "yes" : "");
+  formData.set(`${prefix}[clear_workforce_id]`, clearWorkforceId);
 }
 
 type ReplacementSaveConfirmation = {
@@ -61,6 +71,7 @@ type ReplacementSaveConfirmation = {
   replacements: Array<{ index: number; replacement: ProviderFirstMappingReplacement }>;
   cursor: number;
   confirmedMappingIds: Record<number, string>;
+  confirmedActions: Record<number, "move" | "keep">;
 };
 
 function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
@@ -226,7 +237,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   function chooseWorker(index: number, workerId: string) {
     const worker = workerById.get(workerId);
     if (!worker) {
-      update(index, { workforceId: "", dropxId: "", dropxName: "", mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "" });
+      update(index, { workforceId: "", dropxId: "", dropxName: "", mappingId: baselineRows[index].mappingId, paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "" });
       return;
     }
     const row = rows[index];
@@ -246,7 +257,11 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     });
   }
 
-  async function saveIndexes(indexes: number[], confirmedMappingIds: Record<number, string> = {}) {
+  async function saveIndexes(
+    indexes: number[],
+    confirmedMappingIds: Record<number, string> = {},
+    confirmedActions: Record<number, "move" | "keep"> = {}
+  ) {
     if (isSaving) return;
     const selected = Array.from(new Set(indexes)).filter((index) => dirtyRows[index]);
     const nextErrors: Record<number, string> = {};
@@ -267,7 +282,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       return replacement && !confirmedMappingIds[index] ? [{ index, replacement }] : [];
     });
     if (replacements.length) {
-      setReplacementConfirmation({ indexes: selected, replacements, cursor: 0, confirmedMappingIds });
+      setReplacementConfirmation({ indexes: selected, replacements, cursor: 0, confirmedMappingIds, confirmedActions });
       return;
     }
 
@@ -276,13 +291,21 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       key: providerMemberKey(rows[index].stationId, rows[index].providerMemberId),
       row: { ...rows[index], paymentValues: { ...rows[index].paymentValues } },
       previousWorkforceId: baselineRows[index]?.workforceId ?? "",
-      replacementMappingId: confirmedMappingIds[index] ?? ""
+      replacementMappingId: confirmedMappingIds[index] ?? "",
+      replacementAction: confirmedActions[index] ?? "" as const
     }));
     const snapshotByKey = new Map(snapshots.map((snapshot) => [snapshot.key, snapshot]));
     const snapshotByIndex = new Map(snapshots.map((snapshot) => [snapshot.index, snapshot]));
     const data = new FormData();
     data.set("row_count", String(snapshots.length));
-    snapshots.forEach((snapshot, position) => appendRow(data, position, snapshot.row, snapshot.replacementMappingId));
+    snapshots.forEach((snapshot, position) => appendRow(
+      data,
+      position,
+      snapshot.row,
+      snapshot.replacementMappingId,
+      snapshot.replacementAction,
+      snapshot.previousWorkforceId
+    ));
     setSavingIndexes(new Set(selected));
     setSaveNotice(null);
 
@@ -293,6 +316,15 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       for (const saved of result.savedRows) {
         const snapshot = snapshotByKey.get(saved.clientKey);
         if (!snapshot) continue;
+        if (saved.cleared) {
+          const clearedHistory = relocatedHistory(snapshot.row.history, {
+            previousMappingId: saved.cleared.previousMappingId,
+            previousEffectiveTo: saved.cleared.previousEffectiveTo,
+            previousStatus: saved.cleared.previousStatus
+          });
+          canonicalByIndex.set(snapshot.index, clearCurrentMapping(snapshot.row, clearedHistory));
+          continue;
+        }
         let canonical = {
           ...snapshot.row,
           mappingId: saved.mappingId,
@@ -342,8 +374,31 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           const canonical = canonicalByIndex.get(snapshot.index);
           if (!canonical) continue;
           if (snapshot.previousWorkforceId && snapshot.previousWorkforceId !== canonical.workforceId) {
-            workerClears.set(snapshot.previousWorkforceId, snapshot.row.providerMemberId);
+            const remaining = baselineRows.find((candidate, candidateIndex) => candidateIndex !== snapshot.index
+              && candidate.workforceId === snapshot.previousWorkforceId
+              && candidate.mappingId);
+            if (remaining) {
+              const existingWorker = workerById.get(snapshot.previousWorkforceId);
+              workerUpdates.set(snapshot.previousWorkforceId, {
+                stationId: remaining.stationId,
+                locationLabel: remaining.stationLabel,
+                profileStationId: existingWorker?.profileStationId,
+                profileLocationLabel: existingWorker?.profileLocationLabel,
+                providerId: remaining.providerId,
+                mappingId: remaining.mappingId,
+                paymentMethodId: remaining.paymentMethodId,
+                paymentValues: remaining.paymentValues,
+                productionThresholdConfig: remaining.productionThresholdConfig,
+                productionThresholdMinimumUnits: remaining.productionThresholdMinimumUnits,
+                effectiveFrom: remaining.effectiveFrom,
+                effectiveTo: remaining.effectiveTo,
+                mappedProviderMemberId: remaining.providerMemberId
+              });
+            } else {
+              workerClears.set(snapshot.previousWorkforceId, snapshot.row.providerMemberId);
+            }
           }
+          if (!canonical.workforceId) continue;
           const saved = result.savedRows.find((candidate) => candidate.clientKey === snapshot.key);
           workerUpdates.set(canonical.workforceId, { stationId: canonical.stationId, locationLabel: canonical.stationLabel, profileStationId: saved?.profileStationId ?? canonical.stationId, profileLocationLabel: saved?.profileLocationLabel ?? canonical.stationLabel, providerId: canonical.providerId, mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
         }
@@ -374,7 +429,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             indexes: [failed.index],
             replacements: [{ index: failed.index, replacement: result.replacement }],
             cursor: 0,
-            confirmedMappingIds: {}
+            confirmedMappingIds: {},
+            confirmedActions: {}
           });
         }
       }
@@ -429,7 +485,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Select DropX workforce" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Select DropX workforce" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>
@@ -461,16 +517,29 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           <div className="confirmation-body"><p style={{ whiteSpace: "pre-line" }}>{providerFirstMappingReplacementMessage(active.replacement)}</p></div>
           <div className="form-actions modal-actions confirmation-actions">
             <button className="button secondary" disabled={isSaving} onClick={() => setReplacementConfirmation(null)} type="button">Cancel</button>
-            <button className="button" disabled={isSaving} onClick={() => {
+            {active.replacement.kind === "location" && active.replacement.allowKeepAll !== false ? <button className="button secondary" disabled={isSaving} onClick={() => {
               const confirmedMappingIds = { ...replacementConfirmation.confirmedMappingIds, [active.index]: active.replacement.mappingId };
+              const confirmedActions = { ...replacementConfirmation.confirmedActions, [active.index]: "keep" as const };
               const nextCursor = replacementConfirmation.cursor + 1;
               if (nextCursor < replacementConfirmation.replacements.length) {
-                setReplacementConfirmation({ ...replacementConfirmation, cursor: nextCursor, confirmedMappingIds });
+                setReplacementConfirmation({ ...replacementConfirmation, cursor: nextCursor, confirmedMappingIds, confirmedActions });
                 return;
               }
               const indexes = replacementConfirmation.indexes;
               setReplacementConfirmation(null);
-              void saveIndexes(indexes, confirmedMappingIds);
+              void saveIndexes(indexes, confirmedMappingIds, confirmedActions);
+            }} type="button">Keep all</button> : null}
+            <button className="button" disabled={isSaving} onClick={() => {
+              const confirmedMappingIds = { ...replacementConfirmation.confirmedMappingIds, [active.index]: active.replacement.mappingId };
+              const confirmedActions = { ...replacementConfirmation.confirmedActions, [active.index]: "move" as const };
+              const nextCursor = replacementConfirmation.cursor + 1;
+              if (nextCursor < replacementConfirmation.replacements.length) {
+                setReplacementConfirmation({ ...replacementConfirmation, cursor: nextCursor, confirmedMappingIds, confirmedActions });
+                return;
+              }
+              const indexes = replacementConfirmation.indexes;
+              setReplacementConfirmation(null);
+              void saveIndexes(indexes, confirmedMappingIds, confirmedActions);
             }} type="button">{active.replacement.kind === "location" ? "Move mapping" : "Replace mapping"}</button>
           </div>
         </section>

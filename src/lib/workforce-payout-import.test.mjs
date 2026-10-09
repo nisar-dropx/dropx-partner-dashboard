@@ -4,8 +4,17 @@ import * as XLSX from "xlsx";
 import {
   buildWorkforcePayoutImportTemplate,
   parseWorkforcePayoutWorkbook,
-  resolveWorkforcePayoutImportRows
+  resolveWorkforcePayoutImportRows,
+  workforcePayoutSetupFieldCodes
 } from "./workforce-payout-import.ts";
+
+test("keeps mapping snapshot fields available when the live method relation is incomplete", () => {
+  assert.deepEqual(
+    workforcePayoutSetupFieldCodes(["FIXED_PAY_PER_MONTH"], { KM_RUN: 3, fixed_pay_per_month: 13000 }),
+    ["FIXED_PAY_PER_MONTH", "KM_RUN"]
+  );
+  assert.deepEqual(workforcePayoutSetupFieldCodes([], null), []);
+});
 
 const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "EFFECTIVE_TO", "VALUE", "REMARK"];
 

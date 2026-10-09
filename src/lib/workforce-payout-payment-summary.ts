@@ -19,7 +19,15 @@ export type WorkforcePayoutPaymentSummary = {
   availableToPay: number;
   overpaidAmount: number;
   historyCount: number;
-  status: "Payment Processing" | "Paid" | "Partially paid" | null;
+  status:
+    | "Payment Processing"
+    | "Payment Failed"
+    | "Payment Cancelled"
+    | "Payment On Hold"
+    | "PAN Not Linked"
+    | "Paid"
+    | "Partially paid"
+    | null;
   eligible: boolean | null;
   eligibilityCode: string | null;
   eligibilityMessage: string | null;
@@ -28,6 +36,8 @@ export type WorkforcePayoutPaymentSummary = {
 const PAYMENT_BALANCE_AVAILABLE_CODES = new Set([
   "eligible",
   "payment_processing",
+  "payment_on_hold",
+  "pan_not_linked",
   "no_positive_balance",
   "beneficiary_bank_details_missing",
   "beneficiary_bank_account_invalid",
@@ -69,6 +79,10 @@ export function workforcePayoutPaymentEligibilityLabel(
       return "Current location required";
     case "payment_processing":
       return null;
+    case "payment_on_hold":
+      return "Payment on hold";
+    case "pan_not_linked":
+      return "PAN not linked";
     default:
       return "Payment unavailable";
   }
@@ -121,13 +135,18 @@ export function summarizeWorkforcePayoutPayments(
     const balancePayable = money(Math.max(0, currentNetAmount - paidAmount));
     const availableToPay = money(Math.max(0, balancePayable - processingAmount));
     const overpaidAmount = money(Math.max(0, paidAmount - currentNetAmount));
+    const latestAttemptStatus = history.at(-1)?.status.trim().toLowerCase() ?? "";
     const status = processingAmount > 0
       ? "Payment Processing"
       : paidAmount > 0 && balancePayable === 0
         ? "Paid"
-        : paidAmount > 0
-          ? "Partially paid"
-          : null;
+        : latestAttemptStatus === "failed"
+          ? "Payment Failed"
+          : latestAttemptStatus === "cancelled"
+            ? "Payment Cancelled"
+            : paidAmount > 0
+              ? "Partially paid"
+              : null;
     summaries.set(workforceId, {
       currentNetAmount,
       paidAmount,

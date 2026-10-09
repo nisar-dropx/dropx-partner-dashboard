@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { PGlite } from "@electric-sql/pglite";
 import * as XLSX from "xlsx";
 import {
   canonicalizeProviderFirstMembers,
@@ -11,6 +12,7 @@ import {
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstNamesMatch,
+  providerFirstRowIssue,
   providerFirstValidationStatus,
   providerMemberIdFromSpreadsheetCells,
   providerMemberKey,
@@ -108,7 +110,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
   });
   assert.equal(
     providerFirstMappingReplacementMessage(remap),
-    "Provider ID member-1 - Asha Devi is currently mapped to DROPX1 - Asha Devi at JUGD - Jharsuguda.\nDo you want to move this mapping to JUGF - Sundergarh from 2026-06-28?\nThe old location will end on the preceding day and remain in History."
+    "Provider ID member-1 - Asha Devi is currently mapped to DROPX1 - Asha Devi at JUGD - Jharsuguda.\nMove it to JUGF - Sundergarh, or keep both location mappings for the same DropX ID?\nMoving ends the old location on the preceding day. Keep all preserves both locations."
   );
   assert.equal(providerFirstValidationStatus(destination, sourceWorker, method), "ready");
   assert.equal(providerFirstLocationRemap({ ...destination, providerId: "provider-2" }, sourceWorker), null);
@@ -282,6 +284,19 @@ test("classifies every required mapped-row field consistently", () => {
   ]) assert.equal(providerFirstValidationStatus(invalid, worker, method), "needs_attention");
 });
 
+test("allows an existing mapping to be cleared without selecting another worker", () => {
+  assert.equal(providerFirstRowIssue({
+    ...row,
+    workforceId: "",
+    dropxId: "",
+    dropxName: "",
+    paymentMethodId: "",
+    paymentValues: {},
+    effectiveFrom: ""
+  }, undefined, undefined), null);
+  assert.match(providerFirstRowIssue({ ...row, workforceId: "", mappingId: "" }, undefined, undefined), /Select a DropX workforce ID/);
+});
+
 test("requires one positive whole-number combined minimum for a threshold method", () => {
   const thresholdMethod = {
     ...method,
@@ -337,13 +352,14 @@ test("paginates 1,103 filtered rows with every supported size", () => {
 });
 
 test("provider-first renders only the selected page and saves without navigation", async () => {
-  const [component, page, actions, replacementMigration, locationRemapMigration, correctionMigration] = await Promise.all([
+  const [component, page, actions, replacementMigration, locationRemapMigration, correctionMigration, multiLocationMigration] = await Promise.all([
     readFile(new URL("../components/provider-first-mapping-worksheet.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/provider-id-mapping/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/provider-mapping/actions.ts", import.meta.url), "utf8"),
     readFile(new URL("../../supabase/migrations/20261005083434_provider_mapping_confirmed_replacement.sql", import.meta.url), "utf8"),
     readFile(new URL("../../supabase/migrations/20261005102002_provider_mapping_location_remap.sql", import.meta.url), "utf8"),
-    readFile(new URL("../../supabase/migrations/20261005124958_provider_mapping_drift_and_period_corrections.sql", import.meta.url), "utf8")
+    readFile(new URL("../../supabase/migrations/20261005124958_provider_mapping_drift_and_period_corrections.sql", import.meta.url), "utf8"),
+    readFile(new URL("../../supabase/migrations/20261009173118_workforce_provider_mapping_multi_location.sql", import.meta.url), "utf8")
   ]);
   assert.match(component, /paginatedIndexes\.map/);
   assert.match(component, /isScientificProviderMemberId\(row\.providerMemberId\)/);
@@ -353,6 +369,8 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /mappingId: worker\.mappingId/);
   assert.match(component, /Replace existing mapping\?/);
   assert.match(component, /Move mapping to new location\?/);
+  assert.match(component, />Keep all<\/button>/);
+  assert.match(component, /\[clear_mapping\]/);
   assert.match(component, /Replace mapping/);
   assert.match(component, /providerFirstLocationRemap/);
   assert.match(component, /Mapped: \$\{worker\.locationLabel\} · Profile:/);
@@ -385,7 +403,12 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(actions, /currentMappingLocationDriftEdit/);
   assert.match(actions, /profileStationId/);
   assert.match(actions, /workforce_replace_joining_mapping/);
-  assert.match(actions, /expectedReplacementId === existingMapping!\.id/);
+  assert.match(actions, /expectedReplacementId === existingMapping\.id/);
+  assert.match(actions, /workforce_active_provider_member_mappings/);
+  assert.match(actions, /providerMemberIdentity\(currentMapping\.provider_member_id\)[\s\S]*providerMemberIdentity\(providerMemberId\)/);
+  assert.doesNotMatch(actions, /\.eq\("provider_member_id", providerMemberId\)/);
+  assert.match(actions, /workforce_keep_joining_mapping/);
+  assert.match(actions, /workforce_clear_joining_mapping/);
   assert.match(replacementMigration, /create or replace function public\.workforce_replace_joining_mapping/);
   assert.match(replacementMigration, /p_expected_old_mapping uuid/);
   assert.match(replacementMigration, /old_mapping\.status <> 'active'/);
@@ -411,6 +434,14 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(correctionMigration, /w\.location_id is distinct from v_old\.station_id/);
   assert.match(correctionMigration, /person\.location_id is distinct from new_station_id/);
   assert.match(correctionMigration, /policy\.station_id is distinct from p_new_station/);
+  assert.match(multiLocationMigration, /field_executive_provider_mappings_one_current_member_station_idx/);
+  assert.match(multiLocationMigration, /create or replace function public\.workforce_active_provider_member_mappings/);
+  assert.match(multiLocationMigration, /upper\(btrim\(mapping\.provider_member_id\)\)[\s\S]*upper\(btrim\(p_provider_member_id\)\)/);
+  assert.match(multiLocationMigration, /create or replace function public\.workforce_keep_joining_mapping/);
+  assert.match(multiLocationMigration, /create or replace function public\.workforce_clear_joining_mapping/);
+  assert.match(multiLocationMigration, /workforce_provider_mapping_person/);
+  assert.match(multiLocationMigration, /submitted DropX ID does not match/);
+  assert.match(multiLocationMigration, /begin;[\s\S]*commit;/);
 });
 
 test("locks provider mappings only across the associate's finalized payout dates", async () => {
@@ -432,4 +463,139 @@ test("locks provider mappings only across the associate's finalized payout dates
   assert.match(migration, /workforce\.source_profile_type = 'employee'/);
   assert.doesNotMatch(migration, /daterange\(least\(new_start, old_mapping\.effective_from\)/);
   assert.doesNotMatch(migration, /Finalized Workforce payroll uses this mapping period/);
+});
+
+test("multi-location migration enforces one canonical DropX owner across stations", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    create role anon;
+    create role authenticated;
+    create role service_role;
+    create table public.workforce (
+      id uuid primary key,
+      company_id uuid not null,
+      dropx_id text,
+      full_name text,
+      location_id uuid,
+      deleted_at timestamptz,
+      migration_state text default 'canonical',
+      last_working_date date,
+      lifecycle_status text,
+      source_profile_type text,
+      source_profile_id uuid,
+      provider_employee_id text,
+      provider_id_status text,
+      updated_at timestamptz default now()
+    );
+    create table public.stations (
+      id uuid primary key,
+      company_id uuid not null,
+      provider_id uuid not null
+    );
+    create table public.field_executive_provider_mappings (
+      id uuid primary key default gen_random_uuid(),
+      company_id uuid not null,
+      workforce_id uuid,
+      field_executive_id uuid,
+      employee_id uuid,
+      contractor_id uuid,
+      provider_id uuid,
+      station_id uuid,
+      provider_member_id text,
+      effective_from date not null,
+      effective_to date,
+      payment_method_id uuid,
+      payment_values jsonb default '{}'::jsonb,
+      production_threshold_config jsonb,
+      pay_type text,
+      status text not null default 'active',
+      created_by uuid,
+      created_at timestamptz default now(),
+      updated_at timestamptz default now()
+    );
+    create unique index field_executive_provider_mappings_one_current_member_idx
+      on public.field_executive_provider_mappings(company_id, provider_id, upper(btrim(provider_member_id)))
+      where effective_to is null and status = 'active';
+    create table public.workforce_joining_events (
+      company_id uuid,
+      workforce_id uuid,
+      event_code text,
+      actor_id uuid,
+      actor_name text,
+      details jsonb
+    );
+    create function public.workforce_provider_mapping_person(uuid, uuid, uuid, uuid, uuid)
+    returns uuid language sql immutable as $$ select coalesce($2, $3, $4, $5) $$;
+  `);
+  const migration = await readFile(new URL("../../supabase/migrations/20261009173118_workforce_provider_mapping_multi_location.sql", import.meta.url), "utf8");
+  await db.exec(migration);
+
+  const company = "10000000-0000-4000-8000-000000000001";
+  const provider = "10000000-0000-4000-8000-000000000002";
+  const workerA = "10000000-0000-4000-8000-000000000003";
+  const workerB = "10000000-0000-4000-8000-000000000004";
+  const stationA = "10000000-0000-4000-8000-000000000005";
+  const stationB = "10000000-0000-4000-8000-000000000006";
+  const mappingA = "10000000-0000-4000-8000-000000000007";
+  const mappingB = "10000000-0000-4000-8000-000000000008";
+  await db.exec(`
+    insert into public.workforce(id,company_id,dropx_id,location_id) values
+      ('${workerA}','${company}','DX-A','${stationA}'),
+      ('${workerB}','${company}','DX-B','${stationB}');
+    insert into public.stations(id,company_id,provider_id) values
+      ('${stationA}','${company}','${provider}'),
+      ('${stationB}','${company}','${provider}');
+    insert into public.field_executive_provider_mappings(
+      id,company_id,workforce_id,provider_id,station_id,provider_member_id,effective_from
+    ) values ('${mappingA}','${company}','${workerA}','${provider}','${stationA}','  MeMbEr-1  ','2026-09-01');
+  `);
+  const normalizedLookup = await db.query(`
+    select id, provider_member_id
+    from public.workforce_active_provider_member_mappings(
+      '${company}', '${provider}', ' member-1 '
+    )
+  `);
+  assert.equal(normalizedLookup.rows.length, 1);
+  assert.equal(normalizedLookup.rows[0].id, mappingA);
+  assert.equal(normalizedLookup.rows[0].provider_member_id, "  MeMbEr-1  ");
+  await assert.rejects(db.exec(`
+    insert into public.field_executive_provider_mappings(
+      id,company_id,workforce_id,provider_id,station_id,provider_member_id,effective_from
+    ) values ('${mappingB}','${company}','${workerB}','${provider}','${stationB}','member-1','2026-09-01');
+  `), /same DropX ID/);
+  const kept = await db.query(`
+    select public.workforce_keep_joining_mapping(
+      '${company}',
+      '${workerA}',
+      '${workerA}',
+      '${mappingA}',
+      'DX-A',
+      jsonb_build_object(
+        'status', 'active',
+        'provider_id', '${provider}',
+        'station_id', '${stationB}',
+        'provider_member_id', ' member-1 ',
+        'effective_from', '2026-09-01',
+        'payment_method_id', '${provider}',
+        'payment_values', jsonb_build_object('DELIVERY', 10)
+      ),
+      null,
+      'Test reviewer'
+    ) as id
+  `);
+  const keptMappingId = kept.rows[0].id;
+  const result = await db.query(`select count(*)::int as count from public.field_executive_provider_mappings where status='active'`);
+  assert.equal(result.rows[0].count, 2);
+  const keptIdentity = await db.query(`
+    select provider_member_id
+    from public.field_executive_provider_mappings
+    where id = '${keptMappingId}'
+  `);
+  assert.equal(keptIdentity.rows[0].provider_member_id, "member-1");
+  await db.query(`select public.workforce_clear_joining_mapping(
+    '${company}', '${workerA}', '${workerA}', '${keptMappingId}', null, 'Test reviewer'
+  )`);
+  const afterClear = await db.query(`select count(*)::int as count from public.field_executive_provider_mappings where status='active'`);
+  assert.equal(afterClear.rows[0].count, 1);
+  await db.close();
 });

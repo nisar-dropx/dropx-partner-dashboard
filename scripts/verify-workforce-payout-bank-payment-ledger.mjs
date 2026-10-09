@@ -15,10 +15,17 @@ const publishedSnapshotFreshnessMigrationUrl = new URL(
   "../supabase/migrations/20261009125250_workforce_payout_bank_published_snapshot_freshness.sql",
   import.meta.url
 );
+const lifecycleMigrationUrl = new URL(
+  "../supabase/migrations/20261009172942_workforce_payout_manual_status_and_holds.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
 const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
+const lifecycleMigration = readFileSync(lifecycleMigrationUrl, "utf8");
 const executablePublishedSnapshotFreshnessMigration = publishedSnapshotFreshnessMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableLifecycleMigration = lifecycleMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableMigration = [migration, compatibilityMigration, publishedSnapshotFreshnessMigration]
   .map((sql) => sql.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""))
@@ -137,6 +144,14 @@ assert.doesNotMatch(
   migration,
   /grant\s+(?:[^;]*\b(?:insert|update|delete|truncate)\b[^;]*)\s+on table public\.workforce_payout_payment_/i
 );
+assert.match(lifecycleMigration, /create table public\.workforce_payout_payment_hold_events/i);
+assert.match(lifecycleMigration, /state_changed boolean not null/i);
+assert.match(lifecycleMigration, /force row level security/i);
+assert.match(lifecycleMigration, /status in \('processing', 'paid', 'cancelled', 'failed'\)/i);
+assert.match(lifecycleMigration, /eligibility_code := 'pan_not_linked'/i);
+assert.match(lifecycleMigration, /eligibility_code := 'payment_on_hold'/i);
+assert.match(lifecycleMigration, /cardinality\(selected_workforce_ids\) >= 1/i);
+assert.doesNotMatch(lifecycleMigration, /cardinality\(selected_workforce_ids\) <= 1000/i);
 
 const db = new PGlite();
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -197,6 +212,14 @@ await db.exec(`
     source_profile_type text,
     source_profile_id uuid,
     unique(company_id,id)
+  );
+  create table public.connect_profile_verifications(
+    company_id uuid not null,
+    profile_type text not null,
+    account_id uuid not null,
+    kind text not null,
+    verified boolean not null default false,
+    primary key(company_id, profile_type, account_id, kind)
   );
   create table public.workforce_payout_review_submissions(
     id uuid primary key,
@@ -367,11 +390,22 @@ await db.exec(`
 
 await db.exec(executableMigration);
 await db.exec(executablePublishedSnapshotFreshnessMigration);
+await db.exec(executableLifecycleMigration);
 
 const installedCandidateDefinition = await db.query(`
   select pg_get_functiondef(
     'public.workforce_payout_payment_candidates(uuid,date,date,uuid[])'::regprocedure
   ) definition
+`);
+const installedCreatorDefinition = await db.query(`
+  select pg_get_functiondef(
+    'public.workforce_create_payout_payment_batch(uuid,uuid,uuid,text,uuid,date,date,date,uuid[])'::regprocedure
+  ) definition
+`);
+const installedSelectionConstraint = await db.query(`
+  select pg_get_constraintdef(oid) definition
+  from pg_constraint
+  where conname='workforce_payout_payment_batches_selection_check'
 `);
 assert.doesNotMatch(
   installedCandidateDefinition.rows[0].definition,
@@ -383,6 +417,9 @@ assert.doesNotMatch(
   /workforce_advance_recovery_snapshot_hash|v_current_dependency_hash/i,
   "bank eligibility must not depend on live dependency-hash availability"
 );
+assert.doesNotMatch(installedCandidateDefinition.rows[0].definition, /cardinality\(v_ids\)\s*>\s*1000/i);
+assert.doesNotMatch(installedCreatorDefinition.rows[0].definition, /cardinality\(v_ids\)[^;]*1000/i);
+assert.doesNotMatch(installedSelectionConstraint.rows[0].definition, /1000/i);
 
 const reference = await db.query(
   "select public.workforce_payout_payment_reference('D-111',date '2026-09-01',1) reference_no"
@@ -417,6 +454,12 @@ await db.query(
     id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code
   ) values ($1,$2,'D111','Test Worker','worker@example.com',$3,' 1234 567890 ',' fdrl 0000002 ')`,
   [workforce, company, station]
+);
+await db.query(
+  `insert into public.connect_profile_verifications(
+    company_id,profile_type,account_id,kind,verified
+  ) values ($1,'workforce',$2,'pan_aadhaar',true)`,
+  [company, workforce]
 );
 await db.query(
   `insert into public.workforce_payout_mapping_relocks(
@@ -522,6 +565,113 @@ await db.query(
   "delete from public.verify_workforce_payout_mapping_revision_state where company_id=$1 and workforce_id=$2",
   [company, workforce]
 );
+
+await db.query(
+  `update public.connect_profile_verifications
+   set verified=false
+   where company_id=$1 and account_id=$2 and profile_type='workforce' and kind='pan_aadhaar'`,
+  [company, workforce]
+);
+const panBlockedPreview = await preview();
+assert.equal(panBlockedPreview.eligible, false);
+assert.equal(panBlockedPreview.eligibility_code, "pan_not_linked");
+assert.equal(panBlockedPreview.payment_status, "PAN Not Linked");
+assert.equal(Number(panBlockedPreview.available_to_pay), 0);
+await db.query(
+  `update public.connect_profile_verifications
+   set verified=true
+   where company_id=$1 and account_id=$2 and profile_type='workforce' and kind='pan_aadhaar'`,
+  [company, workforce]
+);
+
+const setHold = async ({ operation, hold, remarks }) => {
+  const result = await db.query(
+    `select public.workforce_set_payout_payment_hold(
+      $1,$2,$3,$4,$5::date,$6::date,$7,$8
+    ) result`,
+    [company, actor, operation, workforce, periodStart, periodEnd, hold, remarks]
+  );
+  return result.rows[0].result;
+};
+
+const noOpRelease = await setHold({
+  operation: id(57),
+  hold: false,
+  remarks: "Already available for bank payment"
+});
+assert.equal(noOpRelease.changed, false);
+assert.equal(noOpRelease.replayed, false);
+const interveningHold = await setHold({
+  operation: id(58),
+  hold: true,
+  remarks: "Temporary finance hold"
+});
+assert.equal(interveningHold.changed, true);
+const noOpReleaseReplay = await setHold({
+  operation: id(57),
+  hold: false,
+  remarks: "Already available for bank payment"
+});
+assert.equal(noOpReleaseReplay.changed, false);
+assert.equal(noOpReleaseReplay.replayed, true);
+const stateAfterNoOpReplay = await db.query(
+  `select
+     (select action from public.workforce_payout_payment_hold_events
+       where company_id=$1 and workforce_id=$2 and period_start=$3 and period_end=$4
+       order by created_at desc,id desc limit 1) latest_action,
+     (select count(*)::int from public.workforce_payout_payment_hold_events
+       where company_id=$1 and operation_id=$5) no_op_operation_count,
+     (select state_changed from public.workforce_payout_payment_hold_events
+       where company_id=$1 and operation_id=$5) no_op_state_changed`,
+  [company, workforce, periodStart, periodEnd, id(57)]
+);
+assert.deepEqual(stateAfterNoOpReplay.rows[0], {
+  latest_action: "hold",
+  no_op_operation_count: 1,
+  no_op_state_changed: false
+});
+const restoredAfterNoOpReplay = await setHold({
+  operation: id(59),
+  hold: false,
+  remarks: "Regression setup restored"
+});
+assert.equal(restoredAfterNoOpReplay.changed, true);
+await assert.rejects(
+  setHold({ operation: id(60), hold: true, remarks: "x" }),
+  /remark between 3 and 1000 characters/i
+);
+const held = await setHold({ operation: id(60), hold: true, remarks: "Awaiting finance review" });
+assert.equal(held.on_hold, true);
+assert.equal(held.replayed, false);
+const heldReplay = await setHold({ operation: id(60), hold: true, remarks: "Awaiting finance review" });
+assert.equal(heldReplay.replayed, true);
+const heldPreview = await preview();
+assert.equal(heldPreview.eligible, false);
+assert.equal(heldPreview.eligibility_code, "payment_on_hold");
+assert.equal(heldPreview.payment_status, "Payment On Hold");
+assert.equal(Number(heldPreview.available_to_pay), 0);
+await assert.rejects(
+  db.query(
+    `update public.workforce_payout_payment_hold_events
+     set remarks='Tampered hold reason' where company_id=$1 and operation_id=$2`,
+    [company, id(60)]
+  ),
+  /only by the payment lifecycle RPC|history is immutable/i
+);
+const released = await setHold({ operation: id(61), hold: false, remarks: "Finance review completed" });
+assert.equal(released.on_hold, false);
+const holdAudit = await db.query(
+  `select action,state_changed,remarks from public.workforce_payout_payment_hold_events
+   where company_id=$1 and workforce_id=$2 order by created_at,id`,
+  [company, workforce]
+);
+assert.deepEqual(holdAudit.rows, [
+  { action: "release", state_changed: false, remarks: "Already available for bank payment" },
+  { action: "hold", state_changed: true, remarks: "Temporary finance hold" },
+  { action: "release", state_changed: true, remarks: "Regression setup restored" },
+  { action: "hold", state_changed: true, remarks: "Awaiting finance review" },
+  { action: "release", state_changed: true, remarks: "Finance review completed" }
+]);
 
 const payablePreview = await preview();
 assert.equal(payablePreview.eligible, true);
@@ -683,6 +833,15 @@ const finalize = async ({ operation, hash, referenceNo, amountPaise, status, utr
   );
   return result.rows[0].result;
 };
+const transitionPayment = async ({ operation, paymentItemId, outcome, remarks }) => {
+  const result = await db.query(
+    `select public.workforce_transition_payout_payment_item(
+      $1,$2,$3,$4,$5,$6
+    ) result`,
+    [company, actor, operation, paymentItemId, outcome, remarks]
+  );
+  return result.rows[0].result;
+};
 const paid = await finalize({
   operation: id(21),
   hash: "b".repeat(64),
@@ -819,15 +978,33 @@ assert.equal(second.items[0].reference_no, "WPD111092026V2");
 assert.equal(Number(second.items[0].paid_before_amount), 11836);
 assert.equal(Number(second.items[0].instruction_amount), 1164);
 
-const cancelled = await finalize({
+const secondItem = await db.query(
+  "select id from public.workforce_payout_payment_items where company_id=$1 and reference_no='WPD111092026V2'",
+  [company]
+);
+await assert.rejects(
+  transitionPayment({ operation: id(23), paymentItemId: secondItem.rows[0].id, outcome: "cancelled", remarks: "x" }),
+  /remark between 3 and 1000 characters/i
+);
+const cancelled = await transitionPayment({
   operation: id(23),
-  hash: "e".repeat(64),
-  referenceNo: "WPD111092026V2",
-  amountPaise: 116400,
-  status: "CANCELLED",
-  remarks: "RETURNED"
+  paymentItemId: secondItem.rows[0].id,
+  outcome: "cancelled",
+  remarks: "Payment cancelled after bank rejection"
 });
-assert.equal(cancelled.cancelled, 1);
+assert.equal(cancelled.outcome, "cancelled");
+assert.equal(cancelled.batch_status, "completed");
+const cancelledReplay = await transitionPayment({
+  operation: id(23),
+  paymentItemId: secondItem.rows[0].id,
+  outcome: "cancelled",
+  remarks: "Payment cancelled after bank rejection"
+});
+assert.equal(cancelledReplay.replayed, true);
+const cancelledPreview = await preview();
+assert.equal(cancelledPreview.eligible, true);
+assert.equal(cancelledPreview.payment_status, "Payment Cancelled");
+assert.equal(Number(cancelledPreview.available_to_pay), 1164);
 const third = await createBatch({ operation: id(24), fingerprint: "f".repeat(64) });
 assert.equal(third.items[0].reference_no, "WPD111092026V3", "cancelled attempts must consume a version");
 assert.equal(Number(third.items[0].instruction_amount), 1164);
@@ -890,6 +1067,79 @@ const meaningfulPaid = await finalize({
 });
 assert.equal(meaningfulPaid.paid, 1);
 
+const revisedAfterPaymentSnapshot = JSON.stringify({
+  schema_version: "2",
+  source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true, payment_status: "Ready for review" },
+  item: { workforce_id: workforce, station_code: "NLRF", net_amount: "13000.00" }
+});
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values ($1,$2,$3,$4,6,$5::jsonb,$6,$7,$8,$9,'worksheet',$10,$11)`,
+  [id(70), company, workforce, station, revisedAfterPaymentSnapshot, "7".repeat(64), dependencyHash,
+    mappingRelock, review, periodStart, periodEnd]
+);
+const revisedDeltaPreview = await preview();
+assert.equal(revisedDeltaPreview.eligible, true);
+assert.equal(revisedDeltaPreview.payment_status, "Partially paid");
+assert.equal(Number(revisedDeltaPreview.current_target_amount), 14000);
+assert.equal(Number(revisedDeltaPreview.paid_amount), 13000);
+assert.equal(Number(revisedDeltaPreview.available_to_pay), 1000);
+const fourth = await createBatch({ operation: id(71), fingerprint: "7".repeat(64) });
+assert.equal(fourth.items[0].reference_no, "WPD111092026V4");
+assert.equal(Number(fourth.items[0].instruction_amount), 1000);
+const fourthItem = await db.query(
+  "select id from public.workforce_payout_payment_items where company_id=$1 and reference_no='WPD111092026V4'",
+  [company]
+);
+const failed = await transitionPayment({
+  operation: id(72),
+  paymentItemId: fourthItem.rows[0].id,
+  outcome: "failed",
+  remarks: "Beneficiary bank rejected the transfer"
+});
+assert.equal(failed.outcome, "failed");
+assert.equal(failed.batch_status, "completed");
+const failedPreview = await preview();
+assert.equal(failedPreview.eligible, true);
+assert.equal(failedPreview.payment_status, "Payment Failed");
+assert.equal(Number(failedPreview.available_to_pay), 1000);
+const fifth = await createBatch({ operation: id(73), fingerprint: "8".repeat(64) });
+assert.equal(fifth.items[0].reference_no, "WPD111092026V5", "failed attempts must consume a version");
+assert.equal(Number(fifth.items[0].instruction_amount), 1000);
+const fifthItem = await db.query(
+  "select id from public.workforce_payout_payment_items where company_id=$1 and reference_no='WPD111092026V5'",
+  [company]
+);
+await transitionPayment({
+  operation: id(74),
+  paymentItemId: fifthItem.rows[0].id,
+  outcome: "cancelled",
+  remarks: "Payment run cancelled by Finance"
+});
+const manualAudit = await db.query(
+  `select event_type,event_data->>'remarks' remarks
+   from public.workforce_payout_payment_events
+   where company_id=$1 and operation_id in ($2,$3)
+   order by event_type`,
+  [company, id(72), id(74)]
+);
+assert.deepEqual(manualAudit.rows, [
+  { event_type: "payment_cancelled_manually", remarks: "Payment run cancelled by Finance" },
+  { event_type: "payment_failed_manually", remarks: "Beneficiary bank rejected the transfer" }
+]);
+await assert.rejects(
+  db.query(
+    `update public.workforce_payout_payment_events
+     set event_data=jsonb_set(event_data,'{remarks}','"Tampered"'::jsonb)
+     where company_id=$1 and operation_id=$2`,
+    [company, id(72)]
+  ),
+  /audit rows (?:are immutable|may be appended only)/i
+);
+
 const catalog = await db.query(`
   select
     (select count(*)::int from pg_trigger
@@ -900,6 +1150,10 @@ const catalog = await db.query(`
       where oid='public.workforce_payout_payment_items'::regclass) item_rls,
     has_table_privilege('service_role','public.workforce_payout_payment_items','SELECT') item_select,
     has_table_privilege('service_role','public.workforce_payout_payment_items','INSERT') item_insert,
+    (select relrowsecurity and relforcerowsecurity from pg_class
+      where oid='public.workforce_payout_payment_hold_events'::regclass) hold_rls,
+    has_table_privilege('service_role','public.workforce_payout_payment_hold_events','SELECT') hold_select,
+    has_table_privilege('service_role','public.workforce_payout_payment_hold_events','INSERT') hold_insert,
     has_table_privilege('service_role','public.workforce_payout_review_submissions','INSERT') review_insert,
     has_function_privilege('service_role',
       'public.workforce_create_payout_payment_batch(uuid,uuid,uuid,text,uuid,date,date,date,uuid[])',
@@ -918,13 +1172,28 @@ const catalog = await db.query(`
       'EXECUTE') authenticated_execute,
     has_function_privilege('service_role',
       'public.workforce_payout_payment_interval_is_processing(uuid,date,date)',
-      'EXECUTE') internal_execute
+      'EXECUTE') internal_execute,
+    has_function_privilege('service_role',
+      'public.workforce_set_payout_payment_hold(uuid,uuid,uuid,uuid,date,date,boolean,text)',
+      'EXECUTE') hold_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_set_payout_payment_hold(uuid,uuid,uuid,uuid,date,date,boolean,text)',
+      'EXECUTE') authenticated_hold_execute,
+    has_function_privilege('service_role',
+      'public.workforce_transition_payout_payment_item(uuid,uuid,uuid,uuid,text,text)',
+      'EXECUTE') transition_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_transition_payout_payment_item(uuid,uuid,uuid,uuid,text,text)',
+      'EXECUTE') authenticated_transition_execute
 `);
 assert.ok(Number(catalog.rows[0].trigger_count) >= 13);
 assert.equal(catalog.rows[0].provider_trigger, true);
 assert.equal(catalog.rows[0].item_rls, true);
 assert.equal(catalog.rows[0].item_select, true);
 assert.equal(catalog.rows[0].item_insert, false);
+assert.equal(catalog.rows[0].hold_rls, true);
+assert.equal(catalog.rows[0].hold_select, true);
+assert.equal(catalog.rows[0].hold_insert, false);
 assert.equal(catalog.rows[0].review_insert, false);
 assert.equal(catalog.rows[0].create_execute, true);
 assert.equal(catalog.rows[0].preview_execute, true);
@@ -932,6 +1201,10 @@ assert.equal(catalog.rows[0].authenticated_preview_execute, false);
 assert.equal(catalog.rows[0].candidate_execute, false);
 assert.equal(catalog.rows[0].authenticated_execute, false);
 assert.equal(catalog.rows[0].internal_execute, false);
+assert.equal(catalog.rows[0].hold_execute, true);
+assert.equal(catalog.rows[0].authenticated_hold_execute, false);
+assert.equal(catalog.rows[0].transition_execute, true);
+assert.equal(catalog.rows[0].authenticated_transition_execute, false);
 
 await db.close();
 console.log("Workforce payout bank payment ledger verification passed.");

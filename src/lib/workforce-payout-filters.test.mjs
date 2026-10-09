@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   WORKFORCE_PAYOUT_FILTER_NONE,
   matchesWorkforcePayoutFilters,
+  reconcileWorkforcePayoutFilterSelection,
   toggleWorkforcePayoutFilterOption,
   workforcePayoutFacetValues
 } from "./workforce-payout-filters.ts";
@@ -108,4 +109,11 @@ test("an All-minus-one selection excludes only the unchecked facet", () => {
   assert.equal(matchesWorkforcePayoutFilters(row, "", { ...all, locations: selected }), true);
   assert.equal(matchesWorkforcePayoutFilters({ ...row, location: "KTUO" }, "", { ...all, locations: selected }), false);
   assert.equal(matchesWorkforcePayoutFilters({ ...row, location: "KLZH" }, "", { ...all, locations: selected }), true);
+});
+
+test("refreshing payout rows removes stale facet values without breaking filters", () => {
+  assert.deepEqual(reconcileWorkforcePayoutFilterSelection(["A", "C"], ["A", "B"]), ["A"]);
+  assert.deepEqual(reconcileWorkforcePayoutFilterSelection(["C"], ["A", "B"]), []);
+  assert.deepEqual(reconcileWorkforcePayoutFilterSelection(["A"], [WORKFORCE_PAYOUT_FILTER_NONE]), [WORKFORCE_PAYOUT_FILTER_NONE]);
+  assert.deepEqual(reconcileWorkforcePayoutFilterSelection(["A", "B"], ["A", "B"]), []);
 });

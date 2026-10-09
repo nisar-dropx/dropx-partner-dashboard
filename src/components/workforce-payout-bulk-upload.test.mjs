@@ -40,3 +40,10 @@ test("bulk payout upload reports queued published-payout refresh warnings withou
   assert.match(source, /Import completed with/);
   assert.match(source, /role="status"/);
 });
+
+test("a committed upload refreshes the worksheet immediately and closes the upload panel", () => {
+  assert.match(source, /announceWorkforcePayoutInputsChanged\(/);
+  assert.match(source, /setOpen\(false\)/);
+  assert.match(source, /setFile\(null\)/);
+  assert.match(source, /router\.refresh\(\)/);
+});

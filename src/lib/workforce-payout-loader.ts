@@ -5,6 +5,7 @@ import "server-only";
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 
 import type { AuthorizationContext } from "@/lib/authorization";
+import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { calculateAutomaticDeductionLines, type AutomaticDeductionHead, type DeductionWorkerContext } from "@/lib/workforce-deductions";
 import { allocationActiveOn, cumulativeDirectPayUnitsBefore, directPayAttendanceBasis, directPayAttendanceUnit, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
@@ -101,6 +102,7 @@ export async function loadWorkforcePayoutRows(
   scope: WorkforcePayoutLoadScope = {}
 ) {
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
+  const admin = supabaseAdmin;
   const scopeEnabled = scope.workforceIds !== undefined;
   const scopedWorkforceIds = [...new Set((scope.workforceIds ?? []).map(String).map((id) => id.trim()).filter(Boolean))];
   if (scopeEnabled && !scopedWorkforceIds.length) return { rows: [] as WorkforcePayoutRow[], error: null as string | null };
@@ -201,10 +203,9 @@ export async function loadWorkforcePayoutRows(
     const attendancePeriods: any[] = [];
     const paymentFields: any[] = [];
     const production: any[] = [];
-    for (let index = 0; index < payoutInputWorkforceIds.length; index += 100) {
-      const workforceChunk = payoutInputWorkforceIds.slice(index, index + 100);
+    const chunkResults = await mapWithConcurrency(chunkedValues(payoutInputWorkforceIds, 100), 3, async (workforceChunk) => {
       const [attendanceResult, attendancePeriodsResult, paymentFieldResult, productionResult] = await Promise.all([
-        readAllRows(supabaseAdmin!.from("workforce_payout_attendance_overrides")
+        readAllRows(admin.from("workforce_payout_attendance_overrides")
           .select("id,workforce_id,station_id,work_date,attendance_status,work_minutes")
           .eq("company_id", companyId)
           .in("workforce_id", workforceChunk)
@@ -212,7 +213,7 @@ export async function loadWorkforcePayoutRows(
           .lte("work_date", toDate)
           .order("work_date")
           .order("id")),
-        readAllRows(supabaseAdmin!.from("workforce_payout_attendance_values")
+        readAllRows(admin.from("workforce_payout_attendance_values")
           .select("id,workforce_id,station_id,attendance_basis,effective_from,effective_to,quantity")
           .eq("company_id", companyId)
           .in("workforce_id", workforceChunk)
@@ -220,7 +221,7 @@ export async function loadWorkforcePayoutRows(
           .gte("effective_to", thresholdHistoryStart)
           .order("effective_from")
           .order("id")),
-        readAllRows(supabaseAdmin!.from("workforce_payment_field_overrides")
+        readAllRows(admin.from("workforce_payment_field_overrides")
           .select("id,workforce_id,station_id,payment_field_id,field_code_snapshot,effective_from,effective_to,input_value")
           .eq("company_id", companyId)
           .in("workforce_id", workforceChunk)
@@ -228,7 +229,7 @@ export async function loadWorkforcePayoutRows(
           .gte("effective_to", thresholdHistoryStart)
           .order("effective_from")
           .order("id")),
-        readAllRows(supabaseAdmin!.from("workforce_custom_production_inputs")
+        readAllRows(admin.from("workforce_custom_production_inputs")
           .select("id,workforce_id,station_id,payment_field_id,field_code_snapshot,work_date,units")
           .eq("company_id", companyId)
           .in("workforce_id", workforceChunk)
@@ -238,11 +239,20 @@ export async function loadWorkforcePayoutRows(
           .order("id"))
       ]);
       const error = attendanceResult.error?.message || attendancePeriodsResult.error?.message || paymentFieldResult.error?.message || productionResult.error?.message;
-      if (error) return { attendance, attendancePeriods, paymentFields, production, error };
-      attendance.push(...(attendanceResult.data ?? []));
-      attendancePeriods.push(...(attendancePeriodsResult.data ?? []));
-      paymentFields.push(...(paymentFieldResult.data ?? []));
-      production.push(...(productionResult.data ?? []));
+      return {
+        attendance: attendanceResult.data ?? [],
+        attendancePeriods: attendancePeriodsResult.data ?? [],
+        paymentFields: paymentFieldResult.data ?? [],
+        production: productionResult.data ?? [],
+        error
+      };
+    });
+    for (const chunk of chunkResults) {
+      if (chunk.error) return { attendance, attendancePeriods, paymentFields, production, error: chunk.error };
+      attendance.push(...chunk.attendance);
+      attendancePeriods.push(...chunk.attendancePeriods);
+      paymentFields.push(...chunk.paymentFields);
+      production.push(...chunk.production);
     }
     return { attendance, attendancePeriods, paymentFields, production, error: null as string | null };
   })();
@@ -288,20 +298,21 @@ export async function loadWorkforcePayoutRows(
     { column: "field_executive_id", ids: canonicalWorkers.filter((worker: any) => worker.source_profile_type === "field_executive").map((worker: any) => worker.source_profile_id) }
   ].map((group) => ({ ...group, ids: Array.from(new Set(group.ids.filter(Boolean))) }));
   const attendanceResult = attendanceIdentityGroups.some((group) => group.ids.length) ? await (async () => {
-    const rows: any[] = [];
-    for (const group of attendanceIdentityGroups) {
-      for (let index = 0; index < group.ids.length; index += 100) {
-        const result = await readAllRows(supabaseAdmin!.from("attendance_daily")
+    const jobs = attendanceIdentityGroups.flatMap((group) => chunkedValues(group.ids, 100)
+      .map((ids) => ({ column: group.column, ids })));
+    const results = await mapWithConcurrency(jobs, 4, async (job) => readAllRows(admin.from("attendance_daily")
           .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
           .eq("company_id", companyId)
-          .in(group.column, group.ids.slice(index, index + 100))
+          .in(job.column, job.ids)
           .gte("punch_date", workforcePaymentMonthStart(fromDate))
           .lte("punch_date", toDate)
           .order("punch_date")
-          .order("id"));
-        if (result.error) return result;
-        rows.push(...(result.data ?? []));
-      }
+          .order("id")));
+    const error = results.find((result) => result.error)?.error ?? null;
+    if (error) return { data: null, error };
+    const rows: any[] = [];
+    for (const result of results) {
+      rows.push(...(result.data ?? []));
     }
     return { data: [...new Map(rows.map((row) => [row.id, row])).values()], error: null };
   })() : { data: [], error: null };
@@ -1305,12 +1316,12 @@ export async function loadWorkforcePayoutRows(
   for (const worker of workerBySource.values()) if (worker?.id) canonicalWorkerById.set(String(worker.id), worker);
   const initialRows = [...providerRows, ...reportOnlyRows, ...directRows];
   const missingPayoutValueWorkerIds = payoutValueWorkforceIds.filter((id) => !canonicalWorkerById.has(id));
-  for (let index = 0; index < missingPayoutValueWorkerIds.length; index += 100) {
-    const extraWorkers = await supabaseAdmin
+  const extraWorkerResults = await mapWithConcurrency(chunkedValues(missingPayoutValueWorkerIds, 100), 3, async (workforceChunk) => admin
       .from("workforce")
       .select("id,dropx_id,full_name,designation,source_profile_type,date_of_join,last_working_date,pan_number,onboarding_status,lifecycle_status,is_active,deleted_at,location_id,designations(code,name)")
       .eq("company_id", companyId)
-      .in("id", missingPayoutValueWorkerIds.slice(index, index + 100));
+      .in("id", workforceChunk));
+  for (const extraWorkers of extraWorkerResults) {
     if (extraWorkers.error) return { rows: [] as WorkforcePayoutRow[], error: extraWorkers.error.message };
     for (const worker of extraWorkers.data ?? []) canonicalWorkerById.set(String(worker.id), worker);
   }

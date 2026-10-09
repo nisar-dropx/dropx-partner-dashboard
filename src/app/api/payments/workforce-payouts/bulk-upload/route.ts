@@ -17,6 +17,7 @@ import {
   parseWorkforcePayoutWorkbook,
   payoutImportRowsOverlap,
   resolveWorkforcePayoutImportRows,
+  workforcePayoutSetupFieldCodes,
   type ResolvedWorkforcePayoutImportRow,
   type WorkforcePayoutImportAdditionalField,
   type WorkforcePayoutImportDeductionHead,
@@ -76,7 +77,7 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
       .order("code")),
     readAllRows(supabaseAdmin
       .from("field_executive_provider_mappings")
-      .select("id,workforce_id,employee_id,contractor_id,field_executive_id,station_id,payment_method_id,effective_from,effective_to,status")
+      .select("id,workforce_id,employee_id,contractor_id,field_executive_id,station_id,payment_method_id,payment_values,effective_from,effective_to,status")
       .eq("company_id", companyId)
       .in("status", ["active", "closed"])
       .lte("effective_from", batchTo)
@@ -213,7 +214,10 @@ async function loadReferences(companyId: string, batchFrom: string, batchTo: str
       locationId: mapping.station_id ? String(mapping.station_id) : null,
       effectiveFrom: String(mapping.effective_from),
       effectiveTo: mapping.effective_to ? String(mapping.effective_to) : null,
-      fieldCodes: codesByMethod.get(methodId) ?? []
+      fieldCodes: workforcePayoutSetupFieldCodes(
+        codesByMethod.get(methodId) ?? [],
+        mapping.payment_values
+      )
     }];
   });
   for (const allocation of allocationsResult.data ?? []) {
@@ -543,6 +547,38 @@ export async function POST(request: Request) {
       parsed = parseWorkforcePayoutWorkbook(bytes, { batchFrom, batchTo });
     } catch (error) {
       return errorResponse(error instanceof Error ? error.message : "The workbook could not be read.", 400);
+    }
+    if (mode === "commit" && inputSource === "manual") {
+      const replay = await supabaseAdmin
+        .from("workforce_payout_import_batches")
+        .select("id,row_count")
+        .eq("company_id", companyId)
+        .eq("effective_from", batchFrom)
+        .eq("effective_to", batchTo)
+        .eq("file_sha256", fileSha256)
+        .eq("status", "committed")
+        .maybeSingle();
+      if (replay.error) throw new Error(replay.error.message);
+      if (replay.data) {
+        const replayedRows = Number(replay.data.row_count ?? parsed.rows.length);
+        return Response.json({
+          fileName: file.name,
+          fileSha256,
+          effectiveFrom: batchFrom,
+          effectiveTo: batchTo,
+          totalRows: replayedRows,
+          matchedRows: replayedRows,
+          canCommit: true,
+          issues: [],
+          counts: Object.fromEntries(["ATTENDANCE", "PRODUCTION_UNITS", "PAYMENT_FIELD_VALUE", "ADDITIONAL_PAYMENT", "DEDUCTION"]
+            .map((type) => [type, parsed.rows.filter((row) => row.inputType === type).length])),
+          rows: [],
+          importId: String(replay.data.id),
+          replayed: true,
+          warnings: [],
+          message: `${replayedRows} payout input row${replayedRows === 1 ? " was" : "s were"} already applied; the retry was accepted safely.`
+        }, { headers: { "Cache-Control": "private, no-store" } });
+      }
     }
     const references = await loadReferences(companyId, batchFrom, batchTo);
     const allowedLocationIds = authorization.hasAllLocationAccess || isCompanyOwner(authorization)

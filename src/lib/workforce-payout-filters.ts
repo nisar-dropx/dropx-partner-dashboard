@@ -23,6 +23,17 @@ export type WorkforcePayoutFilterSelection = {
 
 export const WORKFORCE_PAYOUT_FILTER_NONE = "__WORKFORCE_PAYOUT_FILTER_NONE__";
 
+export function reconcileWorkforcePayoutFilterSelection(
+  options: readonly string[],
+  selected: readonly string[]
+) {
+  if (!selected.length || selected.includes(WORKFORCE_PAYOUT_FILTER_NONE)) return [...selected];
+  const available = new Set(options);
+  const retained = selected.filter((value) => available.has(value));
+  if (!retained.length) return [];
+  return retained.length === options.length && options.every((option) => retained.includes(option)) ? [] : retained;
+}
+
 function includesSelected(selected: readonly string[], value: string) {
   return selected.length === 0 || selected.includes(value);
 }

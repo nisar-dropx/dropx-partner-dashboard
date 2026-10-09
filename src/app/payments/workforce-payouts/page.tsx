@@ -10,6 +10,7 @@ import {
 import { WorkforcePayoutPeriodFilter } from "@/components/workforce-payout-period-filter";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
+import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
@@ -139,32 +140,33 @@ async function withPayoutReviewStatuses(
   unlockedWorkforceIds: ReadonlySet<string>
 ) {
   if (!supabaseAdmin) return { rows, error: null as string | null };
+  const admin = supabaseAdmin;
   const subjectType = audience === "helpers" ? "helper" : "workforce";
   const ids = [...new Set(rows.flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId] : []))];
   if (!ids.length) return { rows, error: null as string | null };
   const submissions: Array<{ subject_id: string; location_id: string; status: string }> = [];
   const publications: Array<{ workforce_id: string; station_id: string; notification_status: string; dependency_hash: string | null }> = [];
-  for (let index = 0; index < ids.length; index += 100) {
+  const reviewChunks = await mapWithConcurrency(chunkedValues(ids, 100), 4, async (idChunk) => {
     const [result, publicationResult] = await Promise.all([
-      readAllRows(supabaseAdmin
+      readAllRows(admin
         .from("workforce_payout_review_submissions")
         .select("subject_id,location_id,status")
         .eq("company_id", companyId)
         .eq("subject_type", subjectType)
         .eq("period_start", fromDate)
         .eq("period_end", toDate)
-        .in("subject_id", ids.slice(index, index + 100))
+        .in("subject_id", idChunk)
         .order("subject_id")
         .order("location_id")),
       audience === "workforce"
-        ? readAllRows(supabaseAdmin
+        ? readAllRows(admin
           .from("workforce_payout_publications")
           .select("workforce_id,station_id,notification_status,dependency_hash")
           .eq("company_id", companyId)
           .eq("publication_kind", "worksheet")
           .eq("period_start", fromDate)
           .eq("period_end", toDate)
-          .in("workforce_id", ids.slice(index, index + 100))
+          .in("workforce_id", idChunk)
           .order("workforce_id")
           .order("station_id")
           .order("revision", { ascending: false })
@@ -172,10 +174,13 @@ async function withPayoutReviewStatuses(
           .order("id", { ascending: false }))
         : Promise.resolve({ data: [], error: null })
     ]);
-    if (result.error) return { rows, error: result.error.message };
-    if (publicationResult.error) return { rows, error: publicationResult.error.message };
-    submissions.push(...((result.data ?? []) as Array<{ subject_id: string; location_id: string; status: string }>));
-    publications.push(...((publicationResult.data ?? []) as Array<{ workforce_id: string; station_id: string; notification_status: string; dependency_hash: string | null }>));
+    return { result, publicationResult };
+  });
+  for (const chunk of reviewChunks) {
+    if (chunk.result.error) return { rows, error: chunk.result.error.message };
+    if (chunk.publicationResult.error) return { rows, error: chunk.publicationResult.error.message };
+    submissions.push(...((chunk.result.data ?? []) as Array<{ subject_id: string; location_id: string; status: string }>));
+    publications.push(...((chunk.publicationResult.data ?? []) as Array<{ workforce_id: string; station_id: string; notification_status: string; dependency_hash: string | null }>));
   }
   const statusBySubject = new Map(submissions.map((entry) => [`${String(entry.subject_id)}|${String(entry.location_id)}`, String(entry.status)]));
   const publicationBySubject = new Map<string, string>();
@@ -301,6 +306,7 @@ async function withPayoutPaymentSummaries(
   rows: WorkforcePayoutRow[]
 ) {
   if (!supabaseAdmin) return { rows, error: null as string | null };
+  const admin = supabaseAdmin;
   const workforceIds = [...new Set(rows.flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId] : []))];
   if (!workforceIds.length) return { rows, error: null as string | null };
   type PaymentPreview = {
@@ -317,13 +323,13 @@ async function withPayoutPaymentSummaries(
     eligibility_message: string;
   };
   const previews: PaymentPreview[] = [];
-  for (let index = 0; index < workforceIds.length; index += 250) {
-    const result = await supabaseAdmin.rpc("workforce_preview_payout_payments", {
+  const previewResults = await mapWithConcurrency(chunkedValues(workforceIds, 250), 3, async (workforceChunk) => admin.rpc("workforce_preview_payout_payments", {
       p_company_id: companyId,
       p_period_start: fromDate,
       p_period_end: toDate,
-      p_workforce_ids: workforceIds.slice(index, index + 250)
-    });
+      p_workforce_ids: workforceChunk
+    }));
+  for (const result of previewResults) {
     if (result.error) return { rows, error: result.error.message };
     previews.push(...((result.data ?? []) as PaymentPreview[]));
   }
@@ -402,7 +408,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     && authorization.hasAllLocationAccess
     && period.mode === "monthly"
     && period.fromDate === `${period.month}-01`;
-  const [loaded, mappingLocks] = await Promise.all([
+  const [loaded, mappingLocks, bankResult] = await Promise.all([
     audience === "helpers"
       ? loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
         .then((result) => ({ ...result, dependencyHash: "" }))
@@ -417,29 +423,42 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         unlocks: [] as WorkforcePayoutMappingUnlock[],
         impactedWorkforceIds: new Set<string>(),
         error: null as string | null
-      })
+      }),
+    loadWorkforcePayoutBanks(companyId, canProcessPayments)
   ]);
   const provisional = audience === "workforce"
     && isProvisionalPayoutDependencyHash(loaded.dependencyHash);
-  const reviewed = loaded.error || mappingLocks.error || (audience === "workforce" && !loaded.dependencyHash)
-    ? { rows: loaded.rows, error: loaded.error || mappingLocks.error || "Payout worksheet version is unavailable." }
-    : await withPayoutReviewStatuses(
-      companyId,
-      audience,
-      period.fromDate,
-      period.toDate,
-      loaded.rows,
-      audience === "workforce" ? loaded.dependencyHash ?? "" : "",
-      mappingLocks.impactedWorkforceIds
-    );
-  const [settled, bankResult] = await Promise.all([
-    reviewed.error || audience !== "workforce" || !canProcessPayments
-      ? Promise.resolve({ rows: reviewed.rows, error: reviewed.error })
-      : withPayoutPaymentSummaries(companyId, period.fromDate, period.toDate, reviewed.rows),
-    loadWorkforcePayoutBanks(companyId, canProcessPayments)
+  const loadError = loaded.error || mappingLocks.error || (audience === "workforce" && !loaded.dependencyHash)
+    ? loaded.error || mappingLocks.error || "Payout worksheet version is unavailable."
+    : null;
+  const [reviewed, paymentEnriched] = await Promise.all([
+    loadError
+      ? Promise.resolve({ rows: loaded.rows, error: loadError })
+      : withPayoutReviewStatuses(
+        companyId,
+        audience,
+        period.fromDate,
+        period.toDate,
+        loaded.rows,
+        audience === "workforce" ? loaded.dependencyHash ?? "" : "",
+        mappingLocks.impactedWorkforceIds
+      ),
+    loadError || audience !== "workforce" || !canProcessPayments
+      ? Promise.resolve({ rows: loaded.rows, error: loadError })
+      : withPayoutPaymentSummaries(companyId, period.fromDate, period.toDate, loaded.rows)
   ]);
-  const rows = settled.rows;
-  const error = reviewed.error || settled.error || bankResult.error;
+  const paymentByRowId = new Map(paymentEnriched.rows.map((row) => [row.id, row]));
+  const rows = reviewed.rows.map((row) => {
+    const paymentRow = paymentByRowId.get(row.id);
+    if (!paymentRow?.paymentSummary) return row;
+    return {
+      ...row,
+      publicationPaymentReady: paymentRow.publicationPaymentReady,
+      paymentSummary: paymentRow.paymentSummary,
+      status: paymentRow.paymentSummary.status ?? row.status
+    };
+  });
+  const error = reviewed.error || paymentEnriched.error || bankResult.error;
   const advancePageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const canDeductAdvances = audience === "workforce"
     && canEdit

@@ -7,14 +7,20 @@ import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import {
   WORKFORCE_PAYOUT_FILTER_NONE,
   matchesWorkforcePayoutFilters,
+  reconcileWorkforcePayoutFilterSelection,
   toggleWorkforcePayoutFilterOption,
   workforcePayoutFacetValues
 } from "@/lib/workforce-payout-filters";
 import {
+  buildWorkforcePayoutBankSelectionIndex,
+  chunkPayoutRowsBySubject,
   duplicateAdvanceWorkforceIds,
+  resolveWorkforcePayoutBankSelection,
   workforcePayoutMappingLockSelectionIds,
   type WorkforcePayoutPublicationLockState
 } from "@/lib/workforce-payout-action-selection";
+import { chunkedValues } from "@/lib/bounded-concurrency";
+import { WORKFORCE_PAYOUT_INPUTS_CHANGED_EVENT } from "@/lib/workforce-payout-client-events";
 import { isWorkforcePayoutDisplayPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import { MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION } from "@/lib/workforce-payout-publication-limits";
 import { buildWorkforcePayoutPublicationSnapshot } from "@/lib/workforce-payout-publication-snapshot";
@@ -104,7 +110,8 @@ function units(value: number) { return value.toLocaleString("en-IN", { maximumFr
 function dateLabel(value: string) { return value.split("-").reverse().join("/"); }
 function workDaysValue(value: number, source: string) { return source.toLowerCase().includes("unavailable") ? "" : value; }
 function workDaysDisplay(value: number, source: string) { return workDaysValue(value, source) === "" ? "—" : units(value); }
-const MAX_REVIEW_SELECTION = 1000;
+const PAYOUT_ACTION_REQUEST_CHUNK_SIZE = 50;
+const ADVANCE_ACTION_REQUEST_CHUNK_SIZE = 1000;
 const ADVANCE_DEDUCTION_LOCKED_STATUSES = new Set(["approved", "paid", "finalized", "finalised"]);
 function canSendPayoutForReview(row: WorkforcePayoutRow, audience: "workforce" | "helpers") {
   if (row.paymentSummary?.status === "Payment Processing") return false;
@@ -121,8 +128,7 @@ function canDeductAdvanceFromPayout(row: WorkforcePayoutRow) {
 }
 function canManuallyEditPayout(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.dropxId)
-    && row.paymentSummary?.status !== "Payment Processing"
-    && row.publicationLockState !== "unlocked";
+    && row.paymentSummary?.status !== "Payment Processing";
 }
 function canCreateBankPayment(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.paymentDetailsAvailable)
@@ -165,8 +171,8 @@ function missingPayoutNotificationLocations(allRows: WorkforcePayoutRow[], selec
 }
 function statusTone(status: string) {
   if (status === "Ready for review" || status === "Approved" || status === "Payment published" || status === "Paid") return "good";
-  if (status === "Under Review" || status === "Returned" || status === "Notification queued" || status === "Delivery needs review" || status === "Mapping unlocked" || status === "Payment Processing" || status === "Partially paid" || status === "Publication refresh pending" || status === "Republish required" || status === "Relock required" || status === "No positive balance") return "warn";
-  if (status === "ID not mapped" || status === "Mapping conflict" || status === "Notification failed" || status === "Payment profile unavailable" || status === "Payment unavailable") return "bad";
+  if (status === "Under Review" || status === "Returned" || status === "Notification queued" || status === "Delivery needs review" || status === "Mapping unlocked" || status === "Payment Processing" || status === "Payment On Hold" || status === "PAN Not Linked" || status === "Partially paid" || status === "Publication refresh pending" || status === "Republish required" || status === "Relock required" || status === "No positive balance") return "warn";
+  if (status === "ID not mapped" || status === "Mapping conflict" || status === "Notification failed" || status === "Payment Failed" || status === "Payment Cancelled" || status === "Payment profile unavailable" || status === "Payment unavailable") return "bad";
   if (status === "Configuration incomplete" || status === "Payment method not allocated" || status === "Payment details required" || status === "Current location required") return "warn";
   return "payout-status-neutral";
 }
@@ -311,7 +317,6 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const canReviewHelpers = canEdit && audience === "helpers";
   const canManuallyEdit = canEdit && audience === "workforce";
   const canManageLocks = canManageMappingLocks && audience === "workforce";
-  const maxActionSelection = audience === "workforce" ? MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION : MAX_REVIEW_SELECTION;
   const showSelection = canPublish || canReviewHelpers || canDeductAdvances || canManuallyEdit || canManageLocks || canProcessPayments;
   const locationOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.location || "-"))).values()).sort(), [rows]);
   const designationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.designation).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [rows]);
@@ -334,31 +339,32 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const reviewSelectedRows = useMemo(() => selectedRows.filter((row) => canSendPayoutForReview(row, audience)), [audience, selectedRows]);
   const advanceSelectedRows = useMemo(() => selectedRows.filter(canDeductAdvanceFromPayout), [selectedRows]);
   const manualSelectedRows = useMemo(() => selectedRows.filter(canManuallyEditPayout), [selectedRows]);
+  const bankSelectionIndex = useMemo(() => buildWorkforcePayoutBankSelectionIndex(
+    rows,
+    canCreateBankPayment,
+    (row) => Number(row.paymentSummary?.availableToPay ?? 0)
+  ), [rows]);
   const selectedBankWorkforceIds = useMemo(() => new Set(selectedRows
     .filter(canCreateBankPayment)
-    .flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId] : [])), [selectedRows]);
-  const bankWorkforceIds = useMemo(() => [...selectedBankWorkforceIds]
-    .filter((workforceId) => {
-      const requiredRows = rows.filter((row) => row.reviewSubjectId === workforceId && canCreateBankPayment(row));
-      return requiredRows.length > 0 && requiredRows.every((row) => selected.has(row.id));
-    })
-    .slice(0, 50), [rows, selected, selectedBankWorkforceIds]);
-  const bankTotalAmount = useMemo(() => bankWorkforceIds.reduce((sum, workforceId) => {
-    const row = rows.find((candidate) => candidate.reviewSubjectId === workforceId && canCreateBankPayment(candidate));
-    return sum + Number(row?.paymentSummary?.availableToPay ?? 0);
-  }, 0), [bankWorkforceIds, rows]);
+    .flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId.trim()] : [])
+    .filter(Boolean)), [selectedRows]);
+  const bankSelection = useMemo(() => resolveWorkforcePayoutBankSelection(
+    bankSelectionIndex,
+    selected,
+    selectedBankWorkforceIds
+  ), [bankSelectionIndex, selected, selectedBankWorkforceIds]);
+  const bankWorkforceIds = bankSelection.workforceIds;
+  const bankTotalAmount = bankSelection.totalAmount;
   const hasBankSelectionConflict = selectedBankWorkforceIds.size > bankWorkforceIds.length;
   const mappingUnlockWorkforceIds = useMemo(
-    () => workforcePayoutMappingLockSelectionIds(selectedRows, "locked").slice(0, 50),
+    () => workforcePayoutMappingLockSelectionIds(selectedRows, "locked"),
     [selectedRows]
   );
-  const relockTargets = useMemo(() => mappingUnlocks.slice(0, 50), [mappingUnlocks]);
+  const relockTargets = mappingUnlocks;
   const advanceSelectionConflictIds = useMemo(() => duplicateAdvanceWorkforceIds(advanceSelectedRows), [advanceSelectedRows]);
   const hasAdvanceSelectionConflict = advanceSelectionConflictIds.size > 0;
   const skippedReviewSelectionCount = selectedRows.length - reviewSelectedRows.length;
-  const actionSelectionTarget = useMemo(() => selectable.slice(0, maxActionSelection), [maxActionSelection, selectable]);
-  const actionSelectionFull = actionSelectionTarget.length > 0 && actionSelectionTarget.every((row) => selected.has(row.id));
-  const actionSelectionLimitReached = selectedRows.length >= maxActionSelection;
+  const actionSelectionFull = selectable.length > 0 && selectable.every((row) => selected.has(row.id));
   const activeFilterCount = locations.length + designations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
   const tableColumnCount = showSelection ? 13 : 12;
   const actionBusy = reviewState.busy || advanceState.busy || mappingState.busy || bankBusy;
@@ -366,6 +372,30 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   useEffect(() => {
     setSelected((current) => new Set([...current].filter((id) => selectableIds.has(id))));
   }, [selectableIds]);
+
+  useEffect(() => {
+    setLocations((current) => reconcileWorkforcePayoutFilterSelection(locationOptions, current));
+    setDesignations((current) => reconcileWorkforcePayoutFilterSelection(designationOptions, current));
+    setProviders((current) => reconcileWorkforcePayoutFilterSelection(providerOptions, current));
+    setMethods((current) => reconcileWorkforcePayoutFilterSelection(methodOptions, current));
+    setMappingStatuses((current) => reconcileWorkforcePayoutFilterSelection(mappingStatusOptions, current));
+    setStatuses((current) => reconcileWorkforcePayoutFilterSelection(statusOptions, current));
+  }, [designationOptions, locationOptions, mappingStatusOptions, methodOptions, providerOptions, statusOptions]);
+
+  useEffect(() => {
+    function handlePayoutInputsChanged(event: Event) {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setSelected(new Set());
+      setExpandedId("");
+      setReviewState({
+        busy: false,
+        error: "",
+        notice: detail?.message || "Payout inputs were updated and the worksheet has been refreshed."
+      });
+    }
+    window.addEventListener(WORKFORCE_PAYOUT_INPUTS_CHANGED_EVENT, handlePayoutInputsChanged);
+    return () => window.removeEventListener(WORKFORCE_PAYOUT_INPUTS_CHANGED_EVENT, handlePayoutInputsChanged);
+  }, []);
 
   useEffect(() => {
     setSelected(new Set());
@@ -477,10 +507,6 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   }
 
   function toggleSelected(rowId: string) {
-    if (!selected.has(rowId) && actionSelectionLimitReached) {
-      setReviewState({ busy: false, error: `Submit at most ${maxActionSelection.toLocaleString("en-IN")} payouts at a time. Deselect one or narrow the filters.`, notice: "" });
-      return;
-    }
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(rowId)) next.delete(rowId); else next.add(rowId);
@@ -495,14 +521,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       setReviewState((current) => ({ ...current, error: "", notice: "" }));
       return;
     }
-    setSelected(new Set(actionSelectionTarget.map((row) => row.id)));
-    setReviewState((current) => ({
-      ...current,
-      error: "",
-      notice: selectable.length > maxActionSelection
-        ? `Selected the first ${maxActionSelection.toLocaleString("en-IN")} matching payouts. Narrow the filters to select a different batch.`
-        : ""
-    }));
+    setSelected(new Set(selectable.map((row) => row.id)));
+    setReviewState((current) => ({ ...current, error: "", notice: "" }));
   }
 
   async function sendNotification() {
@@ -531,50 +551,62 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       if (!confirmed) return;
     }
     setReviewState({ busy: true, error: "", notice: "" });
+    let completedChunks = 0;
     try {
-      const response = await fetch("/api/payments/workforce-payouts/send-review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodStart,
-          periodEnd,
-          items: reviewSelectedRows.map((row) => ({
-            subjectType: row.reviewSubjectType,
-            subjectId: row.reviewSubjectId,
-            locationId: row.locationId,
-            reviewToken: row.reviewToken,
-            ...(audience === "workforce" ? {
-              calculationSnapshot: buildWorkforcePayoutPublicationSnapshot(
-                row,
-                periodStart,
-                periodEnd,
-                row.publicationDependencyHash ?? ""
-              )
-            } : {})
-          }))
-        })
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.error ?? (audience === "workforce" ? "Unable to publish payouts and queue notifications." : "Unable to send Helper payouts for review."));
+      const requestChunks = chunkPayoutRowsBySubject(reviewSelectedRows, MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION);
+      const totals = { submitted: 0, appNotifications: 0, whatsappNotifications: 0 };
+      for (const chunk of requestChunks) {
+        const response = await fetch("/api/payments/workforce-payouts/send-review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            periodStart,
+            periodEnd,
+            items: chunk.map((row) => ({
+              subjectType: row.reviewSubjectType,
+              subjectId: row.reviewSubjectId,
+              locationId: row.locationId,
+              reviewToken: row.reviewToken,
+              ...(audience === "workforce" ? {
+                calculationSnapshot: buildWorkforcePayoutPublicationSnapshot(
+                  row,
+                  periodStart,
+                  periodEnd,
+                  row.publicationDependencyHash ?? ""
+                )
+              } : {})
+            }))
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.error ?? (audience === "workforce" ? "Unable to publish payouts and queue notifications." : "Unable to send Helper payouts for review."));
+        totals.submitted += Number(payload.submitted ?? chunk.length);
+        totals.appNotifications += Number(payload.appNotifications ?? 0);
+        totals.whatsappNotifications += Number(payload.whatsappNotifications ?? payload.notifications ?? 0);
+        completedChunks += 1;
+      }
       setSelected(new Set());
       if (audience === "workforce") {
-        const appNotifications = Number(payload.appNotifications ?? 0);
-        const whatsappNotifications = Number(payload.whatsappNotifications ?? payload.notifications ?? 0);
         const channelSummary = [
-          appNotifications ? `${appNotifications} App notification${appNotifications === 1 ? "" : "s"}` : "",
-          whatsappNotifications ? `${whatsappNotifications} WhatsApp notification${whatsappNotifications === 1 ? "" : "s"}` : ""
+          totals.appNotifications ? `${totals.appNotifications} App notification${totals.appNotifications === 1 ? "" : "s"}` : "",
+          totals.whatsappNotifications ? `${totals.whatsappNotifications} WhatsApp notification${totals.whatsappNotifications === 1 ? "" : "s"}` : ""
         ].filter(Boolean).join(" and ");
         setReviewState({
           busy: false,
           error: "",
-          notice: `${payload.submitted} payout${payload.submitted === 1 ? "" : "s"} published${channelSummary ? `; ${channelSummary} queued.` : "."}`
+          notice: `${totals.submitted} payout${totals.submitted === 1 ? "" : "s"} published${channelSummary ? `; ${channelSummary} queued.` : "."}`
         });
       } else {
-        setReviewState({ busy: false, error: "", notice: `${payload.submitted} Helper payout${payload.submitted === 1 ? "" : "s"} sent for review.` });
+        setReviewState({ busy: false, error: "", notice: `${totals.submitted} Helper payout${totals.submitted === 1 ? "" : "s"} sent for review.` });
       }
       router.refresh();
     } catch (error) {
-      setReviewState({ busy: false, error: error instanceof Error ? error.message : audience === "workforce" ? "Unable to publish payouts and queue notifications." : "Unable to send Helper payouts for review.", notice: "" });
+      if (completedChunks) {
+        setSelected(new Set());
+        router.refresh();
+      }
+      const message = error instanceof Error ? error.message : audience === "workforce" ? "Unable to publish payouts and queue notifications." : "Unable to send Helper payouts for review.";
+      setReviewState({ busy: false, error: completedChunks ? `${completedChunks} request batch${completedChunks === 1 ? " was" : "es were"} completed before the next batch failed. The worksheet is refreshing; select the remaining payouts and retry. ${message}` : message, notice: "" });
     }
   }
 
@@ -595,29 +627,41 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     if (!confirmed) return;
     setAdvanceState({ busy: true, error: "", notice: "" });
     setReviewState((current) => ({ ...current, error: "", notice: "" }));
+    let completedChunks = 0;
     try {
-      const response = await fetch("/api/payments/workforce-payouts/deduct-advances", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodStart,
-          periodEnd,
-          items: advanceSelectedRows.map((row) => ({ workforceId: row.reviewSubjectId, stationId: row.locationId }))
-        })
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.error ?? "Unable to deduct pending advances.");
+      const totals = { deducted: 0, updated: 0 };
+      for (const chunk of chunkedValues(advanceSelectedRows, ADVANCE_ACTION_REQUEST_CHUNK_SIZE)) {
+        const response = await fetch("/api/payments/workforce-payouts/deduct-advances", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            periodStart,
+            periodEnd,
+            items: chunk.map((row) => ({ workforceId: row.reviewSubjectId, stationId: row.locationId }))
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.error ?? "Unable to deduct pending advances.");
+        totals.deducted += Number(payload.deducted ?? 0);
+        totals.updated += Number(payload.updated ?? 0);
+        completedChunks += 1;
+      }
       setSelected(new Set());
       setAdvanceState({
         busy: false,
         error: "",
-        notice: payload.updated
-          ? `${money(Number(payload.deducted ?? 0))} deducted from ${payload.updated} payout${payload.updated === 1 ? "" : "s"} under ADVANCE.`
+        notice: totals.updated
+          ? `${money(totals.deducted)} deducted from ${totals.updated} payout${totals.updated === 1 ? "" : "s"} under ADVANCE.`
           : "No pending advance could be deducted from the selected payouts."
       });
       router.refresh();
     } catch (error) {
-      setAdvanceState({ busy: false, error: error instanceof Error ? error.message : "Unable to deduct pending advances.", notice: "" });
+      if (completedChunks) {
+        setSelected(new Set());
+        router.refresh();
+      }
+      const message = error instanceof Error ? error.message : "Unable to deduct pending advances.";
+      setAdvanceState({ busy: false, error: completedChunks ? `${completedChunks} advance batch${completedChunks === 1 ? " was" : "es were"} applied before the next batch failed. The worksheet is refreshing. ${message}` : message, notice: "" });
     }
   }
 
@@ -653,37 +697,52 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       return;
     }
     setMappingState({ busy: true, error: "", notice: "" });
+    let completedChunks = 0;
     try {
-      const response = await fetch("/api/payments/workforce-payouts/mapping-locks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action,
-          periodStart,
-          periodEnd,
-          operationId: mappingDialog.operationId,
-          ...(action === "unlock"
-            ? { workforceIds: targetIds, reason: explanation }
-            : { unlockIds: targetIds, changeSummary: explanation })
-        })
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.error ?? `Unable to ${action} payout mappings.`);
+      const totals = { unlocked: 0, relocked: 0, published: 0 };
+      const targetChunks = chunkedValues(targetIds, PAYOUT_ACTION_REQUEST_CHUNK_SIZE);
+      for (const [index, chunk] of targetChunks.entries()) {
+        const response = await fetch("/api/payments/workforce-payouts/mapping-locks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            periodStart,
+            periodEnd,
+            operationId: index === 0 ? mappingDialog.operationId : crypto.randomUUID(),
+            ...(action === "unlock"
+              ? { workforceIds: chunk, reason: explanation }
+              : { unlockIds: chunk, changeSummary: explanation })
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.error ?? `Unable to ${action} payout mappings.`);
+        totals.unlocked += Number(payload.unlocked ?? (action === "unlock" ? chunk.length : 0));
+        totals.relocked += Number(payload.relocked ?? (action === "relock" ? chunk.length : 0));
+        totals.published += Number(payload.published ?? 0);
+        completedChunks += 1;
+      }
       setSelected(new Set());
       setMappingDialog(null);
       setMappingState({
         busy: false,
         error: "",
         notice: action === "unlock"
-          ? `${Number(payload.unlocked ?? targetIds.length)} Workforce mapping${Number(payload.unlocked ?? targetIds.length) === 1 ? " is" : "s are"} unlocked for ${periodStart.slice(0, 7)}. Remap the IDs, then relock this month.`
-          : `${Number(payload.relocked ?? targetIds.length)} mapping unlock${Number(payload.relocked ?? targetIds.length) === 1 ? " was" : "s were"} relocked; ${Number(payload.published ?? 0)} revised payout${Number(payload.published ?? 0) === 1 ? " is" : "s are"} now available in DropX One.`
+          ? `${totals.unlocked} Workforce mapping${totals.unlocked === 1 ? " is" : "s are"} unlocked for ${periodStart.slice(0, 7)}. Remap the IDs, then relock this month.`
+          : `${totals.relocked} mapping unlock${totals.relocked === 1 ? " was" : "s were"} relocked; ${totals.published} revised payout${totals.published === 1 ? " is" : "s are"} now available in DropX One.`
       });
       router.refresh();
       requestAnimationFrame(() => mappingDialogTriggerRef.current?.focus());
     } catch (error) {
+      if (completedChunks) {
+        setSelected(new Set());
+        setMappingDialog(null);
+        router.refresh();
+      }
+      const message = error instanceof Error ? error.message : `Unable to ${action} payout mappings.`;
       setMappingState({
         busy: false,
-        error: error instanceof Error ? error.message : `Unable to ${action} payout mappings.`,
+        error: completedChunks ? `${completedChunks} mapping batch${completedChunks === 1 ? " was" : "es were"} completed before the next batch failed. The worksheet is refreshing. ${message}` : message,
         notice: ""
       });
     }
@@ -697,10 +756,10 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       </label>
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
-        {showSelection ? <span className="payout-result-count">Up to {maxActionSelection.toLocaleString("en-IN")} payouts per action.</span> : null}
+        {selectedRows.length ? <span className="payout-result-count">{selectedRows.length.toLocaleString("en-IN")} selected</span> : null}
         {selectedRows.length && skippedReviewSelectionCount ? <span className="payout-result-count">{reviewSelectedRows.length} of {selectedRows.length} selected eligible for {audience === "workforce" ? "notification" : "review"}</span> : null}
         {canManageLocks && mappingUnlockWorkforceIds.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("unlock", event.currentTarget)} type="button">Unlock mapping ({mappingUnlockWorkforceIds.length} {mappingUnlockWorkforceIds.length === 1 ? "ID" : "IDs"})</button> : null}
-        {canManageLocks && relockTargets.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish {mappingUnlocks.length > 50 ? "next " : ""}{relockTargets.length}</button> : null}
+        {canManageLocks && relockTargets.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish {relockTargets.length}</button> : null}
         {canManuallyEdit ? <WorkforcePayoutManualEditor buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status }))} toDate={periodEnd} /> : null}
         {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
         {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !reviewSelectedRows.length || actionBusy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for ${audience === "workforce" ? "notification" : "review"}; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
@@ -728,7 +787,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       <table className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
         <caption className="sr-only">{subjectLabel} payout totals</caption>
         <thead><tr>
-          {showSelection ? <th className="payout-select-cell" scope="col"><input aria-label={`Select up to ${maxActionSelection.toLocaleString("en-IN")} matching ${subjectLabelLower} payouts for available actions`} checked={actionSelectionFull} disabled={!selectable.length || actionBusy} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
+          {showSelection ? <th className="payout-select-cell" scope="col"><input aria-label={`Select all matching ${subjectLabelLower} payouts for available actions`} checked={actionSelectionFull} disabled={!selectable.length || actionBusy} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
           <th className="payout-sticky-id" scope="col">DropX ID</th>
           <th className="payout-sticky-worker" scope="col">{subjectLabel} / payment source</th>
           <th scope="col">Designation</th>
@@ -756,9 +815,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
               ? workforcePayoutPaymentEligibilityLabel(row.paymentSummary)
               : null;
             const hasRowAdvanceSelectionConflict = Boolean(row.reviewSubjectId && advanceSelectionConflictIds.has(row.reviewSubjectId));
-            const selectionTitle = actionSelectionLimitReached && !selected.has(row.id)
-              ? `Maximum ${maxActionSelection.toLocaleString("en-IN")} payouts selected`
-              : hasRowAdvanceSelectionConflict
+            const selectionTitle = hasRowAdvanceSelectionConflict
                 ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all publishable location rows."
                 : !canSendPayoutForReview(row, audience) && canDeductAdvances && canDeductAdvanceFromPayout(row)
                   ? canManuallyEdit && canManuallyEditPayout(row)
@@ -773,7 +830,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             ] as const] : [])).values()];
             return [
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
-                {showSelection ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for payout actions`} checked={selected.has(row.id)} disabled={actionBusy || !selectableIds.has(row.id) || (actionSelectionLimitReached && !selected.has(row.id))} onChange={() => toggleSelected(row.id)} title={selectionTitle} type="checkbox" /></td> : null}
+                {showSelection ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for payout actions`} checked={selected.has(row.id)} disabled={actionBusy || !selectableIds.has(row.id)} onChange={() => toggleSelected(row.id)} title={selectionTitle} type="checkbox" /></td> : null}
                 <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={`DropX ID status: ${row.dropxStatus}`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
                 <td>{row.designation ? <strong>{row.designation}</strong> : <span aria-hidden="true">—</span>}</td>
@@ -785,7 +842,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                 <td className="negative payout-money">{row.paymentDetailsAvailable ? row.deductions ? `- ${money(row.deductions)}` : "—" : null}</td>
                 <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <><strong>{money(row.netAmount)}</strong>{row.paymentSummary ? <small className="payout-payment-balance" title={row.paymentSummary.eligibilityMessage ?? undefined}>{row.paymentSummary.processingAmount > 0 ? <span>Frozen profile net {exactMoney(row.paymentSummary.currentNetAmount)}</span> : null}<span>Paid {exactMoney(row.paymentSummary.paidAmount)}</span>{row.paymentSummary.processingAmount > 0 ? <span>Processing {exactMoney(row.paymentSummary.processingAmount)}</span> : null}{paymentBalanceAvailable ? <span>Balance payable {exactMoney(row.paymentSummary.balancePayable)}</span> : <span>Balance payable —</span>}{paymentEligibilityLabel ? <span className="negative">{paymentEligibilityLabel}</span> : null}{row.paymentSummary.overpaidAmount > 0 ? <span className="negative">Overpaid {exactMoney(row.paymentSummary.overpaidAmount)}</span> : null}</small> : null}</> : null}</td>
                 <td><div className="payout-status-stack">{reviewDays.length > 0 && <span className="status-pill warn">{reviewDays.length} low-delivery days</span>}<span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span>{row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
-                <td><div className="payout-detail-actions">{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}<PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId || row.providerMemberId || row.name} · ${row.name}`} />{canProcessPayments && row.reviewSubjectId && row.paymentSummary ? <WorkforcePayoutPaymentHistoryButton historyCount={row.paymentSummary.historyCount} periodEnd={periodEnd} periodStart={periodStart} subjectLabel={`${row.dropxId || row.name} · ${row.name}`} workforceId={row.reviewSubjectId} /> : null}</div></td>
+                <td><div className="payout-detail-actions">{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}<PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId || row.providerMemberId || row.name} · ${row.name}`} />{canProcessPayments && row.reviewSubjectId && row.paymentSummary ? <WorkforcePayoutPaymentHistoryButton canManageStatus={canProcessPayments} historyCount={row.paymentSummary.historyCount} periodEnd={periodEnd} periodStart={periodStart} subjectLabel={`${row.dropxId || row.name} · ${row.name}`} workforceId={row.reviewSubjectId} /> : null}</div></td>
               </tr>,
               expanded ? <tr className="payout-total-detail-row" key={`${row.id}-totals`}>
                 <td colSpan={tableColumnCount}>

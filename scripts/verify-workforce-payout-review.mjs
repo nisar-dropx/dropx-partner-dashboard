@@ -21,10 +21,11 @@ const opsDisputeActions = new URL("../src/app/ops-pulse/attendance/payout-review
 
 assert.match(tableSource, /Send Notification/);
 assert.match(tableSource, /type="checkbox"/);
-assert.match(tableSource, /MAX_REVIEW_SELECTION = 1000/);
 assert.match(tableSource, /MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION/);
-assert.match(tableSource, /selectable\.slice\(0, maxActionSelection\)/);
-assert.match(tableSource, /Up to \{maxActionSelection\.toLocaleString\("en-IN"\)\} payouts per action/);
+assert.match(tableSource, /chunkPayoutRowsBySubject\(reviewSelectedRows, MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION\)/);
+assert.match(tableSource, /setSelected\(new Set\(selectable\.map\(\(row\) => row\.id\)\)\)/);
+assert.doesNotMatch(tableSource, /selectable\.slice\(0,/);
+assert.doesNotMatch(tableSource, /payouts per action/);
 assert.match(routeSource, /ops_workforce_payouts/);
 assert.match(routeSource, /hasPermission\(authorization, pageCode, "edit"\)/);
 assert.match(routeSource, /if \(!sameOrigin\(request\)\)/);

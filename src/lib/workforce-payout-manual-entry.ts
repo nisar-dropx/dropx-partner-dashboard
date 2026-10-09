@@ -90,6 +90,36 @@ export function createWorkforcePayoutManualLines(
   ));
 }
 
+export function chunkWorkforcePayoutManualLines(
+  lines: readonly WorkforcePayoutManualLine[],
+  maximumLines: number
+) {
+  if (!Number.isSafeInteger(maximumLines) || maximumLines < 1) {
+    throw new Error("The manual payout batch size must be a positive whole number.");
+  }
+
+  const groups = new Map<string, WorkforcePayoutManualLine[]>();
+  lines.forEach((line, index) => {
+    const selectionKey = line.selectionKey.trim() || `unscoped:${index}`;
+    groups.set(selectionKey, [...(groups.get(selectionKey) ?? []), line]);
+  });
+
+  const chunks: WorkforcePayoutManualLine[][] = [];
+  let current: WorkforcePayoutManualLine[] = [];
+  for (const group of groups.values()) {
+    if (group.length > maximumLines) {
+      throw new Error(`One payout profile has more than ${maximumLines} manual input lines and cannot be applied safely.`);
+    }
+    if (current.length && current.length + group.length > maximumLines) {
+      chunks.push(current);
+      current = [];
+    }
+    current.push(...group);
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
 export function normalizeWorkforcePayoutManualLineType(
   line: WorkforcePayoutManualLine,
   inputType: WorkforcePayoutManualInputType | "",

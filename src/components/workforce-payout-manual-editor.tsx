@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
+import { announceWorkforcePayoutInputsChanged } from "@/lib/workforce-payout-client-events";
 import {
   WORKFORCE_PAYOUT_MANUAL_INPUT_TYPES,
   applyWorkforcePayoutManualLineToAll,
   buildWorkforcePayoutManualCsv,
+  chunkWorkforcePayoutManualLines,
   createWorkforcePayoutManualLine,
   createWorkforcePayoutManualLines,
   normalizeWorkforcePayoutManualLineType,
@@ -58,6 +60,8 @@ const INPUT_LABELS: Record<WorkforcePayoutManualInputType, string> = {
   DEDUCTION: "Deduction"
 };
 
+const MANUAL_INPUT_REQUEST_CHUNK_SIZE = 1000;
+
 async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text();
   try {
@@ -84,7 +88,7 @@ export function WorkforcePayoutManualEditor({
 }: WorkforcePayoutManualEditorProps) {
   const router = useRouter();
   const nextLineNumber = useRef(1);
-  const operationIdRef = useRef("");
+  const operationIdsRef = useRef<string[]>([]);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const confirmationRef = useRef<HTMLElement>(null);
@@ -122,6 +126,7 @@ export function WorkforcePayoutManualEditor({
     setError(null);
     setShowClientIssues(false);
     setConfirmationOpen(false);
+    operationIdsRef.current = [];
   }, [fromDate, open, selectionSignature, toDate]); // selectedRows is intentionally represented by its stable identity signature.
 
   useEffect(() => {
@@ -196,6 +201,7 @@ export function WorkforcePayoutManualEditor({
     setPreview(null);
     setError(null);
     setConfirmationOpen(false);
+    operationIdsRef.current = [];
   }
 
   function replaceLine(lineId: string, update: (line: WorkforcePayoutManualLine) => WorkforcePayoutManualLine) {
@@ -263,28 +269,74 @@ export function WorkforcePayoutManualEditor({
     }
     setBusy(mode);
     setError(null);
+    let completedCommitChunks = 0;
     try {
-      if (!operationIdRef.current) operationIdRef.current = crypto.randomUUID();
-      const csv = buildWorkforcePayoutManualCsv(lines);
-      const body = new FormData();
-      body.set("mode", mode);
-      body.set("effective_from", fromDate);
-      body.set("effective_to", toDate);
-      body.set("input_source", "manual");
-      body.set("manual_operation_id", operationIdRef.current);
-      body.set("file", new File([csv], `manual-payout-inputs-${fromDate}-to-${toDate}.csv`, { type: "text/csv" }));
-      const response = await fetch("/api/payments/workforce-payouts/bulk-upload", { method: "POST", body });
-      const result = await readJson<PreviewResponse>(response);
-      setPreview(result);
-      if (!response.ok) throw new Error(result.error ?? "Unable to process these payout inputs.");
+      const chunks = chunkWorkforcePayoutManualLines(lines, MANUAL_INPUT_REQUEST_CHUNK_SIZE);
+      if (mode === "preview" || operationIdsRef.current.length !== chunks.length) {
+        operationIdsRef.current = chunks.map(() => crypto.randomUUID());
+      }
+      const aggregate: PreviewResponse = {
+        totalRows: 0,
+        matchedRows: 0,
+        canCommit: true,
+        counts: {},
+        issues: [],
+        warnings: [],
+        rows: []
+      };
+      let lineOffset = 0;
+      for (const [chunkIndex, chunk] of chunks.entries()) {
+        const csv = buildWorkforcePayoutManualCsv(chunk);
+        const body = new FormData();
+        body.set("mode", mode);
+        body.set("effective_from", fromDate);
+        body.set("effective_to", toDate);
+        body.set("input_source", "manual");
+        body.set("manual_operation_id", operationIdsRef.current[chunkIndex]);
+        body.set("file", new File([csv], `manual-payout-inputs-${fromDate}-to-${toDate}-${chunkIndex + 1}.csv`, { type: "text/csv" }));
+        const response = await fetch("/api/payments/workforce-payouts/bulk-upload", { method: "POST", body });
+        const result = await readJson<PreviewResponse>(response);
+        aggregate.totalRows = Number(aggregate.totalRows ?? 0) + Number(result.totalRows ?? chunk.length);
+        aggregate.matchedRows = Number(aggregate.matchedRows ?? 0) + Number(result.matchedRows ?? 0);
+        aggregate.canCommit = Boolean(aggregate.canCommit && result.canCommit);
+        for (const [key, value] of Object.entries(result.counts ?? {})) {
+          aggregate.counts![key] = Number(aggregate.counts![key] ?? 0) + Number(value ?? 0);
+        }
+        aggregate.issues!.push(...(result.issues ?? []).map((issue) => ({
+          ...issue,
+          rowNumber: issue.rowNumber && issue.rowNumber >= 2 ? issue.rowNumber + lineOffset : issue.rowNumber
+        })));
+        aggregate.warnings!.push(...(result.warnings ?? []));
+        aggregate.rows!.push(...(result.rows ?? []).map((row) => ({
+          ...row,
+          rowNumber: row.rowNumber + lineOffset
+        })));
+        if (aggregate.rows!.length > 50) aggregate.rows = aggregate.rows!.slice(0, 50);
+        if (!response.ok) {
+          setPreview(aggregate);
+          throw new Error(result.error ?? "Unable to process these payout inputs.");
+        }
+        if (mode === "commit") completedCommitChunks += 1;
+        lineOffset += chunk.length;
+      }
+      aggregate.message = mode === "commit"
+        ? `${aggregate.totalRows} payout input line${aggregate.totalRows === 1 ? " was" : "s were"} applied in ${chunks.length} safe batch${chunks.length === 1 ? "" : "es"}.`
+        : `${aggregate.matchedRows} of ${aggregate.totalRows} payout input lines matched server records across ${chunks.length} safe batch${chunks.length === 1 ? "" : "es"}.`;
+      aggregate.importId = mode === "commit" ? operationIdsRef.current.join(",") : undefined;
+      setPreview(aggregate);
       if (mode === "commit") {
-        operationIdRef.current = "";
-        setConfirmationOpen(false);
+        operationIdsRef.current = [];
+        announceWorkforcePayoutInputsChanged(aggregate.message ?? "Payout inputs were updated and the worksheet is refreshing.");
+        closeEditor();
         router.refresh();
         onCommitted?.();
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to process these payout inputs.");
+      const message = caught instanceof Error ? caught.message : "Unable to process these payout inputs.";
+      setError(completedCommitChunks
+        ? `${completedCommitChunks} manual edit batch${completedCommitChunks === 1 ? " was" : "es were"} applied before the next batch failed. Retry to replay completed batches safely and continue. ${message}`
+        : message);
+      if (completedCommitChunks) router.refresh();
     } finally {
       setBusy(null);
     }

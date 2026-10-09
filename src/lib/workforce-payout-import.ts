@@ -146,6 +146,24 @@ export function normalizeWorkforcePayoutCode(value: unknown) {
   return String(value ?? "").trim().toUpperCase();
 }
 
+/**
+ * A provider mapping stores the exact component-value snapshot that was
+ * approved for that worker. Keep those keys available to imports even when a
+ * later payment-method edit (or an incomplete relation load) omits a component
+ * from the current method definition.
+ */
+export function workforcePayoutSetupFieldCodes(
+  componentCodes: readonly unknown[],
+  paymentValues: unknown
+) {
+  const snapshotCodes = paymentValues && typeof paymentValues === "object" && !Array.isArray(paymentValues)
+    ? Object.keys(paymentValues as Record<string, unknown>)
+    : [];
+  return [...new Set([...componentCodes, ...snapshotCodes]
+    .map(normalizeWorkforcePayoutCode)
+    .filter(Boolean))];
+}
+
 export function isValidWorkforcePayoutDate(value: string) {
   if (!ISO_DATE_PATTERN.test(value)) return false;
   const [year, month, day] = value.split("-").map(Number);
