@@ -7,6 +7,8 @@ export type StoredDocument = {
   kind: string;
   fileName: string;
   publishedAt: string;
+  /** Changes when the file content changes, so the phone replaces the copy it already saved. */
+  revision?: string;
   downloadUrl: string;
   mimeType?: string | null;
   external?: boolean;
@@ -28,10 +30,12 @@ function nativeDocuments(): NativeDocumentPlugin | null {
     : null;
 }
 
-// publishedAt is part of the key, so a re-issued document is fetched again instead of showing the
-// old stored copy.
+// The layout mark drops copies saved before the HRMS payslip format. revision then replaces a
+// saved file whenever that document's content changes.
+const DOCUMENT_LAYOUT = "hrms-layout-2";
 function storageKey(document: StoredDocument) {
-  return `${document.kind}-${document.id}-${Date.parse(document.publishedAt) || 0}`;
+  const stamp = document.revision || document.publishedAt;
+  return `${DOCUMENT_LAYOUT}-${document.kind}-${document.id}-${Date.parse(stamp) || 0}`;
 }
 
 function absoluteUrl(url: string) {

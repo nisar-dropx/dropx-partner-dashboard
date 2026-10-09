@@ -15,6 +15,7 @@ type DocumentRow = {
   subtitle: string;
   fileName: string;
   publishedAt: string;
+  revision?: string;
   expiresOn: string | null;
   downloadUrl: string;
   mimeType?: string | null;
@@ -106,7 +107,7 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
   const [viewing, setViewing] = useState<DocumentRow | null>(null);
   const [downloadingId, setDownloadingId] = useState("");
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
-  const listCacheKey = `dropx_documents:${account.profileType}:${account.id}`;
+  const listCacheKey = `dropx_documents:v2:${account.profileType}:${account.id}`;
 
   const load = useCallback(async (background = false, force = false) => {
     if (!background) setLoading(true);

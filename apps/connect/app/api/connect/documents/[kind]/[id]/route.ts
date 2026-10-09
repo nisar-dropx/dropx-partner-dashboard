@@ -1,7 +1,10 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { requireConnectAccount, type ConnectAccount } from "../../../../../../src/lib/connect-auth";
 import { userFacingError } from "@/lib/user-facing-error";
-import { createConnectPayDocument } from "../../../../../../src/lib/connect-pay-document";
 import { renderConnectExitDocumentPdf } from "../../../../../../src/lib/connect-exit-document";
+import { buildPayDocumentInput, isIssuedPayrollStatus, payDocumentSettingsFromSnapshot, type PayDocumentSettings } from "../../../../../../src/lib/hrms-pay-document-input";
+import { createPayDocumentPdf } from "../../../../../../src/lib/hrms-pay-document-pdf";
 import { supabaseAdmin } from "../../../../../../src/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -10,15 +13,31 @@ export const runtime = "nodejs";
 function clean(value: unknown) { return String(value ?? "").trim(); }
 function safeDownloadName(value: string) { return value.replace(/[\r\n"]/g, "_") || "document"; }
 function relation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
-function settings(snapshot: unknown, companyName: string) {
-  const raw = snapshot && typeof snapshot === "object" ? (snapshot as { document_settings?: unknown }).document_settings : null;
-  const row = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+async function payDocumentLogo() {
+  const candidates = [path.join(process.cwd(), "public", "dropx-logo.png"), path.join(process.cwd(), "apps", "connect", "public", "dropx-logo.png")];
+  for (const file of candidates) {
+    try { return new Uint8Array(await readFile(file)); } catch { /* try the next location */ }
+  }
+  return null;
+}
+async function livePayDocumentSettings(companyId: string, companyName: string): Promise<PayDocumentSettings> {
+  const fallback: PayDocumentSettings = {
+    displayCompanyName: companyName,
+    registeredAddress: "",
+    footerText: "This is a system-generated document based on the approved and locked payroll snapshot. No signature is required.",
+    authorisedSignatory: "People & Culture",
+    showAttendance: true
+  };
+  const result = await supabaseAdmin!.from("hr_pay_document_settings")
+    .select("display_company_name,registered_address,footer_text,authorised_signatory,show_attendance")
+    .eq("company_id", companyId).maybeSingle();
+  if (result.error || !result.data) return fallback;
   return {
-    companyName: typeof row.display_company_name === "string" ? row.display_company_name : companyName,
-    address: typeof row.registered_address === "string" ? row.registered_address : "",
-    payslipTitle: typeof row.payslip_title === "string" ? row.payslip_title : "Salary Payslip",
-    contractorTitle: typeof row.contractor_statement_title === "string" ? row.contractor_statement_title : "Contract Payment Statement",
-    footer: typeof row.footer_text === "string" ? row.footer_text : "This is a system-generated document based on the approved and locked payroll snapshot."
+    displayCompanyName: result.data.display_company_name || companyName,
+    registeredAddress: result.data.registered_address || "",
+    footerText: result.data.footer_text || fallback.footerText,
+    authorisedSignatory: result.data.authorised_signatory || fallback.authorisedSignatory,
+    showAttendance: result.data.show_attendance !== false
   };
 }
 
@@ -107,41 +126,38 @@ export async function GET(request: Request, { params }: { params: { kind: string
     }
 
     const result = await supabaseAdmin.from("hr_pay_documents")
-      .select("id,document_number,period_label,period_start,period_end,published_at,snapshot,worker_type,hr_payroll_run_people(worker_code,worker_name,location_name,department_name,designation_name,expected_days,present_days,paid_leave_days,absence_days,gross_pay,net_pay,attendance_deductions,hr_payroll_run_items(name,item_type,amount,source,display_order))")
+      .select("id,run_id,document_number,period_label,period_start,period_end,published_at,snapshot,worker_type,hr_payroll_run_people(worker_type,worker_id,worker_code,worker_name,location_name,department_name,designation_name,payment_basis,expected_days,present_days,paid_leave_days,absence_days,half_days,payable_days,weekoff_days,wfh_days,gross_pay,statutory_deductions,attendance_deductions,other_deductions,employer_contributions,net_pay,adjusted_net_pay,calculation_snapshot,hr_payroll_run_items(code,name,item_type,amount,source,display_order,metadata))")
       .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
       .eq("id", params.id).is("revoked_at", null).maybeSingle();
     if (result.error) throw new Error(result.error.message);
     if (!result.data) return Response.json({ error: "Pay document was not found." }, { status: 404 });
     const person = relation(result.data.hr_payroll_run_people);
-    if (!person) throw new Error("The locked payroll snapshot is unavailable.");
-    const documentSettings = settings(result.data.snapshot, account.companyName);
-    const items = (person.hr_payroll_run_items ?? []).slice().sort((left, right) => left.display_order - right.display_order);
-    const deductions = items.filter((item) => item.item_type === "deduction").map((item) => ({ name: item.name, amount: Number(item.amount) }));
-    if (Number(person.attendance_deductions) > 0 && !items.some((item) => item.source === "payroll_rules")) deductions.push({ name: "Attendance deduction", amount: Number(person.attendance_deductions) });
-    const bytes = await createConnectPayDocument({
-      companyName: documentSettings.companyName,
-      title: result.data.worker_type === "employee" ? documentSettings.payslipTitle : documentSettings.contractorTitle,
-      address: documentSettings.address,
+    if (!person) throw new Error("The payroll snapshot is unavailable.");
+    const workerQuery = profileType === "employee"
+      ? supabaseAdmin.from("employees").select("date_of_join,pan_number,pf_uan,pf_account_no,esi_no,bank_account_no,ifsc,tax_regime,pran").eq("company_id", account.companyId).eq("id", account.id).maybeSingle()
+      : supabaseAdmin.from("contractors").select("date_of_join,pan_number,pf_uan,pf_account_no,esi_no,bank_account_no,ifsc:ifsc_code,tax_regime,pran").eq("company_id", account.companyId).eq("id", account.id).maybeSingle();
+    const [worker, run, settings, logo] = await Promise.all([
+      workerQuery,
+      supabaseAdmin.from("hr_payroll_runs").select("status").eq("company_id", account.companyId).eq("id", result.data.run_id).maybeSingle(),
+      livePayDocumentSettings(account.companyId, account.companyName),
+      payDocumentLogo()
+    ]);
+    if (worker.error) throw new Error(worker.error.message);
+    if (run.error) throw new Error(run.error.message);
+    const bytes = await createPayDocumentPdf(buildPayDocumentInput({
+      settings: payDocumentSettingsFromSnapshot(result.data.snapshot) ?? settings,
       periodLabel: result.data.period_label,
       periodStart: result.data.period_start,
       periodEnd: result.data.period_end,
       documentNumber: result.data.document_number,
-      workerCode: person.worker_code,
-      workerName: person.worker_name,
-      designationName: person.designation_name,
-      departmentName: person.department_name,
-      locationName: person.location_name,
-      expectedDays: Number(person.expected_days),
-      presentDays: Number(person.present_days),
-      paidLeaveDays: Number(person.paid_leave_days),
-      absenceDays: Number(person.absence_days),
-      grossPay: Number(person.gross_pay),
-      netPay: Number(person.net_pay),
-      earnings: items.filter((item) => item.item_type === "earning").map((item) => ({ name: item.name, amount: Number(item.amount) })),
-      deductions,
-      footer: documentSettings.footer,
-      publishedAt: result.data.published_at
-    });
+      publishedAt: result.data.published_at,
+      person: { ...person, worker_type: result.data.worker_type },
+      items: person.hr_payroll_run_items ?? [],
+      worker: worker.data,
+      preview: !isIssuedPayrollStatus(run.data?.status),
+      addAttendanceDeductionFallback: true,
+      logoPng: logo
+    }));
     return new Response(new Uint8Array(bytes), { headers: {
       "Cache-Control": "private, no-store",
       "Content-Disposition": `attachment; filename="${safeDownloadName(result.data.document_number)}.pdf"`,
