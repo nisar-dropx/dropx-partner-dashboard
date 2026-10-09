@@ -15,12 +15,10 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!isEddCronHost(new URL(request.url).hostname)) return NextResponse.json({ skipped: "EDD ledger retention runs only on OpsPulse." });
   if (!supabaseAdmin) return NextResponse.json({ error: "EDD database is not configured." }, { status: 500 });
-  const [stocks, outcomes] = await Promise.all([
-    supabaseAdmin.from("edd_station_snapshots").select("station_code"),
-    supabaseAdmin.from("edd_performance_snapshots").select("station_code")
-  ]);
-  if (stocks.error || outcomes.error) return NextResponse.json({ error: "EDD stations could not be read." }, { status: 500 });
-  const codes = [...new Set([...(stocks.data ?? []), ...(outcomes.data ?? [])].map(row => row.station_code).filter(Boolean))];
+  // Stations as the ledger has them: one that left the live feeds still has rows to remove.
+  const stations = await supabaseAdmin.rpc("edd_ledger_stations");
+  if (stations.error) return NextResponse.json({ error: "EDD stations could not be read." }, { status: 500 });
+  const codes = ((stations.data ?? []) as unknown[]).map(String);
   let deleted = 0;
   const failed: string[] = [];
   for (const code of codes) {
