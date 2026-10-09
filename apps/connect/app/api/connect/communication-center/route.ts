@@ -127,6 +127,7 @@ async function announcementInbox(account: ConnectAccount) {
   const attachments = attachmentResult.error ? [] : attachmentResult.data ?? [];
   return personalized.map(({ data: _copy, ...item }) => ({
     ...item,
+    presentation: _copy?.presentation ?? null,
     attachments: attachments.filter((attachment) => attachment.announcement_id === item.id),
     deliveredAt: receiptById.get(item.id)?.delivered_at ?? null,
     readAt: receiptById.get(item.id)?.read_at ?? null

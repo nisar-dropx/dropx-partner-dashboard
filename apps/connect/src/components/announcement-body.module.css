@@ -1,0 +1,13 @@
+.paragraph { margin: 14px 0; white-space: pre-line; overflow-wrap: anywhere; }
+.paragraph strong { font-weight: 800; }
+.paragraph.callout {
+  padding: 14px 16px;
+  border: 1px solid #f2cc91;
+  border-left: 4px solid #e87521;
+  border-radius: 12px;
+  color: #63370f;
+  background: #fff5e3;
+  line-height: 1.65;
+}
+.callout strong { color: #48260b; }
+@media (max-width: 600px) { .paragraph.callout { padding: 12px 14px; } }

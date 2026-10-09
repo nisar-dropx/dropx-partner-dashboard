@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Bell, ChevronRight, X } from "lucide-react";
 import type { ConnectNotification } from "../lib/dashboard-notices";
 import styles from "./connect-notice.module.css";
+import { AnnouncementBody } from "./announcement-body";
 
 export function ConnectNoticeCards({ notices, onOpen }: { notices: ConnectNotification[]; onOpen: (notice: ConnectNotification) => void }) {
   if (!notices.length) return null;
@@ -17,7 +18,7 @@ export function ConnectNoticeDialog({ notice, onClose, onContinue }: { notice: C
   useEffect(() => { const element = dialog.current; element?.showModal(); return () => element?.close(); }, []);
   return <dialog ref={dialog} className={styles.dialog} aria-labelledby="connect-notice-title" onClose={onClose}>
     <header><div><small>DROPX UPDATE</small><h2 id="connect-notice-title">{notice.title}</h2></div><button type="button" aria-label="Close notice" onClick={onClose}><X size={20}/></button></header>
-    <div className={styles.body}>{notice.body.split(/\n\s*\n/).map((paragraph, index) => <p key={index}>{paragraph}</p>)}</div>
+    <div className={styles.body}><AnnouncementBody body={notice.body} presentation={notice.data?.presentation} /></div>
     <footer><button type="button" onClick={onClose}>Close</button><button type="button" className={styles.primary} onClick={onContinue}>{notice.data?.ctaLabel || "View details"}<ChevronRight size={17}/></button></footer>
   </dialog>;
 }

@@ -23,6 +23,7 @@ import {
   X
 } from "lucide-react";
 import { ConnectDialog } from "./connect-dialog";
+import { AnnouncementBody } from "./announcement-body";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
@@ -64,6 +65,7 @@ type Announcement = {
   title: string;
   body: string;
   priority: "normal" | "important" | "urgent";
+  presentation?: unknown;
   published_at: string;
   readAt?: string | null;
   attachments?: AnnouncementAttachment[];
@@ -322,7 +324,7 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
         <Megaphone />
       </header>
       <div className="dx-privacy-strip announcement"><CheckCircle2 /><span><strong>Official DropX communication.</strong> This update is read-only and was sent to your team.</span></div>
-      <article className="dx-announcement-body">{selectedAnnouncement.body.split("\n").map((line, index) => <p key={`${index}-${line}`}>{line || <>&nbsp;</>}</p>)}</article>
+      <article className="dx-announcement-body"><AnnouncementBody body={selectedAnnouncement.body} presentation={selectedAnnouncement.presentation} /></article>
       {selectedAnnouncement.attachments?.length ? <section className="dx-announcement-files">
         <strong><Paperclip />Attachments · {selectedAnnouncement.attachments.length}</strong>
         {selectedAnnouncement.attachments.filter((file) => file.mime_type.startsWith("image/") && imagePreviews[file.id]).map((file) => <button className="dx-announcement-image" key={`preview-${file.id}`} onClick={() => void openAnnouncementFile(file)} type="button">
