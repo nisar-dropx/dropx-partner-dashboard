@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { connectSessionCookieName, findConnectAccounts } from "../../../../src/lib/connect-auth";
+import { connectSessionCookieName, findConnectSessionAccounts } from "../../../../src/lib/connect-auth";
 import {
   deleteProfileDraft,
   draftVerificationValues,
@@ -174,7 +174,7 @@ async function loadSessionAccounts() {
     cookies().delete(connectSessionCookieName);
     throw new Error("Connect session expired. Please log in again.");
   }
-  return findConnectAccounts(session.country_code, session.mobile_number);
+  return findConnectSessionAccounts(session.country_code, session.mobile_number);
 }
 
 async function requireEmployeeAccess(employeeId: string) {

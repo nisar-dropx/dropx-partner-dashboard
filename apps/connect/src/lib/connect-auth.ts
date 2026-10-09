@@ -12,7 +12,8 @@ import {
 import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
-import { enforceAccessCutoffIfDueForWorker } from "./access-cutoff";
+import { enforceAccessCutoffIfDueForWorker, readAccessCutoffForPreview } from "./access-cutoff";
+import { resolveConnectPreview } from "./connect-preview";
 
 export type ConnectAccount = {
   id: string;
@@ -621,7 +622,14 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   }
 }
 
-async function loadConnectAccounts(countryCode: string, mobile: string): Promise<ConnectAccount[]> {
+export function findConnectPreviewAccounts(countryCode: string, mobile: string) {
+  return loadConnectAccounts(countryCode, mobile, true);
+}
+export async function findConnectSessionAccounts(countryCode: string, mobile: string) {
+  const preview = await resolveConnectPreview();
+  return preview ? [preview] : findConnectAccounts(countryCode, mobile);
+}
+async function loadConnectAccounts(countryCode: string, mobile: string, readOnly = false): Promise<ConnectAccount[]> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
   type ProfileMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null };
@@ -728,7 +736,8 @@ async function loadConnectAccounts(countryCode: string, mobile: string): Promise
   // let a login through past the worker's last day).
   const cutoffChecks = await Promise.all(accounts.map(async (account) => {
     if (account.profile_type !== "employee" && account.profile_type !== "contractor") return true;
-    return enforceAccessCutoffIfDueForWorker(account.company_id, account.profile_type, account.id);
+    return readOnly ? readAccessCutoffForPreview(account.company_id, account.profile_type, account.id)
+      : enforceAccessCutoffIfDueForWorker(account.company_id, account.profile_type, account.id);
   }));
   const liveAccounts = accounts.filter((_, index) => cutoffChecks[index]);
   accounts.length = 0;
@@ -1151,7 +1160,7 @@ export async function requireConnectAccount(profileType: ConnectAccount["profile
     cookies().delete(connectSessionCookieName);
     throw new Error("Connect session expired. Please log in again.");
   }
-  const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+  const accounts = await findConnectSessionAccounts(session.country_code, session.mobile_number);
   const canonicalProfileType = profileType === "field_executive" ? "workforce" : profileType;
   const account = accounts.find((item) => item.profileType === canonicalProfileType && item.id === accountId);
   if (!account) throw new Error("This account is not available for the current login.");

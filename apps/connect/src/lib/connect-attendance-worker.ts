@@ -2,7 +2,8 @@ import "server-only";
 
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
-import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
+import { connectSessionCookieName, normalizeConnectMobile, requireConnectAccount } from "@/lib/connect-auth";
+import { connectPreviewCookieName } from "./connect-preview-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
@@ -75,7 +76,12 @@ export async function resolveConnectAttendanceWorker({
   if (!row) throw new Error("Workforce account not found.");
   const rowMobile = String(row.mobile ?? "").replace(/\D/g, "");
   const rowCountryCode = String(row.mobile_country_code ?? countryCode).replace(/\D/g, "") || countryCode;
-  if (rowCountryCode !== countryCode || (rowMobile !== mobile && rowMobile !== localMobile)) {
+  const preview = Boolean(cookies().get(connectPreviewCookieName)?.value);
+  if (preview) {
+    const selected = await requireConnectAccount(resolvedProfileType, accountId);
+    if (selected.companyId !== row.company_id) throw new Error("This profile is not available in preview.");
+  }
+  if (!preview && (rowCountryCode !== countryCode || (rowMobile !== mobile && rowMobile !== localMobile))) {
     throw new Error("This attendance is not available for the signed-in account.");
   }
   if (requirePeopleScope) {

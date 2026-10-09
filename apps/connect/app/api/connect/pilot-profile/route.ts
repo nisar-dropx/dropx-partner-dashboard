@@ -2,7 +2,7 @@ import { betaJourney } from "@/lib/beta-journey";
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { connectSessionCookieName, findConnectAccounts } from "../../../../src/lib/connect-auth";
+import { connectSessionCookieName, findConnectSessionAccounts } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 
@@ -28,7 +28,7 @@ async function requirePilot(candidateId: string) {
   if (sessionResult.error || !session || session.revoked_at || new Date(session.expires_at).getTime() < Date.now()) {
     throw new Error("Connect session expired. Please log in again.");
   }
-  const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+  const accounts = await findConnectSessionAccounts(session.country_code, session.mobile_number);
   const account = accounts.find(item => item.id === candidateId && item.onboardingBeta && item.activationStage?.startsWith("amazon_email_pilot:"));
   if (!account) throw new Error("Private beta profile is not available for this login.");
   return account;

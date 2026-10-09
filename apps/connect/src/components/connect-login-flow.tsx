@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { ConnectPreviewSwitcher, exitConnectPreview } from "./connect-preview-switcher";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, MessageCircleMore, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
@@ -159,6 +160,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const pendingApprovalSection = useRef(pathname === "/approvals" ? requestedApprovalSection : null);
   const [step, setStep] = useState<Step>("mobile");
   const [checking, setChecking] = useState(true);
+  const [canPreviewUsers, setCanPreviewUsers] = useState(false);
+  const [userPreview, setUserPreview] = useState(false);
   const [sessionError, setSessionError] = useState("");
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [countryCode, setCountryCode] = useState("91");
@@ -199,8 +202,11 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   function route(rows: AppAccount[]) {
     const serverDefault = rows.find((row) => row.isDefault);
     const saved = serverDefault ? accountKey(serverDefault) : "";
-    if (saved) localStorage.setItem(defaultKeyName, saved);
-    else localStorage.removeItem(defaultKeyName);
+    // A preview has a separate temporary account selector; preserve the device preference.
+    if (!rows.every(row => (row as AppAccount & { readOnlyPreview?: boolean }).readOnlyPreview)) {
+      if (saved) localStorage.setItem(defaultKeyName, saved);
+      else localStorage.removeItem(defaultKeyName);
+    }
     const selected = resolveConnectRouteAccount(rows, selectedAccountKey, selectedAccountId);
     setAccounts(rows); setDefaultKey(saved); setAccount(selected); setAvatar(selected?.profilePhotoUrl || "");
     const destination = selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts";
@@ -214,9 +220,13 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     setChecking(true);
     setSessionError("");
     fetch("/api/connect/auth/session", { cache: "no-store", signal: controller.signal })
-      .then((response) => readConnectSessionResponse<{
-        authenticated: boolean; accounts?: AppAccount[]; countryCode?: string; mobile?: string; error?: string;
-      }>(response))
+      .then(async (response) => {
+        const metadata = await response.clone().json().catch(() => ({}));
+        if (!cancelled) { setCanPreviewUsers(Boolean(metadata.canPreviewUsers)); setUserPreview(Boolean(metadata.preview)); }
+        return readConnectSessionResponse<{
+          authenticated: boolean; accounts?: AppAccount[]; countryCode?: string; mobile?: string; error?: string;
+        }>(response);
+      })
       .then((payload) => {
         if (cancelled) return;
         if (payload.authenticated) {
@@ -276,7 +286,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     return () => { cancelled = true; window.clearTimeout(timeout); controller.abort(); };
   }, [account?.id, account?.companyId, account?.profileType, account?.workspace, account?.pageAccess, reporteeAttempt]);
   useEffect(() => {
-    if (!account || ["mobile", "pin", "otp", "createPin", "unlock", "accounts"].includes(step)) return;
+    if (userPreview || !account || ["mobile", "pin", "otp", "createPin", "unlock", "accounts"].includes(step)) return;
     const key = `${account.profileType}:${account.id}:${step}`;
     if (lastLoggedScreen.current === key) return;
     lastLoggedScreen.current = key;
@@ -295,9 +305,9 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       }),
       keepalive: true
     }).catch(() => undefined);
-  }, [account, step]);
+  }, [account, step, userPreview]);
   useEffect(() => {
-    if (!account) return;
+    if (!account || userPreview) return;
     const send = (eventCode: string, action: string, metadata: Record<string, string>) => {
       void fetch("/api/connect/event-log", {
         method: "POST",
@@ -669,6 +679,13 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   // shell. Omitting it here made a valid session render the sign-in artwork
   // (and no login controls) whenever a user opened Work schedule.
   const loggedIn = ["accounts","activation","dashboard","profile","documents","connect","approvals","requests","payments","work","advances","earnings","refer","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
+  useEffect(() => {
+    if (!loggedIn || checking || canPreviewUsers) return;
+    const controller = new AbortController();
+    fetch("/api/connect/preview?capabilities=1", { cache: "no-store", signal: controller.signal })
+      .then(r => r.json()).then(data => { if (!controller.signal.aborted) setCanPreviewUsers(Boolean(data.canPreviewUsers)); }).catch(() => undefined);
+    return () => controller.abort();
+  }, [loggedIn, checking, canPreviewUsers]);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     activation: "Work setup",
@@ -697,6 +714,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     <header><small>DropX One</small><h2>Workspace unavailable</h2></header>
     <p role="alert">{sessionError}</p>
     <button onClick={() => setSessionAttempt((attempt) => attempt + 1)}>Retry workspace</button>
+    {userPreview ? <button onClick={() => void exitConnectPreview().catch(() => setSessionError("Unable to exit preview. Please retry."))}>Exit preview</button> : null}
   </section></div>;
 
   const isolatedBetaJourney = Boolean(account?.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
@@ -746,10 +764,11 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       </nav>
       <button className="dx-desktop-signout" onClick={logout}><LogOut />Sign out</button>
     </aside> : null}
-    {loggedIn ? <header className="dx-header">
+    {loggedIn ? <header className={`dx-header${canPreviewUsers ? " dx-header-with-preview" : ""}`}>
       <button aria-label="Menu" className={!account ? "dx-menu-unavailable" : ""} disabled={!account} onClick={() => { setDrawer(true); setProfileMenu(false); }}><Menu /></button>
       <Image alt="DropX" height={42} priority src="/dropx-logo.png" width={120} />
       <span className="dx-header-context"><small>DropX One</small>{step === "dashboard" ? null : <b>{screenLabel[step] || "Workspace"}</b>}</span>
+      {canPreviewUsers ? <ConnectPreviewSwitcher active={userPreview} /> : null}
       <button aria-label="Notifications" className="dx-notification-trigger" disabled={!account} onClick={() => void loadNotifications()}><Bell />{unreadNotifications ? <b>{unreadNotifications > 99 ? "99+" : unreadNotifications}</b> : null}</button>
       <button className="avatar" onClick={() => { setProfileMenu((v) => !v); setNotificationMenu(false); setDrawer(false); }}>{avatar ? <img alt="" src={avatar} /> : <b>{(account?.name || "U")[0]}</b>}</button>
       {notificationMenu ? <aside className="dx-notification-pop">
@@ -826,13 +845,14 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         {showAppInstallCard ? <ConnectAppInstallCard /> : null}
       </section>
     </div> : <main className="dx-content" data-screen={step} key={account ? accountKey(account) : "accounts"}>
+      {userPreview ? <ConnectPreviewSwitcher active name={account?.name} banner /> : null}
       {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
       {error && !(isolatedBetaJourney && error === "Complete the required work setup to unlock this workspace.") ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
       {step === "accounts" ? <section className="dx-accounts">{accounts.map((row) => <button className={isWorkforceWorkspace(row) ? "workforce" : "people"} key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.name || row.reference}</strong><em>{row.role || "-"}</em><small>{row.companyName || "-"}{row.reference ? ` · ${row.reference}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
-      {account && active(account) && allowed(account, "attendance") ? (
+      {!userPreview && account && active(account) && allowed(account, "attendance") ? (
         <AttendanceLocationMonitor account={account} />
       ) : null}
-      {account ? <ConnectNativeBridge account={account} /> : null}
+      {!userPreview && account ? <ConnectNativeBridge account={account} /> : null}
       <PullToRefresh />
       {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} />}</ConnectBetaJourneyShell> : null}
       {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
@@ -859,7 +879,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       {step === "leave" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
       {step === "lop" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
       {step === "performance" && account && allowed(account, "performance") ? <ConnectPerformance account={account} /> : null}
-      {step === "settings" && account && allowed(account, "settings") ? <section className="dx-settings">
+      {step === "settings" && account && userPreview ? <div className="dx-preview-settings">Account settings are unavailable in read-only preview.</div> : null}
+      {step === "settings" && account && !userPreview && allowed(account, "settings") ? <section className="dx-settings">
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
         <div className="dx-settings-grid">
           <section className="dx-setting-card"><i><SwitchCamera /></i><span><strong>Default account</strong><small>Choose the workspace shown after sign in.</small></span><label><span className="sr-only">Default account</span><select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Ask me every time</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.role || row.profileType} · {row.workspaceLabel || (isWorkforceWorkspace(row) ? "Workforce workspace" : "People workspace")} · {row.companyName} - {row.reference || row.name}</option>)}</select></label></section>

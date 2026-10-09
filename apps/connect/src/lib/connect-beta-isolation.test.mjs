@@ -57,6 +57,7 @@ function fixture({ beta = false, pilotError = null, workforce = [normal('ordinar
     '@/lib/dropx-one-pages':{requiredDropxOnePageCodes},
     './connect-wfh-access':{connectWfhEligible:()=>false,loadConnectWfhPolicies:async()=>new Map()},
     './connect-business-trip-access':{connectBusinessTripEligible:()=>false,loadConnectBusinessTripPolicies:async()=>new Map()},
+    './connect-preview':{resolveConnectPreview:async()=>null},
     './access-cutoff':{enforceAccessCutoffIfDueForWorker:async()=>true},
     './provider-mapping-policy':{requiresProviderMappingActivation:()=>true},
     '@/lib/partner-onboarding':{
