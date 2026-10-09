@@ -31,7 +31,7 @@ async function renderPdf(bytes: Uint8Array, container: HTMLDivElement, isCancell
   }
 }
 
-export function DocumentViewer({ document, title, onClose }: { document: StoredDocument; title: string; onClose: () => void }) {
+export function DocumentViewer({ document, title, note, onClose }: { document: StoredDocument; title: string; note?: string; onClose: () => void }) {
   const pagesRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -91,6 +91,7 @@ export function DocumentViewer({ document, title, onClose }: { document: StoredD
           {saving ? <LoaderCircle /> : <Download />}Download
         </button>
       </header>
+      {note ? <p className="dx-pay-may-change">{note}</p> : null}
       {notice ? <p className="dx-document-viewer-notice">{notice}</p> : null}
       <div className="dx-document-viewer-body">
         {status === "loading" ? <div className="dx-loader"><span /><small>Opening document…</small></div> : null}

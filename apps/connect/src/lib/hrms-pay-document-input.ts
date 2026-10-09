@@ -56,7 +56,7 @@ export type PayDocumentWorkerDetails = {
   pran?: string | null;
 };
 
-export const PAY_DOCUMENT_PREVIEW_FOOTER = "These figures may change if payroll is updated later.";
+export const PAY_DOCUMENT_PREVIEW_FOOTER = "Preview from the current payroll calculation. This is not a published payslip until the month is finalized.";
 
 export function payDocumentSettingsFromSnapshot(snapshot: unknown): PayDocumentSettings | null {
   if (!snapshot || typeof snapshot !== "object") return null;
@@ -271,7 +271,6 @@ export function buildPayDocumentInput(input: {
     companyName: settings.displayCompanyName,
     registeredAddress: settings.registeredAddress,
     footerText,
-    provisionalNote: input.preview && !input.signed ? PAY_DOCUMENT_PREVIEW_FOOTER : undefined,
     includeSignature: Boolean(input.signed),
     authorisedSignatory: settings.authorisedSignatory,
     showAttendance: settings.showAttendance,

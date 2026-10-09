@@ -35,7 +35,8 @@ function nativeDocuments(): NativeDocumentPlugin | null {
 const DOCUMENT_LAYOUT = "hrms-layout-2";
 function storageKey(document: StoredDocument) {
   const stamp = document.revision || document.publishedAt;
-  return `${DOCUMENT_LAYOUT}-${document.kind}-${document.id}-${Date.parse(stamp) || 0}`;
+  const layout = document.kind === "pay" ? "hrms-layout-3" : DOCUMENT_LAYOUT;
+  return `${layout}-${document.kind}-${document.id}-${Date.parse(stamp) || 0}`;
 }
 
 function absoluteUrl(url: string) {

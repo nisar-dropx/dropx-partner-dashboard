@@ -16,6 +16,7 @@ type DocumentRow = {
   fileName: string;
   publishedAt: string;
   revision?: string;
+  mayChange?: boolean;
   expiresOn: string | null;
   downloadUrl: string;
   mimeType?: string | null;
@@ -25,6 +26,7 @@ type DocumentRow = {
 // The document list is kept on the phone and only refetched after this long (or when the person
 // taps refresh), so opening Documents doesn't query Supabase every time.
 const LIST_CACHE_MS = 6 * 60 * 60 * 1000;
+const payMayChangeNote = "These figures may change if payroll is updated later.";
 const isWorkCycle = (document: DocumentRow) => /work\s*_?cycle/i.test(document.category);
 const isInsurance = (document: DocumentRow) => document.kind === "insurance" || (document.kind === "issued" && document.category === "insurance card");
 
@@ -107,7 +109,7 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
   const [viewing, setViewing] = useState<DocumentRow | null>(null);
   const [downloadingId, setDownloadingId] = useState("");
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
-  const listCacheKey = `dropx_documents:v2:${account.profileType}:${account.id}`;
+  const listCacheKey = `dropx_documents:v3:${account.profileType}:${account.id}`;
 
   const load = useCallback(async (background = false, force = false) => {
     if (!background) setLoading(true);
@@ -291,7 +293,7 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
     </section>;
   }
 
-  if (viewing) return <section className="dx-documents"><DocumentViewer document={viewing} onClose={() => setViewing(null)} title={viewing.title} /></section>;
+  if (viewing) return <section className="dx-documents"><DocumentViewer document={viewing} note={viewing.mayChange ? payMayChangeNote : undefined} onClose={() => setViewing(null)} title={viewing.title} /></section>;
 
   return <section className="dx-documents">
     <header className="dx-page-intro dx-documents-head"><div><small>My records</small><h1>Documents</h1><p>{workforce ? "Insurance, Form 16 and official workforce records—kept private and ready when issued." : "Payslips, insurance and official HR records—organised by type."}</p></div><span className="dx-documents-head-actions"><button aria-label="Refresh documents" className="dx-documents-refresh" disabled={loading} onClick={() => void load(false, true)} type="button"><RefreshCw /></button>{requestTypes.length ? <button onClick={() => setShowRequest(true)}><FilePlus2 />Request document</button> : null}</span></header>
@@ -307,7 +309,7 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
     {!loading && section !== "requests" && !rows.length ? <div className="dx-document-empty"><FileText /><strong>No {tabs.find((tab) => tab.key === section)?.label.toLowerCase()} yet</strong><small>{section === "payslips" ? "Completed payroll publishes your document here automatically." : "Use Request document if you need an HR-issued record that is not available."}</small></div> : null}
     {!loading && section !== "requests" && rows.length ? <div className="dx-document-list">{rows.map((document) => <article className="is-openable" key={`${document.kind}:${document.id}`} onClick={() => openDocument(document)} onKeyDown={(event) => { if (event.key === "Enter") openDocument(document); }} role="button" tabIndex={0}>
       <i>{document.kind === "pay" ? <WalletCards /> : isInsurance(document) ? <HeartPulse /> : isWorkCycle(document) ? <CalendarClock /> : <FileText />}</i>
-      <div><span><em>{title(document.category)}</em>{document.expiresOn ? <small>{isInsurance(document) ? "Valid till" : "Expires"} {date(`${document.expiresOn}T00:00:00`)}</small> : null}</span><strong>{document.title}</strong><p>{document.subtitle}</p><small>{document.fileName} · {document.kind === "insurance" ? "Updated" : "Published"} {date(document.publishedAt)}</small></div>
+      <div><span><em>{title(document.category)}</em>{document.expiresOn ? <small>{isInsurance(document) ? "Valid till" : "Expires"} {date(`${document.expiresOn}T00:00:00`)}</small> : null}</span><strong>{document.title}</strong><p>{document.subtitle}</p><small>{document.fileName} · {document.kind === "insurance" ? "Updated" : "Published"} {date(document.publishedAt)}</small>{document.mayChange ? <span className="dx-pay-may-change">{payMayChangeNote}</span> : null}</div>
       <button disabled={downloadingId === document.id} onClick={(event) => { event.stopPropagation(); void startDownload(document); }} type="button">{downloadingId === document.id ? <LoaderCircle /> : <Download />}Download</button>
     </article>)}</div> : null}
     {!loading && section === "requests" ? <div className="dx-document-request-list">{requests.length ? requests.map((request) => { const issued = request.fulfilled_document_id ? issuedDocumentById.get(request.fulfilled_document_id) : null; return <button className="dx-document-request-row" key={request.id} onClick={() => setSelectedRequestId(request.id)} type="button">

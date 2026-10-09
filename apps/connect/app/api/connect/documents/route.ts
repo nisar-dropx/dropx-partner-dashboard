@@ -84,7 +84,7 @@ export async function GET(request: Request) {
 
     const [pay, issued, exit, types, requests, insurance] = await Promise.all([
       supabaseAdmin.from("hr_pay_documents")
-        .select("id,document_type,document_number,period_label,period_start,period_end,published_at,updated_at")
+        .select("id,run_id,document_type,document_number,period_label,period_start,period_end,published_at,updated_at")
         .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
         .is("revoked_at", null).order("period_start", { ascending: false }),
       supabaseAdmin.from("hr_worker_documents")
@@ -126,6 +126,10 @@ export async function GET(request: Request) {
     ]);
     if (messagesResult.error) throw new Error(messagesResult.error.message);
     if (attachmentsResult.error) throw new Error(attachmentsResult.error.message);
+    const runIds = [...new Set((pay.data ?? []).map((row) => row.run_id).filter(Boolean))];
+    const runs = runIds.length ? await supabaseAdmin.from("hr_payroll_runs").select("id,status").eq("company_id", account.companyId).in("id", runIds) : { data: [], error: null };
+    if (runs.error) throw new Error(runs.error.message);
+    const openRuns = new Set((runs.data ?? []).filter((row) => row.status !== "approved" && row.status !== "locked").map((row) => row.id));
     const messages = messagesResult.data ?? [];
     const attachments = attachmentsResult.data ?? [];
 
@@ -134,7 +138,7 @@ export async function GET(request: Request) {
       ...(pay.data ?? []).map((row) => ({
         id: row.id, kind: "pay", category: row.document_type === "payslip" ? "Salary slip" : "Payment statement",
         title: row.period_label, subtitle: `${row.period_start} to ${row.period_end}`, fileName: `${row.document_number}.pdf`,
-        publishedAt: row.published_at, revision: row.updated_at || row.published_at, expiresOn: null, downloadUrl: query("pay", row.id)
+        publishedAt: row.published_at, revision: row.updated_at || row.published_at, mayChange: openRuns.has(row.run_id), expiresOn: null, downloadUrl: query("pay", row.id)
       })),
       ...(issued.data ?? []).map((row) => ({
         id: row.id, kind: "issued", category: row.document_type.replaceAll("_", " "), title: row.title,

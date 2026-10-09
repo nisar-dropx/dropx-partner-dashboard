@@ -9603,6 +9603,20 @@ body {
   background: #fbeceb;
 }
 
+.dx-pay-may-change {
+  display: block;
+  margin: 0;
+  padding: 8px 14px 0;
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.dx-document-list .dx-pay-may-change {
+  padding: 6px 0 0;
+}
+
 .dx-document-viewer-body {
   flex: 1;
   overflow: auto;

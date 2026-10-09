@@ -3,7 +3,7 @@ import path from "node:path";
 import { requireConnectAccount, type ConnectAccount } from "../../../../../../src/lib/connect-auth";
 import { userFacingError } from "@/lib/user-facing-error";
 import { renderConnectExitDocumentPdf } from "../../../../../../src/lib/connect-exit-document";
-import { buildPayDocumentInput, isIssuedPayrollStatus, payDocumentSettingsFromSnapshot, type PayDocumentSettings } from "../../../../../../src/lib/hrms-pay-document-input";
+import { buildPayDocumentInput, payDocumentSettingsFromSnapshot, type PayDocumentSettings } from "../../../../../../src/lib/hrms-pay-document-input";
 import { createPayDocumentPdf } from "../../../../../../src/lib/hrms-pay-document-pdf";
 import { supabaseAdmin } from "../../../../../../src/lib/supabase-admin";
 
@@ -136,14 +136,12 @@ export async function GET(request: Request, { params }: { params: { kind: string
     const workerQuery = profileType === "employee"
       ? supabaseAdmin.from("employees").select("date_of_join,pan_number,pf_uan,pf_account_no,esi_no,bank_account_no,ifsc,tax_regime,pran").eq("company_id", account.companyId).eq("id", account.id).maybeSingle()
       : supabaseAdmin.from("contractors").select("date_of_join,pan_number,pf_uan,pf_account_no,esi_no,bank_account_no,ifsc:ifsc_code,tax_regime,pran").eq("company_id", account.companyId).eq("id", account.id).maybeSingle();
-    const [worker, run, settings, logo] = await Promise.all([
+    const [worker, settings, logo] = await Promise.all([
       workerQuery,
-      supabaseAdmin.from("hr_payroll_runs").select("status").eq("company_id", account.companyId).eq("id", result.data.run_id).maybeSingle(),
       livePayDocumentSettings(account.companyId, account.companyName),
       payDocumentLogo()
     ]);
     if (worker.error) throw new Error(worker.error.message);
-    if (run.error) throw new Error(run.error.message);
     const bytes = await createPayDocumentPdf(buildPayDocumentInput({
       settings: payDocumentSettingsFromSnapshot(result.data.snapshot) ?? settings,
       periodLabel: result.data.period_label,
@@ -154,7 +152,6 @@ export async function GET(request: Request, { params }: { params: { kind: string
       person: { ...person, worker_type: result.data.worker_type },
       items: person.hr_payroll_run_items ?? [],
       worker: worker.data,
-      preview: !isIssuedPayrollStatus(run.data?.status),
       addAttendanceDeductionFallback: true,
       logoPng: logo
     }));

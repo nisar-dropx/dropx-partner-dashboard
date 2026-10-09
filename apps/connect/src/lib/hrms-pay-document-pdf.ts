@@ -22,8 +22,6 @@ export type PayDocumentInput = {
   companyName: string;
   registeredAddress?: string;
   footerText?: string;
-  /** Shown under the title while the month is still open, so a saved copy is not read as final. */
-  provisionalNote?: string;
   /**
    * Adds a "for {company} / Authorised Signatory" block for a copy HR will sign and stamp
    * (bank loans, visas). Off by default: standard payslips are computer-generated and unsigned.
@@ -344,10 +342,6 @@ export async function createPayDocumentPdf(input: PayDocumentInput) {
   c.rect(margin, y, contentWidth, titleH, { fill: COLORS.headFill, border: COLORS.border });
   c.cell(`Payslip for the month of ${input.periodLabel}`, margin, y, contentWidth, titleH, { size: 11, font: bold, align: "center" });
   y -= titleH + 10;
-  if (input.provisionalNote) {
-    c.text(input.provisionalNote, margin, y, { size: 8.5, font: italic, color: COLORS.brand, maxWidth: contentWidth });
-    y -= 14;
-  }
 
   // ── Employee details (fully ruled key/value grid) ──────────────────────
   const rowH = 16;
