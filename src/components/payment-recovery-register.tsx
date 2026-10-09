@@ -1,8 +1,9 @@
 "use client";
 
 import { ChevronDown, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { PaymentRecoveryBulkUpload } from "@/components/payment-recovery-bulk-upload";
+import { PaymentRecoveryConfigurator } from "@/components/payment-recovery-configurator";
 
 export type PaymentRecoveryAllocation = {
   id: string;
@@ -22,11 +23,14 @@ export type PaymentRecoveryRegisterRow = {
   providerName: string;
   location: string;
   debitMonth: string;
-  debitAmount: number;
+  value: number;
   recoveredAmount: number;
   pendingAmount: number;
-  recoveryMethod: "payout_deduction" | "post_invoice_dispute";
+  recoveryMethod: "payout_deduction" | "post_invoice_dispute" | null;
+  payoutMonth: string | null;
+  configuredAt: string | null;
   status:
+    | "awaiting_configuration"
     | "awaiting_registration"
     | "ready_for_deduction"
     | "planned_provider_dispute"
@@ -46,12 +50,14 @@ export type PaymentRecoveryRegisterRow = {
 
 type FilterOption = { value: string; label: string };
 
-const routeLabels: Record<PaymentRecoveryRegisterRow["recoveryMethod"], string> = {
+const routeLabels: Record<string, string> = {
+  unconfigured: "Not configured",
   payout_deduction: "Payout deduction",
   post_invoice_dispute: "Post-invoice provider dispute"
 };
 
 const statusLabels: Record<PaymentRecoveryRegisterRow["status"], string> = {
+  awaiting_configuration: "Awaiting configuration",
   awaiting_registration: "Awaiting registration",
   ready_for_deduction: "Ready for deduction",
   planned_provider_dispute: "Provider dispute planned",
@@ -92,14 +98,19 @@ function uniqueOptions(values: string[], label: (value: string) => string = (val
 }
 
 function rowLinkStatus(row: PaymentRecoveryRegisterRow) {
-  if (row.recoveryMethod === "post_invoice_dispute") return "not_applicable";
+  if (!row.recoveryMethod || row.recoveryMethod === "post_invoice_dispute") return "not_applicable";
   return row.allocations.some((allocation) => allocation.linkStatus === "pending") ? "pending" : "linked";
 }
 
 function rowCategories(row: PaymentRecoveryRegisterRow) {
+  if (!row.recoveryMethod) return [];
   return row.allocations.length
     ? [...new Set(row.allocations.map((allocation) => allocation.category))]
     : ["Provider dispute"];
+}
+
+function rowRoute(row: PaymentRecoveryRegisterRow) {
+  return row.recoveryMethod ?? "unconfigured";
 }
 
 function csvCell(value: unknown) {
@@ -199,8 +210,9 @@ function RecoveryMultiFilter({ allLabel, label, onChange, options, selected }: {
   </div>;
 }
 
-export function PaymentRecoveryRegister({ canAdd, rows }: {
+export function PaymentRecoveryRegister({ canAdd, canEdit, rows }: {
   canAdd: boolean;
+  canEdit: boolean;
   rows: PaymentRecoveryRegisterRow[];
 }) {
   const [search, setSearch] = useState("");
@@ -214,6 +226,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
   const [links, setLinks] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState("50");
+  const [configuringId, setConfiguringId] = useState<string | null>(null);
 
   const providerOptions = useMemo(() => {
     const labels = new Map<string, string>();
@@ -226,7 +239,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
   }, [rows]);
   const locationOptions = useMemo(() => uniqueOptions(rows.map((row) => row.location)), [rows]);
   const categoryOptions = useMemo(() => uniqueOptions(rows.flatMap(rowCategories)), [rows]);
-  const routeOptions = useMemo(() => uniqueOptions(rows.map((row) => row.recoveryMethod), (value) => routeLabels[value as PaymentRecoveryRegisterRow["recoveryMethod"]] ?? sentenceLabel(value)), [rows]);
+  const routeOptions = useMemo(() => uniqueOptions(rows.map(rowRoute), (value) => routeLabels[value] ?? sentenceLabel(value)), [rows]);
   const statusOptions = useMemo(() => uniqueOptions(rows.map((row) => row.status), (value) => statusLabels[value as PaymentRecoveryRegisterRow["status"]] ?? sentenceLabel(value)), [rows]);
   const linkOptions = useMemo(() => uniqueOptions(rows.map(rowLinkStatus), (value) => value === "linked" ? "Linked" : value === "pending" ? "Awaiting registration" : "Not applicable"), [rows]);
   const invalidMonthRange = Boolean(monthFrom && monthTo && monthFrom > monthTo);
@@ -241,7 +254,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
       if (providers.length && !providers.includes(row.providerCode)) return false;
       if (locations.length && !locations.includes(row.location)) return false;
       if (categories.length && !rowCategories(row).some((category) => categories.includes(category))) return false;
-      if (routes.length && !routes.includes(row.recoveryMethod)) return false;
+      if (routes.length && !routes.includes(rowRoute(row))) return false;
       if (statuses.length && !statuses.includes(row.status)) return false;
       if (links.length && !links.includes(rowLinkStatus(row))) return false;
       if (!term) return true;
@@ -260,12 +273,12 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
   }, [categories, invalidMonthRange, links, locations, monthFrom, monthTo, providers, routes, rows, search, statuses]);
 
   const totals = useMemo(() => filtered.reduce((summary, row) => {
-    summary.debit += row.debitAmount;
+    summary.value += row.value;
     summary.recovered += row.recoveredAmount;
     if (row.status === "under_provider_dispute") summary.dispute += row.pendingAmount;
     else summary.pending += row.pendingAmount;
     return summary;
-  }, { debit: 0, recovered: 0, dispute: 0, pending: 0 }), [filtered]);
+  }, { value: 0, recovered: 0, dispute: 0, pending: 0 }), [filtered]);
   const activeFilterCount = (search.trim() ? 1 : 0) + (monthFrom ? 1 : 0) + (monthTo ? 1 : 0)
     + providers.length + locations.length + categories.length + routes.length + statuses.length + links.length;
   const pageSize = size === "all" ? Math.max(1, filtered.length) : Number(size);
@@ -288,14 +301,15 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
 
   function exportRows() {
     if (!filtered.length || invalidMonthRange) return;
-    const headings = ["TID", "PROVIDER", "LOCATION", "DEBIT_MONTH", "DEBIT_AMOUNT", "RECOVERY_ROUTE", "RECOVERY_IDS", "CATEGORIES", "RECOVERED", "UNDER_DISPUTE", "PENDING", "STATUS", "LINK_STATUS", "PROVIDER_REFERENCE", "REASON", "REMARK"];
+    const headings = ["TID", "PROVIDER", "LOCATION", "DEBIT_MONTH", "VALUE", "RECOVERY_ROUTE", "PAYOUT_MONTH", "RECOVERY_IDS", "CATEGORIES", "RECOVERED", "UNDER_DISPUTE", "PENDING", "STATUS", "LINK_STATUS", "PROVIDER_REFERENCE", "REASON", "REMARK"];
     const csv = [headings, ...filtered.map((row) => [
       row.tid,
       row.providerCode,
       row.location,
       monthLabel(row.debitMonth),
-      row.debitAmount.toFixed(2),
-      routeLabels[row.recoveryMethod],
+      row.value.toFixed(2),
+      routeLabels[rowRoute(row)],
+      row.payoutMonth ? monthLabel(row.payoutMonth) : "",
       row.allocations.map((allocation) => allocation.dropxId).join(", "),
       rowCategories(row).join(", "),
       row.recoveredAmount.toFixed(2),
@@ -319,7 +333,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
 
   return <div className="workforce-advance-page">
     <section aria-label="Filtered recovery totals" className="summary-grid">
-      <article className="metric-card"><span>Total provider debit</span><strong>{money(totals.debit)}</strong><small>{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "TID" : "TIDs"}</small></article>
+      <article className="metric-card"><span>Total value</span><strong>{money(totals.value)}</strong><small>{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "TID" : "TIDs"}</small></article>
       <article className="metric-card"><span>Recovered</span><strong className="good-text">{money(totals.recovered)}</strong><small>Posted recoveries and provider credits</small></article>
       <article className="metric-card"><span>Under dispute</span><strong>{money(totals.dispute)}</strong><small>Outstanding with the provider after submission</small></article>
       <article className="metric-card"><span>Pending</span><strong className={totals.pending > 0 ? "negative" : "good-text"}>{money(totals.pending)}</strong><small>Awaiting payout recovery or dispute submission</small></article>
@@ -332,7 +346,7 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
 
     <section className="panel">
       <div className="panel-head workforce-advance-register-head">
-        <div><h2>Recovery register</h2><p className="subtle">One row per provider-debited TID. Expand an allocation to see the equal split across People IDs.</p></div>
+        <div><h2>Recovery register</h2><p className="subtle">One row per TID. Configure each uploaded row here, then review the selected payroll month and equal split across the chosen IDs.</p></div>
         <span aria-live="polite" className="workforce-advance-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
       </div>
       <div aria-label="Recovery register filters" className="workforce-advance-filter-panel">
@@ -348,22 +362,29 @@ export function PaymentRecoveryRegister({ canAdd, rows }: {
         <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
       </div>
       {invalidMonthRange ? <div aria-live="polite" className="payout-inline-message error">Debit month from must be on or before debit month to.</div> : null}
-      <div className="table-wrap workforce-advance-table-wrap"><table className="workforce-advance-table"><thead><tr><th>TID</th><th>Provider (from location)</th><th>Location</th><th>Debit month</th><th className="payout-money">Provider debit</th><th>Recovery route</th><th>Recover from</th><th className="payout-money">Recovered</th><th className="payout-money">Pending</th><th>Status</th><th>Reference (optional) / reason</th></tr></thead>
+      <div className="table-wrap workforce-advance-table-wrap"><table className="workforce-advance-table"><thead><tr><th>TID</th><th>Provider (from location)</th><th>Location</th><th>Debit month</th><th className="payout-money">Value</th><th>Recovery route</th><th>Recover from</th><th className="payout-money">Recovered</th><th className="payout-money">Pending</th><th>Status</th><th>Reference (optional) / reason</th></tr></thead>
         <tbody>{visible.length ? visible.map((row) => {
           const linkStatus = rowLinkStatus(row);
-          return <tr className={linkStatus === "pending" ? "workforce-advance-pending-row" : undefined} key={row.id}>
-            <td><strong>{row.tid}</strong><small>Added {dateLabel(row.createdAt)}</small></td>
-            <td><strong>{row.providerCode}</strong><small>{row.providerName || row.providerCode}</small></td>
-            <td><strong>{row.location}</strong></td>
-            <td>{monthLabel(row.debitMonth)}</td>
-            <td className="payout-money"><strong>{money(row.debitAmount)}</strong></td>
-            <td><strong>{routeLabels[row.recoveryMethod]}</strong><small>{row.recoveryMethod === "payout_deduction" ? "Planned for People payment" : "Planned against provider invoice"}</small></td>
-            <td>{row.allocations.length ? <details className="workforce-advance-history"><summary>{row.allocations.length} {row.allocations.length === 1 ? "ID" : "IDs"} · equal allocation</summary><div>{row.allocations.map((allocation) => <p key={allocation.id}><strong>{allocation.dropxId} · {money(allocation.amount)}</strong><small>{allocation.personName} · {allocation.category}{allocation.location !== "—" ? ` · ${allocation.location}` : ""}</small><small>{allocation.linkStatus === "linked" ? "Linked" : "Awaiting registration"}</small></p>)}</div></details> : <span className="subtle">Provider dispute</span>}</td>
-            <td className="payout-money good-text">{money(row.recoveredAmount)}</td>
-            <td className="payout-money"><strong>{money(row.pendingAmount)}</strong></td>
-            <td><span className={`status-pill ${row.status === "recovered" || row.status === "provider_credited" ? "good" : row.status === "awaiting_registration" || row.status === "planned_provider_dispute" || row.status === "under_provider_dispute" || row.status === "partially_recovered" ? "warn" : "payout-status-neutral"}`}>{statusLabels[row.status] ?? sentenceLabel(row.status)}</span>{linkStatus === "pending" ? <small>One or more IDs are awaiting registration</small> : null}</td>
-            <td><strong>{row.providerReference || "No provider reference"}</strong><small>{row.reason || row.remark || "No reason or remark"}</small>{row.reason && row.remark ? <small>{row.remark}</small> : null}</td>
-          </tr>;
+          const configuring = !row.recoveryMethod && configuringId === row.id;
+          return <Fragment key={row.id}>
+            <tr className={linkStatus === "pending" || !row.recoveryMethod ? "workforce-advance-pending-row" : undefined}>
+              <td><strong>{row.tid}</strong><small>Added {dateLabel(row.createdAt)}</small></td>
+              <td><strong>{row.providerCode}</strong><small>{row.providerName || row.providerCode}</small></td>
+              <td><strong>{row.location}</strong></td>
+              <td>{monthLabel(row.debitMonth)}</td>
+              <td className="payout-money"><strong>{money(row.value)}</strong></td>
+              <td>{row.recoveryMethod
+                ? <><strong>{routeLabels[row.recoveryMethod]}</strong><small>{row.recoveryMethod === "payout_deduction" ? `Payroll ${monthLabel(row.payoutMonth ?? "")}` : "Planned against provider invoice"}</small></>
+                : <><strong>Not configured</strong><small>Select how this value will be recovered</small>{canEdit ? <button className="button secondary compact" onClick={() => setConfiguringId(configuring ? null : row.id)} type="button">{configuring ? "Close" : "Configure"}</button> : null}</>}
+              </td>
+              <td>{row.allocations.length ? <details className="workforce-advance-history"><summary>{row.allocations.length} {row.allocations.length === 1 ? "ID" : "IDs"} · equal allocation</summary><div>{row.allocations.map((allocation) => <p key={allocation.id}><strong>{allocation.dropxId} · {money(allocation.amount)}</strong><small>{allocation.personName} · {allocation.category}{allocation.location !== "—" ? ` · ${allocation.location}` : ""}</small><small>{allocation.linkStatus === "linked" ? "Linked" : "Awaiting registration"}</small></p>)}</div></details> : <span className="subtle">{row.recoveryMethod === "post_invoice_dispute" ? "Provider dispute" : "Configure first"}</span>}</td>
+              <td className="payout-money good-text">{money(row.recoveredAmount)}</td>
+              <td className="payout-money"><strong>{money(row.pendingAmount)}</strong></td>
+              <td><span className={`status-pill ${row.status === "recovered" || row.status === "provider_credited" ? "good" : row.status === "awaiting_configuration" || row.status === "awaiting_registration" || row.status === "planned_provider_dispute" || row.status === "under_provider_dispute" || row.status === "partially_recovered" ? "warn" : "payout-status-neutral"}`}>{statusLabels[row.status] ?? sentenceLabel(row.status)}</span>{linkStatus === "pending" ? <small>One or more IDs are awaiting registration</small> : null}</td>
+              <td><strong>{row.providerReference || "No provider reference"}</strong><small>{row.reason || row.remark || "No reason or remark"}</small>{row.reason && row.remark ? <small>{row.remark}</small> : null}</td>
+            </tr>
+            {configuring ? <tr><td colSpan={11}><PaymentRecoveryConfigurator caseId={row.id} onCancel={() => setConfiguringId(null)} tid={row.tid} value={row.value} /></td></tr> : null}
+          </Fragment>;
         }) : <tr><td className="empty-cell" colSpan={11}>{invalidMonthRange ? "Correct the month range to view recoveries." : "No payment recoveries match this view."}</td></tr>}</tbody>
       </table></div>
       <div className="workforce-advance-pagination"><label>Rows <select className="field" onChange={(event) => { setSize(event.target.value); setPage(1); }} value={size}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="all">All</option></select></label><span>{filtered.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)} of ${filtered.length}` : "0 records"} · Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage(Math.max(1, safePage - 1))} type="button">Previous</button><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage(Math.min(pages, safePage + 1))} type="button">Next</button></div>

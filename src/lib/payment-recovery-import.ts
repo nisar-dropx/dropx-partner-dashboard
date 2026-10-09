@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
 
-export const paymentRecoveryMethods = ["PAYOUT_DEDUCTION", "POST_INVOICE_DISPUTE"] as const;
-export type PaymentRecoveryMethod = (typeof paymentRecoveryMethods)[number];
-
 export type PaymentRecoveryImportIssue = {
   rowNumber: number | null;
   tid: string | null;
@@ -16,9 +13,7 @@ export type PaymentRecoveryImportRow = {
   normalizedTid: string;
   locationCode: string;
   debitMonth: string;
-  debitAmount: number | null;
-  recoveryMethod: PaymentRecoveryMethod | "";
-  recoveryIds: string[];
+  value: number | null;
   providerReference: string;
   reason: string;
   remark: string;
@@ -31,18 +26,11 @@ export type ParsedPaymentRecoveryImport = {
   canCommit: boolean;
 };
 
-export type PaymentRecoveryEqualAllocation = {
-  dropxId: string;
-  amount: number;
-};
-
 export const PAYMENT_RECOVERY_IMPORT_HEADERS = [
   "TID",
   "LOCATION",
   "DEBIT_MONTH",
-  "DEBIT_AMOUNT",
-  "RECOVERY_METHOD",
-  "RECOVERY_IDS",
+  "VALUE",
   "PROVIDER_REFERENCE",
   "REASON",
   "REMARK"
@@ -50,11 +38,16 @@ export const PAYMENT_RECOVERY_IMPORT_HEADERS = [
 
 export const PAYMENT_RECOVERY_IMPORT_MAX_ROWS = 10_000;
 
+const REQUIRED_PAYMENT_RECOVERY_IMPORT_HEADERS = new Set([
+  "TID",
+  "LOCATION",
+  "DEBIT_MONTH",
+  "VALUE"
+]);
+
 const MAX_AMOUNT = 999_999_999_999.99;
 const MAX_TID_LENGTH = 120;
 const MAX_CODE_LENGTH = 80;
-const MAX_RECOVERY_ID_LENGTH = 80;
-const MAX_RECOVERY_IDS = 50;
 const MAX_PROVIDER_REFERENCE_LENGTH = 200;
 const MAX_REASON_LENGTH = 500;
 const MAX_REMARK_LENGTH = 1_000;
@@ -87,10 +80,6 @@ function compactCode(value: unknown) {
 }
 
 export function normalizePaymentRecoveryTid(value: unknown) {
-  return compactCode(value);
-}
-
-export function normalizePaymentRecoveryPersonId(value: unknown) {
   return compactCode(value);
 }
 
@@ -157,22 +146,13 @@ function columns(header: unknown[]) {
   for (const label of PAYMENT_RECOVERY_IMPORT_HEADERS) {
     const key = normalizeHeader(label);
     const matches = normalized.flatMap((value, index) => value === key ? [index] : []);
-    if (!matches.length) throw new Error(`Required column “${label}” is missing.`);
+    if (!matches.length && REQUIRED_PAYMENT_RECOVERY_IMPORT_HEADERS.has(label)) {
+      throw new Error(`Required column “${label}” is missing.`);
+    }
     if (matches.length > 1) throw new Error(`Column “${label}” appears more than once.`);
-    result[key] = matches[0];
+    result[key] = matches[0] ?? -1;
   }
   return { result, normalized };
-}
-
-function normalizeRecoveryMethod(value: unknown): PaymentRecoveryMethod | "" {
-  const normalized = String(value ?? "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return paymentRecoveryMethods.includes(normalized as PaymentRecoveryMethod)
-    ? normalized as PaymentRecoveryMethod
-    : "";
 }
 
 function identifierFromCell(rawValue: unknown, formattedValue: unknown) {
@@ -195,57 +175,8 @@ function identifierFromCell(rawValue: unknown, formattedValue: unknown) {
   };
 }
 
-function parseRecoveryIds(rawValue: unknown, formattedValue: unknown) {
-  const identifier = identifierFromCell(rawValue, formattedValue);
-  if (identifier.unsafe) return { ids: [] as string[], unsafe: true, duplicates: [] as string[] };
-  const tokens = identifier.value
-    .split(/[,;\r\n]+/)
-    .map(normalizePaymentRecoveryPersonId)
-    .filter(Boolean);
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-  const ids: string[] = [];
-  for (const token of tokens) {
-    if (SCIENTIFIC_NOTATION_PATTERN.test(token)) {
-      return { ids: [], unsafe: true, duplicates: [] as string[] };
-    }
-    if (seen.has(token)) {
-      duplicates.add(token);
-      continue;
-    }
-    seen.add(token);
-    ids.push(token);
-  }
-  return { ids, unsafe: false, duplicates: [...duplicates] };
-}
-
 function textStartsLikeFormula(value: unknown) {
   return typeof value === "string" && value.trimStart().startsWith("=");
-}
-
-export function splitPaymentRecoveryAmountEqually(
-  debitAmount: number,
-  recoveryIds: string[]
-): PaymentRecoveryEqualAllocation[] {
-  if (!Number.isFinite(debitAmount) || debitAmount <= 0) {
-    throw new Error("Debit amount must be greater than zero.");
-  }
-  if (Math.abs(debitAmount * 100 - Math.round(debitAmount * 100)) > 0.000001) {
-    throw new Error("Debit amount can have at most two decimal places.");
-  }
-  const ids = [...new Set(recoveryIds.map(normalizePaymentRecoveryPersonId).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right));
-  if (!ids.length) throw new Error("At least one Recovery ID is required.");
-  const totalCents = Math.round(debitAmount * 100);
-  if (totalCents < ids.length) {
-    throw new Error("Debit amount must provide at least one paise for every Recovery ID.");
-  }
-  const baseCents = Math.floor(totalCents / ids.length);
-  const remainder = totalCents % ids.length;
-  return ids.map((dropxId, index) => ({
-    dropxId,
-    amount: (baseCents + (index < remainder ? 1 : 0)) / 100
-  }));
 }
 
 export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRecoveryImport {
@@ -311,11 +242,7 @@ export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRe
     const normalizedTid = normalizePaymentRecoveryTid(tid);
     const locationCode = compactCode(formatted[indexes.location]);
     const debitMonth = spreadsheetMonth(source[indexes.debitmonth], date1904);
-    const debitAmount = money(source[indexes.debitamount]);
-    const rawMethod = textCell(formatted[indexes.recoverymethod]);
-    const recoveryMethod = normalizeRecoveryMethod(rawMethod);
-    const parsedRecoveryIds = parseRecoveryIds(source[indexes.recoveryids], formatted[indexes.recoveryids]);
-    const recoveryIds = parsedRecoveryIds.ids;
+    const value = money(source[indexes.value]);
     const providerReference = textCell(formatted[indexes.providerreference]);
     const reason = textCell(formatted[indexes.reason]);
     const remark = textCell(formatted[indexes.remark]);
@@ -344,80 +271,14 @@ export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRe
         message: "DEBIT_MONTH must be a real Excel date or text written exactly as MMM-YY, for example Jul-26."
       });
     }
-    if (debitAmount === null || !Number.isFinite(debitAmount)) {
-      issues.push({ rowNumber, tid: issueTid, message: "DEBIT_AMOUNT must be a valid number." });
-    } else if (debitAmount <= 0) {
-      issues.push({ rowNumber, tid: issueTid, message: "DEBIT_AMOUNT must be greater than zero." });
-    } else if (debitAmount > MAX_AMOUNT) {
-      issues.push({ rowNumber, tid: issueTid, message: "DEBIT_AMOUNT is too large." });
-    } else if (Math.abs(debitAmount * 100 - Math.round(debitAmount * 100)) > 0.000001) {
-      issues.push({ rowNumber, tid: issueTid, message: "DEBIT_AMOUNT can have at most two decimal places." });
-    }
-    if (!recoveryMethod) {
-      issues.push({
-        rowNumber,
-        tid: issueTid,
-        message: "RECOVERY_METHOD must be PAYOUT_DEDUCTION or POST_INVOICE_DISPUTE."
-      });
-    }
-    if (parsedRecoveryIds.unsafe) {
-      issues.push({
-        rowNumber,
-        tid: issueTid,
-        message: "RECOVERY_IDS contains an unsafe number or scientific notation. Format the IDs as Text and paste the exact values."
-      });
-    }
-    if (parsedRecoveryIds.duplicates.length) {
-      issues.push({
-        rowNumber,
-        tid: issueTid,
-        message: `RECOVERY_IDS lists ${parsedRecoveryIds.duplicates.join(", ")} more than once.`
-      });
-    }
-    for (const recoveryId of recoveryIds) {
-      if (recoveryId.length > MAX_RECOVERY_ID_LENGTH) {
-        issues.push({
-          rowNumber,
-          tid: issueTid,
-          message: `Recovery ID ${recoveryId} cannot exceed ${MAX_RECOVERY_ID_LENGTH} characters.`
-        });
-      }
-    }
-    if (recoveryIds.length > MAX_RECOVERY_IDS) {
-      issues.push({
-        rowNumber,
-        tid: issueTid,
-        message: `RECOVERY_IDS can contain at most ${MAX_RECOVERY_IDS} DropX IDs.`
-      });
-    }
-    if (recoveryMethod === "PAYOUT_DEDUCTION" && recoveryIds.length === 0 && !parsedRecoveryIds.unsafe) {
-      issues.push({
-        rowNumber,
-        tid: issueTid,
-        message: "RECOVERY_IDS is required for PAYOUT_DEDUCTION."
-      });
-    }
-    if (
-      recoveryMethod === "PAYOUT_DEDUCTION"
-      && recoveryIds.length > 0
-      && debitAmount !== null
-      && Number.isFinite(debitAmount)
-      && debitAmount > 0
-      && Math.abs(debitAmount * 100 - Math.round(debitAmount * 100)) <= 0.000001
-      && Math.round(debitAmount * 100) < recoveryIds.length
-    ) {
-      issues.push({
-        rowNumber,
-        tid: issueTid,
-        message: "DEBIT_AMOUNT must provide at least one paise for every Recovery ID."
-      });
-    }
-    if (recoveryMethod === "POST_INVOICE_DISPUTE" && recoveryIds.length > 0) {
-      issues.push({
-        rowNumber,
-        tid: issueTid,
-        message: "RECOVERY_IDS must be blank for POST_INVOICE_DISPUTE."
-      });
+    if (value === null || !Number.isFinite(value)) {
+      issues.push({ rowNumber, tid: issueTid, message: "VALUE must be a valid number." });
+    } else if (value <= 0) {
+      issues.push({ rowNumber, tid: issueTid, message: "VALUE must be greater than zero." });
+    } else if (value > MAX_AMOUNT) {
+      issues.push({ rowNumber, tid: issueTid, message: "VALUE is too large." });
+    } else if (Math.abs(value * 100 - Math.round(value * 100)) > 0.000001) {
+      issues.push({ rowNumber, tid: issueTid, message: "VALUE can have at most two decimal places." });
     }
     if (providerReference.length > MAX_PROVIDER_REFERENCE_LENGTH) {
       issues.push({
@@ -446,9 +307,7 @@ export function parsePaymentRecoveryWorkbook(bytes: Uint8Array): ParsedPaymentRe
       normalizedTid,
       locationCode,
       debitMonth,
-      debitAmount,
-      recoveryMethod,
-      recoveryIds,
+      value,
       providerReference,
       reason,
       remark
@@ -492,16 +351,16 @@ function prepareInputCells(
       sheet[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })] = { t: "s", v: "", z: "mmm-yy" };
     }
   }
-  sheet["!ref"] = `A1:I${PAYMENT_RECOVERY_IMPORT_MAX_ROWS + 1}`;
+  sheet["!ref"] = `A1:G${PAYMENT_RECOVERY_IMPORT_MAX_ROWS + 1}`;
 }
 
 export function buildPaymentRecoveryImportTemplate(options: { exampleMonth?: string } = {}) {
   const headers = [...PAYMENT_RECOVERY_IMPORT_HEADERS];
-  const widths = [24, 16, 16, 18, 26, 42, 28, 44, 52].map((wch) => ({ wch }));
+  const widths = [24, 16, 16, 18, 28, 44, 52].map((wch) => ({ wch }));
   const upload = XLSX.utils.aoa_to_sheet([headers]);
   upload["!cols"] = widths;
-  upload["!autofilter"] = { ref: "A1:I1" };
-  prepareInputCells(upload, [0, 5], [2]);
+  upload["!autofilter"] = { ref: "A1:G1" };
+  prepareInputCells(upload, [0], [2]);
 
   const exampleMonth = exampleMonthDate(options.exampleMonth) ?? "MMM-YY";
   const examples = XLSX.utils.aoa_to_sheet([
@@ -512,61 +371,46 @@ export function buildPaymentRecoveryImportTemplate(options: { exampleMonth?: str
       "KOZA",
       exampleMonth,
       2000,
-      "PAYOUT_DEDUCTION",
-      "DROPX1001, DROPX1002",
-      "PROVIDER-DEBIT-001",
+      "",
       "Shipment loss recovery",
-      "The amount is split equally between both IDs"
+      "Configure the recovery route and responsible IDs after upload"
     ],
     [
       "TID-000002",
       "KOZA",
       exampleMonth,
       1500,
-      "POST_INVOICE_DISPUTE",
-      "",
       "PROVIDER-DEBIT-002",
       "Provider debit disputed",
-      "RECOVERY_IDS stays blank for this method"
+      "No payment deduction or provider dispute is created by this upload"
     ]
   ]);
   examples["!cols"] = widths;
-  examples["!autofilter"] = { ref: "A2:I4" };
-  for (const address of ["A3", "F3", "A4", "F4"]) {
+  examples["!autofilter"] = { ref: "A2:G4" };
+  for (const address of ["A3", "A4"]) {
     if (examples[address]) examples[address].z = "@";
   }
   for (const address of ["C3", "C4"]) {
     if (examples[address]) examples[address].z = "mmm-yy";
   }
 
-  const validValues = XLSX.utils.aoa_to_sheet([
-    ["RECOVERY_METHOD", "When to use it", "RECOVERY_IDS rule"],
-    ["PAYOUT_DEDUCTION", "Recover from one or more people through a payment deduction.", "Required. Separate multiple DropX IDs with commas, semicolons or new lines."],
-    ["POST_INVOICE_DISPUTE", "Raise the debit as a post-invoice dispute with the provider.", "Must be blank."]
-  ]);
-  validValues["!cols"] = [{ wch: 28 }, { wch: 62 }, { wch: 82 }];
-  validValues["!autofilter"] = { ref: "A1:C3" };
-
   const instructions = XLSX.utils.aoa_to_sheet([
     ["PAYMENT RECOVERY BULK UPLOAD"],
     ["TID", "Required and unique. Keep the exact transaction ID as Text, especially for long or numeric-only IDs. Scientific notation and formulas are rejected."],
     ["LOCATION", "Required. Enter the location code for the provider debit. The provider is identified automatically from this location."],
     ["DEBIT_MONTH", "Required. Enter MMM-YY, for example Jul-26. A genuine Excel date cell is also accepted and is normalized to its month."],
-    ["DEBIT_AMOUNT", "Required. Enter an amount greater than zero with no more than two decimal places."],
-    ["RECOVERY_METHOD", "Required. Use PAYOUT_DEDUCTION or POST_INVOICE_DISPUTE exactly as shown on the Valid values worksheet."],
-    ["RECOVERY_IDS", "For PAYOUT_DEDUCTION, enter one or more DropX IDs separated by commas, semicolons or new lines. The debit is split equally. Any remainder paise is assigned in ascending DropX ID order so the allocated total always equals DEBIT_AMOUNT. Leave blank for POST_INVOICE_DISPUTE."],
+    ["VALUE", "Required. Enter an amount greater than zero with no more than two decimal places."],
     ["PROVIDER_REFERENCE", "Optional. Enter the provider debit memo, invoice or other stable reference."],
     ["REASON", "Optional. Enter the business reason for the debit or dispute."],
     ["REMARK", "Optional. Add a short operational note."],
     ["Duplicate protection", "A TID may appear only once in the workbook. A TID already recorded in the Recovery register cannot be imported again."],
-    ["Important", "Formula cells are not accepted. Format TID and RECOVERY_IDS as Text. The upload creates the Recovery register plan; it does not silently deduct a payout or submit a provider dispute."]
+    ["Important", "Formula cells are not accepted. Format TID as Text. Each upload row creates an unconfigured TID recovery case. It does not deduct a payment or submit a provider dispute."]
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 118 }];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, upload, "Upload");
   XLSX.utils.book_append_sheet(workbook, examples, "Examples");
-  XLSX.utils.book_append_sheet(workbook, validValues, "Valid values");
   XLSX.utils.book_append_sheet(workbook, instructions, "Instructions");
   return new Uint8Array(XLSX.write(workbook, { bookType: "xlsx", type: "buffer", cellStyles: true }));
 }
