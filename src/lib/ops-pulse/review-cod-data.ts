@@ -8,7 +8,7 @@ export async function loadReviewCod(companyId:string,stationCode:string,batchId?
   if(!supabaseAdmin)return {snapshot:{...snapshot,error:"COD report is temporarily unavailable."},lines:[]};
   const db=supabaseAdmin;
   try {
-    let query=db.from("report_import_batches").select("id,created_at,file_name,row_count,station_code")
+    let query=db.from("report_import_batches").select("id,created_at,file_name,row_count,station_code,rows_pruned_at")
       .eq("company_id",companyId).eq("source_type","edsp_outstanding_cash").eq("status","Completed")
       .or(`station_code.is.null,station_code.eq.${stationCode}`);
     if(batchId)query=query.eq("id",batchId);
@@ -17,6 +17,8 @@ export async function loadReviewCod(companyId:string,stationCode:string,batchId?
     const batch=batchResult.data;
     if(!batch)return {snapshot:{...snapshot,error:"No completed EDSP outstanding-cash report is available."},lines:[]};
     snapshot.batchId=batch.id; snapshot.importedAt=batch.created_at; snapshot.fileName=batch.file_name;
+    // Only reachable through an old link: the upload was superseded the same day, or is past the six-month limit.
+    if(batch.rows_pruned_at)return {snapshot:{...snapshot,error:"This COD upload is no longer stored: a later upload replaced it, or it is more than six months old. Open the current report."},lines:[]};
     const count=await db.from("report_import_rows").select("id",{count:"exact",head:true}).eq("company_id",companyId).eq("batch_id",batch.id).eq("source_type","edsp_outstanding_cash");
     if(count.error || count.count!==batch.row_count) return {snapshot:{...snapshot,error:"COD report is incomplete. Refresh after the import finishes."},lines:[]};
     const lines:ReviewCodLine[]=[];
