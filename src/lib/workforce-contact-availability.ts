@@ -115,21 +115,7 @@ export async function checkWorkforceMobileAvailability(params: {
   if (!/^\d{10}$/.test(mobile)) {
     return { status: "invalid", message: "Enter a 10-digit mobile number.", match: null };
   }
-  const matches = await findMatches({
-    companyId: params.companyId,
-    column: "mobile",
-    value: mobile,
-    excludeId: params.excludeId,
-    excludeRegister: params.excludeRegister
-  });
-  if (matches.length) {
-    return {
-      status: "taken",
-      message: `Already registered to ${matchLabel(matches[0])}.`,
-      match: matches[0]
-    };
-  }
-  return { status: "available", message: "Mobile number is available.", match: null };
+  return { status: "available", message: "Mobile number format is valid.", match: null };
 }
 
 export async function checkWorkforceEmailAvailability(params: {
@@ -165,17 +151,11 @@ export async function assertWorkforceContactsAvailable(params: {
   email: string;
   excludeId?: string | null;
   excludeRegister?: WorkforceContactRegister | null;
-  allowDuplicateMobile?: boolean;
 }) {
   const [mobileStatus, emailStatus] = await Promise.all([
-    params.allowDuplicateMobile
-      ? Promise.resolve<WorkforceContactFieldStatus>(/^\d{10}$/.test(cleanMobile(params.mobile))
-        ? { status: "available", message: "Mobile number format is valid.", match: null }
-        : { status: "invalid", message: "Enter a 10-digit mobile number.", match: null })
-      : checkWorkforceMobileAvailability(params),
+    checkWorkforceMobileAvailability(params),
     checkWorkforceEmailAvailability(params)
   ]);
-  if (mobileStatus.status === "taken" && !params.allowDuplicateMobile) throw new Error(mobileStatus.message);
   if (mobileStatus.status === "invalid") throw new Error(mobileStatus.message);
   if (emailStatus.status === "taken") throw new Error(emailStatus.message);
   if (emailStatus.status === "invalid") throw new Error(emailStatus.message);
