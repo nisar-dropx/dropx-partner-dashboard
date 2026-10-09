@@ -291,6 +291,8 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
     </section>;
   }
 
+  if (viewing) return <section className="dx-documents"><DocumentViewer document={viewing} onClose={() => setViewing(null)} title={viewing.title} /></section>;
+
   return <section className="dx-documents">
     <header className="dx-page-intro dx-documents-head"><div><small>My records</small><h1>Documents</h1><p>{workforce ? "Insurance, Form 16 and official workforce records—kept private and ready when issued." : "Payslips, insurance and official HR records—organised by type."}</p></div><span className="dx-documents-head-actions"><button aria-label="Refresh documents" className="dx-documents-refresh" disabled={loading} onClick={() => void load(false, true)} type="button"><RefreshCw /></button>{requestTypes.length ? <button onClick={() => setShowRequest(true)}><FilePlus2 />Request document</button> : null}</span></header>
     <div className="dx-document-summary">
@@ -315,7 +317,6 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
       {issued ? <span className="dx-request-download" onClick={(event) => { event.stopPropagation(); void startDownload(issued); }} role="presentation"><Download />Download</span> : <ChevronRight />}
     </button>; }) : <div className="dx-document-empty"><FileClock /><strong>No document requests</strong><small>Request a missing HR document and track it here until it is ready.</small></div>}</div> : null}
     <p className="dx-document-privacy"><ShieldCheck />Files are private. Once opened, a document is kept only inside the DropX One app on this phone and is removed if you log out or uninstall the app.</p>
-    {viewing ? <DocumentViewer document={viewing} onClose={() => setViewing(null)} title={viewing.title} /> : null}
     {showRequest ? <div className="dx-document-request-modal" role="dialog" aria-modal="true" aria-labelledby="document-request-title"><button aria-label="Close request form" className="dx-document-request-scrim" onClick={() => setShowRequest(false)} /><form onSubmit={submitRequest}><header><span><small>People &amp; Culture</small><h2 id="document-request-title">Request a document</h2></span><button aria-label="Close" onClick={() => setShowRequest(false)} type="button"><X /></button></header><label>Document type<select required value={requestTypeId} onChange={(event) => setRequestTypeId(event.target.value)}>{requestTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>{selectedType ? <div className="dx-document-request-guidance"><strong>{selectedType.description}</strong><span>{selectedType.instructions || "Add any detail People & Culture needs to prepare the document."}</span><small>Target turnaround: {selectedType.sla_days} working days</small></div> : null}<label>Purpose or details<textarea maxLength={500} minLength={3} onChange={(event) => setReason(event.target.value)} placeholder="Mention purpose, period or addressee if relevant" required value={reason} /></label><button disabled={submitting || !requestTypeId || reason.trim().length < 3}>{submitting ? "Submitting…" : "Submit request"}</button></form></div> : null}
   </section>;
 }

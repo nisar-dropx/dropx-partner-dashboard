@@ -9554,15 +9554,20 @@ body {
 }
 
 .dx-document-viewer {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
+  position: relative;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   background: #f4f2ef;
+  border: 1px solid rgba(25, 34, 59, .08);
+  border-radius: 16px;
+  overflow: hidden;
 }
 
 .dx-document-viewer header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -9601,6 +9606,7 @@ body {
 .dx-document-viewer-body {
   flex: 1;
   overflow: auto;
+  max-height: calc(100dvh - 250px);
   padding: 12px;
   -webkit-overflow-scrolling: touch;
 }
@@ -9609,6 +9615,7 @@ body {
 .dx-document-viewer-pages canvas {
   display: block;
   width: 100%;
+  height: auto;
   margin: 0 auto 12px;
   background: #fff;
   box-shadow: 0 4px 16px rgba(30, 24, 18, .12);

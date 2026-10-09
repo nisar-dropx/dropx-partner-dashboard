@@ -22,6 +22,7 @@ async function renderPdf(bytes: Uint8Array, container: HTMLDivElement, isCancell
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     canvas.style.width = "100%";
+    canvas.style.height = "auto";
     const context = canvas.getContext("2d");
     if (!context) continue;
     await page.render({ canvasContext: context, viewport }).promise;
@@ -82,13 +83,13 @@ export function DocumentViewer({ document, title, onClose }: { document: StoredD
   }
 
   return (
-    <div aria-labelledby="dx-document-viewer-title" aria-modal="true" className="dx-document-viewer" role="dialog">
+    <div aria-labelledby="dx-document-viewer-title" className="dx-document-viewer">
       <header>
+        <button aria-label="Back to documents" className="close" onClick={onClose} type="button"><X />Back</button>
         <strong id="dx-document-viewer-title">{title}</strong>
         <button disabled={saving} onClick={() => void save()} type="button">
           {saving ? <LoaderCircle /> : <Download />}Download
         </button>
-        <button aria-label="Close" className="close" onClick={onClose} type="button"><X /></button>
       </header>
       {notice ? <p className="dx-document-viewer-notice">{notice}</p> : null}
       <div className="dx-document-viewer-body">
