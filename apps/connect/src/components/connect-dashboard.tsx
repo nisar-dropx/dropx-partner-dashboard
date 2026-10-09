@@ -38,6 +38,8 @@ import {
 } from "../lib/attendance-insights";
 import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
+import { useDashboardClock } from "../lib/use-dashboard-clock";
+import { dashboardGreeting } from "../lib/dashboard-greeting";
 import { summarizeAttendance, type AttendanceFilter } from "../lib/attendance-summary";
 import summaryStyles from "./attendance-summary-controls.module.css";
 
@@ -222,6 +224,7 @@ export function ConnectDashboard({
   const [refreshKey, setRefreshKey] = useState(0);
   const [motivation, setMotivation] = useState("");
   const [paymentSummary, setPaymentSummary] = useState<WorkforcePaymentSummary | null>(null);
+  const now = useDashboardClock(active);
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
   // A background staleness refresh must not blank the dashboard back to its
   // loading state - only the very first load should do that. This flag is
@@ -460,7 +463,6 @@ export function ConnectDashboard({
   if (!profile && !error) return <div className="dx-loader fullscreen"><span /><small>Loading dashboard...</small></div>;
   if (!profile || !attendance) return <div className="dx-alert error">{error}<button onClick={() => setRefreshKey((value) => value + 1)}>Retry</button></div>;
 
-  const now = new Date();
   const today = attendance.rows.find((row) => row.date === localIsoDate());
   const todayInsight = attendanceDayInsight(today, {
     today: true,
@@ -477,8 +479,7 @@ export function ConnectDashboard({
   const latestRequest = [...attendance.rows]
     .filter((row) => row.regularization)
     .sort((left, right) => right.date.localeCompare(left.date))[0];
-  const hour = now.getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const greeting = dashboardGreeting(now.getHours());
   const todayLabel = new Intl.DateTimeFormat("en-IN", {
     weekday: "long",
     day: "numeric",
