@@ -34,3 +34,13 @@ export async function enforceAccessCutoffIfDueForWorker(
   const row = Array.isArray(result.data) ? result.data[0] : result.data;
   return row?.app_active ?? true;
 }
+
+// A preview must observe the same cutoff without changing the worker or their links.
+export async function readAccessCutoffForPreview(companyId: string, workerType: "employee" | "contractor", workerId: string) {
+  if (!supabaseAdmin) return false;
+  const result = await supabaseAdmin.from("hr_exit_cases").select("access_cutoff_at,status")
+    .eq("company_id", companyId).eq("worker_type", workerType).eq(`${workerType}_id`, workerId)
+    .not("status", "in", "(closed,rejected,withdrawn,cancelled)").order("submitted_at", { ascending: false }).limit(1).maybeSingle();
+  if (result.error) throw result.error;
+  return !(result.data?.access_cutoff_at && Date.parse(result.data.access_cutoff_at) <= Date.now() && result.data.status === "documents_ready");
+}

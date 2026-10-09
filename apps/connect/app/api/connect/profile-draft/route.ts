@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { connectSessionCookieName, findConnectAccounts } from "../../../../src/lib/connect-auth";
+import { connectSessionCookieName, findConnectSessionAccounts } from "../../../../src/lib/connect-auth";
 import {
   isMissingProfileDraftTable,
   loadProfileDraft,
@@ -67,7 +67,7 @@ async function authenticatedAccount(accountId: string, profileType: string) {
     cookies().delete(connectSessionCookieName);
     throw new Error("Connect session expired. Please log in again.");
   }
-  const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+  const accounts = await findConnectSessionAccounts(session.country_code, session.mobile_number);
   const account = accounts.find((item) => item.id === accountId && item.profileType === profileType);
   if (!account) throw new Error("Profile is not available for this login.");
   return { ...account, profileType: profileType as WorkforceProfileType };

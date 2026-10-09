@@ -2,7 +2,9 @@ import { createHash } from "crypto";
 import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { connectSessionCookieName, findConnectAccounts } from "@/lib/connect-auth";
+import { connectSessionCookieName, findConnectSessionAccounts } from "@/lib/connect-auth";
+import { getConnectPreviewActor, previewNoStore } from "@/lib/connect-preview";
+import { connectPreviewCookieName } from "@/lib/connect-preview-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET() {
@@ -22,8 +24,8 @@ export async function GET() {
       cookies().delete(connectSessionCookieName);
       return NextResponse.json({ authenticated: false });
     }
-    await supabaseAdmin.from("connect_login_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", session.id);
-    const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+    if (!cookies().get(connectPreviewCookieName)?.value) await supabaseAdmin.from("connect_login_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", session.id);
+    const accounts = await findConnectSessionAccounts(session.country_code, session.mobile_number);
     if (!accounts.length) {
       // A missing account must deny access, but it must not silently destroy a
       // valid 180-day device session. Workforce records can be momentarily
@@ -34,16 +36,19 @@ export async function GET() {
         error: "You don't have access to DropX One. Contact HR or your platform administrator for access."
       }, { status: 403 });
     }
+    const actor = await getConnectPreviewActor(cookies().get(connectPreviewCookieName)?.value ? undefined : accounts).catch(() => null);
     return NextResponse.json({
       authenticated: true,
+      canPreviewUsers: Boolean(actor?.companyIds.length),
+      preview: Boolean(cookies().get(connectPreviewCookieName)?.value),
       accounts,
       countryCode: session.country_code,
       mobile: session.mobile_number.startsWith(session.country_code)
         ? session.mobile_number.slice(session.country_code.length)
         : session.mobile_number
-    });
+    }, { headers: previewNoStore });
   } catch (error) {
-    return NextResponse.json({ error: userFacingError(error, "Unable to load session.") }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load session."), preview: Boolean(cookies().get(connectPreviewCookieName)?.value) }, { status: 500, headers: previewNoStore });
   }
 }
 
@@ -59,6 +64,7 @@ export async function DELETE() {
         .eq("session_hash", sessionHash);
     }
     cookies().delete(connectSessionCookieName);
+    cookies().delete(connectPreviewCookieName);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to clear session.") }, { status: 500 });

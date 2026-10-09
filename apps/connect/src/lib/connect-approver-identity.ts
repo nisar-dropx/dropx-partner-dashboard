@@ -1,5 +1,7 @@
 ﻿import "server-only";
 
+import { cookies } from "next/headers";
+import { connectPreviewCookieName } from "./connect-preview-policy";
 import { randomUUID } from "crypto";
 import { supabaseAdmin } from "./supabase-admin";
 
@@ -24,6 +26,7 @@ function connectOnlyEmail(input: { companyId: string; personId: string; mobile: 
 }
 
 async function ensurePersonLink(companyId: string, personId: string, userId: string) {
+  if (cookies().get(connectPreviewCookieName)?.value) return;
   const existing = await db().from("hr_user_person_links").select("id,status")
     .eq("company_id", companyId).eq("person_id", personId).maybeSingle();
   if (existing.error && !/does not exist|schema cache/i.test(existing.error.message)) {
@@ -141,7 +144,7 @@ export async function resolveConnectApproverUserId(companyId: string, personId: 
     }
   }
 
-  if (!contact.mobile) return null;
+  if (cookies().get(connectPreviewCookieName)?.value || !contact.mobile) return null;
 
   const email = contact.email || connectOnlyEmail({
     companyId,

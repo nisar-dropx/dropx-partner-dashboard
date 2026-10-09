@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+import { connectPreviewCookieName } from "@/lib/connect-preview-policy";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
@@ -84,7 +86,7 @@ export async function GET(request: Request) {
       }
     }
 
-    if (staleIds.size) {
+    if (staleIds.size && !cookies().get(connectPreviewCookieName)?.value) {
       const now = new Date().toISOString();
       await supabaseAdmin.from("mob_app_notifications")
         .update({ read_at: now, archived_at: now })
