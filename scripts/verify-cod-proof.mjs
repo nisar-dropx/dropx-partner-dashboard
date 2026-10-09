@@ -25,10 +25,11 @@ const view=require('react-dom/server').renderToStaticMarkup(require('react').cre
 assert.match(view,/Slip checks/);assert.match(view,/Seal visible/);assert.match(view,/medium/i);assert.match(view,/Radiant text/);
 
 const {matchesCodEmail}=compile('src/lib/ops-pulse/cod-mail-evidence.ts',{'./cod-proof-policy':policy});
-const record={email_subject:'Banker not reported — NLRC',sender_email:'nlrc@dropxlogistics.com',email_sent_at:'2026-09-26T13:30:00Z',stakeholder_emails:['ops@dropxlogistics.com'],client_poc_emails:['client@example.com']};
+const record={email_subject:'Banker not reported — NLRC',sender_email:'nlrc@dropxlogistics.com',email_sent_at:'2026-09-26T13:30:00Z'};
 const message={internalDate:String(Date.parse(record.email_sent_at)),payload:{headers:[{name:'Subject',value:record.email_subject},{name:'From',value:'Station <nlrc@dropxlogistics.com>'},{name:'To',value:'ops@dropxlogistics.com, client@example.com'},{name:'Cc',value:'Control Tower <ct@dropxlogistics.com>'}]}};
 assert.equal(matchesCodEmail(message,record),true);
-for(const name of ['Subject','From','To','Cc'])assert.equal(matchesCodEmail({...message,payload:{headers:message.payload.headers.filter(h=>h.name!==name)}},record),false,`Missing ${name} cannot confirm email`);
+for(const name of ['Subject','From','Cc'])assert.equal(matchesCodEmail({...message,payload:{headers:message.payload.headers.filter(h=>h.name!==name)}},record),false,`Missing ${name} cannot confirm email`);
+assert.equal(matchesCodEmail({...message,payload:{headers:message.payload.headers.filter(h=>h.name!=='To')}},record),true,'Recipient re-entry is not required for mailbox confirmation');
 assert.equal(matchesCodEmail({...message,internalDate:String(Date.parse(record.email_sent_at)-7200000)},record),false);
 assert.equal(matchesCodEmail({...message,payload:{headers:message.payload.headers.map(h=>h.name==='Cc'?{...h,value:'ct@dropxlogistics.com <other@example.com>'}:h)}},record),false,'A display name is not the actual CC address');
 const pending=compile('src/lib/ops-pulse/cod-pending.ts');
@@ -81,6 +82,7 @@ await db.exec(readFileSync('supabase/migrations/20260925035330_cod_slip_gpt_vali
 await db.exec(readFileSync('supabase/migrations/20260926121610_cod_proof_queue_history.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260926122500_cod_receipt_reference_validation.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260926131000_cod_control_tower_address.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20261009090000_simplify_banker_not_reported_evidence.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260926210000_cod_seal_validation.sql','utf8'));
 const company='11111111-1111-1111-1111-111111111111',location='22222222-2222-2222-2222-222222222222',user='33333333-3333-3333-3333-333333333333';
 await db.query('insert into companies values($1)',[company]);await db.query('insert into stations values($1)',[location]);
@@ -103,7 +105,7 @@ await assert.rejects(()=>db.query(base+`)`+values+`'Banker Not Reported','Absent
 const {rows:[ex]}=await db.query(base+`,proof)`+values+`'No Cash','No cash',$3,$3,'User',$4) returning *`,[company,location,user,{storage_bucket:'ops-pulse-documents',storage_path:company+'/proof.png'}]);
 assert.equal((await db.query('select event from cod_proof_history where exception_id=$1',[ex.id])).rows[0].event,'Daily update recorded');
 await assert.rejects(()=>db.query(base+`,email_subject,sender_email,stakeholder_emails,client_poc_emails,email_sent_at,email_cc) values($1,$2,'2026-09-25','Banker Not Reported','Absent',$3,$3,'User','Banker missing','station@dropxlogistics.com',ARRAY['ops@dropxlogistics.com'],ARRAY['client@example.com'],now(),ARRAY['other@dropxlogistics.com'])`,[company,location,user]),/check constraint/);
-await db.query(base+`,email_subject,sender_email,stakeholder_emails,client_poc_emails,email_sent_at,email_cc) values($1,$2,'2026-09-25','Banker Not Reported','Absent',$3,$3,'User','Banker missing','station@dropxlogistics.com',ARRAY['ops@dropxlogistics.com'],ARRAY['client@example.com'],now(),ARRAY['ct@dropxlogistics.com'])`,[company,location,user]);
+await db.query(base+`,email_subject,sender_email,stakeholder_emails,client_poc_emails,email_sent_at,email_cc) values($1,$2,'2026-09-25','Banker Not Reported','Absent',$3,$3,'User','Banker missing','station@dropxlogistics.com',ARRAY[]::text[],ARRAY[]::text[],now(),ARRAY['ct@dropxlogistics.com'])`,[company,location,user]);
 await db.exec('set role authenticated');await assert.rejects(()=>db.query('select * from cod_daily_exceptions'),/permission denied/);await assert.rejects(()=>db.query('select * from cod_proof_history'),/permission denied/);await assert.rejects(()=>db.query('select * from claim_cod_proof_check_v4()'),/permission denied/);await db.exec('reset role');
 // Apply return workflow after exercising the prior queue, then verify the new handover.
 await db.exec(readFileSync('supabase/migrations/20260927090000_cod_slip_returns.sql','utf8'));

@@ -40,19 +40,17 @@ export async function recordCodException(_prev:ExceptionState|null,form:FormData
   }
   const subject=kind==='Banker Not Reported'?String(form.get('email_subject')||'').trim():null;
   const sender=kind==='Banker Not Reported'?emailList(String(form.get('sender_email')||'')):[];
-  const stakeholders=kind==='Banker Not Reported'?emailList(String(form.get('stakeholder_emails')||'')):[];
-  const pocs=kind==='Banker Not Reported'?emailList(String(form.get('client_poc_emails')||'')):[];
   const sent=String(form.get('email_sent_at')||'');
   let sentAt:string|null=null;
   if(kind==='Banker Not Reported'){
    if(!subject||subject.length<3||subject.length>250||/[\r\n]/.test(subject))throw new Error('Enter the exact email subject (3–250 characters).');
    if(sender.length!==1||!sender[0].endsWith('@dropxlogistics.com'))throw new Error('Enter the DropX address that sent this email.');
-   if(form.get('sent_confirmed')!=='yes')throw new Error('Confirm the email was sent to the stakeholders and client COD POC, with Control Tower in CC.');
+   if(form.get('sent_confirmed')!=='yes')throw new Error('Confirm the email was sent from the station address with Control Tower in CC.');
    const timestamp=new Date(sent+'+05:30');
    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(sent)||!Number.isFinite(timestamp.getTime())||timestamp.getTime()>Date.now()||sent.slice(0,10)!==date)throw new Error('Enter the actual sent time in IST on the selected report date.');
    sentAt=timestamp.toISOString();
   }
-  const row={id,company_id:company,location_id:location,report_date:date,kind,reason,proof,email_subject:subject,sender_email:sender[0]||null,stakeholder_emails:stakeholders,client_poc_emails:pocs,email_cc:kind==='Banker Not Reported'?[CONTROL_TOWER_CC]:[],email_sent_at:sentAt,email_check_status:kind==='Banker Not Reported'?'Confirmation pending':'Not applicable',email_check_reason:null,email_message_id:null,email_checked_at:null,updated_by:auth.userId,updater_name:auth.fullName||auth.email||'Station user',updated_at:new Date().toISOString(),version:(prior?.version||0)+1};
+  const row={id,company_id:company,location_id:location,report_date:date,kind,reason,proof,email_subject:subject,sender_email:sender[0]||null,stakeholder_emails:prior?.stakeholder_emails||[],client_poc_emails:prior?.client_poc_emails||[],email_cc:kind==='Banker Not Reported'?[CONTROL_TOWER_CC]:[],email_sent_at:sentAt,email_check_status:kind==='Banker Not Reported'?'Confirmation pending':'Not applicable',email_check_reason:null,email_message_id:null,email_checked_at:null,updated_by:auth.userId,updater_name:auth.fullName||auth.email||'Station user',updated_at:new Date().toISOString(),version:(prior?.version||0)+1};
   const saved=prior?await supabaseAdmin.from('cod_daily_exceptions').update(row).eq('company_id',company).eq('id',id).eq('version',prior.version).select('id'):await supabaseAdmin.from('cod_daily_exceptions').insert({...row,created_by:auth.userId}).select('id');
   if(saved.error)throw new Error(saved.error.code==='23505'?'An update already exists for this station/date. Reload and use Amend update.':saved.error.message);
   if(!saved.data?.length)throw new Error('This update changed. Reload before editing.');

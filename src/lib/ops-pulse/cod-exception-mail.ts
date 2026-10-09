@@ -11,7 +11,7 @@ export async function checkCodExceptionEmails(){
  if(result.error)throw new Error(result.error.message);
  let checked=0,confirmed=0;
  for(const row of (result.data||[]) as CodException[]){
-  let status='Email not found',reason='No matching email was found with the recorded sender, subject, recipients and Control Tower CC.',messageId:string|null=null;
+  let status='Email not found',reason='No matching email was found with the recorded sender, subject, sent time and Control Tower CC.',messageId:string|null=null;
   try{
    const setting=await supabaseAdmin.from('google_workspace_settings').select('primary_domain').eq('company_id',row.company_id).maybeSingle();
    if(setting.error||setting.data?.primary_domain!=='dropxlogistics.com')throw new Error('Control Tower mailbox is not configured for this company.');
@@ -27,7 +27,7 @@ export async function checkCodExceptionEmails(){
     }
     pageToken=listed.nextPageToken;if(messageId||!pageToken)break;
    }
-   if(messageId){status='Email confirmed';reason='Matching email found in the Control Tower mailbox with all recorded recipients and mandatory CC.';confirmed++;}
+   if(messageId){status='Email confirmed';reason='Matching email found in the Control Tower mailbox with the recorded sender, subject, sent time and mandatory CC.';confirmed++;}
    else if(pageToken){status='Email check unavailable';reason='Mailbox results were incomplete. Confirmation will be retried.';}
   }catch(error){console.error('COD mailbox confirmation unavailable',row.id,error instanceof Error?error.message:'Unknown error');status='Email check unavailable';reason='Control Tower mailbox confirmation is unavailable. The recorded email has not yet been independently confirmed.';}
   let save=supabaseAdmin.from('cod_daily_exceptions').update({email_check_status:status,email_check_reason:reason,email_message_id:messageId,email_checked_at:new Date().toISOString()}).eq('company_id',row.company_id).eq('id',row.id).eq('version',row.version).eq('email_check_status',row.email_check_status);
