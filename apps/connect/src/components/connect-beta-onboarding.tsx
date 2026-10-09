@@ -10,6 +10,7 @@ import { useBetaGuidanceLanguage } from "./connect-beta-journey-shell";
 import { betaExitNotice, betaExitNoticeVersion } from "../lib/beta-exit-notice";
 import { betaJourney } from "../lib/beta-journey";
 import type { AppAccount } from "./connect-profile-app";
+import { ConnectBetaAmazonOtp } from "./connect-beta-amazon-otp";
 
 type Stage = "overview" | "attendance" | "registration" | "amazon" | "bgc" | "account" | "activation";
 type CheckState = "complete" | "action" | "in_progress" | "pending";
@@ -125,6 +126,7 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
         <div className="dx-beta-action-row"><button type="button" className="dx-beta-primary" onClick={()=>void copyValue("link",data.invitationUrl!)}><Copy/>{copied==="link"?"Link copied":"Copy link"}</button><a className="dx-beta-primary" href={data.invitationUrl} target="_blank" rel="noopener noreferrer"><ExternalLink/>Open invitation</a></div>
         <details className="dx-beta-link-value"><summary>Show invitation link</summary><p>{data.invitationUrl}</p></details>
       </>:<div className="dx-beta-empty"><Clock3/><strong>Waiting for the invitation link</strong><span>DropX monitors your sign-in address. You do not need mailbox access. Refresh here when the invitation arrives.</span></div>}
+      {data.isolatedBeta && journey.invitationUnlocked ? <ConnectBetaAmazonOtp key={`${account.companyId}:${account.id}`} accountId={account.id} companyId={account.companyId} language={language}/> : null}
       <div className="dx-beta-browser-safety"><ShieldCheck/><span><strong>Your password stays with you</strong><small>DropX does not create, read or store your Amazon password.</small></span></div>
       <a className="dx-beta-store-link" href="https://play.google.com/store/apps/details?id=com.amazon.flex.rabbit" target="_blank" rel="noopener noreferrer"><Smartphone/>Get Amazon Flex on Google Play <ArrowRight/></a>
       {!data.isolatedBeta&&mailHref?<a className="dx-beta-secondary-link" href={mailHref} target="_blank" rel="noreferrer">Open email inbox</a>:null}
