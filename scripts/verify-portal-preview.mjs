@@ -66,6 +66,7 @@ const mocks = {
 // Authorization reads the session and the cached access rows through two shared
 // modules; load the real ones against the same mocks so their logic is exercised.
 function withSharedModules(base) {
+  base = { ...base, "@/lib/auth-session-policy": moduleAt("src/lib/auth-session-policy.ts", {}) };
   return {
     ...base,
     "@/lib/session-user": moduleAt("src/lib/session-user.ts", base),
@@ -79,13 +80,13 @@ const timeoutAuth = moduleAt("src/lib/authorization.ts", withSharedModules({
   "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new ImmediateTimeout(); } },
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
 }));
-assert.equal(await timeoutAuth.getAuthorization(), null, "two consecutive sign-in timeouts resolve as an unavailable session instead of a server exception");
+await assert.rejects(timeoutAuth.getAuthorization(), /not been signed out/, "timeouts must stay retryable, not become a missing session/login redirect");
 const unavailableAuth = moduleAt("src/lib/authorization.ts", withSharedModules({
   ...mocks,
   "@/lib/with-timeout": { TimeoutError: ImmediateTimeout, withTimeout: async () => { throw new Error("Supabase auth is unavailable"); } },
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }
 }));
-assert.equal(await unavailableAuth.getAuthorization(), null, "an upstream auth error fails closed as an unavailable session instead of leaving the route unresolved");
+await assert.rejects(unavailableAuth.getAuthorization(), /Supabase auth is unavailable/, "unexpected upstream failures must reach the retry boundary without granting access or logging out");
 const claimsFallbackAuth = moduleAt("src/lib/authorization.ts", withSharedModules({
   ...mocks,
   "@/lib/supabase-server": {

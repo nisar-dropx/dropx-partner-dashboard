@@ -9,7 +9,7 @@ const emptySnapshot: PaymentNotificationSnapshot = {
   items: []
 };
 
-const REFRESH_INTERVAL_MS = 15_000;
+const REFRESH_INTERVAL_MS = 60_000;
 
 type PaymentNotificationContextValue = {
   isRefreshing: boolean;
@@ -77,6 +77,11 @@ export function PaymentNotificationProvider({
     inFlightRef.current = request;
     return request;
   }, []);
+
+  useEffect(() => {
+    if (refreshOnMount) void runRefresh(true);
+    else setSnapshot(initialData);
+  }, [initialData, refreshOnMount, runRefresh]);
 
   const refresh = useCallback(() => runRefresh(true), [runRefresh]);
 

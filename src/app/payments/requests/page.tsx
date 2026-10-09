@@ -1,3 +1,4 @@
+import { readPaymentPages } from "@/lib/payment-query-policy";
 import { PaymentTrackingInput } from "@/components/payment-tracking-input";
 import { isPaymentTrackingQuestion } from "@/lib/payment-shipment-count";
 import { AppShell } from "@/components/app-shell";
@@ -268,28 +269,35 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");
-  let requestsQuery = supabaseAdmin
+  const admin = supabaseAdmin;
+  const requestsQuery = () => {
+    let query = admin
       .from("payment_requests")
       .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date, work_date, source_type, source_id, requested_for_name, category, details")
       .eq("company_id", companyId)
       .not("amount", "is", null)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }).order("id");
+
+    if (!authorization.hasAllLocationAccess) query = query.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [NO_LOCATION_SCOPE_ID]);
+    return query;
+  };
 
   if (!authorization.hasAllLocationAccess) {
     const locationIds = authorization.locationScopeIds.length
       ? authorization.locationScopeIds
       : [NO_LOCATION_SCOPE_ID];
     locationsQuery = locationsQuery.in("id", locationIds);
-    requestsQuery = requestsQuery.in("location_id", locationIds);
+
   }
 
   const [locationsResult, headsResult, requestsResult] = await Promise.all([
     locationsQuery,
     headsQuery,
-    requestsQuery
+    Promise.all([requestsQuery().limit(20), readPaymentPages((from, to) => requestsQuery().eq("requested_by", authorization.userId).range(from, to))])
   ]);
-  const error = locationsResult.error?.message || headsResult.error?.message || requestsResult.error?.message || null;
-  const allRequests = (requestsResult.data ?? []) as PaymentRequestRow[];
+  const error = locationsResult.error?.message || headsResult.error?.message || requestsResult[0].error?.message || null;
+  const allRequests = [...new Map([...requestsResult[0].data ?? [], ...requestsResult[1].data]
+    .map(row => [row.id, row])).values()].sort((a, b) => b.created_at.localeCompare(a.created_at)) as PaymentRequestRow[];
   const visibleRequestIds = new Set([
     ...allRequests.slice(0, 20).map((request) => request.id),
     ...allRequests.filter((request) => request.requested_by === authorization.userId).map((request) => request.id)
@@ -533,7 +541,7 @@ export default async function PaymentRequestsPage({
               <h2>New payment request</h2>
               <p className="subtle">Use this for payment heads that do not require expense approval.</p>
             </div>
-            <PendingLink className="button secondary" href="/payments/expense-request">
+            <PendingLink prefetch={false} refresh={false} className="button secondary" href="/payments/expense-request">
               New expense request
               {expenseActionCount > 0 ? <span className="nav-badge">{expenseActionCount > 99 ? "99+" : expenseActionCount}</span> : null}
             </PendingLink>
@@ -592,11 +600,11 @@ export default async function PaymentRequestsPage({
                       <td>{formatDashboardDate(request.created_at)}</td>
                       <td>
                         <div className="payment-row-actions">
-                          <PendingLink className="button secondary compact" href={`/payments/requests?view=${request.id}`} scroll={false}>View</PendingLink>
+                          <PendingLink prefetch={false} refresh={false} className="button secondary compact" href={`/payments/requests?view=${request.id}`} scroll={false}>View</PendingLink>
                           {pagePermission.canAdd && canSubmitBankDetails(request, authorization.userId) ? (
-                            <PendingLink className="button compact" href={`/payments/requests?bank=${request.id}`} scroll={false}>Submit payout details</PendingLink>
+                            <PendingLink prefetch={false} refresh={false} className="button compact" href={`/payments/requests?bank=${request.id}`} scroll={false}>Submit payout details</PendingLink>
                           ) : pagePermission.canAdd && isResubmittable(request, authorization.userId) ? (
-                            <PendingLink className="button secondary compact" href={`/payments/requests?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
+                            <PendingLink prefetch={false} refresh={false} className="button secondary compact" href={`/payments/requests?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
                           ) : null}
                         </div>
                       </td>
@@ -619,7 +627,7 @@ export default async function PaymentRequestsPage({
                 <h2 id="bank-payment-title">Submit payment details</h2>
                 <p className="subtle">{bankRequest.request_no} - Enter actual amount and beneficiary bank details.</p>
               </div>
-              <PendingLink className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
+              <PendingLink prefetch={false} refresh={false} className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
             </div>
             <form action={submitPaymentBankDetails} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={bankRequest.id} />
@@ -673,7 +681,7 @@ export default async function PaymentRequestsPage({
                 <textarea className="field" name="remarks" rows={3} defaultValue={bankRequest.remarks ?? ""} />
               </label>
               <div className="form-actions modal-actions">
-                <PendingLink className="button secondary" href="/payments/requests" scroll={false}>Cancel</PendingLink>
+                <PendingLink prefetch={false} refresh={false} className="button secondary" href="/payments/requests" scroll={false}>Cancel</PendingLink>
                 <SubmitButton pendingText="Submitting">Submit details</SubmitButton>
               </div>
             </form>
@@ -689,7 +697,7 @@ export default async function PaymentRequestsPage({
                 <h2 id="resubmit-payment-title">Resubmit payment request</h2>
                 <p className="subtle">{resubmitRequest.request_no} - Make corrections and add remarks before resubmitting.</p>
               </div>
-              <PendingLink className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
+              <PendingLink prefetch={false} refresh={false} className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
             </div>
             <form action={resubmitPaymentRequest} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={resubmitRequest.id} />
@@ -760,7 +768,7 @@ export default async function PaymentRequestsPage({
                 <textarea className="field" name="remarks" rows={5} required defaultValue={resubmitRequest.remarks ?? ""} />
               </label>
               <div className="form-actions modal-actions">
-                <PendingLink className="button secondary" href="/payments/requests" scroll={false}>Cancel</PendingLink>
+                <PendingLink prefetch={false} refresh={false} className="button secondary" href="/payments/requests" scroll={false}>Cancel</PendingLink>
                 <SubmitButton pendingText="Resubmitting">Resubmit request</SubmitButton>
               </div>
             </form>
@@ -782,7 +790,7 @@ export default async function PaymentRequestsPage({
               </div>
               <div className="payment-view-header-side">
                 <StatusPill status={paymentLifecycleLabel(viewRequest, authorization.userId)} tone={paymentApprovalStatusTone(viewRequest)} />
-                <PendingLink className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
+                <PendingLink prefetch={false} refresh={false} className="icon-button" href="/payments/requests" scroll={false} aria-label="Close">x</PendingLink>
               </div>
             </header>
 

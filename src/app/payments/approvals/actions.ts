@@ -1,8 +1,9 @@
 "use server";
 
+import { waitUntil } from "@vercel/functions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requirePagePermission } from "@/lib/authorization";
+import { requirePagePermissionOrThrow } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
@@ -10,6 +11,15 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
 import { effectiveApprovalStepOrder } from "@/lib/payment-stage-policy";
+
+
+function notifyAfterDecision(input: Parameters<typeof sendPaymentNotification>[0]) {
+  waitUntil(sendPaymentNotification(input).then(result => {
+    if (!result.sent) console.warn("Payment decision saved; notification not sent", { requestId: input.requestId, reason: result.reason });
+  }).catch(error => {
+    console.error("Payment decision saved; notification failed", { requestId: input.requestId, message: error instanceof Error ? error.message : String(error) });
+  }));
+}
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -124,7 +134,8 @@ async function ensureUserHasNotAlreadyActed(
       .eq("approver_user_id", userId)
       .eq("approval_cycle", approvalCycle)
       .eq("request_id", requestId);
-    if (!legacyQuery.error && (legacyQuery.count ?? 0) > 0) {
+    if (legacyQuery.error) throw new Error("Approval history could not be checked. Please retry before making a decision.");
+    if ((legacyQuery.count ?? 0) > 0) {
       throw new Error("You have already acted on this payment request.");
     }
     return;
@@ -225,7 +236,7 @@ async function runApprovalAction(
     approvalRedirect(params);
   } catch (error) {
     if (isNextRedirect(error)) throw error;
-    approvalRedirect(redirectParams(formData, "approvalError", errorMessage(error)));
+    return { error: errorMessage(error) };
   }
 }
 
@@ -379,7 +390,7 @@ async function updatePaymentRequest(
 }
 
 export async function approvePaymentRequest(formData: FormData) {
-  const authorization = await requirePagePermission("payment_approvals", "edit");
+  const authorization = await requirePagePermissionOrThrow("payment_approvals", "edit");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
 
@@ -547,18 +558,18 @@ export async function approvePaymentRequest(formData: FormData) {
   revalidatePath("/payments/requests");
   revalidatePath("/payments/process");
   revalidatePath("/payments/report");
-  const emailResult = await sendPaymentNotification({
+  notifyAfterDecision({
     actorUserId: authorization.userId,
     companyId,
     eventType: "payment_approve",
     remarks: comments,
     requestId: request.id
   });
-  return emailResult.sent ? undefined : emailResult.reason;
+
 }
 
 export async function rejectPaymentRequest(formData: FormData) {
-  const authorization = await requirePagePermission("payment_approvals", "edit");
+  const authorization = await requirePagePermissionOrThrow("payment_approvals", "edit");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
 
@@ -598,18 +609,18 @@ export async function rejectPaymentRequest(formData: FormData) {
   revalidatePath("/payments/approvals");
   revalidatePath("/payments/requests");
   revalidatePath("/payments/report");
-  const emailResult = await sendPaymentNotification({
+  notifyAfterDecision({
     actorUserId: authorization.userId,
     companyId,
     eventType: "payment_reject",
     remarks: comments,
     requestId: request.id
   });
-  return emailResult.sent ? undefined : emailResult.reason;
+
 }
 
 export async function returnPaymentRequest(formData: FormData) {
-  const authorization = await requirePagePermission("payment_approvals", "edit");
+  const authorization = await requirePagePermissionOrThrow("payment_approvals", "edit");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
 
@@ -657,14 +668,14 @@ export async function returnPaymentRequest(formData: FormData) {
   revalidatePath("/payments/approvals");
   revalidatePath("/payments/requests");
   revalidatePath("/payments/report");
-  const emailResult = await sendPaymentNotification({
+  notifyAfterDecision({
     actorUserId: authorization.userId,
     companyId,
     eventType: "payment_return",
     remarks: comments,
     requestId: request.id
   });
-  return emailResult.sent ? undefined : emailResult.reason;
+
 }
 
 export async function handlePaymentApprovalAction(formData: FormData) {
@@ -690,13 +701,13 @@ export async function handlePaymentApprovalAction(formData: FormData) {
 }
 
 export async function handleApprovePaymentApproval(formData: FormData) {
-  await runApprovalAction(formData, approvePaymentRequest, "Payment request approved.", "acted");
+  return runApprovalAction(formData, approvePaymentRequest, "Payment request approved.", "acted");
 }
 
 export async function handleReturnPaymentApproval(formData: FormData) {
-  await runApprovalAction(formData, returnPaymentRequest, "Payment request returned.");
+  return runApprovalAction(formData, returnPaymentRequest, "Payment request returned.");
 }
 
 export async function handleRejectPaymentApproval(formData: FormData) {
-  await runApprovalAction(formData, rejectPaymentRequest, "Payment request rejected.");
+  return runApprovalAction(formData, rejectPaymentRequest, "Payment request rejected.");
 }

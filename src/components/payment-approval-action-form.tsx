@@ -10,9 +10,9 @@ type PaymentApprovalActionFormProps = {
   status: string;
   currentStep?: number | null;
   totalSteps?: number | null;
-  approveAction: (formData: FormData) => void | Promise<void>;
-  returnAction: (formData: FormData) => void | Promise<void>;
-  rejectAction: (formData: FormData) => void | Promise<void>;
+  approveAction: (formData: FormData) => void | Promise<void | { error: string }>;
+  returnAction: (formData: FormData) => void | Promise<void | { error: string }>;
+  rejectAction: (formData: FormData) => void | Promise<void | { error: string }>;
 };
 
 function PaymentApprovalButton({
@@ -60,11 +60,22 @@ export function PaymentApprovalActionForm({
   returnAction,
   rejectAction
 }: PaymentApprovalActionFormProps) {
+  const [actionError, setActionError] = useState("");
   const remarksRef = useRef<HTMLTextAreaElement>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const displayedCurrentStep = Number(currentStep) || 0;
   const displayedTotalSteps = Math.max(Number(totalSteps) || 0, displayedCurrentStep);
   const isFinalApprovalStep = displayedCurrentStep > 0 && displayedTotalSteps > 0 && displayedCurrentStep >= displayedTotalSteps;
+
+  const submit = (action: PaymentApprovalActionFormProps["approveAction"]) => async (formData: FormData) => {
+    setActionError("");
+    try {
+      const result = await action(formData);
+      if (result?.error) setActionError(result.error);
+    } catch {
+      setActionError("We could not confirm the result. Your note is kept below. Check the request status before submitting again.");
+    }
+  };
 
   function validateAction(actionName: string) {
     const remarks = remarksRef.current;
@@ -109,11 +120,12 @@ export function PaymentApprovalActionForm({
         <textarea className="field" name="comments" ref={remarksRef} rows={2} />
         <small>Optional when approving. Required when returning or rejecting.</small>
       </label>
+      {actionError ? <p role="alert" className="message error">{actionError} <a href="/payments/approvals">Check current status</a></p> : null}
       <div className="payment-approval-action-buttons">
         <PaymentApprovalButton
           actionName="approve"
           className="button payment-approve-button"
-          formAction={approveAction}
+          formAction={submit(approveAction)}
           onBeforeSubmit={() => validateAction("approve")}
           pendingAction={pendingAction}
         >
@@ -122,7 +134,7 @@ export function PaymentApprovalActionForm({
         <PaymentApprovalButton
           actionName="return"
           className="button payment-return-button"
-          formAction={returnAction}
+          formAction={submit(returnAction)}
           onBeforeSubmit={() => validateAction("return")}
           pendingAction={pendingAction}
         >
@@ -131,7 +143,7 @@ export function PaymentApprovalActionForm({
         <PaymentApprovalButton
           actionName="reject"
           className="button payment-reject-button"
-          formAction={rejectAction}
+          formAction={submit(rejectAction)}
           onBeforeSubmit={() => validateAction("reject")}
           pendingAction={pendingAction}
         >

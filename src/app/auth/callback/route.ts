@@ -351,7 +351,7 @@ export async function GET(request: NextRequest) {
       profileActive: Boolean(profile?.is_active),
       locationRoleFound: Boolean(locationRole)
     });
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" });
     loginUrl.searchParams.set("error", "Your account is not active in the DropX dashboard. Contact an administrator.");
     return NextResponse.redirect(loginUrl);
   }
@@ -375,7 +375,7 @@ export async function GET(request: NextRequest) {
       profileId: profile.id,
       companyId: profile.company_id ?? null
     });
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" });
     loginUrl.searchParams.set("error", "Your company is not active in the DropX dashboard. Contact an administrator.");
     return NextResponse.redirect(loginUrl);
   }
@@ -388,7 +388,7 @@ export async function GET(request: NextRequest) {
       profileId: profile.id,
       companyId: profile.company_id ?? null
     });
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" });
     loginUrl.searchParams.set("error", "Your email domain is not allowed for this company. Contact an administrator.");
     return NextResponse.redirect(loginUrl);
   }
@@ -423,7 +423,7 @@ export async function GET(request: NextRequest) {
     console.error("Auth callback failed", {
       message: error instanceof Error ? error.message : String(error)
     });
-    if (supabase) await supabase.auth.signOut();
+    // A backend failure is not a sign-out request. Keep other portal sessions intact.
     loginUrl.searchParams.set("error", "Google login could not be completed. Please try again.");
     return NextResponse.redirect(loginUrl);
   }
