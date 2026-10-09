@@ -56,6 +56,8 @@ export function SidebarNav({ active, items }: SidebarNavProps) {
     };
   }, [items, updateSubmenuPosition]);
 
+  // Navigation should load the chosen page, not render every hidden submenu
+  // in the background or repeat its request immediately after a click.
   return (
     <nav className="nav" aria-label="Primary">
       {items.filter(item=>item.code!=='fleet_da_mapping'||mappingAvailable).map((item) => item.children ? (
@@ -84,7 +86,7 @@ export function SidebarNav({ active, items }: SidebarNavProps) {
             }}
           >
             {item.children.map((child) => child.href ? (
-              <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label}>
+              <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label} prefetch={false} refresh={false}>
                 <span className="nav-label">{child.label}</span>
                 <PaymentNavBadge code={child.hideBadge || (item.code === "people_all" && child.code === "people_all") ? undefined : child.code} />
               </PendingLink>
@@ -98,6 +100,8 @@ export function SidebarNav({ active, items }: SidebarNavProps) {
           className={`nav-item ${active === item.label ? "active" : ""}`}
           disableWhenCurrent
           href={item.href}
+          prefetch={false}
+          refresh={false}
           key={item.label}
         >
           <Icon>{item.icon}</Icon>
