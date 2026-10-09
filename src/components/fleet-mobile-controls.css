@@ -1,0 +1,4 @@
+/* Default layout also applies to Fleet reports embedded outside Fleet Control. */
+.fc-mobile-section,.fc-mobile-section-content{display:contents}
+.fc-mobile-section-toggle,.fc-export-toggle{display:none}
+.fc-export-options{display:flex;align-items:center;gap:6px;flex-wrap:wrap}

@@ -21,7 +21,7 @@ export async function loadExpenseVariances(db: SupabaseClient, company: string, 
   }
   throw new Error('Select a shorter report range.');
 }
-export function expenseVarianceExport(rows: ExpenseVarianceRow[]) {
-  return rows.map(r => ({ Date: r.date, Station: r.station, Reference: r.reference, 'Payment head': r.head, Status: r.status, 'Estimated INR': r.estimated,
-    'Actual submitted INR': r.actual, 'Difference INR': r.delta, 'Difference %': r.percent == null ? null : Number(r.percent.toFixed(2)), Attention: r.state, 'Estimated shipments': r.shipments, 'Estimated CPS': r.cps == null ? null : Number(r.cps.toFixed(2)) }));
+export function expenseVarianceExport(rows: ExpenseVarianceRow[], storeOnly = false) {
+  return rows.map(r => ({ Date: r.date, [storeOnly ? "Store" : "Station"]: r.station, Reference: r.reference, 'Payment head': r.head, Status: r.status, 'Estimated INR': r.estimated,
+    'Actual submitted INR': r.actual, 'Difference INR': r.delta, 'Difference %': r.percent == null ? null : Number(r.percent.toFixed(2)), Attention: r.state, ...(storeOnly ? {} : { 'Estimated shipments': r.shipments, 'Estimated CPS': r.cps == null ? null : Number(r.cps.toFixed(2)) }) }));
 }

@@ -1,3 +1,4 @@
+import {FleetMappingPending} from "@/components/fleet-mapping-pending";
 import { DarkStoreHome, CommandLoading } from "./dark-store-home";
 import { Suspense } from "react";
 import { AuditCommandCard } from "./audits/audit-command-card";
@@ -174,6 +175,7 @@ async function OperationsContent({authorization,companyId,locationsResult,contex
       <div className="ops-command-center">
         <PageHead eyebrow="Live workforce · scope controlled" title="Shift Attendance" subtitle="See each authorised office, station or store roster, reporting times and attendance exceptions." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
         {context.mode!=="amazon_now" && <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>}
+        {context.mode!=="amazon_now" && <FleetMappingPending/>}
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link href="/ops-pulse">Operations view</Link>
           <Link className="active" href="/ops-pulse?view=manpower">Shift attendance</Link>
@@ -319,6 +321,7 @@ async function OperationsContent({authorization,companyId,locationsResult,contex
         />
 
         {context.mode!=="amazon_now" && <Suspense fallback={<p className="subtle">Loading your audit queue…</p>}><AuditCommandCard authorization={authorization}/></Suspense>}
+        {context.mode!=="amazon_now" && <FleetMappingPending/>}
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link className="active" href="/ops-pulse">Operations view</Link>
           <Link href="/ops-pulse?view=manpower">Shift attendance</Link>
