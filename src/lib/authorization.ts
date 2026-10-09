@@ -10,6 +10,7 @@ import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from
 import { enforceAccessCutoffIfDue } from "@/lib/access-cutoff";
 import { getSessionUser, legacySessionProfileColumns, loadSessionProfile, sessionProfileColumns } from "@/lib/session-user";
 import { TimeoutError } from "@/lib/with-timeout";
+import { SessionUnavailableError } from "@/lib/auth-session-policy";
 
 export type PermissionAction = "access" | "view" | "add" | "edit";
 
@@ -199,7 +200,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
 
   const { data: profileById, error: profileByIdError } = await loadSessionProfile(data.user.id);
 
-  if (profileByIdError) return null;
+  if (profileByIdError) throw new SessionUnavailableError();
 
   let profile = profileById;
   if (!profile) {
@@ -215,7 +216,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       profileRows = legacyRowsResult.data as typeof profileRows;
       profileRowsError = legacyRowsResult.error;
     }
-    if (profileRowsError) return null;
+    if (profileRowsError) throw new SessionUnavailableError();
     const emailMatches = (profileRows ?? []).filter((item) => normalizeEmail(item.email) === signedInEmail);
     const activeEmailMatches = emailMatches.filter((item) => item.is_active);
     const masterOwnerMatch = activeEmailMatches.find((item) => item.is_master_owner);
@@ -262,7 +263,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   if (!companyId) return null;
 
   if (companyId) {
-    const company = await loadCompanyAccessRow(companyId).catch(() => null);
+    const company = await loadCompanyAccessRow(companyId).catch(() => { throw new SessionUnavailableError(); });
     if (!company?.is_active) return null;
     if (company) {
       companyId = company.id;
@@ -299,7 +300,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       .eq("user_id", profile.id)
       .eq("product_code", surfaceProductCode)
       .eq("is_active", true);
-    if (!membershipResult.error && !isMasterOwner) {
+    if (membershipResult.error) throw new SessionUnavailableError();
+    if (!isMasterOwner) {
       const membershipRows = membershipResult.data ?? [];
       const membershipRoleIds = membershipRows.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId));
       // Ops/People/Finance must use the product membership role matrix from Settings.
@@ -316,7 +318,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   }
 
   if (effectiveRoleIds.length) {
-    const roles = await loadActiveRoles(companyId as string, effectiveRoleIds).catch(() => null);
+    const roles = await loadActiveRoles(companyId as string, effectiveRoleIds).catch(() => { throw new SessionUnavailableError(); });
     if (!roles) return null;
     effectiveRoleCodes = roles.map(role => String(role.code ?? "").trim().toUpperCase());
     const primaryRole = roles.find((role) => role.id === primaryRoleId) ?? roles[0] ?? null;
@@ -348,7 +350,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       hasAllLocationAccess = true;
       grantFullAccess(permissions);
     } else {
-      const access = await loadRolePageGrants(companyId as string, effectiveRoleIds).catch(() => null);
+      const access = await loadRolePageGrants(companyId as string, effectiveRoleIds).catch(() => { throw new SessionUnavailableError(); });
       if (!access) return null;
       const codeByPageId = new Map(access.pages.map((page) => [page.id, page.code]));
 
@@ -430,14 +432,8 @@ export async function requirePagePermission(pageCode: string, action: Permission
 }
 
 /**
- * For Server Actions only: a page load has no in-progress user input to lose,
- * so requirePagePermission's redirect-on-any-failure is fine there. A Server
- * Action triggered mid-form does have input worth preserving - on a Supabase
- * timeout specifically, throw a plain Error instead of redirecting, so the
- * action's own try/catch can surface a retryable message rather than
- * navigating the browser away and discarding what the user was entering. A
- * genuine "not signed in" or "not permitted" result still redirects exactly
- * as before.
+ * Server Actions surface backend failures without discarding the login.
+ * Genuine missing sessions and denied permissions still redirect.
  */
 export async function requirePagePermissionOrThrow(pageCode: string, action: PermissionAction) {
   let authorization: AuthorizationContext | null;

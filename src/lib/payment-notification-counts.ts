@@ -1,3 +1,4 @@
+import { readPaymentPages } from "@/lib/payment-query-policy";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { currentAccessSurface } from "@/lib/access-surface";
 import { canAccessPaymentLocation } from "@/lib/payment-approval-scope";
@@ -63,13 +64,6 @@ const EMPTY_BADGES = {
 };
 
 const TERMINAL_APPROVAL_STATUSES = new Set(["RE_APPROVED", "REJECTED", "RETURNED", "CANCELLED", "PROCESSING", "PROCESSED"]);
-
-// Was a hardcoded 1000 with no visibility if it was ever actually hit -- a company with more
-// than 1000 payment_requests rows total (not 1000 *pending*, just 1000 ever) would silently
-// stop seeing older pending/returned items in these badges, with no error anywhere. Raised
-// well past any realistic near-term company size; the console.warn below at the call site
-// means hitting even this higher cap is now visible instead of silent.
-const PAYMENT_REQUESTS_FETCH_CAP = 20_000;
 
 export function emptyPaymentNotificationSnapshot(): PaymentNotificationSnapshot {
   return {
@@ -184,14 +178,14 @@ async function loadPeopleReviewCount(authorization: AuthorizationContext) {
 }
 
 // PaymentNotificationProvider (src/components/payment-notification-provider.tsx) polls
-// /api/payment-notifications every 15 seconds from every open tab of the dashboard shell --
+// /api/payment-notifications every minute from every open tab of the dashboard shell --
 // it's mounted globally in app-shell.tsx, not opt-in. Each call here fires ~13 queries,
 // several of them full-table reads across employees/workforce/contractors/vendors/workers
 // (loadPeopleReviewCount, loadPeopleExceptionCount) plus a payment_requests fetch, all
 // re-derived from scratch. Cached per-user (not per-company): several of these badges are
 // genuinely personalized (ownRequests filtered by requested_by === userId,
 // isAssignedToCurrentUser), so a shared per-company cache would leak one user's pending
-// approvals into another's badge count. A 12s TTL (just under the 15s poll interval) still
+// approvals into another's badge count. A 12s TTL (within the poll interval) still
 // collapses the common case -- the same user with more than one tab open -- onto one computed
 // result, without ever risking a stale *cross-user* read.
 const snapshotCache = new Map<string, { expires: number; body: Promise<PaymentNotificationSnapshot> }>();
@@ -201,7 +195,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
   if (!authorization.companyId) return emptyPaymentNotificationSnapshot();
 
   const accessSurface = currentAccessSurface();
-  const cacheKey = `${authorization.userId}:${authorization.companyId}:${accessSurface}`;
+  const cacheKey = JSON.stringify([authorization.userId, authorization.companyId, accessSurface, authorization.roleCode, authorization.isMasterOwner, authorization.hasAllLocationAccess, authorization.locationScopeIds, authorization.effectiveRoleIds, authorization.permissions]);
   const cached = snapshotCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.body;
   const body = loadPaymentNotificationSnapshotUncached(authorization, accessSurface);
@@ -214,13 +208,14 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
 async function loadPaymentNotificationSnapshotUncached(authorization: AuthorizationContext, accessSurface: ReturnType<typeof currentAccessSurface>): Promise<PaymentNotificationSnapshot> {
   const badges = { ...EMPTY_BADGES };
   const items: PaymentNotificationItem[] = [];
-  badges.people_review = await loadPeopleReviewCount(authorization);
-  badges.people_exceptions = await loadPeopleExceptionCount(authorization);
+  [badges.people_review, badges.people_exceptions] = await Promise.all([loadPeopleReviewCount(authorization), loadPeopleExceptionCount(authorization)]);
   badges.people_all = badges.people_review + badges.people_exceptions;
   const canSeePayments = hasPermission(authorization, "payments", "access");
   if (!canSeePayments || !supabaseAdmin) return { total: 0, badges, items };
 
-  const { data, error } = await supabaseAdmin
+  const admin = supabaseAdmin;
+  const { data } = await readPaymentPages((from, to) => {
+  let requestsQuery = admin
     .from("payment_requests")
     .select(`
       id,
@@ -250,23 +245,14 @@ async function loadPaymentNotificationSnapshotUncached(authorization: Authorizat
       )
     `)
     .eq("company_id", authorization.companyId)
-    .order("created_at", { ascending: false })
-    .limit(PAYMENT_REQUESTS_FETCH_CAP);
+    .or("approval_status.is.null,approval_status.not.in.(PROCESSED,CANCELLED,REJECTED)")
+    .order("created_at", { ascending: false }).order("id");
 
-  if (error || !data) return { total: 0, badges, items };
-
-  // The badge rules below mix several different concerns per row (own requests vs.
-  // role-assigned approvals, and a different "still needs attention" definition per badge),
-  // so they don't cleanly translate into one SQL WHERE clause without risking a wrong badge
-  // count for a live payments feature. Kept as a single ordered-by-recency fetch (same
-  // behavior as before) with a much higher cap and a one-time warning if that cap is ever
-  // actually hit, so a company approaching this size becomes visible instead of silently
-  // losing older pending/returned items from these counts.
-  if (data.length >= PAYMENT_REQUESTS_FETCH_CAP) {
-    console.warn(
-      `[payment-notifications] company ${authorization.companyId} hit the ${PAYMENT_REQUESTS_FETCH_CAP}-row fetch cap -- badge counts may be missing older pending/returned requests.`
-    );
+  if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner) {
+    requestsQuery = requestsQuery.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
   }
+  return requestsQuery.range(from, to);
+  });
   const requests = data as PaymentNotificationRequest[];
   const ownRequests = authorization.userId
     ? requests.filter((request) => request.requested_by === authorization.userId)

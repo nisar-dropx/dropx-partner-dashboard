@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
 import { timeoutFetch } from "@/lib/timeout-fetch";
-import { TimeoutError, withTimeout } from "@/lib/with-timeout";
+import { withTimeout } from "@/lib/with-timeout";
 import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
+import { LEGACY_OPS_AUTH_KEY, sharedAuthStorageKey, isTransientAuthFailure, SessionUnavailableError } from "@/lib/auth-session-policy";
 import { providerMappingPageCodeForHost } from "@/lib/provider-mapping-host";
 
 const AUTH_TIMEOUT_MS = 5000;
@@ -121,32 +122,20 @@ function decodeCookieValue(value: string) {
   return new TextDecoder().decode(bytes);
 }
 
-function isTransientAuthFailure(error: unknown) {
-  if (error instanceof TimeoutError) return true;
-  const candidate = error as { name?: unknown; message?: unknown; status?: unknown } | null;
-  const name = String(candidate?.name ?? "").toLowerCase();
-  const message = String(candidate?.message ?? "").toLowerCase();
-  const status = Number(candidate?.status ?? 0);
-  return name === "aborterror" ||
-    status >= 500 ||
-    message.includes("abort") ||
-    message.includes("timeout") ||
-    message.includes("network") ||
-    message.includes("fetch failed");
-}
-
 async function hasVerifiedSessionClaims(supabase: {
   auth: {
-    getClaims?: () => Promise<{ data?: { claims?: Record<string, unknown> | null } | null }>;
+    getClaims?: () => Promise<{ data?: { claims?: Record<string, unknown> | null } | null; error?: unknown }>;
   };
 }) {
   const getClaims = supabase.auth.getClaims;
   if (typeof getClaims !== "function") return false;
   try {
     const result = await withTimeout(getClaims.call(supabase.auth), AUTH_CLAIMS_TIMEOUT_MS, "Session claim check");
+    if (result.error && isTransientAuthFailure(result.error)) throw new SessionUnavailableError();
     return typeof result.data?.claims?.sub === "string";
-  } catch {
-    return false;
+  } catch (error) {
+    if (isTransientAuthFailure(error) || error instanceof SessionUnavailableError) throw new SessionUnavailableError();
+    throw error;
   }
 }
 
@@ -305,7 +294,7 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.next();
   const cookieDomain = host.endsWith("dropxlogistics.com") ? ".dropxlogistics.com" : undefined;
   const cookieOptions = {
-    ...(isOpsHost ? {} : { domain: cookieDomain }),
+    domain: cookieDomain,
     httpOnly: true,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
@@ -320,7 +309,7 @@ export async function middleware(request: NextRequest) {
     expireCookie(key);
     for (let index = 0; index < MAX_COOKIE_CHUNKS; index += 1) expireCookie(`${key}.${index}`);
   };
-  const getStoredValue = (key: string) => {
+  const readStoredValue = (key: string) => {
     const legacyValue = request.cookies.get(key)?.value;
     if (legacyValue) return decodeCookieValue(legacyValue);
 
@@ -332,6 +321,9 @@ export async function middleware(request: NextRequest) {
     }
     return value ? decodeCookieValue(value) : null;
   };
+  const storageKey = sharedAuthStorageKey(supabaseUrl);
+  const legacyOpsValue = isOpsHost && !readStoredValue(storageKey) ? readStoredValue(LEGACY_OPS_AUTH_KEY) : null;
+  const getStoredValue = (key: string) => readStoredValue(key) || (key === storageKey ? legacyOpsValue : null);
   const setStoredValue = (key: string, value: string) => {
     clearStoredValue(key);
     const encodedValue = encodeCookieValue(value);
@@ -345,7 +337,7 @@ export async function middleware(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseAuthKey, {
     auth: {
       flowType: "pkce",
-      ...(isOpsHost ? { storageKey: "dropx-ops-auth-v3" } : {}),
+      storageKey,
       autoRefreshToken: false,
       detectSessionInUrl: false,
       persistSession: true,
@@ -364,64 +356,59 @@ export async function middleware(request: NextRequest) {
   // navigation and link prefetch, so asking the Auth API (and the database
   // behind it) each time is the single largest source of background load. The
   // Auth API is only consulted when the token cannot be verified locally.
-  let needsClaimVerification = false;
-  const hasLocallyVerifiedSession = await hasVerifiedSessionClaims(supabase);
-  if (!hasLocallyVerifiedSession) {
-    try {
+  const copySessionCookies = (target: NextResponse) => {
+    response.cookies.getAll().forEach(cookie => target.cookies.set(cookie));
+    target.headers.set("Cache-Control", "private, no-store");
+    return target;
+  };
+  const loginResponse = () => {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+    return copySessionCookies(NextResponse.redirect(loginUrl));
+  };
+  try {
+    if (!(await hasVerifiedSessionClaims(supabase))) {
       const { data, error } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
-      if (!data.user) {
-        if (isTransientAuthFailure(error)) {
-          needsClaimVerification = true;
-        } else {
-          const loginUrl = new URL("/login", request.url);
-          loginUrl.searchParams.set("next", request.nextUrl.pathname);
-          return NextResponse.redirect(loginUrl);
-        }
-      }
-    } catch (error) {
-      if (!isTransientAuthFailure(error)) throw error;
-      needsClaimVerification = true;
+      if (error && isTransientAuthFailure(error)) return copySessionCookies(unavailableSessionResponse());
+      if (!data.user) return loginResponse();
     }
+  } catch (error) {
+    if (isTransientAuthFailure(error) || error instanceof SessionUnavailableError) return copySessionCookies(unavailableSessionResponse());
+    throw error;
   }
 
-  // A transient Auth API failure is not proof that a browser session is
-  // invalid. Verify its signed JWT claims before allowing the request through;
-  // otherwise return a retryable response instead of logging the user out or
-  // treating an unverified request as authenticated.
-  if (needsClaimVerification && !(await hasVerifiedSessionClaims(supabase))) {
-    try {
-      const { data, error } = await withTimeout(
-        supabase.auth.getUser(),
-        AUTH_TIMEOUT_MS,
-        "Session check (retry)"
-      );
-      if (!data.user) {
-        if (isTransientAuthFailure(error)) return unavailableSessionResponse();
-        const loginUrl = new URL("/login", request.url);
-        loginUrl.searchParams.set("next", request.nextUrl.pathname);
-        return NextResponse.redirect(loginUrl);
-      }
-    } catch (error) {
-      if (!isTransientAuthFailure(error)) throw error;
-      return unavailableSessionResponse();
+  // Persist a verified legacy Ops session once; never maintain two copies of
+  // one rotating refresh token. The shared cookie wins when both are present.
+  if (legacyOpsValue && !readStoredValue(storageKey)) setStoredValue(storageKey, legacyOpsValue);
+  if (isOpsHost) {
+    for (const name of [LEGACY_OPS_AUTH_KEY, ...Array.from({ length: MAX_COOKIE_CHUNKS }, (_, i) => `${LEGACY_OPS_AUTH_KEY}.${i}`)]) {
+      if (!request.cookies.get(name)?.value) continue;
+      request.cookies.delete(name);
+      response.cookies.set(name, "", { ...cookieOptions, domain: undefined, maxAge: 0 });
     }
   }
+  const forwardSession = (rewriteUrl?: URL) => {
+    // response cookies alone reach the browser, but not the current page/action.
+    const init = { request: { headers: request.headers } };
+    const next = rewriteUrl ? NextResponse.rewrite(rewriteUrl, init) : NextResponse.next(init);
+    response.cookies.getAll().forEach(cookie => next.cookies.set(cookie));
+    next.headers.set("Cache-Control", "private, no-store");
+    return next;
+  };
 
   if (isPlatformAdminHost && path === "/") {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = "/platform-admin";
-    return NextResponse.rewrite(rewriteUrl);
+    return forwardSession(rewriteUrl);
   }
 
   if (isOpsHost && path !== "/unauthorized" && isCleanOpsPath(path)) {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = path === "/" ? "/ops-pulse" : `/ops-pulse${path}`;
-    const rewriteResponse = NextResponse.rewrite(rewriteUrl);
-    response.cookies.getAll().forEach((cookie) => rewriteResponse.cookies.set(cookie));
-    return rewriteResponse;
+    return forwardSession(rewriteUrl);
   }
 
-  return response;
+  return forwardSession();
 }
 
 export const config = {

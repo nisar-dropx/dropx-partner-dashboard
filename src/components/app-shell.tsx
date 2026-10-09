@@ -107,7 +107,8 @@ export async function AppShell({ children, active, pageCode }: { children: React
     .filter((item) => item.children?.length ? item.children.length > 0 : hasPermission(authorization, item.code, "access"));
   const inboxNotificationsEnabled = !isFinanceHost && !authorization.isPreview && hasPermission(authorization, "inbox", "access");
   // Badge refresh runs after hydration on Ops; it must not block workspace navigation.
-  const paymentNotifications = isOpsHost ? {total:0,badges:{},items:[]} : await loadPaymentNotificationSnapshot(authorization);
+  const deferPaymentNotifications = isOpsHost || ["payment_approvals", "payment_requests", "expense_requests", "advance_requests", "payment_process", "payment_reports"].includes(pageCode ?? active);
+  const paymentNotifications = deferPaymentNotifications ? {total:0,badges:{},items:[]} : await loadPaymentNotificationSnapshot(authorization);
   const userMenuProps = {
     action: signOut,
     email: authorization.email,
@@ -133,7 +134,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
   );
 
   return (
-    <PaymentNotificationProvider key={`${authorization.userId}:${authorization.isPreview}`} initialData={paymentNotifications} refreshOnMount={isOpsHost}>
+    <PaymentNotificationProvider key={`${authorization.userId}:${authorization.isPreview}`} initialData={paymentNotifications} refreshOnMount={deferPaymentNotifications}>
     <AppShellFrame
       desktopActions={topActions}
       mobileActions={topActions}

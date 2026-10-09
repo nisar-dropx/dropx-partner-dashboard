@@ -2,6 +2,7 @@ import { cookies, headers } from "next/headers";
 import type { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { timeoutFetch } from "./timeout-fetch";
+import { LEGACY_OPS_AUTH_KEY, sharedAuthStorageKey } from "./auth-session-policy";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -40,21 +41,16 @@ function cookieDomain() {
   return host.endsWith("dropxlogistics.com") ? ".dropxlogistics.com" : undefined;
 }
 
-export function createServerSupabaseClient(response?: NextResponse, forceOpsStorage?: boolean) {
+export function createServerSupabaseClient(response?: NextResponse, _forceOpsStorage?: boolean) {
   if (!supabaseUrl || !supabaseAuthKey) return null;
 
   const cookieStore = cookies();
   const host = headers().get("x-forwarded-host")?.split(":")[0].toLowerCase() ??
     headers().get("host")?.split(":")[0].toLowerCase() ??
     "";
-  const hasOpsSessionCookie = Boolean(
-    cookieStore.get("dropx-ops-auth-v3")?.value ||
-    cookieStore.get("dropx-ops-auth-v3.0")?.value
-  );
-  const useOpsStorage = forceOpsStorage ??
-    (host === "ops.dropxlogistics.com" || hasOpsSessionCookie);
+  const storageKey = sharedAuthStorageKey(supabaseUrl);
   const cookieOptions = {
-    ...(useOpsStorage ? {} : { domain: cookieDomain() }),
+    domain: cookieDomain(),
     httpOnly: true,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
@@ -62,7 +58,7 @@ export function createServerSupabaseClient(response?: NextResponse, forceOpsStor
     maxAge: 60 * 60 * 24 * 30
   };
 
-  const getStoredValue = (key: string) => {
+  const readStoredValue = (key: string) => {
     const legacyValue = cookieStore.get(key)?.value;
     if (legacyValue) return decodeCookieValue(legacyValue);
 
@@ -74,6 +70,9 @@ export function createServerSupabaseClient(response?: NextResponse, forceOpsStor
     }
     return value ? decodeCookieValue(value) : null;
   };
+
+  const getStoredValue = (key: string) => readStoredValue(key) ||
+    (key === storageKey && host === "ops.dropxlogistics.com" ? readStoredValue(LEGACY_OPS_AUTH_KEY) : null);
 
   const writeStoredCookie = (
     name: string,
@@ -89,7 +88,15 @@ export function createServerSupabaseClient(response?: NextResponse, forceOpsStor
     }
   };
 
+  const clearLegacyOpsValue = () => {
+    if (host !== "ops.dropxlogistics.com") return;
+    for (const name of [LEGACY_OPS_AUTH_KEY, ...Array.from({ length: MAX_COOKIE_CHUNKS }, (_, i) => `${LEGACY_OPS_AUTH_KEY}.${i}`)]) {
+      if (cookieStore.get(name)?.value) writeStoredCookie(name, "", { ...cookieOptions, domain: undefined, maxAge: 0 });
+    }
+  };
+
   const clearStoredValue = (key: string) => {
+    if (key === storageKey) clearLegacyOpsValue();
     writeStoredCookie(key, "", { ...cookieOptions, maxAge: 0 });
     for (let index = 0; index < MAX_COOKIE_CHUNKS; index += 1) {
       writeStoredCookie(`${key}.${index}`, "", { ...cookieOptions, maxAge: 0 });
@@ -108,7 +115,7 @@ export function createServerSupabaseClient(response?: NextResponse, forceOpsStor
   return createClient(supabaseUrl, supabaseAuthKey, {
     auth: {
       flowType: "pkce",
-      ...(useOpsStorage ? { storageKey: "dropx-ops-auth-v3" } : {}),
+      storageKey,
       autoRefreshToken: false,
       detectSessionInUrl: false,
       persistSession: true,
