@@ -34,3 +34,9 @@ test("bulk payout upload requires an explicit scoped-replacement confirmation", 
   assert.match(source, /manual deductions/i);
   assert.match(source, /Confirm matching replacements/);
 });
+
+test("bulk payout upload reports queued published-payout refresh warnings without hiding the successful import", () => {
+  assert.match(source, /preview\?\.warnings/);
+  assert.match(source, /Import completed with/);
+  assert.match(source, /role="status"/);
+});

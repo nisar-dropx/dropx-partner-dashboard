@@ -21,12 +21,30 @@ export type WorkforcePayoutFilterSelection = {
   statuses: readonly string[];
 };
 
+export const WORKFORCE_PAYOUT_FILTER_NONE = "__WORKFORCE_PAYOUT_FILTER_NONE__";
+
 function includesSelected(selected: readonly string[], value: string) {
   return selected.length === 0 || selected.includes(value);
 }
 
 export function workforcePayoutFacetValues(value: string) {
   return String(value ?? "").split(" / ").map((item) => item.trim()).filter(Boolean);
+}
+
+export function toggleWorkforcePayoutFilterOption(
+  options: readonly string[],
+  selected: readonly string[],
+  value: string
+) {
+  const selectedOptions = selected.filter((option) => options.includes(option));
+  const selectedSet = new Set(selectedOptions);
+  const next = selected.length === 0
+    ? options.filter((option) => option !== value)
+    : selectedSet.has(value)
+      ? selectedOptions.filter((option) => option !== value)
+      : [...selectedOptions, value];
+  if (!next.length) return [WORKFORCE_PAYOUT_FILTER_NONE];
+  return next.length === options.length && options.every((option) => next.includes(option)) ? [] : next;
 }
 
 function includesSelectedFacet(selected: readonly string[], value: string) {

@@ -249,9 +249,24 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   }));
   const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests);
   const normalizedFilter = filters.status || "pending";
+  const approvalHistoryResult = normalizedFilter === "acted" || normalizedFilter === "all"
+    ? await supabaseAdmin
+      .from("payment_request_approvals")
+      .select("payment_request_id, request_id")
+      .eq("company_id", companyId)
+      .eq("approver_user_id", authorization.userId)
+      .eq("action", "approved")
+    : { data: [], error: null };
+  const approvedByCurrentUserIds = new Set(
+    (approvalHistoryResult.data ?? [])
+      .flatMap((row) => [row.payment_request_id, row.request_id])
+      .filter((id): id is string => Boolean(id))
+  );
   const normalizedSearch = String(filters.search ?? "").trim().toLowerCase();
   const statusScopedRequests = unscopedRequests.filter((request) => {
-    if (!eligibleIds.has(request.id)) return false;
+    const isCurrentAssignment = eligibleIds.has(request.id);
+    const wasApprovedByCurrentUser = approvedByCurrentUserIds.has(request.id);
+    if (!isCurrentAssignment && !wasApprovedByCurrentUser) return false;
     const requestStatus = String(request.status ?? "").trim().toLowerCase();
     const approvalStatus = String(request.approval_status || request.status || "").trim().toUpperCase();
     if (normalizedFilter === "pending") {
@@ -260,6 +275,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       if (requestStatus !== "returned" && approvalStatus !== "RETURNED") return false;
     } else if (normalizedFilter === "rejected") {
       if (requestStatus !== "rejected" && approvalStatus !== "REJECTED") return false;
+    } else if (normalizedFilter === "acted") {
+      if (!wasApprovedByCurrentUser) return false;
     }
     return true;
   });
@@ -309,7 +326,7 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     canDownloadProcessData: Boolean(authorization.roleId && (processHeadsResult.count ?? 0) > 0),
     filterOptions: { stations: stationOptions, paymentHeads: paymentHeadOptions, dates: dateOptions },
     selectedFilters,
-    error: requestsResult.error?.message || processHeadsResult.error?.message || null
+    error: requestsResult.error?.message || processHeadsResult.error?.message || approvalHistoryResult.error?.message || null
   };
 }
 
@@ -324,7 +341,7 @@ export default async function PaymentApprovalsPage({
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_approvals;
   const requestedStatus = firstSearchParam(searchParams?.status);
-  const currentStatus = ["pending", "returned", "rejected", "all"].includes(requestedStatus) ? requestedStatus : "pending";
+  const currentStatus = ["pending", "acted", "returned", "rejected", "all"].includes(requestedStatus) ? requestedStatus : "pending";
   const currentSearch = firstSearchParam(searchParams?.search);
   const requestedFilters: PaymentApprovalFacetSelection = {
     stations: selectedPaymentApprovalValues(searchParams?.station),

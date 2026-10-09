@@ -309,12 +309,13 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
         ? "Failed"
         : "Not verified";
   const statusMessage = message ? `${status} · ${message}` : status;
+  const showButton = !isVerified && (isDirty || (loaded && !missing));
   return (
-    <div className={`profile-verification-inline ${resultTone} ${!isVerified && isDirty ? "needs-button" : ""}`} ref={hostRef}>
+    <div className={`profile-verification-inline ${resultTone} ${showButton ? "needs-button" : ""}`} ref={hostRef}>
       {hiddenResults.length ? (
         <input name="profile_verification_results" type="hidden" value={JSON.stringify(hiddenResults)} />
       ) : null}
-      {!isVerified && isDirty ? (
+      {showButton ? (
         <button className="button secondary profile-verification-button" disabled={running || Boolean(missing)} onClick={verify} type="button">
           {running ? "Verifying" : "Verify"}
         </button>

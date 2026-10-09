@@ -122,6 +122,7 @@ function fileTypeForBank(bank: PaymentProcessBank | undefined) {
 type Props = {
   banks: PaymentProcessBank[];
   requests: PaymentProcessRequest[];
+  awaitingDetails: PaymentProcessRequest[];
   finalizeAction: (formData: FormData) => Promise<void>;
   finalizeResultKey?: string;
   processAction: (
@@ -175,7 +176,7 @@ function ProcessActionButton({
   );
 }
 
-export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeResultKey, processAction, today }: Props) {
+export function PaymentProcessPanel({ banks, requests, awaitingDetails, finalizeAction, finalizeResultKey, processAction, today }: Props) {
   const router = useRouter();
   const [processResult, processFormAction] = useFormState(processAction, initialProcessActionState);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -273,7 +274,7 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
         )}
       />
 
-      <div className="stat-grid three" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
         <div className="stat-card">
           <span>Final approved</span>
           <strong>{requests.length}</strong>
@@ -283,10 +284,44 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
           <strong>Rs {totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</strong>
         </div>
         <div className="stat-card">
+          <span>Awaiting payout details</span>
+          <strong>{awaitingDetails.length}</strong>
+        </div>
+        <div className="stat-card">
           <span>Active banks</span>
           <strong>{banks.length}</strong>
         </div>
       </div>
+
+      {awaitingDetails.length ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>Awaiting payout details</h2>
+              <p className="subtle">Approval is complete. The requesting location must submit the actual amount and bank, UPI or portal details before Finance can process payment.</p>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Request</th><th>Location</th><th>Payment Head</th><th>Approved estimate</th><th>Status</th><th>Created</th></tr>
+              </thead>
+              <tbody>
+                {awaitingDetails.map((request) => (
+                  <tr key={request.id}>
+                    <td><strong>{request.request_no}</strong></td>
+                    <td>{locationLabel(request)}</td>
+                    <td>{request.payment_head_name ?? "-"}</td>
+                    <td>Rs {amountValue(request).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td>
+                    <td><StatusPill status="Payout details pending" tone="payment-stage-initial" /></td>
+                    <td>{displayDate(request.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="panel">
         <div className="panel-head">

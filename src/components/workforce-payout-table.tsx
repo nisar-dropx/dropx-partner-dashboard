@@ -4,12 +4,18 @@ import { ChevronDown, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
-import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "@/lib/workforce-payout-filters";
+import {
+  WORKFORCE_PAYOUT_FILTER_NONE,
+  matchesWorkforcePayoutFilters,
+  toggleWorkforcePayoutFilterOption,
+  workforcePayoutFacetValues
+} from "@/lib/workforce-payout-filters";
 import { duplicateAdvanceWorkforceIds } from "@/lib/workforce-payout-action-selection";
 import { isWorkforcePayoutDisplayPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import { MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION } from "@/lib/workforce-payout-publication-limits";
 import { buildWorkforcePayoutPublicationSnapshot } from "@/lib/workforce-payout-publication-snapshot";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
+import { WorkforcePayoutManualEditor } from "@/components/workforce-payout-manual-editor";
 import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 
 export type WorkforcePayoutLine = {
@@ -83,6 +89,9 @@ function canDeductAdvanceFromPayout(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.paymentDetailsAvailable)
     && !ADVANCE_DEDUCTION_LOCKED_STATUSES.has(row.status.trim().toLowerCase());
 }
+function canManuallyEditPayout(row: WorkforcePayoutRow) {
+  return Boolean(row.reviewSubjectId && row.locationId && row.dropxId);
+}
 function missingPayoutNotificationLocations(allRows: WorkforcePayoutRow[], selectedRows: WorkforcePayoutRow[]) {
   const selectedLocations = new Set(selectedRows.map((row) => `${String(row.reviewSubjectId ?? "")}|${String(row.locationId ?? "")}`));
   const missingBySubject = new Map<string, { dropxId: string; name: string; locations: Set<string> }>();
@@ -133,15 +142,19 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const implicitAll = selected.length === 0;
+  const selectedOptions = useMemo(() => options.filter((option) => selectedSet.has(option)), [options, selectedSet]);
   const visibleOptions = useMemo(() => {
     const term = query.trim().toLowerCase();
     return options.filter((option) => !term || option.toLowerCase().includes(term));
   }, [options, query]);
   const summary = selected.length === 0
     ? allLabel
-    : selected.length <= 2
-      ? selected.join(", ")
-      : `${selected.length} selected`;
+    : selectedOptions.length === 0
+      ? "None selected"
+      : selectedOptions.length <= 2
+        ? selectedOptions.join(", ")
+        : `${selectedOptions.length} selected`;
 
   useEffect(() => {
     if (!open) {
@@ -163,9 +176,7 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
   }, [open]);
 
   function toggle(value: string) {
-    onChange(selectedSet.has(value)
-      ? selected.filter((item) => item !== value)
-      : [...selected, value]);
+    onChange(toggleWorkforcePayoutFilterOption(options, selected, value));
   }
 
   return <div className="payout-multi-filter" ref={rootRef}>
@@ -196,12 +207,16 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
           />
         </div>
         <label className="multi-select-all">
-          <input checked={selected.length === 0} onChange={() => onChange([])} type="checkbox" />
+          <input
+            checked={selected.length === 0}
+            onChange={(event) => onChange(event.target.checked ? [] : [WORKFORCE_PAYOUT_FILTER_NONE])}
+            type="checkbox"
+          />
           <span>{allLabel}</span>
         </label>
         <div aria-label={label} className="multi-select-options" role="group">
-          {visibleOptions.map((option) => <label className={`multi-select-option ${selectedSet.has(option) ? "selected" : ""}`} key={option}>
-            <input checked={selectedSet.has(option)} onChange={() => toggle(option)} type="checkbox" />
+          {visibleOptions.map((option) => <label className={`multi-select-option ${implicitAll || selectedSet.has(option) ? "selected" : ""}`} key={option}>
+            <input checked={implicitAll || selectedSet.has(option)} onChange={() => toggle(option)} type="checkbox" />
             <span>{option}</span>
           </label>)}
           {!visibleOptions.length ? <p className="payout-filter-empty">No matching options</p> : null}
@@ -244,8 +259,9 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   const canPublishPeriod = canEdit && audience === "workforce" && calendarMonthEnd === periodEnd;
   const canPublish = canPublishPeriod && canPublishNotifications;
   const canReviewHelpers = canEdit && audience === "helpers";
+  const canManuallyEdit = canEdit && audience === "workforce";
   const maxActionSelection = audience === "workforce" ? MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION : MAX_REVIEW_SELECTION;
-  const showSelection = canPublish || canReviewHelpers || canDeductAdvances;
+  const showSelection = canPublish || canReviewHelpers || canDeductAdvances || canManuallyEdit;
   const locationOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.location || "-"))).values()).sort(), [rows]);
   const designationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.designation).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [rows]);
   const providerOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.provider || "-"))).values()).sort(), [rows]);
@@ -258,14 +274,16 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const selectable = useMemo(() => filtered.filter((row) => ((canPublish || canReviewHelpers) && canSendPayoutForReview(row, audience))
-    || (canDeductAdvances && canDeductAdvanceFromPayout(row))), [audience, canDeductAdvances, canPublish, canReviewHelpers, filtered]);
+    || (canDeductAdvances && canDeductAdvanceFromPayout(row))
+    || (canManuallyEdit && canManuallyEditPayout(row))), [audience, canDeductAdvances, canManuallyEdit, canPublish, canReviewHelpers, filtered]);
   const selectableIds = useMemo(() => new Set(selectable.map((row) => row.id)), [selectable]);
   const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
   const reviewSelectedRows = useMemo(() => selectedRows.filter((row) => canSendPayoutForReview(row, audience)), [audience, selectedRows]);
   const advanceSelectedRows = useMemo(() => selectedRows.filter(canDeductAdvanceFromPayout), [selectedRows]);
+  const manualSelectedRows = useMemo(() => selectedRows.filter(canManuallyEditPayout), [selectedRows]);
   const advanceSelectionConflictIds = useMemo(() => duplicateAdvanceWorkforceIds(advanceSelectedRows), [advanceSelectedRows]);
   const hasAdvanceSelectionConflict = advanceSelectionConflictIds.size > 0;
-  const hasNonReviewSelection = reviewSelectedRows.length !== selectedRows.length;
+  const skippedReviewSelectionCount = selectedRows.length - reviewSelectedRows.length;
   const actionSelectionTarget = useMemo(() => selectable.slice(0, maxActionSelection), [maxActionSelection, selectable]);
   const actionSelectionFull = actionSelectionTarget.length > 0 && actionSelectionTarget.every((row) => selected.has(row.id));
   const actionSelectionLimitReached = selectedRows.length >= maxActionSelection;
@@ -384,13 +402,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   }
 
   async function sendNotification() {
-    if (!selectedRows.length || reviewState.busy) return;
-    if (hasNonReviewSelection) {
-      setReviewState({ busy: false, error: audience === "workforce"
-        ? "Some selected payouts do not have a complete payment setup. Deselect them before sending notifications."
-        : "Some selected payouts are not Ready for review or Returned. Deselect them before sending for review.", notice: "" });
-      return;
-    }
+    if (!reviewSelectedRows.length || reviewState.busy) return;
     if (audience === "workforce") {
       const missingLocations = missingPayoutNotificationLocations(rows, reviewSelectedRows);
       if (missingLocations.length) {
@@ -514,8 +526,10 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
       <div className="payout-search-controls">
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
         {showSelection ? <span className="payout-result-count">Up to {maxActionSelection.toLocaleString("en-IN")} payouts per action.</span> : null}
+        {selectedRows.length && skippedReviewSelectionCount ? <span className="payout-result-count">{reviewSelectedRows.length} of {selectedRows.length} selected eligible for {audience === "workforce" ? "notification" : "review"}</span> : null}
+        {canManuallyEdit ? <WorkforcePayoutManualEditor buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status }))} toDate={periodEnd} /> : null}
         {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || reviewState.busy || advanceState.busy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
-        {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !selectedRows.length || hasNonReviewSelection || reviewState.busy || advanceState.busy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : hasNonReviewSelection ? audience === "workforce" ? "Deselect payouts without a complete payment setup." : "Deselect payouts that are not Ready for review or Returned." : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${selectedRows.length ? ` (${selectedRows.length})` : ""}`}</button> : null}
+        {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !reviewSelectedRows.length || reviewState.busy || advanceState.busy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for ${audience === "workforce" ? "notification" : "review"}; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" type="button" onClick={exportRows}>Export full CSV</button>
       </div>
     </div>
@@ -563,7 +577,11 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
               : hasRowAdvanceSelectionConflict
                 ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all publishable location rows."
                 : !canSendPayoutForReview(row, audience) && canDeductAdvances && canDeductAdvanceFromPayout(row)
-                  ? "Available for advance deduction only."
+                  ? canManuallyEdit && canManuallyEditPayout(row)
+                    ? "Available for advance deduction or manual payout input editing."
+                    : "Available for advance deduction only."
+                  : canManuallyEdit && !canSendPayoutForReview(row, audience) && canManuallyEditPayout(row)
+                    ? "Available for manual payout input editing."
                   : undefined;
             const attendanceRanges = [...new Map(row.dailyBreakdown.flatMap((day) => day.attendanceRange ? [[
               `${day.attendanceRange.basis}|${day.attendanceRange.effectiveFrom}|${day.attendanceRange.effectiveTo}`,

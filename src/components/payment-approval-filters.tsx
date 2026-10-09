@@ -188,6 +188,7 @@ export function PaymentApprovalFilters({
         value={status}
       >
         <option value="pending">Pending / Resubmitted</option>
+        <option value="acted">Approved by me</option>
         <option value="returned">Returned</option>
         <option value="rejected">Rejected</option>
         <option value="all">All</option>

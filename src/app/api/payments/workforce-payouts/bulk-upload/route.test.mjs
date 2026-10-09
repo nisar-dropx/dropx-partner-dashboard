@@ -257,5 +257,13 @@ test("the bulk route validates attendance ranges and preserves FIELD_CODE/VALUE 
   assert.match(source, /item\.effectiveTo >= row\.effectiveFrom/);
   assert.match(source, /This exact attendance period already belongs to another location/);
   assert.match(source, /This attendance range partially overlaps the stored/);
+  assert.match(source, /refreshWorkforcePayoutPublicationJobs\(\{/);
+  assert.match(source, /batchId: importId/);
+  assert.match(source, /publicationRevisions: publicationRefresh\.published/);
+  assert.match(source, /publicationRefresh:\s*\{/);
+  assert.match(source, /deadLettered/);
+  assert.match(source, /published payout revision/);
+  assert.match(source, /inputSource === "manual" \? manualOperationId : null/);
+  assert.match(source, /Manual operation ID is valid only for manual payout edits/);
   assert.doesNotMatch(source, /workHours: row\.workHours|workDays: row\.workDays/);
 });
