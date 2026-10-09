@@ -64,7 +64,7 @@ export async function loadPayoutMappingRevisionState(db: any, companyId: string,
   const result = await db.rpc("workforce_payout_mapping_revision_state", {
     p_company_id: companyId,
     p_workforce_id: workforceId,
-  });
+  }, { get: true }); // STABLE read-only RPC; also safe in View as user preview.
   if (result.error) {
     throw new Error("Payout mapping revision details could not be loaded. Please retry.");
   }

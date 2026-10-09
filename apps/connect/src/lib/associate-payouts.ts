@@ -154,12 +154,14 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
   // the two reads we fail closed (old rows are hidden) instead of pairing new
   // publications with stale visibility rules from before the relock.
   const publications = await rows(db.from("workforce_payout_publications").select("*").eq("company_id", company).eq("workforce_id", worker).order("revision", { ascending: false, nullsFirst: false }).order("published_at", { ascending: false }).order("id", { ascending: false }));
+  // A calculated/approved run alone is not a publication to the associate.
+  if (!publications.length) return [];
   const [items, disputes, mappingRevisions] = await Promise.all([
     rows(db.from("workforce_payroll_items").select("*").eq("company_id", company).eq("workforce_id", worker).order("created_at", { ascending: false }).order("id")),
     rows(db.from("workforce_payout_disputes").select("id,publication_id,payroll_run_id,category,reason,status,resolution,created_at,updated_at").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id")),
     loadPayoutMappingRevisionState(db, company, worker),
   ]);
-  const runIds = [...new Set([...publications, ...items].map((row) => row.payroll_run_id).filter(Boolean))];
+  const runIds = [...new Set(publications.map((row) => row.payroll_run_id).filter(Boolean))];
   const runs: Row[] = [];
   for (let index = 0; index < runIds.length; index += 100) {
     runs.push(...await rows(db.from("workforce_payroll_runs").select("id,run_number,period_start,period_end,status,payment_reference,payment_date,paid_at,calculated_at").eq("company_id", company).in("id", runIds.slice(index, index + 100)).order("id")));
@@ -214,7 +216,7 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
     const publication = publications.find((candidate) => candidate.payroll_run_id === run.id) ?? null;
     const current = items.find((item) => item.payroll_run_id === run.id);
     const final = ["approved", "paid"].includes(run.status);
-    if ((!publication && !final) || run.status === "cancelled") continue;
+    if (!publication || run.status === "cancelled") continue;
     let item: Row | undefined = publication?.snapshot.item;
     let payoutLines: Row[] = publication?.snapshot.lines ?? [];
     let status = "For your review";

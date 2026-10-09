@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
+import { loadPayoutMappingRevisionState } from './payout-mapping-relocks.ts';
 import * as policy from './connect-preview-policy.ts';
 import * as signing from './connect-preview-cookie.ts';
 const company='11111111-1111-1111-1111-111111111111';
@@ -70,4 +72,36 @@ test('preview API requires same-origin POST, rejects unauthorized/cross-company 
  eligible=true;assert.equal((await api.POST(req({...target,companyId:'33333333-3333-3333-3333-333333333333'}))).status,403);assert.equal(writes.length,0);
  assert.equal((await api.POST(req(target))).status,200);assert.equal(writes.length,1);assert.equal(writes[0][2].httpOnly,true);assert.equal(writes[0][2].sameSite,'strict');
  eligible=false;assert.equal((await api.POST(req({exit:true}))).status,200);assert.equal(writes[1][2].maxAge,0);
+});
+
+test('payout mapping lookup uses a real Supabase GET in preview and normal mode without enabling writes', async () => {
+ let active = true;
+ const calls = [];
+ const {previewSafeFetch} = load('./connect-preview-fetch.ts', {
+  'next/headers': {cookies: () => ({get: () => active ? {value: 'preview'} : null})},
+  './connect-preview-policy': policy,
+ });
+ const fetch = previewSafeFetch(async (input, init) => {
+  calls.push({url: new URL(String(input)), method: init.method});
+  return Response.json([]);
+ });
+ const db = createClient('https://example.supabase.co', 'test-only-key', {
+  global: {fetch}, auth: {persistSession: false, autoRefreshToken: false},
+ });
+ for (const preview of [true, false]) {
+  active = preview;
+  const state = await loadPayoutMappingRevisionState(db, company, target.id);
+  assert.equal(state.openPeriodKeys.size, 0);
+  const call = calls.at(-1);
+  assert.equal(call.method, 'GET');
+  assert.equal(call.url.pathname, '/rest/v1/rpc/workforce_payout_mapping_revision_state');
+  assert.equal(call.url.searchParams.get('p_company_id'), company);
+  assert.equal(call.url.searchParams.get('p_workforce_id'), target.id);
+ }
+ active = true;
+ const count = calls.length;
+ const mutation = await db.rpc('workforce_raise_payout_dispute', {p_company: company});
+ assert.equal(mutation.status, 403);
+ assert.equal(mutation.error.code, 'read_only_preview');
+ assert.equal(calls.length, count, 'no mutation reaches the database');
 });

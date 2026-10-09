@@ -33,9 +33,12 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  assert.match(source,/result\.month!==month/);
  const payouts=readFileSync(new URL('../components/associate-payouts.tsx',import.meta.url),'utf8');
  assert.match(payouts,/if\s*\(!response\.ok\)\s*throw new Error\(body\.error\)/);
- assert.match(payouts,/Loading finalized earnings/);
+ assert.match(payouts,/Loading published payouts/);
+ assert.match(payouts,/!response\.ok \|\| !Array\.isArray\(body\.payouts\)/);
+ assert.match(payouts,/We couldn’t load your published payouts/);
+ assert.match(payouts,/loadError \? "Retry" : "Refresh"/);
  assert.doesNotMatch(payouts,/Previous payout month|Next payout month/);
- assert.match(payouts,/No finalized earnings published for/);
+ assert.match(payouts,/Payout not published yet/);
  assert.match(payouts,/loadError \? null : !payout/);
  assert.match(payouts,/onMonthLockChange\?\.\(loading \|\| busy\)/);
  assert.match(payouts,/generation !== loadGeneration\.current/);

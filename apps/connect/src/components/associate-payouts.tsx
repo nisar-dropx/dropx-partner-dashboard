@@ -95,16 +95,17 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
     setLoading(true);
+    setLoadError("");
     try {
       const response = await fetch(`/api/connect/payout-review?${query}`, { cache: "no-store" });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error);
+      if (!response.ok || !Array.isArray(body.payouts)) throw new Error("Payout lookup failed");
       if (generation !== loadGeneration.current) return;
       setPayouts(body.payouts);
       setLoadError("");
-    } catch (reason) {
+    } catch {
       if (generation !== loadGeneration.current) return;
-      setLoadError(reason instanceof Error ? reason.message : "Unable to load finalized earnings.");
+      setLoadError("We couldn’t load your published payouts. Please select Retry. If this continues, contact the Workforce team.");
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
@@ -198,17 +199,17 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
   const visibleEarnings = (payout?.earnings ?? []).filter((line) => line.amount !== 0 || line.rate !== null || line.units !== null);
   const visibleDeductions = (payout?.deductionLines ?? []).filter((line) => line.amount !== 0);
 
-  return <section className={styles.card}>
+  return <section className={styles.card} aria-busy={loading}>
     <header className={styles.heading}>
-      <div><small>Published by Workforce</small><h2>Monthly payout</h2><p>Your finalized attendance, payment heads and deductions in one view.</p></div>
-      <button type="button" onClick={() => void load()} disabled={loading}>Refresh</button>
+      <div><small>Published by Workforce</small><h2>Monthly payout</h2><p>Your published attendance, payment heads and deductions in one view.</p></div>
+      <button type="button" onClick={() => void load()} disabled={loading}>{loadError ? "Retry" : "Refresh"}</button>
     </header>
     {loadError ? <p className={styles.error} role="alert">{loadError}</p> : null}
     {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
     {notice ? <p className={styles.success} role="status">{notice}</p> : null}
-    {loading ? <p>Loading finalized earnings…</p> : loadError ? null : !payout ? <div className={styles.empty}>
-      <strong>No finalized earnings published for {payoutMonthLabel(month)}</strong>
-      <p>Live earnings remain available in the Live earnings tab. This month appears here after Workforce freezes and publishes it for review.</p>
+    {loading ? <p role="status">Loading published payouts…</p> : loadError ? null : !payout ? <div className={styles.empty} role="status">
+      <strong>Payout not published yet</strong>
+      <p>No payout is available for {payoutMonthLabel(month)} yet. It will appear here once published by Workforce. For ongoing earnings, use the Live earnings tab.</p>
     </div> : <>
       {monthPayouts.length > 1 ? <label className={styles.period}>Pay period
         <select value={payout.id} onChange={(event) => { setSelected(event.target.value); setShowDisputes(false); setDisputeAreas([]); }}>
