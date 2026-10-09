@@ -2,7 +2,11 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { WorkforcePayoutBulkUpload } from "@/components/workforce-payout-bulk-upload";
-import { WorkforcePayoutTable, type WorkforcePayoutRow } from "@/components/workforce-payout-table";
+import {
+  WorkforcePayoutTable,
+  type WorkforcePayoutMappingUnlock,
+  type WorkforcePayoutRow
+} from "@/components/workforce-payout-table";
 import { WorkforcePayoutPeriodFilter } from "@/components/workforce-payout-period-filter";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
@@ -47,13 +51,90 @@ function resolvePeriod(params: Record<string, string | string[] | undefined>): R
   return { mode, month, day, from, to, fromDate: `${month}-01`, toDate: end.toISOString().slice(0, 10), title: `Monthly payout worksheet · ${month}` };
 }
 
+async function loadOpenMappingUnlocks(companyId: string, fromDate: string, toDate: string) {
+  if (!supabaseAdmin) return {
+    unlocks: [] as WorkforcePayoutMappingUnlock[],
+    impactedWorkforceIds: new Set<string>(),
+    error: null as string | null
+  };
+  const result = await supabaseAdmin
+    .from("workforce_payout_mapping_unlocks")
+    .select("id,workforce_id,reason,unlocked_at")
+    .eq("company_id", companyId)
+    .eq("period_start", fromDate)
+    .eq("period_end", toDate)
+    .eq("status", "open")
+    .order("unlocked_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (result.error) return {
+    unlocks: [] as WorkforcePayoutMappingUnlock[],
+    impactedWorkforceIds: new Set<string>(),
+    error: result.error.message
+  };
+  const openRows = (result.data ?? []) as Array<{
+    id: string;
+    workforce_id: string;
+    reason: string;
+    unlocked_at: string;
+  }>;
+  if (!openRows.length) return {
+    unlocks: [] as WorkforcePayoutMappingUnlock[],
+    impactedWorkforceIds: new Set<string>(),
+    error: null as string | null
+  };
+
+  const sourceIds = [...new Set(openRows.map((row) => String(row.workforce_id)))];
+  const [people, impacted] = await Promise.all([
+    supabaseAdmin
+      .from("workforce")
+      .select("id,dropx_id,full_name")
+      .eq("company_id", companyId)
+      .in("id", sourceIds),
+    supabaseAdmin.rpc("workforce_payout_mapping_unlock_impacted_ids", {
+      p_company_id: companyId,
+      p_period_start: fromDate,
+      p_period_end: toDate,
+      p_unlock_ids: openRows.map((row) => row.id)
+    })
+  ]);
+  if (people.error) return {
+    unlocks: [] as WorkforcePayoutMappingUnlock[],
+    impactedWorkforceIds: new Set<string>(),
+    error: people.error.message
+  };
+  if (impacted.error) return {
+    unlocks: [] as WorkforcePayoutMappingUnlock[],
+    impactedWorkforceIds: new Set<string>(),
+    error: impacted.error.message
+  };
+  const personById = new Map((people.data ?? []).map((person) => [String(person.id), person]));
+  return {
+    unlocks: openRows.map((row) => {
+      const person = personById.get(String(row.workforce_id));
+      return {
+        id: String(row.id),
+        workforceId: String(row.workforce_id),
+        dropxId: String(person?.dropx_id ?? ""),
+        name: String(person?.full_name ?? "Workforce member"),
+        reason: String(row.reason ?? ""),
+        unlockedAt: String(row.unlocked_at ?? "")
+      };
+    }),
+    impactedWorkforceIds: new Set(Array.isArray(impacted.data)
+      ? impacted.data.map((id) => String(id))
+      : sourceIds),
+    error: null as string | null
+  };
+}
+
 async function withPayoutReviewStatuses(
   companyId: string,
   audience: "workforce" | "helpers",
   fromDate: string,
   toDate: string,
   rows: WorkforcePayoutRow[],
-  dependencyHash: string
+  dependencyHash: string,
+  unlockedWorkforceIds: ReadonlySet<string>
 ) {
   if (!supabaseAdmin) return { rows, error: null as string | null };
   const subjectType = audience === "helpers" ? "helper" : "workforce";
@@ -90,7 +171,9 @@ async function withPayoutReviewStatuses(
   }
   const statusBySubject = new Map(submissions.map((entry) => [`${String(entry.subject_id)}|${String(entry.location_id)}`, String(entry.status)]));
   const publicationBySubject = new Map<string, string>();
+  const publishedWorkforceIds = new Set<string>();
   publications.forEach((entry) => {
+    publishedWorkforceIds.add(String(entry.workforce_id));
     const key = `${String(entry.workforce_id)}|${String(entry.station_id)}`;
     if (!publicationBySubject.has(key)) publicationBySubject.set(key, String(entry.notification_status));
   });
@@ -123,12 +206,23 @@ async function withPayoutReviewStatuses(
         : null;
       const reviewStatus = subjectKey ? statusBySubject.get(subjectKey) : null;
       const presentation = payoutReviewPresentation(row.status, reviewStatus, subjectType);
-      const status = presentation.status === "Under Review" && subjectKey
-        ? publishedStatus(publicationBySubject.get(subjectKey)) ?? presentation.status
-        : presentation.status;
+      const workforceId = String(row.reviewSubjectId ?? "");
+      const mappingUnlocked = audience === "workforce" && unlockedWorkforceIds.has(workforceId);
+      const status = mappingUnlocked
+        ? "Mapping unlocked"
+        : presentation.status === "Under Review" && subjectKey
+          ? publishedStatus(publicationBySubject.get(subjectKey)) ?? presentation.status
+          : presentation.status;
       const publicationSnapshot = audience === "workforce"
         ? buildWorkforcePayoutPublicationSnapshot(row, fromDate, toDate, dependencyHash)
         : null;
+      const publicationLockState: WorkforcePayoutRow["publicationLockState"] = audience !== "workforce"
+        ? null
+        : mappingUnlocked
+          ? "unlocked"
+          : publishedWorkforceIds.has(workforceId)
+            ? "locked"
+            : null;
       const reviewToken = row.reviewSubjectId && row.reviewSubjectType && row.locationId
         && presentation.tokenStatus
         ? createWorkforcePayoutReviewToken({
@@ -154,6 +248,7 @@ async function withPayoutReviewStatuses(
       return {
         ...row,
         status,
+        publicationLockState,
         reviewToken,
         publicationDependencyHash: audience === "workforce" ? dependencyHash : null,
         publicationLocations: audience === "workforce"
@@ -173,28 +268,44 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const pageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const loaded = audience === "helpers"
-    ? { ...(await loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)), dependencyHash: "" }
-    : await loadStablePayoutWorksheet({
-      loadRows: () => loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate),
-      loadDependency: () => workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate),
-      allowProvisionalOnChurn: true
-    });
+  const canEdit = hasPermission(authorization, pageCode, "edit");
+  const canManageMappingLocks = audience === "workforce"
+    && canEdit
+    && authorization.hasAllLocationAccess
+    && period.mode === "monthly"
+    && period.fromDate === `${period.month}-01`;
+  const [loaded, mappingLocks] = await Promise.all([
+    audience === "helpers"
+      ? loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
+        .then((result) => ({ ...result, dependencyHash: "" }))
+      : loadStablePayoutWorksheet({
+        loadRows: () => loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate),
+        loadDependency: () => workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate),
+        allowProvisionalOnChurn: true
+      }),
+    canManageMappingLocks
+      ? loadOpenMappingUnlocks(companyId, period.fromDate, period.toDate)
+      : Promise.resolve({
+        unlocks: [] as WorkforcePayoutMappingUnlock[],
+        impactedWorkforceIds: new Set<string>(),
+        error: null as string | null
+      })
+  ]);
   const provisional = audience === "workforce"
     && isProvisionalPayoutDependencyHash(loaded.dependencyHash);
-  const reviewed = loaded.error || (audience === "workforce" && !loaded.dependencyHash)
-    ? { rows: loaded.rows, error: loaded.error || "Payout worksheet version is unavailable." }
+  const reviewed = loaded.error || mappingLocks.error || (audience === "workforce" && !loaded.dependencyHash)
+    ? { rows: loaded.rows, error: loaded.error || mappingLocks.error || "Payout worksheet version is unavailable." }
     : await withPayoutReviewStatuses(
       companyId,
       audience,
       period.fromDate,
       period.toDate,
       loaded.rows,
-      audience === "workforce" ? loaded.dependencyHash ?? "" : ""
+      audience === "workforce" ? loaded.dependencyHash ?? "" : "",
+      mappingLocks.impactedWorkforceIds
     );
   const rows = reviewed.rows;
   const error = reviewed.error;
-  const canEdit = hasPermission(authorization, pageCode, "edit");
   const advancePageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const canDeductAdvances = audience === "workforce"
     && canEdit
@@ -227,7 +338,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         : null}
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
-        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} canDeductAdvances={canDeductAdvances} canEdit={canEdit} canPublishNotifications={authorization.hasAllLocationAccess} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
+        : <section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div><WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} canDeductAdvances={canDeductAdvances} canEdit={canEdit} canManageMappingLocks={canManageMappingLocks} canPublishNotifications={authorization.hasAllLocationAccess} mappingUnlocks={mappingLocks.unlocks} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section>}
     </div>
   </AppShell>;
 }

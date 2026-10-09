@@ -10,7 +10,11 @@ import {
   toggleWorkforcePayoutFilterOption,
   workforcePayoutFacetValues
 } from "@/lib/workforce-payout-filters";
-import { duplicateAdvanceWorkforceIds } from "@/lib/workforce-payout-action-selection";
+import {
+  duplicateAdvanceWorkforceIds,
+  workforcePayoutMappingLockSelectionIds,
+  type WorkforcePayoutPublicationLockState
+} from "@/lib/workforce-payout-action-selection";
 import { isWorkforcePayoutDisplayPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import { MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION } from "@/lib/workforce-payout-publication-limits";
 import { buildWorkforcePayoutPublicationSnapshot } from "@/lib/workforce-payout-publication-snapshot";
@@ -45,6 +49,7 @@ export type WorkforcePayoutRow = {
   id: string; dropxId: string; dropxStatus: string; name: string; designation: string; providerMemberId: string; providerMemberName: string; locationId: string | null;
   reviewSubjectType?: "workforce" | "helper"; reviewSubjectId?: string | null; reviewToken?: string | null; publicationDependencyHash?: string | null;
   publicationLocations?: Array<{ id: string; label: string }>;
+  publicationLockState?: WorkforcePayoutPublicationLockState | null;
   location: string; provider: string; model: string; paymentMethod: string; mappingStatus: string; paymentDetailsAvailable: boolean; workDays: number; workDaysSource: string; production: number;
   paymentMethodBreakdown: Array<{ id: string; label: string; amount: number }>;
   history: PaymentAllocationHistoryEntry[];
@@ -71,6 +76,15 @@ export type WorkforcePayoutRow = {
   baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED" | ""; netAmount: number; status: string;
 };
 
+export type WorkforcePayoutMappingUnlock = {
+  id: string;
+  workforceId: string;
+  dropxId: string;
+  name: string;
+  reason: string;
+  unlockedAt: string;
+};
+
 function money(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`; }
 function rateMoney(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function units(value: number) { return value.toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
@@ -87,10 +101,12 @@ function canSendPayoutForReview(row: WorkforcePayoutRow, audience: "workforce" |
 }
 function canDeductAdvanceFromPayout(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.paymentDetailsAvailable)
+    && row.publicationLockState !== "unlocked"
     && !ADVANCE_DEDUCTION_LOCKED_STATUSES.has(row.status.trim().toLowerCase());
 }
 function canManuallyEditPayout(row: WorkforcePayoutRow) {
-  return Boolean(row.reviewSubjectId && row.locationId && row.dropxId);
+  return Boolean(row.reviewSubjectId && row.locationId && row.dropxId)
+    && row.publicationLockState !== "unlocked";
 }
 function missingPayoutNotificationLocations(allRows: WorkforcePayoutRow[], selectedRows: WorkforcePayoutRow[]) {
   const selectedLocations = new Set(selectedRows.map((row) => `${String(row.reviewSubjectId ?? "")}|${String(row.locationId ?? "")}`));
@@ -125,7 +141,7 @@ function missingPayoutNotificationLocations(allRows: WorkforcePayoutRow[], selec
 }
 function statusTone(status: string) {
   if (status === "Ready for review" || status === "Approved" || status === "Payment published") return "good";
-  if (status === "Under Review" || status === "Returned" || status === "Notification queued" || status === "Delivery needs review") return "warn";
+  if (status === "Under Review" || status === "Returned" || status === "Notification queued" || status === "Delivery needs review" || status === "Mapping unlocked") return "warn";
   if (status === "ID not mapped" || status === "Mapping conflict" || status === "Notification failed") return "bad";
   if (status === "Configuration incomplete" || status === "Payment method not allocated") return "warn";
   return "payout-status-neutral";
@@ -226,7 +242,7 @@ function PayoutMultiFilter({ allLabel, label, onChange, options, selected }: {
   </div>;
 }
 
-export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances = false, canEdit = false, canPublishNotifications = false, periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; canDeductAdvances?: boolean; canEdit?: boolean; canPublishNotifications?: boolean; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canPublishNotifications = false, mappingUnlocks = [], periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canPublishNotifications?: boolean; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
   const router = useRouter();
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
@@ -245,9 +261,18 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [reviewState, setReviewState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
   const [advanceState, setAdvanceState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
+  const [mappingState, setMappingState] = useState<{ busy: boolean; error: string; notice: string }>({ busy: false, error: "", notice: "" });
+  const [mappingDialog, setMappingDialog] = useState<null | {
+    action: "unlock" | "relock";
+    explanation: string;
+    operationId: string;
+  }>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
+  const mappingDialogRef = useRef<HTMLElement>(null);
+  const mappingDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const mappingDialogOpen = mappingDialog !== null;
   const deferredSearch = useDeferredValue(search);
   const calendarMonthEnd = useMemo(() => {
     if (!/^\d{4}-\d{2}-01$/.test(periodStart)) return "";
@@ -260,8 +285,9 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   const canPublish = canPublishPeriod && canPublishNotifications;
   const canReviewHelpers = canEdit && audience === "helpers";
   const canManuallyEdit = canEdit && audience === "workforce";
+  const canManageLocks = canManageMappingLocks && audience === "workforce";
   const maxActionSelection = audience === "workforce" ? MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION : MAX_REVIEW_SELECTION;
-  const showSelection = canPublish || canReviewHelpers || canDeductAdvances || canManuallyEdit;
+  const showSelection = canPublish || canReviewHelpers || canDeductAdvances || canManuallyEdit || canManageLocks;
   const locationOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.location || "-"))).values()).sort(), [rows]);
   const designationOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.designation).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [rows]);
   const providerOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => workforcePayoutFacetValues(row.provider || "-"))).values()).sort(), [rows]);
@@ -275,12 +301,18 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const selectable = useMemo(() => filtered.filter((row) => ((canPublish || canReviewHelpers) && canSendPayoutForReview(row, audience))
     || (canDeductAdvances && canDeductAdvanceFromPayout(row))
-    || (canManuallyEdit && canManuallyEditPayout(row))), [audience, canDeductAdvances, canManuallyEdit, canPublish, canReviewHelpers, filtered]);
+    || (canManuallyEdit && canManuallyEditPayout(row))
+    || (canManageLocks && row.publicationLockState === "locked")), [audience, canDeductAdvances, canManageLocks, canManuallyEdit, canPublish, canReviewHelpers, filtered]);
   const selectableIds = useMemo(() => new Set(selectable.map((row) => row.id)), [selectable]);
   const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
   const reviewSelectedRows = useMemo(() => selectedRows.filter((row) => canSendPayoutForReview(row, audience)), [audience, selectedRows]);
   const advanceSelectedRows = useMemo(() => selectedRows.filter(canDeductAdvanceFromPayout), [selectedRows]);
   const manualSelectedRows = useMemo(() => selectedRows.filter(canManuallyEditPayout), [selectedRows]);
+  const mappingUnlockWorkforceIds = useMemo(
+    () => workforcePayoutMappingLockSelectionIds(selectedRows, "locked").slice(0, 50),
+    [selectedRows]
+  );
+  const relockTargets = useMemo(() => mappingUnlocks.slice(0, 50), [mappingUnlocks]);
   const advanceSelectionConflictIds = useMemo(() => duplicateAdvanceWorkforceIds(advanceSelectedRows), [advanceSelectedRows]);
   const hasAdvanceSelectionConflict = advanceSelectionConflictIds.size > 0;
   const skippedReviewSelectionCount = selectedRows.length - reviewSelectedRows.length;
@@ -289,6 +321,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
   const actionSelectionLimitReached = selectedRows.length >= maxActionSelection;
   const activeFilterCount = locations.length + designations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
   const tableColumnCount = showSelection ? 13 : 12;
+  const actionBusy = reviewState.busy || advanceState.busy || mappingState.busy;
 
   useEffect(() => {
     setSelected((current) => new Set([...current].filter((id) => selectableIds.has(id))));
@@ -298,7 +331,38 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
     setSelected(new Set());
     setReviewState({ busy: false, error: "", notice: "" });
     setAdvanceState({ busy: false, error: "", notice: "" });
+    setMappingState({ busy: false, error: "", notice: "" });
+    setMappingDialog(null);
   }, [periodStart, periodEnd]);
+
+  useEffect(() => {
+    if (!mappingDialogOpen) return;
+    const dialog = mappingDialogRef.current;
+    dialog?.querySelector<HTMLElement>("textarea, button:not([disabled])")?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !mappingState.busy) {
+        setMappingDialog(null);
+        requestAnimationFrame(() => mappingDialogTriggerRef.current?.focus());
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), textarea:not([disabled])"
+      )];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mappingDialogOpen, mappingState.busy]);
 
   useEffect(() => {
     if (!selectAllRef.current) return;
@@ -517,6 +581,74 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
     }
   }
 
+  function openMappingLockDialog(action: "unlock" | "relock", trigger: HTMLButtonElement) {
+    const hasTargets = action === "unlock"
+      ? mappingUnlockWorkforceIds.length > 0
+      : relockTargets.length > 0;
+    if (!hasTargets || mappingState.busy) return;
+    mappingDialogTriggerRef.current = trigger;
+    setMappingState((current) => ({ ...current, error: "", notice: "" }));
+    setMappingDialog({ action, explanation: "", operationId: crypto.randomUUID() });
+  }
+
+  function closeMappingLockDialog() {
+    if (mappingState.busy) return;
+    setMappingDialog(null);
+    requestAnimationFrame(() => mappingDialogTriggerRef.current?.focus());
+  }
+
+  async function submitMappingLockChange() {
+    if (!mappingDialog || mappingState.busy) return;
+    const explanation = mappingDialog.explanation.trim();
+    if (explanation.length < 10 || explanation.length > 500) {
+      setMappingState({ busy: false, error: "Enter 10 to 500 characters for the audit record.", notice: "" });
+      return;
+    }
+    const action = mappingDialog.action;
+    const targetIds = action === "unlock"
+      ? mappingUnlockWorkforceIds
+      : relockTargets.map((entry) => entry.id);
+    if (!targetIds.length) {
+      setMappingState({ busy: false, error: "The mapping lock selection changed. Refresh and try again.", notice: "" });
+      return;
+    }
+    setMappingState({ busy: true, error: "", notice: "" });
+    try {
+      const response = await fetch("/api/payments/workforce-payouts/mapping-locks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          periodStart,
+          periodEnd,
+          operationId: mappingDialog.operationId,
+          ...(action === "unlock"
+            ? { workforceIds: targetIds, reason: explanation }
+            : { unlockIds: targetIds, changeSummary: explanation })
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error ?? `Unable to ${action} payout mappings.`);
+      setSelected(new Set());
+      setMappingDialog(null);
+      setMappingState({
+        busy: false,
+        error: "",
+        notice: action === "unlock"
+          ? `${Number(payload.unlocked ?? targetIds.length)} Workforce mapping${Number(payload.unlocked ?? targetIds.length) === 1 ? " is" : "s are"} unlocked for ${periodStart.slice(0, 7)}. Remap the IDs, then relock this month.`
+          : `${Number(payload.relocked ?? targetIds.length)} mapping unlock${Number(payload.relocked ?? targetIds.length) === 1 ? " was" : "s were"} relocked; ${Number(payload.published ?? 0)} revised payout${Number(payload.published ?? 0) === 1 ? " is" : "s are"} now available in DropX One.`
+      });
+      router.refresh();
+      requestAnimationFrame(() => mappingDialogTriggerRef.current?.focus());
+    } catch (error) {
+      setMappingState({
+        busy: false,
+        error: error instanceof Error ? error.message : `Unable to ${action} payout mappings.`,
+        notice: ""
+      });
+    }
+  }
+
   return <>
     <div className="payout-search-strip">
       <label>
@@ -527,13 +659,17 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
         <span aria-live="polite" className="payout-result-count">{filtered.length.toLocaleString("en-IN")} matching {filtered.length === 1 ? "record" : "records"}</span>
         {showSelection ? <span className="payout-result-count">Up to {maxActionSelection.toLocaleString("en-IN")} payouts per action.</span> : null}
         {selectedRows.length && skippedReviewSelectionCount ? <span className="payout-result-count">{reviewSelectedRows.length} of {selectedRows.length} selected eligible for {audience === "workforce" ? "notification" : "review"}</span> : null}
+        {canManageLocks && mappingUnlockWorkforceIds.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("unlock", event.currentTarget)} type="button">Unlock mapping ({mappingUnlockWorkforceIds.length} {mappingUnlockWorkforceIds.length === 1 ? "ID" : "IDs"})</button> : null}
+        {canManageLocks && relockTargets.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish {mappingUnlocks.length > 50 ? "next " : ""}{relockTargets.length}</button> : null}
         {canManuallyEdit ? <WorkforcePayoutManualEditor buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status }))} toDate={periodEnd} /> : null}
-        {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || reviewState.busy || advanceState.busy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
-        {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !reviewSelectedRows.length || reviewState.busy || advanceState.busy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for ${audience === "workforce" ? "notification" : "review"}; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
+        {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
+        {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !reviewSelectedRows.length || actionBusy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for ${audience === "workforce" ? "notification" : "review"}; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" type="button" onClick={exportRows}>Export full CSV</button>
       </div>
     </div>
     {reviewState.error || reviewState.notice ? <div aria-live="polite" className={`payout-inline-message ${reviewState.error ? "error" : "success"}`}>{reviewState.error || reviewState.notice}</div> : null}
+    {mappingState.error || mappingState.notice ? <div aria-live="polite" className={`payout-inline-message ${mappingState.error ? "error" : "success"}`}>{mappingState.error || mappingState.notice}</div> : null}
+    {mappingUnlocks.length ? <div className="payout-inline-message" role="status"><strong>{mappingUnlocks.length} mapping {mappingUnlocks.length === 1 ? "correction is" : "corrections are"} open for this month.</strong> The last stable payout remains in DropX One as revising until you relock and republish. <span>{mappingUnlocks.slice(0, 5).map((entry) => entry.dropxId || entry.name).join(", ")}{mappingUnlocks.length > 5 ? ` and ${mappingUnlocks.length - 5} more` : ""}.</span></div> : null}
     {canEdit && audience === "workforce" && !canPublishNotifications ? <div className="payout-inline-message">Send Notification requires all-location access because every publishable location row for a DropX ID must be published and frozen together.</div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
     {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row, so the extra row may be required for publication.</div> : null}
@@ -550,7 +686,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
       <table className="workforce-payout-table workforce-payout-detail-table payout-view-overview">
         <caption className="sr-only">{subjectLabel} payout totals</caption>
         <thead><tr>
-          {showSelection ? <th className="payout-select-cell" scope="col"><input aria-label={`Select up to ${maxActionSelection.toLocaleString("en-IN")} matching ${subjectLabelLower} payouts for available actions`} checked={actionSelectionFull} disabled={!selectable.length} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
+          {showSelection ? <th className="payout-select-cell" scope="col"><input aria-label={`Select up to ${maxActionSelection.toLocaleString("en-IN")} matching ${subjectLabelLower} payouts for available actions`} checked={actionSelectionFull} disabled={!selectable.length || actionBusy} onChange={toggleAll} ref={selectAllRef} type="checkbox" /></th> : null}
           <th className="payout-sticky-id" scope="col">DropX ID</th>
           <th className="payout-sticky-worker" scope="col">{subjectLabel} / payment source</th>
           <th scope="col">Designation</th>
@@ -589,7 +725,7 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
             ] as const] : [])).values()];
             return [
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
-                {showSelection ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for payout actions`} checked={selected.has(row.id)} disabled={!selectableIds.has(row.id) || (actionSelectionLimitReached && !selected.has(row.id))} onChange={() => toggleSelected(row.id)} title={selectionTitle} type="checkbox" /></td> : null}
+                {showSelection ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for payout actions`} checked={selected.has(row.id)} disabled={actionBusy || !selectableIds.has(row.id) || (actionSelectionLimitReached && !selected.has(row.id))} onChange={() => toggleSelected(row.id)} title={selectionTitle} type="checkbox" /></td> : null}
                 <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={`DropX ID status: ${row.dropxStatus}`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
                 <td>{row.designation ? <strong>{row.designation}</strong> : <span aria-hidden="true">—</span>}</td>
@@ -694,6 +830,53 @@ export function WorkforcePayoutTable({ audience = "workforce", canDeductAdvances
     >
       <div style={{ width: stickyScrollWidth }} />
     </div>
+    {mappingDialog ? <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMappingLockDialog(); }} role="presentation">
+      <section aria-describedby="mapping-lock-dialog-description" aria-labelledby="mapping-lock-dialog-title" aria-modal="true" className="modal-panel confirmation-dialog" ref={mappingDialogRef} role="alertdialog">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Published payout mapping</p>
+            <h2 id="mapping-lock-dialog-title">{mappingDialog.action === "unlock" ? "Unlock ID mapping" : "Relock and republish"}</h2>
+          </div>
+          <button aria-label="Close mapping lock dialog" className="button secondary compact" disabled={mappingState.busy} onClick={closeMappingLockDialog} type="button">Close</button>
+        </div>
+        <div className="panel-body">
+          <p id="mapping-lock-dialog-description">{mappingDialog.action === "unlock"
+            ? `Unlock ${mappingUnlockWorkforceIds.length} selected DropX ID${mappingUnlockWorkforceIds.length === 1 ? "" : "s"} only for ${periodStart.slice(0, 7)}. You can then correct the provider ID mapping. The current DropX One payout stays visible as revising until relock.`
+            : `Recalculate and freeze the ${relockTargets.length} open mapping correction${relockTargets.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}. This creates a silent payout revision in Dashboard and DropX One; it does not send another notification.`}</p>
+          <div className="payout-inline-message">
+            <strong>{mappingDialog.action === "unlock" ? "Selected IDs" : "Open corrections"}</strong>
+            <p>{(mappingDialog.action === "unlock"
+              ? mappingUnlockWorkforceIds.map((workforceId) => {
+                const row = selectedRows.find((entry) => entry.reviewSubjectId === workforceId);
+                return row?.dropxId || row?.name || workforceId;
+              })
+              : relockTargets.map((entry) => entry.dropxId || entry.name || entry.workforceId)
+            ).slice(0, 8).join(", ")}{(mappingDialog.action === "unlock" ? mappingUnlockWorkforceIds.length : relockTargets.length) > 8 ? " and more" : ""}</p>
+          </div>
+          <label>
+            <span>{mappingDialog.action === "unlock" ? "Reason for unlocking" : "What was corrected"}</span>
+            <textarea
+              aria-describedby="mapping-lock-explanation-help"
+              className="field"
+              disabled={mappingState.busy}
+              maxLength={500}
+              minLength={10}
+              onChange={(event) => setMappingDialog((current) => current ? { ...current, explanation: event.target.value } : current)}
+              placeholder={mappingDialog.action === "unlock" ? "Example: Provider ID was mapped to the wrong DropX ID." : "Example: Provider ID was reassigned to the correct DropX ID."}
+              required
+              rows={4}
+              value={mappingDialog.explanation}
+            />
+          </label>
+          <p className="subtle" id="mapping-lock-explanation-help">10–500 characters. This note is kept in the permanent payout audit history.</p>
+          {mappingState.error ? <p className="payout-inline-message error" role="alert">{mappingState.error}</p> : null}
+          <div className="form-actions">
+            <button className="button secondary" disabled={mappingState.busy} onClick={closeMappingLockDialog} type="button">Cancel</button>
+            <button className="button" disabled={mappingState.busy || mappingDialog.explanation.trim().length < 10} onClick={submitMappingLockChange} type="button">{mappingState.busy ? mappingDialog.action === "unlock" ? "Unlocking…" : "Relocking…" : mappingDialog.action === "unlock" ? "Unlock mapping" : "Relock & republish"}</button>
+          </div>
+        </div>
+      </section>
+    </div> : null}
     <div className="pagination payout-pagination">
       <label className="payout-page-size">Rows per page<select className="field" value={size} onChange={(event) => { setSize(event.target.value); setPage(1); }}>{["50","100","500","1000","all"].map((value) => <option value={value} key={value}>{value === "all" ? "All" : value}</option>)}</select></label>
       <span>Showing {filtered.length ? (safePage - 1) * pageSize + 1 : 0}–{Math.min(safePage * pageSize, filtered.length)} of {filtered.length}</span>

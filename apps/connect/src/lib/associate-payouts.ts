@@ -4,6 +4,10 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentStatus } from "./workforce-payment-status";
 import { payoutReviewState } from "./payout-dispute";
 import { publishedPayoutBreakdown } from "./published-payout-breakdown";
+import {
+  loadPayoutMappingRevisionState,
+  payoutMappingPublicationState,
+} from "./payout-mapping-relocks";
 
 type Row = Record<string, any>;
 
@@ -146,9 +150,15 @@ function payoutOutput({
 
 export async function loadAssociatePayouts(company: string, worker: string): Promise<Row[]> {
   const db = supabaseAdmin!;
+  // Read publications before their relock authority. If a relock commits between
+  // the two reads we fail closed (old rows are hidden) instead of pairing new
+  // publications with stale visibility rules from before the relock.
   const publications = await rows(db.from("workforce_payout_publications").select("*").eq("company_id", company).eq("workforce_id", worker).order("revision", { ascending: false, nullsFirst: false }).order("published_at", { ascending: false }).order("id", { ascending: false }));
-  const items = await rows(db.from("workforce_payroll_items").select("*").eq("company_id", company).eq("workforce_id", worker).order("created_at", { ascending: false }).order("id"));
-  const disputes = await rows(db.from("workforce_payout_disputes").select("id,publication_id,payroll_run_id,category,reason,status,resolution,created_at,updated_at").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id"));
+  const [items, disputes, mappingRevisions] = await Promise.all([
+    rows(db.from("workforce_payroll_items").select("*").eq("company_id", company).eq("workforce_id", worker).order("created_at", { ascending: false }).order("id")),
+    rows(db.from("workforce_payout_disputes").select("id,publication_id,payroll_run_id,category,reason,status,resolution,created_at,updated_at").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id")),
+    loadPayoutMappingRevisionState(db, company, worker),
+  ]);
   const runIds = [...new Set([...publications, ...items].map((row) => row.payroll_run_id).filter(Boolean))];
   const runs: Row[] = [];
   for (let index = 0; index < runIds.length; index += 100) {
@@ -162,6 +172,14 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
     if (publication.publication_kind !== "worksheet" && snapshot.schema_version !== 2) continue;
     const from = String(publication.period_start ?? snapshot.run?.period_start ?? "");
     const to = String(publication.period_end ?? snapshot.run?.period_end ?? "");
+    const mappingRevision = payoutMappingPublicationState(
+      mappingRevisions,
+      from,
+      to,
+      publication.station_id,
+      publication.mapping_relock_id,
+    );
+    if (!mappingRevision.visible) continue;
     const key = `${publication.workforce_id}|${publication.station_id}|${from}|${to}`;
     if (modernKeys.has(key)) continue;
     modernKeys.add(key);
@@ -185,7 +203,7 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
       to,
       status: "For your review",
       runStatus: "review",
-      revisionPending: false,
+      revisionPending: mappingRevision.revisionPending,
       disputes: disputes.filter((dispute) => publicationIdsForPeriod.includes(dispute.publication_id)),
       payoutSlipAvailable: false,
       snapshot,
@@ -214,7 +232,16 @@ export async function loadAssociatePayouts(company: string, worker: string): Pro
       payoutLines = await rows(db.from("workforce_payroll_lines").select("*").eq("company_id", company).eq("workforce_id", worker).eq("payroll_run_id", run.id).order("work_date").order("id"));
     }
     if (!item) continue;
-    const revisionPending = Boolean(publication) && publication?.source_calculated_at !== run.calculated_at && !final;
+    const mappingRevision = payoutMappingPublicationState(
+      mappingRevisions,
+      run.period_start,
+      run.period_end,
+      publication?.station_id ?? item.station_id,
+      publication?.mapping_relock_id,
+    );
+    if (!mappingRevision.visible) continue;
+    const revisionPending = mappingRevision.revisionPending
+      || (Boolean(publication) && publication?.source_calculated_at !== run.calculated_at && !final);
     output.push(payoutOutput({
       id: run.id,
       publication,

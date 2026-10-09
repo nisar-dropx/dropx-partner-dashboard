@@ -2,6 +2,7 @@ import {NextRequest,NextResponse} from 'next/server';
 import {payoutIdentity,loadAssociatePayouts} from '@/lib/associate-payouts';
 import {supabaseAdmin} from '@/lib/supabase-admin';
 import {encodePayoutDisputeReason,legacyPayoutDisputeCategory,normalizePayoutDisputeAreas} from '@/lib/payout-dispute';
+import {loadPayoutMappingRevisionState,payoutMappingPublicationState} from '@/lib/payout-mapping-relocks';
 export const dynamic='force-dynamic';
 const headers={'Cache-Control':'private, no-store','Vary':'Cookie'};
 const legacyCategories=new Set(['counts','training','loss','tds','other']);
@@ -10,9 +11,13 @@ function text(value:unknown){return typeof value==='string'?value.trim():'';}
 function validReason(value:unknown,min:number){const reason=text(value);if(reason.length<min||reason.length>2000)throw new Error(`Enter between ${min} and 2000 characters.`);return reason;}
 async function ownReviewPublication(company:string,worker:string,publicationId:string){
  const db=supabaseAdmin!;
- const publication=await db.from('workforce_payout_publications').select('id,payroll_run_id,source_calculated_at,review_until,publication_kind,period_start,period_end,station_id,revision').eq('company_id',company).eq('workforce_id',worker).eq('id',publicationId).maybeSingle();
+ const publication=await db.from('workforce_payout_publications').select('id,payroll_run_id,source_calculated_at,review_until,publication_kind,period_start,period_end,station_id,revision,mapping_relock_id').eq('company_id',company).eq('workforce_id',worker).eq('id',publicationId).maybeSingle();
  if(publication.error)throw new Error('Payout review details could not be verified. Refresh and try again.');
  if(!publication.data)throw new Error('This published payout is unavailable for your account.');
+ const mappingRevisions=await loadPayoutMappingRevisionState(db,company,worker);
+ const mappingRevision=payoutMappingPublicationState(mappingRevisions,publication.data.period_start,publication.data.period_end,publication.data.station_id,publication.data.mapping_relock_id);
+ if(mappingRevision.revisionPending)throw new Error('Workforce is preparing a revised payout after a mapping change. Refresh after it is republished.');
+ if(!mappingRevision.visible)throw new Error('This payout moved to another Workforce mapping. Refresh to view the latest payout.');
  if(publication.data.publication_kind==='worksheet'){
   const latest=await db.from('workforce_payout_publications').select('id').eq('company_id',company).eq('workforce_id',worker).eq('publication_kind','worksheet').eq('period_start',publication.data.period_start).eq('period_end',publication.data.period_end).eq('station_id',publication.data.station_id).order('revision',{ascending:false,nullsFirst:false}).order('published_at',{ascending:false,nullsFirst:false}).order('id',{ascending:false}).limit(1).maybeSingle();
   if(latest.error)throw new Error('Payout review details could not be verified. Refresh and try again.');

@@ -158,13 +158,11 @@ export async function processPayoutReviewNotifications(options: ProcessPayoutRev
   let processed = 0;
   let sent = 0;
   await concurrently(queue, targeted ? 12 : 8, async (publication) => {
-    const claim = await db
-      .from("workforce_payout_publications")
-      .update({ notification_status: "sending", notification_attempted_at: new Date().toISOString() })
-      .eq("id", publication.id)
-      .eq("notification_status", "pending")
-      .select("id")
-      .maybeSingle();
+    const attemptedAt = new Date().toISOString();
+    const claim = await db.rpc("workforce_claim_payout_review_notification", {
+      p_publication_id: publication.id,
+      p_attempted_at: attemptedAt
+    });
     if (claim.error || !claim.data) return;
     processed += 1;
 
