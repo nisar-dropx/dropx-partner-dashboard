@@ -381,6 +381,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   }
   async function logout() {
     await fetch("/api/connect/auth/session", { method: "DELETE" });
+    setCanPreviewUsers(false);
+    setUserPreview(false);
     localStorage.removeItem(biometricUnlockTimestampKey);
     // Payslips and cards stored on the phone belong to the person logging out.
     Object.keys(localStorage).filter((key) => key.startsWith("dropx_documents:")).forEach((key) => localStorage.removeItem(key));
