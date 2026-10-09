@@ -2,13 +2,15 @@ import { loadExpenseVariances, expenseVarianceExport } from "@/lib/expense-varia
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
-import { isOpsReportType } from "@/lib/ops-pulse/report-catalog";
+import { isOpsReportType, reportsForWorkspace } from "@/lib/ops-pulse/report-catalog";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { adhocDaReport, type AdhocPayment, type AdhocShipment, type AdhocAdjustment } from "@/lib/ops-pulse/adhoc-da-report";
+import { resolveReportScope, requestedReportCodes } from "@/lib/ops-pulse/report-scope";
+import { loadCpu } from "@/lib/ops-pulse/dark-store";
 import * as XLSX from "xlsx";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function csv(value: unknown) {
   const text = value == null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -17,10 +19,6 @@ function csv(value: unknown) {
 function n(value: unknown) { const parsed = Number(value ?? 0); return Number.isFinite(parsed) ? parsed : 0; }
 function validDate(value: string) { return /^\d{4}-\d{2}-\d{2}$/.test(value); }
 function dateDiff(from: string, to: string) { return Math.floor((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86400000); }
-function stationScope(requested: string[], permitted: string[]) {
-  const normalized = requested.map((code) => code.trim().toUpperCase()).filter((code) => permitted.includes(code));
-  return requested.length ? [...new Set(normalized)] : permitted;
-}
 function response(headers: string[], rows: unknown[][], filename: string) {
   const body = [headers.map(csv).join(","), ...rows.map((row) => row.map(csv).join(","))].join("\r\n");
   return new Response(`\uFEFF${body}`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" } });
@@ -64,18 +62,40 @@ export async function GET(request: Request) {
   }
   const companyId = requireCompanyId(authorization);
   const locations = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
-  const permittedCodes = locations.locations.map((row) => row.station_code);
-  const codes = stationScope((url.searchParams.get("stations") ?? "").split(",").filter(Boolean), permittedCodes);
+  if (locations.error) return Response.json({ error: "Location access could not be loaded. Please retry." }, { status: 503 });
+  const scope = resolveReportScope(locations.locations);
+  const requestedWorkspace = url.searchParams.get("workspace");
+  if (requestedWorkspace && requestedWorkspace !== scope.workspace) return Response.json({ error: "Workspace changed. Reopen Reports and try again." }, { status: 409 });
+  if (!reportsForWorkspace(scope.workspace, hasPermission(authorization, "cpu_overview", "access")).some((report) => report.type === type)) {
+    return Response.json({ error: "This report is not available in your current workspace." }, { status: 403 });
+  }
+  const permittedCodes = scope.locations.map((row) => row.station_code);
+  const codes = requestedReportCodes((url.searchParams.get("stations") ?? "").split(",").filter(Boolean), permittedCodes);
   if (!codes.length) return Response.json({ error: "No permitted stations." }, { status: 403 });
   const suffix = `${from}-to-${to}.csv`;
 
+  if (type === "cpu") {
+    try {
+      const scopedAuthorization = { ...authorization, hasAllLocationAccess: false, locationScopeIds: scope.locations.filter((row) => codes.includes(row.station_code)).map((row) => row.id) };
+      const data = await loadCpu(scopedAuthorization, { period: "custom", from, to });
+      const heads = [...new Set(data.rows.flatMap((row) => row.groups.map((group) => group.head)))].sort();
+      const headers = ["Store", "Store name", "City", "Category", "From", "Data through", "Days", "Processed units", "CPU", "Operating cost", ...heads.flatMap((head) => [`${head} cost`, `${head} CPU`]), "Notes"];
+      const rows = data.rows.map((row) => [row.code, row.name, row.city, row.category, data.period.from, row.through, row.days, row.units, row.cpu, row.cost, ...heads.flatMap((head) => {
+        const group = row.groups.find((item) => item.head === head);
+        return [group?.amount ?? 0, group?.cpu ?? null];
+      }), row.notes.join("; ")]);
+      return response(headers, rows, `store-cpu-${suffix}`);
+    } catch {
+      return Response.json({ error: "Store CPU report could not be loaded. Please retry." }, { status: 503 });
+    }
+  }
   if (type === "expense_variance") {
     if (locations.error) return Response.json({error:"Station scope is unavailable."},{status:503});
     try {
       const records = await loadExpenseVariances(db, companyId, locations.locations.filter(s=>codes.includes(s.station_code)), from, to);
       const head=url.searchParams.get('head'),attention=url.searchParams.get('attention');
       const rows=records.filter(r=>(!head||r.headCode===head)&&(!attention||(attention==='overrun'?r.overrun:r.state==='Actual pending')));
-      return workbookResponse([{name:'Expense comparison',rows:expenseVarianceExport(rows)},{name:'Read me',rows:[{Basis:'Work date; actual is submitted cost, not settled payment.',Estimate:'Saved expense estimate. Historical edits may have changed legacy estimates.',Attention:'Positive overruns on active requests; missing actuals are pending, not zero.'}]}],`expense-variance-${from}-to-${to}.xlsx`);
+      return workbookResponse([{name:'Expense comparison',rows:expenseVarianceExport(rows, scope.workspace === "ds")},{name:'Read me',rows:[{Basis:'Work date; actual is submitted cost, not settled payment.',Estimate:'Saved expense estimate. Historical edits may have changed legacy estimates.',Attention:'Positive overruns on active requests; missing actuals are pending, not zero.'}]}],`expense-variance-${from}-to-${to}.xlsx`);
     } catch { return Response.json({error:'Expense comparison could not be loaded.'},{status:503}); }
   }
   if (type === "adhoc_da") {
@@ -235,7 +255,7 @@ export async function GET(request: Request) {
   if (type === "attendance") {
     const result = await allRows((start, end) => db.from("attendance_daily").select("punch_date,station_code,worker_name,employee_code,enrolment_id,status,punch_count,in_time,out_time,work_minutes,remark").eq("company_id", companyId).in("station_code", codes).gte("punch_date", from).lte("punch_date", to).order("punch_date").range(start, end));
     if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
-    return response(["Date", "Station", "Worker", "Employee Code", "Enrolment ID", "Status", "Punches", "In", "Out", "Work Minutes", "Remark"], (result.data ?? []).map((row) => [row.punch_date, row.station_code, row.worker_name, row.employee_code, row.enrolment_id, row.status, row.punch_count, row.in_time, row.out_time, row.work_minutes, row.remark]), `attendance-${suffix}`);
+    return response(["Date", scope.workspace === "ds" ? "Store" : "Station", "Employee", "Employee Code", "Enrolment ID", "Status", "Punches", "In", "Out", "Work Minutes", "Remark"], (result.data ?? []).map((row) => [row.punch_date, row.station_code, row.worker_name, row.employee_code, row.enrolment_id, row.status, row.punch_count, row.in_time, row.out_time, row.work_minutes, row.remark]), `attendance-${suffix}`);
   }
   if (type === "cps") {
     const result = await allRows<Record<string, unknown>>((start, end) => db.from("cps_station_daily").select("*").eq("company_id", companyId).in("station_code", codes).gte("work_date", from).lte("work_date", to).order("work_date").range(start, end));
