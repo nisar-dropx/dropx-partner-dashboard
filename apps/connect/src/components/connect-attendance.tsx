@@ -31,6 +31,8 @@ import {
 import { readJsonResponse, userFacingError } from "@/lib/user-facing-error";
 import { missingPunchReason, regularizationTimeInput } from "@/lib/regularization-input";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
+import { attendanceCorrectionHint, attendanceFilterLabels, summarizeAttendance, type AttendanceFilter } from "../lib/attendance-summary";
+import summaryStyles from "./attendance-summary-controls.module.css";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -243,12 +245,13 @@ function localIsoDate(date = new Date()) {
 
 const readPosition = readResilientPosition;
 
-export function ConnectAttendance({ account, active = true }: { account: Account; active?: boolean }) {
+export function ConnectAttendance({ account, active = true, initialFilter = "all" }: { account: Account; active?: boolean; initialFilter?: AttendanceFilter }) {
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const [month, setMonth] = useState(currentMonth);
-  const [tab, setTab] = useState<"calendar" | "list" | "punches">("calendar");
+  const [tab, setTab] = useState<"calendar" | "list" | "punches">(initialFilter === "all" ? "calendar" : "list");
+  const [filter, setFilter] = useState<AttendanceFilter>(initialFilter);
   const [data, setData] = useState<Attendance | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
   const [error, setError] = useState("");
@@ -259,6 +262,7 @@ export function ConnectAttendance({ account, active = true }: { account: Account
   const [supportFlag, setSupportFlag] = useState<OpenFlag | null>(null);
   const [supportNotice, setSupportNotice] = useState("");
   const selectedDayRef = useRef<HTMLDivElement>(null);
+  const attendanceListRef = useRef<HTMLDivElement>(null);
 
   const loadAttendance = useCallback((background = false) => {
     // A background revalidation (screen was already showing data, just
@@ -348,10 +352,15 @@ export function ConnectAttendance({ account, active = true }: { account: Account
     today: attentionRow.date === todayDate,
     shiftOpen: attentionRow.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
   }) : null;
-  const reviewCount = useMemo(
-    () => (data?.rows ?? []).filter((row) => insightFor(row).needsRegularization).length,
-    [data?.rows, insightFor]
-  );
+  const summary = summarizeAttendance(data?.rows ?? [], { today: todayDate, openShiftDate: punchStatus?.shift.open ? punchStatus.shift.punchDate : null });
+  const showSummaryDates = (next: AttendanceFilter) => {
+    setFilter(next);
+    setTab("list");
+    window.requestAnimationFrame(() => {
+      attendanceListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      attendanceListRef.current?.focus({ preventScroll: true });
+    });
+  };
 
   const openDayDetails = useCallback((row: Row) => {
     setSelected(row);
@@ -466,19 +475,19 @@ export function ConnectAttendance({ account, active = true }: { account: Account
           </button>
         </section> : null}
         <div className="dx-attendance-summary">
-          <div><i><CheckCircle2 /></i><span>Full Day<strong>{data.summary.fullDay ?? data.summary.present}</strong></span></div>
-          <div><i><UserCheck /></i><span>Half Day<strong>{data.summary.halfDay ?? 0}</strong></span></div>
-          <div><i><UserX /></i><span>Absent<strong>{data.summary.absent}</strong></span></div>
-          <div><i><ShieldAlert /></i><span>Needs review<strong>{reviewCount}</strong></span></div>
+          <div><button className={summaryStyles.summaryButton} aria-pressed={tab === "list" && filter === "fullDay"} onClick={() => showSummaryDates("fullDay")}><i><CheckCircle2 /></i><span>Full Day<strong>{summary.fullDay}</strong></span></button></div>
+          <div><button className={summaryStyles.summaryButton} aria-pressed={tab === "list" && filter === "halfDay"} onClick={() => showSummaryDates("halfDay")}><i><UserCheck /></i><span>Half Day<strong>{summary.halfDay}</strong></span></button></div>
+          <div><button className={summaryStyles.summaryButton} aria-pressed={tab === "list" && filter === "absent"} onClick={() => showSummaryDates("absent")}><i><UserX /></i><span>Absent<strong>{summary.absent}</strong></span></button></div>
+          <div><button className={summaryStyles.summaryButton} aria-pressed={tab === "list" && filter === "needsReview"} onClick={() => showSummaryDates("needsReview")}><i><ShieldAlert /></i><span>Needs review<strong>{summary.needsReview}</strong></span></button></div>
           <p><Clock3 /> Total Hours <strong>{Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}</strong></p>
         </div>
-        {(data.summary.lateIn || data.summary.earlyOut) ? (
+        {(summary.lateIn || summary.earlyOut) ? (
           <div className="dx-attendance-flashes" aria-label="Attendance exceptions this month">
-            {data.summary.lateIn ? <span className="late"><Clock3 /> Late in <strong>{data.summary.lateIn}</strong></span> : null}
-            {data.summary.earlyOut ? <span className="early"><LogOut /> Early out <strong>{data.summary.earlyOut}</strong></span> : null}
+            {summary.lateIn ? <button className={summaryStyles.flashButton} onClick={() => showSummaryDates("lateIn")}><span className="late"><Clock3 /> Late in <strong>{summary.lateIn}</strong></span></button> : null}
+            {summary.earlyOut ? <button className={summaryStyles.flashButton} onClick={() => showSummaryDates("earlyOut")}><span className="early"><LogOut /> Early out <strong>{summary.earlyOut}</strong></span></button> : null}
           </div>
         ) : null}
-        <div className="dx-tabs-card">
+        <div className="dx-tabs-card" ref={attendanceListRef} tabIndex={-1}>
           <nav>
             {(["calendar", "list", "punches"] as const).map((item) => (
               <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>
@@ -515,8 +524,12 @@ export function ConnectAttendance({ account, active = true }: { account: Account
               <span className="issue">Late / early</span>
             </div>
           </div> : null}
-          {tab === "list" ? <div className="dx-attendance-list">
-            {data.rows.length ? [...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
+          {tab === "list" ? <><div className={summaryStyles.filters}>
+            <label>Show<select aria-label="Attendance filter" value={filter} onChange={event => setFilter(event.target.value as AttendanceFilter)}>{Object.entries(attendanceFilterLabels).map(([key, label]) => <option key={key} value={key}>{label} ({summary.groups[key as AttendanceFilter].length})</option>)}</select></label>
+            {filter !== "all" ? <button onClick={() => setFilter("all")}>Show all dates</button> : null}
+            <p>{filter === "needsReview" ? "Incomplete punches or days marked for review. Absences are listed separately." : "Select a date for punches, the reason and correction details."}</p>
+          </div><div className="dx-attendance-list" aria-label={`${attendanceFilterLabels[filter]} dates`}>
+            {summary.groups[filter].length ? summary.groups[filter].map((row) => {
               const insight = insightFor(row);
               const nudge = attendanceCompactNudge(row, {
                 today: row.date === todayDate,
@@ -526,9 +539,10 @@ export function ConnectAttendance({ account, active = true }: { account: Account
                 <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={insight.calendarClass}>{insight.label}</em></header>
                 <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>{row.workMode === "wfh" && !row.punchCount ? "CREDIT" : "HRS"}</small>{row.workHours || "00:00"}</span>
                 {nudge ? <p className={`dx-attendance-list-issue ${nudge.tone}`}>{nudge.headline} · {nudge.detail}</p> : null}
+                {insight.needsRegularization || row.regularization ? <p className={summaryStyles.hint}>{attendanceCorrectionHint(row)}</p> : null}
               </button>;
-            }) : <div className="dx-empty"><CalendarDays /><strong>No records this month</strong><small>Attendance days will appear here once you punch in.</small></div>}
-          </div> : null}
+            }) : <div className="dx-empty"><CalendarDays /><strong>{filter === "all" ? "No records this month" : `No ${attendanceFilterLabels[filter].toLowerCase()} dates this month`}</strong><small>{filter === "all" ? "Attendance days will appear here once you punch in." : "Choose another filter or show all dates."}</small></div>}
+          </div></> : null}
           {tab === "punches" ? <div className="dx-punches">
             {data.rows.some((row) => (row.punches?.length ?? 0) > 0 || row.inTime || row.outTime) ? [...data.rows].sort((left, right) => right.date.localeCompare(left.date)).flatMap((row) => {
               const punches = row.punches?.length ? row.punches : [row.inTime, row.outTime].filter(Boolean);
@@ -556,7 +570,7 @@ export function ConnectAttendance({ account, active = true }: { account: Account
               && !["week-off", "paid-leave", "leave"].includes(selectedInsight.calendarClass)
               && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
               && selected.regularizationOpen !== false
-              ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button>
+              ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.issues.some(issue => issue.code === "missing_punch") ? "Regularize missing punch" : "Request regularization"}</button>
               : null}
             {selected.regularizationOpen === false && canSubmitRegularization(selected) && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
               ? <small className="dx-regularization-closed">Regularization closed{selected.regularizationClosesOn ? ` on ${new Date(`${selected.regularizationClosesOn}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}` : ""} for this day. Contact HR if it needs correcting.</small>

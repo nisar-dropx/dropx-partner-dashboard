@@ -1,5 +1,5 @@
-import type { AttendanceCalendarClass, AttendancePayDayType } from "@/lib/attendance-pay-day";
-import { calendarClassForPayDayType, resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
+import type { AttendanceCalendarClass, AttendancePayDayType } from "../../../../src/lib/attendance-pay-day.ts";
+import { calendarClassForPayDayType, resolveAttendancePayDayType } from "../../../../src/lib/attendance-pay-day.ts";
 
 export type AttendanceInsightTone = "green" | "amber" | "red" | "blue" | "neutral";
 
@@ -82,6 +82,7 @@ function workedDuration(value: string) {
 }
 
 function durationOutcomeDetail(row: AttendanceInsightRow, outcome: "Half Day" | "Absent") {
+  if (!row.punchCount && outcome === "Absent") return "No punches are recorded for this day. Marked Absent under attendance policy. Request regularization only if this is incorrect.";
   const worked = workedDuration(row.workHours);
   const reason = outcome === "Half Day"
     ? `You worked ${worked}, below the full-day requirement. This day is marked Half Day and the applicable deduction will be made under company HR policy.`
@@ -169,11 +170,12 @@ export function attendanceDayInsight(
   const remark = normalized(row.remark);
   const lateMinutes = resolveLateMinutes(row);
   const earlyOutMinutes = resolveEarlyOutMinutes(row);
-  const missingPunch = row.status.toUpperCase() !== "A"
-    && row.punchCount > 0
-    && (row.punchCount < 2 || !row.outTime || /single|missing/.test(remark));
-  const needsPolicyReview = state.includes("needs review");
   const payDayType = resolvePayDayType(row);
+  const missingPunch = row.status.toUpperCase() !== "A"
+    && payDayType !== "absent"
+    && row.punchCount > 0
+    && !workedFullPunchPair(row);
+  const needsPolicyReview = state.includes("needs review");
   if (row.workMode === "wfh" && row.status === "PENDING") {
     return {
       // WFH (approved, credit not yet finalized) must render as the
@@ -399,6 +401,11 @@ export function attendanceDayInsight(
       payDayType: "half_day",
       tone: "amber"
     };
+  }
+
+  if (payDayType === "no_record") {
+    return { calendarClass: "off", detail: "No finalized attendance outcome is available for this day.",
+      headline: label, issues: [], label, needsRegularization: false, payDayType, tone: "neutral" };
   }
 
   const baseLabel = state.includes("full day") ? "Full day" : label;

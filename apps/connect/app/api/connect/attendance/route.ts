@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
+import { summarizeAttendance } from "@/lib/attendance-summary";
 import { approvedLeaveDays } from "@/lib/leave-calendar-days";
 import { userFacingError } from "@/lib/user-facing-error";
 import { regularizationTimeInput } from "@/lib/regularization-input";
@@ -79,20 +80,6 @@ export async function GET(request: NextRequest) {
       toDate: range.toDate,
       reportType: "performance"
     })).filter((row) => Boolean(enrolmentId) && cleanEnrolmentId(row.enrolmentId) === enrolmentId);
-
-    const present = rows.filter((row) => row.status === "P").length;
-    const fullDay = rows.filter((row) => row.attendanceStatus === "Full Day" || row.wfhCreditState === "credited").length;
-    const halfDay = rows.filter((row) => row.attendanceStatus === "Half Day").length;
-    const absent = rows.filter((row) => row.attendanceStatus === "Absent").length;
-    const needsReview = rows.filter((row) => row.attendanceStatus === "Needs Review").length;
-    const lateIn = rows.filter((row) => row.lateMinutes > 0).length;
-    const earlyOut = rows.filter((row) => row.earlyOutMinutes > 0).length;
-    const misPunch = rows.filter((row) => row.workMode !== "wfh" && row.workMode !== "business_trip" && (
-      row.punchCount < 2 ||
-      !row.outTime ||
-      row.remark.toLowerCase().includes("single") ||
-      row.remark.toLowerCase().includes("missing")
-    )).length;
 
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
@@ -261,37 +248,6 @@ export async function GET(request: NextRequest) {
         regularization: requestByDate.get(date) ?? null
       });
     }
-    for (const [date, regularization] of requestByDate) {
-      if (!attendanceDates.has(date)) {
-        attendanceDates.add(date);
-        responseRows.push({
-          date,
-          status: "",
-          statusLabel: null,
-          statusKind: "attendance" as const,
-          isPaidLeave: null,
-          payDayType: "needs_review" as const,
-          attendanceStatus: "Needs Review",
-          inTime: "",
-          outTime: "",
-          punches: [],
-          workHours: "",
-          punchCount: 0,
-          lateMinutes: 0,
-          earlyOutMinutes: 0,
-          scheduledStart: "--:--",
-          scheduledEnd: "--:--",
-          scheduledMinutes: 0,
-          shiftName: "Unassigned",
-          shiftCode: "",
-          shiftSource: "Unassigned",
-          remark: "",
-          workMode: "onsite" as const,
-          regularization
-        });
-      }
-    }
-
     // attendance_daily has no row at all for a zero-punch day. Backfill every
     // completed active-service day so the calendar can distinguish absence,
     // rest days and genuine out-of-service dates — and so a missed-both-punch
@@ -332,6 +288,7 @@ export async function GET(request: NextRequest) {
         })
         : [];
       for (const row of [...calendarGapRows, ...upcomingRestRows]) {
+        attendanceDates.add(row.punchDate);
         responseRows.push({
           date: row.punchDate,
           status: row.status,
@@ -352,15 +309,32 @@ export async function GET(request: NextRequest) {
           punchCount: 0,
           lateMinutes: 0,
           earlyOutMinutes: 0,
-          scheduledStart: "--:--",
-          scheduledEnd: "--:--",
-          scheduledMinutes: 0,
+          scheduledStart: row.scheduledStart,
+          scheduledEnd: row.scheduledEnd,
+          scheduledMinutes: row.scheduledMinutes,
           shiftName: row.shiftName,
-          shiftCode: "",
+          shiftCode: row.shiftCode,
           shiftSource: row.shiftSource,
           remark: "",
           workMode: "onsite" as const,
-          regularization: null
+          regularization: requestByDate.get(row.punchDate) ?? null
+        });
+      }
+    }
+
+    // A request is workflow state, not an attendance outcome. Evaluate completed
+    // no-punch days against roster/policy first; otherwise even a cancelled
+    // request replaced a genuine Absent/Off day with a synthetic Needs Review.
+    // Retain the request-only fallback for days not covered by that evaluation.
+    for (const [date, regularization] of requestByDate) {
+      if (!attendanceDates.has(date)) {
+        responseRows.push({
+          date, status: "", statusLabel: null, statusKind: "attendance" as const,
+          isPaidLeave: null, payDayType: "needs_review" as const, attendanceStatus: "Needs Review",
+          inTime: "", outTime: "", punches: [], workHours: "", punchCount: 0,
+          lateMinutes: 0, earlyOutMinutes: 0, scheduledStart: "--:--", scheduledEnd: "--:--",
+          scheduledMinutes: 0, shiftName: "Unassigned", shiftCode: "", shiftSource: "Unassigned",
+          remark: "", workMode: "onsite" as const, regularization
         });
       }
     }
@@ -380,7 +354,6 @@ export async function GET(request: NextRequest) {
       const date = String(day.calendar_date).slice(0, 10);
       if (!holidayNameByDate.has(date) || day.location_id) holidayNameByDate.set(date, day.name || "Holiday");
     }
-    let holidaysMarkedAbsent = 0;
     for (const row of responseRows) {
       if (row.statusKind !== "attendance") continue;
       const name = holidayNameByDate.get(row.date);
@@ -389,7 +362,6 @@ export async function GET(request: NextRequest) {
         row.payDayType = "paid_holiday";
         continue;
       }
-      if (row.attendanceStatus === "Absent" || row.payDayType === "absent") holidaysMarkedAbsent += 1;
       row.status = "holiday";
       row.attendanceStatus = name;
       row.payDayType = "paid_holiday";
@@ -439,19 +411,10 @@ export async function GET(request: NextRequest) {
       return { ...row, regularizationOpen: open, regularizationClosesOn: closesOnDate };
     });
 
+    const { groups: _groups, ...summary } = summarizeAttendance(withWindow, { today: todayIst });
     return NextResponse.json({
       month: range.label,
-      summary: {
-        totalRows: rows.length,
-        present,
-        fullDay,
-        halfDay,
-        absent: Math.max(0, absent - holidaysMarkedAbsent),
-        needsReview,
-        lateIn,
-        earlyOut,
-        misPunch
-      },
+      summary,
       rows: withWindow
     });
   } catch (error) {

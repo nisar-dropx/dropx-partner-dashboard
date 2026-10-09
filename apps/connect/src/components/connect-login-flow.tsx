@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, MessageCircleMore, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
+import type { AttendanceFilter } from "../lib/attendance-summary";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
 import { ConnectNativeBridge } from "./connect-native-bridge";
 import { PullToRefresh } from "./pull-to-refresh";
@@ -157,6 +158,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const requestedApprovalSection = connectApprovalSection(searchParams.get("section"));
   const pendingApprovalSection = useRef(pathname === "/approvals" ? requestedApprovalSection : null);
   const [step, setStep] = useState<Step>("mobile");
+  const [attendanceFilter, setAttendanceFilter] = useState<AttendanceFilter>("all");
   const [checking, setChecking] = useState(true);
   const [canPreviewUsers, setCanPreviewUsers] = useState(false);
   const [userPreview, setUserPreview] = useState(false);
@@ -614,8 +616,9 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     const route = routeForStep[next] ?? "/accounts";
     return connectAccountRoute(route, targetAccount, requestedApprovalSection ?? pendingApprovalSection.current);
   }
-  function open(next: Step) {
+  function open(next: Step, nextAttendanceFilter: AttendanceFilter = "all") {
     setDrawer(false); setProfileMenu(false);
+    if (next === "attendance") setAttendanceFilter(nextAttendanceFilter);
     if (next === "lop") next = "leave";
     if (next === "wfh") {
       setLeaveSection("wfh");
@@ -885,7 +888,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} />}</ConnectBetaJourneyShell> : null}
       {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
-      {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
+      {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onAttendanceSummary={(filter) => open("attendance", filter)} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && sharedSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "salary" && account && canViewInterimSalary(account) ? <ConnectInterimSalary key={accountKey(account)} account={account} onDocuments={() => open("documents")} onAttendance={allowed(account, "attendance") ? () => open("attendance") : undefined} /> : null}
@@ -903,7 +906,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       {step === "work" && account && workforceWorkAvailable(account) ? <ConnectWorkforceWork account={account} /> : null}
       {step === "refer" && account && allowed(account, "refer_earn") ? <ConnectReferEarn account={account} /> : null}
       {step === "reimbursements" && account && peopleSelfService(account) && allowed(account, "reimbursements") ? <ConnectReimbursements account={account} /> : null}
-      {step === "attendance" && account && allowed(account, "attendance") ? <ConnectAttendance account={account} /> : null}
+      {step === "attendance" && account && allowed(account, "attendance") ? <ConnectAttendance account={account} initialFilter={attendanceFilter} /> : null}
       {step === "roster" && account && allowed(account, "roster") ? <ConnectRoster account={account} /> : null}
       {step === "leave" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
       {step === "lop" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}

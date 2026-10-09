@@ -1,0 +1,14 @@
+.metricButton { color: inherit; font: inherit; cursor: pointer; text-align: left; background: transparent; border: 0; }
+.flashButton { composes: metricButton; padding: 0; border-radius: 10px; }
+.flashButton > span { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 12px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.flashButton svg { width: 14px; height: 14px; }
+.flashButton strong { font-size: 13px; }
+.summaryButton { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 0; color: inherit; font: inherit; cursor: pointer; text-align: left; background: transparent; border: 0; border-radius: 8px; }
+.summaryButton:focus-visible, .metricButton:focus-visible { outline: 3px solid #fdba74; outline-offset: 3px; }
+.summaryButton[aria-pressed="true"] { box-shadow: 0 2px #fdba74; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 14px; border-bottom: 1px solid #eef0f5; }
+.filters label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.filters select { max-width: 100%; min-height: 38px; border: 1px solid #dde3eb; border-radius: 8px; background: white; padding: 6px 10px; color: #243047; }
+.filters p { flex-basis: 100%; margin: 0; font-size: 12px; color: #64748b; }
+.filters button { margin-left: auto; padding: 7px 10px; border: 1px solid #dde3eb; border-radius: 8px; background: white; color: #334155; cursor: pointer; }
+.hint { grid-column: 1 / -1; margin: 0; color: #64748b; font-size: 12px; }

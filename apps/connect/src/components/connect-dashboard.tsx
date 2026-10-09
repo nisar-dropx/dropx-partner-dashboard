@@ -38,6 +38,8 @@ import {
 } from "../lib/attendance-insights";
 import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
+import { summarizeAttendance, type AttendanceFilter } from "../lib/attendance-summary";
+import summaryStyles from "./attendance-summary-controls.module.css";
 
 type Profile = {
   editable: Record<string, string>;
@@ -156,15 +158,18 @@ function Metric({
   icon,
   label,
   value,
-  tone
+  tone,
+  onClick
 }: {
   icon: React.ReactNode;
   label: string;
   value: string | number;
   tone: "green" | "red" | "orange" | "purple";
+  onClick?: () => void;
 }) {
+  const Element = onClick ? "button" : "div";
   return (
-    <div className={`dx-dashboard-metric ${tone}`}>
+    <Element className={`dx-dashboard-metric ${tone}${onClick ? ` ${summaryStyles.metricButton}` : ""}`} onClick={onClick}>
       <span className="dx-dashboard-metric-icon" aria-hidden="true">
         {icon}
       </span>
@@ -172,7 +177,7 @@ function Metric({
         <strong>{value}</strong>
         <small>{label}</small>
       </div>
-    </div>
+    </Element>
   );
 }
 
@@ -180,6 +185,7 @@ export function ConnectDashboard({
   account,
   active = true,
   onAttendance,
+  onAttendanceSummary,
   onAdvances,
   onConnect,
   onLeave,
@@ -195,6 +201,7 @@ export function ConnectDashboard({
   /** Whether this screen is the one currently shown (vs. kept alive but hidden behind another tab). Triggers a background refresh on becoming active again if the data has gone stale. */
   active?: boolean;
   onAttendance: () => void;
+  onAttendanceSummary?: (filter: AttendanceFilter) => void;
   onAdvances: () => void;
   onConnect: () => void;
   onLeave: () => void;
@@ -488,15 +495,13 @@ export function ConnectDashboard({
   const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor" || pageAccess.includes("performance");
   const advancesAllowed = pageAccess.includes("advances");
   const referAllowed = variant === "workforce" && pageAccess.includes("refer_earn");
-  const fullDayCount = attendance.summary.fullDay ?? attendance.summary.present;
-  const halfDayCount = attendance.summary.halfDay ?? 0;
-  const lateInCount = attendance.summary.lateIn ?? 0;
-  const earlyOutCount = attendance.summary.earlyOut ?? 0;
-  const reviewCount = attendance.rows.filter((row) => attendanceDayInsight(row, {
-    today: row.date === localIsoDate(now),
-    shiftOpen: row.date === punchState?.punchDate && punchState?.open === true
-  }).needsRegularization).length;
-  const trackedDays = fullDayCount + halfDayCount + attendance.summary.absent + reviewCount;
+  const summary = summarizeAttendance(attendance.rows, {
+    today: localIsoDate(now), openShiftDate: punchState?.open ? punchState.punchDate : null
+  });
+  const { fullDay: fullDayCount, halfDay: halfDayCount, lateIn: lateInCount, earlyOut: earlyOutCount, needsReview: reviewCount, trackedDays } = summary;
+  const openSummary = (filter: AttendanceFilter) => attendanceAllowed
+    ? () => onAttendanceSummary ? onAttendanceSummary(filter) : onAttendance()
+    : undefined;
   const attendanceRate = trackedDays ? Math.round(((fullDayCount + halfDayCount * 0.5) / trackedDays) * 100) : 0;
   const workforce = variant === "workforce";
 
@@ -552,15 +557,15 @@ export function ConnectDashboard({
     {!workforce ? <section className="dx-dashboard-card dx-dashboard-summary-card">
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
-        <Metric icon={<CheckCircle2 />} label="Full day" value={fullDayCount} tone="green" />
-        <Metric icon={<PersonStanding />} label="Half day" value={halfDayCount} tone="orange" />
-        <Metric icon={<UserRoundX />} label="Absent" value={attendance.summary.absent} tone="red" />
-        <Metric icon={<Clock3 />} label="Needs review" value={reviewCount} tone="purple" />
+        <Metric icon={<CheckCircle2 />} label="Full day" value={fullDayCount} tone="green" onClick={openSummary("fullDay")} />
+        <Metric icon={<PersonStanding />} label="Half day" value={halfDayCount} tone="orange" onClick={openSummary("halfDay")} />
+        <Metric icon={<UserRoundX />} label="Absent" value={summary.absent} tone="red" onClick={openSummary("absent")} />
+        <Metric icon={<Clock3 />} label="Needs review" value={reviewCount} tone="purple" onClick={openSummary("needsReview")} />
       </div>
       {(lateInCount || earlyOutCount) ? (
         <div className="dx-attendance-flashes dx-dashboard-flashes" aria-label="Attendance exceptions this month">
-          {lateInCount ? <span className="late"><Clock3 /> Late in <strong>{lateInCount}</strong></span> : null}
-          {earlyOutCount ? <span className="early"><LogOut /> Early out <strong>{earlyOutCount}</strong></span> : null}
+          {lateInCount ? <button className={summaryStyles.flashButton} onClick={openSummary("lateIn")}><span className="late"><Clock3 /> Late in <strong>{lateInCount}</strong></span></button> : null}
+          {earlyOutCount ? <button className={summaryStyles.flashButton} onClick={openSummary("earlyOut")}><span className="early"><LogOut /> Early out <strong>{earlyOutCount}</strong></span></button> : null}
         </div>
       ) : null}
       <div className="dx-month-progress">

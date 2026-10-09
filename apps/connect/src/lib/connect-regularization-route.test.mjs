@@ -29,7 +29,7 @@ function fixture() {
       return { companyId: 'company', profileId: 'worker', profileType: 'employee', fullName: 'Test person' };
     } },
     '@/lib/supabase-admin': { supabaseAdmin: db },
-    '@/lib/attendance-pay-day': {}, '@/lib/leave-calendar-days': {},
+    '@/lib/attendance-pay-day': {}, '@/lib/leave-calendar-days': {}, '@/lib/attendance-summary': {},
     '@/lib/user-facing-error': { userFacingError },
     '@/lib/regularization-input': { regularizationTimeInput },
     '@/lib/connect-regularization-cancel': {},
