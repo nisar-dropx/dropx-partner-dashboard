@@ -6,7 +6,7 @@ import {requirePagePermission} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
 import {supabaseAdmin} from '@/lib/supabase-admin';
 import {validReportDate} from '@/lib/ops-pulse/cod-pending';
-import {CONTROL_TOWER_CC,emailList} from '@/lib/ops-pulse/cod-proof-policy';
+import {CONTROL_TOWER_CC} from '@/lib/ops-pulse/cod-proof-policy';
 import {uploadOpsProof} from '@/lib/ops-pulse/upload';
 import {inferFormTypeFromLocation,todayKolkata} from '@/lib/ops-pulse/cod';
 import type {CodException} from '@/lib/ops-pulse/cod-exceptions';
@@ -22,7 +22,7 @@ export async function recordCodException(_prev:ExceptionState|null,form:FormData
   if(!['No Cash','Banker Not Reported'].includes(kind))throw new Error('Choose a valid update.');
   if(reason.length<3||reason.length>2000)throw new Error('Enter a reason between 3 and 2,000 characters.');
   if(!auth.hasAllLocationAccess&&!auth.locationScopeIds.includes(location))throw new Error('Station access denied.');
-  const station=await supabaseAdmin.from('stations').select('id,station_code,station_name,providers(code,name),location_models(code,name)').eq('company_id',company).eq('id',location).eq('is_active',true).maybeSingle();
+  const station=await supabaseAdmin.from('stations').select('id,station_code,station_name,station_email,providers(code,name),location_models(code,name)').eq('company_id',company).eq('id',location).eq('is_active',true).maybeSingle();
   if(station.error||!station.data||!inferFormTypeFromLocation(station.data))throw new Error('Choose an active COD station.');
   let prior:CodException|null=null;
   if(existingId){const result=await supabaseAdmin.from('cod_daily_exceptions').select('*').eq('company_id',company).eq('id',existingId).eq('location_id',location).eq('report_date',date).maybeSingle();if(result.error||!result.data)throw new Error('Update not found.');prior=result.data as CodException;if(prior.version!==Number(form.get('version')))throw new Error('This update changed. Reload before editing.');}
@@ -39,18 +39,18 @@ export async function recordCodException(_prev:ExceptionState|null,form:FormData
    if(!proof)throw new Error('Upload the ERP screenshot showing no cash.');
   }
   const subject=kind==='Banker Not Reported'?String(form.get('email_subject')||'').trim():null;
-  const sender=kind==='Banker Not Reported'?emailList(String(form.get('sender_email')||'')):[];
+  const senderAddress=kind==='Banker Not Reported'?String(station.data.station_email||'').trim().toLowerCase():'';
   const sent=String(form.get('email_sent_at')||'');
   let sentAt:string|null=null;
   if(kind==='Banker Not Reported'){
    if(!subject||subject.length<3||subject.length>250||/[\r\n]/.test(subject))throw new Error('Enter the exact email subject (3–250 characters).');
-   if(sender.length!==1||!sender[0].endsWith('@dropxlogistics.com'))throw new Error('Enter the DropX address that sent this email.');
+   if(!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@dropxlogistics\.com$/i.test(senderAddress))throw new Error('The selected station needs one valid DropX email in Location Master before this update can be saved.');
    if(form.get('sent_confirmed')!=='yes')throw new Error('Confirm the email was sent from the station address with Control Tower in CC.');
    const timestamp=new Date(sent+'+05:30');
    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(sent)||!Number.isFinite(timestamp.getTime())||timestamp.getTime()>Date.now()||sent.slice(0,10)!==date)throw new Error('Enter the actual sent time in IST on the selected report date.');
    sentAt=timestamp.toISOString();
   }
-  const row={id,company_id:company,location_id:location,report_date:date,kind,reason,proof,email_subject:subject,sender_email:sender[0]||null,stakeholder_emails:prior?.stakeholder_emails||[],client_poc_emails:prior?.client_poc_emails||[],email_cc:kind==='Banker Not Reported'?[CONTROL_TOWER_CC]:[],email_sent_at:sentAt,email_check_status:kind==='Banker Not Reported'?'Confirmation pending':'Not applicable',email_check_reason:null,email_message_id:null,email_checked_at:null,updated_by:auth.userId,updater_name:auth.fullName||auth.email||'Station user',updated_at:new Date().toISOString(),version:(prior?.version||0)+1};
+  const row={id,company_id:company,location_id:location,report_date:date,kind,reason,proof,email_subject:subject,sender_email:senderAddress||null,stakeholder_emails:prior?.stakeholder_emails||[],client_poc_emails:prior?.client_poc_emails||[],email_cc:kind==='Banker Not Reported'?[CONTROL_TOWER_CC]:[],email_sent_at:sentAt,email_check_status:kind==='Banker Not Reported'?'Confirmation pending':'Not applicable',email_check_reason:null,email_message_id:null,email_checked_at:null,updated_by:auth.userId,updater_name:auth.fullName||auth.email||'Station user',updated_at:new Date().toISOString(),version:(prior?.version||0)+1};
   const saved=prior?await supabaseAdmin.from('cod_daily_exceptions').update(row).eq('company_id',company).eq('id',id).eq('version',prior.version).select('id'):await supabaseAdmin.from('cod_daily_exceptions').insert({...row,created_by:auth.userId}).select('id');
   if(saved.error)throw new Error(saved.error.code==='23505'?'An update already exists for this station/date. Reload and use Amend update.':saved.error.message);
   if(!saved.data?.length)throw new Error('This update changed. Reload before editing.');
