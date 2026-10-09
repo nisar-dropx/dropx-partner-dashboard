@@ -34,6 +34,7 @@ type PreviewResponse = {
   canCommit?: boolean;
   counts?: Record<string, number>;
   issues?: PreviewIssue[];
+  warnings?: Array<string | { message?: string; dropxId?: string | null }>;
   rows?: PreviewRow[];
 };
 
@@ -154,6 +155,14 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
 
             {error ? <div className="compensation-import-message error"><strong>Import blocked</strong><span>{error}</span></div> : null}
             {preview?.message ? <div className="compensation-import-message success"><strong>Import completed</strong><span>{preview.message}</span></div> : null}
+            {(preview?.warnings ?? []).length ? <div className="workforce-payout-manual-warnings" role="status">
+              <strong>Import completed with {preview?.warnings?.length} warning{preview?.warnings?.length === 1 ? "" : "s"}</strong>
+              <ul>{preview?.warnings?.map((warning, index) => {
+                const message = typeof warning === "string" ? warning : warning.message ?? "The server reported a payout update warning.";
+                const dropxId = typeof warning === "string" ? null : warning.dropxId;
+                return <li key={`${dropxId ?? "warning"}-${index}`}>{dropxId ? `${dropxId}: ` : ""}{message}</li>;
+              })}</ul>
+            </div> : null}
 
             {preview?.totalRows ? (
               <div className="compensation-preview">

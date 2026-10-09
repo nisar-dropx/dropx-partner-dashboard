@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -26,12 +25,16 @@ import {
   type WorkforcePayoutImportSetup,
   type WorkforcePayoutImportWorker
 } from "@/lib/workforce-payout-import";
+import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
+import { workforcePayoutImportFingerprint } from "@/lib/workforce-payout-import-fingerprint";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const FILE_PATTERN = /\.(xlsx|xls|csv)$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function errorResponse(message: string, status: number) {
   return Response.json({ error: message }, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -502,6 +505,7 @@ function rpcRows(rows: ResolvedWorkforcePayoutImportRow[]) {
 }
 
 export async function POST(request: Request) {
+  const publicationRefreshDeadlineAtMs = Date.now() + (maxDuration - 60) * 1000;
   try {
     if (!sameOrigin(request)) return errorResponse("Invalid request origin.", 403);
     const authorization = await getAuthorization();
@@ -516,14 +520,24 @@ export async function POST(request: Request) {
     const mode = String(form.get("mode") ?? "preview");
     const batchFrom = String(form.get("effective_from") ?? "");
     const batchTo = String(form.get("effective_to") ?? "");
+    const inputSource = String(form.get("input_source") ?? "workbook").trim().toLowerCase();
+    const manualOperationId = String(form.get("manual_operation_id") ?? "").trim();
     const file = form.get("file");
     if (mode !== "preview" && mode !== "commit") return errorResponse("Select preview or commit mode.", 400);
+    if (inputSource !== "workbook" && inputSource !== "manual") return errorResponse("Payout input source is not supported.", 400);
+    if (inputSource === "manual" && !UUID_PATTERN.test(manualOperationId)) {
+      return errorResponse("The manual payout edit session is invalid. Close the editor and try again.", 400);
+    }
+    if (inputSource !== "manual" && manualOperationId) return errorResponse("Manual operation ID is valid only for manual payout edits.", 400);
     if (!(file instanceof File) || !file.name || !file.size) return errorResponse("Choose a payout input workbook.", 400);
     if (!FILE_PATTERN.test(file.name)) return errorResponse("Upload an Excel or CSV workbook.", 400);
     if (file.size > MAX_FILE_BYTES) return errorResponse("The workbook must be 5 MB or smaller.", 413);
 
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const fileSha256 = createHash("sha256").update(bytes).digest("hex");
+    const fileSha256 = workforcePayoutImportFingerprint(
+      bytes,
+      inputSource === "manual" ? manualOperationId : null
+    );
     let parsed;
     try {
       parsed = parseWorkforcePayoutWorkbook(bytes, { batchFrom, batchTo });
@@ -592,14 +606,49 @@ export async function POST(request: Request) {
       p_allowed_location_ids: allowedLocationIds ? [...allowedLocationIds] : null
     });
     if (applied.error) {
-      const conflict = /already imported|overlap|approved|paid/i.test(applied.error.message);
+      const conflict = /already imported|overlap|approved|paid|cancelled|review|notification|sending/i.test(applied.error.message);
       return errorResponse(applied.error.message, conflict ? 409 : 400);
+    }
+    const importId = String(applied.data);
+    const publicationRefresh = await refreshWorkforcePayoutPublicationJobs({
+      authorization,
+      batchId: importId,
+      companyId,
+      deadlineAtMs: publicationRefreshDeadlineAtMs,
+      limit: 100
+    });
+    const remainingRefreshJobs = await supabaseAdmin
+      .from("workforce_payout_publication_refresh_jobs")
+      .select("id,status,next_attempt_at,last_error,claim_attempts,max_attempts")
+      .eq("company_id", companyId)
+      .eq("input_batch_id", importId)
+      .neq("status", "completed");
+    const warnings = publicationRefresh.warnings.map((warning) => ({ message: warning.message }));
+    const remainingRows = remainingRefreshJobs.data ?? [];
+    const remainingQueued = remainingRows.filter((job) => job.status === "pending" || job.status === "processing").length;
+    const deadLettered = remainingRows.filter((job) => job.status === "failed").length;
+    if (remainingRefreshJobs.error) {
+      warnings.push({ message: `Payout inputs were saved, but publication refresh status is unavailable: ${remainingRefreshJobs.error.message}` });
+    } else {
+      if (remainingQueued > 0) {
+        warnings.push({ message: `${remainingQueued} published payout update${remainingQueued === 1 ? " remains" : "s remain"} queued with automatic retry.` });
+      }
+      if (deadLettered > 0) {
+        warnings.push({ message: `${deadLettered} published payout update${deadLettered === 1 ? " requires" : "s require"} operator attention after exhausting automatic retries.` });
+      }
     }
     return Response.json({
       ...preview,
       canCommit: false,
-      importId: applied.data,
-      message: `${parsed.rows.length} payout input row${parsed.rows.length === 1 ? " was" : "s were"} imported atomically.`
+      importId,
+      publicationRevisions: publicationRefresh.published,
+      publicationRefresh: {
+        ...publicationRefresh,
+        remainingQueued,
+        deadLettered
+      },
+      warnings,
+      message: `${parsed.rows.length} payout input row${parsed.rows.length === 1 ? " was" : "s were"} imported atomically.${publicationRefresh.published ? ` ${publicationRefresh.published} published payout revision${publicationRefresh.published === 1 ? " was" : "s were"} refreshed in DropX One.` : ""}`
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Unable to process the payout workbook.", 500);

@@ -9,6 +9,10 @@ import {
   workforcePayoutPublicationSnapshotHash
 } from "./workforce-payout-publication.ts";
 import { buildWorkforcePayoutPublicationSnapshot as buildClientSnapshot } from "./workforce-payout-publication-snapshot.ts";
+import {
+  buildClearedInputOnlyWorkforcePayoutPublicationSnapshot,
+  isInputOnlyWorkforcePayoutPublicationSnapshot
+} from "./workforce-payout-publication-snapshot.ts";
 import { revalidateSelectedWorkforcePayoutRows } from "./workforce-payout-selection-revalidation.ts";
 
 const row = (overrides = {}) => ({
@@ -53,6 +57,52 @@ test("a zero payout produces a valid frozen publication snapshot", () => {
   assert.equal(snapshot.item.gross_amount, 0);
   assert.equal(snapshot.item.net_amount, 0);
   assert.deepEqual(snapshot.lines, []);
+});
+
+test("CLEAR produces a zero revision only for a synthetic input-only payout", () => {
+  const previous = buildWorkforcePayoutPublicationSnapshot(row({
+    id: "payout-input-00000000-0000-4000-8000-000000000002-00000000-0000-4000-8000-000000000003",
+    providerMemberId: "No provider ID",
+    providerMemberName: "Additional payment",
+    paymentMethod: "Additional payment",
+    model: "Global additional fields",
+    mappingStatus: "Not required",
+    workDaysSource: "Not required",
+    paymentMethodBreakdown: [],
+    additions: 125,
+    grossPayment: 125,
+    netAmount: 125,
+    additionalPaymentBreakdown: [{
+      fieldId: "field-1",
+      code: "BONUS",
+      label: "Bonus",
+      calculationType: "fixed",
+      inputValue: 125,
+      rateValue: null,
+      amount: 125
+    }]
+  }), "2026-09-01", "2026-09-30", "version-a");
+  assert.equal(isInputOnlyWorkforcePayoutPublicationSnapshot(previous), true);
+  const cleared = buildClearedInputOnlyWorkforcePayoutPublicationSnapshot(previous, "version-b");
+  assert.ok(cleared);
+  assert.equal(cleared.dependency_hash, "version-b");
+  assert.equal(cleared.item.worker_name, previous.item.worker_name);
+  assert.equal(cleared.item.workforce_id, previous.item.workforce_id);
+  assert.equal(cleared.item.gross_amount, 0);
+  assert.equal(cleared.item.net_amount, 0);
+  assert.deepEqual(cleared.lines, []);
+  assert.deepEqual(cleared.worksheet.additional_payment_breakdown, []);
+  assert.equal(cleared.worksheet.tombstone_reason, "input_values_cleared");
+});
+
+test("a genuinely missing mapped payout cannot be tombstoned", () => {
+  const mapped = buildWorkforcePayoutPublicationSnapshot(row({
+    id: "mapping-1",
+    mappingStatus: "Mapped",
+    paymentMethodBreakdown: [{ id: "method-1", label: "Per packet", amount: 100 }]
+  }), "2026-09-01", "2026-09-30", "version-a");
+  assert.equal(isInputOnlyWorkforcePayoutPublicationSnapshot(mapped), false);
+  assert.equal(buildClearedInputOnlyWorkforcePayoutPublicationSnapshot(mapped, "version-b"), null);
 });
 
 test("a selected row fingerprint ignores another payout changing but detects a change to the selected payout", () => {

@@ -46,6 +46,7 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  const reviewRoute=readFileSync(new URL('../../app/api/connect/payout-review/route.ts',import.meta.url),'utf8');
  assert.match(payoutLoader,/publication\.publication_kind !== "worksheet"/);
  assert.match(payoutLoader,/payoutSlipAvailable: false/);
+ assert.match(payoutLoader,/order\("revision", \{ ascending: false, nullsFirst: false \}\)\.order\("published_at", \{ ascending: false \}\)/);
  assert.match(reviewRoute,/publication\.data\.publication_kind==='worksheet'/);
  assert.match(reviewRoute,/newer payout revision is available/i);
  const detailsRoute=readFileSync(new URL('../../app/api/connect/workforce-payments/route.ts',import.meta.url),'utf8');

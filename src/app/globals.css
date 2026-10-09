@@ -21177,6 +21177,50 @@ td strong,
 .payout-inline-message.error { color: #b42318; background: #fef3f2; border-color: #fecdca; }
 .workforce-payout-bulk-upload { display: grid; justify-items: end; gap: 10px; }
 .workforce-payout-bulk-upload > .compensation-import-panel { width: 100%; justify-self: stretch; margin: 0; }
+.workforce-payout-manual-backdrop { z-index: 30; }
+.workforce-payout-manual-modal { display: flex; flex-direction: column; overflow: hidden; }
+.workforce-payout-manual-head { flex: 0 0 auto; align-items: flex-start; gap: 20px; }
+.workforce-payout-manual-head h2 { margin-bottom: 4px; }
+.workforce-payout-manual-head p { max-width: 820px; margin: 0; }
+.workforce-payout-manual-body { display: grid; min-height: 0; gap: 13px; padding: 14px 16px 0; overflow: auto; }
+.workforce-payout-manual-summary { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 8px; }
+.workforce-payout-manual-summary span { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid #dfe5ed; border-radius: 9px; background: #f8fafc; color: #667085; font-size: 11px; }
+.workforce-payout-manual-summary strong { color: #172033; font-size: 17px; }
+.workforce-payout-manual-notice { margin: 0; padding: 10px 12px; border: 1px solid #f7c98b; border-radius: 8px; background: #fff8ed; color: #9a4b0c; font-size: 12px; line-height: 1.45; }
+.workforce-payout-manual-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.workforce-payout-manual-toolbar > div { display: grid; gap: 3px; }
+.workforce-payout-manual-toolbar strong { color: #172033; font-size: 13px; }
+.workforce-payout-manual-toolbar span { color: #667085; font-size: 11px; }
+.workforce-payout-manual-loading { margin: 0; }
+.workforce-payout-manual-table-wrap { max-height: min(48vh, 520px); border: 1px solid #dfe5ed; border-radius: 9px; }
+.workforce-payout-manual-table { min-width: 1460px; }
+.workforce-payout-manual-table th { position: sticky; top: 0; z-index: 2; white-space: nowrap; background: #f8fafc; }
+.workforce-payout-manual-table td { min-width: 124px; padding: 9px 8px; vertical-align: top; }
+.workforce-payout-manual-table td:first-child { min-width: 260px; }
+.workforce-payout-manual-table td:nth-child(3) { min-width: 180px; }
+.workforce-payout-manual-table td:nth-child(4) { min-width: 220px; }
+.workforce-payout-manual-table td:nth-child(8) { min-width: 190px; }
+.workforce-payout-manual-table td:last-child { min-width: 130px; }
+.workforce-payout-manual-table .field { width: 100%; min-height: 36px; padding: 7px 8px; font-size: 11px; }
+.workforce-payout-manual-table tr.has-error td { background: #fffafa; }
+.workforce-payout-manual-person small { display: block; max-width: 250px; margin-top: 5px; color: #667085; font-size: 10px; line-height: 1.35; white-space: normal; }
+.workforce-payout-manual-table tr.has-error .workforce-payout-manual-person small { color: #b42318; font-weight: 700; }
+.workforce-payout-manual-value-help { display: grid; max-width: 210px; gap: 2px; margin-top: 5px; color: #667085; font-size: 10px; line-height: 1.35; white-space: normal; }
+.workforce-payout-manual-value-help strong { color: #344054; font-size: 10px; }
+.workforce-payout-manual-line-actions { display: grid; gap: 6px; }
+.workforce-payout-manual-line-actions .button { min-height: 32px; padding: 6px 9px; font-size: 10px; white-space: nowrap; }
+.workforce-payout-manual-preview { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 12px; border: 1px solid; border-radius: 8px; }
+.workforce-payout-manual-preview > div { display: grid; gap: 3px; }
+.workforce-payout-manual-preview span { font-size: 11px; }
+.workforce-payout-manual-preview.success { border-color: #abefc6; background: #ecfdf3; color: #067647; }
+.workforce-payout-manual-preview.error { border-color: #fecdca; background: #fef3f2; color: #b42318; }
+.workforce-payout-manual-warnings { padding: 10px 12px; border: 1px solid #f7c98b; border-radius: 8px; background: #fff8ed; color: #9a4b0c; font-size: 12px; }
+.workforce-payout-manual-warnings ul { margin: 6px 0 0; padding-left: 18px; }
+.workforce-payout-manual-footer { position: sticky; bottom: 0; z-index: 3; justify-content: flex-end; margin: 0 -16px; padding: 12px 16px; border-top: 1px solid #e4e9f0; background: rgba(255,255,255,.97); }
+@media (max-width: 760px) {
+  .workforce-payout-manual-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workforce-payout-manual-toolbar, .workforce-payout-manual-preview { align-items: stretch; flex-direction: column; }
+}
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px; border-top: 1px solid #e4e9f0; color: #647087; }
 .pagination > div { display: flex; align-items: center; gap: 12px; }
 @media (max-width: 1100px) { .payout-filters { grid-template-columns: repeat(3, minmax(170px, 1fr)); } .additional-payment-field-form, .deduction-head-create, .deduction-head-row { grid-template-columns: repeat(2, minmax(180px,1fr)); } }

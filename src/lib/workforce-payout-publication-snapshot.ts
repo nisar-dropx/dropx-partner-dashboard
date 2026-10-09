@@ -121,3 +121,76 @@ export function buildWorkforcePayoutPublicationSnapshot(
 }
 
 export type WorkforcePayoutPublicationSnapshot = ReturnType<typeof buildWorkforcePayoutPublicationSnapshot>;
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function list(value: unknown): unknown[] | null {
+  return Array.isArray(value) ? value : null;
+}
+
+/**
+ * Synthetic payout-input rows are the only worksheet rows allowed to disappear
+ * after an input CLEAR. A mapped row disappearing signals an incomplete
+ * recalculation and must be retried instead of silently publishing zero.
+ */
+export function isInputOnlyWorkforcePayoutPublicationSnapshot(
+  value: unknown
+): value is WorkforcePayoutPublicationSnapshot {
+  const snapshot = record(value);
+  const item = record(snapshot?.item);
+  const worksheet = record(snapshot?.worksheet);
+  const lines = list(snapshot?.lines);
+  const paymentMethods = list(worksheet?.payment_method_breakdown);
+  const production = list(worksheet?.production_breakdown);
+  const daily = list(worksheet?.daily_breakdown);
+  if (!snapshot || !item || !worksheet || !lines || !paymentMethods || !production || !daily) return false;
+  if (snapshot.schema_version !== 2 || snapshot.source !== "workforce_payout_worksheet") return false;
+  if (!String(worksheet.row_id ?? "").startsWith("payout-input-")) return false;
+  if (worksheet.mapping_status !== "Not required") return false;
+  if (paymentMethods.length || production.length || daily.length) return false;
+  if (Number(item.base_amount) !== 0 || Number(item.work_days) !== 0) return false;
+  return lines.every((line) => {
+    const row = record(line);
+    return row?.source_type === "additional_payment" || row?.source_type === "deduction";
+  });
+}
+
+export function buildClearedInputOnlyWorkforcePayoutPublicationSnapshot(
+  previous: unknown,
+  dependencyHash: string
+): WorkforcePayoutPublicationSnapshot | null {
+  if (!isInputOnlyWorkforcePayoutPublicationSnapshot(previous)) return null;
+  const snapshot = previous as unknown as Record<string, unknown>;
+  const item = snapshot.item as Record<string, unknown>;
+  const worksheet = snapshot.worksheet as Record<string, unknown>;
+  return {
+    ...snapshot,
+    dependency_hash: dependencyHash,
+    item: {
+      ...item,
+      work_days: 0,
+      base_amount: 0,
+      incentive_amount: 0,
+      adjustment_amount: 0,
+      deduction_amount: 0,
+      gross_amount: 0,
+      net_amount: 0
+    },
+    lines: [],
+    worksheet: {
+      ...worksheet,
+      payment_method: "",
+      work_days_source: "Not required",
+      payment_method_breakdown: [],
+      production_breakdown: [],
+      additional_payment_breakdown: [],
+      deduction_breakdown: [],
+      daily_breakdown: [],
+      tombstone_reason: "input_values_cleared"
+    }
+  } as unknown as WorkforcePayoutPublicationSnapshot;
+}

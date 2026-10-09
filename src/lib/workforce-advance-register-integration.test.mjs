@@ -444,9 +444,10 @@ test("advance deduction and review submission use separate row eligibility", () 
   assert.match(payoutTable, /canDeductAdvances\s*&&\s*canDeductAdvanceFromPayout\(row\)/);
   assert.match(payoutTable, /reviewSelectedRows\s*=\s*useMemo\(\(\)\s*=>\s*selectedRows\.filter\(\(row\)\s*=>\s*canSendPayoutForReview\(row,\s*audience\)\)/);
   assert.match(payoutTable, /advanceSelectedRows\s*=\s*useMemo\(\(\)\s*=>\s*selectedRows\.filter\(canDeductAdvanceFromPayout\)/);
-  assert.match(payoutTable, /hasNonReviewSelection\s*=\s*reviewSelectedRows\.length\s*!==\s*selectedRows\.length/);
-  assert.match(payoutTable, /if\s*\(hasNonReviewSelection\)[\s\S]*?audience\s*===\s*["']workforce["'][\s\S]*?complete payment setup[\s\S]*?not Ready for review or Returned/);
-  assert.match(payoutTable, /disabled=\{\(audience === "workforce" && !canPublish\)\s*\|\|\s*!selectedRows\.length\s*\|\|\s*hasNonReviewSelection/);
+  assert.match(payoutTable, /skippedReviewSelectionCount\s*=\s*selectedRows\.length\s*-\s*reviewSelectedRows\.length/);
+  assert.match(payoutTable, /reviewSelectedRows\.length\} of \{selectedRows\.length\} selected eligible for/);
+  assert.match(payoutTable, /items:\s*reviewSelectedRows\.map/);
+  assert.match(payoutTable, /disabled=\{\(audience === "workforce" && !canPublish\)\s*\|\|\s*!reviewSelectedRows\.length/);
   assert.match(payoutTable, /items:\s*advanceSelectedRows\.map/);
   assert.match(payoutTable, /Available for advance deduction only\./);
 });

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchesWorkforcePayoutFilters, workforcePayoutFacetValues } from "./workforce-payout-filters.ts";
+import {
+  WORKFORCE_PAYOUT_FILTER_NONE,
+  matchesWorkforcePayoutFilters,
+  toggleWorkforcePayoutFilterOption,
+  workforcePayoutFacetValues
+} from "./workforce-payout-filters.ts";
 
 const row = {
   dropxId: "KOZA5249",
@@ -79,4 +84,28 @@ test("dated allocations remain filterable by every location and provider segment
   assert.equal(matchesWorkforcePayoutFilters(transferred, "", { ...all, locations: ["KTUO"] }), true);
   assert.equal(matchesWorkforcePayoutFilters(transferred, "", { ...all, providers: ["Flipkart"] }), true);
   assert.equal(matchesWorkforcePayoutFilters(transferred, "", { ...all, locations: ["KLZH"] }), false);
+});
+
+test("unchecking an option from All keeps every other option selected", () => {
+  const options = ["A", "B", "C"];
+  assert.deepEqual(toggleWorkforcePayoutFilterOption(options, [], "B"), ["A", "C"]);
+  assert.deepEqual(toggleWorkforcePayoutFilterOption(options, ["A", "C"], "A"), ["C"]);
+});
+
+test("restoring the last excluded option normalizes the selection back to All", () => {
+  assert.deepEqual(toggleWorkforcePayoutFilterOption(["A", "B", "C"], ["A", "C"], "B"), []);
+});
+
+test("unchecking the only or final selected option represents none instead of resetting to All", () => {
+  assert.deepEqual(toggleWorkforcePayoutFilterOption(["A"], [], "A"), [WORKFORCE_PAYOUT_FILTER_NONE]);
+  assert.deepEqual(toggleWorkforcePayoutFilterOption(["A", "B"], ["A"], "A"), [WORKFORCE_PAYOUT_FILTER_NONE]);
+  assert.equal(matchesWorkforcePayoutFilters(row, "", { ...all, locations: [WORKFORCE_PAYOUT_FILTER_NONE] }), false);
+  assert.deepEqual(toggleWorkforcePayoutFilterOption(["A"], [WORKFORCE_PAYOUT_FILTER_NONE], "A"), []);
+});
+
+test("an All-minus-one selection excludes only the unchecked facet", () => {
+  const selected = toggleWorkforcePayoutFilterOption(["KOZA", "KTUO", "KLZH"], [], "KTUO");
+  assert.equal(matchesWorkforcePayoutFilters(row, "", { ...all, locations: selected }), true);
+  assert.equal(matchesWorkforcePayoutFilters({ ...row, location: "KTUO" }, "", { ...all, locations: selected }), false);
+  assert.equal(matchesWorkforcePayoutFilters({ ...row, location: "KLZH" }, "", { ...all, locations: selected }), true);
 });

@@ -146,7 +146,7 @@ function payoutOutput({
 
 export async function loadAssociatePayouts(company: string, worker: string): Promise<Row[]> {
   const db = supabaseAdmin!;
-  const publications = await rows(db.from("workforce_payout_publications").select("*").eq("company_id", company).eq("workforce_id", worker).order("published_at", { ascending: false }).order("id"));
+  const publications = await rows(db.from("workforce_payout_publications").select("*").eq("company_id", company).eq("workforce_id", worker).order("revision", { ascending: false, nullsFirst: false }).order("published_at", { ascending: false }).order("id", { ascending: false }));
   const items = await rows(db.from("workforce_payroll_items").select("*").eq("company_id", company).eq("workforce_id", worker).order("created_at", { ascending: false }).order("id"));
   const disputes = await rows(db.from("workforce_payout_disputes").select("id,publication_id,payroll_run_id,category,reason,status,resolution,created_at,updated_at").eq("company_id", company).eq("workforce_id", worker).order("created_at").order("id"));
   const runIds = [...new Set([...publications, ...items].map((row) => row.payroll_run_id).filter(Boolean))];
