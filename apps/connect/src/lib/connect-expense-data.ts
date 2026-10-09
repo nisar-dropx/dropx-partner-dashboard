@@ -1,3 +1,4 @@
+import { resolveSsaApprovalManager } from "../../../../src/lib/ssa-approval-manager";
 import "server-only";
 
 import { isManagingPartnerDesignation } from "./approval-designation-labels";
@@ -232,6 +233,8 @@ export type ExpenseClaimRequestAssignee = {
 };
 
 async function resolveImmediateReportingManager(account: ConnectAccount, identity: Awaited<ReturnType<typeof expenseIdentity>>): Promise<ExpenseClaimRequestAssignee | null> {
+  const ssaManager = await resolveSsaApprovalManager({ companyId: account.companyId, workerType: identity.workerType, workerId: identity.workerId, asOf: identity.today });
+  if (ssaManager) return { assignee_role: "reporting_manager", approver_user_id: ssaManager.userId, approver_person_id: ssaManager.personId };
   const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
     .eq("company_id", account.companyId).eq("subject_assignment_id", identity.assignment.id)
     .eq("relationship_type", "solid_line").eq("is_primary", true)

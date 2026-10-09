@@ -6,9 +6,9 @@ import {
   type OperationalHierarchyPerson,
   type PeopleHierarchyAssignment,
   type PeopleHierarchyRelationship
-} from "@/lib/people-operational-hierarchy-core";
+} from "./people-operational-hierarchy-core";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { readAllRows } from "@/lib/supabase-pagination";
+import { readAllRows } from "./supabase-pagination";
 
 type WorkAssignmentRow = {
   id: string;
@@ -36,9 +36,8 @@ function indiaToday() {
   }).format(new Date());
 }
 
-async function loadPeopleHierarchyGraph(companyId: string) {
+async function loadPeopleHierarchyGraph(companyId: string, day = indiaToday()) {
   if (!supabaseAdmin) return { assignments: [] as PeopleHierarchyAssignment[], relationships: [] as PeopleHierarchyRelationship[], error: "Supabase service role key is not configured." };
-  const day = indiaToday();
   const [assignmentsResult, engagementsResult, peopleResult, designationsResult, relationshipsResult] = await Promise.all([
     readAllRows(supabaseAdmin.from("hr_work_assignments")
       .select("id,engagement_id,location_id,designation_id,position_title")
@@ -127,11 +126,11 @@ async function loadStationResponsibilityRoots(companyId: string, locationIds: st
 export async function loadPeopleOperationalHierarchy(
   companyId: string,
   locationIds: string[],
-  options: { includeStationResponsibilities?: boolean } = {}
+  options: { includeStationResponsibilities?: boolean; asOf?: string } = {}
 ) {
   const empty = new Map<string, LocationOperationalHierarchy>();
   if (!supabaseAdmin || !locationIds.length) return { byLocation: empty, error: null as string | null };
-  const graph = await loadPeopleHierarchyGraph(companyId);
+  const graph = await loadPeopleHierarchyGraph(companyId, options.asOf);
   if (graph.error) return { byLocation: empty, error: graph.error };
   try {
     const roots = options.includeStationResponsibilities

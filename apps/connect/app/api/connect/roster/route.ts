@@ -1,3 +1,4 @@
+import { resolveSsaApprovalManager } from "../../../../../../src/lib/ssa-approval-manager";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
@@ -296,6 +297,8 @@ async function loadRosterChangeDeadlineHour(companyId: string) {
 }
 
 async function immediateManager(companyId: string, workerType: WorkerType, workerId: string) {
+  const ssaManager = await resolveSsaApprovalManager({ companyId, workerType, workerId });
+  if (ssaManager) return ssaManager.userId;
   const today = todayIndia();
   const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
   const engagement = await db().from("hr_engagements").select("id").eq("company_id", companyId).eq("worker_type", workerType).eq(workerColumn, workerId).eq("status", "active").maybeSingle();
