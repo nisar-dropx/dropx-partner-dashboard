@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
-import { sendPaymentNotification } from "@/lib/payment-email-notifications";
+import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
@@ -554,6 +554,19 @@ export async function approvePaymentRequest(formData: FormData) {
     remarks: comments,
     requestId: request.id
   });
+  const finalState = await supabaseAdmin
+    .from("payment_requests")
+    .select("approval_status,current_approver_user_id")
+    .eq("company_id", companyId)
+    .eq("id", request.id)
+    .single();
+  if (!finalState.error && String(finalState.data?.approval_status ?? "").toUpperCase() === "FINAL_APPROVED" && !finalState.data?.current_approver_user_id) {
+    await sendPaymentLocationNotification({
+      companyId,
+      eventType: "payment_details_required",
+      requestId: request.id
+    });
+  }
   return emailResult.sent ? undefined : emailResult.reason;
 }
 

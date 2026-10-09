@@ -50,7 +50,7 @@ export async function deliverPaymentMail(input: {
   const now = new Date();
   const month = paymentThreadMonth(now, policy.hours.timezone);
   const monthLabel = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: policy.hours.timezone }).format(now);
-  const subject = `${initial.data.location_code} Payment Request ${monthLabel}`;
+  const subject = `${initial.data.location_code} Payment Updates ${monthLabel}`;
   const token = randomUUID();
   const claimed = await db.rpc("claim_payment_email_thread", { p_company: input.companyId, p_location: initial.data.location_id, p_month: month, p_token: token, p_subject: subject });
   if (claimed.error) throw new Error(claimed.error.message);
@@ -72,6 +72,7 @@ export async function deliverPaymentMail(input: {
       return { sent: false as const, reason: "Decision completed or reminder not due" };
     // An interrupted SMTP operation cannot safely be retried automatically.
     const uncertain = await db.from("payment_email_attempts").select("id").eq("company_id", input.companyId).eq("request_id", input.requestId)
+      .eq("event_type", input.eventType)
       .in("status", ["sending", "uncertain"]).limit(1);
     if (uncertain.error) throw new Error(uncertain.error.message);
     if (uncertain.data?.length) return { sent: false as const, reason: "Previous delivery needs reconciliation" };
