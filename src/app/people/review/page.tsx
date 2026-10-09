@@ -7,6 +7,8 @@ import { SubmitButton } from "@/components/submit-button";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
+import { paginateProfileReview, profileReviewIdBatches } from "@/lib/profile-review-pagination";
+import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   nonEmployeeProfileConfigs,
@@ -109,45 +111,37 @@ async function loadReviewProfiles(
   );
   const queryProfileTypes: WorkforceProfileType[] = ["employee", "workforce", ...nonEmployeeTypes];
   const profileQueries = [
-    admin
+    readAllRows(admin
       .from("employees")
       .select(employeeSelect)
       .eq("company_id", companyId)
-      .eq("profile_completion_status", "under_review"),
-    admin
+      .eq("profile_completion_status", "under_review")
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true })),
+    readAllRows(admin
       .from("workforce")
       .select(workforceSelect)
       .eq("company_id", companyId)
-      .eq("onboarding_status", "under_review"),
-    ...nonEmployeeTypes.map((profileType) => admin
+      .eq("onboarding_status", "under_review")
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true })),
+    ...nonEmployeeTypes.map((profileType) => readAllRows(admin
       .from(nonEmployeeProfileConfigs[profileType].table)
       .select(nonEmployeeSelect)
       .eq("company_id", companyId)
-      .eq("onboarding_status", "under_review"))
+      .eq("onboarding_status", "under_review")
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true })))
   ];
-  const [verificationResult, ...profileResults] = await Promise.all([
-    admin
-      .from("connect_profile_verifications")
-      .select("account_id, profile_type, kind, manual_review, block_submit, display_name, message, updated_at")
-      .eq("company_id", companyId)
-      .eq("manual_review", true),
-    ...profileQueries
-  ]);
+  const profileResults = await Promise.all(profileQueries);
 
-  const firstError = [verificationResult, ...profileResults].find((result) => result.error)?.error;
-  if (firstError) return { profiles: [] as ReviewProfile[], error: firstError.message };
-
-  const issuesByProfile = new Map<string, ReviewIssue[]>();
-  for (const row of (verificationResult.data ?? []) as ReviewIssue[]) {
-    if (!workforceProfileTypes.includes(row.profile_type)) continue;
-    const key = reviewKey(row.profile_type, row.account_id);
-    issuesByProfile.set(key, [...(issuesByProfile.get(key) ?? []), row]);
-  }
+  const profileError = profileResults.find((result) => result.error)?.error;
+  if (profileError) return { profiles: [] as ReviewProfile[], error: profileError.message };
 
   const profiles: ReviewProfile[] = [];
   profileResults.forEach((result, index) => {
     const profileType = queryProfileTypes[index];
-    for (const raw of (result.data ?? []) as unknown as Array<Record<string, unknown>>) {
+    for (const raw of (result.data ?? []) as Array<Record<string, unknown>>) {
       const locationId = text(raw.location_id) || null;
       if (!hasAllLocationAccess && (!locationId || !locationScopeIds.includes(locationId))) continue;
       const station = firstRelation(raw.stations as { station_code?: string } | Array<{ station_code?: string }> | null);
@@ -177,10 +171,42 @@ async function loadReviewProfiles(
         attachmentPaths: attachmentFields
           .map((field) => ({ field: field.key, label: field.label, path: text(raw[field.key]) }))
           .filter((file) => Boolean(file.path)),
-        issues: issuesByProfile.get(reviewKey(profileType, id)) ?? []
+        issues: []
       });
     }
   });
+
+  const profileIdsByType = new Map<WorkforceProfileType, string[]>();
+  for (const profile of profiles) {
+    profileIdsByType.set(profile.profileType, [...(profileIdsByType.get(profile.profileType) ?? []), profile.id]);
+  }
+
+  const verificationRows: ReviewIssue[] = [];
+  for (const [profileType, profileIds] of profileIdsByType) {
+    for (const accountIds of profileReviewIdBatches(profileIds)) {
+      const result = await readAllRows(admin
+        .from("connect_profile_verifications")
+        .select("account_id, profile_type, kind, manual_review, block_submit, display_name, message, updated_at")
+        .eq("company_id", companyId)
+        .eq("manual_review", true)
+        .eq("profile_type", profileType)
+        .in("account_id", accountIds)
+        .order("account_id", { ascending: true })
+        .order("kind", { ascending: true }));
+      if (result.error) return { profiles: [] as ReviewProfile[], error: result.error.message };
+      verificationRows.push(...(result.data ?? []) as ReviewIssue[]);
+    }
+  }
+
+  const issuesByProfile = new Map<string, ReviewIssue[]>();
+  for (const row of verificationRows) {
+    if (!workforceProfileTypes.includes(row.profile_type)) continue;
+    const key = reviewKey(row.profile_type, row.account_id);
+    issuesByProfile.set(key, [...(issuesByProfile.get(key) ?? []), row]);
+  }
+  for (const profile of profiles) {
+    profile.issues = issuesByProfile.get(reviewKey(profile.profileType, profile.id)) ?? [];
+  }
 
   profiles.sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)));
   return { profiles, error: null as string | null };
@@ -196,6 +222,7 @@ export default async function PeopleReviewPage({
     error?: string;
     issue?: string;
     notice?: string;
+    page?: string;
     review?: string;
     search?: string;
   };
@@ -210,7 +237,8 @@ export default async function PeopleReviewPage({
   );
   const designation = text(searchParams?.designation);
   const issue = text(searchParams?.issue);
-  const search = text(searchParams?.search).toLowerCase();
+  const searchValue = text(searchParams?.search);
+  const search = searchValue.toLowerCase();
   const designationOptions = Array.from(
     new Set(profiles.map((profile) => profile.designation).filter((value) => value && value !== "-"))
   ).sort((a, b) => a.localeCompare(b));
@@ -226,6 +254,17 @@ export default async function PeopleReviewPage({
     ].some((value) => value.toLowerCase().includes(search))) return false;
     return true;
   });
+  const paginatedProfiles = paginateProfileReview(filteredProfiles, searchParams?.page);
+  const listHref = (page: number, review?: string) => {
+    const params = new URLSearchParams();
+    if (designation) params.set("designation", designation);
+    if (issue) params.set("issue", issue);
+    if (searchValue) params.set("search", searchValue);
+    if (page > 1) params.set("page", String(page));
+    if (review) params.set("review", review);
+    const query = params.toString();
+    return query ? `/people/review?${query}` : "/people/review";
+  };
   const selected = profiles.find((profile) => reviewKey(profile.profileType, profile.id) === searchParams?.review) ?? null;
   const selectedAttachments = selected?.attachmentPaths ?? [];
 
@@ -249,7 +288,12 @@ export default async function PeopleReviewPage({
         <div className="panel-head people-review-listing-head">
           <div>
             <h2>Profiles awaiting decision</h2>
-            <p className="subtle">{filteredProfiles.length} of {profiles.length} profiles</p>
+            <p className="subtle">
+              {filteredProfiles.length} of {profiles.length} profiles
+              {paginatedProfiles.pageCount > 1
+                ? ` · showing ${paginatedProfiles.firstItem}-${paginatedProfiles.lastItem}`
+                : ""}
+            </p>
           </div>
           <form className="people-review-filters" method="get">
             <label>
@@ -274,7 +318,7 @@ export default async function PeopleReviewPage({
               <span>Search</span>
               <span className="people-review-search-field">
                 <Search aria-hidden="true" size={15} />
-                <input className="field" defaultValue={searchParams?.search ?? ""} name="search" placeholder="Name, ID, biometric ID" />
+                <input className="field" defaultValue={searchValue} name="search" placeholder="Name, ID, biometric ID" />
               </span>
             </label>
             <button className="button secondary" type="submit">Filter</button>
@@ -295,7 +339,7 @@ export default async function PeopleReviewPage({
               </tr>
             </thead>
             <tbody>
-              {filteredProfiles.length ? filteredProfiles.map((profile) => (
+              {paginatedProfiles.items.length ? paginatedProfiles.items.map((profile) => (
                 <tr key={reviewKey(profile.profileType, profile.id)}>
                   <td>
                     <div className="people-review-person">
@@ -321,7 +365,7 @@ export default async function PeopleReviewPage({
                   <td>
                     <PendingLink
                       className="button secondary compact"
-                      href={`/people/review?review=${encodeURIComponent(reviewKey(profile.profileType, profile.id))}`}
+                      href={listHref(paginatedProfiles.page, reviewKey(profile.profileType, profile.id))}
                     >
                       Review
                     </PendingLink>
@@ -339,6 +383,29 @@ export default async function PeopleReviewPage({
             </tbody>
           </table>
         </div>
+        {paginatedProfiles.pageCount > 1 ? (
+          <nav aria-label="Profile review pages" className="people-review-pagination">
+            <span>
+              Page {paginatedProfiles.page} of {paginatedProfiles.pageCount}
+            </span>
+            <div>
+              {paginatedProfiles.page > 1 ? (
+                <PendingLink className="button secondary compact" href={listHref(paginatedProfiles.page - 1)}>
+                  Previous
+                </PendingLink>
+              ) : (
+                <button className="button secondary compact" disabled type="button">Previous</button>
+              )}
+              {paginatedProfiles.page < paginatedProfiles.pageCount ? (
+                <PendingLink className="button secondary compact" href={listHref(paginatedProfiles.page + 1)}>
+                  Next
+                </PendingLink>
+              ) : (
+                <button className="button secondary compact" disabled type="button">Next</button>
+              )}
+            </div>
+          </nav>
+        ) : null}
       </section>
 
       {selected ? (
@@ -350,7 +417,7 @@ export default async function PeopleReviewPage({
                 <h2>{selected.fullName}</h2>
                 <p className="subtle">{selected.dropxId} / Biometric ID {selected.biometricId} / {selected.location}</p>
               </div>
-              <PendingLink aria-label="Close review" className="icon-button" href="/people/review" title="Close">
+              <PendingLink aria-label="Close review" className="icon-button" href={listHref(paginatedProfiles.page)} title="Close">
                 <ArrowLeft aria-hidden="true" size={18} />
               </PendingLink>
             </div>
