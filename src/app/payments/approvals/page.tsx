@@ -29,6 +29,7 @@ import {
 } from "@/lib/payment-approval-filtering";
 import { isResubmittedPaymentStage, paymentApprovalStatusTone, paymentStatusLabel } from "@/lib/payment-status-label";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import { DATABASE_UNREACHABLE_MESSAGE } from "@/lib/timeout-fetch";
 import {
   handleApprovePaymentApproval,
   handleRejectPaymentApproval,
@@ -99,6 +100,7 @@ type ApprovalLogRow = {
 type ApprovalSearchParams = {
   status?: string | string[];
   search?: string | string[];
+  stage?: string | string[];
   station?: string | string[];
   head?: string | string[];
   date?: string | string[];
@@ -110,7 +112,16 @@ type ApprovalSearchParams = {
 type ApprovalFilters = PaymentApprovalFacetSelection & {
   status?: string;
   search?: string;
+  stage?: string;
 };
+
+// The coloured milestone chips above the list; each one opens the requests at that milestone.
+const APPROVAL_STAGES = [
+  { value: "initial", label: "Initial review", tone: "payment-stage-initial", tones: ["payment-stage-initial"] },
+  { value: "progress", label: "In progress", tone: "payment-stage-progress", tones: ["payment-stage-progress"] },
+  { value: "final", label: "Final approval", tone: "payment-stage-final", tones: ["payment-stage-final"] },
+  { value: "approved", label: "Approved", tone: "payment-stage-approved", tones: ["payment-stage-approved", "payment-stage-processing", "payment-stage-complete"] }
+];
 
 function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
@@ -249,6 +260,7 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   }));
   const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests);
   const normalizedFilter = filters.status || "pending";
+  const stageTones = APPROVAL_STAGES.find((stage) => stage.value === filters.stage)?.tones ?? null;
   const approvalHistoryResult = normalizedFilter === "acted" || normalizedFilter === "all"
     ? await supabaseAdmin
       .from("payment_request_approvals")
@@ -278,6 +290,7 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     } else if (normalizedFilter === "acted") {
       if (!wasApprovedByCurrentUser) return false;
     }
+    if (stageTones && !stageTones.includes(paymentApprovalStatusTone(request) ?? "")) return false;
     return true;
   });
   const stationOptions = [...new Set(statusScopedRequests.map((request) => request.location_code).filter(Boolean))]
@@ -341,7 +354,12 @@ export default async function PaymentApprovalsPage({
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_approvals;
   const requestedStatus = firstSearchParam(searchParams?.status);
-  const currentStatus = ["pending", "acted", "returned", "rejected", "all"].includes(requestedStatus) ? requestedStatus : "pending";
+  const requestedStage = firstSearchParam(searchParams?.stage);
+  const currentStage = APPROVAL_STAGES.some((stage) => stage.value === requestedStage) ? requestedStage : "";
+  // A milestone chip looks across everything assigned to or approved by the user, not just the pending queue.
+  const currentStatus = currentStage
+    ? "all"
+    : ["pending", "acted", "returned", "rejected", "all"].includes(requestedStatus) ? requestedStatus : "pending";
   const currentSearch = firstSearchParam(searchParams?.search);
   const requestedFilters: PaymentApprovalFacetSelection = {
     stations: selectedPaymentApprovalValues(searchParams?.station),
@@ -351,14 +369,24 @@ export default async function PaymentApprovalsPage({
   const { requests, canDownloadProcessData, filterOptions, selectedFilters, error } = await loadApprovals(companyId, authorization, {
     status: currentStatus,
     search: currentSearch,
+    stage: currentStage,
     ...requestedFilters
   });
   const currentParams = new URLSearchParams();
   currentParams.set("status", currentStatus);
+  if (currentStage) currentParams.set("stage", currentStage);
   if (currentSearch) currentParams.set("search", currentSearch);
   selectedFilters.stations.forEach((value) => currentParams.append("station", value));
   selectedFilters.paymentHeads.forEach((value) => currentParams.append("head", value));
   selectedFilters.dates.forEach((value) => currentParams.append("date", value));
+  const stageHref = (stage: string) => {
+    const next = new URLSearchParams(currentParams);
+    next.set("status", stage ? "all" : "pending");
+    if (stage) next.set("stage", stage);
+    else next.delete("stage");
+    return `/payments/approvals?${next.toString()}`;
+  };
+  const isDatabaseUnreachable = error === DATABASE_UNREACHABLE_MESSAGE;
   const manageId = firstSearchParam(searchParams?.manage);
   const selectedRequest = manageId ? requests.find((request) => request.id === manageId) ?? null : null;
   const selectedAmount = selectedRequest ? paymentApprovalAmount(selectedRequest) : null;
@@ -451,8 +479,8 @@ export default async function PaymentApprovalsPage({
       {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
-            <strong>Payment approval setup needed</strong>
-            <p className="subtle" style={{ marginTop: 6 }}>{error} Run `scripts/payment_requests_v1.sql` in Supabase SQL Editor, then refresh.</p>
+            <strong>{isDatabaseUnreachable ? "Approvals could not be loaded" : "Payment approval setup needed"}</strong>
+            <p className="subtle" style={{ marginTop: 6 }}>{isDatabaseUnreachable ? error : `${error} Run \`scripts/payment_requests_v1.sql\` in Supabase SQL Editor, then refresh.`}</p>
           </div>
         </section>
       ) : null}
@@ -489,12 +517,25 @@ export default async function PaymentApprovalsPage({
             stationOptions={filterOptions.stations}
             status={currentStatus}
           />
-          <div className="payment-approval-stage-legend" aria-label="Approval status colour guide">
+          <div className="payment-approval-stage-legend" aria-label="Filter approvals by milestone">
             <span>Milestones</span>
-            <StatusPill status="Initial review" tone="payment-stage-initial" />
-            <StatusPill status="In progress" tone="payment-stage-progress" />
-            <StatusPill status="Final approval" tone="payment-stage-final" />
-            <StatusPill status="Approved" tone="payment-stage-approved" />
+            <PendingLink
+              className={`status-pill payment-approval-stage-chip ${currentStage || currentStatus !== "pending" ? "" : "active"}`}
+              href={stageHref("")}
+              scroll={false}
+            >
+              Pending for me
+            </PendingLink>
+            {APPROVAL_STAGES.map((stage) => (
+              <PendingLink
+                className={`status-pill payment-approval-stage-chip ${stage.tone} ${currentStage === stage.value ? "active" : ""}`}
+                href={stageHref(stage.value)}
+                key={stage.value}
+                scroll={false}
+              >
+                {stage.label}
+              </PendingLink>
+            ))}
           </div>
           <div className="table-wrap">
             <table>
@@ -529,7 +570,7 @@ export default async function PaymentApprovalsPage({
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 8 : 7}>No approvals pending.</td></tr>
+                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 8 : 7}>{currentStatus === "pending" ? "No approvals pending." : "No requests match this view."}</td></tr>
                 )}
               </tbody>
             </table>

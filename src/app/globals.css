@@ -7638,6 +7638,16 @@ h3 {
   margin-right: 2px;
 }
 
+.payment-approval-stage-chip {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.payment-approval-stage-chip:hover,
+.payment-approval-stage-chip.active {
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
 .table-wrap {
   border-color: #e4e7ec;
   border-radius: 8px;

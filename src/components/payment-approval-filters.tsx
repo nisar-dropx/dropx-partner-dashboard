@@ -184,7 +184,7 @@ export function PaymentApprovalFilters({
         aria-label="Approval status"
         className="field compact payment-approval-status-filter"
         name="status"
-        onChange={(event) => updateParams(router, pathname, searchParams, { status: event.target.value, manage: "" })}
+        onChange={(event) => updateParams(router, pathname, searchParams, { status: event.target.value, stage: "", manage: "" })}
         value={status}
       >
         <option value="pending">Pending / Resubmitted</option>

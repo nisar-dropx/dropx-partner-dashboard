@@ -208,21 +208,10 @@ function appendEmailNotice(message: string, emailReason?: string) {
   return emailReason ? `${message} Email not sent: ${emailReason}` : message;
 }
 
-async function runApprovalAction(
-  formData: FormData,
-  action: (payload: FormData) => Promise<string | void>,
-  successMessage: string,
-  successStatus?: string
-) {
+async function runApprovalAction(formData: FormData, action: (payload: FormData) => Promise<string | void>, successMessage: string) {
   try {
     const emailReason = await action(formData);
-    const params = redirectParams(formData, "approvalNotice", appendEmailNotice(successMessage, emailReason || undefined));
-    if (successStatus) {
-      params.status = successStatus;
-      const requestId = clean(formData.get("request_id"));
-      if (requestId) params.manage = requestId;
-    }
-    approvalRedirect(params);
+    approvalRedirect(redirectParams(formData, "approvalNotice", appendEmailNotice(successMessage, emailReason || undefined)));
   } catch (error) {
     if (isNextRedirect(error)) throw error;
     approvalRedirect(redirectParams(formData, "approvalError", errorMessage(error)));
@@ -703,7 +692,7 @@ export async function handlePaymentApprovalAction(formData: FormData) {
 }
 
 export async function handleApprovePaymentApproval(formData: FormData) {
-  await runApprovalAction(formData, approvePaymentRequest, "Payment request approved.", "acted");
+  await runApprovalAction(formData, approvePaymentRequest, "Payment request approved.");
 }
 
 export async function handleReturnPaymentApproval(formData: FormData) {
