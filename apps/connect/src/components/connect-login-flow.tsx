@@ -13,6 +13,8 @@ import { PullToRefresh } from "./pull-to-refresh";
 import { clearStoredDocuments } from "../lib/document-store";
 import { ConnectAppInstallCard } from "./connect-app-install-card";
 import { ConnectDashboard } from "./connect-dashboard";
+import { ConnectNoticeCards, ConnectNoticeDialog } from "./connect-notice";
+import { visibleDashboardNotices, type ConnectNotification } from "../lib/dashboard-notices";
 import { ConnectDocuments } from "./connect-documents";
 import { ConnectLeave } from "./connect-leave";
 import { ConnectRoster } from "./connect-roster";
@@ -29,16 +31,18 @@ import { ConnectActivationStatus } from "./connect-activation-status";
 import { ConnectReferEarn } from "./connect-refer-earn";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
-import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
+import { peopleDocumentsAvailable, requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
+import { canViewInterimSalary } from "@/lib/interim-salary";
 import { userFacingError } from "@/lib/user-facing-error";
 import { connectAccountKey as accountKey, connectAccountRoute, resolveConnectRouteAccount } from "@/lib/connect-account-routing";
 import { connectApprovalSection } from "@/lib/connect-approval-links";
 import { leaveRouteState, readConnectSessionResponse, resolveApprovalAccess, type ReporteeCheck } from "@/lib/connect-navigation-state";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "activation" | "dashboard" | "profile" | "documents" | "connect" | "approvals" | "requests" | "payments" | "work" | "advances" | "earnings" | "refer" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "activation" | "dashboard" | "profile" | "documents" | "salary" | "connect" | "approvals" | "requests" | "payments" | "work" | "advances" | "earnings" | "refer" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
 const routeForStep: Partial<Record<Step, string>> = {
   accounts: "/accounts", activation: "/activation", dashboard: "/dashboard", profile: "/profile", documents: "/documents",
   connect: "/connect",
+  salary: "/salary",
   approvals: "/approvals", requests: "/requests", payments: "/payments", work: "/work", advances: "/advances", earnings: "/earnings",
   refer: "/refer", reimbursements: "/reimbursements", attendance: "/attendance", roster: "/roster", leave: "/leave",
   wfh: "/leave/wfh", performance: "/performance", settings: "/settings"
@@ -47,14 +51,6 @@ function stepFromPath(pathname: string): Step | null {
   const path = pathname.replace(/\/+$/, "") || "/";
   return (Object.entries(routeForStep).find(([, route]) => route === path)?.[0] as Step | undefined) ?? null;
 }
-type ConnectNotification = {
-  id: string;
-  title: string;
-  body: string;
-  route?: string | null;
-  created_at: string;
-  read_at?: string | null;
-};
 const defaultKeyName = "dropx_connect_default_account";
 const biometricKey = "dropx_connect_biometric";
 const credentialKey = "dropx_connect_passkey_id";
@@ -90,6 +86,7 @@ const peopleSelfService = (account: AppAccount | null) => Boolean(account && !is
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const allowed = (account: AppAccount | null, page: DropxOnePageCode) =>
   !account?.activationOnly && (requiredDropxOnePageCodes.includes(page) ||
+  (page === "documents" && peopleDocumentsAvailable(account)) ||
   (page === "performance" && (account?.profileType === "employee" || account?.profileType === "contractor")) ||
   (account?.pageAccess ?? defaultPageAccess).includes(page));
 const showLeaveNav = (account: AppAccount | null) => Boolean(
@@ -127,6 +124,7 @@ const ConnectCommunicationCenter = dynamic(
   () => import("./connect-communication-center").then((module) => module.ConnectCommunicationCenter),
   { loading: () => <Loader text="Opening Connect…" /> }
 );
+const ConnectInterimSalary = dynamic(() => import("./connect-interim-salary").then(module => module.ConnectInterimSalary), { loading: () => <Loader text="Opening interim salary…" /> });
 
 // Static fallback while the persistent workspace layout initializes.
 export function ConnectShellFallback() {
@@ -179,6 +177,9 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationClearing, setNotificationClearing] = useState(false);
   const [notifications, setNotifications] = useState<ConnectNotification[]>([]);
+  const [dashboardNotices, setDashboardNotices] = useState<ConnectNotification[]>([]);
+  const [openedNotice, setOpenedNotice] = useState<ConnectNotification | null>(null);
+  const notificationAccount = useRef("");
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -266,8 +267,10 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     setNotificationMenu(false);
     setNotifications([]);
     setUnreadNotifications(0);
+    notificationAccount.current = account ? accountKey(account) : "";
+    setNotifications([]); setDashboardNotices([]); setOpenedNotice(null); setUnreadNotifications(0);
     if (account) void loadNotifications(false);
-  }, [account?.id, account?.profileType]);
+  }, [account?.id, account?.profileType, account?.companyId]);
   useEffect(() => {
     if (!account || isWorkforceWorkspace(account) || isManagerAccount(account) || account.pageAccess?.includes("approvals")) return;
     const key = accountKey(account);
@@ -392,6 +395,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   }
   async function loadNotifications(showPanel = true) {
     if (!account) return;
+    const requestedAccount = accountKey(account);
     if (showPanel) {
       setNotificationMenu((current) => !current);
       setProfileMenu(false);
@@ -403,7 +407,9 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       const response = await fetch(`/api/connect/notifications?${query}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load notifications.");
+      if (notificationAccount.current !== requestedAccount) return;
       setNotifications(payload.notifications ?? []);
+      setDashboardNotices(payload.dashboardNotices ?? []);
       setUnreadNotifications(Number(payload.unreadCount ?? 0));
     } catch (reason) {
       setError(userFacingError(reason, "Unable to load notifications. Please try again."));
@@ -413,7 +419,9 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   }
   async function readNotification(notification: ConnectNotification) {
     if (!account) return;
-    if (!notification.read_at) {
+    const requestedAccount = accountKey(account);
+    if (!notification.read_at && !userPreview) {
+      try {
       const response = await fetch("/api/connect/notifications", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -423,15 +431,26 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
           notificationId: notification.id
         })
       });
-      if (response.ok) {
+      if (response.ok && notificationAccount.current === requestedAccount) {
+        setDashboardNotices((rows) => rows.map((row) => row.id === notification.id ? { ...row, read_at: new Date().toISOString() } : row));
         setNotifications((rows) => rows.map((row) => row.id === notification.id
           ? { ...row, read_at: new Date().toISOString() }
           : row));
         setUnreadNotifications((count) => Math.max(0, count - 1));
       }
+      } catch { /* A read-receipt failure must not prevent opening the notice. */ }
     }
+    if (notificationAccount.current !== requestedAccount) return;
+    if (notification.data?.openNotice === true) {
+      setNotificationMenu(false);
+      setOpenedNotice(notification);
+      return;
+    }
+    navigateNotification(notification);
+  }
+  function navigateNotification(notification: ConnectNotification) {
     const destination = (notification.route === "communication_center" ? "connect" : notification.route) as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "documents", "connect", "approvals", "requests", "advances", "earnings", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "performance", "settings"].includes(destination)) {
+    if (destination && ["dashboard", "profile", "documents", "salary", "connect", "approvals", "requests", "advances", "earnings", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "performance", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
     } else if (destination) {
@@ -628,6 +647,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       (next !== "profile" || allowed(account, "profile") || (account.activationOnly && !active(account))) &&
       (next !== "settings" || allowed(account, "settings")) &&
       (next !== "documents" || (allowed(account, "documents") && sharedSelfService(account))) &&
+      (next !== "salary" || canViewInterimSalary(account)) &&
       (next !== "requests" || peopleSelfService(account)) &&
       (next !== "approvals" || approvalAccess !== "denied") &&
       (next !== "advances" || (allowed(account, "advances") && sharedSelfService(account))) &&
@@ -648,6 +668,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       if (pathname !== "/settings") router.replace(urlFor("settings"));
       return;
     }
+    if (next === "salary") setPaymentsExpanded(true);
     setStep(next === "wfh" ? leaveRouteState(next).screen : next);
     const destination = routeForStep[next];
     if (destination && pathname !== destination) router.push(urlFor(next));
@@ -680,7 +701,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   // `work` is a Workforce-only screen, but it still uses the same authenticated
   // shell. Omitting it here made a valid session render the sign-in artwork
   // (and no login controls) whenever a user opened Work schedule.
-  const loggedIn = ["accounts","activation","dashboard","profile","documents","connect","approvals","requests","payments","work","advances","earnings","refer","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
+  const loggedIn = ["accounts","activation","dashboard","profile","documents","salary","connect","approvals","requests","payments","work","advances","earnings","refer","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
   useEffect(() => {
     if (!loggedIn || checking || canPreviewUsers) return;
     const controller = new AbortController();
@@ -694,6 +715,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     dashboard: "Today",
     profile: "My profile",
     documents: "Documents",
+    salary: "Interim salary",
     connect: "Connect",
     approvals: "Approvals",
     requests: "My requests",
@@ -753,7 +775,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
           <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore />Connect</button>
           {peopleSelfService(account) ? <button aria-current={step === "requests" ? "page" : undefined} className={step === "requests" ? "active" : ""} onClick={() => open("requests")}><ClipboardList />My Requests</button> : null}
           {(approvalAccess === "allowed") ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
-          {sharedSelfService(account) && (allowed(account, "advances") || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "reimbursements" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button> : null}
+          {sharedSelfService(account) && (canViewInterimSalary(account) || allowed(account, "advances") || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "salary" || step === "advances" || step === "reimbursements" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button> : null}
+          {canViewInterimSalary(account) && paymentsExpanded ? <button aria-current={step === "salary" ? "page" : undefined} className={`desktop-subitem${step === "salary" ? " active" : ""}`} onClick={() => open("salary")}><IndianRupee />Interim salary</button> : null}
           {sharedSelfService(account) && allowed(account, "advances") && paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
           {peopleSelfService(account) && allowed(account, "reimbursements") && paymentsExpanded ? <button aria-current={step === "reimbursements" ? "page" : undefined} className={`desktop-subitem${step === "reimbursements" ? " active" : ""}`} onClick={() => open("reimbursements")}><ReceiptText />Expense requests</button> : null}
           {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
@@ -811,7 +834,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
           <button onClick={() => open("connect")}><MessageCircleMore />Connect<ChevronRight /></button>
           {peopleSelfService(account) ? <button onClick={() => open("requests")}><ClipboardList />My Requests<ChevronRight /></button> : null}
           {(approvalAccess === "allowed") ? <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button> : null}
-          {sharedSelfService(account) && (allowed(account, "advances") || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button> : null}
+          {sharedSelfService(account) && (canViewInterimSalary(account) || allowed(account, "advances") || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button> : null}
+          {canViewInterimSalary(account) && paymentsExpanded ? <button className="subitem" onClick={() => open("salary")}><span />Interim salary<ChevronRight /></button> : null}
           {sharedSelfService(account) && allowed(account, "advances") && paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
           {peopleSelfService(account) && allowed(account, "reimbursements") && paymentsExpanded ? <button className="subitem" onClick={() => open("reimbursements")}><span />Expense requests<ChevronRight /></button> : null}
           {allowed(account, "attendance") ? <button onClick={() => open("attendance")}><Fingerprint />Attendance<ChevronRight /></button> : null}
@@ -856,12 +880,15 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       ) : null}
       {!userPreview && account ? <ConnectNativeBridge account={account} /> : null}
       <PullToRefresh />
+      {step === "dashboard" && account && peopleSelfService(account) ? <ConnectNoticeCards notices={visibleDashboardNotices(dashboardNotices)} onOpen={notice => void readNotification(notice)} /> : null}
+      {openedNotice ? <ConnectNoticeDialog notice={openedNotice} onClose={() => setOpenedNotice(null)} onContinue={() => { navigateNotification(openedNotice); setOpenedNotice(null); }} /> : null}
       {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} />}</ConnectBetaJourneyShell> : null}
       {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && sharedSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
+      {step === "salary" && account && canViewInterimSalary(account) ? <ConnectInterimSalary key={accountKey(account)} account={account} onDocuments={() => open("documents")} onAttendance={allowed(account, "attendance") ? () => open("attendance") : undefined} /> : null}
       {step === "connect" && account && isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
       {step === "connect" && account && !isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
       {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import { visibleDashboardNotices } from "@/lib/dashboard-notices";
 
 function setupMessage(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? "");
@@ -39,6 +40,17 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false })
       .limit(50);
     if (result.error) throw result.error;
+
+    // Fetch pinned notices separately so ordinary punch notifications cannot push
+    // an active announcement out of the latest-50 notification window.
+    const noticesResult = await supabaseAdmin.from("mob_app_notifications")
+      .select("id,event_code,title,body,route,data,created_at,read_at")
+      .eq("company_id", account.companyId).eq("recipient_profile_type", account.profileType)
+      .eq("recipient_account_id", account.id).is("archived_at", null)
+      .contains("data", { showOnDashboard: true })
+      .gt("data->>dashboardUntil", new Date().toISOString())
+      .order("created_at", { ascending: false }).limit(5);
+    if (noticesResult.error) throw noticesResult.error;
 
     const rows = result.data ?? [];
     const requestIds = [...new Set(rows.flatMap((row) => {
@@ -97,8 +109,9 @@ export async function GET(request: Request) {
     const notifications = rows.filter((row) => !staleIds.has(row.id));
     return NextResponse.json({
       notifications,
+      dashboardNotices: visibleDashboardNotices(noticesResult.data ?? []),
       unreadCount: notifications.filter((row) => !row.read_at).length
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return errorResponse(error);
   }

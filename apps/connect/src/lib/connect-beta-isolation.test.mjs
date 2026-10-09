@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 import ts from 'typescript';
 import * as profiles from './workforce-profiles.ts';
-import { requiredDropxOnePageCodes } from './dropx-one-pages.ts';
+import { peopleDocumentsAvailable, requiredDropxOnePageCodes } from './dropx-one-pages.ts';
 
 const realRequire = createRequire(import.meta.url);
 const mobile = '8086403828';
@@ -54,7 +54,7 @@ function fixture({ beta = false, pilotError = null, workforce = [normal('ordinar
     '@/lib/connect-otp':{normalizeMobile: v=>String(v)},
     '@/lib/india-date':{todayInIndia:()=> '2026-10-07'},
     '@/lib/supabase-admin':{supabaseAdmin:db}, '@/lib/workforce-profiles':profiles,
-    '@/lib/dropx-one-pages':{requiredDropxOnePageCodes},
+    '@/lib/dropx-one-pages':{peopleDocumentsAvailable,requiredDropxOnePageCodes},
     './connect-wfh-access':{connectWfhEligible:()=>false,loadConnectWfhPolicies:async()=>new Map()},
     './connect-business-trip-access':{connectBusinessTripEligible:()=>false,loadConnectBusinessTripPolicies:async()=>new Map()},
     './connect-preview':{resolveConnectPreview:async()=>null},
