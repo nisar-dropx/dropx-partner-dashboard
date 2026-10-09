@@ -2,6 +2,7 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { authUnreachableMessage } from "@/lib/auth-reachable";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 function authOriginFromHeaders(requestHeaders: Headers) {
@@ -87,6 +88,9 @@ export async function signInWithGoogle(formData: FormData) {
   if (error || !data.url) {
     redirect(`/login?error=${encodeURIComponent(error?.message ?? "Unable to start Google login")}`);
   }
+
+  const unreachable = await authUnreachableMessage();
+  if (unreachable) redirect(`/login?error=${encodeURIComponent(unreachable)}`);
 
   redirect(data.url);
 }

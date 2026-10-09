@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authUnreachableMessage } from "@/lib/auth-reachable";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -40,6 +41,12 @@ export async function GET(request: NextRequest) {
 
   if (error || !data.url) {
     loginUrl.searchParams.set("error", error?.message ?? "Unable to start Google login.");
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const unreachable = await authUnreachableMessage();
+  if (unreachable) {
+    loginUrl.searchParams.set("error", unreachable);
     return NextResponse.redirect(loginUrl);
   }
 
