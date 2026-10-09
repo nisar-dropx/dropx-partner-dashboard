@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assertOnboardingIdentityAllowed } from "./onboarding-identity.ts";
+import { assertOnboardingIdentityAllowed, identityExceptionEventMetadata } from "./onboarding-identity.ts";
 
 const exactMatch = {
   normalizedMobile: "9876543210",
@@ -31,27 +31,14 @@ const otherDesignationMatch = {
   }]
 };
 
-test("Workforce can reuse a mobile number from the same designation", () => {
-  assert.doesNotThrow(() => assertOnboardingIdentityAllowed(exactMatch, {
-    allowDuplicateMobile: true,
-    allowDifferentWorkforceDesignation: true
-  }));
+test("any People ID can reuse a mobile number from the same designation", () => {
+  assert.doesNotThrow(() => assertOnboardingIdentityAllowed(exactMatch));
 });
 
-test("Workforce can reuse a mobile number from another designation", () => {
-  assert.doesNotThrow(() => assertOnboardingIdentityAllowed(otherDesignationMatch, {
-    allowDuplicateMobile: true,
-    allowDifferentWorkforceDesignation: true
-  }));
+test("any People ID can reuse a mobile number from another designation", () => {
+  assert.doesNotThrow(() => assertOnboardingIdentityAllowed(otherDesignationMatch));
 });
 
-test("other registers retain duplicate-mobile protection", () => {
-  assert.throws(() => assertOnboardingIdentityAllowed(exactMatch), /already registered/i);
-  assert.throws(() => assertOnboardingIdentityAllowed(otherDesignationMatch), /already belongs/i);
-});
-
-test("the existing different-Workforce-designation exception remains available", () => {
-  assert.doesNotThrow(() => assertOnboardingIdentityAllowed(otherDesignationMatch, {
-    allowDifferentWorkforceDesignation: true
-  }));
+test("shared mobile numbers do not create lifecycle exception metadata", () => {
+  assert.deepEqual(identityExceptionEventMetadata(otherDesignationMatch), {});
 });
