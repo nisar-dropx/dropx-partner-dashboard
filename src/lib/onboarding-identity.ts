@@ -31,24 +31,9 @@ export function parseOnboardingIdentityEvaluation(value: unknown): OnboardingIde
   };
 }
 
-function existingProfile(match: OnboardingIdentityMatch | undefined) {
-  if (!match) return "an existing profile";
-  const name = match.display_name || "an existing person";
-  const designation = match.designation_name || match.designation_code || "another designation";
-  return `${name} (${designation})`;
-}
-
-export function assertOnboardingIdentityAllowed(evaluation: OnboardingIdentityEvaluation, options: {
-  allowDifferentWorkforceDesignation?: boolean;
-  allowDuplicateMobile?: boolean;
-} = {}) {
-  if (options.allowDuplicateMobile) return;
-  if (evaluation.exactMatches.length) {
-    throw new Error(`This mobile number is already registered to ${existingProfile(evaluation.exactMatches[0])}. Continue the existing profile; the same designation cannot be registered twice.`);
-  }
-  if (evaluation.otherMatches.length && !options.allowDifferentWorkforceDesignation) {
-    throw new Error(`This mobile number already belongs to ${existingProfile(evaluation.otherMatches[0])}. Only a different Workforce engagement can continue, and it requires lifecycle approval.`);
-  }
+export function assertOnboardingIdentityAllowed(evaluation: OnboardingIdentityEvaluation) {
+  // Mobile numbers are contact details and may be shared by independent People IDs.
+  void evaluation;
 }
 
 export async function evaluateOnboardingIdentity({ client, companyId, mobile, designationId, designationName }: {
@@ -71,17 +56,6 @@ export async function evaluateOnboardingIdentity({ client, companyId, mobile, de
 }
 
 export function identityExceptionEventMetadata(evaluation: OnboardingIdentityEvaluation) {
-  if (!evaluation.otherMatches.length) return {};
-  return {
-    identity_exception_required: true,
-    identity_exception_reason: "existing_person_different_designation",
-    existing_profiles: evaluation.otherMatches.map((match) => ({
-      source_type: match.source_type,
-      source_id: match.source_id,
-      display_name: match.display_name,
-      designation_code: match.designation_code,
-      designation_name: match.designation_name,
-      profile_status: match.profile_status
-    }))
-  };
+  void evaluation;
+  return {};
 }

@@ -5,11 +5,9 @@ import {
   PAYMENT_RECOVERY_IMPORT_HEADERS,
   PAYMENT_RECOVERY_IMPORT_MAX_ROWS,
   buildPaymentRecoveryImportTemplate,
-  normalizePaymentRecoveryPersonId,
   normalizePaymentRecoveryTid,
   parsePaymentRecoveryWorkbook,
-  paymentRecoveryWorkbookSha256,
-  splitPaymentRecoveryAmountEqually
+  paymentRecoveryWorkbookSha256
 } from "./payment-recovery-import.ts";
 
 function recoveryRow(overrides = {}) {
@@ -17,9 +15,7 @@ function recoveryRow(overrides = {}) {
     tid: "TID-000001",
     location: "KOZA",
     debitMonth: "Jul-26",
-    debitAmount: 2000,
-    recoveryMethod: "PAYOUT_DEDUCTION",
-    recoveryIds: "DROPX1001",
+    value: 2000,
     providerReference: "",
     reason: "Shipment loss",
     remark: "",
@@ -29,9 +25,7 @@ function recoveryRow(overrides = {}) {
     row.tid,
     row.location,
     row.debitMonth,
-    row.debitAmount,
-    row.recoveryMethod,
-    row.recoveryIds,
+    row.value,
     row.providerReference,
     row.reason,
     row.remark
@@ -44,21 +38,19 @@ function workbookBytes(rows, headers = PAYMENT_RECOVERY_IMPORT_HEADERS) {
   return new Uint8Array(XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }));
 }
 
-test("parses payout deductions and provider disputes with a stable file hash", () => {
+test("parses unconfigured TID recovery cases with a stable file hash", () => {
   const bytes = workbookBytes([
     recoveryRow({
       tid: " tid-000001 ",
       location: " koza ",
       debitMonth: "jUl-26",
-      recoveryIds: " dropx1002 ; DROPX1001\nDROPX1003 ",
-      debitAmount: "₹2,000.50"
+      value: "₹2,000.50"
     }),
     recoveryRow({
       tid: "TID-000002",
       debitMonth: "OCT-26",
-      debitAmount: 1500,
-      recoveryMethod: "POST_INVOICE_DISPUTE",
-      recoveryIds: ""
+      value: 1500,
+      providerReference: "PROVIDER-DEBIT-002"
     })
   ]);
   const parsed = parsePaymentRecoveryWorkbook(bytes);
@@ -69,27 +61,24 @@ test("parses payout deductions and provider disputes with a stable file hash", (
   assert.equal(parsed.rows[0].normalizedTid, "TID-000001");
   assert.equal(parsed.rows[0].locationCode, "KOZA");
   assert.equal(parsed.rows[0].debitMonth, "2026-07-01");
-  assert.equal(parsed.rows[0].debitAmount, 2000.5);
-  assert.deepEqual(parsed.rows[0].recoveryIds, ["DROPX1002", "DROPX1001", "DROPX1003"]);
-  assert.equal(parsed.rows[1].recoveryMethod, "POST_INVOICE_DISPUTE");
+  assert.equal(parsed.rows[0].value, 2000.5);
+  assert.equal(parsed.rows[0].providerReference, "");
   assert.equal(parsed.rows[1].debitMonth, "2026-10-01");
-  assert.deepEqual(parsed.rows[1].recoveryIds, []);
+  assert.equal(parsed.rows[1].providerReference, "PROVIDER-DEBIT-002");
+  assert.deepEqual(Object.keys(parsed.rows[0]), [
+    "rowNumber",
+    "tid",
+    "normalizedTid",
+    "locationCode",
+    "debitMonth",
+    "value",
+    "providerReference",
+    "reason",
+    "remark"
+  ]);
   assert.equal(parsed.fileSha256, paymentRecoveryWorkbookSha256(bytes));
   assert.match(parsed.fileSha256, /^[a-f0-9]{64}$/);
   assert.equal(normalizePaymentRecoveryTid(" tid 1 "), "TID1");
-  assert.equal(normalizePaymentRecoveryPersonId(" dropx 1001 "), "DROPX1001");
-});
-
-test("splits an amount equally without losing a paise", () => {
-  assert.deepEqual(splitPaymentRecoveryAmountEqually(100, ["dropx3", "DROPX1", "dropx2"]), [
-    { dropxId: "DROPX1", amount: 33.34 },
-    { dropxId: "DROPX2", amount: 33.33 },
-    { dropxId: "DROPX3", amount: 33.33 }
-  ]);
-  assert.throws(
-    () => splitPaymentRecoveryAmountEqually(0.01, ["DROPX1", "DROPX2"]),
-    /at least one paise/i
-  );
 });
 
 test("normalizes genuine Excel date cells to the first day of their month", () => {
@@ -110,24 +99,6 @@ test("normalizes genuine Excel date cells to the first day of their month", () =
   ]));
   assert.deepEqual(typed.issues, []);
   assert.equal(typed.rows[0].debitMonth, "2026-10-01");
-});
-
-test("enforces recovery-method target rules and non-zero equal allocations", () => {
-  const parsed = parsePaymentRecoveryWorkbook(workbookBytes([
-    recoveryRow({ tid: "TID-1", recoveryIds: "" }),
-    recoveryRow({ tid: "TID-2", recoveryMethod: "POST_INVOICE_DISPUTE", recoveryIds: "DROPX1" }),
-    recoveryRow({ tid: "TID-3", recoveryMethod: "UNKNOWN", recoveryIds: "DROPX1" }),
-    recoveryRow({ tid: "TID-4", debitAmount: 0.01, recoveryIds: "DROPX1,DROPX2" }),
-    recoveryRow({ tid: "TID-5", recoveryIds: "DROPX1; dropx1" })
-  ]));
-  const messages = parsed.issues.map((issue) => issue.message).join("\n");
-
-  assert.equal(parsed.canCommit, false);
-  assert.match(messages, /RECOVERY_IDS is required for PAYOUT_DEDUCTION/i);
-  assert.match(messages, /must be blank for POST_INVOICE_DISPUTE/i);
-  assert.match(messages, /must be PAYOUT_DEDUCTION or POST_INVOICE_DISPUTE/i);
-  assert.match(messages, /at least one paise for every Recovery ID/i);
-  assert.match(messages, /lists DROPX1 more than once/i);
 });
 
 test("rejects unsafe numeric TIDs, scientific notation and formulas", () => {
@@ -153,28 +124,46 @@ test("rejects unsafe numeric TIDs, scientific notation and formulas", () => {
 
 test("requires a location and strict MMM-YY month text", () => {
   const parsed = parsePaymentRecoveryWorkbook(workbookBytes([
-    recoveryRow({ tid: "TID-DUP", debitMonth: "2026-10-01", debitAmount: 0 }),
-    recoveryRow({ tid: " tid-dup ", location: "", debitMonth: "01/10/2026", debitAmount: 12.345 })
+    recoveryRow({ tid: "TID-DUP", debitMonth: "2026-10-01", value: 0 }),
+    recoveryRow({ tid: " tid-dup ", location: "", debitMonth: "01/10/2026", value: 12.345 })
   ]));
   const messages = parsed.issues.map((issue) => issue.message).join("\n");
 
   assert.equal(parsed.canCommit, false);
   assert.match(messages, /LOCATION is required/i);
   assert.match(messages, /DEBIT_MONTH must be a real Excel date or text written exactly as MMM-YY/i);
-  assert.match(messages, /DEBIT_AMOUNT must be greater than zero/i);
+  assert.match(messages, /VALUE must be greater than zero/i);
   assert.match(messages, /at most two decimal places/i);
   assert.match(messages, /TID duplicates row 2/i);
 });
 
-test("requires the exact header contract and reports obsolete columns", () => {
+test("requires the four core headers, permits omitted optional columns and reports obsolete columns", () => {
+  const minimal = parsePaymentRecoveryWorkbook(workbookBytes([
+    recoveryRow().slice(0, 4)
+  ], ["TID", "LOCATION", "DEBIT_MONTH", "VALUE"]));
+  assert.equal(minimal.canCommit, true);
+  assert.equal(minimal.rows[0].providerReference, "");
+  assert.equal(minimal.rows[0].reason, "");
+  assert.equal(minimal.rows[0].remark, "");
+
   assert.throws(() => parsePaymentRecoveryWorkbook(workbookBytes([
-    recoveryRow()
-  ], PAYMENT_RECOVERY_IMPORT_HEADERS.filter((header) => header !== "PROVIDER_REFERENCE"))), /PROVIDER_REFERENCE/i);
+    recoveryRow().slice(0, 3)
+  ], ["TID", "LOCATION", "DEBIT_MONTH"])), /VALUE/i);
 
   const parsed = parsePaymentRecoveryWorkbook(workbookBytes([
-    [recoveryRow()[0], "AMAZON", ...recoveryRow().slice(1)]
-  ], ["TID", "PROVIDER_CODE", ...PAYMENT_RECOVERY_IMPORT_HEADERS.slice(1)]));
-  assert.match(parsed.issues.map((issue) => issue.message).join("\n"), /Unknown column “PROVIDER_CODE”/i);
+    [...recoveryRow(), "AMAZON", 2000, "PAYOUT_DEDUCTION", "DROPX1001"]
+  ], [
+    ...PAYMENT_RECOVERY_IMPORT_HEADERS,
+    "PROVIDER_CODE",
+    "DEBIT_AMOUNT",
+    "RECOVERY_METHOD",
+    "RECOVERY_IDS"
+  ]));
+  const obsoleteMessages = parsed.issues.map((issue) => issue.message).join("\n");
+  assert.match(obsoleteMessages, /Unknown column “PROVIDER_CODE”/i);
+  assert.match(obsoleteMessages, /Unknown column “DEBIT_AMOUNT”/i);
+  assert.match(obsoleteMessages, /Unknown column “RECOVERY_METHOD”/i);
+  assert.match(obsoleteMessages, /Unknown column “RECOVERY_IDS”/i);
 });
 
 test("limits one workbook to 10,000 populated TIDs", () => {
@@ -187,34 +176,30 @@ test("limits one workbook to 10,000 populated TIDs", () => {
   );
 });
 
-test("builds the current four-sheet template and formats identifier inputs as text", () => {
+test("builds the current three-sheet template with the exact unconfigured-case headers", () => {
   const bytes = buildPaymentRecoveryImportTemplate({ exampleMonth: "2026-10-01" });
   const workbook = XLSX.read(bytes, { type: "array", cellStyles: true, cellDates: true });
-  assert.deepEqual(workbook.SheetNames, ["Upload", "Examples", "Valid values", "Instructions"]);
+  assert.deepEqual(workbook.SheetNames, ["Upload", "Examples", "Instructions"]);
 
   const upload = XLSX.utils.sheet_to_json(workbook.Sheets.Upload, { header: 1, defval: "" });
   assert.deepEqual(upload[0], [...PAYMENT_RECOVERY_IMPORT_HEADERS]);
   assert.equal(workbook.Sheets.Upload.A2.z, "@");
   assert.equal(workbook.Sheets.Upload.C2.z, "mmm-yy");
-  assert.equal(workbook.Sheets.Upload.F2.z, "@");
 
   const examples = XLSX.utils.sheet_to_json(workbook.Sheets.Examples, { header: 1, defval: "", raw: false });
   assert.match(examples[0][0], /EXAMPLES ONLY/i);
   assert.deepEqual(examples[1], [...PAYMENT_RECOVERY_IMPORT_HEADERS]);
   assert.equal(examples[2][2], "Oct-26");
   assert.equal(workbook.Sheets.Examples.C3.z, "mmm-yy");
-  assert.equal(examples[2][4], "PAYOUT_DEDUCTION");
-  assert.equal(examples[3][4], "POST_INVOICE_DISPUTE");
-
-  const values = XLSX.utils.sheet_to_json(workbook.Sheets["Valid values"], { header: 1, defval: "" });
-  assert.deepEqual(values.slice(1).map((row) => row[0]), ["PAYOUT_DEDUCTION", "POST_INVOICE_DISPUTE"]);
+  assert.equal(examples[2][4], "");
+  assert.equal(examples[3][4], "PROVIDER-DEBIT-002");
 
   const instructions = XLSX.utils.sheet_to_json(workbook.Sheets.Instructions, { header: 1, defval: "" });
   const instructionText = instructions.flat().join("\n");
   assert.match(instructionText, /MMM-YY, for example Jul-26/i);
   assert.match(instructionText, /provider is identified automatically from this location/i);
   assert.match(instructionText, /PROVIDER_REFERENCE\nOptional/i);
-  assert.match(instructionText, /split equally/i);
   assert.match(instructionText, /scientific notation and formulas are rejected/i);
-  assert.match(instructionText, /does not silently deduct a payout/i);
+  assert.match(instructionText, /creates an unconfigured TID recovery case/i);
+  assert.doesNotMatch(instructionText, /RECOVERY_METHOD|RECOVERY_IDS|DEBIT_AMOUNT/i);
 });
