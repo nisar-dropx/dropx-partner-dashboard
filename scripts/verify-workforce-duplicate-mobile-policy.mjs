@@ -4,7 +4,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const actions = read("src/app/field-executive/actions.ts");
 const contacts = read("src/lib/workforce-contact-availability.ts");
 const identity = read("src/lib/onboarding-identity.ts");
-const migration = read("supabase/migrations/20261008184202_allow_shared_mobile_numbers_across_people.sql");
+const migration = read("supabase/migrations/20261009015557_allow_shared_mobile_numbers_across_people.sql");
 const opsPage = read("src/components/ops-work-force-register-page.tsx");
 const sharedPage = read("src/components/field-executive-page-content.tsx");
 

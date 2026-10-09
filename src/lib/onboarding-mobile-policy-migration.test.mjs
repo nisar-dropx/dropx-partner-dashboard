@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { PGlite } from "@electric-sql/pglite";
 
-const migrationUrl = new URL("../../supabase/migrations/20261008184202_allow_shared_mobile_numbers_across_people.sql", import.meta.url);
+const migrationUrl = new URL("../../supabase/migrations/20261009015557_allow_shared_mobile_numbers_across_people.sql", import.meta.url);
 const registers = ["employees", "contractors", "vendors", "workforce_helpers"];
 
 test("the People trigger allows shared mobiles without changing other identity fields", async () => {
