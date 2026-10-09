@@ -4,8 +4,10 @@ import { approvalEmailCard } from "@/lib/approval-email-card";
 import { deliverPaymentMail, loadPaymentMailPolicy } from "@/lib/payment-mail-delivery";
 import { excludeFinanceRecipients } from "@/lib/payment-email-recipient-policy";
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
+import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 
 const PAYMENT_APPROVALS_URL = "https://ops.dropxlogistics.com/payments/approvals";
+const PAYMENT_REQUESTS_URL = "https://ops.dropxlogistics.com/payments/requests";
 
 function paymentEmailHtml(eventType: PaymentEmailEventType, values: Record<string, string>, reminderNumber?: number, reminderInterval = 90) {
   const heading = `${values.request_no} · ${values.requester_name}`;
@@ -87,6 +89,8 @@ type TemplateRow = {
 export type PaymentEmailResult =
   | { sent: true; cc: string[]; to: string[] }
   | { sent: false; reason: string };
+
+export type PaymentLocationEmailEventType = "payment_details_required" | "payment_processed";
 
 const defaultTemplates: Record<PaymentEmailEventType, Pick<TemplateRow, "subject_template" | "body_template" | "to_recipients" | "cc_recipients">> = {
   payment_request: {
@@ -533,6 +537,129 @@ export async function sendPaymentNotification({
   } catch (error) {
     console.error("Payment email notification failed", error);
     return skipped(error instanceof Error ? error.message : "Payment email notification failed.");
+  }
+}
+
+/**
+ * Station-facing payment lifecycle email. Both events use the shared
+ * station/month thread in deliverPaymentMail, so every request and update for
+ * one location stays in one conversation for the calendar month.
+ */
+export async function sendPaymentLocationNotification({
+  companyId,
+  eventType,
+  requestId
+}: {
+  companyId: string;
+  eventType: PaymentLocationEmailEventType;
+  requestId: string;
+}): Promise<PaymentEmailResult> {
+  try {
+    if (!supabaseAdmin) return skipped("Supabase service role key is not configured.");
+    const { data: request, error: requestError } = await supabaseAdmin
+      .from("payment_requests")
+      .select(`
+        id, request_no, location_id, location_code, amount, amount_requested,
+        payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name,
+        status, approval_status, utr_cin, bank_processing_remarks,
+        details_required_email_sent_at, processed_email_sent_at,
+        email_send_count, email_root_message_id, email_last_message_id,
+        current_approver_user_id, payment_heads ( name, code )
+      `)
+      .eq("company_id", companyId)
+      .eq("id", requestId)
+      .maybeSingle();
+    if (requestError || !request) throw new Error(requestError?.message ?? "Payment request not found.");
+    if (!request.location_id) return skipped("Payment location is missing.");
+    if (eventType === "payment_details_required") {
+      if (String(request.approval_status ?? "").toUpperCase() !== "FINAL_APPROVED") {
+        return skipped("Payment details are not currently required.");
+      }
+      if (hasSubmittedPaymentDetails(request)) return skipped("Payment details have already been submitted.");
+      if (request.details_required_email_sent_at) return skipped("Payment details email was already sent.");
+    } else {
+      const processed = String(request.status ?? "").toUpperCase() === "PROCESSED" || String(request.approval_status ?? "").toUpperCase() === "PROCESSED";
+      if (!processed || !clean(request.utr_cin || request.bank_processing_remarks)) return skipped("Payment is not completed with a reference.");
+      if (request.processed_email_sent_at) return skipped("Payment completion email was already sent.");
+    }
+
+    const [{ data: location, error: locationError }, { data: company }] = await Promise.all([
+      supabaseAdmin.from("stations")
+        .select("station_code, station_email")
+        .eq("company_id", companyId)
+        .eq("id", request.location_id)
+        .maybeSingle(),
+      supabaseAdmin.from("companies").select("name").eq("id", companyId).maybeSingle()
+    ]);
+    if (locationError) throw new Error(locationError.message);
+    const stationEmail = normalizeEmail(location?.station_email);
+    if (!stationEmail) return skipped("The location email is not configured.");
+
+    const paymentHead = firstRelation(request.payment_heads);
+    const locationCode = clean(request.location_code || location?.station_code || "-");
+    const amountValue = request.amount ?? request.amount_requested;
+    const amount = amountValue == null ? "-" : `Rs ${Number(amountValue).toLocaleString("en-IN")}`;
+    const requestNo = clean(request.request_no || "-");
+    const paymentHeadName = clean(paymentHead?.name || paymentHead?.code || "-");
+    const companyName = clean(company?.name || "DropX");
+    const paid = eventType === "payment_processed";
+    const reference = clean(request.utr_cin || request.bank_processing_remarks || "-");
+    const heading = `${requestNo} · ${locationCode}`;
+    const body = paid
+      ? `${requestNo} has been paid. Amount: ${amount}. UTR/CIN: ${reference}.`
+      : `${requestNo} is finally approved. Submit the actual payable amount and bank, UPI or payment portal details in OpsPulse so Finance can process it.`;
+    const html = approvalEmailCard({
+      eyebrow: paid ? "PAYMENT COMPLETED" : "PAYMENT DETAILS REQUIRED",
+      heading,
+      introduction: paid
+        ? `${companyName} has completed this payment. UTR/CIN: ${reference}.`
+        : "This request is finally approved and is waiting for the location to submit payout details.",
+      infoLabel: paymentHeadName,
+      infoValue: `${amount} · ${locationCode}`,
+      ctaLabel: paid ? "View payment" : "Submit payment details",
+      ctaUrl: PAYMENT_REQUESTS_URL,
+      steps: paid ? [] : [
+        `Open OpsPulse: ${PAYMENT_REQUESTS_URL}`,
+        `Open request ${requestNo}.`,
+        "Enter the actual amount and the required bank, UPI or portal details, then submit."
+      ],
+      footer: paid
+        ? `Payment reference: ${reference}. Keep this email for reconciliation.`
+        : "This message is part of the location's monthly payment email thread."
+    });
+    const messageId = `<dropx.payment.${request.id}.${(request.email_send_count ?? 0) + 1}@partner.dropxlogistics.com>`;
+    const result = await deliverPaymentMail({
+      companyId,
+      requestId,
+      expectedApprover: request.current_approver_user_id,
+      eventType,
+      mail: {
+        body,
+        html,
+        companyId,
+        subject: paid ? `Payment completed · ${requestNo}` : `Payment details required · ${requestNo}`,
+        to: [stationEmail],
+        cc: [],
+        messageId,
+        inReplyTo: request.email_last_message_id ?? undefined,
+        references: request.email_last_message_id
+          ? [...new Set([request.email_root_message_id, request.email_last_message_id].filter((id): id is string => Boolean(id)))]
+          : undefined
+      }
+    });
+    if (result.sent) {
+      const sentColumn = eventType === "payment_processed" ? "processed_email_sent_at" : "details_required_email_sent_at";
+      const update = await supabaseAdmin.from("payment_requests")
+        .update({ [sentColumn]: new Date().toISOString() })
+        .eq("company_id", companyId)
+        .eq("id", requestId)
+        .is(sentColumn, null);
+      if (update.error) throw new Error(update.error.message);
+    }
+    return result;
+  } catch (error) {
+    console.error("Payment location email failed", error);
+    return skipped(error instanceof Error ? error.message : "Payment location email failed.");
   }
 }
 

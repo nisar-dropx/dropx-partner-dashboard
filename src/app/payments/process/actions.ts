@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { sendPaymentNotification } from "@/lib/payment-email-notifications";
+import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { notifyReimbursementPayment } from "@/lib/reimbursement-payment-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { insertPaymentApprovalLog } from "../approvals/actions";
@@ -303,6 +303,7 @@ export async function updatePaymentProcessStatus(
         comments: `Processed. UTR/CIN: ${remarks}`
       }, companyId);
       await notifyReimbursementPayment({ companyId, paymentRequestId: requestId, status: "paid", remarks, actorUserId: authorization.userId });
+      await sendPaymentLocationNotification({ companyId, eventType: "payment_processed", requestId });
       revalidatePath("/payments/process");
       revalidatePath("/payments/report");
       return {
@@ -464,6 +465,7 @@ export async function finalizePaymentProcess(formData: FormData) {
           comments: row.utrCin ? `Processed by bank. UTR/CIN: ${row.utrCin}` : "Processed by bank."
         }, companyId);
         await notifyReimbursementPayment({ companyId, paymentRequestId: request.id, status: "paid", remarks: row.utrCin || row.remarks || null, actorUserId: authorization.userId });
+        await sendPaymentLocationNotification({ companyId, eventType: "payment_processed", requestId: request.id });
         paidCount += 1;
       } else if (status === "CANCELLED" || status === "CANCELED") {
         const remarks = `Payment Failed - ${row.remarks || "Cancelled by bank"}`;
