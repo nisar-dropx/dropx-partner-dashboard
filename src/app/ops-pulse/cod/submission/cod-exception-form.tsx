@@ -20,7 +20,7 @@ export function CodExceptionForm({stations,date,canAdd,canEdit,existing}:{statio
     <label className="span-2">Exact subject of the email already sent<input className="field" name="email_subject" required maxLength={250} defaultValue={existing?.email_subject||''}/></label>
     <label>Sent at (IST)<input className="field" name="email_sent_at" type="datetime-local" required defaultValue={existing?.email_sent_at?new Date(Date.parse(existing.email_sent_at)+19800000).toISOString().slice(0,16):undefined}/></label>
     <label className="span-2">Mandatory CC<input className="field" readOnly value="ct@dropxlogistics.com"/></label>
-    <label className="span-2" style={{display:'flex',gap:10,alignItems:'center'}}><input name="sent_confirmed" type="checkbox" value="yes" required/>I confirm this email was sent from the selected station’s registered email with ct@dropxlogistics.com in CC.</label>
+    <label className="span-2" style={{display:'flex',gap:10,alignItems:'center'}}><input name="sent_confirmed" type="checkbox" value="yes" required/>I confirm this email was sent from the configured station email (parent station email for XPT) with ct@dropxlogistics.com in CC.</label>
    </>}
    {state?.error?<p className="span-2" role="alert" style={{color:'#b91c1c'}}>{state.error}</p>:null}{state?.ok?<p className="span-2" role="status">{state.notice}</p>:null}
    <div className="form-actions span-2"><SubmitButton className="button primary" disabled={!allowed}>Save {kind} update</SubmitButton><button type="button" className="button secondary" onClick={()=>setOpen(false)}>Close</button></div>

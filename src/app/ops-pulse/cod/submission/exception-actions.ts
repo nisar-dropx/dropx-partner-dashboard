@@ -22,8 +22,17 @@ export async function recordCodException(_prev:ExceptionState|null,form:FormData
   if(!['No Cash','Banker Not Reported'].includes(kind))throw new Error('Choose a valid update.');
   if(reason.length<3||reason.length>2000)throw new Error('Enter a reason between 3 and 2,000 characters.');
   if(!auth.hasAllLocationAccess&&!auth.locationScopeIds.includes(location))throw new Error('Station access denied.');
-  const station=await supabaseAdmin.from('stations').select('id,station_code,station_name,station_email,providers(code,name),location_models(code,name)').eq('company_id',company).eq('id',location).eq('is_active',true).maybeSingle();
+  const station=await supabaseAdmin.from('stations').select('id,station_code,station_name,station_email,parent_station_id,providers(code,name),location_models(code,name)').eq('company_id',company).eq('id',location).eq('is_active',true).maybeSingle();
   if(station.error||!station.data||!inferFormTypeFromLocation(station.data))throw new Error('Choose an active COD station.');
+  const modelRelation=station.data.location_models as {code?:string|null}|{code?:string|null}[]|null;
+  const modelCode=String((Array.isArray(modelRelation)?modelRelation[0]:modelRelation)?.code||'').trim().toUpperCase();
+  let configuredSender=String(station.data.station_email||'').trim().toLowerCase();
+  if(kind==='Banker Not Reported'&&modelCode==='XPT'){
+   if(!station.data.parent_station_id)throw new Error('This XPT needs a parent station in Location Master before Banker Not Reported can be saved.');
+   const parent=await supabaseAdmin.from('stations').select('station_email').eq('company_id',company).eq('id',station.data.parent_station_id).eq('is_active',true).maybeSingle();
+   if(parent.error||!parent.data)throw new Error('The active parent station for this XPT could not be loaded.');
+   configuredSender=String(parent.data.station_email||'').trim().toLowerCase();
+  }
   let prior:CodException|null=null;
   if(existingId){const result=await supabaseAdmin.from('cod_daily_exceptions').select('*').eq('company_id',company).eq('id',existingId).eq('location_id',location).eq('report_date',date).maybeSingle();if(result.error||!result.data)throw new Error('Update not found.');prior=result.data as CodException;if(prior.version!==Number(form.get('version')))throw new Error('This update changed. Reload before editing.');}
   const id=existingId||randomUUID();
@@ -39,12 +48,12 @@ export async function recordCodException(_prev:ExceptionState|null,form:FormData
    if(!proof)throw new Error('Upload the ERP screenshot showing no cash.');
   }
   const subject=kind==='Banker Not Reported'?String(form.get('email_subject')||'').trim():null;
-  const senderAddress=kind==='Banker Not Reported'?String(station.data.station_email||'').trim().toLowerCase():'';
+  const senderAddress=kind==='Banker Not Reported'?configuredSender:'';
   const sent=String(form.get('email_sent_at')||'');
   let sentAt:string|null=null;
   if(kind==='Banker Not Reported'){
    if(!subject||subject.length<3||subject.length>250||/[\r\n]/.test(subject))throw new Error('Enter the exact email subject (3–250 characters).');
-   if(!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@dropxlogistics\.com$/i.test(senderAddress))throw new Error('The selected station needs one valid DropX email in Location Master before this update can be saved.');
+   if(!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@dropxlogistics\.com$/i.test(senderAddress))throw new Error(modelCode==='XPT'?'The XPT parent station needs one valid DropX email in Location Master before this update can be saved.':'The selected station needs one valid DropX email in Location Master before this update can be saved.');
    if(form.get('sent_confirmed')!=='yes')throw new Error('Confirm the email was sent from the station address with Control Tower in CC.');
    const timestamp=new Date(sent+'+05:30');
    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(sent)||!Number.isFinite(timestamp.getTime())||timestamp.getTime()>Date.now()||sent.slice(0,10)!==date)throw new Error('Enter the actual sent time in IST on the selected report date.');
