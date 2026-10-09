@@ -12,16 +12,6 @@ type SidebarNavProps = {
 };
 
 export function SidebarNav({ active, items }: SidebarNavProps) {
-  const hasMappingItem=items.some(item=>item.code==='fleet_da_mapping');
-  const [mappingAvailable,setMappingAvailable]=useState(false);
-  // Vehicle eligibility is optional navigation data and never delays the app shell.
-  useEffect(()=>{
-    if(!hasMappingItem)return;
-    const controller=new AbortController();
-    const load=()=>{void fetch('/api/fleet/da-mapping?eligibility=1',{cache:'no-store',signal:controller.signal}).then(r=>r.ok?r.json():{available:false}).then(d=>setMappingAvailable(Boolean(d.available))).catch(()=>{});};
-    load();window.addEventListener('focus',load);
-    return()=>{controller.abort();window.removeEventListener('focus',load);};
-  },[hasMappingItem]);
   const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const submenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [submenuUp, setSubmenuUp] = useState<Record<string, boolean>>({});
@@ -60,7 +50,7 @@ export function SidebarNav({ active, items }: SidebarNavProps) {
   // in the background or repeat its request immediately after a click.
   return (
     <nav className="nav" aria-label="Primary">
-      {items.filter(item=>item.code!=='fleet_da_mapping'||mappingAvailable).map((item) => item.children ? (
+      {items.map((item) => item.children ? (
         <div
           className={`nav-group ${submenuUp[item.label] ? "submenu-up" : ""}`.trim()}
           key={item.label}
