@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveSsaApprovalManager } from "../../../../src/lib/ssa-approval-manager";
 
 // NOTE: This resolver is hand-duplicated in two other places that read the same
 // hr_approval_workflow_routes/designations tables against the shared database:
@@ -295,14 +296,15 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   level3StepName?: string;
   /** When true, missing manager levels are skipped instead of throwing (caller may send to HR). */
   allowMissingApprovers?: boolean;
-}): Promise<{ routeName: string; steps: ConfiguredApprovalStep[]; routeId: string } | null> {
+}): Promise<{ routeName: string; steps: ConfiguredApprovalStep[]; routeId: string; managerPolicy?: "ssa_station_manager" } | null> {
   const asOf = input.asOf ?? indiaToday();
   const worker = await activeWorkerAssignment(input.companyId, input.workerType, input.workerId, asOf);
   const route = await matchingRoute(input.companyId, input.workflowCode, worker.assignment.designation_id, worker.engagement.person_id, worker.assignment.location_id);
   if (!route) return null;
   const maxLevel = input.maxLevel ?? 3;
-  const chain = await reportingChain(input.companyId, worker.assignment.id, asOf);
-  const designationById = await designationLabels(input.companyId, chain.map((item) => item.designationId ?? "").filter(Boolean));
+  const ssaManager = await resolveSsaApprovalManager({ ...input, asOf });
+  const chain = await reportingChain(input.companyId, ssaManager?.assignmentId ?? worker.assignment.id, asOf);
+  const designationById = await designationLabels(input.companyId, [...chain.map((item) => item.designationId ?? ""), route.level_2_designation_id ?? ""].filter(Boolean));
   // Which workflow(s) the "requires HR precheck and finalizes" reorder applies to is
   // admin-configurable from the Approval Workflow Master (per-workflow, not hardcoded
   // to any specific workflow name) — see hr_workflow_applies_hr_precheck_finalize_flag.
@@ -326,7 +328,23 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   let deferredFinalStep: ConfiguredApprovalStep | null = null;
   for (const level of [1, 2, 3] as const) {
     if (level > maxLevel) continue;
+    if (level === 1 && ssaManager) {
+      steps.push({
+        step_name: ssaManager.stepName, approver_user_id: ssaManager.userId,
+        approver_person_id: ssaManager.personId, approver_name: ssaManager.name,
+        route_id: route.id, resolved_via: ssaManager.isAomFallback ? "fallback" : "configured_designation",
+        original_approver_person_id: null, fallback_reason: ssaManager.fallbackReason
+      });
+      excludedPeople.add(ssaManager.personId);
+      continue;
+    }
+
     if (level === 2 && !route.level_2_required) continue;
+    // Older SSA routes placed TL at L1 and CM at L2. CM now owns L1;
+    // do not turn the duplicate CM seat into an extra fallback approval.
+    if (level === 2 && ssaManager && ["CLM", "CM", "TL", "ATL"].includes(
+      String(designationById.get(route.level_2_designation_id ?? "")?.code ?? "").toUpperCase()
+    )) continue;
     if (level === 3 && (deferredFinalStep || !route.hr_final_required)) continue;
     if (level === 3 && HR_HEAD_FINAL_WORKFLOWS.has(input.workflowCode)) {
       const hrCandidates = await companyHrHeadCandidates(input.companyId, asOf);
@@ -463,5 +481,5 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     steps.push(resolved.step);
   }
   if (deferredFinalStep) steps.push(deferredFinalStep);
-  return { routeName: route.route_name, steps, routeId: route.id };
+  return { routeName: route.route_name, steps, routeId: route.id, ...(ssaManager ? { managerPolicy: "ssa_station_manager" as const } : {}) };
 }

@@ -21,6 +21,7 @@ export type PlannedResignationSeat = {
 export type ChainManagerSeat = {
   userId: string;
   name: string;
+  stationApprovalManager?: boolean;
   positionTitle?: string | null;
   designation: DesignationLabel | null;
 };
@@ -88,7 +89,7 @@ export function resolveResignationSeats(input: {
 
   for (const seat of input.seats) {
     if (seat.kind === "cluster_manager" || seat.kind === "business_head") {
-      const match = input.chain.find((row) => !usedUserIds.has(row.userId) && matchesSeatKind(seat.kind, row.designation));
+      const match = input.chain.find((row) => !usedUserIds.has(row.userId) && (matchesSeatKind(seat.kind, row.designation) || (seat.kind === "cluster_manager" && row.stationApprovalManager === true)));
       if (!match) {
         const reason = `${seat.label} was not found in the reporting line`;
         skipped.push({ kind: seat.kind, label: seat.label, reason });
@@ -98,7 +99,7 @@ export function resolveResignationSeats(input: {
       usedUserIds.add(match.userId);
       resolved.push({
         kind: seat.kind,
-        label: seat.label,
+        label: match.stationApprovalManager ? match.positionTitle || seat.label : seat.label,
         status: "resolved",
         assignedUserId: match.userId,
         approverSource: "reporting_manager",

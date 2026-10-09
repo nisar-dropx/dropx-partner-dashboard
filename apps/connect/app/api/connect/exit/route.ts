@@ -1,3 +1,4 @@
+import { resolveSsaApprovalManager } from "../../../../../../src/lib/ssa-approval-manager";
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
@@ -129,6 +130,9 @@ async function resolveWorker(profileType: string, accountId: string): Promise<Wo
 }
 
 async function reportingManagerChain(context: WorkerContext, levels: number): Promise<ChainManagerSeat[]> {
+  const ssaManager = levels > 0 ? await resolveSsaApprovalManager({
+    companyId: context.account.companyId, workerType: context.workerType, workerId: context.workerId
+  }) : null;
   const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
   const today = todayInIndia();
   const { data: engagement } = await db().from("hr_engagements")
@@ -152,9 +156,13 @@ async function reportingManagerChain(context: WorkerContext, levels: number): Pr
       .limit(1)
       .maybeSingle();
     if (assignment) {
-      let subjectAssignmentId = assignment.id;
+      if (ssaManager) chain.push({
+        userId: ssaManager.userId, name: ssaManager.name, positionTitle: ssaManager.role,
+        designation: { code: ssaManager.designationCode, name: ssaManager.role }, stationApprovalManager: true
+      });
+      let subjectAssignmentId = ssaManager?.assignmentId ?? assignment.id;
       const seenAssignments = new Set<string>([assignment.id]);
-      for (let level = 1; level <= levels; level += 1) {
+      for (let level = chain.length + 1; level <= levels; level += 1) {
         const { data: relationship } = await db().from("hr_reporting_relationships")
         .select("manager_assignment_id")
         .eq("company_id", context.account.companyId)

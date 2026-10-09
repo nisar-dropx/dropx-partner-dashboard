@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveSsaApprovalManager, SsaApprovalRoutingError } from "./ssa-approval-manager";
 
 import { resolveConfiguredApprovalWorkflow, type ConfiguredApprovalStep } from "@/lib/approval-workflow-routing";
 import { isManagingPartnerDesignation, isStationSupportAttendanceDesignation, isStoreOrStationManagerDesignation, isTeamLeadDesignation } from "./approval-designation-labels";
@@ -138,6 +139,12 @@ async function resolveChainFallbackSteps(input: {
   managerLevels: number;
   skipStationFloorManagers?: boolean;
 }) {
+  const ssaManager = await resolveSsaApprovalManager(input);
+  if (ssaManager) return [{
+    step_name: ssaManager.stepName, approver_user_id: ssaManager.userId,
+    approver_person_id: ssaManager.personId, resolved_via: ssaManager.isAomFallback ? "fallback" : "configured_designation",
+    original_approver_person_id: null, fallback_reason: ssaManager.fallbackReason
+  }];
   const workerColumn = input.workerType === "employee" ? "employee_id" : "contractor_id";
   const engagement = await db().from("hr_engagements").select("id,person_id,status")
     .eq("company_id", input.companyId).eq("worker_type", input.workerType).eq(workerColumn, input.workerId)
@@ -254,7 +261,7 @@ export async function resolveAttendanceRegularizationApprovers(
     if (configured?.steps.length) {
       let steps = configured.steps.map(mapStep);
       if (skipStationFloorManagers) steps = await withoutStationFloorManagers(companyId, steps);
-      const targetLevels = Math.min(levels, await routeManagerLevelCap(companyId, configured.routeId));
+      const targetLevels = configured.managerPolicy === "ssa_station_manager" ? steps.length : Math.min(levels, await routeManagerLevelCap(companyId, configured.routeId));
       if (steps.length < targetLevels) {
         const chainSteps = await resolveChainFallbackSteps({
           companyId,
@@ -282,6 +289,7 @@ export async function resolveAttendanceRegularizationApprovers(
       }
     }
   } catch (error) {
+    if (error instanceof SsaApprovalRoutingError) throw error;
     console.warn("Configured attendance regularization route failed, trying reporting-chain fallback:", error);
   }
 
