@@ -34,14 +34,14 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
 
   return <section className={styles.page} aria-busy={loading}>
     <header className={styles.header}>
-      <div><small>PAYMENTS</small><h1>Interim salary</h1><p>Your current payroll breakup and payment updates.</p></div>
+      <div><small>PAYMENTS</small><h1>Salary Calculation</h1><p>Your current payroll breakup and payment updates.</p></div>
       <div className={styles.controls}>
         {rows.length ? <label>Salary period<select value={salary.id} onChange={event => setSelected(event.target.value)}>{rows.map(row => <option key={row.id} value={row.id}>{row.label || `${date(row.periodStart)} – ${date(row.periodEnd)}`}</option>)}</select></label> : null}
         <button type="button" aria-label="Refresh salary" disabled={loading} onClick={() => setAttempt(value => value + 1)}><RefreshCw size={18}/></button>
       </div>
     </header>
     <aside className={styles.notice}><Info size={20}/><div><strong>This is not your final salary.</strong><p>Final salary details will appear in your payslip under Documents once published. This is only an interim view.</p></div></aside>
-    {loading ? <div className={styles.empty} role="status">Loading salary…</div> : error ? <div className={styles.empty} role="alert"><p>{error}</p><button onClick={() => setAttempt(value => value + 1)}>Retry</button></div> : !salary ? <div className={styles.empty}><WalletCards/><h2>No interim salary yet</h2><p>Your breakup will appear when a salary payment is prepared.</p></div> : <>
+    {loading ? <div className={styles.empty} role="status">Loading salary…</div> : error ? <div className={styles.empty} role="alert"><p>{error}</p><button onClick={() => setAttempt(value => value + 1)}>Retry</button></div> : !salary ? <div className={styles.empty}><WalletCards/><h2>No salary calculation yet</h2><p>Your breakup will appear when a salary payment is prepared.</p></div> : <>
       <div className={styles.summary}>
         <article className={styles.net}><span>Interim net amount</span><strong>{money(salary.payable)}</strong><small>{date(salary.periodStart)} – {date(salary.periodEnd)}</small></article>
         <article><span>Paid so far</span><strong>{money(salary.paid)}</strong><small>Bank-confirmed payments only</small></article>

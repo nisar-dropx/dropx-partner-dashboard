@@ -124,7 +124,7 @@ const ConnectCommunicationCenter = dynamic(
   () => import("./connect-communication-center").then((module) => module.ConnectCommunicationCenter),
   { loading: () => <Loader text="Opening Connect…" /> }
 );
-const ConnectInterimSalary = dynamic(() => import("./connect-interim-salary").then(module => module.ConnectInterimSalary), { loading: () => <Loader text="Opening interim salary…" /> });
+const ConnectInterimSalary = dynamic(() => import("./connect-interim-salary").then(module => module.ConnectInterimSalary), { loading: () => <Loader text="Opening salary calculation…" /> });
 
 // Static fallback while the persistent workspace layout initializes.
 export function ConnectShellFallback() {
@@ -715,7 +715,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     dashboard: "Today",
     profile: "My profile",
     documents: "Documents",
-    salary: "Interim salary",
+    salary: "Salary Calculation",
     connect: "Connect",
     approvals: "Approvals",
     requests: "My requests",
@@ -775,7 +775,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
           {peopleSelfService(account) ? <button aria-current={step === "requests" ? "page" : undefined} className={step === "requests" ? "active" : ""} onClick={() => open("requests")}><ClipboardList />My Requests</button> : null}
           {(approvalAccess === "allowed") ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
           {sharedSelfService(account) && (canViewInterimSalary(account) || allowed(account, "advances") || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "salary" || step === "advances" || step === "reimbursements" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button> : null}
-          {canViewInterimSalary(account) && paymentsExpanded ? <button aria-current={step === "salary" ? "page" : undefined} className={`desktop-subitem${step === "salary" ? " active" : ""}`} onClick={() => open("salary")}><IndianRupee />Interim salary</button> : null}
+          {canViewInterimSalary(account) && paymentsExpanded ? <button aria-current={step === "salary" ? "page" : undefined} className={`desktop-subitem${step === "salary" ? " active" : ""}`} onClick={() => open("salary")}><IndianRupee />Salary Calculation</button> : null}
           {sharedSelfService(account) && allowed(account, "advances") && paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
           {peopleSelfService(account) && allowed(account, "reimbursements") && paymentsExpanded ? <button aria-current={step === "reimbursements" ? "page" : undefined} className={`desktop-subitem${step === "reimbursements" ? " active" : ""}`} onClick={() => open("reimbursements")}><ReceiptText />Expense requests</button> : null}
           {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
@@ -834,7 +834,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
           {peopleSelfService(account) ? <button onClick={() => open("requests")}><ClipboardList />My Requests<ChevronRight /></button> : null}
           {(approvalAccess === "allowed") ? <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button> : null}
           {sharedSelfService(account) && (canViewInterimSalary(account) || allowed(account, "advances") || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button> : null}
-          {canViewInterimSalary(account) && paymentsExpanded ? <button className="subitem" onClick={() => open("salary")}><span />Interim salary<ChevronRight /></button> : null}
+          {canViewInterimSalary(account) && paymentsExpanded ? <button className="subitem" onClick={() => open("salary")}><span />Salary Calculation<ChevronRight /></button> : null}
           {sharedSelfService(account) && allowed(account, "advances") && paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
           {peopleSelfService(account) && allowed(account, "reimbursements") && paymentsExpanded ? <button className="subitem" onClick={() => open("reimbursements")}><span />Expense requests<ChevronRight /></button> : null}
           {allowed(account, "attendance") ? <button onClick={() => open("attendance")}><Fingerprint />Attendance<ChevronRight /></button> : null}

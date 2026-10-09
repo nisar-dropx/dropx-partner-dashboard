@@ -11,6 +11,17 @@ const run = { id: 'run', label: 'Period', period_start: '2026-09-01', period_end
 const item = (code, amount, item_type = 'deduction') => ({ code, name: code, amount, item_type, display_order: 1 });
 const person = { id: 'person', run_id: 'run', gross_pay: 20000, other_earnings: 0, net_pay: 18000, adjusted_net_pay: null, payable_days: 26, hr_payroll_run_items: [item('BASIC', 20000, 'earning'), item('PF', 2000), item('EMPLOYER_PF', 2000, 'employer_contribution')] };
 const payment = (status, amount, overrides = {}) => ({ id: status, run_id: 'run', amount, status, attempt: 1, reference: status, value_date: '2026-10-09', ...overrides });
+test('Salary Calculation is the desktop/mobile label while the interim warning remains', () => {
+  const flow = fs.readFileSync(new URL('../components/connect-login-flow.tsx', import.meta.url), 'utf8');
+  const page = fs.readFileSync(new URL('../components/connect-interim-salary.tsx', import.meta.url), 'utf8');
+  assert.match(flow, /salary: "Salary Calculation"/);
+  assert.match(flow, /<IndianRupee \/>Salary Calculation<\/button>/);
+  assert.match(flow, /<span \/>Salary Calculation<ChevronRight \/>/);
+  assert.match(page, /<h1>Salary Calculation<\/h1>/);
+  assert.match(page, /This is not your final salary/);
+  assert.match(page, /This is only an interim view/);
+  assert.doesNotMatch(flow + page, /Interim salary|interim salary/);
+});
 function load(file, mocks) {
   const mod = { exports: {} };
   const js = ts.transpileModule(fs.readFileSync(new URL(file, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
