@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { personalizeNotices } from "@/lib/announcement-personalization-data";
 import {
   cleanCommunicationText,
   communicationCaseNumber,
@@ -79,7 +80,8 @@ async function ownsCase(companyId: string, profileType: string, accountId: strin
   return Boolean(result.data);
 }
 
-async function announcementInbox(companyId: string, profileType: string, accountId: string) {
+async function announcementInbox(account: ConnectAccount) {
+  const { companyId, profileType, id: accountId } = account;
   const receiptResult = await supabaseAdmin!
     .from("communication_announcement_recipients")
     .select("announcement_id,delivered_at,read_at")
@@ -101,6 +103,17 @@ async function announcementInbox(companyId: string, profileType: string, account
   const now = Date.now();
   const visible = (announcementResult.data ?? [])
     .filter((item) => !item.expires_at || new Date(item.expires_at).getTime() > now);
+  // Use the same recipient-scoped copy rules as the bell/dashboard. A receipt
+  // remains mandatory; a notification can never grant access to an announcement.
+  const copyResult = visible.length ? await supabaseAdmin!
+    .from("mob_app_notifications").select("source_key,data")
+    .eq("company_id", companyId).eq("recipient_profile_type", profileType)
+    .eq("recipient_account_id", accountId).eq("event_code", "communication_announcement")
+    .in("source_key", visible.map(item => item.id)) : { data: [], error: null };
+  if (copyResult.error) throw copyResult.error;
+  const copyById = new Map((copyResult.data ?? []).map(item => [item.source_key, item.data]));
+  const personalized = await personalizeNotices(supabaseAdmin!, account,
+    visible.map(item => ({ ...item, data: copyById.get(item.id) })));
   // Attachment metadata only - files open through a short-lived signed URL
   // (GET ?announcementAttachmentId=). Tolerates the table not existing yet.
   const attachmentResult = visible.length
@@ -112,7 +125,7 @@ async function announcementInbox(companyId: string, profileType: string, account
       .order("display_order")
     : { data: [], error: null };
   const attachments = attachmentResult.error ? [] : attachmentResult.data ?? [];
-  return visible.map((item) => ({
+  return personalized.map(({ data: _copy, ...item }) => ({
     ...item,
     attachments: attachments.filter((attachment) => attachment.announcement_id === item.id),
     deliveredAt: receiptById.get(item.id)?.delivered_at ?? null,
@@ -241,7 +254,7 @@ export async function GET(request: Request) {
       .eq("reporter_account_id", account.id);
     if (reporterResult.error) throw reporterResult.error;
     const caseIds = (reporterResult.data ?? []).map((row) => row.case_id);
-    const announcements = await announcementInbox(account.companyId, account.profileType, account.id);
+    const announcements = await announcementInbox(account);
     if (!caseIds.length) {
       return NextResponse.json({ settings: await loadSettings(account.companyId), cases: [], announcements });
     }

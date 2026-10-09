@@ -5,6 +5,7 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { visibleDashboardNotices } from "@/lib/dashboard-notices";
+import { personalizeNotices } from "@/lib/announcement-personalization-data";
 
 function setupMessage(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? "");
@@ -106,10 +107,11 @@ export async function GET(request: Request) {
         .in("id", [...staleIds]);
     }
 
-    const notifications = rows.filter((row) => !staleIds.has(row.id));
+    const personal = await personalizeNotices(supabaseAdmin, account, [...rows, ...(noticesResult.data ?? [])]);
+    const notifications = personal.slice(0, rows.length).filter((row) => !staleIds.has(row.id));
     return NextResponse.json({
       notifications,
-      dashboardNotices: visibleDashboardNotices(noticesResult.data ?? []),
+      dashboardNotices: visibleDashboardNotices(personal.slice(rows.length)),
       unreadCount: notifications.filter((row) => !row.read_at).length
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
