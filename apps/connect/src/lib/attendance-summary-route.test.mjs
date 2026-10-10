@@ -133,6 +133,12 @@ test('real backend retains approved manual times when raw punches are shorter', 
   assert.equal(body.summary.fullDay, 7); assert.equal(body.summary.halfDay, 0);
 });
 
+test('an approved regularization that is still short is scored on its corrected times, not shown as a full day', async () => {
+  const f = fixture(); f.data.attendance_daily[2] = daily(5, 300, { manual_out_request_id: 'approved-correction', out_source: 'manual_regularization', out_time: at(5, '14:00') });
+  const body = await f.run(); const row = body.rows.find(r => r.date === date(5));
+  assert.equal(row.outTime, '14:00'); assert.equal(row.attendanceStatus, 'Half Day'); assert.equal(body.summary.halfDay, 1);
+});
+
 test('pending replacement roster cannot replace the approved baseline', async () => {
   const f = fixture(); const pending = { ...weekly, id: 'pending', effective_from: '2026-10-05', revision_no: 20, status: 'pending' };
   f.data.hr_roster_plans.push(pending);

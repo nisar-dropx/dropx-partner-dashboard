@@ -1573,9 +1573,14 @@ export async function loadAttendanceReportRows({
       ? Math.max(storedPunchCount, 2)
       : Math.max(storedPunchCount, punches.length);
     const creditState = wfhCreditState({ ...row, in_time: effectiveInTime, out_time: effectiveOutTime, punch_count: effectivePunchCount });
+    // Score an approved regularization on its corrected clock span, not on a stored
+    // total that may predate the correction.
+    const regularizedSpan = regularized && effectiveInTime && effectiveOutTime
+      ? summarizeFirstInLastOut([effectiveInTime, effectiveOutTime]).workMinutes
+      : 0;
     const effectiveWorkMinutes = creditState && creditState !== "credited" ? 0 : punchSummary
       ? punchSummary.workMinutes
-      : Number(row.work_minutes ?? 0);
+      : regularizedSpan > 0 ? regularizedSpan : Number(row.work_minutes ?? 0);
     const effectiveRemark = punchSummary && punchTimes.length >= 2
       ? (String(row.remark ?? "").toLowerCase().includes("single") ? "" : (row.remark ?? ""))
       : (row.remark ?? "");
@@ -1597,11 +1602,9 @@ export async function loadAttendanceReportRows({
     // An approved business trip is attendance credit, like WFH: no punch times are recorded,
     // but the day is a full present day.
     const businessTripCredit = row.work_mode === "business_trip" && !effectiveInTime && !effectiveOutTime && effectivePunchCount === 0;
-    // An approved regularization is Present. Re-scoring the corrected clock span
-    // was turning short approved days into Half Day or Absent in DropX One.
-    const attendanceStatus = regularized
-      ? "Full Day"
-      : creditState ? wfhCreditLabel(creditState) : businessTripCredit ? "Full Day" : attendanceDayStatus({
+    // An approved regularization corrects the clock times only. The corrected span is
+    // still scored against policy, so a short approved day shows as Half Day or Absent.
+    const attendanceStatus = creditState ? wfhCreditLabel(creditState) : businessTripCredit ? "Full Day" : attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: effectivePunchCount,
       rules: scheduleContext.rulesFor(profileId),
