@@ -1,0 +1,137 @@
+[
+  {
+    "id": "flex-signin",
+    "source": "dropx",
+    "page": 8,
+    "width": 720,
+    "height": 745,
+    "redactedRegions": 2,
+    "flattened": true
+  },
+  {
+    "id": "privacy",
+    "source": "dropx",
+    "page": 10,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 0,
+    "flattened": true
+  },
+  {
+    "id": "about-name",
+    "source": "dropx",
+    "page": 11,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 6,
+    "flattened": true
+  },
+  {
+    "id": "about-contact",
+    "source": "dropx",
+    "page": 11,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 6,
+    "flattened": true
+  },
+  {
+    "id": "licence-front",
+    "source": "dropx",
+    "page": 13,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 2,
+    "flattened": true
+  },
+  {
+    "id": "licence-back",
+    "source": "dropx",
+    "page": 13,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 2,
+    "flattened": true
+  },
+  {
+    "id": "licence-review",
+    "source": "dropx",
+    "page": 13,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 3,
+    "flattened": true
+  },
+  {
+    "id": "profile-photo",
+    "source": "dropx",
+    "page": 15,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 1,
+    "flattened": true
+  },
+  {
+    "id": "bgc-consent",
+    "source": "dropx",
+    "page": 17,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 0,
+    "flattened": true
+  },
+  {
+    "id": "bgc-details",
+    "source": "dropx",
+    "page": 16,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 5,
+    "flattened": true
+  },
+  {
+    "id": "bgc-address",
+    "source": "dropx",
+    "page": 16,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 4,
+    "flattened": true
+  },
+  {
+    "id": "eshram-uan",
+    "source": "dropx",
+    "page": 16,
+    "width": 720,
+    "height": 1440,
+    "redactedRegions": 2,
+    "flattened": true
+  },
+  {
+    "id": "account-review",
+    "source": "amazon",
+    "page": 34,
+    "width": 304,
+    "height": 488,
+    "redactedRegions": 0,
+    "flattened": true
+  },
+  {
+    "id": "account-resolve",
+    "source": "amazon",
+    "page": 34,
+    "width": 271,
+    "height": 488,
+    "redactedRegions": 0,
+    "flattened": true
+  },
+  {
+    "id": "training-task",
+    "source": "dropx",
+    "page": 14,
+    "width": 720,
+    "height": 300,
+    "redactedRegions": 0,
+    "flattened": true
+  }
+]
