@@ -27,12 +27,27 @@ const rowSelectionMigrationUrl = new URL(
   "../supabase/migrations/20261010130000_workforce_payout_location_row_bank_selection.sql",
   import.meta.url
 );
+const bulkCancellationMigrationUrl = new URL(
+  "../supabase/migrations/20261010150000_workforce_payout_bulk_processing_cancellation.sql",
+  import.meta.url
+);
+const processingRedownloadMigrationUrl = new URL(
+  "../supabase/migrations/20261010160000_workforce_payout_processing_bank_redownload.sql",
+  import.meta.url
+);
+const partialPaymentStatusMigrationUrl = new URL(
+  "../supabase/migrations/20261010180000_workforce_payout_partial_payment_status.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
 const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
 const lifecycleMigration = readFileSync(lifecycleMigrationUrl, "utf8");
 const activeProfileStationLinesMigration = readFileSync(activeProfileStationLinesMigrationUrl, "utf8");
 const rowSelectionMigration = readFileSync(rowSelectionMigrationUrl, "utf8");
+const bulkCancellationMigration = readFileSync(bulkCancellationMigrationUrl, "utf8");
+const processingRedownloadMigration = readFileSync(processingRedownloadMigrationUrl, "utf8");
+const partialPaymentStatusMigration = readFileSync(partialPaymentStatusMigrationUrl, "utf8");
 const executablePublishedSnapshotFreshnessMigration = publishedSnapshotFreshnessMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableLifecycleMigration = lifecycleMigration
@@ -40,6 +55,12 @@ const executableLifecycleMigration = lifecycleMigration
 const executableActiveProfileStationLinesMigration = activeProfileStationLinesMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableRowSelectionMigration = rowSelectionMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableBulkCancellationMigration = bulkCancellationMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableProcessingRedownloadMigration = processingRedownloadMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executablePartialPaymentStatusMigration = partialPaymentStatusMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableMigration = [migration, compatibilityMigration, publishedSnapshotFreshnessMigration]
   .map((sql) => sql.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""))
@@ -91,6 +112,30 @@ assert.match(
   "the dashboard preview must consume the canonical candidate calculation"
 );
 assert.match(migration, /set search_path = ''/i);
+assert.match(bulkCancellationMigration, /create or replace function public\.workforce_cancel_payout_payment_items/i);
+assert.match(bulkCancellationMigration, /array_agg\(distinct requested\.item_id order by requested\.item_id\)/i);
+assert.match(bulkCancellationMigration, /Every selected payment must still be Payment Processing\. No payments were cancelled\./i);
+assert.match(bulkCancellationMigration, /Every selected payment must be one exact location instruction\. Legacy combined instructions cannot be bulk-cancelled/i);
+assert.match(bulkCancellationMigration, /update public\.workforce_payout_payment_items item[\s\S]*?item\.id = any\(v_item_ids\)/i);
+assert.match(bulkCancellationMigration, /with batch_counts as \([\s\S]*?batch_states as \([\s\S]*?update public\.workforce_payout_payment_batches batch/i);
+assert.match(bulkCancellationMigration, /insert into public\.workforce_payout_payment_events[\s\S]*?select[\s\S]*?'payment_cancelled_manually'/i);
+assert.doesNotMatch(bulkCancellationMigration, /public\.workforce_transition_payout_payment_item\(/i);
+assert.doesNotMatch(bulkCancellationMigration, /\bfor\s+\w+\s+in\s+select\b/i);
+assert.match(bulkCancellationMigration, /'payment_cancelled_bulk'/i);
+assert.match(bulkCancellationMigration, /to service_role/i);
+assert.match(processingRedownloadMigration, /create or replace function public\.workforce_get_payout_payment_redownload/i);
+assert.match(processingRedownloadMigration, /item\.status <> 'processing'/i);
+assert.match(processingRedownloadMigration, /batch\.status not in \('processing', 'partially_finalized'\)/i);
+assert.match(processingRedownloadMigration, /allocation_check\.allocation_count <> 1/i);
+assert.match(processingRedownloadMigration, /allocation_check\.matching_station_count <> 1/i);
+assert.match(processingRedownloadMigration, /allocation_check\.allocated_amount <> item\.instruction_amount/i);
+assert.match(processingRedownloadMigration, /to service_role/i);
+assert.match(partialPaymentStatusMigration, /v_paid > 0 and balance_payable > 0 then ''Partially Paid''/i);
+assert.match(partialPaymentStatusMigration, /workforce_payout_payment_row_candidates/i);
+assert.doesNotMatch(
+  processingRedownloadMigration,
+  /\b(update|insert into|delete from)\s+public\.workforce_payout_payment_/i
+);
 assert.match(migration, /upper\(btrim\(bank\.bank_code\)\) = 'FEDERAL_BANK'[\s\S]*?for share/i);
 assert.match(
   migration,
@@ -742,6 +787,15 @@ assert.equal(heldPreview.eligible, false);
 assert.equal(heldPreview.eligibility_code, "payment_on_hold");
 assert.equal(heldPreview.payment_status, "Payment On Hold");
 assert.equal(Number(heldPreview.available_to_pay), 0);
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-01')`,
+  [company, workforce]
+);
+assert.equal(Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count), 1, "Payment On Hold remains editable");
 await assert.rejects(
   db.query(
     `update public.workforce_payout_payment_hold_events
@@ -842,6 +896,24 @@ assert.equal(first.replayed, false);
 assert.equal(first.items.length, 1);
 assert.equal(first.items[0].reference_no, "WPD111092026V1");
 assert.equal(Number(first.items[0].instruction_amount), 11836);
+const sourceRowsBeforeProcessingEdit = Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count);
+await assert.rejects(
+  db.query(
+    `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+     values ($1,$2,date '2026-09-02')`,
+    [company, workforce]
+  ),
+  /Payment Processing is active/i,
+  "Payment Processing rejects payout-source edits"
+);
+assert.equal(Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count), sourceRowsBeforeProcessingEdit,
+"a rejected processing edit leaves no partial source row");
 assert.equal(first.items[0].credit_remarks, "NLRF");
 assert.equal(first.items[0].debit_account_no, "0011223344");
 assert.equal(first.items[0].bank_account_no, "1234567890");
@@ -945,6 +1017,11 @@ const paid = await finalize({
 });
 assert.equal(paid.paid, 1);
 assert.equal(paid.cancelled, 0);
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-03')`,
+  [company, workforce]
+);
 const paidReplay = await finalize({
   operation: id(21),
   hash: "b".repeat(64),
@@ -1178,6 +1255,7 @@ assert.equal(revisedDeltaPreview.eligible, true);
 assert.equal(revisedDeltaPreview.payment_status, "Partially paid");
 assert.equal(Number(revisedDeltaPreview.current_target_amount), 14000);
 assert.equal(Number(revisedDeltaPreview.paid_amount), 13000);
+assert.equal(Number(revisedDeltaPreview.balance_payable), 1000);
 assert.equal(Number(revisedDeltaPreview.available_to_pay), 1000);
 const fourth = await createBatch({ operation: id(71), fingerprint: "7".repeat(64) });
 assert.equal(fourth.items[0].reference_no, "WPD111092026V4");
@@ -1194,6 +1272,11 @@ const failed = await transitionPayment({
 });
 assert.equal(failed.outcome, "failed");
 assert.equal(failed.batch_status, "completed");
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-04')`,
+  [company, workforce]
+);
 const failedPreview = await preview();
 assert.equal(failedPreview.eligible, true);
 assert.equal(failedPreview.payment_status, "Payment Failed");
@@ -1211,6 +1294,16 @@ await transitionPayment({
   outcome: "cancelled",
   remarks: "Payment run cancelled by Finance"
 });
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-05')`,
+  [company, workforce]
+);
+assert.equal(Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count), 4,
+"paid, failed and cancelled payment outcomes all release payout-source editing");
 const manualAudit = await db.query(
   `select event_type,event_data->>'remarks' remarks
    from public.workforce_payout_payment_events
@@ -1331,6 +1424,37 @@ assert.equal(
 
 await db.exec(executableActiveProfileStationLinesMigration);
 await db.exec(executableRowSelectionMigration);
+await db.exec(executableBulkCancellationMigration);
+await db.exec(executableProcessingRedownloadMigration);
+await db.exec(executablePartialPaymentStatusMigration);
+
+const standardizedPartialPreview = await preview();
+assert.equal(standardizedPartialPreview.payment_status, "Partially Paid");
+assert.equal(Number(standardizedPartialPreview.current_target_amount), 14000);
+assert.equal(Number(standardizedPartialPreview.paid_amount), 13000);
+assert.equal(Number(standardizedPartialPreview.balance_payable), 1000);
+assert.equal(Number(standardizedPartialPreview.available_to_pay), 1000);
+
+// A legacy profile-wide processing instruction spans two allocation rows. It
+// cannot be represented by one dashboard location row, so bulk row
+// cancellation must fail closed and leave the instruction untouched.
+await assert.rejects(
+  db.query(
+    `select public.workforce_cancel_payout_payment_items(
+      $1,$2,$3,$4::uuid[],$5::date,$6::date,$7
+    )`,
+    [company, actor, id(299), [signedBatch.items[0].item_id], periodStart, periodEnd,
+      "Do not cancel a legacy combined instruction"]
+  ),
+  /Legacy combined instructions cannot be bulk-cancelled.*No payments were cancelled/i
+);
+const untouchedLegacyCombinedItem = await db.query(
+  "select status,bank_response_status,finalized_at from public.workforce_payout_payment_items where id=$1",
+  [signedBatch.items[0].item_id]
+);
+assert.equal(untouchedLegacyCombinedItem.rows[0].status, "processing");
+assert.equal(untouchedLegacyCombinedItem.rows[0].bank_response_status, null);
+assert.equal(untouchedLegacyCombinedItem.rows[0].finalized_at, null);
 
 const createProfileBatch = async ({ operation, fingerprint, workforceIds }) => {
   const result = await db.query(
@@ -1370,6 +1494,228 @@ const finalizeProfileItem = async ({ operation, hash, item, utr }) => {
   );
   return result.rows[0].result;
 };
+
+// Bulk manual cancellation is exact, atomic and replayable. A stale item in
+// the requested set must prevent every sibling transition; a valid subset
+// updates its shared batch to partially_finalized, and the last processing
+// sibling completes that immutable batch.
+const bulkCancelWorkforces = Array.from({ length: 12 }, (_, index) => id(300 + index));
+for (const [index, profileId] of bulkCancelWorkforces.entries()) {
+  const relockId = id(320 + index);
+  const reviewId = id(340 + index);
+  const publicationId = id(360 + index);
+  const snapshot = JSON.stringify({
+    schema_version: "2",
+    source: "workforce_payout_worksheet",
+    worksheet: { payment_eligible: true },
+    item: { workforce_id: profileId, station_code: "NLRF", net_amount: String(700 + index * 100) }
+  });
+  await db.query(
+    `insert into public.workforce(
+      id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code,
+      onboarding_status,lifecycle_status,is_active
+    ) values ($1,$2,$3,$3 || ' Worker',$3 || '@example.com',$4,
+      $5,'FDRL0000002','active','active',true)`,
+    [profileId, company, `BULK${index + 1}`, station, `8234567${String(index).padStart(3, "0")}`]
+  );
+  await db.query(
+    `insert into public.connect_profile_verifications(
+      company_id,profile_type,account_id,kind,verified
+    ) values ($1,'workforce',$2,'pan_aadhaar',true)`,
+    [company, profileId]
+  );
+  await db.query(
+    `insert into public.workforce_payout_mapping_relocks(
+      id,company_id,period_start,period_end,affected_workforce_ids,active_locations
+    ) values ($1,$2,$3,$4,array[$5::uuid],$6::jsonb)`,
+    [relockId, company, periodStart, periodEnd, profileId,
+      JSON.stringify({ [profileId]: [station] })]
+  );
+  await db.query(
+    `insert into public.workforce_payout_review_submissions(
+      id,company_id,subject_type,subject_id,location_id,period_start,period_end,status,calculation_snapshot
+    ) values ($1,$2,'workforce',$3,$4,$5,$6,'under_review',$7::jsonb)`,
+    [reviewId, company, profileId, station, periodStart, periodEnd, snapshot]
+  );
+  await db.query(
+    `insert into public.workforce_payout_publications(
+      id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+      mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+    ) values ($1,$2,$3,$4,1,$5::jsonb,$6,$7,$8,$9,'worksheet',$10,$11)`,
+    [publicationId, company, profileId, station, snapshot,
+      (index + 1).toString(16).slice(-1).repeat(64), dependencyHash, relockId, reviewId,
+      periodStart, periodEnd]
+  );
+}
+const bulkCancelBatch = await createProfileBatch({
+  operation: id(380), fingerprint: "b".repeat(64), workforceIds: bulkCancelWorkforces
+});
+assert.equal(bulkCancelBatch.items.length, 12,
+  "one large selection must create every exact station instruction in the same batch");
+const firstBulkItemId = bulkCancelBatch.items[0].item_id;
+const secondBulkItemId = bulkCancelBatch.items[1].item_id;
+const pristineRedownload = await db.query(
+  `select public.workforce_get_payout_payment_redownload(
+    $1,$2::uuid[],$3::date,$4::date
+  ) result`,
+  [company, [secondBulkItemId, firstBulkItemId], periodStart, periodEnd]
+);
+assert.equal(pristineRedownload.rows[0].result.payment_count, 2);
+assert.deepEqual(
+  pristineRedownload.rows[0].result.items.map((item) => item.payment_item_id).sort(),
+  [firstBulkItemId, secondBulkItemId].sort()
+);
+assert.deepEqual(
+  pristineRedownload.rows[0].result.items.map((item) => item.reference_no).sort(),
+  bulkCancelBatch.items.slice(0, 2).map((item) => item.reference_no).sort(),
+  "a re-download must preserve the original unique bank references"
+);
+assert.deepEqual(
+  pristineRedownload.rows[0].result.items.map((item) => Number(item.instruction_amount)).sort((a, b) => a - b),
+  bulkCancelBatch.items.slice(0, 2).map((item) => Number(item.instruction_amount)).sort((a, b) => a - b),
+  "a re-download must preserve the immutable instruction amounts"
+);
+await transitionPayment({
+  operation: id(381),
+  paymentItemId: firstBulkItemId,
+  outcome: "cancelled",
+  remarks: "First transfer was cancelled separately"
+});
+await assert.rejects(
+  db.query(
+    `select public.workforce_get_payout_payment_redownload(
+      $1,$2::uuid[],$3::date,$4::date
+    )`,
+    [company, [firstBulkItemId, secondBulkItemId], periodStart, periodEnd]
+  ),
+  /must still be Payment Processing/i,
+  "one terminal item must reject the complete re-download selection"
+);
+const remainingRedownload = await db.query(
+  `select public.workforce_get_payout_payment_redownload(
+    $1,$2::uuid[],$3::date,$4::date
+  ) result`,
+  [company, [secondBulkItemId], periodStart, periodEnd]
+);
+assert.equal(remainingRedownload.rows[0].result.payment_count, 1);
+assert.equal(remainingRedownload.rows[0].result.items[0].payment_item_id, secondBulkItemId);
+assert.equal(remainingRedownload.rows[0].result.items[0].batch_status, "partially_finalized",
+  "a still-processing item remains re-downloadable after a sibling is finalized");
+await assert.rejects(
+  db.query(
+    `select public.workforce_cancel_payout_payment_items(
+      $1,$2,$3,$4::uuid[],$5::date,$6::date,$7
+    )`,
+    [company, actor, id(382), [firstBulkItemId, secondBulkItemId], periodStart, periodEnd,
+      "Bulk cancellation must remain atomic"]
+  ),
+  /must still be Payment Processing.*No payments were cancelled/i
+);
+const afterRejectedBulk = await db.query(
+  `select id,status from public.workforce_payout_payment_items
+   where id=any($1::uuid[]) order by id`,
+  [[firstBulkItemId, secondBulkItemId]]
+);
+const rejectedBulkStatusByItem = new Map(afterRejectedBulk.rows.map((row) => [row.id, row.status]));
+assert.equal(rejectedBulkStatusByItem.get(firstBulkItemId), "cancelled");
+assert.equal(rejectedBulkStatusByItem.get(secondBulkItemId), "processing");
+const subsetBulkResult = await db.query(
+  `select public.workforce_cancel_payout_payment_items(
+    $1,$2,$3,$4::uuid[],$5::date,$6::date,$7
+  ) result`,
+  [company, actor, id(383), [secondBulkItemId], periodStart, periodEnd,
+    "Cancel one more payment in the shared bank batch"]
+);
+assert.equal(subsetBulkResult.rows[0].result.cancelled, 1);
+const partiallyCancelledBulkBatch = await db.query(
+  "select status,completed_at from public.workforce_payout_payment_batches where id=$1",
+  [bulkCancelBatch.batch_id]
+);
+assert.equal(partiallyCancelledBulkBatch.rows[0].status, "partially_finalized");
+assert.equal(partiallyCancelledBulkBatch.rows[0].completed_at, null);
+
+const remainingBulkItemIds = bulkCancelBatch.items.slice(2).map((item) => item.item_id);
+const remainingBulkResult = await db.query(
+  `select public.workforce_cancel_payout_payment_items(
+    $1,$2,$3,$4::uuid[],$5::date,$6::date,$7
+  ) result`,
+  [company, actor, id(384), [...remainingBulkItemIds].reverse(), periodStart, periodEnd,
+    "Cancel all remaining payments in the shared bank batch"]
+);
+assert.equal(remainingBulkResult.rows[0].result.cancelled, 10);
+assert.equal(remainingBulkResult.rows[0].result.items.length, 10);
+const completedBulkBatch = await db.query(
+  "select status,completed_at from public.workforce_payout_payment_batches where id=$1",
+  [bulkCancelBatch.batch_id]
+);
+assert.equal(completedBulkBatch.rows[0].status, "completed");
+assert.ok(completedBulkBatch.rows[0].completed_at);
+const allLargeBatchItems = await db.query(
+  `select status,count(*)::int item_count
+   from public.workforce_payout_payment_items where batch_id=$1 group by status`,
+  [bulkCancelBatch.batch_id]
+);
+assert.deepEqual(allLargeBatchItems.rows, [{ status: "cancelled", item_count: 12 }]);
+const largeBatchCancellationAudits = await db.query(
+  `select count(*)::int event_count
+   from public.workforce_payout_payment_events
+   where company_id=$1
+     and payment_item_id=any($2::uuid[])
+     and event_type='payment_cancelled_manually'`,
+  [company, bulkCancelBatch.items.map((item) => item.item_id)]
+);
+assert.equal(largeBatchCancellationAudits.rows[0].event_count, 12,
+  "set-based cancellation must retain one immutable audit event per instruction");
+
+// A later operation may select processing items from separate immutable bank
+// batches. Reversing the submitted IDs is the same idempotent request.
+const separateBulkBatchA = await createProfileBatch({
+  operation: id(385), fingerprint: "c".repeat(64), workforceIds: [bulkCancelWorkforces[0]]
+});
+const separateBulkBatchB = await createProfileBatch({
+  operation: id(386), fingerprint: "d".repeat(64), workforceIds: [bulkCancelWorkforces[1]]
+});
+const separateBulkItemIds = [separateBulkBatchA.items[0].item_id, separateBulkBatchB.items[0].item_id];
+const crossBatchBulk = await db.query(
+  `select public.workforce_cancel_payout_payment_items(
+    $1,$2,$3,$4::uuid[],$5::date,$6::date,$7
+  ) result`,
+  [company, actor, id(387), separateBulkItemIds, periodStart, periodEnd,
+    "Cancel the replacement bank instructions"]
+);
+assert.equal(crossBatchBulk.rows[0].result.cancelled, 2);
+assert.equal(crossBatchBulk.rows[0].result.replayed, false);
+const crossBatchReplay = await db.query(
+  `select public.workforce_cancel_payout_payment_items(
+    $1,$2,$3,$4::uuid[],$5::date,$6::date,$7
+  ) result`,
+  [company, actor, id(387), [...separateBulkItemIds].reverse(), periodStart, periodEnd,
+    "Cancel the replacement bank instructions"]
+);
+assert.equal(crossBatchReplay.rows[0].result.replayed, true);
+await assert.rejects(
+  db.query(
+    `select public.workforce_cancel_payout_payment_items(
+      $1,$2,$3,$4::uuid[],$5::date,$6::date,$7
+    )`,
+    [company, actor, id(387), separateBulkItemIds, periodStart, periodEnd,
+      "Changed cancellation reason"]
+  ),
+  /operation ID was already used for a different request/i
+);
+const crossBatchStatuses = await db.query(
+  `select status,completed_at from public.workforce_payout_payment_batches
+   where id=any($1::uuid[]) order by id`,
+  [[separateBulkBatchA.batch_id, separateBulkBatchB.batch_id]]
+);
+assert.deepEqual(crossBatchStatuses.rows.map((row) => row.status), ["completed", "completed"]);
+assert.ok(crossBatchStatuses.rows.every((row) => row.completed_at));
+const bulkAudit = await db.query(
+  `select count(*)::int event_count from public.workforce_payout_payment_events
+   where company_id=$1 and operation_id=$2 and event_type='payment_cancelled_bulk'`,
+  [company, id(387)]
+);
+assert.equal(bulkAudit.rows[0].event_count, 1);
 
 // T1013-style positive station rows are unambiguous: one selected profile
 // creates one exact bank instruction per station in deterministic station-code
@@ -2252,7 +2598,13 @@ const catalog = await db.query(`
       'EXECUTE') transition_execute,
     has_function_privilege('authenticated',
       'public.workforce_transition_payout_payment_item(uuid,uuid,uuid,uuid,text,text)',
-      'EXECUTE') authenticated_transition_execute
+      'EXECUTE') authenticated_transition_execute,
+    has_function_privilege('service_role',
+      'public.workforce_get_payout_payment_redownload(uuid,uuid[],date,date)',
+      'EXECUTE') redownload_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_get_payout_payment_redownload(uuid,uuid[],date,date)',
+      'EXECUTE') authenticated_redownload_execute
 `);
 assert.ok(Number(catalog.rows[0].trigger_count) >= 13);
 assert.equal(catalog.rows[0].provider_trigger, true);
@@ -2281,6 +2633,8 @@ assert.equal(catalog.rows[0].hold_execute, true);
 assert.equal(catalog.rows[0].authenticated_hold_execute, false);
 assert.equal(catalog.rows[0].transition_execute, true);
 assert.equal(catalog.rows[0].authenticated_transition_execute, false);
+assert.equal(catalog.rows[0].redownload_execute, true);
+assert.equal(catalog.rows[0].authenticated_redownload_execute, false);
 
 await db.close();
 console.log("Workforce payout bank payment ledger verification passed.");

@@ -29,6 +29,10 @@ const attendanceValuesMigration = readFileSync(
 )
   .replace(/create extension if not exists btree_gist\s*;/gi, "")
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const nonprocessingEditsMigration = readFileSync(
+  new URL("../supabase/migrations/20261010170000_workforce_payout_nonprocessing_edits.sql", import.meta.url),
+  "utf8"
+).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const apiSource = readFileSync(
   new URL("../src/app/api/payments/workforce-payouts/bulk-upload/route.ts", import.meta.url),
   "utf8"
@@ -71,6 +75,9 @@ assert.match(attendanceValuesMigration, /field_code_snapshot in \('WORK_HOURS', 
 assert.match(attendanceValuesMigration, /workforce_apply_payout_import_without_attendance_values/i);
 assert.match(attendanceValuesMigration, /workforce_payout_attendance_values_01_finalized_guard/i);
 assert.match(attendanceValuesMigration, /'attendance_values'/i);
+assert.match(nonprocessingEditsMigration, /app\.workforce_payout_nonprocessing_edit/i);
+assert.match(nonprocessingEditsMigration, /workforce_apply_payout_import_without_deductions/i);
+assert.match(nonprocessingEditsMigration, /workforce_additional_payment_period_is_finalized/i);
 for (const indexName of [
   "workforce_payout_deduction_values_workforce_fk_idx",
   "workforce_payout_deduction_values_source_batch_fk_idx",
@@ -82,6 +89,18 @@ for (const indexName of [
 }
 
 const db = new PGlite({ extensions: { btree_gist } });
+
+const migrationBlock = (tag) => {
+  const match = nonprocessingEditsMigration.match(
+    new RegExp(`do \\$${tag}\\$[\\s\\S]*?\\$${tag}\\$;`, "i")
+  );
+  assert.ok(match, `missing ${tag} compatibility block`);
+  return match[0];
+};
+const retainedNonprocessingEditMigration = [
+  migrationBlock("patch_retained_importers"),
+  migrationBlock("patch_additional_payment_guard")
+].join("\n");
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 const company = id(1);
 const station = id(2);
@@ -238,6 +257,52 @@ await db.exec(migration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""));
 await db.exec(deductionUploadMigration);
 await db.exec(attendanceValuesMigration);
+
+// This focused verifier intentionally omits the later publication schema. Give
+// the real bulk-import stack its production retained name, exercise the exact
+// compatibility blocks from the post-publication migration, and use a compact
+// trusted facade. The full publication wrapper (including queue provenance) is
+// executed by verify-workforce-payout-publication-refresh.mjs.
+await db.exec(`
+  alter function public.workforce_apply_payout_import(
+    uuid,date,date,text,text,jsonb,uuid,uuid[]
+  ) rename to workforce_apply_payout_import_without_publication_refresh;
+
+  create or replace function public.workforce_apply_payout_import(
+    p_company_id uuid,
+    p_effective_from date,
+    p_effective_to date,
+    p_file_name text,
+    p_file_sha256 text,
+    p_rows jsonb,
+    p_actor_user_id uuid,
+    p_allowed_location_ids uuid[] default null
+  ) returns uuid language plpgsql security definer set search_path = '' as $function$
+  declare
+    v_batch_id uuid;
+    v_previous_trusted_edit text := pg_catalog.current_setting(
+      'app.workforce_payout_nonprocessing_edit', true
+    );
+  begin
+    perform pg_catalog.set_config(
+      'app.workforce_payout_nonprocessing_edit',
+      'workforce_apply_payout_import',
+      true
+    );
+    v_batch_id := public.workforce_apply_payout_import_without_publication_refresh(
+      p_company_id, p_effective_from, p_effective_to, p_file_name,
+      p_file_sha256, p_rows, p_actor_user_id, p_allowed_location_ids
+    );
+    perform pg_catalog.set_config(
+      'app.workforce_payout_nonprocessing_edit',
+      coalesce(v_previous_trusted_edit, ''),
+      true
+    );
+    return v_batch_id;
+  end
+  $function$;
+`);
+await db.exec(retainedNonprocessingEditMigration);
 
 await db.exec(`
   insert into auth.users(id) values ('${user}');
@@ -686,10 +751,42 @@ assert.deepEqual(providerProduction.rows, [{ units: "11.0000", field_code_snapsh
 
 await db.query(`insert into public.workforce_payroll_runs(id,company_id,period_start,period_end,status)
   values ($1,$2,'2026-09-01','2026-09-30','approved')`, [id(30), company]);
+const batchesBeforeApprovedEdit = Number((
+  await db.query("select count(*)::int as count from public.workforce_payout_import_batches")
+).rows[0].count);
+await apply("da".repeat(32), [{ ...rows[3], row_number: 2, numeric_value: 1300 }]);
+assert.equal(Number((
+  await db.query("select count(*)::int as count from public.workforce_payout_import_batches")
+).rows[0].count), batchesBeforeApprovedEdit + 1);
+assert.equal(Number((
+  await db.query("select final_amount from public.workforce_additional_payment_values where additional_payment_field_id=$1", [additionalField])
+).rows[0].final_amount), 1300,
+"the trusted bulk importer may revise an approved period, including its additional-payment guard");
+assert.equal((await db.query(
+  "select current_setting('app.workforce_payout_nonprocessing_edit',true) as marker"
+)).rows[0].marker, "", "the trusted edit marker is restored after a successful import");
+
+const batchesBeforeUntrustedEdit = Number((
+  await db.query("select count(*)::int as count from public.workforce_payout_import_batches")
+).rows[0].count);
 await assert.rejects(
-  apply("d".repeat(64), [{ ...rows[0], row_number: 2 }]),
+  db.query(`select public.workforce_apply_payout_import_without_publication_refresh(
+    $1,$2,$3,'untrusted.xlsx',$4,$5::jsonb,$6,$7::uuid[]
+  )`, [company, "2026-09-01", "2026-09-30", "db".repeat(32),
+    JSON.stringify([{ ...rows[3], row_number: 2, numeric_value: 1350 }]), user, [station]]),
   /approved or paid/i,
-  "a finalized company period is locked even when the worker was omitted from payroll items"
+  "retained import layers cannot bypass the finalized-period guard when called outside the trusted facade"
 );
+assert.equal(Number((
+  await db.query("select count(*)::int as count from public.workforce_payout_import_batches")
+).rows[0].count), batchesBeforeUntrustedEdit,
+"a rejected untrusted edit leaves no partial audit batch");
+
+await db.query("update public.workforce_payroll_runs set status='paid' where id=$1", [id(30)]);
+await apply("dc".repeat(32), [{ ...rows[3], row_number: 2, numeric_value: 1400 }]);
+assert.equal(Number((
+  await db.query("select final_amount from public.workforce_additional_payment_values where additional_payment_field_id=$1", [additionalField])
+).rows[0].final_amount), 1400,
+"the trusted bulk importer may revise a paid legacy payroll period");
 
 console.log("Workforce payout bulk-import migration verification passed.");

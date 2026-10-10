@@ -850,14 +850,17 @@ function TwentyFourHourTimeInput({
   required?: boolean;
 }) {
   const normalized = normalizeTwentyFourHour(value);
-  const [hour, minute] = normalized ? normalized.split(":") : ["", ""];
+  // Hours and minutes are each chosen explicitly; a half-filled time stays incomplete
+  // instead of being completed with "00".
+  const [parts, setParts] = useState<[string, string]>(() => {
+    const [initialHour = "", initialMinute = ""] = normalized ? normalized.split(":") : [];
+    return [initialHour, initialMinute];
+  });
+  const [hour, minute] = parts;
 
   function update(nextHour: string, nextMinute: string) {
-    if (!nextHour || !nextMinute) {
-      onChange("");
-      return;
-    }
-    onChange(`${nextHour}:${nextMinute}`);
+    setParts([nextHour, nextMinute]);
+    onChange(nextHour && nextMinute ? `${nextHour}:${nextMinute}` : "");
   }
 
   return (
@@ -866,7 +869,7 @@ function TwentyFourHourTimeInput({
         aria-label="Hours (24-hour)"
         required={required}
         value={hour}
-        onChange={(event) => update(event.target.value, minute || "00")}
+        onChange={(event) => update(event.target.value, minute)}
       >
         <option value="">HH</option>
         {HOUR_OPTIONS_24.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -876,7 +879,7 @@ function TwentyFourHourTimeInput({
         aria-label="Minutes"
         required={required}
         value={minute}
-        onChange={(event) => update(hour || "00", event.target.value)}
+        onChange={(event) => update(hour, event.target.value)}
       >
         <option value="">MM</option>
         {MINUTE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -900,8 +903,9 @@ function RegularizationSheet({
   error: string;
   setError: (message: string) => void;
 }) {
-  const [inTime, setInTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedInTime || row.inTime || ""));
-  const [outTime, setOutTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedOutTime || row.outTime || ""));
+  // Requested times start blank so the recorded punch is never submitted unchanged by mistake.
+  const [inTime, setInTime] = useState("");
+  const [outTime, setOutTime] = useState("");
   const missingReason = missingPunchReason(row.inTime, row.outTime);
   const [reason, setReason] = useState(() => {
     const previous = row.regularization?.reasonCode;

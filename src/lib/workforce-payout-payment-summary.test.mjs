@@ -36,7 +36,21 @@ test("a paid V1 and higher revised payout exposes only the delta", () => {
   assert.equal(summary?.paidAmount, 1000);
   assert.equal(summary?.balancePayable, 250);
   assert.equal(summary?.availableToPay, 250);
-  assert.equal(summary?.status, "Partially paid");
+  assert.equal(summary?.status, "Partially Paid");
+});
+
+test("a failed retry does not hide a finalized partial payment", () => {
+  const summary = summarizeWorkforcePayoutPayments(
+    [{ rowId: "a", workforceId: "W1", netAmount: 1500 }],
+    [
+      { workforceId: "W1", status: "paid", amount: 1000 },
+      { workforceId: "W1", status: "failed", amount: 500 }
+    ]
+  ).get("w1");
+  assert.equal(summary?.paidAmount, 1000);
+  assert.equal(summary?.balancePayable, 500);
+  assert.equal(summary?.availableToPay, 500);
+  assert.equal(summary?.status, "Partially Paid");
 });
 
 test("sums signed station amounts before applying the zero floor", () => {

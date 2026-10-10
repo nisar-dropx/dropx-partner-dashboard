@@ -26,3 +26,11 @@ test("notification submit names missing locations even when payout filters hide 
   assert.match(source, /selectedRow\.publicationLocations/);
   assert.match(source, /Missing locations:[\s\S]*?Clear or change the filters/);
 });
+
+test("payout editors receive authoritative processing status without receiving bank action access", () => {
+  assert.match(pageSource, /const canLoadPaymentSummaries = audience === ["']workforce["'][\s\S]*?period\.mode === ["']monthly["'][\s\S]*?&& canEdit;/);
+  assert.match(pageSource, /loadWorkforcePayoutBanks\(companyId, canProcessPayments\)/);
+  assert.match(pageSource, /loadError \|\| !canLoadPaymentSummaries[\s\S]*?withPayoutPaymentSummaries\([\s\S]*?includeProcessingActionDetails: canProcessPayments/);
+  assert.match(pageSource, /includeProcessingActionDetails[\s\S]*?\? loadProcessingItems\(\)[\s\S]*?: Promise\.resolve\(\{ data: \[\] as ProcessingPaymentItem\[\], error: null \}\)/);
+  assert.match(source, /row\.paymentSummary\?\.status !== ["']Payment Processing["']/);
+});

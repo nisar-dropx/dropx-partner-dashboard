@@ -5,11 +5,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const noStore = { "Cache-Control": "private, no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_REQUEST_BYTES = 16 * 1024;
+const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 const actions = new Set(["failed", "cancelled", "hold", "release_hold"]);
 
 function errorResponse(error: string, status: number) {
@@ -36,7 +37,7 @@ function completeCalendarMonth(periodStart: string, periodEnd: string) {
 }
 
 function databaseStatus(message: string) {
-  return /processing|terminal|already|different request|not found|hold state/i.test(message) ? 409 : 400;
+  return /processing|terminal|already|different request|not found|hold state|still be|no payments were cancelled/i.test(message) ? 409 : 400;
 }
 
 function resultRecord(value: unknown) {
@@ -97,6 +98,30 @@ export async function POST(request: Request) {
 
     const companyId = requireCompanyId(authorization);
     if (action === "failed" || action === "cancelled") {
+      if (Array.isArray(body.paymentItemIds)) {
+        if (action !== "cancelled") return errorResponse("Bulk status changes support cancellation only.", 400);
+        const periodStart = String(body.periodStart ?? "").trim();
+        const periodEnd = String(body.periodEnd ?? "").trim();
+        if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
+        const paymentItemIds = body.paymentItemIds.map((value) => String(value ?? "").trim().toLowerCase());
+        if (!paymentItemIds.length || paymentItemIds.some((value) => !UUID.test(value))) {
+          return errorResponse("Select at least one valid processing payment.", 400);
+        }
+        if (new Set(paymentItemIds).size !== paymentItemIds.length) {
+          return errorResponse("Each processing payment may be selected only once.", 400);
+        }
+        const result = await supabaseAdmin.rpc("workforce_cancel_payout_payment_items", {
+          p_company_id: companyId,
+          p_actor_user_id: authorization.userId,
+          p_operation_id: operationId,
+          p_payment_item_ids: paymentItemIds,
+          p_period_start: periodStart,
+          p_period_end: periodEnd,
+          p_remarks: remarks
+        });
+        if (result.error) return errorResponse(result.error.message, databaseStatus(result.error.message));
+        return Response.json(resultRecord(result.data), { headers: noStore });
+      }
       const paymentItemId = String(body.paymentItemId ?? "").trim().toLowerCase();
       if (!UUID.test(paymentItemId)) return errorResponse("A valid processing payment is required.", 400);
       const result = await supabaseAdmin.rpc("workforce_transition_payout_payment_item", {
