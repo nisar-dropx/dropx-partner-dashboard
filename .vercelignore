@@ -1,4 +1,6 @@
 .env*
+*.env
+.codex-tmp/
 .git
 .next
 node_modules
