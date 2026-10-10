@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 let sent, stored;
+let root = null;
 const db = {
   from(table) {
     const q = {
@@ -39,9 +40,14 @@ const mocks = {
   "./station-audit-report-data": {
     buildStationAuditReport: async () => ({
       pdf: Buffer.from("pdf-fixture"),
-      data: { photos: [] },
+      data: { photos: [], type:"Virtual COD", auditor:"Auditor A", summary:"Locker requires repair", checks:[{section:"COD",label:"Locker",outcome:"Not compliant",remarks:"Repair <script>",nonCompliant:true}],actions:[{title:"Repair locker",status:"open",action:"Replace lock",owner:"Manager A",dueAt:"2026-10-12T04:30:00Z"}] },
     }),
   },
+  "./station-audit-thread": { acquireStationAuditThread: async () => ({
+    subject: "QLDA · Station audit updates", messageId: root ? "next-message" : "root-message",
+    inReplyTo: root || undefined, references: root ? [root] : undefined,
+    finish: async id => { stored={root_message_id:root||id};root=id; }, release:async()=>{}
+  }) },
   "server-only": {},
   "node:crypto": { randomUUID: () => "message-id" },
   "@/lib/supabase-admin": { supabaseAdmin: db },
@@ -123,12 +129,20 @@ assert.match(
 );
 assert.equal(sent.attachments[0].contentType, "application/pdf");
 assert.equal(stored.root_message_id, sent.messageId);
-assert.equal(stored.thread_month, "2026-10");
+assert.equal(sent.subject,"QLDA · Station audit updates");
+assert.match(sent.html,/Major findings/);
+assert.match(sent.html,/Manager A/);
+assert.match(sent.html,/Due \/ ETA/);
+assert.match(sent.html,/Repair &lt;script&gt;/);
+assert.match(sent.body,/Locker requires repair/);
+assert.match(sent.body,/12 Oct 2026/);
 await mod.exports.sendStationAuditCompletedEmail({
   ...input,
   audit: { ...input.audit, station_response_status: "not_requested" },
 });
 assert.match(sent.html, /View audit report/);
+assert.equal(sent.inReplyTo, "root-message");
+assert.deepEqual(sent.references,["root-message"]);
 await assert.rejects(
   mod.exports.sendStationAuditCompletedEmail({
     ...input,

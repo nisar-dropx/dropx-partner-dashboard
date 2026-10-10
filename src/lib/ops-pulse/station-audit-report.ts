@@ -26,6 +26,7 @@ export type AuditReportData = {
     outcome: string;
     remarks: string;
     employees: string;
+    nonCompliant?: boolean;
   }[];
   shipments: {
     tid: string;
@@ -33,7 +34,15 @@ export type AuditReportData = {
     remarks: string;
     response: string;
   }[];
-  actions: { title: string; status: string; action: string }[];
+  actions: {
+    title: string;
+    status: string;
+    action: string;
+    owner?: string;
+    dueAt?: string | null;
+    severity?: string;
+    completionNote?: string;
+  }[];
   photos: {
     id: string;
     label: string;

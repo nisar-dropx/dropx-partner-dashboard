@@ -76,14 +76,18 @@ export function AuditRangeReport({
           className={styles.reportDates}
           onSubmit={(event) => {
             event.preventDefault();
-            const problem = auditReportRangeError(from, to);
+            const dates = new FormData(event.currentTarget);
+            const selectedFrom = String(dates.get("from") || "");
+            const selectedTo = String(dates.get("to") || "");
+            const problem = auditReportRangeError(selectedFrom, selectedTo);
             setValidation(problem);
-            if (!problem) onRange(from, to);
+            if (!problem) onRange(selectedFrom, selectedTo);
           }}
         >
           <label>
             From
             <input
+              name="from"
               aria-label="Report from date"
               type="date"
               required
@@ -94,6 +98,7 @@ export function AuditRangeReport({
           <label>
             To
             <input
+              name="to"
               aria-label="Report to date"
               type="date"
               required

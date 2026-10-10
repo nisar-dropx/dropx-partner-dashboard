@@ -127,6 +127,10 @@ export async function buildStationAuditReport(
       const value = raw.response_value?.value || "";
       return {
         id: raw.checklist_item_id,
+        nonCompliant:
+          raw.is_compliant === false ||
+          item?.response_options.find((o) => o.value === value)
+            ?.is_compliant === false,
         section:
           snap?.name ||
           raw.ops_audit_checklist_items?.ops_audit_checklist_sections?.name ||
@@ -174,6 +178,10 @@ export async function buildStationAuditReport(
       title: a.title,
       status: a.status_code,
       action: a.corrective_action || "",
+      owner: a.owner_name || a.owner_email || "Unassigned",
+      dueAt: a.due_at,
+      severity: a.severity_code || "",
+      completionNote: a.completion_note || "",
     })),
     photos,
   };
