@@ -1,15 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import {
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -38,7 +31,10 @@ import {
 } from "@/lib/ops-pulse/station-audit-planning";
 import { AuditDownloads } from "./audit-downloads";
 import { AuditRangeReport } from "./audit-range-report";
-import { inAuditReportRange, matchesAuditReportStatus } from "@/lib/ops-pulse/station-audit-progress";
+import {
+  inAuditReportRange,
+  matchesAuditReportStatus,
+} from "@/lib/ops-pulse/station-audit-progress";
 import { AuditMonthTracker } from "./audit-month-tracker";
 import {
   auditAssigneeKey,
@@ -418,23 +414,37 @@ export function AuditWorkspace({
   canViewMaster: boolean;
   readOnly: boolean;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState(searchParams.get("view") === "reports" ? "log" : stationOnly ? "queue" : "mine");
-  const [typeId, setTypeId] = useState("all");
-  const [stations, setStations] = useState<string[]>([]);
-  const [clusters, setClusters] = useState<string[]>([]);
-  const [airways, setAirways] = useState<string[]>([]);
-  const [auditors, setAuditors] = useState<string[]>([]);
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
-  const [fastOnly, setFastOnly] = useState(false);
+  const [tab, setTab] = useState(
+    searchParams.get("view") === "reports"
+      ? "log"
+      : ["mine", "tracker", "queue", "plan", "calendar"].includes(searchParams.get("view") || "")
+        ? searchParams.get("view")!
+        : stationOnly
+        ? "queue"
+        : "mine",
+  );
+  const [typeId, setTypeId] = useState(searchParams.get("type") || "all");
+  const [stations, setStations] = useState<string[]>(
+    searchParams.get("stations")?.split(",").filter(Boolean) || [],
+  );
+  const [clusters, setClusters] = useState<string[]>(
+    searchParams.get("clusters")?.split(",").filter(Boolean) || [],
+  );
+  const [airways, setAirways] = useState<string[]>(
+    searchParams.get("airways")?.split(",").filter(Boolean) || [],
+  );
+  const [auditors, setAuditors] = useState<string[]>(
+    searchParams.get("auditors")?.split(",").filter(Boolean) || [],
+  );
+  const [query, setQuery] = useState(searchParams.get("q") || "");
+  const [status, setStatus] = useState(searchParams.get("status") || "all");
+  const [fastOnly, setFastOnly] = useState(searchParams.get("fast") === "true");
   const [day, setDay] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState(focusAuditId || "");
   const [seed, setSeed] = useState<ScheduleSeed | null>(null);
   const [today, setToday] = useState(auditDay());
-  const [navigationPending, navigate] = useTransition();
+  const [navigationPending, setNavigationPending] = useState(false);
   useEffect(() => {
     const timer = window.setInterval(() => setToday(auditDay()), 30000);
     return () => clearInterval(timer);
@@ -557,7 +567,9 @@ export function AuditWorkspace({
   const history = (stationOnly ? visibleAudits : monthAudits).filter(
     (audit) => audit.completed_at,
   );
-  const reportAudits = visibleAudits.filter((audit) => inAuditReportRange(audit, reportRange.from, reportRange.to));
+  const reportAudits = visibleAudits.filter((audit) =>
+    inAuditReportRange(audit, reportRange.from, reportRange.to),
+  );
   const modalAudits = day
     ? visibleAudits.filter((audit) => auditDay(audit.scheduled_for) === day)
     : visibleAudits.filter((audit) => audit.id === selectedId);
@@ -572,22 +584,44 @@ export function AuditWorkspace({
     setSelectedId("");
     setSeed(null);
   };
+  const openReportPeriod = (params: URLSearchParams) => {
+    for (const [key, value] of Object.entries({
+      type: typeId,
+      stations: stations.join(","),
+      clusters: clusters.join(","),
+      airways: airways.join(","),
+      auditors: auditors.join(","),
+      q: query,
+      status,
+      fast: String(fastOnly),
+    })) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    setNavigationPending(true);
+    // Use the browser's public portal path, not the rewritten Next.js route.
+    // A full navigation avoids a stalled RSC transition on custom domains.
+    window.location.assign(`${window.location.pathname}?${params}`);
+  };
   const changeMonth = (value: string) => {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return;
     close();
     const params = new URLSearchParams(searchParams.toString());
     params.set("month", value);
+    params.set("view", tab === "log" ? "reports" : tab);
     params.delete("audit");
     params.delete("from");
     params.delete("to");
-    navigate(() => router.push(`${pathname}?${params}`));
+    openReportPeriod(params);
   };
   const changeReportRange = (from: string, to: string) => {
     close();
     const params = new URLSearchParams(searchParams.toString());
-    params.set("from", from); params.set("to", to); params.set("view", "reports");
+    params.set("from", from);
+    params.set("to", to);
+    params.set("view", "reports");
     params.delete("audit");
-    navigate(() => router.push(`${pathname}?${params}`));
+    openReportPeriod(params);
   };
   const shiftMonth = (amount: number) => {
     const date = new Date(`${month}-15T12:00:00Z`);
@@ -639,7 +673,13 @@ export function AuditWorkspace({
         </span>
       </div>
       <div className={styles.actions}>
-        {audit.score_snapshot && <span className={styles.photoBadge}>{audit.score_snapshot.percentage ?? "—"}% · {audit.score_snapshot.rating}{audit.score_snapshot.provisional ? " · provisional" : ""}</span>}
+        {audit.score_snapshot && (
+          <span className={styles.photoBadge}>
+            {audit.score_snapshot.percentage ?? "—"}% ·{" "}
+            {audit.score_snapshot.rating}
+            {audit.score_snapshot.provisional ? " · provisional" : ""}
+          </span>
+        )}
         <Badge audit={audit} />
         {isFastAudit(audit) && <mark className={styles.fast}>≤10 min</mark>}
         <ChevronRight size={18} />
@@ -821,42 +861,44 @@ export function AuditWorkspace({
           )}
         </div>
       </div>
-      {tab !== "log" && <div className={styles.summary}>
-        <div className={styles.metric}>
-          <span>Scheduled</span>
-          <strong>
-            {monthAudits.filter((a) => a.status_code === "scheduled").length}
-          </strong>
-          <small>Planned for {monthLabel(month)}</small>
+      {tab !== "log" && (
+        <div className={styles.summary}>
+          <div className={styles.metric}>
+            <span>Scheduled</span>
+            <strong>
+              {monthAudits.filter((a) => a.status_code === "scheduled").length}
+            </strong>
+            <small>Planned for {monthLabel(month)}</small>
+          </div>
+          <div className={styles.metric}>
+            <span>In progress / pending</span>
+            <strong>
+              {
+                (stationOnly ? visibleAudits : monthAudits).filter(
+                  (a) => auditTone(a) === "pending",
+                ).length
+              }
+            </strong>
+            <small>Live work and follow-up</small>
+          </div>
+          <div className={styles.metric}>
+            <span>Completed</span>
+            <strong>
+              {
+                (stationOnly ? visibleAudits : monthAudits).filter(
+                  (a) => auditTone(a) === "complete",
+                ).length
+              }
+            </strong>
+            <small>Closed audit records</small>
+          </div>
+          <div className={styles.metric}>
+            <span>Quick audit checks</span>
+            <strong>{history.filter(isFastAudit).length}</strong>
+            <small>Completed in 10 minutes or less</small>
+          </div>
         </div>
-        <div className={styles.metric}>
-          <span>In progress / pending</span>
-          <strong>
-            {
-              (stationOnly ? visibleAudits : monthAudits).filter(
-                (a) => auditTone(a) === "pending",
-              ).length
-            }
-          </strong>
-          <small>Live work and follow-up</small>
-        </div>
-        <div className={styles.metric}>
-          <span>Completed</span>
-          <strong>
-            {
-              (stationOnly ? visibleAudits : monthAudits).filter(
-                (a) => auditTone(a) === "complete",
-              ).length
-            }
-          </strong>
-          <small>Closed audit records</small>
-        </div>
-        <div className={styles.metric}>
-          <span>Quick audit checks</span>
-          <strong>{history.filter(isFastAudit).length}</strong>
-          <small>Completed in 10 minutes or less</small>
-        </div>
-      </div>}
+      )}
       <div className={styles.viewBar}>
         <div className={styles.tabs}>
           {(stationOnly
@@ -887,7 +929,12 @@ export function AuditWorkspace({
             </button>
           ))}
         </div>
-        {canManage && <AuditDownloads params={exportParams.toString()} disabled={navigationPending} />}
+        {canManage && (
+          <AuditDownloads
+            params={exportParams.toString()}
+            disabled={navigationPending}
+          />
+        )}
       </div>
       <div className={styles.legend}>
         <span className={styles.complete}>● Completed</span>
@@ -906,18 +953,23 @@ export function AuditWorkspace({
       </div>
       {workspace.truncated && (
         <p role="alert" className={styles.notice}>
-          The first 1,500 audits are shown. Choose a shorter range for the on-screen summary. The Excel report includes every audit in your selected range.
+          The first 1,500 audits are shown. Choose a shorter range for the
+          on-screen summary. The Excel report includes every audit in your
+          selected range.
         </p>
       )}
       {navigationPending && <p role="status">Loading audits…</p>}
-      {tab !== "mine" && tab !== "log" && selectedAuditorNames.length > 0 && !monthAudits.length && (
-        <p role="status" className={styles.notice}>
-          {selectedAuditorNames.join(", ")}{" "}
-          {selectedAuditorNames.length === 1 ? "has" : "have"} no audits in{" "}
-          {monthLabel(month)} that match the current filters. Schedule one, or
-          reassign an existing audit to them.
-        </p>
-      )}
+      {tab !== "mine" &&
+        tab !== "log" &&
+        selectedAuditorNames.length > 0 &&
+        !monthAudits.length && (
+          <p role="status" className={styles.notice}>
+            {selectedAuditorNames.join(", ")}{" "}
+            {selectedAuditorNames.length === 1 ? "has" : "have"} no audits in{" "}
+            {monthLabel(month)} that match the current filters. Schedule one, or
+            reassign an existing audit to them.
+          </p>
+        )}
       {tab === "mine" && (
         <section className={styles.personal}>
           <div className={styles.calendarHead}>
@@ -975,11 +1027,18 @@ export function AuditWorkspace({
           )}
         </div>
       )}
-      {tab === "log" && <AuditRangeReport
-        audits={reportAudits} workspace={workspace} range={reportRange}
-        error={reportError} loading={navigationPending} auditorName={auditorName}
-        onRange={changeReportRange} onOpen={showAudit}
-      />}
+      {tab === "log" && (
+        <AuditRangeReport
+          audits={reportAudits}
+          workspace={workspace}
+          range={reportRange}
+          error={reportError}
+          loading={navigationPending}
+          auditorName={auditorName}
+          onRange={changeReportRange}
+          onOpen={showAudit}
+        />
+      )}
       {tab === "calendar" && (
         <section className={styles.calendarPanel}>
           <div className={styles.calendarHead}>
