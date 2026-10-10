@@ -11,9 +11,9 @@ export function AuditDownloads({
   disabled: boolean;
   auditId?: string;
 }) {
-  const [pending, setPending] = useState<"xlsx" | "pdf" | null>(null);
+  const [pending, setPending] = useState<"xlsx" | "pdf" | "csv" | null>(null);
   const [notice, setNotice] = useState("");
-  async function download(format: "xlsx" | "pdf") {
+  async function download(format: "xlsx" | "pdf" | "csv") {
     if (pending || disabled) return;
     setPending(format);
     setNotice("");
@@ -34,7 +34,13 @@ export function AuditDownloads({
       }
       const mime = response.headers.get("Content-Type") || "";
       if (
-        !mime.includes(format === "pdf" ? "application/pdf" : "spreadsheetml")
+        !mime.includes(
+          format === "pdf"
+            ? "application/pdf"
+            : format === "csv"
+              ? "text/csv"
+              : "spreadsheetml",
+        )
       )
         throw new Error(
           "Your session could not be verified. Reload this page and try the download again.",
@@ -51,7 +57,9 @@ export function AuditDownloads({
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(href), 60000);
-      setNotice(`${format === "pdf" ? "PDF" : "Excel"} download started.`);
+      setNotice(
+        `${format === "pdf" ? "PDF" : format === "csv" ? "CSV" : "Excel"} download started.`,
+      );
     } catch (error) {
       setNotice(
         error instanceof Error && error.name === "AbortError"
@@ -75,6 +83,16 @@ export function AuditDownloads({
         maxWidth: 440,
       }}
     >
+      {!auditId && (
+        <button
+          className="button secondary compact"
+          disabled={disabled || !!pending}
+          title="One row per audit: station, date and time, auditor and status"
+          onClick={() => download("csv")}
+        >
+          {pending === "csv" ? "Preparing CSV…" : "Download CSV"}
+        </button>
+      )}
       {!auditId && (
         <button
           className="button secondary compact"

@@ -42,7 +42,7 @@ import {
   isMyAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
 import type { AuditClusters } from "@/lib/ops-pulse/station-audit-clusters";
-import { scheduleStationAudit } from "./actions";
+import { rescheduleStationAudit, scheduleStationAudit } from "./actions";
 import { AuditDetail, auditActor } from "./audit-detail";
 import styles from "./audit-workspace.module.css";
 
@@ -214,11 +214,17 @@ function Schedule({
   workspace,
   seed,
   onSaved,
+  onOpen,
+  canReschedule,
+  auditorName,
   viewerId,
 }: {
   workspace: StationAuditWorkspace;
   seed: ScheduleSeed;
   onSaved: () => void;
+  onOpen: (audit: StationAudit) => void;
+  canReschedule: boolean;
+  auditorName: (audit: StationAudit) => string;
   viewerId: string;
 }) {
   const types = workspace.auditTypes.filter((type) => type.is_active);
@@ -237,16 +243,44 @@ function Schedule({
     : null;
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
+  // A monthly programme allows one audit per station in each date window. Spot the
+  // audit that already holds this window so it can be moved instead of duplicated.
+  const booked =
+    type?.cadence_unit === "monthly" && dateSlot && stationId
+      ? workspace.audits.find(
+          (audit) =>
+            !audit.deleted_at &&
+            audit.location_id === stationId &&
+            audit.audit_type_id === typeId &&
+            auditDay(audit.scheduled_for).slice(0, 7) ===
+              scheduledDate.slice(0, 7) &&
+            Number(auditDay(audit.scheduled_for).slice(-2)) >=
+              dateSlot.startDay &&
+            Number(auditDay(audit.scheduled_for).slice(-2)) <= dateSlot.endDay,
+        )
+      : undefined;
+  const movable =
+    !!booked &&
+    canReschedule &&
+    booked.status_code === "scheduled" &&
+    !booked.started_at &&
+    !booked.completed_at;
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
-        if (pending) return;
+        if (pending || (booked && !movable)) return;
         setPending(true);
         void (async () => {
           try {
-            const result = await scheduleStationAudit(data);
+            if (booked) {
+              data.set("audit_id", booked.id);
+              data.set("original_scheduled_for", booked.scheduled_for);
+            }
+            const result = booked
+              ? await rescheduleStationAudit(data)
+              : await scheduleStationAudit(data);
             setNotice(result.message);
             if (result.ok) onSaved();
           } catch {
@@ -261,6 +295,32 @@ function Schedule({
         Choose a date and time for this programme slot. Times are in India
         Standard Time.
       </p>
+      {booked && (
+        <div className={styles.notice} role="status">
+          <strong>
+            This station already has this audit in the {dateSlot?.label} window.
+          </strong>
+          <p>
+            {booked.audit_number} · {dateLabel(auditDay(booked.scheduled_for))},{" "}
+            {auditLocalTime(booked.scheduled_for)} · {auditorName(booked)} ·{" "}
+            {auditStatusLabel(booked.status_code)}
+          </p>
+          <p>
+            {movable
+              ? "Pick the new date and time below and give a reason to move it. The auditor stays the same."
+              : booked.status_code === "scheduled" && !booked.started_at
+                ? "You do not have permission to move it. Ask an audit manager."
+                : "It has already started or finished, so this window is used and cannot be booked again."}
+          </p>
+          <button
+            type="button"
+            className="button secondary compact"
+            onClick={() => onOpen(booked)}
+          >
+            Open this audit
+          </button>
+        </div>
+      )}
       <div className={styles.compactForm}>
         <label className={styles.inputLabel}>
           Audit type
@@ -327,12 +387,12 @@ function Schedule({
             value={dateSlot?.code || ""}
           />
         </div>
-        <div className={styles.inputLabel}>
+        <div className={styles.inputLabel} hidden={!!booked}>
           Assigned auditor
           <SearchableSelect
             key={stationId}
             name="assigned_to"
-            required
+            required={!booked}
             defaultValue={
               workspace.assignees.some(
                 (p) => p.id === viewerId && p.stationIds.includes(stationId),
@@ -352,17 +412,33 @@ function Schedule({
           </small>
         </div>
         <label className={styles.inputLabel}>
-          Purpose / context
+          {booked ? "Reason for the change" : "Purpose / context"}
           <input
             name="reason"
-            placeholder="Routine coverage or follow-up"
+            placeholder={
+              booked
+                ? "Why is this audit being moved?"
+                : "Routine coverage or follow-up"
+            }
+            required={!!booked}
             maxLength={500}
           />
         </label>
       </div>
       <div className={styles.actions}>
-        <button className="button" disabled={pending || !stationId || !typeId}>
-          {pending ? "Scheduling…" : "Schedule audit"}
+        <button
+          className="button"
+          disabled={
+            pending || !stationId || !typeId || (!!booked && !movable)
+          }
+        >
+          {pending
+            ? booked
+              ? "Moving…"
+              : "Scheduling…"
+            : booked
+              ? "Move this audit to the new date"
+              : "Schedule audit"}
         </button>
         <p role="status">{notice}</p>
       </div>
@@ -1140,6 +1216,12 @@ export function AuditWorkspace({
               seed={seed}
               viewerId={viewerId}
               onSaved={close}
+              canReschedule={canEdit}
+              auditorName={auditorName}
+              onOpen={(audit) => {
+                setSeed(null);
+                showAudit(audit);
+              }}
             />
           ) : (
             <>
