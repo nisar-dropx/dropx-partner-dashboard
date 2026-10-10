@@ -62,8 +62,11 @@ async function exportAuditReport(request: Request) {
   const client = supabaseAdmin;
   const url = new URL(request.url);
   const format = url.searchParams.get("format") || "xlsx";
-  if (format !== "xlsx" && format !== "pdf")
-    return Response.json({ error: "Choose Excel or PDF." }, { status: 400 });
+  if (format !== "xlsx" && format !== "pdf" && format !== "csv")
+    return Response.json(
+      { error: "Choose Excel, PDF or CSV." },
+      { status: 400 },
+    );
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to") ?? "";
   const rangeError = auditReportRangeError(from, to);
@@ -304,6 +307,29 @@ async function exportAuditReport(request: Request) {
     "Manager note": audit.manager_summary,
     Email: audit.email_status,
   }));
+  if (format === "csv") {
+    // One row per audit: who audits which station and when. The byte-order mark
+    // keeps station names readable when the file is opened in Excel.
+    // Text that a spreadsheet would run as a formula is stored as plain text.
+    const safe = register.map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+          key,
+          typeof value === "string" && /^[=+-@]/.test(value)
+            ? `'${value}`
+            : value,
+        ]),
+      ),
+    );
+    const csv = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(safe));
+    return new Response(`﻿${csv}`, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="station-audits-${from}-to-${to}.csv"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
   appendAuditProgressSummary(book, audits, {
     from,
     to,
