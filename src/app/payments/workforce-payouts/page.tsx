@@ -303,7 +303,8 @@ async function withPayoutPaymentSummaries(
   companyId: string,
   fromDate: string,
   toDate: string,
-  rows: WorkforcePayoutRow[]
+  rows: WorkforcePayoutRow[],
+  { includeProcessingActionDetails = false }: { includeProcessingActionDetails?: boolean } = {}
 ) {
   if (!supabaseAdmin) return { rows, error: null as string | null };
   const admin = supabaseAdmin;
@@ -342,7 +343,30 @@ async function withPayoutPaymentSummaries(
   };
   const previews: PaymentPreview[] = [];
   const processingItems: ProcessingPaymentItem[] = [];
-  const workforceIds = new Set(payoutRows.map((row) => String(row.workforce_id).toLowerCase()));
+  const visiblePayoutKeys = new Set(payoutRows.map((row) =>
+    `${String(row.workforce_id).toLowerCase()}|${String(row.station_id).toLowerCase()}`
+  ));
+  const loadProcessingItems = async () => {
+    const pageRows: ProcessingPaymentItem[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const result = await admin
+        .from("workforce_payout_payment_items")
+        .select("id,workforce_id,location_id_snapshot,instruction_amount")
+        .eq("company_id", companyId)
+        .eq("period_start", fromDate)
+        .eq("period_end", toDate)
+        .eq("status", "processing")
+        .order("id")
+        .range(offset, offset + 999);
+      if (result.error) return { data: null, error: result.error };
+      const currentPage = (result.data ?? []) as ProcessingPaymentItem[];
+      pageRows.push(...currentPage.filter((item) => visiblePayoutKeys.has(
+        `${String(item.workforce_id).toLowerCase()}|${String(item.location_id_snapshot).toLowerCase()}`
+      )));
+      if (currentPage.length < 1000) break;
+    }
+    return { data: pageRows, error: null };
+  };
   const [previewResults, processingResult] = await Promise.all([
     mapWithConcurrency(chunkedValues(payoutRows, 250), 3, async (payoutChunk) => admin.rpc("workforce_preview_payout_payment_rows", {
         p_company_id: companyId,
@@ -350,25 +374,9 @@ async function withPayoutPaymentSummaries(
         p_period_end: toDate,
         p_rows: payoutChunk
       })),
-    (async () => {
-      const pageRows: ProcessingPaymentItem[] = [];
-      for (let offset = 0; ; offset += 1000) {
-        const result = await admin
-          .from("workforce_payout_payment_items")
-          .select("id,workforce_id,location_id_snapshot,instruction_amount")
-          .eq("company_id", companyId)
-          .eq("period_start", fromDate)
-          .eq("period_end", toDate)
-          .eq("status", "processing")
-          .order("id")
-          .range(offset, offset + 999);
-        if (result.error) return { data: null, error: result.error };
-        const currentPage = (result.data ?? []) as ProcessingPaymentItem[];
-        pageRows.push(...currentPage.filter((item) => workforceIds.has(String(item.workforce_id).toLowerCase())));
-        if (currentPage.length < 1000) break;
-      }
-      return { data: pageRows, error: null };
-    })()
+    includeProcessingActionDetails
+      ? loadProcessingItems()
+      : Promise.resolve({ data: [] as ProcessingPaymentItem[], error: null })
   ]);
   for (const result of previewResults) {
     if (result.error) return { rows, error: result.error.message };
@@ -499,6 +507,9 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     && authorization.hasAllLocationAccess
     && hasPermission(authorization, "payment_process", "edit")
     && !authorization.readOnly;
+  const canLoadPaymentSummaries = audience === "workforce"
+    && period.mode === "monthly"
+    && canEdit;
   const canManageMappingLocks = audience === "workforce"
     && canEdit
     && authorization.hasAllLocationAccess
@@ -539,9 +550,11 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         audience === "workforce" ? loaded.dependencyHash ?? "" : "",
         mappingLocks.impactedWorkforceIds
       ),
-    loadError || audience !== "workforce" || !canProcessPayments
+    loadError || !canLoadPaymentSummaries
       ? Promise.resolve({ rows: loaded.rows, error: loadError })
-      : withPayoutPaymentSummaries(companyId, period.fromDate, period.toDate, loaded.rows)
+      : withPayoutPaymentSummaries(companyId, period.fromDate, period.toDate, loaded.rows, {
+        includeProcessingActionDetails: canProcessPayments
+      })
   ]);
   const paymentByRowId = new Map(paymentEnriched.rows.map((row) => [row.id, row]));
   const rows = reviewed.rows.map((row) => {

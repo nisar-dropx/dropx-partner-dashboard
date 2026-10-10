@@ -28,7 +28,7 @@ export type WorkforcePayoutPaymentSummary = {
     | "Payment On Hold"
     | "PAN Not Linked"
     | "Paid"
-    | "Partially paid"
+    | "Partially Paid"
     | null;
   eligible: boolean | null;
   eligibilityCode: string | null;
@@ -145,12 +145,12 @@ export function summarizeWorkforcePayoutPayments(
       ? "Payment Processing"
       : paidAmount > 0 && balancePayable === 0
         ? "Paid"
-        : latestAttemptStatus === "failed"
-          ? "Payment Failed"
-          : latestAttemptStatus === "cancelled"
-            ? "Payment Cancelled"
-            : paidAmount > 0
-              ? "Partially paid"
+        : paidAmount > 0 && balancePayable > 0
+          ? "Partially Paid"
+          : latestAttemptStatus === "failed"
+            ? "Payment Failed"
+            : latestAttemptStatus === "cancelled"
+              ? "Payment Cancelled"
               : null;
     summaries.set(workforceId, {
       currentNetAmount,

@@ -53,11 +53,12 @@ test("bulk re-download preserves immutable instructions and separates original b
   assert.match(route, /X-Workforce-Payout-Redownload": "true"/);
 });
 
-test("dashboard loads processing items with one paginated period query", () => {
+test("dashboard loads bank-action details with one paginated period query scoped to visible payout rows", () => {
   assert.match(page, /\.from\("workforce_payout_payment_items"\)[\s\S]{0,500}\.eq\("company_id", companyId\)[\s\S]{0,300}\.eq\("period_start", fromDate\)[\s\S]{0,200}\.eq\("period_end", toDate\)[\s\S]{0,200}\.eq\("status", "processing"\)/);
   assert.match(page, /\.range\(offset, offset \+ 999\)/);
-  assert.match(page, /workforceIds\.has\(String\(item\.workforce_id\)\.toLowerCase\(\)\)/);
-  assert.doesNotMatch(page, /chunkedValues\(workforceIds/);
+  assert.match(page, /visiblePayoutKeys\.has\([\s\S]{0,150}item\.workforce_id[\s\S]{0,150}item\.location_id_snapshot/);
+  assert.match(page, /includeProcessingActionDetails[\s\S]{0,100}\? loadProcessingItems\(\)/);
+  assert.doesNotMatch(page, /chunkedValues\(visiblePayoutKeys/);
 });
 
 test("database snapshot rejects stale, terminal, cross-period, and legacy combined items", () => {

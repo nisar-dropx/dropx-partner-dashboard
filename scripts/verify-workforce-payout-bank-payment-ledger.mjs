@@ -35,6 +35,10 @@ const processingRedownloadMigrationUrl = new URL(
   "../supabase/migrations/20261010160000_workforce_payout_processing_bank_redownload.sql",
   import.meta.url
 );
+const partialPaymentStatusMigrationUrl = new URL(
+  "../supabase/migrations/20261010180000_workforce_payout_partial_payment_status.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
 const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
@@ -43,6 +47,7 @@ const activeProfileStationLinesMigration = readFileSync(activeProfileStationLine
 const rowSelectionMigration = readFileSync(rowSelectionMigrationUrl, "utf8");
 const bulkCancellationMigration = readFileSync(bulkCancellationMigrationUrl, "utf8");
 const processingRedownloadMigration = readFileSync(processingRedownloadMigrationUrl, "utf8");
+const partialPaymentStatusMigration = readFileSync(partialPaymentStatusMigrationUrl, "utf8");
 const executablePublishedSnapshotFreshnessMigration = publishedSnapshotFreshnessMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableLifecycleMigration = lifecycleMigration
@@ -54,6 +59,8 @@ const executableRowSelectionMigration = rowSelectionMigration
 const executableBulkCancellationMigration = bulkCancellationMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableProcessingRedownloadMigration = processingRedownloadMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executablePartialPaymentStatusMigration = partialPaymentStatusMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableMigration = [migration, compatibilityMigration, publishedSnapshotFreshnessMigration]
   .map((sql) => sql.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""))
@@ -123,6 +130,8 @@ assert.match(processingRedownloadMigration, /allocation_check\.allocation_count 
 assert.match(processingRedownloadMigration, /allocation_check\.matching_station_count <> 1/i);
 assert.match(processingRedownloadMigration, /allocation_check\.allocated_amount <> item\.instruction_amount/i);
 assert.match(processingRedownloadMigration, /to service_role/i);
+assert.match(partialPaymentStatusMigration, /v_paid > 0 and balance_payable > 0 then ''Partially Paid''/i);
+assert.match(partialPaymentStatusMigration, /workforce_payout_payment_row_candidates/i);
 assert.doesNotMatch(
   processingRedownloadMigration,
   /\b(update|insert into|delete from)\s+public\.workforce_payout_payment_/i
@@ -778,6 +787,15 @@ assert.equal(heldPreview.eligible, false);
 assert.equal(heldPreview.eligibility_code, "payment_on_hold");
 assert.equal(heldPreview.payment_status, "Payment On Hold");
 assert.equal(Number(heldPreview.available_to_pay), 0);
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-01')`,
+  [company, workforce]
+);
+assert.equal(Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count), 1, "Payment On Hold remains editable");
 await assert.rejects(
   db.query(
     `update public.workforce_payout_payment_hold_events
@@ -878,6 +896,24 @@ assert.equal(first.replayed, false);
 assert.equal(first.items.length, 1);
 assert.equal(first.items[0].reference_no, "WPD111092026V1");
 assert.equal(Number(first.items[0].instruction_amount), 11836);
+const sourceRowsBeforeProcessingEdit = Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count);
+await assert.rejects(
+  db.query(
+    `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+     values ($1,$2,date '2026-09-02')`,
+    [company, workforce]
+  ),
+  /Payment Processing is active/i,
+  "Payment Processing rejects payout-source edits"
+);
+assert.equal(Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count), sourceRowsBeforeProcessingEdit,
+"a rejected processing edit leaves no partial source row");
 assert.equal(first.items[0].credit_remarks, "NLRF");
 assert.equal(first.items[0].debit_account_no, "0011223344");
 assert.equal(first.items[0].bank_account_no, "1234567890");
@@ -981,6 +1017,11 @@ const paid = await finalize({
 });
 assert.equal(paid.paid, 1);
 assert.equal(paid.cancelled, 0);
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-03')`,
+  [company, workforce]
+);
 const paidReplay = await finalize({
   operation: id(21),
   hash: "b".repeat(64),
@@ -1214,6 +1255,7 @@ assert.equal(revisedDeltaPreview.eligible, true);
 assert.equal(revisedDeltaPreview.payment_status, "Partially paid");
 assert.equal(Number(revisedDeltaPreview.current_target_amount), 14000);
 assert.equal(Number(revisedDeltaPreview.paid_amount), 13000);
+assert.equal(Number(revisedDeltaPreview.balance_payable), 1000);
 assert.equal(Number(revisedDeltaPreview.available_to_pay), 1000);
 const fourth = await createBatch({ operation: id(71), fingerprint: "7".repeat(64) });
 assert.equal(fourth.items[0].reference_no, "WPD111092026V4");
@@ -1230,6 +1272,11 @@ const failed = await transitionPayment({
 });
 assert.equal(failed.outcome, "failed");
 assert.equal(failed.batch_status, "completed");
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-04')`,
+  [company, workforce]
+);
 const failedPreview = await preview();
 assert.equal(failedPreview.eligible, true);
 assert.equal(failedPreview.payment_status, "Payment Failed");
@@ -1247,6 +1294,16 @@ await transitionPayment({
   outcome: "cancelled",
   remarks: "Payment run cancelled by Finance"
 });
+await db.query(
+  `insert into public.workforce_payout_attendance_overrides(company_id,workforce_id,work_date)
+   values ($1,$2,date '2026-09-05')`,
+  [company, workforce]
+);
+assert.equal(Number((await db.query(
+  "select count(*)::int as count from public.workforce_payout_attendance_overrides where workforce_id=$1",
+  [workforce]
+)).rows[0].count), 4,
+"paid, failed and cancelled payment outcomes all release payout-source editing");
 const manualAudit = await db.query(
   `select event_type,event_data->>'remarks' remarks
    from public.workforce_payout_payment_events
@@ -1369,6 +1426,14 @@ await db.exec(executableActiveProfileStationLinesMigration);
 await db.exec(executableRowSelectionMigration);
 await db.exec(executableBulkCancellationMigration);
 await db.exec(executableProcessingRedownloadMigration);
+await db.exec(executablePartialPaymentStatusMigration);
+
+const standardizedPartialPreview = await preview();
+assert.equal(standardizedPartialPreview.payment_status, "Partially Paid");
+assert.equal(Number(standardizedPartialPreview.current_target_amount), 14000);
+assert.equal(Number(standardizedPartialPreview.paid_amount), 13000);
+assert.equal(Number(standardizedPartialPreview.balance_payable), 1000);
+assert.equal(Number(standardizedPartialPreview.available_to_pay), 1000);
 
 // A legacy profile-wide processing instruction spans two allocation rows. It
 // cannot be represented by one dashboard location row, so bulk row

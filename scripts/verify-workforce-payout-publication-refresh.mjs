@@ -24,6 +24,10 @@ const dependencyRefreshMigration = readFileSync(
   new URL("../supabase/migrations/20261010045430_workforce_payout_dependency_refresh_queue.sql", import.meta.url),
   "utf8"
 ).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const nonprocessingEditsMigration = readFileSync(
+  new URL("../supabase/migrations/20261010170000_workforce_payout_nonprocessing_edits.sql", import.meta.url),
+  "utf8"
+).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 
 assert.match(migration, /security definer\s+set search_path = ''/i);
 assert.match(migration, /for update of job skip locked/i);
@@ -75,6 +79,11 @@ assert.match(
 assert.match(dependencyRefreshMigration, /revision_source in \([\s\S]*'mapping_relock'[\s\S]*'dependency_refresh'/i);
 assert.match(dependencyRefreshMigration, /job\.id = v_job_id[\s\S]*job\.status = ''processing''/i);
 assert.doesNotMatch(dependencyRefreshMigration, /^\+/m);
+assert.match(nonprocessingEditsMigration, /app\.workforce_payout_nonprocessing_edit/i);
+assert.match(nonprocessingEditsMigration, /on conflict on constraint workforce_payout_refresh_jobs_request_identity_unique/i);
+assert.match(nonprocessingEditsMigration, /review\.status in \(''under_review'', ''returned'', ''approved'', ''cancelled''\)/i);
+assert.doesNotMatch(nonprocessingEditsMigration, /^\+/m);
+assert.doesNotMatch(nonprocessingEditsMigration, /\\n\+/);
 
 const db = new PGlite();
 
@@ -1900,7 +1909,115 @@ try {
       periodStart, periodEnd, actor]
   );
 
+  // Reproduce the retained production import stack that the compatibility
+  // migration patches. The publication-refresh verifier starts from a compact
+  // importer stub, so these two dormant layers and the legacy finalized guards
+  // make its pg_get_functiondef checks representative without duplicating the
+  // bulk importer's field-specific behavior.
+  await db.exec(`
+    create table public.workforce_payroll_runs(
+      id uuid primary key default gen_random_uuid(),
+      company_id uuid not null,
+      period_start date not null,
+      period_end date not null,
+      status text not null
+    );
+
+    create or replace function public.workforce_apply_payout_import_without_publication_refresh(
+      p_company_id uuid,
+      p_effective_from date,
+      p_effective_to date,
+      p_file_name text,
+      p_file_sha256 text,
+      p_rows jsonb,
+      p_actor_user_id uuid,
+      p_allowed_location_ids uuid[] default null
+    ) returns uuid language plpgsql security definer set search_path = '' as $function$
+    declare
+      v_batch_id uuid := gen_random_uuid();
+      v_row jsonb;
+    begin
+      if exists (
+        select 1
+        from public.workforce_payroll_runs payroll_run
+        where payroll_run.company_id = p_company_id
+          and lower(coalesce(payroll_run.status, '')) in ('approved', 'paid')
+          and daterange(payroll_run.period_start, payroll_run.period_end, '[]')
+            && daterange(p_effective_from, p_effective_to, '[]')
+      ) then
+        raise exception 'The selected payout import period overlaps an approved or paid Workforce payroll.';
+      end if;
+
+      insert into public.workforce_payout_import_batches(
+        id, company_id, effective_from, effective_to, file_name, file_sha256,
+        status, row_count, created_by, committed_at
+      ) values (
+        v_batch_id, p_company_id, p_effective_from, p_effective_to,
+        p_file_name, p_file_sha256, 'committed', jsonb_array_length(p_rows),
+        p_actor_user_id, clock_timestamp()
+      );
+      for v_row in select value from jsonb_array_elements(p_rows)
+      loop
+        insert into public.workforce_payout_import_rows(
+          batch_id, company_id, row_number, workforce_id, station_id,
+          effective_from, effective_to
+        ) values (
+          v_batch_id, p_company_id, (v_row ->> 'row_number')::integer,
+          (v_row ->> 'workforce_id')::uuid, (v_row ->> 'station_id')::uuid,
+          (v_row ->> 'effective_from')::date, (v_row ->> 'effective_to')::date
+        );
+      end loop;
+      return v_batch_id;
+    end
+    $function$;
+
+    create or replace function public.guard_finalized_workforce_payout_input()
+    returns trigger language plpgsql security definer set search_path = '' as $function$
+    declare
+      v_old_company_id uuid;
+      v_new_company_id uuid;
+      v_old_from date;
+      v_old_to date;
+      v_new_from date;
+      v_new_to date;
+    begin
+      if (v_old_company_id is not null and exists (
+          select 1 from public.workforce_payroll_runs payroll_run
+          where payroll_run.company_id = v_old_company_id
+            and lower(coalesce(payroll_run.status, '')) in ('approved', 'paid')
+            and daterange(payroll_run.period_start, payroll_run.period_end, '[]')
+              && daterange(v_old_from, v_old_to, '[]')
+        )) or (v_new_company_id is not null and exists (
+          select 1 from public.workforce_payroll_runs payroll_run
+          where payroll_run.company_id = v_new_company_id
+            and lower(coalesce(payroll_run.status, '')) in ('approved', 'paid')
+            and daterange(payroll_run.period_start, payroll_run.period_end, '[]')
+              && daterange(v_new_from, v_new_to, '[]')
+        )) then
+        raise exception 'Workforce payout input cannot change because the affected period is approved or paid.';
+      end if;
+      if tg_op = 'DELETE' then return old; end if;
+      return new;
+    end
+    $function$;
+
+    create or replace function public.workforce_additional_payment_period_is_finalized(
+      p_company_id uuid, p_workforce_id uuid,
+      p_effective_from date, p_effective_to date
+    ) returns boolean language sql stable set search_path = '' as $function$
+      select exists (
+        select 1
+        from public.workforce_payroll_runs payroll_run
+        where payroll_run.company_id = p_company_id
+          and lower(coalesce(payroll_run.status, '')) in ('approved', 'paid')
+          and daterange(payroll_run.period_start, payroll_run.period_end, '[]')
+            && daterange(p_effective_from, p_effective_to, '[]')
+      );
+    $function$;
+  `.replace(/^    /gm, ""));
+
   await db.exec(dependencyRefreshMigration);
+  await db.exec(nonprocessingEditsMigration);
 
   const backfilledDependencyJob = (
     await db.query(
@@ -2082,32 +2199,33 @@ try {
     dependencyApply.publication_ids[0]
   );
 
-  // The legacy payout-import wrapper does not name the new request column;
-  // its row-preparation trigger must still preserve input-batch provenance.
+  // Exercise the public importer after the dependency-refresh migration. A
+  // direct queue INSERT is not enough here: that used to pass while the
+  // importer's stale ON CONFLICT target failed every manual and workbook edit.
+  // The row-preparation trigger must also preserve input-batch provenance.
   await db.exec("reset role");
-  const compatibleBatch = randomUUID();
-  await db.query(
-    `insert into public.workforce_payout_import_batches(
-      id,company_id,effective_from,effective_to,file_name,file_sha256,status,row_count,
-      created_by,committed_at
-    ) values ($1,$2,$3,$4,'compatibility.csv',$5,'committed',1,$6,clock_timestamp())`,
-    [compatibleBatch, company, periodStart, periodEnd, "6".repeat(64), actor]
-  );
-  const compatibleJob = randomUUID();
-  await db.query(
-    `insert into public.workforce_payout_publication_refresh_jobs(
-      id,company_id,input_batch_id,workforce_id,station_id,period_start,period_end,
-      base_publication_id,base_revision,requested_by,next_attempt_at
-    ) values ($1,$2,$3,$4,$5,$6,$7,$8,3,$9,clock_timestamp())`,
-    [compatibleJob, company, compatibleBatch, unpublishedWorkforce, station, periodStart,
-      periodEnd, dependencyApply.publication_ids[0], actor]
-  );
+  await db.exec("set role service_role");
+  const compatibleBatch = (
+    await db.query(
+      `select public.workforce_apply_payout_import(
+        $1,$2,$3,'compatibility.csv',$4,$5::jsonb,$6,null
+      ) as id`,
+      [company, periodStart, periodEnd, "6".repeat(64), JSON.stringify([{
+        ...importRows[0],
+        workforce_id: dependencyWorkforce,
+        station_id: station
+      }]), actor]
+    )
+  ).rows[0].id;
   const compatibleInputJob = (
     await db.query(
-      "select refresh_source,refresh_request_id,input_batch_id from public.workforce_payout_publication_refresh_jobs where id=$1",
-      [compatibleJob]
+      `select refresh_source,refresh_request_id,input_batch_id
+       from public.workforce_payout_publication_refresh_jobs
+       where company_id=$1 and input_batch_id=$2 and workforce_id=$3 and station_id=$4`,
+      [company, compatibleBatch, dependencyWorkforce, station]
     )
   ).rows[0];
+  assert.ok(compatibleInputJob, "the public importer queues an input refresh after the dependency migration");
   assert.equal(compatibleInputJob.refresh_source, "input_batch");
   assert.equal(compatibleInputJob.refresh_request_id, compatibleBatch);
   assert.equal(compatibleInputJob.input_batch_id, compatibleBatch);

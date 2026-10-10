@@ -167,7 +167,9 @@ test("selected processing rows can be cancelled atomically with one mandatory re
 test("the UI pays only eligible location rows and displays row-specific ledger balances", () => {
   assert.match(page, /rpc\("workforce_preview_payout_payment_rows"/);
   assert.match(page, /`\$\{String\(preview\.workforce_id\)\.toLowerCase\(\)\}\|\$\{String\(preview\.station_id\)\.toLowerCase\(\)\}`/);
-  assert.match(page, /loadError \|\| audience !== "workforce" \|\| !canProcessPayments/);
+  assert.match(page, /const canLoadPaymentSummaries = audience === "workforce"[\s\S]*?period\.mode === "monthly"[\s\S]*?&& canEdit/);
+  assert.match(page, /loadError \|\| !canLoadPaymentSummaries/);
+  assert.match(page, /includeProcessingActionDetails: canProcessPayments/);
   assert.match(page, /const \[reviewed, paymentEnriched\] = await Promise\.all/);
   assert.match(page, /canProcessPayments = audience === "workforce"[\s\S]*?period\.mode === "monthly"[\s\S]*?authorization\.hasAllLocationAccess[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
   assert.match(page, /from\("workforce_payout_payment_items"\)[\s\S]{0,300}instruction_amount/);
