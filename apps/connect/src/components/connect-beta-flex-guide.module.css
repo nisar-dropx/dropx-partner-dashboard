@@ -2,3 +2,39 @@
 @media(max-width:1100px){.layout{grid-template-columns:185px minmax(0,1fr)}.panel{padding:20px}.desktopNav{padding:8px}.desktopNav button{padding:8px;font-size:11px}}
 @media(max-width:800px){.layout{display:block}.desktopNav{display:none}.mobileSelect{display:block;padding:16px 16px 0}.mobileSelect label{display:block;font-size:11px;color:#707e93;margin-bottom:7px}.mobileSelect select{width:100%;min-width:0;min-height:48px;background:white;border:1px solid #dce1e9;border-radius:10px;padding:10px;color:#29374d;font-size:14px}.panel{padding:20px 16px}.guideHeader{padding:15px 16px;font-size:13px}.stepTitle h2{font-size:20px}.stepNumber{width:40px;height:40px;font-size:20px}.email{flex-wrap:wrap;padding:14px}.email>div{flex-basis:calc(100% - 40px)}.email button{margin-left:32px;font-size:12px}.tabs button{flex:1;padding:12px 8px;font-size:12px}.bridge{padding:18px;gap:12px}.bridge>i{width:38px;height:38px;border-radius:11px}.bridge h2{font-size:19px}.bridge p{font-size:13px}.bridge button{width:100%;font-size:13px;padding:12px}.instructions{font-size:14px}.actions>*{flex:1}.controls button{font-size:12px;padding:11px;min-height:48px}.controls .primary{font-size:12px;padding:11px}.evidence{padding:14px 16px}.liveStatus{font-size:12px}.journey,.panel{scroll-margin-top:84px}}
 @media(prefers-reduced-motion:reduce){.journey *{scroll-behavior:auto}}
+
+/* Redacted PDF examples: compact preview, readable on-demand viewer. */
+.examples{margin:0 0 20px;border:1px solid #e8e5eb;border-radius:14px;overflow:hidden;background:#fff}
+.examplesHeader{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:14px 16px;border-bottom:1px solid #eeedf1}
+.examplesHeader h3{display:flex;align-items:center;gap:8px;font-size:14px;margin:0;color:#374158}
+.examplesHeader h3 svg{color:#bb355f}
+.exampleNavigation{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:#66728a}
+.exampleNavigation span{line-height:1.5;text-align:center}
+.exampleNavigation button,.screenDialog>header>button{display:grid;place-items:center;flex-shrink:0;width:44px;height:44px;border:1px solid #e4e6ec;border-radius:10px;background:#fff;color:#a72d57;cursor:pointer}
+.exampleNavigation button:disabled{opacity:.35;cursor:default}
+.exampleBody{display:grid;grid-template-columns:minmax(130px,180px) minmax(0,1fr);gap:18px;padding:18px;background:linear-gradient(125deg,#f8f6fa,#fff 65%)}
+.screenPreview{display:flex;align-items:center;flex-direction:column;justify-content:center;gap:10px;align-self:start;min-width:0;padding:10px;border:1px solid #e4e2e9;border-radius:12px;background:#fff;cursor:zoom-in;box-shadow:0 6px 20px #26324709}
+.screenPreview img{display:block;max-width:100%;width:auto;height:auto;max-height:255px;border:1px solid #e2e6e9;border-radius:5px}
+.screenPreview>span{display:flex;align-items:center;justify-content:center;gap:6px;min-height:30px;color:#a62f56;font-size:11px;font-weight:650;line-height:1.5}
+.screenPreview>span svg{flex-shrink:0}
+.exampleNotes{min-width:0;align-self:center}
+.screenPointers{list-style:none;padding:0;margin:0}
+.screenPointers li{display:flex;align-items:flex-start;gap:9px;margin:0 0 13px}
+.screenPointers li>span{display:grid;place-items:center;flex-shrink:0;width:23px;height:23px;border-radius:50%;background:#c43b68;color:#fff;font-size:11px;font-weight:750;margin-top:2px}
+.screenPointers p{font-size:13px;line-height:1.8;margin:0;overflow-wrap:anywhere}
+.exampleNotice{font-size:11px;line-height:1.7;color:#758096;border-top:1px solid #e9e8ee;padding-top:12px;margin:16px 0 0}
+.screenDialog{position:fixed;inset:0;width:min(900px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);padding:0;border:1px solid #e1dfe8;border-radius:20px;color:#29364b;background:#fff;box-shadow:0 24px 100px #111a3b44;overflow:auto;margin:auto}
+.screenDialog::backdrop{background:#172135b8;backdrop-filter:blur(4px)}
+.screenDialog>header{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;padding:16px 20px;border-bottom:1px solid #e9e7ee}
+.screenDialog>header small{font-size:11px;color:#a82f59}
+.screenDialog h3{font-size:18px;line-height:1.5;margin:3px 0 0}
+.dialogBody{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);align-items:start}
+.fullScreen{display:flex;justify-content:center;padding:22px;background:#f4f5f8;min-width:0}
+.fullScreen img{display:block;width:auto;max-width:100%;height:auto;align-self:start;border:1px solid #dce1e7;border-radius:6px}
+.dialogNotes{position:sticky;top:105px;padding:24px}
+.dialogNotes .exampleNavigation{margin-bottom:22px}
+.dialogNotes .screenPointers p{font-size:14px}
+.screenPreview:focus-visible,.exampleNavigation button:focus-visible,.screenDialog>header>button:focus-visible{outline:3px solid #d584a0;outline-offset:3px}
+.help .instructions{padding:0 20px 0 38px;font-size:13px;color:#617087}
+@media(max-width:1100px){.exampleBody{grid-template-columns:minmax(110px,150px) minmax(0,1fr);gap:12px;padding:14px}.screenPointers p{font-size:12px}}
+@media(max-width:600px){.exampleBody{grid-template-columns:minmax(0,1fr);padding:16px}.screenPreview{width:100%;background:#f7f8fb}.screenPreview img{max-height:270px}.screenPreview>span{font-size:13px;min-height:34px}.screenPointers p{font-size:14px}.exampleNotes{margin-top:5px}.examplesHeader{padding:12px}.examplesHeader h3{font-size:14px}.examplesHeader .exampleNavigation{width:100%}.screenDialog{width:calc(100vw - 16px);max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:14px}.dialogBody{display:block}.screenDialog>header{padding:12px 14px}.screenDialog h3{font-size:16px}.fullScreen{padding:14px}.fullScreen img{width:100%;max-width:420px}.dialogNotes{position:static;padding:18px}.dialogNotes .exampleNavigation{margin-bottom:18px}}

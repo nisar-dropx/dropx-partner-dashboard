@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { betaFlexGuide, betaFlexGuideEnabled, flexGuideSteps } from './beta-flex-guide.ts';
 import { betaAmazonOtpCopy } from './beta-amazon-otp-copy.ts';
 import { guidanceLanguages, stationGuidanceLanguage } from './beta-guidance.ts';
+import { flexScreenExamples, flexScreenCopy } from './beta-flex-screens.ts';
+import { readFileSync, readdirSync } from 'node:fs';
 
 test('guide requires both the isolated response and the exact selected email-pilot account', () => {
   const beta = { workspace:'workforce', profileType:'workforce', onboardingBeta:true, activationStage:'amazon_email_pilot:sent' };
@@ -56,4 +58,42 @@ test('source-backed guide keeps UAN type, old-account consequences, training and
   assert.match(betaFlexGuide.en.statusBody,/not yet confirmed here/);
   assert.match(betaFlexGuide.en.steps.signin.expect,/password alone does not finish/);
   assert.doesNotMatch(JSON.stringify(betaFlexGuide),/Amazon@123|500419|7f382313/);
+});
+
+test('each guide step has redacted examples and complete regional captions', () => {
+  assert.deepEqual(Object.keys(flexScreenExamples).sort(), flexGuideSteps.map(s => s.id).sort());
+  const ids = Object.values(flexScreenExamples).flat().sort();
+  const base = new URL('../../public/guide/amazon-onboarding/', import.meta.url);
+  const manifest = JSON.parse(readFileSync(new URL('manifest.json', base), 'utf8'));
+  assert.deepEqual(manifest.map(s => s.id).sort(), ids);
+  assert.deepEqual(readdirSync(base).sort(), ['manifest.json', ...ids.map(id => `${id}.png`)].sort());
+  for (const item of manifest) {
+    assert.equal(item.flattened, true);
+    const bytes = readFileSync(new URL(`${item.id}.png`, base));
+    assert.equal(bytes.toString('hex', 0, 8), '89504e470d0a1a0a');
+    assert.equal(bytes.readUInt32BE(16), item.width);
+    assert.equal(bytes.readUInt32BE(20), item.height);
+    // No embedded EXIF, comments or source document in published PNGs.
+    for (let at = 8; at < bytes.length;) {
+      const length = bytes.readUInt32BE(at), kind = bytes.toString('ascii', at + 4, at + 8);
+      assert.ok(['IHDR','IDAT','IEND','pHYs'].includes(kind), `${item.id}: unexpected ${kind}`);
+      at += length + 12;
+    }
+  }
+  const sensitiveScreens = ['flex-signin','about-name','about-contact','licence-front','licence-back','licence-review','profile-photo','bgc-details','bgc-address','eshram-uan'];
+  for (const id of sensitiveScreens) assert.ok(manifest.find(s => s.id === id).redactedRegions > 0, id);
+  for (const { code } of guidanceLanguages) {
+    const copy = flexScreenCopy[code];
+    assert.deepEqual(Object.keys(copy).sort(), Object.keys(flexScreenCopy.en).sort(), code);
+    assert.deepEqual(Object.keys(copy.examples).sort(), ids, code);
+    for (const id of ids) {
+      assert.equal(copy.examples[id].length, flexScreenCopy.en.examples[id].length, `${code}.${id}`);
+      assert.ok(copy.examples[id].every(text => text.trim()));
+      if (code !== 'en') assert.notDeepEqual(copy.examples[id], flexScreenCopy.en.examples[id]);
+    }
+    assert.match(copy.examples['eshram-uan'].join(' '), /e-Shram/);
+    assert.match(copy.examples['eshram-uan'].join(' '), /PF UAN/);
+    assert.match(copy.examples['account-resolve'][0], /TL/);
+  }
+  assert.doesNotMatch(JSON.stringify(flexScreenCopy), /Amazon@123|500419|7f382313|resend\.app/);
 });

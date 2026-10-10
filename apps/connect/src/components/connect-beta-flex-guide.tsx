@@ -5,6 +5,7 @@ import { useId, useRef, useState } from "react";
 import { betaFlexGuide, flexGuideSteps, flexInvitationWaiting, type FlexGuideStep } from "../lib/beta-flex-guide";
 import type { GuidanceLanguage } from "../lib/beta-guidance";
 import { ConnectBetaAmazonOtp } from "./connect-beta-amazon-otp";
+import { ConnectBetaFlexScreens } from "./connect-beta-flex-screens";
 import styles from "./connect-beta-flex-guide.module.css";
 
 export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvitation }: {
@@ -27,10 +28,10 @@ export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvit
       <article className={styles.panel} ref={panel} tabIndex={-1} aria-labelledby={titleId}>
         <div className={styles.stepTitle}><span className={styles.stepNumber}>{index + 1}</span><div><small>{copy.step} {index + 1}</small><h2 id={titleId}>{item.title}</h2></div></div>
         <div className={styles.screen}><Smartphone size={18}/><span><small>{copy.screen}</small><strong lang="en">{meta.screen}</strong></span></div>
-        <ol className={styles.instructions}>{item.actions.map((line, i) => <li key={i}>{line}</li>)}</ol>
+        <ConnectBetaFlexScreens key={`screens-${step}`} step={step} language={language} title={item.title}/>
         {step === "signin" || step === "learning" ? <a className={styles.download} href={step === "signin" ? "https://play.google.com/store/apps/details?id=com.amazon.flex.rabbit" : "https://play.google.com/store/apps/details?id=com.disprz.amazon"} target="_blank" rel="noopener noreferrer"><Smartphone size={17}/>{step === "signin" ? copy.flexDownload : copy.learningDownload}<ExternalLink size={15}/></a> : null}
         <div className={styles.expect}><Info size={18}/><div><strong>{copy.expect}</strong><p>{item.expect}</p></div></div>
-        <details className={styles.help} key={step}><summary>{copy.help}<ChevronDown size={16}/></summary><p>{item.help}</p></details>
+        <details className={styles.help} key={step}><summary>{copy.help}<ChevronDown size={16}/></summary><ol className={styles.instructions}>{item.actions.map((line, i) => <li key={i}>{line}</li>)}</ol><p>{item.help}</p></details>
         <footer className={styles.controls}><button type="button" disabled={index === 0} onClick={() => open(flexGuideSteps[index - 1].id)}><ArrowLeft size={17}/>{copy.back}</button>{index < flexGuideSteps.length - 1 ? <button className={styles.primary} type="button" onClick={() => open(flexGuideSteps[index + 1].id)}>{copy.next}<ArrowRight size={17}/></button> : onInvitation ? <button className={styles.primary} type="button" onClick={onInvitation}>{copy.finish}<ArrowRight size={17}/></button> : null}</footer>
         <small className={styles.source}>{copy.source}: {meta.source === "amazon" ? copy.amazonSource : copy.dropxSource} · {copy.pages} {meta.pages}</small>
       </article>

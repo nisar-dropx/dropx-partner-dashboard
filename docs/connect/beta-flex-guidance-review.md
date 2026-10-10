@@ -32,3 +32,11 @@ Desktop has a compact step rail; mobile uses a step selector and large next/back
 - Type check and production build required before release.
 - Local browser checked all nine steps, language switching and all seven languages at 390px with no horizontal overflow; desktop layout inspected.
 - Temporary local fixture is removed before commit. No Amazon registration, terms acceptance, password change or other external account mutation was performed for UI testing.
+
+## Illustrated guide follow-up
+
+Fifteen examples now cover all nine guide steps. Thirteen come from the DropX guide's English section; the two old-account screens come from Amazon p. 34. A compact single-screen viewer replaces the main text list, with numbered field pointers in all seven languages. Original fuller instructions remain in expandable help. Multiple screens have previous/next controls; tap the preview to enlarge. Language changes preserve the selected screen; changing guide steps resets the screen index. Opening a screen never changes registration status.
+
+The original PDF images include real personal information, document photos and a shared password. `scripts/build-beta-flex-examples.py` removes those pixels using native PDF redaction, inserts field placeholders, and exports flattened PNGs. Only these reviewed PNGs and a provenance manifest are committed; no source PDF or unredacted extracted image is published. Screens are examples, not representations of the current candidate's status. Native Amazon labels stay in English, accompanied by localized instructions. Consent, Yes/No history and UAN answers must be personal and truthful; no example answer should be copied.
+
+All fifteen sanitized images were visually inspected. Tests require complete localized captions, a screen for every guide step, known PNG-only assets without embedded metadata, and redaction entries for screens that held personal information. Existing beta gates are unchanged; no route, database, registration, worker, payroll or mapping logic is modified.
