@@ -196,6 +196,7 @@ export function WorkforcePayoutBankDialog({
             <div className="payout-inline-message warn">
               <strong>Payment Processing lock</strong>
               <p>Generating this file marks {workforceIds.length} selected profile{workforceIds.length === 1 ? "" : "s"} as Payment Processing. Their payout inputs and ID mapping cannot change until the bank response is finalized.</p>
+              <p>Each selected DropX ID creates one profile-level bank line for its complete monthly balance. All published location rows and deductions are included, even when only one bank-eligible table row was checked.</p>
             </div>
             {publicationRefreshCount ? <div className="payout-inline-message warn" role="status">
               <strong>Refresh before file generation</strong>

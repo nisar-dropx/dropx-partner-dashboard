@@ -26,6 +26,7 @@ const accessSurface = source("./access-surface.ts");
 const importHardeningMigration = source("../../supabase/migrations/20261007111000_workforce_advance_import_hardening.sql");
 const reassignmentMigration = source("../../supabase/migrations/20261007210000_workforce_advance_reassignment.sql");
 const reassignmentPaidLocationFix = source("../../supabase/migrations/20261007211000_workforce_advance_reassignment_paid_location_fix.sql");
+const dependencyRefreshMigration = source("../../supabase/migrations/20261010041629_workforce_payout_dependency_refresh_queue.sql");
 
 test("Workforce Advance Register is shared by Dashboard and Ops with separate page codes", () => {
   assert.match(registerPage, /currentAdminAccessSurface\(\)/);
@@ -292,6 +293,45 @@ test("recovery hashes every payout dependency, respects scope, and caps ADVANCE 
     /p_allowed_location_ids:\s*authorization\.hasAllLocationAccess\s*\?\s*null\s*:\s*authorization\.locationScopeIds/
   );
   assert.match(deductAdvancesRoute, /later advance deductions|recalculating this earlier period/i);
+});
+
+test("advance deductions revise already-published payout snapshots without fake import provenance", () => {
+  assert.match(dependencyRefreshMigration, /add column refresh_source text not null default 'input_batch'/i);
+  assert.match(dependencyRefreshMigration, /add column refresh_request_id uuid/i);
+  assert.match(
+    dependencyRefreshMigration,
+    /refresh_source = 'payout_dependency'[\s\S]*?input_batch_id is null/i
+  );
+  assert.match(
+    dependencyRefreshMigration,
+    /create trigger workforce_payout_deduction_values_90_queue_publication_refresh[\s\S]*?after insert or update or delete on public\.workforce_payout_deduction_values/i
+  );
+  assert.match(
+    dependencyRefreshMigration,
+    /old\.source_type in \('advance_register', 'payment_recovery'\)[\s\S]*?new\.source_type in \('advance_register', 'payment_recovery'\)/i
+  );
+  assert.match(dependencyRefreshMigration, /old\.amount is not distinct from new\.amount/i);
+  assert.match(
+    dependencyRefreshMigration,
+    /revision_source in \([\s\S]*?'initial'[\s\S]*?'input_batch_refresh'[\s\S]*?'mapping_relock'[\s\S]*?'dependency_refresh'/i
+  );
+  assert.match(dependencyRefreshMigration, /case when v_revision_source = ''input_batch''[\s\S]*?''dependency_refresh''/i);
+  assert.match(
+    dependencyRefreshMigration,
+    /new\.revision_source in \('input_batch_refresh', 'dependency_refresh'\)[\s\S]*?previous\.mapping_relock_id/i
+  );
+  assert.match(
+    dependencyRefreshMigration,
+    /public\.workforce_advance_recoveries recovery[\s\S]*?recovery\.created_at > latest\.published_at[\s\S]*?recovery\.reversed_at/i
+  );
+  assert.doesNotMatch(dependencyRefreshMigration, /insert into public\.workforce_payout_import_batches/i);
+
+  assert.match(deductAdvancesRoute, /refreshWorkforcePayoutPublicationJobs/);
+  assert.match(
+    deductAdvancesRoute,
+    /workforceIds:\s*\[\.\.\.new Set\(selected\.map\([\s\S]*?periodStart,[\s\S]*?periodEnd,[\s\S]*?limit:\s*Math\.min\(100, selected\.length\)/
+  );
+  assert.match(deductAdvancesRoute, /publicationRefresh\s*\n?\s*}/);
 });
 
 test("high-frequency attendance and shipment revisions are scoped to the payout month", () => {

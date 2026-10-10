@@ -17,6 +17,7 @@ import {
   chunkPayoutRowsBySubject,
   duplicateAdvanceWorkforceIds,
   resolveWorkforcePayoutBankSelection,
+  selectedWorkforcePayoutBankIds,
   workforcePayoutMappingLockSelectionIds,
   type WorkforcePayoutPublicationLockState
 } from "@/lib/workforce-payout-action-selection";
@@ -367,10 +368,10 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       ? preliminaryBankBalances.get(String(row.reviewSubjectId ?? "").trim()) ?? 0
       : Number(row.paymentSummary?.availableToPay ?? 0)
   ), [bankActionableIds, preliminaryBankBalances, rows]);
-  const selectedBankWorkforceIds = useMemo(() => new Set(selectedRows
-    .filter((row) => bankActionableIds.has(row.id))
-    .flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId.trim()] : [])
-    .filter(Boolean)), [bankActionableIds, selectedRows]);
+  const selectedBankWorkforceIds = useMemo(
+    () => selectedWorkforcePayoutBankIds(selectedRows, (row) => bankActionableIds.has(row.id)),
+    [bankActionableIds, selectedRows]
+  );
   const bankSelection = useMemo(() => resolveWorkforcePayoutBankSelection(
     bankSelectionIndex,
     selected,
@@ -378,13 +379,15 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   ), [bankSelectionIndex, selected, selectedBankWorkforceIds]);
   const bankWorkforceIds = bankSelection.workforceIds;
   const bankTotalAmount = bankSelection.totalAmount;
+  const bankProfilesWithImplicitRows = bankWorkforceIds.filter((workforceId) =>
+    bankSelectionIndex.get(workforceId)?.rowIds.some((rowId) => !selected.has(rowId))
+  ).length;
   const bankRefreshPendingWorkforceIds = useMemo(() => new Set(rows
     .filter((row) => bankActionableIds.has(row.id) && publicationRefreshPending(row))
     .flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId.trim()] : [])), [bankActionableIds, rows]);
   const selectedBankRefreshPendingCount = bankWorkforceIds
     .filter((workforceId) => bankRefreshPendingWorkforceIds.has(workforceId))
     .length;
-  const hasBankSelectionConflict = selectedBankWorkforceIds.size > bankWorkforceIds.length;
   const mappingUnlockWorkforceIds = useMemo(
     () => workforcePayoutMappingLockSelectionIds(selectedRows, "locked"),
     [selectedRows]
@@ -802,7 +805,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     {canEdit && audience === "workforce" && !canPublishNotifications ? <div className="payout-inline-message">Send Notification requires all-location access because every publishable location row for a DropX ID must be published and frozen together.</div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
     {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row, so the extra row may be required for publication.</div> : null}
-    {hasBankSelectionConflict ? <div aria-live="polite" className="payout-inline-message warn">Select every published location row for each DropX ID before creating its bank payment. The bank file pays the profile&apos;s complete monthly balance, never one location in isolation.</div> : null}
+    {bankProfilesWithImplicitRows ? <div aria-live="polite" className="payout-inline-message warn"><strong>Bank payment is profile-wide.</strong> One bank-eligible checked row is enough to select the DropX ID, but the bank file uses its complete monthly balance across every published location row, including deductions. It creates one bank line per DropX ID, not one line per table row.</div> : null}
     {selectedBankRefreshPendingCount ? <div aria-live="polite" className="payout-inline-message warn"><strong>{selectedBankRefreshPendingCount} selected profile{selectedBankRefreshPendingCount === 1 ? " has" : "s have"} a publication refresh pending.</strong> The refresh runs before bank-file generation, then current balance and every payment eligibility rule are checked again. No stale publication will be paid.</div> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />

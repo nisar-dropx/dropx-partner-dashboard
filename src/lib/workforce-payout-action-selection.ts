@@ -96,6 +96,21 @@ export function buildWorkforcePayoutBankSelectionIndex<Row extends WorkforcePayo
   return index;
 }
 
+export function selectedWorkforcePayoutBankIds<Row extends WorkforcePayoutBankSelectionRow>(
+  selectedRows: readonly Row[],
+  isEligible: (row: Row) => boolean
+) {
+  const workforceIds = new Set<string>();
+
+  for (const row of selectedRows) {
+    if (!isEligible(row)) continue;
+    const workforceId = String(row.reviewSubjectId ?? "").trim();
+    if (workforceId) workforceIds.add(workforceId);
+  }
+
+  return workforceIds;
+}
+
 export function resolveWorkforcePayoutBankSelection(
   index: ReadonlyMap<string, WorkforcePayoutBankSelectionIndexEntry>,
   selectedRowIds: ReadonlySet<string>,
@@ -106,7 +121,11 @@ export function resolveWorkforcePayoutBankSelection(
 
   for (const workforceId of selectedWorkforceIds) {
     const entry = index.get(workforceId);
-    if (!entry?.rowIds.length || !entry.rowIds.every((rowId) => selectedRowIds.has(rowId))) continue;
+    // A bank instruction is authoritative at Workforce-profile/month level.
+    // One checked location row therefore opts the profile into the bank action;
+    // the server candidate still includes every required publication (including
+    // unselected location deductions) before it creates the single instruction.
+    if (!entry?.rowIds.some((rowId) => selectedRowIds.has(rowId))) continue;
 
     workforceIds.push(workforceId);
     totalAmount += entry.availableToPay;

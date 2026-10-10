@@ -3,9 +3,11 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
+import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -111,10 +113,19 @@ export async function POST(request: Request) {
       }
       const results = Array.isArray(applied.data) ? applied.data : [];
       const deducted = results.reduce((sum, item) => sum + Math.max(0, Number(item?.deducted ?? 0)), 0);
+      const publicationRefresh = await refreshWorkforcePayoutPublicationJobs({
+        authorization,
+        companyId,
+        workforceIds: [...new Set(selected.map((item) => item.workforceId.toLowerCase()))],
+        periodStart,
+        periodEnd,
+        limit: Math.min(100, selected.length)
+      });
       return Response.json({
         updated: results.filter((item) => Number(item?.deducted ?? 0) > 0).length,
         deducted: Math.round((deducted + Number.EPSILON) * 100) / 100,
-        selected: selected.length
+        selected: selected.length,
+        publicationRefresh
       }, { headers: noStore });
     }
     return errorResponse("The selected payout period is still updating. Please try again in a moment.", 409);

@@ -1140,6 +1140,103 @@ await assert.rejects(
   /audit rows (?:are immutable|may be appended only)/i
 );
 
+const signedWorkforce = id(80);
+const signedMappingRelock = id(81);
+const signedPositiveReview = id(82);
+const signedDeductionReview = id(83);
+const signedPositivePublication = id(84);
+const signedDeductionPublication = id(85);
+await db.query(
+  `insert into public.workforce(
+    id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code
+  ) values ($1,$2,'T1013','Signed Balance Worker','t1013@example.com',$3,'5678 901234','FDRL 0000003')`,
+  [signedWorkforce, company, station]
+);
+await db.query(
+  `insert into public.connect_profile_verifications(
+    company_id,profile_type,account_id,kind,verified
+  ) values ($1,'workforce',$2,'pan_aadhaar',true)`,
+  [company, signedWorkforce]
+);
+await db.query(
+  `insert into public.workforce_payout_mapping_relocks(
+    id,company_id,period_start,period_end,affected_workforce_ids,active_locations
+  ) values ($1,$2,$3,$4,array[$5::uuid],$6::jsonb)`,
+  [signedMappingRelock, company, periodStart, periodEnd, signedWorkforce,
+    JSON.stringify({ [signedWorkforce]: [station, secondStation] })]
+);
+const signedPositiveSnapshot = JSON.stringify({
+  schema_version: "2",
+  source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true, payment_status: "Ready for review" },
+  item: { workforce_id: signedWorkforce, station_code: "NLRF", net_amount: "71125.56" }
+});
+const signedDeductionSnapshot = JSON.stringify({
+  schema_version: "2",
+  source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true, payment_status: "Ready for review" },
+  item: { workforce_id: signedWorkforce, station_code: "KOZA", net_amount: "-2000.00" }
+});
+await db.query(
+  `insert into public.workforce_payout_review_submissions(
+    id,company_id,subject_type,subject_id,location_id,period_start,period_end,status,calculation_snapshot
+  ) values
+    ($1,$2,'workforce',$3,$4,$5,$6,'under_review',$7::jsonb),
+    ($8,$2,'workforce',$3,$9,$5,$6,'under_review',$10::jsonb)`,
+  [signedPositiveReview, company, signedWorkforce, station, periodStart, periodEnd,
+    signedPositiveSnapshot, signedDeductionReview, secondStation, signedDeductionSnapshot]
+);
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values
+    ($1,$2,$3,$4,1,$5::jsonb,$6,$7,$8,$9,'worksheet',$10,$11),
+    ($12,$2,$3,$13,1,$14::jsonb,$15,$7,$8,$16,'worksheet',$10,$11)`,
+  [signedPositivePublication, company, signedWorkforce, station, signedPositiveSnapshot,
+    "1".repeat(64), dependencyHash, signedMappingRelock, signedPositiveReview, periodStart, periodEnd,
+    signedDeductionPublication, secondStation, signedDeductionSnapshot, "2".repeat(64), signedDeductionReview]
+);
+const signedPreviewResult = await db.query(
+  `select * from public.workforce_preview_payout_payments(
+    $1,$2::date,$3::date,array[$4::uuid]
+  )`,
+  [company, periodStart, periodEnd, signedWorkforce]
+);
+assert.equal(signedPreviewResult.rows.length, 1);
+assert.equal(signedPreviewResult.rows[0].eligible, true);
+assert.equal(Number(signedPreviewResult.rows[0].current_target_amount), 69125.56);
+assert.equal(Number(signedPreviewResult.rows[0].available_to_pay), 69125.56);
+const signedBatchResult = await db.query(
+  `select public.workforce_create_payout_payment_batch(
+    $1,$2,$3,$4,$5,$6::date,$7::date,$8::date,array[$9::uuid]
+  ) result`,
+  [company, actor, id(86), "6".repeat(64), bank, periodStart, periodEnd, "2026-10-10", signedWorkforce]
+);
+const signedBatch = signedBatchResult.rows[0].result;
+assert.equal(signedBatch.items.length, 1,
+  "one signed profile/month must create one bank instruction");
+assert.equal(Number(signedBatch.items[0].instruction_amount), 69125.56,
+  "the negative publication must reduce the complete profile/month instruction");
+const signedAllocations = await db.query(
+  `select allocation.net_amount_snapshot,allocation.instruction_amount_snapshot
+   from public.workforce_payout_payment_allocations allocation
+   join public.workforce_payout_payment_items item on item.id=allocation.payment_item_id
+   where item.company_id=$1 and item.batch_id=$2
+   order by allocation.net_amount_snapshot`,
+  [company, signedBatch.batch_id]
+);
+assert.equal(signedAllocations.rows.length, 2,
+  "both the positive and deduction publications must be frozen into the instruction ledger");
+assert.deepEqual(
+  signedAllocations.rows.map((row) => Number(row.net_amount_snapshot)),
+  [-2000, 71125.56]
+);
+assert.equal(
+  signedAllocations.rows.reduce((sum, row) => sum + Number(row.instruction_amount_snapshot), 0),
+  69125.56
+);
+
 const catalog = await db.query(`
   select
     (select count(*)::int from pg_trigger

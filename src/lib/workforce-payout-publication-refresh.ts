@@ -14,7 +14,9 @@ import {
 type PublicationRefreshJob = {
   id: string;
   company_id: string;
-  input_batch_id: string;
+  input_batch_id: string | null;
+  refresh_request_id: string;
+  refresh_source: "input_batch" | "payout_dependency";
   workforce_id: string;
   station_id: string;
   period_start: string;

@@ -20,6 +20,10 @@ const selectedClaimMigration = readFileSync(
   new URL("../supabase/migrations/20261010022326_claim_selected_workforce_payout_publication_refresh_jobs.sql", import.meta.url),
   "utf8"
 ).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const dependencyRefreshMigration = readFileSync(
+  new URL("../supabase/migrations/20261010041629_workforce_payout_dependency_refresh_queue.sql", import.meta.url),
+  "utf8"
+).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 
 assert.match(migration, /security definer\s+set search_path = ''/i);
 assert.match(migration, /for update of job skip locked/i);
@@ -61,6 +65,16 @@ assert.match(selectedClaimMigration, /predecessor\.status in \('pending', 'proce
 assert.match(selectedClaimMigration, /target_batch[\s\S]*for update of job skip locked/i);
 assert.match(selectedClaimMigration, /cardinality\(p_workforce_ids\) > 10000/i);
 assert.match(selectedClaimMigration, /count\(distinct supplied\.workforce_id\)/i);
+assert.match(dependencyRefreshMigration, /refresh_source = 'payout_dependency'/i);
+assert.match(dependencyRefreshMigration, /refresh_request_id/i);
+assert.match(dependencyRefreshMigration, /workforce_payout_dependency:'\s*\|\|\s*txid_current\(\)::text/i);
+assert.match(
+  dependencyRefreshMigration,
+  /on conflict \(\s*company_id, refresh_request_id, workforce_id, station_id,\s*period_start, period_end\s*\) do nothing/i
+);
+assert.match(dependencyRefreshMigration, /revision_source in \([\s\S]*'mapping_relock'[\s\S]*'dependency_refresh'/i);
+assert.match(dependencyRefreshMigration, /job\.id = v_job_id[\s\S]*job\.status = ''processing''/i);
+assert.doesNotMatch(dependencyRefreshMigration, /^\+/m);
 
 const db = new PGlite();
 
@@ -1750,6 +1764,353 @@ try {
     Number((await db.query("select count(*)::int as count from public.workforce_payout_import_batches")).rows[0].count),
     batchesBeforeApprovedConflict
   );
+
+  // Reproduce the current production publication shape (mapping-relock was
+  // added after the original queue), seed a stale system deduction, then apply
+  // the dependency-refresh migration itself in PGlite.
+  await db.exec(`
+    alter table public.workforce_payout_publications add column mapping_relock_id uuid;
+    alter table public.workforce_payout_publications
+      drop constraint workforce_payout_publications_revision_source_check,
+      drop constraint workforce_payout_publications_revision_source_shape_check;
+    alter table public.workforce_payout_publications
+      add constraint workforce_payout_publications_revision_source_check
+        check (revision_source in ('initial', 'input_batch_refresh', 'mapping_relock')),
+      add constraint workforce_payout_publications_revision_source_shape_check
+        check (
+          (
+            revision_source = 'initial'
+            and input_batch_id is null
+            and supersedes_publication_id is null
+            and mapping_relock_id is null
+          )
+          or (
+            revision_source = 'input_batch_refresh'
+            and input_batch_id is not null
+            and supersedes_publication_id is not null
+          )
+          or (
+            revision_source = 'mapping_relock'
+            and input_batch_id is null
+            and mapping_relock_id is not null
+          )
+        );
+
+    create or replace function public.inherit_workforce_payout_mapping_relock_lineage()
+    returns trigger language plpgsql set search_path = '' as $$
+    begin
+      if new.revision_source = 'input_batch_refresh'
+        and new.mapping_relock_id is null
+        and new.supersedes_publication_id is not null
+      then
+        select previous.mapping_relock_id into new.mapping_relock_id
+        from public.workforce_payout_publications previous
+        where previous.id = new.supersedes_publication_id;
+      end if;
+      return new;
+    end
+    $$;
+    create trigger workforce_payout_publications_05_mapping_relock_lineage
+      before insert on public.workforce_payout_publications
+      for each row execute function public.inherit_workforce_payout_mapping_relock_lineage();
+
+    create table public.workforce_payout_deduction_values(
+      id uuid primary key default gen_random_uuid(),
+      company_id uuid not null,
+      deduction_head_id uuid not null,
+      workforce_id uuid not null,
+      station_id uuid not null,
+      effective_from date not null,
+      effective_to date not null,
+      amount numeric(18,2) not null,
+      source_type text not null,
+      source_batch_id uuid,
+      source_row_id uuid,
+      import_metadata jsonb not null default '{}'::jsonb,
+      created_by uuid,
+      updated_by uuid,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create table public.workforce_advance_recoveries(
+      id uuid primary key default gen_random_uuid(),
+      company_id uuid not null,
+      workforce_id uuid not null,
+      station_id uuid not null,
+      period_start date not null,
+      period_end date not null,
+      created_by uuid,
+      created_at timestamptz not null default now(),
+      reversed_by uuid,
+      reversed_at timestamptz,
+      status text not null default 'deducted'
+    );
+  `);
+
+  const dependencyWorkforce = randomUUID();
+  const dependencyReview = randomUUID();
+  const dependencyInitialPublication = randomUUID();
+  const dependencyMappingPublication = randomUUID();
+  const dependencyMappingRelock = randomUUID();
+  const dependencyDeduction = randomUUID();
+  const dependencyHead = randomUUID();
+  const dependencyInitialSnapshot = {
+    schema_version: 2,
+    source: "workforce_payout_worksheet",
+    dependency_hash: "hash-v2",
+    run: { period_start: periodStart, period_end: periodEnd },
+    item: { workforce_id: dependencyWorkforce, station_id: station, net_amount: 100 }
+  };
+  await db.query("insert into public.workforce(id,company_id) values ($1,$2)", [dependencyWorkforce, company]);
+  await db.query(
+    `insert into public.workforce_payout_review_submissions(
+      id,company_id,subject_type,subject_id,location_id,period_start,period_end,status,
+      calculation_snapshot,submitted_by,submitted_at
+    ) values ($1,$2,'workforce',$3,$4,$5,$6,'under_review',$7::jsonb,$8,clock_timestamp()-interval '3 days')`,
+    [dependencyReview, company, dependencyWorkforce, station, periodStart, periodEnd,
+      JSON.stringify(dependencyInitialSnapshot), actor]
+  );
+  await db.query(
+    `insert into public.workforce_payout_publications(
+      id,company_id,workforce_id,station_id,revision,snapshot,published_by,published_at,
+      review_until,notify_at,source_calculated_at,notification_status,review_submission_id,
+      period_start,period_end,snapshot_hash,dependency_hash,notification_config_snapshot,
+      publication_kind,revision_source,input_batch_id,supersedes_publication_id,mapping_relock_id
+    ) values
+      ($1,$3,$4,$5,1,$6::jsonb,$7,clock_timestamp()-interval '3 days',
+        clock_timestamp()+interval '7 days',clock_timestamp(),clock_timestamp()-interval '3 days',
+        'disabled',$8,$9,$10,$11,'hash-v2',$12::jsonb,'worksheet','initial',null,null,null),
+      ($2,$3,$4,$5,2,$6::jsonb,$7,clock_timestamp()-interval '2 days',
+        clock_timestamp()+interval '7 days',clock_timestamp(),clock_timestamp()-interval '2 days',
+        'disabled',$8,$9,$10,$13,'hash-v2',$12::jsonb,'worksheet','mapping_relock',null,$1,$14)`,
+    [
+      dependencyInitialPublication, dependencyMappingPublication, company, dependencyWorkforce,
+      station, JSON.stringify(dependencyInitialSnapshot), actor, dependencyReview, periodStart,
+      periodEnd, "1".repeat(64), JSON.stringify(originalNotificationConfig), "2".repeat(64),
+      dependencyMappingRelock
+    ]
+  );
+  await db.query(
+    `insert into public.workforce_payout_deduction_values(
+      id,company_id,deduction_head_id,workforce_id,station_id,effective_from,effective_to,
+      amount,source_type,import_metadata,created_by,updated_by,created_at,updated_at
+    ) values ($1,$2,$3,$4,$5,$6,$7,10,'advance_register','{}'::jsonb,$8,$8,
+      clock_timestamp()-interval '1 day',clock_timestamp()-interval '1 day')`,
+    [dependencyDeduction, company, dependencyHead, dependencyWorkforce, station,
+      periodStart, periodEnd, actor]
+  );
+
+  await db.exec(dependencyRefreshMigration);
+
+  const backfilledDependencyJob = (
+    await db.query(
+      `select * from public.workforce_payout_publication_refresh_jobs
+       where company_id=$1 and workforce_id=$2 and station_id=$3
+         and refresh_source='payout_dependency'
+       order by created_at,id limit 1`,
+      [company, dependencyWorkforce, station]
+    )
+  ).rows[0];
+  assert.ok(backfilledDependencyJob, "the migration backfills a post-publication ADVANCE mutation");
+  assert.equal(backfilledDependencyJob.input_batch_id, null);
+  assert.ok(backfilledDependencyJob.refresh_request_id);
+  assert.equal(backfilledDependencyJob.base_publication_id, dependencyMappingPublication);
+
+  const dependencyJobsBeforeNoop = Number((
+    await db.query(
+      "select count(*)::int as count from public.workforce_payout_publication_refresh_jobs where workforce_id=$1",
+      [dependencyWorkforce]
+    )
+  ).rows[0].count);
+  await db.query(
+    `update public.workforce_payout_deduction_values
+     set import_metadata='{"note":"audit only"}'::jsonb, updated_at=clock_timestamp()
+     where id=$1`,
+    [dependencyDeduction]
+  );
+  assert.equal(Number((
+    await db.query(
+      "select count(*)::int as count from public.workforce_payout_publication_refresh_jobs where workforce_id=$1",
+      [dependencyWorkforce]
+    )
+  ).rows[0].count), dependencyJobsBeforeNoop, "audit-only updates do not create payout revisions");
+
+  await db.exec("set role service_role");
+  const firstDependencyClaim = (
+    await db.query(
+      `select * from public.workforce_claim_selected_payout_publication_refresh_jobs(
+        1,$1,array[$2]::uuid[],$3,$4
+      )`,
+      [company, dependencyWorkforce, periodStart, periodEnd]
+    )
+  ).rows[0];
+  assert.equal(firstDependencyClaim.id, backfilledDependencyJob.id);
+  assert.equal(firstDependencyClaim.refresh_source, "payout_dependency");
+  assert.equal(firstDependencyClaim.input_batch_id, null);
+
+  // Queue a newer dependency generation after the first lease. Repeated
+  // financial writes in this one transaction coalesce to one generation, but
+  // the processing predecessor must never suppress that pending successor.
+  await db.exec("reset role");
+  const dependencyJobsBeforeConcurrentWrite = Number((
+    await db.query(
+      "select count(*)::int as count from public.workforce_payout_publication_refresh_jobs where workforce_id=$1",
+      [dependencyWorkforce]
+    )
+  ).rows[0].count);
+  await db.exec("begin");
+  await db.query(
+    `update public.workforce_payout_deduction_values
+     set amount=15, updated_by=$2, updated_at=clock_timestamp() where id=$1`,
+    [dependencyDeduction, newerActor]
+  );
+  await db.query(
+    `update public.workforce_payout_deduction_values
+     set amount=20, updated_by=$2, updated_at=clock_timestamp() where id=$1`,
+    [dependencyDeduction, newerActor]
+  );
+  await db.exec("commit");
+  assert.equal(Number((
+    await db.query(
+      "select count(*)::int as count from public.workforce_payout_publication_refresh_jobs where workforce_id=$1",
+      [dependencyWorkforce]
+    )
+  ).rows[0].count), dependencyJobsBeforeConcurrentWrite + 1,
+  "same-transaction dependency writes create exactly one successor generation");
+  const successorDependencyJob = (
+    await db.query(
+      `select * from public.workforce_payout_publication_refresh_jobs
+       where workforce_id=$1 and id<>$2 order by created_at desc,id desc limit 1`,
+      [dependencyWorkforce, firstDependencyClaim.id]
+    )
+  ).rows[0];
+  assert.ok(successorDependencyJob);
+  assert.equal(successorDependencyJob.status, "pending");
+  assert.equal(
+    successorDependencyJob.requested_by,
+    newerActor,
+    "a same-identity dependency update is attributed to its current updater"
+  );
+  assert.notEqual(successorDependencyJob.refresh_request_id, firstDependencyClaim.refresh_request_id);
+  await db.query(
+    `update public.test_payout_dependency_hashes set dependency_hash='hash-dependency'
+     where company_id=$1 and period_start=$2 and period_end=$3`,
+    [company, periodStart, periodEnd]
+  );
+  const dependencySnapshot = {
+    ...dependencyInitialSnapshot,
+    dependency_hash: "hash-dependency",
+    item: { ...dependencyInitialSnapshot.item, net_amount: 80 }
+  };
+  await db.exec("set role service_role");
+  const dependencyApply = (
+    await db.query(
+      `select public.workforce_apply_payout_publication_input_revisions(
+        $1,$2,$3,'hash-dependency',$4,$5::jsonb
+      ) as result`,
+      [company, periodStart, periodEnd, actor, JSON.stringify([{
+        job_id: firstDependencyClaim.id,
+        claim_token: firstDependencyClaim.claim_token,
+        workforce_id: dependencyWorkforce,
+        station_id: station,
+        snapshot: dependencySnapshot,
+        snapshot_hash: "3".repeat(64)
+      }])]
+    )
+  ).rows[0].result;
+  assert.equal(dependencyApply.completed, 1);
+  assert.equal(dependencyApply.published, 1);
+  const dependencyPublication = (
+    await db.query(
+      `select revision_source,input_batch_id,refresh_request_id,mapping_relock_id,
+        supersedes_publication_id,published_by
+       from public.workforce_payout_publications where id=$1`,
+      [dependencyApply.publication_ids[0]]
+    )
+  ).rows[0];
+  assert.equal(dependencyPublication.revision_source, "dependency_refresh");
+  assert.equal(dependencyPublication.input_batch_id, null);
+  assert.equal(dependencyPublication.refresh_request_id, firstDependencyClaim.refresh_request_id);
+  assert.equal(dependencyPublication.mapping_relock_id, dependencyMappingRelock);
+  assert.equal(dependencyPublication.supersedes_publication_id, dependencyMappingPublication);
+  assert.equal(dependencyPublication.published_by, actor);
+  assert.equal((
+    await db.query("select status from public.workforce_payout_publication_refresh_jobs where id=$1", [successorDependencyJob.id])
+  ).rows[0].status, "pending", "a newer dependency generation remains independently refreshable");
+
+  const secondDependencyClaim = (
+    await db.query(
+      `select * from public.workforce_claim_selected_payout_publication_refresh_jobs(
+        1,$1,array[$2]::uuid[],$3,$4
+      )`,
+      [company, dependencyWorkforce, periodStart, periodEnd]
+    )
+  ).rows[0];
+  assert.equal(secondDependencyClaim.id, successorDependencyJob.id);
+  assert.equal(secondDependencyClaim.refresh_request_id, successorDependencyJob.refresh_request_id);
+  const successorDependencyApply = (
+    await db.query(
+      `select public.workforce_apply_payout_publication_input_revisions(
+        $1,$2,$3,'hash-dependency',$4,$5::jsonb
+      ) as result`,
+      [company, periodStart, periodEnd, actor, JSON.stringify([{
+        job_id: secondDependencyClaim.id,
+        claim_token: secondDependencyClaim.claim_token,
+        workforce_id: dependencyWorkforce,
+        station_id: station,
+        snapshot: dependencySnapshot,
+        snapshot_hash: "4".repeat(64)
+      }])]
+    )
+  ).rows[0].result;
+  const successorDependencyPublication = (
+    await db.query(
+      `select published_by,supersedes_publication_id
+       from public.workforce_payout_publications where id=$1`,
+      [successorDependencyApply.publication_ids[0]]
+    )
+  ).rows[0];
+  assert.equal(successorDependencyApply.completed, 1);
+  assert.equal(successorDependencyApply.published, 1);
+  assert.equal(
+    successorDependencyPublication.published_by,
+    newerActor,
+    "the immutable dependency revision preserves the current updater as publisher"
+  );
+  assert.equal(
+    successorDependencyPublication.supersedes_publication_id,
+    dependencyApply.publication_ids[0]
+  );
+
+  // The legacy payout-import wrapper does not name the new request column;
+  // its row-preparation trigger must still preserve input-batch provenance.
+  await db.exec("reset role");
+  const compatibleBatch = randomUUID();
+  await db.query(
+    `insert into public.workforce_payout_import_batches(
+      id,company_id,effective_from,effective_to,file_name,file_sha256,status,row_count,
+      created_by,committed_at
+    ) values ($1,$2,$3,$4,'compatibility.csv',$5,'committed',1,$6,clock_timestamp())`,
+    [compatibleBatch, company, periodStart, periodEnd, "6".repeat(64), actor]
+  );
+  const compatibleJob = randomUUID();
+  await db.query(
+    `insert into public.workforce_payout_publication_refresh_jobs(
+      id,company_id,input_batch_id,workforce_id,station_id,period_start,period_end,
+      base_publication_id,base_revision,requested_by,next_attempt_at
+    ) values ($1,$2,$3,$4,$5,$6,$7,$8,3,$9,clock_timestamp())`,
+    [compatibleJob, company, compatibleBatch, unpublishedWorkforce, station, periodStart,
+      periodEnd, dependencyApply.publication_ids[0], actor]
+  );
+  const compatibleInputJob = (
+    await db.query(
+      "select refresh_source,refresh_request_id,input_batch_id from public.workforce_payout_publication_refresh_jobs where id=$1",
+      [compatibleJob]
+    )
+  ).rows[0];
+  assert.equal(compatibleInputJob.refresh_source, "input_batch");
+  assert.equal(compatibleInputJob.refresh_request_id, compatibleBatch);
+  assert.equal(compatibleInputJob.input_batch_id, compatibleBatch);
 
   for (const role of ["anon", "authenticated"]) {
     await db.exec(`reset role; set role ${role}`);

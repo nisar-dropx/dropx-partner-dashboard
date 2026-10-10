@@ -113,9 +113,12 @@ test("the UI pays only eligible profiles, displays trustworthy ledger balances a
   assert.match(table, /publicationPaymentReady === true/);
   assert.match(table, /row\.paymentSummary\?\.eligible === true/);
   assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
+  assert.match(table, /selectedWorkforcePayoutBankIds\(selectedRows,\s*\(row\) => bankActionableIds\.has\(row\.id\)\)/);
   assert.match(table, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected,\s*selectedBankWorkforceIds/);
-  assert.match(actionSelection, /entry\.rowIds\.every\(\(rowId\) => selectedRowIds\.has\(rowId\)\)/);
-  assert.match(table, /Select every published location row for each DropX ID/);
+  assert.match(actionSelection, /entry\?\.rowIds\.some\(\(rowId\) => selectedRowIds\.has\(rowId\)\)/);
+  assert.match(table, /One bank-eligible checked row is enough to select the DropX ID/);
+  assert.match(table, /complete monthly balance across every published location row, including deductions/);
+  assert.match(bankDialog, /All published location rows and deductions are included, even when only one bank-eligible table row was checked/);
   assert.match(table, /Paid \{exactMoney\(row\.paymentSummary\.paidAmount\)\}/);
   assert.match(table, /Balance payable \{exactMoney\(row\.paymentSummary\.balancePayable\)\}/);
   assert.match(table, /paymentBalanceAvailable \? <span>Balance payable[\s\S]*?<span>Balance payable —<\/span>/);
