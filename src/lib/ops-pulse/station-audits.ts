@@ -102,6 +102,7 @@ export type AuditStation = {
 };
 export type AuditProgrammeSettings = {
   company_id: string;
+  delete_user_ids: string[];
   scheduler_role_ids: string[];
   responder_role_ids: string[];
   excluded_location_model_ids: string[];
@@ -428,7 +429,7 @@ export async function loadStationAuditMaster(companyId: string) {
       db()
         .from("ops_audit_programme_settings")
         .select(
-          "company_id,scheduler_role_ids,responder_role_ids,excluded_location_model_ids,excluded_location_ids,exclude_head_office",
+          "company_id,delete_user_ids,scheduler_role_ids,responder_role_ids,excluded_location_model_ids,excluded_location_ids,exclude_head_office",
         )
         .eq("company_id", companyId)
         .maybeSingle(),
@@ -447,6 +448,7 @@ export async function loadStationAuditMaster(companyId: string) {
     options: (options.data ?? []).map(mapOption),
     programmeSettings: {
       company_id: companyId,
+      delete_user_ids: stringList(programmeSettings.data?.delete_user_ids),
       scheduler_role_ids: stringList(
         programmeSettings.data?.scheduler_role_ids,
       ),

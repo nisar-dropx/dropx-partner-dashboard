@@ -89,7 +89,7 @@ export default async function StationAuditsPage({
           }
           viewerRole={authorization.roleName || "Authorized user"}
           viewerId={authorization.userId}
-          canDelete={canDeleteStationAudit(authorization)}
+          canDelete={canDeleteStationAudit(authorization, master.programmeSettings)}
           canViewMaster={hasPermission(
             authorization,
             "station_audit_master",

@@ -36,7 +36,10 @@ const db = {
     return q;
   },
 };
+const evidence = { exports: {} };
+new Function("module", "exports", ts.transpileModule(fs.readFileSync("src/lib/ops-pulse/station-audit-evidence.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(evidence, evidence.exports);
 const mocks = {
+  "./station-audit-evidence": evidence.exports,
   "./station-audit-report-data": {
     buildStationAuditReport: async () => ({
       pdf: Buffer.from("pdf-fixture"),
@@ -244,3 +247,8 @@ await assert.rejects(
 console.log(
   "Audit mail tests passed: scoped cluster recipients, deduplication, response deep link, timezone, report CTA and real email thread root. No external email sent.",
 );
+
+const evidenceAudit = { ...input.audit, video_call_url: "https://drive.google.com/drive/folders/test_folder?usp=sharing" };
+assert.match(mod.exports.auditUpdateDetails(evidenceAudit).html, /Open saved Google Drive evidence/);
+assert.match(mod.exports.auditUpdateDetails(evidenceAudit).plain, /test_folder/);
+assert.doesNotMatch(mod.exports.auditUpdateDetails({ ...input.audit, video_call_url: "javascript:alert(1)" }).html, /javascript:/);

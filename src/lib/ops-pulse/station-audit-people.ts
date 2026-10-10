@@ -15,20 +15,16 @@ export type AuditAssignee = {
   /** Eligible only as company owner, not through a role chosen in Audit Master. */
   ownerOnly: boolean;
 };
-export function canDeleteStationAudit(auth: AuthorizationContext) {
+/** Named users only: leadership roles and owner status never grant deletion. */
+export function canDeleteStationAudit(
+  auth: AuthorizationContext,
+  settings: { company_id: string; delete_user_ids: string[] },
+) {
   return (
     !auth.readOnly &&
-    (auth.isMasterOwner ||
-      (auth.effectiveRoleCodes || [auth.roleCode || ""]).some((code) =>
-        [
-          "OPERATIONS_BH",
-          "OPERATIONS_HLM",
-          "OPERATIONS_SLPM",
-          "OPERATIONS_NH",
-          "OPERATIONS_NATIONAL_HEAD",
-          "NATIONAL_HEAD",
-        ].includes(code),
-      ))
+    Boolean(auth.userId) &&
+    auth.companyId === settings.company_id &&
+    settings.delete_user_ids.includes(auth.userId)
   );
 }
 /** Resolve from the same Operations memberships and role scope used at login. */

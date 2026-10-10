@@ -9,6 +9,7 @@ import {
   createChecklistItem,
   saveAuditOption,
   saveAuditProgrammeSettings,
+  saveAuditDeletionSettings,
   saveAuditType,
   saveChecklistItem,
 } from "./actions";
@@ -97,7 +98,9 @@ export function AuditMasterClient({
   locationModels,
   allStations,
   notificationUsers,
+  canConfigureDeletion,
 }: {
+  canConfigureDeletion: boolean;
   notificationUsers: AuditNotificationUser[];
   auditTypes: AuditType[];
   sections: AuditSection[];
@@ -161,6 +164,56 @@ export function AuditMasterClient({
             </div>
           </div>
           <div className="panel-body">
+            <section
+              style={{ marginBottom: 24 }}
+              aria-label="Audit deletion access"
+            >
+              <strong>Who can delete audits</strong>
+              <p className="subtle">
+                Applies to both COD and physical audits. Only named users can
+                delete; role and owner permissions do not grant this access.
+                History and evidence are retained.
+              </p>
+              <p>
+                {notificationUsers
+                  .filter((user) =>
+                    programmeSettings.delete_user_ids.includes(user.id),
+                  )
+                  .map((user) => user.name)
+                  .join(", ") || "No deletion users configured"}
+              </p>
+              {canConfigureDeletion ? (
+                <details>
+                  <summary>Manage named deletion users</summary>
+                  <ActionForm action={saveAuditDeletionSettings}>
+                    <fieldset
+                      style={{
+                        ...fieldStyle,
+                        maxHeight: 260,
+                        overflowY: "auto",
+                      }}
+                    >
+                      <legend>Authorized deletion users</legend>
+                      {notificationUsers.map((user) => (
+                        <label key={user.id}>
+                          <input
+                            type="checkbox"
+                            name="delete_user_ids"
+                            value={user.id}
+                            defaultChecked={programmeSettings.delete_user_ids.includes(
+                              user.id,
+                            )}
+                          />{" "}
+                          {user.name} · {user.email}
+                        </label>
+                      ))}
+                    </fieldset>
+                  </ActionForm>
+                </details>
+              ) : (
+                <small>Only these users can change deletion access.</small>
+              )}
+            </section>
             <ActionForm action={saveAuditProgrammeSettings}>
               <div className="fin-form-grid">
                 <label className="fin-label">

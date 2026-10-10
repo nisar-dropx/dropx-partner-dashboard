@@ -36,6 +36,9 @@ await db.exec(
     "utf8",
   ),
 );
+await db.exec(`create table ops_audit_programme_settings(company_id uuid primary key); insert into ops_audit_programme_settings values('${company}');`);
+await db.exec(fs.readFileSync('supabase/migrations/20261011043000_station_audit_named_deletion.sql', 'utf8'));
+await db.query('update ops_audit_programme_settings set delete_user_ids=$1 where company_id=$2', [[manager], company]);
 const insert = (id, date, slot) =>
   db.query(
     `insert into ops_station_audits(id,company_id,audit_number,audit_type_id,location_id,scheduled_for,cycle_key,period_slot,assigned_to,assigned_name,assignment_verified) values($1::uuid,$2,$1::text,$3,$4,$5,'2099-10',$6,$7,'Auditor',true)`,
@@ -71,7 +74,13 @@ const manage = async (op, actor = manager, changes = {}) => {
     ],
   );
 };
-await assert.rejects(manage("delete", auditor), /cannot delete/);
+// Even an owner / formerly authorized leader is denied when absent from the list.
+await db.query('update ops_audit_programme_settings set delete_user_ids=$1 where company_id=$2', [[], company]);
+await db.query('update profiles set is_master_owner=true where id=$1', [manager]);
+await assert.rejects(manage("delete", manager), /authorized users/);
+await db.query('update profiles set is_master_owner=false where id=$1', [manager]);
+await db.query('update ops_audit_programme_settings set delete_user_ids=$1 where company_id=$2', [[manager], company]);
+await assert.rejects(manage("delete", auditor), /cannot delete|authorized users/);
 await assert.rejects(
   manage("delete", manager, { updated: "2000-01-01" }),
   /changed/,
@@ -194,22 +203,12 @@ new Function(
   ).outputText,
 )(() => ({}), mod, mod.exports);
 const canDelete = mod.exports.canDeleteStationAudit;
-for (const code of [
-  "OPERATIONS_BH",
-  "OPERATIONS_HLM",
-  "OPERATIONS_SLPM",
-  "OPERATIONS_NH",
-])
-  assert.equal(canDelete({ effectiveRoleCodes: [code] }), true);
-for (const code of [
-  "OPERATIONS_CLM",
-  "OPERATIONS_AOM",
-  "OPERATIONS_RM",
-  "LOCATION",
-  "FINANCE_NATIONAL_HEAD",
-])
-  assert.equal(canDelete({ effectiveRoleCodes: [code] }), false);
-assert.equal(canDelete({ isMasterOwner: true, readOnly: true }), false);
-console.log(
-  "Audit tracker passed: role-restricted soft deletion, stale writes, retained evidence, date windows, duplicate slots, assignment and atomic report rollback.",
-);
+const settings = { company_id: company, delete_user_ids: [manager, auditor] };
+for (const userId of [manager, auditor]) assert.equal(canDelete({ companyId: company, userId }, settings), true);
+for (const code of ["OPERATIONS_BH", "OPERATIONS_HLM", "OPERATIONS_SLPM", "OPERATIONS_NH", "OPERATIONS_CLM", "OPERATIONS_AOM", "OPERATIONS_RM", "LOCATION"]) {
+  assert.equal(canDelete({ companyId: company, userId: second, effectiveRoleCodes: [code], isMasterOwner: true }, settings), false, "Roles and owner status cannot bypass named users");
+}
+assert.equal(canDelete({ companyId: company, userId: manager, readOnly: true }, settings), false);
+assert.equal(canDelete({ companyId: second, userId: manager }, settings), false);
+assert.equal(canDelete({ companyId: company, userId: manager }, { ...settings, delete_user_ids: [] }), false);
+console.log("Audit tracker passed: named-user soft deletion, default deny, owner/role bypass denied, tenant/preview checks, stale writes, retained evidence and atomic report rollback.");

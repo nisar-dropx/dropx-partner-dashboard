@@ -1,5 +1,9 @@
 "use client";
 import {
+  isAuditEvidenceFolder,
+  isAuditDriveLink,
+} from "@/lib/ops-pulse/station-audit-evidence";
+import {
   AuditScore,
   ResponsibilityAssessment,
   ScoreReview,
@@ -520,24 +524,37 @@ export function AuditDetail({
                 {type.requires_video_link ? (
                   <div className={styles.twoCol} style={{ marginTop: 12 }}>
                     <label className={styles.inputLabel}>
-                      Google Drive recording link{" "}
-                      <small>{type.video_link_help}</small>
+                      Google Drive evidence folder *
+                      <small>
+                        Upload the video-call screen recording and audit photos
+                        to one Google Drive folder. Set General access to
+                        “Anyone with the link” and role to “Viewer”, then paste
+                        the folder link here.
+                      </small>
+                      {type.video_link_help && (
+                        <small>{type.video_link_help}</small>
+                      )}
                       <input
                         name="video_call_url"
                         type="url"
                         defaultValue={audit.video_call_url ?? ""}
-                        placeholder="https://drive.google.com/..."
+                        placeholder="https://drive.google.com/drive/folders/..."
                         required
                       />
                     </label>
                     <label className={styles.inputLabel}>
-                      Viewing access
-                      <select name="video_access_confirmed" defaultValue="">
+                      Recording, photos & viewing access *
+                      <select
+                        name="video_access_confirmed"
+                        defaultValue=""
+                        required
+                      >
                         <option value="" disabled>
                           Confirm access
                         </option>
                         <option value="yes">
-                          Anyone with the link can view
+                          Uploaded recording and photos · Anyone with the link —
+                          Viewer
                         </option>
                       </select>
                     </label>
@@ -1479,10 +1496,48 @@ function SavedAudit({
                   <b>Manager note:</b> {audit.manager_summary}
                 </p>
               )}
-              {audit.video_call_url && (
-                <a href={audit.video_call_url} target="_blank" rel="noreferrer">
-                  Open audit recording
-                </a>
+              {(audit.video_call_url ||
+                audit.ops_audit_types?.requires_video_link) && (
+                <section
+                  style={{
+                    padding: 16,
+                    marginTop: 16,
+                    border: "1px solid #cbd5e1",
+                    borderRadius: 10,
+                    background: "#f8fafc",
+                  }}
+                  aria-label="COD recording and photo evidence"
+                >
+                  <strong>Video-call recording &amp; audit photos</strong>
+                  {audit.video_call_url &&
+                  isAuditDriveLink(audit.video_call_url) ? (
+                    <>
+                      <p>
+                        <a
+                          className="button secondary compact"
+                          href={audit.video_call_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {isAuditEvidenceFolder(audit.video_call_url)
+                            ? "Open Google Drive evidence folder"
+                            : "Open saved audit recording"}{" "}
+                          ↗
+                        </a>
+                      </p>
+                      <small>
+                        {isAuditEvidenceFolder(audit.video_call_url)
+                          ? "Folder for the screen recording and audit photos. Auditor confirms Anyone with the link — Viewer access."
+                          : "This older audit has an individual recording link. New submissions require one shared Drive folder containing the recording and photos."}
+                      </small>
+                    </>
+                  ) : (
+                    <p className="fin-negative">
+                      Required evidence folder has not been recorded for this
+                      audit.
+                    </p>
+                  )}
+                </section>
               )}
             </>
           )}

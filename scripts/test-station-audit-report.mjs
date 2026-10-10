@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
+import { PDFDocument, PDFName, PDFArray } from 'pdf-lib';
 const require = createRequire(import.meta.url);
 function load(file) {
   const module = { exports: {} };
@@ -22,10 +23,14 @@ const snapshot = calculateAuditScore({
 assert.equal(snapshot.percentage, 100);
 const pdf = await renderAuditPdf({
   number: 'TEST-REPORT', station: 'TEST - Sample', type: 'Physical audit', auditor: 'Test auditor', completed: '6 October 2026', status: 'Test only',
+  evidenceFolderUrl: 'https://drive.google.com/drive/folders/audit-evidence-test',
   summary: 'Regional notes: ശുചിത്വം. Formula uses 100 × (1 − variance ÷ total).', stationResponse: 'Verified before audit.',
   expectedCash: 500, actualCash: 500, missing: 1, excess: 0, cashCounts: [{ denomination: 500, count: 1, amount: 500 }], snapshot,
   checks: [], shipments: [{ tid: 'TEST002', discrepancy: 'missing', remarks: 'Prior missing scan', response: 'Proof verified' }], actions: [], photos: [],
 });
 assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
 assert.ok(pdf.length > 1000);
+const parsed = await PDFDocument.load(pdf);
+const links = parsed.getPages().flatMap(page => page.node.lookupMaybe(PDFName.of('Annots'), PDFArray)?.asArray() || []);
+assert.ok(links.some(ref => parsed.context.lookup(ref).toString().includes('audit-evidence-test')), 'Evidence folder is a clickable PDF link');
 console.log('Audit PDF passed: actual scoring formulas, verified exclusion, source lists, denominations and regional text render successfully. No email sent.');

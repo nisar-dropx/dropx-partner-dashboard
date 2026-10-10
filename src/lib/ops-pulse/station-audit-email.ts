@@ -1,4 +1,5 @@
 import "server-only";
+import { isAuditDriveLink } from "./station-audit-evidence";
 import { buildStationAuditReport } from "./station-audit-report-data";
 import type { AuditReportData } from "./station-audit-report";
 import { resolveStationAuditRecipients } from "./station-audit-recipients";
@@ -158,6 +159,9 @@ export function auditUpdateDetails(
   );
   const actions = report?.actions || [];
   const cash = auditCashDetails(audit, report);
+  const evidenceUrl = isAuditDriveLink(audit.video_call_url || "")
+    ? audit.video_call_url!
+    : "";
   const summary =
     report?.summary || audit.overall_summary || "No auditor summary recorded.";
   const line = (a: (typeof actions)[number]) =>
@@ -165,6 +169,7 @@ export function auditUpdateDetails(
   const plain = [
     ...facts.map(([k, v]) => `${k}: ${v}`),
     cash.plain,
+    evidenceUrl ? `Video-call recording and audit photos: ${evidenceUrl}` : "",
     `Major findings / auditor summary: ${summary}`,
     ...findings.map(
       (c) => `${c.section}: ${c.label} — ${c.outcome}. ${c.remarks}`,
@@ -182,7 +187,7 @@ export function auditUpdateDetails(
     .filter(Boolean)
     .join("\n");
   const html = `<h2 style="font-size:18px;margin:22px 0 10px">Latest audit update</h2><table width="100%" style="font-size:13px;border-collapse:collapse">${facts.map(([k, v]) => `<tr><td style="padding:6px 0;color:#66758f;width:30%">${escapeHtml(k)}</td><td style="padding:6px 0">${escapeHtml(v)}</td></tr>`).join("")}</table>
-    ${cash.html}<h3 style="font-size:16px;margin:20px 0 8px">Major findings &amp; observations</h3><p style="line-height:1.5;white-space:pre-line">${escapeHtml(summary)}</p>
+    ${cash.html}${evidenceUrl ? `<h3 style="font-size:16px;margin:20px 0 8px">Video-call recording &amp; audit photos</h3><p><a href="${escapeHtml(evidenceUrl)}">Open saved Google Drive evidence</a></p>` : ""}<h3 style="font-size:16px;margin:20px 0 8px">Major findings &amp; observations</h3><p style="line-height:1.5;white-space:pre-line">${escapeHtml(summary)}</p>
     ${
       findings.length
         ? `<ul style="padding-left:20px;line-height:1.5">${findings

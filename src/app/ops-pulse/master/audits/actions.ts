@@ -1,5 +1,8 @@
 "use server";
 
+import { canDeleteStationAudit } from "@/lib/ops-pulse/station-audit-people";
+import { loadStationAuditMaster } from "@/lib/ops-pulse/station-audits";
+import { loadAuditNotificationUsers } from "@/lib/ops-pulse/station-audit-recipients";
 import { validAuditRecipientRule } from "@/lib/ops-pulse/station-audit-recipients";
 import { revalidatePath } from "next/cache";
 import { requirePagePermission } from "@/lib/authorization";
@@ -158,6 +161,42 @@ export async function saveAuditProgrammeSettings(
     if (saved.error) throw new Error(saved.error.message);
     refresh();
     return { ok: true, message: "Audit access and station scope updated." };
+  } catch (error) {
+    return result(error);
+  }
+}
+
+export async function saveAuditDeletionSettings(
+  formData: FormData,
+): Promise<Result> {
+  try {
+    const { authorization, companyId } = await access();
+    const master = await loadStationAuditMaster(companyId);
+    if (!canDeleteStationAudit(authorization, master.programmeSettings))
+      throw new Error(
+        "Only currently authorized deletion users can change this list.",
+      );
+    const ids = selectedValues(formData, "delete_user_ids");
+    const users = await loadAuditNotificationUsers(companyId);
+    if (!ids.length || ids.some((id) => !users.some((user) => user.id === id)))
+      throw new Error("Choose at least one active user with Audit access.");
+    const saved = await db()
+      .from("ops_audit_programme_settings")
+      .update({ delete_user_ids: ids, updated_by: authorization.userId })
+      .eq("company_id", companyId)
+      .contains("delete_user_ids", [authorization.userId])
+      .select("company_id")
+      .maybeSingle();
+    if (saved.error) throw new Error(saved.error.message);
+    if (!saved.data)
+      throw new Error(
+        "Your audit deletion access changed. Refresh and try again.",
+      );
+    refresh();
+    return {
+      ok: true,
+      message: "Named audit deletion users updated for all audit types.",
+    };
   } catch (error) {
     return result(error);
   }

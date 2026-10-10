@@ -106,6 +106,7 @@ export async function buildStationAuditReport(
       : "Not submitted",
     status: audit.status_code.replaceAll("_", " "),
     summary: audit.overall_summary || "",
+    evidenceFolderUrl: audit.video_call_url || undefined,
     stationResponse: audit.station_summary || "",
     expectedCash: audit.system_cash_amount,
     actualCash: audit.physical_cash_amount,

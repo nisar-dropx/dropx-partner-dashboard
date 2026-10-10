@@ -1,3 +1,4 @@
+import { canDeleteStationAudit } from "@/lib/ops-pulse/station-audit-people";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
@@ -41,7 +42,7 @@ export default async function AuditMasterPage() {
           stations={stations}
           canEdit={hasPermission(authorization, "station_audit_master", "edit")}
         />
-        <AuditMasterClient {...master} notificationUsers={notificationUsers} />
+        <AuditMasterClient {...master} notificationUsers={notificationUsers} canConfigureDeletion={canDeleteStationAudit(authorization, master.programmeSettings)} />
       </div>
     </AppShell>
   );

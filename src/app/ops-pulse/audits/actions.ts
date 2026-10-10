@@ -1,4 +1,5 @@
 "use server";
+import { auditEvidenceError } from "@/lib/ops-pulse/station-audit-evidence";
 import {
   calculateAuditScore,
   type AuditAssessment,
@@ -34,7 +35,6 @@ import {
   canRespondToStationAudits,
   canUseStationAuditLocation,
   createStationAudit,
-  isGoogleDriveUrl,
   isStationAuditEligible,
   loadAuditStations,
   loadStationAuditMaster,
@@ -217,7 +217,10 @@ export async function scheduleStationAudit(
     refreshAudits();
     return { ok: true, message: `${audit.audit_number} scheduled.` };
   } catch (error) {
-    if (error instanceof Error && /already has an audit in this date window/i.test(error.message)) {
+    if (
+      error instanceof Error &&
+      /already has an audit in this date window/i.test(error.message)
+    ) {
       const existing = await describeAuditsInMonth(formData).catch(() => "");
       if (existing) {
         return {
@@ -236,7 +239,10 @@ async function describeAuditsInMonth(formData: FormData) {
   const month = clean(formData.get("scheduled_date")).slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(month)) return "";
   const [year, monthNumber] = month.split("-").map(Number);
-  const next = monthNumber === 12 ? `${year + 1}-01` : `${year}-${String(monthNumber + 1).padStart(2, "0")}`;
+  const next =
+    monthNumber === 12
+      ? `${year + 1}-01`
+      : `${year}-${String(monthNumber + 1).padStart(2, "0")}`;
   const result = await db()
     .from("ops_station_audits")
     .select("audit_number,scheduled_for,assigned_name")
@@ -568,17 +574,12 @@ export async function submitStationAudit(
     if (cashVariance && !varianceReason)
       throw new Error("Add a reason or finding for the cash difference.");
     const videoUrl = clean(formData.get("video_call_url"));
-    if (type.requires_video_link && !isGoogleDriveUrl(videoUrl))
-      throw new Error(
-        "Add a valid Google Drive video link for the virtual COD audit.",
-      );
-    if (
-      type.requires_video_link &&
-      clean(formData.get("video_access_confirmed")) !== "yes"
-    )
-      throw new Error(
-        "Confirm that anyone with the video link can view the recording.",
-      );
+    const videoError = auditEvidenceError(
+      type.requires_video_link,
+      videoUrl,
+      clean(formData.get("video_access_confirmed")),
+    );
+    if (videoError) throw new Error(videoError);
     let shipments = parseShipments(clean(formData.get("shipments_json")));
     let reconciliation: { expected: string[]; scanned: string[] } | null = null;
     if (type.shipment_reconciliation_enabled) {
@@ -1108,9 +1109,9 @@ export async function manageAuditAssignment(
     );
     const operation = clean(formData.get("operation"));
     if (operation === "delete") {
-      if (!canDeleteStationAudit(authorization))
+      if (!canDeleteStationAudit(authorization, master.programmeSettings))
         throw new Error(
-          "Only Business Head, Last Mile Head, SLP Manager, National Head and the owner can delete audits.",
+          "Only the named users authorized in Audit Master can delete audits.",
         );
     } else if (operation === "reassign") {
       const choices = await loadAuditAssignees(

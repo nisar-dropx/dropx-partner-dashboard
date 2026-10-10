@@ -2,7 +2,7 @@ import "regenerator-runtime/runtime";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, type PDFFont, rgb } from "pdf-lib";
+import { PDFDocument, PDFString, type PDFFont, rgb } from "pdf-lib";
 import type { AuditScoreSnapshot } from "./station-audit-scoring";
 export type AuditReportData = {
   number: string;
@@ -12,6 +12,7 @@ export type AuditReportData = {
   completed: string;
   status: string;
   summary: string;
+  evidenceFolderUrl?: string;
   stationResponse: string;
   expectedCash: number | null;
   actualCash: number | null;
@@ -218,6 +219,33 @@ export async function renderAuditPdf(data: AuditReportData) {
         });
       y -= 19;
     }
+  }
+  if (data.evidenceFolderUrl) {
+    heading("Video-call recording & audit photos");
+    ensure(24);
+    const linkY = y;
+    text("Open saved Google Drive evidence", 10, false, teal);
+    const annotation = doc.context.register(
+      doc.context.obj({
+        Type: "Annot",
+        Subtype: "Link",
+        Rect: [42, linkY - 3, 265, linkY + 12],
+        Border: [0, 0, 0],
+        A: {
+          Type: "Action",
+          S: "URI",
+          URI: PDFString.of(data.evidenceFolderUrl),
+        },
+      }),
+    );
+    page.node.addAnnot(annotation);
+    text(data.evidenceFolderUrl, 9, false, teal);
+    text(
+      "Google Drive evidence — open the saved link to review the recording and photos.",
+      8,
+      false,
+      gray,
+    );
   }
   heading("COD and shipment reconciliation");
   text(

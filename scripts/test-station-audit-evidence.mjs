@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import ts from "typescript";
+const m={exports:{}};
+new Function("module","exports",ts.transpileModule(fs.readFileSync("src/lib/ops-pulse/station-audit-evidence.ts","utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(m,m.exports);
+const {isAuditEvidenceFolder,auditEvidenceError}=m.exports;
+for(const link of ["https://drive.google.com/drive/folders/folder_ABC-123?usp=sharing","https://drive.google.com/drive/u/0/folders/folder_ABC-123/"]) assert.equal(isAuditEvidenceFolder(link),true);
+for(const link of ["", "https://drive.google.com/file/d/video/view", "https://drive.google.com/drive/folders/", "http://drive.google.com/drive/folders/abc", "https://drive.google.com.evil.test/drive/folders/abc", "https://x@drive.google.com/drive/folders/abc"]) assert.equal(isAuditEvidenceFolder(link),false,link);
+const link="https://drive.google.com/drive/folders/test";
+assert.match(auditEvidenceError(true,"","yes"),/folder/);
+assert.match(auditEvidenceError(true,link,""),/Anyone with the link/);
+assert.equal(auditEvidenceError(true,link,"yes"),"");
+assert.equal(auditEvidenceError(false,"",""),"");
+console.log("Audit evidence passed: mandatory folder and explicit access confirmation; individual file, empty and spoofed URLs rejected; master requirement respected.");
