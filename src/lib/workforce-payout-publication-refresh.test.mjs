@@ -1,11 +1,31 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { noStoreFetch } from "./timeout-fetch.ts";
 
 const source = readFileSync(new URL("./workforce-payout-publication-refresh.ts", import.meta.url), "utf8");
+const supabaseAdminSource = readFileSync(new URL("./supabase-admin.ts", import.meta.url), "utf8");
 const cronSource = readFileSync(new URL("../app/api/cron/workforce-payout-publication-refresh/route.ts", import.meta.url), "utf8");
 const bulkUploadSource = readFileSync(new URL("../app/api/payments/workforce-payouts/bulk-upload/route.ts", import.meta.url), "utf8");
 const vercel = readFileSync(new URL("../../vercel.json", import.meta.url), "utf8");
+
+test("service-role Supabase requests always bypass the Next.js data cache", async () => {
+  let receivedInit;
+  const fetcher = noStoreFetch(async (_input, init) => {
+    receivedInit = init;
+    return Response.json({ ok: true });
+  });
+
+  const response = await fetcher("https://example.supabase.co/rest/v1/rpc/claim", {
+    method: "POST",
+    cache: "force-cache"
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(receivedInit.method, "POST");
+  assert.equal(receivedInit.cache, "no-store");
+  assert.match(supabaseAdminSource, /fetch:\s*timeoutFetch\(noStoreFetch\(\)\)/);
+});
 
 test("publication refresh worker claims bounded durable jobs and recalculates a stable worksheet", () => {
   assert.match(source, /workforce_claim_payout_publication_refresh_jobs/);
@@ -83,6 +103,8 @@ test("missing rows become zero revisions only for safe input-only publications",
 test("a protected recurring worker drains publication refresh jobs after request failures", () => {
   assert.match(cronSource, /process\.env\.CRON_SECRET/);
   assert.match(cronSource, /authorization/);
+  assert.match(cronSource, /fetchCache\s*=\s*"force-no-store"/);
+  assert.match(cronSource, /revalidate\s*=\s*0/);
   assert.match(cronSource, /refreshWorkforcePayoutPublicationJobs\(\{ deadlineAtMs, limit: 100 \}\)/);
   assert.match(vercel, /\/api\/cron\/workforce-payout-publication-refresh/);
 });

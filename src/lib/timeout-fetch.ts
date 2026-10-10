@@ -7,6 +7,17 @@ const SUPABASE_FETCH_TIMEOUT_MS = 20_000;
 
 export const DATABASE_UNREACHABLE_MESSAGE = "The database is not reachable right now. Please check your connection and try again in a moment.";
 
+/**
+ * Next.js extends the server-side `fetch` implementation with a persistent
+ * data cache. Database requests are live coordination reads/writes, so a
+ * cached response (including an empty RPC result) is never valid. Keep this
+ * adapter separate from the timeout wrapper so it can be reused by every
+ * service-role client and tested without making a network request.
+ */
+export function noStoreFetch(fetcher: typeof fetch = (...args) => fetch(...args)): typeof fetch {
+  return (input, init) => fetcher(input, { ...init, cache: "no-store" });
+}
+
 // Supabase always answers in JSON. An HTML error body is a Cloudflare/gateway
 // outage page, and a thrown fetch is a dropped or timed-out connection. Both
 // are replaced with a JSON error so callers surface one readable message

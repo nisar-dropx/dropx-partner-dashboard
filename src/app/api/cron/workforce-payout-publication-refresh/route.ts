@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
 export const runtime = "nodejs";
 export const maxDuration = 300;
 

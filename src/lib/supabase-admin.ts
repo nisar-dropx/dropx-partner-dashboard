@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { timeoutFetch } from "./timeout-fetch";
+import { noStoreFetch, timeoutFetch } from "./timeout-fetch";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -13,7 +13,10 @@ export const supabaseAdmin = isSupabaseAdminConfigured
         persistSession: false
       },
       global: {
-        fetch: timeoutFetch()
+        // Next.js can cache server-side fetches outside POST route handlers.
+        // Supabase service-role calls include lease/claim RPCs and must always
+        // reach PostgREST instead of replaying an earlier empty response.
+        fetch: timeoutFetch(noStoreFetch())
       }
     })
   : null;
