@@ -1,4 +1,4 @@
-import { allAuditRows } from "@/lib/ops-pulse/station-audit-query";
+import { allAuditRows, auditRowsForIds } from "@/lib/ops-pulse/station-audit-query";
 import "server-only";
 import { loadAuditAssignees, type AuditAssignee } from "./station-audit-people";
 
@@ -606,11 +606,11 @@ export async function loadStationAuditWorkspace(
     : auditsQuery.or(
         `and(scheduled_for.gte.${from}T00:00:00+05:30,scheduled_for.lte.${to}T23:59:59.999+05:30),and(assigned_to.eq.${authorization.userId},assignment_verified.eq.true,status_code.neq.closed)`,
       );
-  const auditsResult = await auditsQuery
-    .order("scheduled_for", { ascending: true })
-    .limit(1501);
+  const auditsResult = await allAuditRows((start, end) => auditsQuery
+    .order("scheduled_for", { ascending: true }).order("id")
+    .range(start, end));
   if (auditsResult.error) throw new Error(auditsResult.error.message);
-  const audits = ((auditsResult.data ?? []).slice(0, 1500) as StationAudit[])
+  const audits = ((auditsResult.data ?? []) as StationAudit[])
     .filter((audit) => !stationOnly || stationCanSeeAudit(audit))
     .map((audit) =>
       stationOnly ? { ...audit, manager_summary: null } : audit,
@@ -640,85 +640,85 @@ export async function loadStationAuditWorkspace(
     shipments,
     events,
   ] = await Promise.all([
-    allAuditRows((from, to) =>
+    auditRowsForIds(auditIds, (batchIds, from, to) =>
       db()
         .from("ops_station_audit_actions")
         .select(
           "id,audit_id,title,corrective_action,preventive_action,severity_code,status_code,owner_name,owner_email,due_at,completion_note",
         )
         .eq("company_id", companyId)
-        .in("audit_id", auditIds)
+        .in("audit_id", batchIds)
         .order("due_at", { ascending: true })
         .order("id")
         .range(from, to),
     ),
-    allAuditRows((from, to) =>
+    auditRowsForIds(auditIds, (batchIds, from, to) =>
       db()
         .from("ops_station_audit_comments")
         .select(
           "id,audit_id,body,audience,requests_station_response,author_name,author_email,created_at",
         )
         .eq("company_id", companyId)
-        .in("audit_id", auditIds)
+        .in("audit_id", batchIds)
         .order("created_at", { ascending: true })
         .order("id")
         .range(from, to),
     ),
-    allAuditRows((from, to) =>
+    auditRowsForIds(auditIds, (batchIds, from, to) =>
       db()
         .from("ops_station_audit_evidence")
         .select(
           "id,audit_id,file_name,media_url,caption,evidence_kind_code,checklist_item_id,content_type,uploaded_at",
         )
         .eq("company_id", companyId)
-        .in("audit_id", auditIds)
+        .in("audit_id", batchIds)
         .order("uploaded_at", { ascending: false })
         .order("id")
         .range(from, to),
     ),
-    allAuditRows((from, to) =>
+    auditRowsForIds(auditIds, (batchIds, from, to) =>
       db()
         .from("ops_station_audit_check_responses")
         .select(
           "id,audit_id,checklist_item_id,response_value,is_compliant,remarks",
         )
         .eq("company_id", companyId)
-        .in("audit_id", auditIds)
+        .in("audit_id", batchIds)
         .order("id")
         .range(from, to),
     ),
-    allAuditRows((from, to) =>
+    auditRowsForIds(auditIds, (batchIds, from, to) =>
       db()
         .from("ops_station_audit_cash_counts")
         .select(
           "id,audit_id,cash_side,denomination_option_id,denomination_value,note_count,computed_amount,notes",
         )
         .eq("company_id", companyId)
-        .in("audit_id", auditIds)
+        .in("audit_id", batchIds)
         .order("denomination_value", { ascending: false })
         .order("id")
         .range(from, to),
     ),
-    allAuditRows((from, to) =>
+    auditRowsForIds(auditIds, (batchIds, from, to) =>
       db()
         .from("ops_station_audit_shipments")
         .select(
           "id,audit_id,tracking_id,system_status_code,physical_status_code,discrepancy_code,remarks,required_action,due_at,is_resolved,station_response",
         )
         .eq("company_id", companyId)
-        .in("audit_id", auditIds)
+        .in("audit_id", batchIds)
         .order("created_at")
         .order("id")
         .range(from, to),
     ),
-    allAuditRows((from, to) =>
+    auditRowsForIds(auditIds, (batchIds, from, to) =>
       db()
         .from("ops_station_audit_events")
         .select(
           "id,audit_id,event_type,actor_user_id,actor_name,actor_email,created_at,before_data,after_data",
         )
         .eq("company_id", companyId)
-        .in("audit_id", auditIds)
+        .in("audit_id", batchIds)
         .in(
           "event_type",
           stationOnly
@@ -759,7 +759,7 @@ export async function loadStationAuditWorkspace(
     events: (events.data ?? []).map((event) =>
       stationOnly ? { ...event, before_data: {}, after_data: {} } : event,
     ) as AuditEvent[],
-    truncated: (auditsResult.data?.length ?? 0) > 1500,
+    truncated: false,
     actions: (actions.data ?? []) as AuditAction[],
     comments: ((comments.data ?? []) as AuditComment[]).filter(
       (comment) =>

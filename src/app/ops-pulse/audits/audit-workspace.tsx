@@ -36,6 +36,8 @@ import {
   auditTone,
   isFastAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
+import { AuditRangeReport } from "./audit-range-report";
+import { inAuditReportRange, matchesAuditReportStatus } from "@/lib/ops-pulse/station-audit-progress";
 import { AuditMonthTracker } from "./audit-month-tracker";
 import {
   auditAssigneeKey,
@@ -392,6 +394,8 @@ export function AuditWorkspace({
   canDelete,
   month,
   focusAuditId,
+  reportRange,
+  reportError,
   canViewMaster,
   readOnly,
 }: {
@@ -408,13 +412,15 @@ export function AuditWorkspace({
   canDelete: boolean;
   month: string;
   focusAuditId?: string;
+  reportRange: { from: string; to: string };
+  reportError: string;
   canViewMaster: boolean;
   readOnly: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState(stationOnly ? "queue" : "mine");
+  const [tab, setTab] = useState(searchParams.get("view") === "reports" ? "log" : stationOnly ? "queue" : "mine");
   const [typeId, setTypeId] = useState("all");
   const [stations, setStations] = useState<string[]>([]);
   const [clusters, setClusters] = useState<string[]>([]);
@@ -531,7 +537,7 @@ export function AuditWorkspace({
   );
   const visibleAudits = scopeAudits.filter(
     (audit) =>
-      (status === "all" || auditTone(audit) === status) &&
+      matchesAuditReportStatus(audit, status) &&
       (!fastOnly || isFastAudit(audit)),
   );
   const monthAudits = visibleAudits.filter(
@@ -550,6 +556,7 @@ export function AuditWorkspace({
   const history = (stationOnly ? visibleAudits : monthAudits).filter(
     (audit) => audit.completed_at,
   );
+  const reportAudits = visibleAudits.filter((audit) => inAuditReportRange(audit, reportRange.from, reportRange.to));
   const modalAudits = day
     ? visibleAudits.filter((audit) => auditDay(audit.scheduled_for) === day)
     : visibleAudits.filter((audit) => audit.id === selectedId);
@@ -570,6 +577,15 @@ export function AuditWorkspace({
     const params = new URLSearchParams(searchParams.toString());
     params.set("month", value);
     params.delete("audit");
+    params.delete("from");
+    params.delete("to");
+    navigate(() => router.push(`${pathname}?${params}`));
+  };
+  const changeReportRange = (from: string, to: string) => {
+    close();
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("from", from); params.set("to", to); params.set("view", "reports");
+    params.delete("audit");
     navigate(() => router.push(`${pathname}?${params}`));
   };
   const shiftMonth = (amount: number) => {
@@ -588,8 +604,8 @@ export function AuditWorkspace({
             ? `${tab === "calendar" ? "Calendar" : "Audits"} of ${selectedAuditorNames.length} auditors`
             : `Team ${tab === "calendar" ? "calendar" : "audits"} · all auditors`;
   const exportParams = new URLSearchParams({
-    from: range.from,
-    to: range.to,
+    from: tab === "log" ? reportRange.from : range.from,
+    to: tab === "log" ? reportRange.to : range.to,
     stations: filteredStations.map((s) => s.id).join(","),
     type: typeId,
     auditors: auditors.join(","),
@@ -733,6 +749,10 @@ export function AuditWorkspace({
             onChange={(e) => setStatus(e.target.value)}
           >
             <option value="all">All statuses</option>
+            <option value="incomplete">Not completed</option>
+            <option value="overdue">Overdue · not submitted</option>
+            <option value="unsubmitted">Not submitted</option>
+            <option value="followup">Submitted · follow-up pending</option>
             <option value="scheduled">Scheduled</option>
             <option value="pending">Pending / in progress</option>
             <option value="complete">Completed</option>
@@ -800,7 +820,7 @@ export function AuditWorkspace({
           )}
         </div>
       </div>
-      <div className={styles.summary}>
+      {tab !== "log" && <div className={styles.summary}>
         <div className={styles.metric}>
           <span>Scheduled</span>
           <strong>
@@ -835,7 +855,7 @@ export function AuditWorkspace({
           <strong>{history.filter(isFastAudit).length}</strong>
           <small>Completed in 10 minutes or less</small>
         </div>
-      </div>
+      </div>}
       <div className={styles.viewBar}>
         <div className={styles.tabs}>
           {(stationOnly
@@ -867,12 +887,14 @@ export function AuditWorkspace({
           ))}
         </div>
         {canManage && (
-          <Link
+          <a
             className="button secondary compact"
+            aria-disabled={navigationPending}
+            onClick={(event) => { if (navigationPending) event.preventDefault(); }}
             href={`/api/ops-pulse/audits/export?${exportParams}`}
           >
             Download Excel
-          </Link>
+          </a>
         )}
       </div>
       <div className={styles.legend}>
@@ -892,12 +914,11 @@ export function AuditWorkspace({
       </div>
       {workspace.truncated && (
         <p role="alert" className={styles.notice}>
-          The first 1,500 audits are shown. Choose a narrower month to see all
-          records.
+          The first 1,500 audits are shown. Choose a shorter range for the on-screen summary. The Excel report includes every audit in your selected range.
         </p>
       )}
-      {navigationPending && <p role="status">Loading {monthLabel(month)}…</p>}
-      {tab !== "mine" && selectedAuditorNames.length > 0 && !monthAudits.length && (
+      {navigationPending && <p role="status">Loading audits…</p>}
+      {tab !== "mine" && tab !== "log" && selectedAuditorNames.length > 0 && !monthAudits.length && (
         <p role="status" className={styles.notice}>
           {selectedAuditorNames.join(", ")}{" "}
           {selectedAuditorNames.length === 1 ? "has" : "have"} no audits in{" "}
@@ -962,20 +983,11 @@ export function AuditWorkspace({
           )}
         </div>
       )}
-      {tab === "log" && (
-        <div className={styles.list}>
-          {[...history]
-            .sort((a, b) =>
-              String(b.completed_at).localeCompare(String(a.completed_at)),
-            )
-            .map(renderCard)}
-          {!history.length && (
-            <div className={styles.empty}>
-              No completed audits match this view.
-            </div>
-          )}
-        </div>
-      )}
+      {tab === "log" && <AuditRangeReport
+        audits={reportAudits} workspace={workspace} range={reportRange}
+        error={reportError} loading={navigationPending} auditorName={auditorName}
+        onRange={changeReportRange} onOpen={showAudit}
+      />}
       {tab === "calendar" && (
         <section className={styles.calendarPanel}>
           <div className={styles.calendarHead}>

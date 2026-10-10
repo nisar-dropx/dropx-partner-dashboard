@@ -21,3 +21,17 @@ export async function allAuditRows<T>(
       };
   }
 }
+
+/** Bound IN filters so long date ranges do not exceed PostgREST URL limits. */
+export async function auditRowsForIds<T>(
+  ids: string[],
+  page: (ids: string[], from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const data: T[] = [];
+  for (let index = 0; index < ids.length; index += 100) {
+    const result = await allAuditRows((from, to) => page(ids.slice(index, index + 100), from, to));
+    if (result.error) return { data: null, error: result.error };
+    data.push(...(result.data || []));
+  }
+  return { data, error: null };
+}

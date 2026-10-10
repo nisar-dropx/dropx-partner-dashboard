@@ -1,5 +1,8 @@
-import { allAuditRows } from "@/lib/ops-pulse/station-audit-query";
+import { allAuditRows, auditRowsForIds } from "@/lib/ops-pulse/station-audit-query";
 import * as XLSX from "xlsx";
+import { auditProgress, auditReportRangeError, matchesAuditReportStatus } from "@/lib/ops-pulse/station-audit-progress";
+import { appendAuditProgressSummary, auditWorkbookSheet } from "@/lib/ops-pulse/station-audit-progress-export";
+import { loadAuditAssignees } from "@/lib/ops-pulse/station-audit-people";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
@@ -10,33 +13,16 @@ import {
 import {
   auditAssigneeKey,
   auditDuration,
+  auditResponseLabel,
   auditStatusLabel,
-  auditTone,
   isFastAudit,
-  validAuditDate,
 } from "@/lib/ops-pulse/station-audit-planning";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function workbookSheet(rows: Record<string, unknown>[]) {
-  const sheet = XLSX.utils.json_to_sheet(
-    rows.length ? rows : [{ "No records": "No records for this selection" }],
-  );
-  const keys = Object.keys(rows[0] ?? { "No records": "" });
-  sheet["!autofilter"] = {
-    ref: XLSX.utils.encode_range({
-      s: { r: 0, c: 0 },
-      e: { r: Math.max(rows.length, 1), c: Math.max(keys.length - 1, 0) },
-    }),
-  };
-  sheet["!freeze"] = { ySplit: 1 };
-  sheet["!cols"] = keys.map((key) => ({
-    wch: Math.min(42, Math.max(12, key.length + 3)),
-  }));
-  return sheet;
-}
+const workbookSheet = auditWorkbookSheet;
 
 export async function GET(request: Request) {
   const authorization = await getAuthorization();
@@ -51,9 +37,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to") ?? "";
-  if (!validAuditDate(from) || !validAuditDate(to) || from > to)
+  const rangeError = auditReportRangeError(from, to);
+  if (rangeError)
     return Response.json(
-      { error: "Choose a valid audit date range." },
+      { error: rangeError },
       { status: 400 },
     );
   const companyId = requireCompanyId(authorization);
@@ -82,18 +69,18 @@ export async function GET(request: Request) {
       { status: 403 },
     );
   const stationById = new Map(stations.map((station) => [station.id, station]));
-  const auditsResult = await supabaseAdmin
+  const auditsResult = await allAuditRows((start, end) => client
     .from("ops_station_audits")
     .select(
-      "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,assignment_verified,started_at,completed_at,completed_by,response_due_at,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
+      "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,assignment_verified,started_at,completed_at,completed_by,response_due_at,station_response_status,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
     )
     .eq("company_id", companyId)
     .is("deleted_at", null)
     .in("location_id", stationIds)
     .gte("scheduled_for", `${from}T00:00:00+05:30`)
     .lte("scheduled_for", `${to}T23:59:59.999+05:30`)
-    .order("scheduled_for")
-    .limit(5000);
+    .order("scheduled_for").order("id")
+    .range(start, end));
   if (auditsResult.error)
     return Response.json(
       { error: auditsResult.error.message },
@@ -105,15 +92,20 @@ export async function GET(request: Request) {
   const requestedType = url.searchParams.get("type") || "all";
   const requestedStatus = url.searchParams.get("status") || "all";
   const term = (url.searchParams.get("q") || "").toLowerCase();
+  const now = Date.now();
+  const assignees = await loadAuditAssignees(companyId, master.programmeSettings.scheduler_role_ids, stationIds);
+  const names = new Map(assignees.map((person) => [person.id, person.name]));
+  const auditorName = (audit: { assigned_to: string | null; assigned_name: string | null; assignment_verified: boolean }) =>
+    audit.assignment_verified && audit.assigned_to ? names.get(audit.assigned_to) || audit.assigned_name || "Former auditor" : `${audit.assigned_name || "Unassigned"}${audit.assigned_name ? " (assignment unconfirmed)" : ""}`;
   const audits = (auditsResult.data ?? []).filter(
     (audit) =>
       (requestedType === "all" || audit.audit_type_id === requestedType) &&
-      (requestedStatus === "all" || auditTone(audit) === requestedStatus) &&
+      matchesAuditReportStatus(audit, requestedStatus, now) &&
       (!selectedAuditors.length ||
         selectedAuditors.includes(auditAssigneeKey(audit))) &&
       (url.searchParams.get("fast") !== "true" || isFastAudit(audit)) &&
       (!term ||
-        `${audit.audit_number} ${stationById.get(audit.location_id)?.station_code} ${audit.assigned_name} ${stationById.get(audit.location_id)?.station_name}`
+        `${audit.audit_number} ${stationById.get(audit.location_id)?.station_code} ${auditorName(audit)} ${stationById.get(audit.location_id)?.station_name}`
           .toLowerCase()
           .includes(term)),
   );
@@ -126,69 +118,69 @@ export async function GET(request: Request) {
   );
   const [cash, responses, shipments, actions, comments, events] = ids.length
     ? await Promise.all([
-        allAuditRows((from, to) =>
+        auditRowsForIds(ids, (batchIds, from, to) =>
           client
             .from("ops_station_audit_cash_counts")
             .select(
               "audit_id,cash_side,denomination_value,note_count,computed_amount,notes",
             )
             .eq("company_id", companyId)
-            .in("audit_id", ids)
+            .in("audit_id", batchIds)
             .order("id")
             .range(from, to),
         ),
-        allAuditRows((from, to) =>
+        auditRowsForIds(ids, (batchIds, from, to) =>
           client
             .from("ops_station_audit_check_responses")
             .select(
               "audit_id,checklist_item_id,response_value,is_compliant,remarks,ops_audit_checklist_items(label,code)",
             )
             .eq("company_id", companyId)
-            .in("audit_id", ids)
+            .in("audit_id", batchIds)
             .order("id")
             .range(from, to),
         ),
-        allAuditRows((from, to) =>
+        auditRowsForIds(ids, (batchIds, from, to) =>
           client
             .from("ops_station_audit_shipments")
             .select(
               "audit_id,tracking_id,system_status_code,physical_status_code,discrepancy_code,remarks,required_action,due_at,is_resolved,station_response",
             )
             .eq("company_id", companyId)
-            .in("audit_id", ids)
+            .in("audit_id", batchIds)
             .order("id")
             .range(from, to),
         ),
-        allAuditRows((from, to) =>
+        auditRowsForIds(ids, (batchIds, from, to) =>
           client
             .from("ops_station_audit_actions")
             .select(
               "audit_id,title,corrective_action,preventive_action,severity_code,status_code,owner_name,owner_email,due_at,completed_at,completion_note",
             )
             .eq("company_id", companyId)
-            .in("audit_id", ids)
+            .in("audit_id", batchIds)
             .order("id")
             .range(from, to),
         ),
-        allAuditRows((from, to) =>
+        auditRowsForIds(ids, (batchIds, from, to) =>
           client
             .from("ops_station_audit_comments")
             .select(
               "audit_id,body,audience,requests_station_response,author_name,author_email,created_at",
             )
             .eq("company_id", companyId)
-            .in("audit_id", ids)
+            .in("audit_id", batchIds)
             .order("id")
             .range(from, to),
         ),
-        allAuditRows((from, to) =>
+        auditRowsForIds(ids, (batchIds, from, to) =>
           client
             .from("ops_station_audit_events")
             .select(
               "audit_id,event_type,actor_name,actor_email,created_at,before_data,after_data",
             )
             .eq("company_id", companyId)
-            .in("audit_id", ids)
+            .in("audit_id", batchIds)
             .order("created_at")
             .order("id")
             .range(from, to),
@@ -225,10 +217,7 @@ export async function GET(request: Request) {
         }).format(new Date(value))
       : "";
   const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(
-    book,
-    workbookSheet(
-      audits.map((audit: any) => ({
+  const register = audits.map((audit: any) => ({
         "Audit number": audit.audit_number,
         "Audit type": typeName.get(audit.id),
         Station: stationById.get(audit.location_id)?.station_code,
@@ -237,7 +226,13 @@ export async function GET(request: Request) {
           stationById.get(audit.location_id)?.city,
         "Scheduled (IST)": localTime(audit.scheduled_for),
         Status: auditStatusLabel(audit.status_code),
-        "Assigned auditor": audit.assigned_name,
+        Completion: auditProgress(audit, now).completion,
+        "Fieldwork submitted": auditProgress(audit, now).submitted ? "Yes" : "No",
+        "Overdue audit": auditProgress(audit, now).overdue ? "Yes" : "No",
+        "Days overdue": auditProgress(audit, now).daysOverdue,
+        "Station response status": auditResponseLabel(audit, now),
+        "Next action": auditProgress(audit, now).nextAction,
+        "Assigned auditor": auditorName(audit),
         "Scheduled by":
           actor(audit.id, "scheduled")?.actor_name || "Not recorded",
         "Started by":
@@ -250,7 +245,8 @@ export async function GET(request: Request) {
         "Completed (IST)": localTime(audit.completed_at),
         "Duration minutes": auditDuration(audit),
         "Quality review (10 min or less)": isFastAudit(audit) ? "Yes" : "",
-        "Response due": audit.response_due_at,
+        "Response due (IST)": localTime(audit.response_due_at),
+        "Open in OpsPulse": `${url.origin}/ops-pulse/audits?audit=${encodeURIComponent(audit.id)}`,
         "System cash": audit.system_cash_amount,
         "Physical cash": audit.physical_cash_amount,
         "Cash variance": audit.cash_variance_amount,
@@ -266,10 +262,13 @@ export async function GET(request: Request) {
         "Station response": audit.station_summary,
         "Manager note": audit.manager_summary,
         Email: audit.email_status,
-      })),
-    ),
-    "Audit register",
-  );
+      }));
+  appendAuditProgressSummary(book, audits, {
+    from, to, now, auditorName, register,
+    stations: stations.filter((station) => stationIds.includes(station.id)),
+    filters: `Type: ${master.auditTypes.find((type) => type.id === requestedType)?.name || "All"}; status: ${requestedStatus}; auditors: ${selectedAuditors.map((id) => names.get(id) || id).join(", ") || "All"}; search: ${term || "None"}; quick audits only: ${url.searchParams.get("fast") === "true" ? "Yes" : "No"}`,
+  });
+  XLSX.utils.book_append_sheet(book, workbookSheet(register), "Audit register");
   const auditLookup = new Map(audits.map((audit) => [audit.id, audit]));
   const metadata = (auditId: string) => {
     const audit: any = auditLookup.get(auditId);
