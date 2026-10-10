@@ -26,7 +26,7 @@ const accessSurface = source("./access-surface.ts");
 const importHardeningMigration = source("../../supabase/migrations/20261007111000_workforce_advance_import_hardening.sql");
 const reassignmentMigration = source("../../supabase/migrations/20261007210000_workforce_advance_reassignment.sql");
 const reassignmentPaidLocationFix = source("../../supabase/migrations/20261007211000_workforce_advance_reassignment_paid_location_fix.sql");
-const dependencyRefreshMigration = source("../../supabase/migrations/20261010041629_workforce_payout_dependency_refresh_queue.sql");
+const dependencyRefreshMigration = source("../../supabase/migrations/20261010045430_workforce_payout_dependency_refresh_queue.sql");
 
 test("Workforce Advance Register is shared by Dashboard and Ops with separate page codes", () => {
   assert.match(registerPage, /currentAdminAccessSurface\(\)/);

@@ -21,7 +21,7 @@ const selectedClaimMigration = readFileSync(
   "utf8"
 ).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const dependencyRefreshMigration = readFileSync(
-  new URL("../supabase/migrations/20261010041629_workforce_payout_dependency_refresh_queue.sql", import.meta.url),
+  new URL("../supabase/migrations/20261010045430_workforce_payout_dependency_refresh_queue.sql", import.meta.url),
   "utf8"
 ).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 
