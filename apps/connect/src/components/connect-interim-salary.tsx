@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight, Files, Info, RefreshCw, WalletCards } from "lucide-react";
+import { ChevronDown, ChevronRight, Files, Info, RefreshCw, WalletCards } from "lucide-react";
 import type { AppAccount } from "./connect-profile-app";
 import type { InterimSalary } from "../lib/interim-salary";
 import styles from "./connect-interim-salary.module.css";
@@ -9,6 +9,28 @@ import styles from "./connect-interim-salary.module.css";
 const money = (amount: number | null) => amount == null ? "—" : amount.toLocaleString("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 });
 const date = (value: string) => new Date(`${value.slice(0, 10)}T12:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 const paymentLabels: Record<string, string> = { paid: "Bank confirmed", issued: "Confirmation pending", failed: "Failed / replaced", returned: "Returned" };
+function PayrollDays({ attendance }: { attendance: NonNullable<InterimSalary["attendance"]> }) {
+  const [open, setOpen] = useState(false);
+  const split = (attendance.paidDays ?? []).filter(row => row.days > 0);
+  const rows = [
+    ["Present", attendance.present], ["Half days", attendance.half], ["Absent", attendance.absent],
+    ["Week off", attendance.weekoff], ["Missing punches", attendance.missingPunches]
+  ] as const;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  return <>
+    <div className={styles.days}>
+      {rows.slice(0, 3).map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+      {split.length ? <button type="button" className={styles.daySplit} aria-expanded={open} aria-controls="paid-leave-split" onClick={() => setOpen(value => !value)}><span>Paid leave<small>{open ? "Hide split" : "View split"}</small></span><b>{attendance.leave}<ChevronDown size={15} aria-hidden="true"/></b></button> : <div><span>Paid leave</span><b>{attendance.leave}</b></div>}
+      {rows.slice(3).map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+    </div>
+    {open && split.length ? <div className={styles.split} id="paid-leave-split" role="region" aria-label="Paid leave split"><header><span>Inside paid leave</span><button type="button" onClick={() => setOpen(false)} aria-label="Hide paid leave split">Close</button></header><ul>{split.map(row => <li key={row.label}><span>{row.label}</span><b>{row.days}</b></li>)}<li className={styles.splitTotal}><span>Paid leave</span><b>{attendance.leave}</b></li></ul><p className={styles.helper}>These days are already included in the paid leave total.</p></div> : null}
+  </>;
+}
 
 export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { account: AppAccount; onDocuments: () => void; onAttendance?: () => void }) {
   const [rows, setRows] = useState<InterimSalary[]>([]);
@@ -63,9 +85,7 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
         </details>
         {salary.calculatedAt ? <p className={styles.helper}>Payroll snapshot updated {new Date(salary.calculatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST.</p> : null}
       </div>
-      {salary.attendance ? <div className={styles.card}><details key={`attendance-${salary.id}`}><summary><span>Days used in payroll <b>{salary.attendance.payable} / {salary.attendance.expected}</b></span><ChevronRight size={18}/></summary><div className={styles.days}>{[
-        ["Present", salary.attendance.present], ["Half days", salary.attendance.half], ["Absent", salary.attendance.absent], ["Paid leave", salary.attendance.leave], ["Week off", salary.attendance.weekoff], ["Missing punches", salary.attendance.missingPunches]
-      ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div><p className={styles.helper}>Calculation: {date(salary.calculatedFrom)} – {date(salary.calculatedThrough)}. Attendance corrections appear here after payroll is recalculated.</p>{onAttendance ? <button className={styles.textButton} onClick={onAttendance}>Review attendance <ChevronRight size={16}/></button> : null}</details></div> : null}
+      {salary.attendance ? <div className={styles.card}><details key={`attendance-${salary.id}`}><summary><span>Days used in payroll <b>{salary.attendance.payable} / {salary.attendance.expected}</b></span><ChevronRight size={18}/></summary><PayrollDays attendance={salary.attendance}/><p className={styles.helper}>Calculation: {date(salary.calculatedFrom)} – {date(salary.calculatedThrough)}. Attendance corrections appear here after payroll is recalculated.</p>{onAttendance ? <button className={styles.textButton} onClick={onAttendance}>Review attendance <ChevronRight size={16}/></button> : null}</details></div> : null}
       <div className={styles.card}><details open key={`history-${salary.id}`}><summary>Payment history <ChevronRight size={18}/></summary>{salary.history.length ? <ul className={styles.history}>{salary.history.map(row => <li key={row.id}><div><strong>{money(row.amount)}</strong><span className={row.status === "paid" ? styles.paid : styles.pending}>{paymentLabels[row.status] ?? "Under review"}</span></div><small>Value date {date(row.date)} · {row.utr ? `UTR ${row.utr}` : `Reference ${row.reference}`}</small></li>)}</ul> : <p className={styles.helper}>No bank-confirmed payment recorded.</p>}</details></div>
     </>}
     <button className={styles.documents} onClick={onDocuments}><Files size={20}/><span><strong>Final payslip</strong><small>{salary?.documentId ? "Published · View in Documents" : "Available in Documents once published"}</small></span><ChevronRight size={20}/></button>

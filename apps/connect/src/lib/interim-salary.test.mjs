@@ -20,6 +20,10 @@ test('Salary Calculation is the desktop/mobile label while the interim warning r
   assert.match(page, /<h1>Salary Calculation<\/h1>/);
   assert.match(page, /This is not your final salary/);
   assert.match(page, /This is only an interim view/);
+  assert.match(page, /Paid leave/);
+  assert.match(page, /View split/);
+  assert.match(page, /id="paid-leave-split"/);
+  assert.doesNotMatch(page, /each counted on its own/);
   assert.doesNotMatch(flow + page, /Interim salary|interim salary/);
 });
 function load(file, mocks) {
@@ -41,7 +45,7 @@ test('salary and Documents apply to People employees and ICs, never Workforce or
 test('issued is not paid; failures and returns never inflate paid amounts; instalments sum', () => {
   const result = salary.buildInterimSalary(run, person, [payment('issued', 8000), payment('paid', 5000), payment('paid', 2000), payment('failed', 8000), payment('returned', 8000), payment('paid', 50000, { run_id: 'other' })], null);
   assert.equal(result.paid, 7000); assert.equal(result.awaitingConfirmation, 8000);
-  assert.equal(result.unconfirmedBalance, 11000); assert.equal(result.history.length, 5);
+  assert.equal(result.unconfirmedBalance, 11000); assert.deepEqual(result.history.map(row => row.status), ['paid', 'paid']);
   assert.equal(result.deductionTotal, 2000); assert.equal(result.earnings.length, 1);
   assert.equal(result.reconciliation, 0); assert.equal(result.provisional, true);
 });
@@ -50,6 +54,45 @@ test('hold calculations mirror current and legacy People payroll, including manu
     const result = salary.buildInterimSalary(run, { ...person, net_pay: net, adjusted_net_pay: adjusted, hr_payroll_run_items: [...person.hr_payroll_run_items, item('SALARY_HOLD', 1000, holdType)] }, [], null);
     assert.equal(result.payable, expected); assert.equal(result.hold, 1000); assert.equal(result.deductionTotal, 2000);
   }
+});
+test('paid days split work from home, business trip, casual leave, sick leave and public holiday', () => {
+  const fractions = [
+    { date: '2026-09-01', fraction: 1, kind: 'wfh' },
+    { date: '2026-09-02', fraction: 1, kind: 'payable_work_mode' },
+    { date: '2026-09-03', fraction: 1, kind: 'paid_leave' },
+    { date: '2026-09-04', fraction: 1, kind: 'paid_leave' },
+    { date: '2026-09-05', fraction: 1, kind: 'paid_holiday' },
+    { date: '2026-09-06', fraction: 1, kind: 'present' },
+    { date: '2026-09-07', fraction: 1, kind: 'weekoff' }
+  ];
+  const detailed = { ...person, present_days: 20, half_days: 1, absence_days: 2, weekoff_days: 4, missing_punch_days: 1, paid_leave_days: 5, payable_days: 30, calculation_snapshot: { payable_fractions: fractions } };
+  const leaves = [
+    { start: '2026-09-03', end: '2026-09-03', code: 'CL', name: 'Casual leave' },
+    { start: '2026-09-04', end: '2026-09-04', code: 'SL', name: 'Sick leave' }
+  ];
+  const result = salary.buildInterimSalary(run, detailed, [], null, leaves);
+  assert.deepEqual(result.attendance.paidDays.map(row => [row.label, row.days]), [
+    ['Work from home', 1], ['Business trip', 1], ['Casual leave', 1], ['Sick leave', 1], ['Public holiday', 1]
+  ]);
+  assert.equal(result.attendance.present, 20); assert.equal(result.attendance.half, 1); assert.equal(result.attendance.absent, 2);
+  assert.equal(result.attendance.weekoff, 4); assert.equal(result.attendance.missingPunches, 1);
+  assert.equal(JSON.stringify(result).includes('payable_fractions'), false);
+  const coded = salary.paidDayBreakdown([
+    { date: '2026-09-08', fraction: 1, kind: 'paid_leave' },
+    { date: '2026-09-09', fraction: 1, kind: 'paid_leave' },
+    { date: '2026-09-10', fraction: 1, kind: 'paid_leave' }
+  ], [
+    { start: '2026-09-08', end: '2026-09-08', code: 'CASUAL', name: 'Casual Leave' },
+    { start: '2026-09-09', end: '2026-09-09', code: 'SICK', name: 'Sick Leave' },
+    { start: '2026-09-10', end: '2026-09-10', code: 'PUBLIC', name: 'Public Holiday' }
+  ]);
+  assert.equal(coded.find(row => row.label === 'Casual leave').days, 1);
+  assert.equal(coded.find(row => row.label === 'Sick leave').days, 1);
+  assert.equal(coded.find(row => row.label === 'Public holiday').days, 1);
+  const unnamed = salary.buildInterimSalary(run, { ...detailed, paid_leave_days: 6 }, [], null, [leaves[0]]);
+  assert.equal(unnamed.attendance.paidDays.find(row => row.label === 'Paid leave').days, 2);
+  const legacy = salary.buildInterimSalary(run, { ...person, paid_leave_days: 4 }, [], null);
+  assert.equal(legacy.attendance.paidDays, null); assert.equal(legacy.attendance.leave, 4);
 });
 test('missing snapshot does not invent zero salary; overpayment is flagged, private bank fields omitted', () => {
   const missing = salary.buildInterimSalary(run, null, [payment('paid', 50, { credit_account: 'private-bank', remarks: 'private-notes' })], null);
@@ -78,6 +121,15 @@ test('loader scopes every worker read by company/type/ID and limits runs to issu
   }
   assert.ok(f.queries.find(q => q.table === 'hr_pay_documents').filters.some(x => x[0] === 'is' && x[1] === 'revoked_at' && x[2] === null));
   assert.deepEqual(f.queries.find(q => q.table === 'hr_payroll_runs').filters.find(x => x[0] === 'in')[2], ['run']);
+});
+test('loader classifies paid leave for the signed-in worker only', async () => {
+  const f = dataFixture();
+  f.tables.hr_payroll_run_people = [{ ...person, paid_leave_days: 1, calculation_snapshot: { payable_fractions: [{ date: '2026-09-03', fraction: 1, kind: 'paid_leave' }] } }];
+  f.tables.hr_leave_requests = [{ start_date: '2026-09-03', end_date: '2026-09-03', hr_leave_types: { code: 'CL', attendance_code: 'CL', name: 'Casual leave' } }];
+  const rows = await f.load();
+  assert.equal(rows[0].attendance.paidDays.find(row => row.label === 'Casual leave').days, 1);
+  const leaveQuery = f.queries.find(query => query.table === 'hr_leave_requests');
+  assert.deepEqual(leaveQuery.filters.filter(row => row[0] === 'eq').map(row => row.slice(1)), [['company_id', 'company'], ['employee_id', 'worker'], ['status', 'approved']]);
 });
 test('unreleased drafts stay private, Workforce performs no reads, failures do not become zero payroll', async () => {
   const f = dataFixture(); await assert.rejects(f.load({ ...account, workspace: 'workforce' })); assert.equal(f.queries.length, 0);
