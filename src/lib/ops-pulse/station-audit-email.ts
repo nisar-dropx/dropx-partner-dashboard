@@ -45,6 +45,86 @@ function displayDate(value: string | null | undefined) {
     ? "Not set"
     : `${date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST`;
 }
+function cashNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : null;
+}
+function money(value: number | null) {
+  return value == null
+    ? "Not recorded"
+    : `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+export function auditCashDetails(
+  audit: StationAudit,
+  report?: AuditReportData,
+) {
+  const expected = cashNumber(report?.expectedCash ?? audit.system_cash_amount);
+  const actual = cashNumber(report?.actualCash ?? audit.physical_cash_amount);
+  const difference =
+    expected == null || actual == null
+      ? null
+      : Math.round((actual - expected) * 100) / 100;
+  const result =
+    difference == null
+      ? "Cash reconciliation incomplete: expected or actual cash is not recorded."
+      : difference < 0
+        ? `Cash shortage of ${money(Math.abs(difference))}`
+        : difference > 0
+          ? `Excess cash of ${money(difference)}`
+          : "Cash matched: expected and actual amounts agree.";
+  const rows = (report?.cashCounts || []).filter(
+    (row) =>
+      Number.isFinite(row.denomination) &&
+      row.denomination > 0 &&
+      Number.isInteger(row.count) &&
+      row.count >= 0 &&
+      Number.isFinite(row.amount),
+  );
+  const total = rows.length
+    ? Math.round(rows.reduce((n, row) => n + row.amount, 0) * 100) / 100
+    : null;
+  const mismatch =
+    total != null && actual != null && Math.round((total - actual) * 100) !== 0;
+  const reason = text(audit.cash_variance_reason);
+  const facts = [
+    ["Expected cash · ERP", money(expected)],
+    ["Actual cash · counted", money(actual)],
+    ["Difference · actual minus expected", money(difference)],
+  ];
+  const note = mismatch
+    ? "Needs review: denomination total does not match recorded actual cash."
+    : "";
+  return {
+    plain: [
+      "COD cash reconciliation",
+      ...facts.map(([k, v]) => `${k}: ${v}`),
+      `Cash result: ${result}`,
+      reason
+        ? `Variance explanation: ${reason}`
+        : difference
+          ? "Variance explanation: Not recorded"
+          : "",
+      "Cash denominations (denomination × count = amount):",
+      ...rows.map(
+        (row) =>
+          `${money(row.denomination)} × ${row.count} = ${money(row.amount)}`,
+      ),
+      rows.length
+        ? `Denomination total: ${money(total)}`
+        : "No denomination breakdown recorded.",
+      note,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    html: `<h2 style="font-size:18px;margin:22px 0 10px">COD cash reconciliation</h2>
+      <table width="100%" style="font-size:14px;border-collapse:collapse">${facts.map(([k, v]) => `<tr><td style="padding:9px;border-bottom:1px solid #e2e8f0">${escapeHtml(k)}</td><td align="right" style="padding:9px;border-bottom:1px solid #e2e8f0;font-weight:700">${escapeHtml(v)}</td></tr>`).join("")}</table>
+      <p style="padding:12px;border-radius:8px;background:${difference === 0 ? "#edf8f5" : "#fff4e5"};font-weight:700">${escapeHtml(result)}</p>
+      ${reason || difference ? `<p style="white-space:pre-line"><b>Variance explanation:</b> ${escapeHtml(reason || "Not recorded")}</p>` : ""}
+      <h3 style="font-size:16px;margin:18px 0 8px">Cash denominations</h3>${rows.length ? `<table width="100%" style="font-size:13px;border-collapse:collapse"><tr style="background:#f4f7fb"><th align="left" style="padding:8px">Denomination</th><th align="right" style="padding:8px">Count</th><th align="right" style="padding:8px">Amount</th></tr>${rows.map((row) => `<tr><td style="padding:7px;border-bottom:1px solid #e2e8f0">${escapeHtml(money(row.denomination))}</td><td align="right" style="padding:7px;border-bottom:1px solid #e2e8f0">${row.count}</td><td align="right" style="padding:7px;border-bottom:1px solid #e2e8f0">${escapeHtml(money(row.amount))}</td></tr>`).join("")}<tr style="background:#f4f7fb;font-weight:700"><td colspan="2" style="padding:8px">Denomination total</td><td align="right" style="padding:8px">${escapeHtml(money(total))}</td></tr></table>` : '<p style="color:#66758f">No denomination breakdown recorded.</p>'}
+      ${note ? `<p style="color:#a64215">${escapeHtml(note)}</p>` : ""}`,
+  };
+}
 export function auditUpdateDetails(
   audit: StationAudit,
   report?: AuditReportData,
@@ -73,20 +153,26 @@ export function auditUpdateDetails(
         : "No response outstanding",
     ],
   ];
-  const findings = (report?.checks || []).filter((c) => c.nonCompliant);
+  const findings = (report?.checks || []).filter(
+    (c) => c.nonCompliant || text(c.remarks),
+  );
   const actions = report?.actions || [];
+  const cash = auditCashDetails(audit, report);
   const summary =
     report?.summary || audit.overall_summary || "No auditor summary recorded.";
   const line = (a: (typeof actions)[number]) =>
     `${a.title} — ${a.action || "Action not recorded"} | Owner: ${a.owner || "Unassigned"} | Due / ETA: ${displayDate(a.dueAt)} | Status: ${a.status.replaceAll("_", " ")}${a.dueAt && new Date(a.dueAt).getTime() < Date.now() && !["completed", "closed", "cancelled"].includes(a.status) ? " · OVERDUE" : ""}${a.completionNote ? ` | Update: ${a.completionNote}` : ""}`;
   const plain = [
     ...facts.map(([k, v]) => `${k}: ${v}`),
+    cash.plain,
     `Major findings / auditor summary: ${summary}`,
     ...findings.map(
       (c) => `${c.section}: ${c.label} — ${c.outcome}. ${c.remarks}`,
     ),
     `Shipment differences: ${report?.missing ?? audit.shipment_missing_count ?? 0} missing; ${report?.excess ?? audit.shipment_excess_count ?? 0} excess.`,
-    `Cash variance: ${audit.cash_variance_amount == null ? "Not recorded" : audit.cash_variance_amount}`,
+    audit.manager_summary
+      ? `Manager review / final findings: ${audit.manager_summary}`
+      : "",
     actions.length
       ? "Actions, owners and ETA:"
       : "No corrective actions recorded.",
@@ -96,32 +182,26 @@ export function auditUpdateDetails(
     .filter(Boolean)
     .join("\n");
   const html = `<h2 style="font-size:18px;margin:22px 0 10px">Latest audit update</h2><table width="100%" style="font-size:13px;border-collapse:collapse">${facts.map(([k, v]) => `<tr><td style="padding:6px 0;color:#66758f;width:30%">${escapeHtml(k)}</td><td style="padding:6px 0">${escapeHtml(v)}</td></tr>`).join("")}</table>
-    <h3 style="font-size:16px;margin:20px 0 8px">Major findings</h3><p style="line-height:1.5;white-space:pre-line">${escapeHtml(summary)}</p>
+    ${cash.html}<h3 style="font-size:16px;margin:20px 0 8px">Major findings &amp; observations</h3><p style="line-height:1.5;white-space:pre-line">${escapeHtml(summary)}</p>
     ${
       findings.length
         ? `<ul style="padding-left:20px;line-height:1.5">${findings
-            .slice(0, 8)
             .map(
               (c) =>
                 `<li><strong>${escapeHtml(c.section)} · ${escapeHtml(c.label)}</strong><br/>${escapeHtml(c.outcome)}${c.remarks ? ` — ${escapeHtml(c.remarks)}` : ""}</li>`,
             )
-            .join(
-              "",
-            )}</ul>${findings.length > 8 ? `<p>${findings.length - 8} more findings are in the attached report.</p>` : ""}`
+            .join("")}</ul>`
         : '<p style="font-size:13px;color:#66758f">No non-compliant checklist outcomes recorded. Review the summary, scores and reconciliation below.</p>'
     }
+    ${audit.manager_summary ? `<h3 style="font-size:16px;margin:20px 0 8px">Manager review / final findings</h3><p style="line-height:1.5;white-space:pre-line">${escapeHtml(audit.manager_summary)}</p>` : ""}
     <h3 style="font-size:16px;margin:20px 0 8px">Actions · owners · due dates</h3>${
       actions.length
         ? actions
-            .slice(0, 10)
             .map(
               (a) =>
                 `<div style="border:1px solid #e2e8f0;border-left:3px solid #e89128;border-radius:8px;padding:12px;margin:8px 0;font-size:13px;line-height:1.5"><b>${escapeHtml(a.title)}</b><br/>${escapeHtml(a.action || "Action not recorded")}<br/><b>Owner:</b> ${escapeHtml(a.owner || "Unassigned")} · <b>Due / ETA:</b> ${escapeHtml(displayDate(a.dueAt))}<br/><b>Status:</b> ${escapeHtml(a.status.replaceAll("_", " "))}${a.completionNote ? `<br/>${escapeHtml(a.completionNote)}` : ""}</div>`,
             )
-            .join("") +
-          (actions.length > 10
-            ? `<p>${actions.length - 10} further actions are in OpsPulse.</p>`
-            : "")
+            .join("")
         : "<p>No corrective actions recorded.</p>"
     }
     ${report?.stationResponse ? `<p><b>Station update:</b> ${escapeHtml(report.stationResponse)}</p>` : ""}`;

@@ -40,14 +40,48 @@ const mocks = {
   "./station-audit-report-data": {
     buildStationAuditReport: async () => ({
       pdf: Buffer.from("pdf-fixture"),
-      data: { photos: [], type:"Virtual COD", auditor:"Auditor A", summary:"Locker requires repair", checks:[{section:"COD",label:"Locker",outcome:"Not compliant",remarks:"Repair <script>",nonCompliant:true}],actions:[{title:"Repair locker",status:"open",action:"Replace lock",owner:"Manager A",dueAt:"2026-10-12T04:30:00Z"}] },
+      data: {
+        photos: [],
+        type: "Virtual COD",
+        auditor: "Auditor A",
+        summary: "Locker requires repair",
+        expectedCash: 2500,
+        actualCash: 2000,
+        cashCounts: [{ denomination: 500, count: 4, amount: 2000 }],
+        checks: [
+          {
+            section: "COD",
+            label: "Locker",
+            outcome: "Not compliant",
+            remarks: "Repair <script>",
+            nonCompliant: true,
+          },
+        ],
+        actions: [
+          {
+            title: "Repair locker",
+            status: "open",
+            action: "Replace lock",
+            owner: "Manager A",
+            dueAt: "2026-10-12T04:30:00Z",
+          },
+        ],
+      },
     }),
   },
-  "./station-audit-thread": { acquireStationAuditThread: async () => ({
-    subject: "QLDA · Station audit updates", messageId: root ? "next-message" : "root-message",
-    inReplyTo: root || undefined, references: root ? [root] : undefined,
-    finish: async id => { stored={root_message_id:root||id};root=id; }, release:async()=>{}
-  }) },
+  "./station-audit-thread": {
+    acquireStationAuditThread: async () => ({
+      subject: "QLDA · Station audit updates",
+      messageId: root ? "next-message" : "root-message",
+      inReplyTo: root || undefined,
+      references: root ? [root] : undefined,
+      finish: async (id) => {
+        stored = { root_message_id: root || id };
+        root = id;
+      },
+      release: async () => {},
+    }),
+  },
   "server-only": {},
   "node:crypto": { randomUUID: () => "message-id" },
   "@/lib/supabase-admin": { supabaseAdmin: db },
@@ -114,6 +148,8 @@ const input = {
     scheduled_for: "2026-09-30T20:00Z",
     station_response_status: "requested",
     cash_variance_amount: -500,
+    cash_variance_reason: "Pending DA remittance <review>",
+    manager_summary: "Recovery action remains open <review>",
     response_due_at: "2026-10-02T12:00Z",
   },
   openActions: 2,
@@ -129,20 +165,75 @@ assert.match(
 );
 assert.equal(sent.attachments[0].contentType, "application/pdf");
 assert.equal(stored.root_message_id, sent.messageId);
-assert.equal(sent.subject,"QLDA · Station audit updates");
-assert.match(sent.html,/Major findings/);
-assert.match(sent.html,/Manager A/);
-assert.match(sent.html,/Due \/ ETA/);
-assert.match(sent.html,/Repair &lt;script&gt;/);
-assert.match(sent.body,/Locker requires repair/);
-assert.match(sent.body,/12 Oct 2026/);
+assert.equal(sent.subject, "QLDA · Station audit updates");
+assert.match(sent.html, /Major findings/);
+assert.match(sent.html, /Manager A/);
+assert.match(sent.html, /Due \/ ETA/);
+assert.match(sent.html, /Repair &lt;script&gt;/);
+assert.match(sent.body, /Locker requires repair/);
+assert.match(sent.body, /12 Oct 2026/);
+assert.match(sent.html, /Expected cash · ERP/);
+assert.match(sent.html, /Actual cash · counted/);
+assert.match(sent.html, /₹2,500.00/);
+assert.match(sent.html, /Cash shortage of ₹500.00/);
+assert.match(sent.body, /₹500.00 × 4 = ₹2,000.00/);
+assert.match(sent.html, /Denomination total/);
+assert.match(sent.html, /Recovery action remains open &lt;review&gt;/);
+assert.match(sent.html, /Pending DA remittance &lt;review&gt;/);
+const cash = mod.exports.auditCashDetails;
+assert.match(
+  cash({ system_cash_amount: 0, physical_cash_amount: 0 }).plain,
+  /Cash matched/,
+);
+assert.match(
+  cash({ system_cash_amount: null, physical_cash_amount: 0 }).plain,
+  /reconciliation incomplete/,
+);
+assert.doesNotMatch(
+  cash({ system_cash_amount: null, physical_cash_amount: 0 }).plain,
+  /Cash matched/,
+);
+assert.match(
+  cash({ system_cash_amount: 100, physical_cash_amount: 150 }).plain,
+  /Excess cash of ₹50.00/,
+);
+assert.match(
+  cash(
+    { system_cash_amount: 100, physical_cash_amount: 100 },
+    { cashCounts: [{ denomination: 50, count: 1, amount: 50 }] },
+  ).html,
+  /denomination total does not match/,
+);
+assert.match(
+  cash(
+    { system_cash_amount: 100, physical_cash_amount: 100 },
+    { cashCounts: [] },
+  ).plain,
+  /No denomination breakdown recorded/,
+);
+const details = mod.exports.auditUpdateDetails(input.audit, {
+  checks: Array.from({ length: 12 }, (_, i) => ({
+    section: "COD",
+    label: `Finding ${i + 1}`,
+    outcome: "Pass",
+    remarks: `Observation ${i + 1}`,
+    nonCompliant: false,
+  })),
+  actions: [],
+  summary: "Audit review",
+});
+assert.match(
+  details.html,
+  /Finding 12/,
+  "Every recorded observation is included, even for compliant checks",
+);
 await mod.exports.sendStationAuditCompletedEmail({
   ...input,
   audit: { ...input.audit, station_response_status: "not_requested" },
 });
 assert.match(sent.html, /View audit report/);
 assert.equal(sent.inReplyTo, "root-message");
-assert.deepEqual(sent.references,["root-message"]);
+assert.deepEqual(sent.references, ["root-message"]);
 await assert.rejects(
   mod.exports.sendStationAuditCompletedEmail({
     ...input,
