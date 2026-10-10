@@ -2,7 +2,7 @@ import "server-only";
 import { resolveSsaApprovalManager, SsaApprovalRoutingError } from "./ssa-approval-manager";
 
 import { resolveConfiguredApprovalWorkflow, type ConfiguredApprovalStep } from "@/lib/approval-workflow-routing";
-import { isManagingPartnerDesignation, isStationSupportAttendanceDesignation, isStoreOrStationManagerDesignation, isTeamLeadDesignation } from "./approval-designation-labels";
+import { isManagingPartnerDesignation, isStationManagerDesignation, isStationSupportAttendanceDesignation, isTeamLeadDesignation } from "./approval-designation-labels";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -125,7 +125,8 @@ async function withoutStationFloorManagers(companyId: string, steps: AttendanceR
       ? await db().from("designations").select("name,code").eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle()
       : { data: null, error: null };
     if (designation.error) throw new Error(designation.error.message);
-    if (isStoreOrStationManagerDesignation(designation.data)) continue;
+    // Store managers stay: a picker goes Store Manager, then the next manager.
+    if (isStationManagerDesignation(designation.data)) continue;
     kept.push(step);
   }
   return kept;
@@ -189,7 +190,7 @@ async function resolveChainFallbackSteps(input: {
       designationLabel = designation.data ? { name: designation.data.name, code: designation.data.code } : null;
     }
     if (isTeamLeadDesignation(designationLabel)) continue;
-    if (input.skipStationFloorManagers && isStoreOrStationManagerDesignation(designationLabel)) continue;
+    if (input.skipStationFloorManagers && isStationManagerDesignation(designationLabel)) continue;
     if (isAttendanceExecutiveStop(designationLabel)) continue;
 
     const managerEngagement = await db().from("hr_engagements").select("person_id,status,worker_type,employee_id,contractor_id")

@@ -101,6 +101,18 @@ export function isHrHeadRoleCode(code: string | null | undefined) {
     || value === "HR_MANAGER";
 }
 
+/**
+ * Station Manager only. Station-floor attendance regularization starts above
+ * this seat. Store Manager and Senior Store Manager are not skipped: they
+ * approve their own store's pickers and floor staff.
+ */
+export function isStationManagerDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase().replaceAll("-", " ");
+  return code === "STM" || code === "STATION_MANAGER" || name.includes("station manager");
+}
+
 /** Station manager, store manager, and senior store manager. */
 export function isStoreOrStationManagerDesignation(designation: DesignationLabel | null | undefined) {
   if (!designation) return false;
@@ -118,8 +130,9 @@ export function isStoreOrStationManagerDesignation(designation: DesignationLabel
 
 /**
  * Station-floor workers whose attendance regularization starts above the
- * station and store managers: picker, station support, delivery associate,
- * and the same kind of station role.
+ * station manager: picker, station support, delivery associate, and the same
+ * kind of station role. Store managers still approve (see
+ * isStationManagerDesignation).
  */
 export function isStationSupportAttendanceDesignation(designation: DesignationLabel | null | undefined) {
   if (!designation) return false;
