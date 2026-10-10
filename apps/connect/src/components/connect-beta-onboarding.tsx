@@ -11,6 +11,8 @@ import { betaExitNotice, betaExitNoticeVersion } from "../lib/beta-exit-notice";
 import { betaJourney } from "../lib/beta-journey";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectBetaAmazonOtp } from "./connect-beta-amazon-otp";
+import { ConnectBetaFlexGuide, ConnectBetaFlexJourney } from "./connect-beta-flex-guide";
+import { betaFlexGuide, betaFlexGuideEnabled } from "../lib/beta-flex-guide";
 
 type Stage = "overview" | "attendance" | "registration" | "amazon" | "bgc" | "account" | "activation";
 type CheckState = "complete" | "action" | "in_progress" | "pending";
@@ -45,8 +47,8 @@ function milestoneState(data:Data):Milestone[]{
     {id:"registration",label:"DropX registration",detail:registrationComplete?"Registration submitted.":journey.ready?"Confirm your details and submit the registration.":"Continue here after learning the role with your buddy.",status:registrationComplete?"complete":journey.ready?"action":"pending",source:"DropX registration + Workforce review"},
     {id:"amazon",label:"Amazon registration",detail:data.offboardingRequested?"Your station team will follow up.":!registrationComplete?"Your invitation is kept ready while you complete the first two steps.":invitationComplete?"Amazon registration received; follow the remaining checks.":data.invitationAvailable?"Open the invitation and create your Amazon login.":"Waiting for your Amazon invitation link.",status:invitationComplete?"complete":registrationComplete?(data.invitationAvailable?"action":"in_progress"):"pending",source:"Amazon LSC / DA In-App registration evidence"},
     {id:"bgc",label:"Background verification",detail:bgcAction?`${data.bgcChecks?.filter(item=>item.status==="action").length} check(s) need attention.`:bgcComplete?"All received checks are clear.":"Verification is continuing check by check.",status:bgcAction?"action":bgcComplete?"complete":invitationComplete?"in_progress":"pending",source:"IDfy; DA In-App only as fallback"},
-    {id:"account",label:"Account setup and UAN",detail:accountComplete?"Amazon account setup is complete.":"UAN and provisioning are tracked inside account setup.",status:accountComplete?"complete":data.stage==="verification_pending"?"in_progress":"pending",source:"Amazon LSC profile; DA In-App fallback"},
-    {id:"activation",label:"Driver ID and first delivery",detail:data.driverId?`LSC Driver ID ${data.driverId} received.`:"Driver ID appears only after Amazon returns it.",status:data.driverId?"complete":"pending",source:"Amazon LSC / SCC + daily shipment count"}
+    {id:"account",label:data.isolatedBeta?"Account setup & e-Shram UAN":"Account setup and UAN",detail:accountComplete?"Amazon account setup is complete.":"UAN and provisioning are tracked inside account setup.",status:accountComplete?"complete":data.stage==="verification_pending"?"in_progress":"pending",source:"Amazon LSC profile; DA In-App fallback"},
+    {id:"activation",label:data.isolatedBeta?"Amazon training & first delivery":"Driver ID and first delivery",detail:data.driverId?`LSC Driver ID ${data.driverId} received.`:"Driver ID appears only after Amazon returns it.",status:data.driverId?"complete":"pending",source:"Amazon LSC / SCC + daily shipment count"}
   ];
 }
 
@@ -100,10 +102,11 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
   const mailHref=inbox(workEmail);
   const regionalLanguage=stationGuidanceLanguage(data.stationState);
   const language=useRegionalLanguage?regionalLanguage:"en";
+  const flexGuideEnabled=betaFlexGuideEnabled(account,data.isolatedBeta);
   const copy=betaJourneyCopy[language];
   const regionalLabel=guidanceLanguages.find(item=>item.code===regionalLanguage)?.label;
   const guideStage=view==="overview"?(next?.id??"attendance"):view;
-  const guidance=["attendance","registration","amazon"].includes(guideStage)?betaGuidance[language][guideStage as "attendance"|"registration"|"amazon"]:null;
+  const guidance=!(flexGuideEnabled&&view==="amazon"&&journey.invitationUnlocked)&&["attendance","registration","amazon"].includes(guideStage)?betaGuidance[language][guideStage as "attendance"|"registration"|"amazon"]:null;
   const renderDetail=()=>{
     if(view==="attendance")return <>
       <div className="dx-beta-focus"><i><Fingerprint/></i><div><small>Your biometric enrolment ID</small><strong>{data.biometricId||"Ask your station team"}</strong><p>Ask your station team to enrol this ID on the device. Punch IN when you arrive and OUT when you leave, every day.</p></div></div>
@@ -118,6 +121,7 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
       {journey.registered?<button className="dx-beta-primary" onClick={()=>navigate("amazon")}>Continue to Amazon registration<ArrowRight/></button>:null}
       <Soc updated={data.registrationUpdatedAt}>DropX registration and Workforce confirmation</Soc>
     </>;
+    if(view==="amazon"&&flexGuideEnabled&&journey.invitationUnlocked)return <ConnectBetaFlexJourney key={`${account.companyId}:${account.id}`} accountId={account.id} companyId={account.companyId} language={language} email={workEmail} invitationUrl={data.invitationUrl??null}/>;
     if(view==="amazon")return <>
       {workEmail?<div className="dx-beta-email"><Mail/><span><small>Amazon Flex sign-in email</small><strong>{workEmail}</strong></span><button aria-label="Copy Amazon Flex sign-in email" onClick={()=>void copyValue("email",workEmail)}><Copy/>{copied==="email"?"Email copied":"Copy email"}</button></div>:null}
       {!journey.invitationUnlocked?<div className="dx-beta-empty"><UserRoundCheck/><strong>{journey.stopped?"Your station team will follow up":!journey.ready?"Start with biometric enrolment and buddy training":"Complete DropX registration first"}</strong><span>Your Amazon invitation is monitored from day one. The link is available after DropX registration.</span>{!journey.stopped?<button className="dx-beta-primary" onClick={()=>journey.ready?onRegister():navigate("attendance")}>{journey.ready?"Complete registration":"Open first milestone"}<ArrowRight/></button>:null}</div>:data.invitationUrl?<>
@@ -133,6 +137,7 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
       <Soc updated={data.invitationReceivedAt??data.updatedAt}>DropX monitored inbox and Amazon invitation queue</Soc>
     </>;
     if(view==="bgc")return <>{data.bgcChecks?.length?<div className="dx-beta-checks">{data.bgcChecks.map(item=><article key={item.code}><i className={item.status}>{item.status==="complete"?<Check/>:item.status==="action"?<CircleAlert/>:<Clock3/>}</i><span><strong>{item.label}</strong><small>{item.detail}</small><em>Owner: {item.owner}</em>{item.actionUrl?<a className="dx-beta-secondary-link" href={item.actionUrl} target="_blank" rel="noopener noreferrer">Open IDfy action <ExternalLink size={14}/></a>:null}</span><StateBadge state={item.status}/></article>)}</div>:<div className="dx-beta-empty"><ShieldCheck/><strong>No IDfy action received</strong><span>DropX is monitoring the sign-in address. A safe IDfy link will appear here when received.</span></div>}<Soc updated={data.reportUpdatedAt}>DropX monitored inbox and IDfy worker; DA In-App onboarding as fallback</Soc></>;
+    if(view==="account"&&flexGuideEnabled)return <div className="dx-beta-focus" lang={language}><i><BadgeCheck/></i><div><strong>{betaFlexGuide[language].status}</strong><p>{betaFlexGuide[language].statusBody}</p></div></div>;
     if(view==="account")return <><div className="dx-beta-focus"><i><BadgeCheck/></i><div><small>Amazon account setup</small><strong>{["scc_pending","scc_available","delivery_started"].includes(data.stage)?"Provisioning complete":"Setup in progress"}</strong><p>Complete your UAN details when Amazon asks. Your account status updates here.</p></div></div><div className="dx-beta-checks"><article><i className="in_progress"><Clock3/></i><span><strong>UAN update</strong><small>Complete or confirm UAN when Amazon requests it.</small><em>Owner: Associate / Amazon</em></span><StateBadge state={data.stage==="scc_pending"||data.driverId?"complete":"in_progress"}/></article><article><i className="in_progress"><Clock3/></i><span><strong>Account provisioning</strong><small>{data.amazonAction||data.instruction||"Amazon is processing the operational account."}</small><em>Owner: Amazon</em></span><StateBadge state={data.driverId?"complete":"in_progress"}/></article></div><Soc updated={data.reportUpdatedAt}>Amazon LSC profile; DA In-App onboarding fallback</Soc></>;
     return <><div className="dx-beta-focus"><i><BadgeCheck/></i><div><small>LSC Driver ID</small><strong>{data.driverId||"Waiting for Amazon LSC"}</strong><p>{data.driverId?"This is your operational Driver ID. Your biometric ID remains attendance-only.":"Amazon will issue your Driver ID after setup is complete. It will appear here automatically."}</p></div></div><div className="dx-beta-checks"><article><i className={data.driverId?"complete":"pending"}>{data.driverId?<Check/>:<Clock3/>}</i><span><strong>Driver ID received</strong><small>{data.driverId?"Exact LSC identity connected.":"Waiting for exact LSC evidence."}</small><em>Owner: Amazon / station team</em></span><StateBadge state={data.driverId?"complete":"pending"}/></article><article><i className={data.stage==="delivery_started"?"complete":"pending"}>{data.stage==="delivery_started"?<Check/>:<Clock3/>}</i><span><strong>First delivery confirmed</strong><small>Confirmed only from Amazon daily shipment count.</small><em>Owner: System</em></span><StateBadge state={data.stage==="delivery_started"?"complete":"pending"}/></article></div><Soc updated={data.updatedAt}>Amazon LSC / SCC and Amazon daily shipment count</Soc></>;
   };
@@ -152,6 +157,7 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
     </>:<>
       <nav className="dx-beta-stage-nav" aria-label="Work setup milestones">{milestones.map((item,index)=><button aria-label={`Step ${index+1}: ${item.label}`} aria-current={view===item.id?"step":undefined} className={`${item.status}${view===item.id?" active":""}`} key={item.id} onClick={()=>navigate(item.id)}><b>{item.status==="complete"?<Check size={15}/>:index+1}</b><span>{item.label}</span></button>)}</nav>
       <section className="dx-beta-card dx-beta-detail">{renderDetail()}</section>
+      {flexGuideEnabled&&["bgc","account","activation"].includes(view)?<ConnectBetaFlexGuide key={view} language={language} initialStep={view==="bgc"?"bgc":view==="account"?"uan":"learning"}/>:null}
       {guidanceCard}
     </>}
     {!data.offboardingRequested?<section className="dx-beta-support" lang={language} aria-labelledby="beta-support-title"><div><h2 id="beta-support-title">{copy.helpTitle}</h2><p>{copy.helpBody}</p></div><button type="button" onClick={()=>{setExitAcknowledged(false);setExitError("");setExitOpen(true);}}>{copy.leaveAction}<ArrowRight size={18}/></button></section>:null}
