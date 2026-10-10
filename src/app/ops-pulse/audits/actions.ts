@@ -217,8 +217,51 @@ export async function scheduleStationAudit(
     refreshAudits();
     return { ok: true, message: `${audit.audit_number} scheduled.` };
   } catch (error) {
+    if (error instanceof Error && /already has an audit in this date window/i.test(error.message)) {
+      const existing = await describeAuditsInMonth(formData).catch(() => "");
+      if (existing) {
+        return {
+          ok: false,
+          message: `This station already has an audit in this date window: ${existing}. Open that audit from Team tracker or Calendar to reschedule it instead of scheduling a new one.`,
+        };
+      }
+    }
     return message(error);
   }
+}
+
+/** Names the audits already booked for this station and type in the chosen month. */
+async function describeAuditsInMonth(formData: FormData) {
+  const { companyId } = await assertManager("add");
+  const month = clean(formData.get("scheduled_date")).slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) return "";
+  const [year, monthNumber] = month.split("-").map(Number);
+  const next = monthNumber === 12 ? `${year + 1}-01` : `${year}-${String(monthNumber + 1).padStart(2, "0")}`;
+  const result = await db()
+    .from("ops_station_audits")
+    .select("audit_number,scheduled_for,assigned_name")
+    .eq("company_id", companyId)
+    .eq("audit_type_id", clean(formData.get("audit_type_id")))
+    .eq("location_id", clean(formData.get("location_id")))
+    .is("deleted_at", null)
+    .gte("scheduled_for", `${month}-01T00:00:00+05:30`)
+    .lt("scheduled_for", `${next}-01T00:00:00+05:30`)
+    .order("scheduled_for", { ascending: true })
+    .limit(5);
+  if (result.error) return "";
+  return (result.data ?? [])
+    .map((row) => {
+      const when = new Date(row.scheduled_for).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+      return `${row.audit_number} on ${when} with ${row.assigned_name || "an unassigned auditor"}`;
+    })
+    .join("; ");
 }
 
 export async function rescheduleStationAudit(
