@@ -63,6 +63,7 @@ export type WorkforcePayoutPublicationRefreshInput = {
   companyId?: string | null;
   deadlineAtMs?: number;
   limit?: number;
+  payoutRows?: Array<{ workforceId: string; stationId: string }>;
   periodEnd?: string;
   periodStart?: string;
   workforceIds?: string[];
@@ -70,6 +71,7 @@ export type WorkforcePayoutPublicationRefreshInput = {
 
 type TargetedClaimScope = {
   companyId: string;
+  payoutRows: Array<{ workforceId: string; stationId: string }>;
   periodEnd: string;
   periodStart: string;
   workforceIds: string[];
@@ -133,21 +135,33 @@ function errorMessage(error: unknown) {
 }
 
 function targetedClaimScope(input: WorkforcePayoutPublicationRefreshInput): TargetedClaimScope | null {
-  const targeted = input.workforceIds !== undefined || input.periodStart !== undefined || input.periodEnd !== undefined;
+  const targeted = input.payoutRows !== undefined || input.workforceIds !== undefined || input.periodStart !== undefined || input.periodEnd !== undefined;
   if (!targeted) return null;
-  const workforceIds = [...new Set((input.workforceIds ?? []).map((id) => id.trim().toLowerCase()).filter(Boolean))];
+  const payoutRows = [...new Map((input.payoutRows ?? []).map((row) => {
+    const workforceId = row.workforceId.trim().toLowerCase();
+    const stationId = row.stationId.trim().toLowerCase();
+    return [`${workforceId}|${stationId}`, { workforceId, stationId }] as const;
+  })).values()].filter((row) => row.workforceId && row.stationId);
+  const workforceIds = [...new Set([
+    ...(input.workforceIds ?? []).map((id) => id.trim().toLowerCase()).filter(Boolean),
+    ...payoutRows.map((row) => row.workforceId)
+  ])];
   const periodStart = input.periodStart?.trim() ?? "";
   const periodEnd = input.periodEnd?.trim() ?? "";
   if (!input.companyId || !workforceIds.length || !periodStart || !periodEnd) {
     throw new Error("Targeted payout publication refresh requires a company, Workforce IDs, period start, and period end together.");
   }
-  if (!UUID_PATTERN.test(input.companyId) || workforceIds.some((id) => !UUID_PATTERN.test(id))) {
-    throw new Error("Targeted payout publication refresh requires valid company and Workforce IDs.");
+  if (
+    !UUID_PATTERN.test(input.companyId)
+    || workforceIds.some((id) => !UUID_PATTERN.test(id))
+    || payoutRows.some((row) => !UUID_PATTERN.test(row.stationId))
+  ) {
+    throw new Error("Targeted payout publication refresh requires valid company, Workforce, and station IDs.");
   }
-  if (workforceIds.length > MAX_TARGETED_WORKFORCE_IDS) {
-    throw new Error(`Targeted payout publication refresh accepts at most ${MAX_TARGETED_WORKFORCE_IDS.toLocaleString("en-US")} Workforce IDs.`);
+  if (Math.max(workforceIds.length, payoutRows.length) > MAX_TARGETED_WORKFORCE_IDS) {
+    throw new Error(`Targeted payout publication refresh accepts at most ${MAX_TARGETED_WORKFORCE_IDS.toLocaleString("en-US")} Workforce payout rows.`);
   }
-  return { companyId: input.companyId, workforceIds, periodStart, periodEnd };
+  return { companyId: input.companyId, payoutRows, workforceIds, periodStart, periodEnd };
 }
 
 function isTransientClaimError(error: unknown) {
@@ -172,7 +186,18 @@ async function claimRefreshJobs(target: TargetedClaimScope | null, input: Workfo
   for (let attempt = 1; attempt <= MAX_CLAIM_REQUEST_ATTEMPTS; attempt += 1) {
     attempts = attempt;
     try {
-      const claimed = target
+      const claimed = target?.payoutRows.length
+        ? await supabaseAdmin.rpc("workforce_claim_selected_payout_publication_row_refresh_jobs", {
+          p_limit: 1,
+          p_company_id: target.companyId,
+          p_rows: target.payoutRows.map((row) => ({
+            workforce_id: row.workforceId,
+            station_id: row.stationId
+          })),
+          p_period_start: target.periodStart,
+          p_period_end: target.periodEnd
+        })
+        : target
         ? await supabaseAdmin.rpc("workforce_claim_selected_payout_publication_refresh_jobs", {
           p_limit: 1,
           p_company_id: target.companyId,

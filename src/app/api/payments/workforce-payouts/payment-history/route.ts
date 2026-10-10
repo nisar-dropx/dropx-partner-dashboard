@@ -47,9 +47,11 @@ export async function GET(request: Request) {
 
     const params = new URL(request.url).searchParams;
     const workforceId = String(params.get("workforceId") ?? "").trim().toLowerCase();
+    const stationId = String(params.get("stationId") ?? "").trim().toLowerCase();
     const periodStart = String(params.get("periodStart") ?? "").trim();
     const periodEnd = String(params.get("periodEnd") ?? "").trim();
     if (!UUID.test(workforceId)) return errorResponse("A valid Workforce profile is required.", 400);
+    if (!UUID.test(stationId)) return errorResponse("A valid payout location is required.", 400);
     if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
     const companyId = requireCompanyId(authorization);
 
@@ -59,6 +61,7 @@ export async function GET(request: Request) {
         .select("id,batch_id,reference_no,payment_version,instruction_amount,status,bank_account_no_snapshot,location_id_snapshot,location_code_snapshot,utr_cin,bank_processing_remarks,created_at,finalized_at")
         .eq("company_id", companyId)
         .eq("workforce_id", workforceId)
+        .eq("location_id_snapshot", stationId)
         .eq("period_start", periodStart)
         .eq("period_end", periodEnd)
         .order("payment_version", { ascending: false })

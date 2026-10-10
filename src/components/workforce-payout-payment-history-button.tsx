@@ -74,6 +74,7 @@ export function WorkforcePayoutPaymentHistoryButton({
   historyCount,
   periodEnd,
   periodStart,
+  stationId,
   subjectLabel,
   workforceId
 }: {
@@ -81,6 +82,7 @@ export function WorkforcePayoutPaymentHistoryButton({
   historyCount: number;
   periodStart: string;
   periodEnd: string;
+  stationId: string;
   subjectLabel: string;
   workforceId: string;
 }) {
@@ -103,7 +105,7 @@ export function WorkforcePayoutPaymentHistoryButton({
     setLoading(true);
     setError("");
     try {
-      const query = new URLSearchParams({ workforceId, periodStart, periodEnd });
+      const query = new URLSearchParams({ workforceId, stationId, periodStart, periodEnd });
       const response = await fetch(`/api/payments/workforce-payouts/payment-history?${query}`, { signal });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || "Unable to load payment history.");
@@ -119,7 +121,7 @@ export function WorkforcePayoutPaymentHistoryButton({
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [periodEnd, periodStart, workforceId]);
+  }, [periodEnd, periodStart, stationId, workforceId]);
 
   useEffect(() => {
     if (!open) return;

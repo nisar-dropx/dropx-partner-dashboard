@@ -43,10 +43,18 @@ test("publication refresh worker can claim an exact selected Workforce period wi
   assert.match(source, /p_period_end: target\.periodEnd/);
   assert.match(source, /requires a company, Workforce IDs, period start, and period end together/i);
   assert.match(source, /MAX_TARGETED_WORKFORCE_IDS\s*=\s*10_000/);
-  assert.match(source, /requires valid company and Workforce IDs/);
+  assert.match(source, /requires valid company, Workforce, and station IDs/);
   assert.doesNotMatch(source, /\.in\("workforce_id", target\.workforceIds\)/);
   assert.match(source, /workforce_claim_payout_publication_refresh_jobs/);
   assert.match(source, /p_batch_id: input\.batchId \?\? null/);
+});
+
+test("publication refresh worker can target exact Workforce and station row pairs", () => {
+  assert.match(source, /payoutRows\?: Array<\{ workforceId: string; stationId: string \}>/);
+  assert.match(source, /workforce_claim_selected_payout_publication_row_refresh_jobs/);
+  assert.match(source, /p_rows: target\.payoutRows\.map/);
+  assert.match(source, /workforce_id: row\.workforceId/);
+  assert.match(source, /station_id: row\.stationId/);
 });
 
 test("transient claim failures are retried a bounded number of times", () => {

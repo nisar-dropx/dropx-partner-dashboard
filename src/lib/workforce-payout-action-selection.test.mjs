@@ -7,7 +7,7 @@ import {
   chunkPayoutRowsBySubject,
   duplicateAdvanceWorkforceIds,
   resolveWorkforcePayoutBankSelection,
-  selectedWorkforcePayoutBankIds,
+  selectedWorkforcePayoutBankRows,
   workforcePayoutMappingLockSelectionIds
 } from "./workforce-payout-action-selection.ts";
 
@@ -81,10 +81,11 @@ test("unlimited UI selections are divided into safe action requests without spli
   assert.deepEqual(chunks.flat().map((row) => row.id), rows.map((row) => row.id));
 });
 
-test("large bank selections use one indexed row pass and any checked row selects one payment amount per Workforce profile", () => {
+test("large bank selections use one indexed pass and preserve every checked location row", () => {
   const rows = Array.from({ length: 12_000 }, (_, index) => ({
     id: `row-${index}`,
     reviewSubjectId: `worker-${Math.floor(index / 2)}`,
+    locationId: `station-${index}`,
     eligible: true,
     availableToPay: Math.floor(index / 2) + 1
   }));
@@ -102,120 +103,128 @@ test("large bank selections use one indexed row pass and any checked row selects
     }
   );
   const selectedRowIds = new Set(rows.map((row) => row.id));
-  const selectedWorkforceIds = new Set(rows.map((row) => row.reviewSubjectId));
-  const selection = resolveWorkforcePayoutBankSelection(index, selectedRowIds, selectedWorkforceIds);
+  const selection = resolveWorkforcePayoutBankSelection(index, selectedRowIds);
 
   assert.equal(eligibilityChecks, rows.length);
-  assert.equal(amountReads, 6_000);
-  assert.equal(index.size, 6_000);
-  assert.equal(selection.workforceIds.length, 6_000);
-  assert.equal(selection.totalAmount, 18_003_000);
-  assert.deepEqual(index.get("worker-0"), { rowIds: ["row-0", "row-1"], availableToPay: 1 });
+  assert.equal(amountReads, 12_000);
+  assert.equal(index.size, 12_000);
+  assert.equal(selection.payoutRows.length, 12_000);
+  assert.equal(selection.totalAmount, 36_006_000);
+  assert.deepEqual(index.get("row-0"), {
+    workforceId: "worker-0",
+    stationId: "station-0",
+    availableToPay: 1
+  });
 
   selectedRowIds.delete("row-9");
-  const partialSelection = resolveWorkforcePayoutBankSelection(index, selectedRowIds, selectedWorkforceIds);
-  assert.equal(partialSelection.workforceIds.includes("worker-4"), true);
-  assert.equal(partialSelection.workforceIds.length, 6_000);
+  const partialSelection = resolveWorkforcePayoutBankSelection(index, selectedRowIds);
+  assert.equal(partialSelection.payoutRows.some((row) => row.workforceId === "worker-4" && row.stationId === "station-9"), false);
+  assert.equal(partialSelection.payoutRows.length, 11_999);
 
   selectedRowIds.delete("row-8");
-  const profileRemovedSelection = resolveWorkforcePayoutBankSelection(index, selectedRowIds, selectedWorkforceIds);
-  assert.equal(profileRemovedSelection.workforceIds.includes("worker-4"), false);
-  assert.equal(profileRemovedSelection.workforceIds.length, 5_999);
+  const profileRemovedSelection = resolveWorkforcePayoutBankSelection(index, selectedRowIds);
+  assert.equal(profileRemovedSelection.payoutRows.some((row) => row.workforceId === "worker-4"), false);
+  assert.equal(profileRemovedSelection.payoutRows.length, 11_998);
 });
 
-test("one bank-eligible checked T1013 row selects the complete profile balance without dropping its deduction row", () => {
+test("one checked T1013 row selects only that location balance", () => {
   const rows = [
     {
       id: "t1013-production-klza",
       reviewSubjectId: "t1013-workforce",
+      locationId: "klza",
       netAmount: 71_125.56,
       bankActionable: true,
       paymentSummary: { paidAmount: 0, processingAmount: 0 }
     },
     {
-      id: "t1013-manual-deduction-kbwe",
+      id: "t1013-kbwe",
       reviewSubjectId: "t1013-workforce",
-      netAmount: -2_000,
+      locationId: "kbwe",
+      netAmount: 474.01,
       bankActionable: true,
       paymentSummary: { paidAmount: 0, processingAmount: 0 }
     },
     {
       id: "manual-only-row",
       reviewSubjectId: "manual-only-workforce",
+      locationId: "manual-station",
       netAmount: 500,
       bankActionable: false,
       paymentSummary: { paidAmount: 0, processingAmount: 0 }
     }
   ];
-  const profileBalances = buildWorkforcePayoutPreliminaryBalanceIndex(rows);
-  assert.equal(profileBalances.get("t1013-workforce"), 69_125.56);
+  const rowBalances = buildWorkforcePayoutPreliminaryBalanceIndex(rows);
+  assert.equal(rowBalances.get("t1013-production-klza"), 71_125.56);
+  assert.equal(rowBalances.get("t1013-kbwe"), 474.01);
   const index = buildWorkforcePayoutBankSelectionIndex(
     rows,
     (row) => row.bankActionable,
-    (row) => profileBalances.get(row.reviewSubjectId) ?? 0
+    (row) => rowBalances.get(row.id) ?? 0
   );
   const productionSelectedRows = [rows[0], rows[2]];
-  const productionSelectedWorkforceIds = selectedWorkforcePayoutBankIds(
+  const productionSelections = selectedWorkforcePayoutBankRows(
     productionSelectedRows,
     (row) => row.bankActionable
   );
-  assert.deepEqual([...productionSelectedWorkforceIds], ["t1013-workforce"]);
+  assert.deepEqual(productionSelections, [{ workforceId: "t1013-workforce", stationId: "klza" }]);
 
   const productionRowSelection = resolveWorkforcePayoutBankSelection(
     index,
-    new Set(productionSelectedRows.map((row) => row.id)),
-    productionSelectedWorkforceIds
+    new Set(productionSelectedRows.map((row) => row.id))
   );
   assert.deepEqual(productionRowSelection, {
-    workforceIds: ["t1013-workforce"],
-    totalAmount: 69_125.56
+    payoutRows: [{ workforceId: "t1013-workforce", stationId: "klza" }],
+    totalAmount: 71_125.56
   });
 
-  const deductionSelectedRows = [rows[1]];
-  const deductionSelectedWorkforceIds = selectedWorkforcePayoutBankIds(
-    deductionSelectedRows,
-    (row) => row.bankActionable
-  );
-  const deductionRowSelection = resolveWorkforcePayoutBankSelection(
+  const kbweRowSelection = resolveWorkforcePayoutBankSelection(
     index,
-    new Set(deductionSelectedRows.map((row) => row.id)),
-    deductionSelectedWorkforceIds
+    new Set([rows[1].id])
   );
-  assert.deepEqual(deductionRowSelection, productionRowSelection);
+  assert.deepEqual(kbweRowSelection, {
+    payoutRows: [{ workforceId: "t1013-workforce", stationId: "kbwe" }],
+    totalAmount: 474.01
+  });
 });
 
-test("pending-publication bank selection uses a profile-level preliminary balance without duplicating ledger totals", () => {
+test("pending-publication bank selection keeps preliminary balances per location row", () => {
   const balances = buildWorkforcePayoutPreliminaryBalanceIndex([
     {
       id: "worker-1|station-a",
       reviewSubjectId: "worker-1",
+      locationId: "station-a",
       netAmount: 800,
       paymentSummary: { paidAmount: 250, processingAmount: 0 }
     },
     {
       id: "worker-1|station-b",
       reviewSubjectId: "worker-1",
+      locationId: "station-b",
       netAmount: 450.25,
       paymentSummary: { paidAmount: 250, processingAmount: 0 }
     },
     {
       id: "worker-1|station-b",
       reviewSubjectId: "worker-1",
+      locationId: "station-b",
       netAmount: 450.25,
       paymentSummary: { paidAmount: 250, processingAmount: 0 }
     },
     {
       id: "worker-2|station-a",
       reviewSubjectId: "worker-2",
+      locationId: "station-a",
       netAmount: 100,
       paymentSummary: { paidAmount: 25, processingAmount: 75 }
     },
     { id: "unmapped", reviewSubjectId: null, netAmount: 9_999 }
   ]);
 
-  assert.equal(balances.get("worker-1"), 1_000.25);
-  assert.equal(balances.get("worker-2"), 0);
-  assert.equal(balances.has(""), false);
+  assert.equal(balances.get("worker-1|station-a"), 550);
+  assert.equal(balances.get("worker-1|station-b"), 200.25);
+  assert.equal(balances.get("worker-2|station-a"), 0);
+  assert.equal(balances.has("unmapped"), false);
 });
 
 test("payout UI separates one-row advance recovery from complete-location notification selection", () => {
@@ -237,8 +246,8 @@ test("payout UI separates one-row advance recovery from complete-location notifi
   assert.match(payoutTable, /items:\s*chunk\.map/);
   assert.doesNotMatch(payoutTable, /bankWorkforceIds[\s\S]{0,400}\.slice\(0,\s*50\)/);
   assert.match(payoutTable, /buildWorkforcePayoutBankSelectionIndex\(\s*rows,\s*\(row\) => bankActionableIds\.has\(row\.id\)/);
-  assert.match(payoutTable, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected,\s*selectedBankWorkforceIds/);
-  assert.doesNotMatch(payoutTable, /const bankWorkforceIds[\s\S]{0,500}rows\.(?:filter|find)\(/);
+  assert.match(payoutTable, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected\s*\)/);
+  assert.doesNotMatch(payoutTable, /const bankWorkforceIds/);
 });
 
 test("publication-refresh-pending rows remain explicit preliminary bank candidates", () => {
@@ -263,7 +272,7 @@ test("published and mapping-unlocked payouts remain available for manual input e
 
 test("selected-month enrichment and high-cardinality loader reads use bounded parallel batches", () => {
   assert.match(payoutPage, /mapWithConcurrency\(chunkedValues\(ids, 100\), 4/);
-  assert.match(payoutPage, /mapWithConcurrency\(chunkedValues\(workforceIds, 250\), 3/);
+  assert.match(payoutPage, /mapWithConcurrency\(chunkedValues\(payoutRows, 250\), 3/);
   assert.match(payoutLoader, /mapWithConcurrency\(chunkedValues\(payoutInputWorkforceIds, 100\), 3/);
   assert.match(payoutLoader, /mapWithConcurrency\(jobs, 4/);
 });

@@ -12,11 +12,18 @@ export type WorkforcePayoutMappingLockSelectionRow = {
 export type WorkforcePayoutBankSelectionRow = {
   id: string;
   reviewSubjectId?: string | null;
+  locationId?: string | null;
 };
 
 export type WorkforcePayoutBankSelectionIndexEntry = {
-  rowIds: string[];
+  workforceId: string;
+  stationId: string;
   availableToPay: number;
+};
+
+export type WorkforcePayoutBankRowSelection = {
+  workforceId: string;
+  stationId: string;
 };
 
 export type WorkforcePayoutPreliminaryBalanceRow = WorkforcePayoutBankSelectionRow & {
@@ -34,38 +41,21 @@ function money(value: number) {
 export function buildWorkforcePayoutPreliminaryBalanceIndex<
   Row extends WorkforcePayoutPreliminaryBalanceRow
 >(rows: readonly Row[]) {
-  const totals = new Map<string, {
-    netAmount: number;
-    paidAmount: number;
-    processingAmount: number;
-    rowIds: Set<string>;
-  }>();
+  const balances = new Map<string, number>();
 
   for (const row of rows) {
     const workforceId = String(row.reviewSubjectId ?? "").trim();
-    if (!workforceId) continue;
-
-    const current = totals.get(workforceId) ?? {
-      netAmount: 0,
-      paidAmount: 0,
-      processingAmount: 0,
-      rowIds: new Set<string>()
-    };
-    if (!current.rowIds.has(row.id)) {
-      current.rowIds.add(row.id);
-      current.netAmount = money(current.netAmount + (Number(row.netAmount) || 0));
-    }
-    // The server preview is repeated on every location row. Use the largest
-    // ledger value rather than summing duplicates across those rows.
-    current.paidAmount = Math.max(current.paidAmount, Number(row.paymentSummary?.paidAmount ?? 0) || 0);
-    current.processingAmount = Math.max(current.processingAmount, Number(row.paymentSummary?.processingAmount ?? 0) || 0);
-    totals.set(workforceId, current);
+    const stationId = String(row.locationId ?? "").trim();
+    if (!workforceId || !stationId) continue;
+    balances.set(row.id, money(Math.max(
+      0,
+      (Number(row.netAmount) || 0)
+        - (Number(row.paymentSummary?.paidAmount ?? 0) || 0)
+        - (Number(row.paymentSummary?.processingAmount ?? 0) || 0)
+    )));
   }
 
-  return new Map([...totals].map(([workforceId, total]) => [
-    workforceId,
-    money(Math.max(0, total.netAmount - total.paidAmount - total.processingAmount))
-  ]));
+  return balances;
 }
 
 export function buildWorkforcePayoutBankSelectionIndex<Row extends WorkforcePayoutBankSelectionRow>(
@@ -79,16 +69,12 @@ export function buildWorkforcePayoutBankSelectionIndex<Row extends WorkforcePayo
     if (!isEligible(row)) continue;
 
     const workforceId = String(row.reviewSubjectId ?? "").trim();
-    if (!workforceId) continue;
+    const stationId = String(row.locationId ?? "").trim();
+    if (!workforceId || !stationId) continue;
 
-    const current = index.get(workforceId);
-    if (current) {
-      current.rowIds.push(row.id);
-      continue;
-    }
-
-    index.set(workforceId, {
-      rowIds: [row.id],
+    index.set(row.id, {
+      workforceId,
+      stationId,
       availableToPay: getAvailableToPay(row)
     });
   }
@@ -96,42 +82,43 @@ export function buildWorkforcePayoutBankSelectionIndex<Row extends WorkforcePayo
   return index;
 }
 
-export function selectedWorkforcePayoutBankIds<Row extends WorkforcePayoutBankSelectionRow>(
+export function selectedWorkforcePayoutBankRows<Row extends WorkforcePayoutBankSelectionRow>(
   selectedRows: readonly Row[],
   isEligible: (row: Row) => boolean
 ) {
-  const workforceIds = new Set<string>();
+  const selections = new Map<string, WorkforcePayoutBankRowSelection>();
 
   for (const row of selectedRows) {
     if (!isEligible(row)) continue;
     const workforceId = String(row.reviewSubjectId ?? "").trim();
-    if (workforceId) workforceIds.add(workforceId);
+    const stationId = String(row.locationId ?? "").trim();
+    if (!workforceId || !stationId) continue;
+    selections.set(`${workforceId}|${stationId}`, { workforceId, stationId });
   }
 
-  return workforceIds;
+  return [...selections.values()].sort((left, right) =>
+    left.workforceId.localeCompare(right.workforceId) || left.stationId.localeCompare(right.stationId)
+  );
 }
 
 export function resolveWorkforcePayoutBankSelection(
   index: ReadonlyMap<string, WorkforcePayoutBankSelectionIndexEntry>,
-  selectedRowIds: ReadonlySet<string>,
-  selectedWorkforceIds: ReadonlySet<string>
+  selectedRowIds: ReadonlySet<string>
 ) {
-  const workforceIds: string[] = [];
+  const payoutRows: WorkforcePayoutBankRowSelection[] = [];
   let totalAmount = 0;
 
-  for (const workforceId of selectedWorkforceIds) {
-    const entry = index.get(workforceId);
-    // A bank instruction is authoritative at Workforce-profile/month level.
-    // One checked location row therefore opts the profile into the bank action;
-    // the server candidate still includes every required publication (including
-    // unselected location deductions) before it creates the single instruction.
-    if (!entry?.rowIds.some((rowId) => selectedRowIds.has(rowId))) continue;
-
-    workforceIds.push(workforceId);
+  for (const rowId of selectedRowIds) {
+    const entry = index.get(rowId);
+    if (!entry) continue;
+    payoutRows.push({ workforceId: entry.workforceId, stationId: entry.stationId });
     totalAmount += entry.availableToPay;
   }
 
-  return { workforceIds, totalAmount };
+  payoutRows.sort((left, right) =>
+    left.workforceId.localeCompare(right.workforceId) || left.stationId.localeCompare(right.stationId)
+  );
+  return { payoutRows, totalAmount: money(totalAmount) };
 }
 
 export function chunkPayoutRowsBySubject<Row extends { reviewSubjectId?: string | null }>(

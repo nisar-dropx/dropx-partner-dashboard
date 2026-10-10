@@ -307,10 +307,16 @@ async function withPayoutPaymentSummaries(
 ) {
   if (!supabaseAdmin) return { rows, error: null as string | null };
   const admin = supabaseAdmin;
-  const workforceIds = [...new Set(rows.flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId] : []))];
-  if (!workforceIds.length) return { rows, error: null as string | null };
+  const payoutRows = [...new Map(rows.flatMap((row) => row.reviewSubjectId && row.locationId
+    ? [[`${row.reviewSubjectId.toLowerCase()}|${row.locationId.toLowerCase()}`, {
+      workforce_id: row.reviewSubjectId,
+      station_id: row.locationId
+    }] as const]
+    : [])).values()];
+  if (!payoutRows.length) return { rows, error: null as string | null };
   type PaymentPreview = {
     workforce_id: string;
+    station_id: string;
     current_target_amount: number | string;
     paid_amount: number | string;
     processing_amount: number | string;
@@ -323,21 +329,24 @@ async function withPayoutPaymentSummaries(
     eligibility_message: string;
   };
   const previews: PaymentPreview[] = [];
-  const previewResults = await mapWithConcurrency(chunkedValues(workforceIds, 250), 3, async (workforceChunk) => admin.rpc("workforce_preview_payout_payments", {
+  const previewResults = await mapWithConcurrency(chunkedValues(payoutRows, 250), 3, async (payoutChunk) => admin.rpc("workforce_preview_payout_payment_rows", {
       p_company_id: companyId,
       p_period_start: fromDate,
       p_period_end: toDate,
-      p_workforce_ids: workforceChunk
+      p_rows: payoutChunk
     }));
   for (const result of previewResults) {
     if (result.error) return { rows, error: result.error.message };
     previews.push(...((result.data ?? []) as PaymentPreview[]));
   }
-  const previewByWorkforce = new Map(previews.map((preview) => [String(preview.workforce_id).toLowerCase(), preview]));
+  const previewByPayoutRow = new Map(previews.map((preview) => [
+    `${String(preview.workforce_id).toLowerCase()}|${String(preview.station_id).toLowerCase()}`,
+    preview
+  ]));
   return {
     rows: rows.map((row) => {
-      const preview = row.reviewSubjectId
-        ? previewByWorkforce.get(row.reviewSubjectId.toLowerCase())
+      const preview = row.reviewSubjectId && row.locationId
+        ? previewByPayoutRow.get(`${row.reviewSubjectId.toLowerCase()}|${row.locationId.toLowerCase()}`)
         : undefined;
       const currentNetAmount = Number(preview?.current_target_amount ?? 0);
       const paidAmount = Number(preview?.paid_amount ?? 0);

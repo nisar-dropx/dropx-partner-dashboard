@@ -23,16 +23,23 @@ const activeProfileStationLinesMigrationUrl = new URL(
   "../supabase/migrations/20261010122406_workforce_payout_active_profile_station_bank_lines.sql",
   import.meta.url
 );
+const rowSelectionMigrationUrl = new URL(
+  "../supabase/migrations/20261010130000_workforce_payout_location_row_bank_selection.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
 const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
 const lifecycleMigration = readFileSync(lifecycleMigrationUrl, "utf8");
 const activeProfileStationLinesMigration = readFileSync(activeProfileStationLinesMigrationUrl, "utf8");
+const rowSelectionMigration = readFileSync(rowSelectionMigrationUrl, "utf8");
 const executablePublishedSnapshotFreshnessMigration = publishedSnapshotFreshnessMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableLifecycleMigration = lifecycleMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableActiveProfileStationLinesMigration = activeProfileStationLinesMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableRowSelectionMigration = rowSelectionMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableMigration = [migration, compatibilityMigration, publishedSnapshotFreshnessMigration]
   .map((sql) => sql.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""))
@@ -191,6 +198,36 @@ assert.doesNotMatch(
   /grant execute on function public\.workforce_payout_payment_candidates/i,
   "the internal candidate calculator must remain unavailable to API roles"
 );
+assert.match(
+  rowSelectionMigration,
+  /required_stations as \([\s\S]*?v_active_locations[\s\S]*?candidate_publications[\s\S]*?v_eligible_count <> v_required_count/i,
+  "row payments must validate the complete current station publication set"
+);
+assert.match(
+  rowSelectionMigration,
+  /item\.status in \('paid', 'processing'\)[\s\S]*?item_check\.amount_reconciles and item_check\.allocations_valid/i,
+  "every paid and processing item must reconcile to valid current-station allocations"
+);
+assert.match(
+  rowSelectionMigration,
+  /v_paid_deltas_nonnegative[\s\S]*?v_profile_outstanding_reconciles[\s\S]*?payment_history_allocation_reassignment_required/i,
+  "unsafe station deltas or profile outstanding totals must fail closed with the reassignment code"
+);
+assert.match(
+  rowSelectionMigration,
+  /v_max_payment_version \+ v_selected_row_count/i,
+  "reference preflight must reserve enough version digits for every selected row of a profile"
+);
+assert.doesNotMatch(
+  rowSelectionMigration,
+  /revoke execute on function public\.workforce_create_payout_payment_batch/i,
+  "the additive row rollout must not revoke the legacy creator before the app rollout completes"
+);
+assert.match(
+  rowSelectionMigration,
+  /workforce_claim_selected_payout_publication_row_refresh_jobs[\s\S]*?pair\.workforce_id = job\.workforce_id[\s\S]*?pair\.station_id = job\.station_id/i,
+  "targeted refresh claiming must use exact Workforce/station pairs rather than an array cross-product"
+);
 
 const db = new PGlite();
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -305,9 +342,22 @@ await db.exec(`
     id uuid primary key default gen_random_uuid(),
     company_id uuid not null,
     workforce_id uuid not null,
+    station_id uuid not null,
     period_start date not null,
     period_end date not null,
-    status text not null
+    status text not null,
+    refresh_request_id uuid not null default gen_random_uuid(),
+    claim_attempts integer not null default 0,
+    max_attempts integer not null default 5,
+    claim_token uuid,
+    claimed_at timestamptz,
+    next_attempt_at timestamptz default clock_timestamp(),
+    failed_at timestamptz,
+    completed_at timestamptz,
+    published_publication_id uuid,
+    last_error text,
+    created_at timestamptz not null default clock_timestamp(),
+    updated_at timestamptz not null default clock_timestamp()
   );
   create table public.workforce_payroll_runs(
     id uuid primary key default gen_random_uuid(),
@@ -585,9 +635,9 @@ await db.exec(`
 `);
 await db.query(
   `insert into public.workforce_payout_publication_refresh_jobs(
-    id,company_id,workforce_id,period_start,period_end,status
-  ) values ($1,$2,$3,$4,$5,'pending')`,
-  [refreshJob, company, workforce, periodStart, periodEnd]
+    id,company_id,workforce_id,station_id,period_start,period_end,status
+  ) values ($1,$2,$3,$4,$5,$6,'pending')`,
+  [refreshJob, company, workforce, station, periodStart, periodEnd]
 );
 const refreshBlockedPreview = await preview();
 assert.equal(refreshBlockedPreview.eligible, false);
@@ -1280,6 +1330,7 @@ assert.equal(
 );
 
 await db.exec(executableActiveProfileStationLinesMigration);
+await db.exec(executableRowSelectionMigration);
 
 const createProfileBatch = async ({ operation, fingerprint, workforceIds }) => {
   const result = await db.query(
@@ -1724,6 +1775,418 @@ assert.deepEqual(
 );
 assert.equal(atomicRejection.rows[0].rejected_operation_count, 0);
 
+// Row-level selection is strict: both rows expose independent balances, and a
+// bank batch requested for one station contains no sibling-station amount.
+const rowSelectionWorkforce = id(150);
+const rowSelectionRelock = id(151);
+const rowSelectionReviewKbwe = id(152);
+const rowSelectionReviewKlza = id(153);
+const rowSelectionPublicationKbwe = id(154);
+const rowSelectionPublicationKlza = id(155);
+await db.query(
+  `insert into public.workforce(
+    id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code,
+    onboarding_status,lifecycle_status,is_active
+  ) values ($1,$2,'ROW150','Row Selection','row150@example.com',$3,
+    '4234567890','FDRL0000002','active','active',true)`,
+  [rowSelectionWorkforce, company, kbweStation]
+);
+await db.query(
+  `insert into public.connect_profile_verifications(
+    company_id,profile_type,account_id,kind,verified
+  ) values ($1,'workforce',$2,'pan_aadhaar',true)`,
+  [company, rowSelectionWorkforce]
+);
+await db.query(
+  `insert into public.workforce_payout_mapping_relocks(
+    id,company_id,period_start,period_end,affected_workforce_ids,active_locations
+  ) values ($1,$2,$3,$4,array[$5::uuid],$6::jsonb)`,
+  [rowSelectionRelock, company, periodStart, periodEnd, rowSelectionWorkforce,
+    JSON.stringify({ [rowSelectionWorkforce]: [kbweStation, klzaStation] })]
+);
+const rowSelectionKbweSnapshot = JSON.stringify({
+  schema_version: "2", source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true },
+  item: { workforce_id: rowSelectionWorkforce, station_code: "KBWE", net_amount: "474.01" }
+});
+const rowSelectionKlzaSnapshot = JSON.stringify({
+  schema_version: "2", source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true },
+  item: { workforce_id: rowSelectionWorkforce, station_code: "KLZA", net_amount: "71125.56" }
+});
+await db.query(
+  `insert into public.workforce_payout_review_submissions(
+    id,company_id,subject_type,subject_id,location_id,period_start,period_end,status,calculation_snapshot
+  ) values
+    ($1,$3,'workforce',$4,$5,$6,$7,'under_review',$8::jsonb),
+    ($2,$3,'workforce',$4,$9,$6,$7,'under_review',$10::jsonb)`,
+  [rowSelectionReviewKbwe, rowSelectionReviewKlza, company, rowSelectionWorkforce,
+    kbweStation, periodStart, periodEnd, rowSelectionKbweSnapshot,
+    klzaStation, rowSelectionKlzaSnapshot]
+);
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values
+    ($1,$3,$4,$5,1,$6::jsonb,$7,$8,$9,$10,'worksheet',$11,$12),
+    ($2,$3,$4,$13,1,$14::jsonb,$15,$8,$9,$16,'worksheet',$11,$12)`,
+  [rowSelectionPublicationKbwe, rowSelectionPublicationKlza, company,
+    rowSelectionWorkforce, kbweStation, rowSelectionKbweSnapshot,
+    "7".repeat(64), dependencyHash, rowSelectionRelock,
+    rowSelectionReviewKbwe, periodStart, periodEnd, klzaStation,
+    rowSelectionKlzaSnapshot, "8".repeat(64), rowSelectionReviewKlza]
+);
+const rowSelections = [
+  { workforce_id: rowSelectionWorkforce, station_id: kbweStation },
+  { workforce_id: rowSelectionWorkforce, station_id: klzaStation }
+];
+
+// Targeted publication repair must lease only the exact checked row. A
+// sibling station for the same Workforce profile remains untouched.
+const rowRefreshRequest = id(160);
+const rowRefreshKbwe = id(161);
+const rowRefreshKlza = id(162);
+await db.query(
+  `insert into public.workforce_payout_publication_refresh_jobs(
+    id,company_id,workforce_id,station_id,period_start,period_end,status,
+    refresh_request_id,next_attempt_at,created_at
+  ) values
+    ($1,$4,$5,$6,$7,$8,'pending',$9,clock_timestamp() - interval '1 minute',clock_timestamp() - interval '2 minutes'),
+    ($2,$4,$5,$3,$7,$8,'pending',$9,clock_timestamp() - interval '1 minute',clock_timestamp() - interval '1 minute')`,
+  [rowRefreshKbwe, rowRefreshKlza, klzaStation, company, rowSelectionWorkforce,
+    kbweStation, periodStart, periodEnd, rowRefreshRequest]
+);
+const claimedRowRefresh = await db.query(
+  `select id,workforce_id,station_id,status
+   from public.workforce_claim_selected_payout_publication_row_refresh_jobs(
+     100,$1,$2::jsonb,$3::date,$4::date
+   )`,
+  [company, JSON.stringify([rowSelections[0]]), periodStart, periodEnd]
+);
+assert.deepEqual(claimedRowRefresh.rows, [{
+  id: rowRefreshKbwe,
+  workforce_id: rowSelectionWorkforce,
+  station_id: kbweStation,
+  status: "processing"
+}]);
+const siblingRefreshState = await db.query(
+  `select station_id,status from public.workforce_payout_publication_refresh_jobs
+   where id=any($1::uuid[]) order by station_id`,
+  [[rowRefreshKbwe, rowRefreshKlza]]
+);
+assert.deepEqual(siblingRefreshState.rows, [
+  { station_id: kbweStation, status: "processing" },
+  { station_id: klzaStation, status: "pending" }
+]);
+await db.query(
+  `update public.workforce_payout_publication_refresh_jobs
+   set status='completed',completed_at=clock_timestamp(),claim_token=null
+   where id=$1`,
+  [rowRefreshKbwe]
+);
+const siblingPendingDoesNotBlock = await db.query(
+  `select eligibility_code,eligible
+   from public.workforce_preview_payout_payment_rows(
+     $1,$2::date,$3::date,$4::jsonb
+   )`,
+  [company, periodStart, periodEnd, JSON.stringify([rowSelections[0]])]
+);
+assert.equal(siblingPendingDoesNotBlock.rows[0].eligible, true);
+assert.equal(siblingPendingDoesNotBlock.rows[0].eligibility_code, "eligible");
+await db.query(
+  `update public.workforce_payout_publication_refresh_jobs
+   set status='completed',completed_at=clock_timestamp()
+   where id=$1`,
+  [rowRefreshKlza]
+);
+
+const expiredRefreshKbwe = id(167);
+const expiredRefreshKlza = id(168);
+await db.query(
+  `insert into public.workforce_payout_publication_refresh_jobs(
+    id,company_id,workforce_id,station_id,period_start,period_end,status,
+    refresh_request_id,claim_attempts,max_attempts,claim_token,claimed_at,next_attempt_at
+  ) values
+    ($1,$3,$4,$5,$6,$7,'processing',$8,5,5,$9,clock_timestamp() - interval '11 minutes',null),
+    ($2,$3,$4,$10,$6,$7,'processing',$11,5,5,$12,clock_timestamp() - interval '11 minutes',null)`,
+  [expiredRefreshKbwe, expiredRefreshKlza, company, rowSelectionWorkforce,
+    kbweStation, periodStart, periodEnd, id(169), id(170), klzaStation, id(171), id(172)]
+);
+const expiredClaim = await db.query(
+  `select id from public.workforce_claim_selected_payout_publication_row_refresh_jobs(
+    100,$1,$2::jsonb,$3::date,$4::date
+  )`,
+  [company, JSON.stringify([rowSelections[0]]), periodStart, periodEnd]
+);
+assert.equal(expiredClaim.rows.length, 0);
+const expiredPairState = await db.query(
+  `select station_id,status from public.workforce_payout_publication_refresh_jobs
+   where id=any($1::uuid[]) order by station_id`,
+  [[expiredRefreshKbwe, expiredRefreshKlza]]
+);
+assert.deepEqual(expiredPairState.rows, [
+  { station_id: kbweStation, status: "failed" },
+  { station_id: klzaStation, status: "processing" }
+]);
+await db.query(
+  `update public.workforce_payout_publication_refresh_jobs
+   set status='completed',completed_at=clock_timestamp(),claim_token=null,claimed_at=null
+   where id=any($1::uuid[])`,
+  [[expiredRefreshKbwe, expiredRefreshKlza]]
+);
+
+const rowPreview = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  ) order by station_id`,
+  [company, periodStart, periodEnd, JSON.stringify(rowSelections)]
+);
+assert.deepEqual(
+  rowPreview.rows.map((row) => ({
+    stationId: row.station_id,
+    target: Number(row.current_target_amount),
+    paid: Number(row.paid_amount),
+    balance: Number(row.balance_payable),
+    available: Number(row.available_to_pay),
+    eligible: row.eligible
+  })),
+  [
+    { stationId: kbweStation, target: 474.01, paid: 0, balance: 474.01, available: 474.01, eligible: true },
+    { stationId: klzaStation, target: 71125.56, paid: 0, balance: 71125.56, available: 71125.56, eligible: true }
+  ]
+);
+
+// Selecting a valid row must not hide a missing sibling publication from the
+// latest relocked station set.
+await db.query(
+  `update public.workforce_payout_mapping_relocks
+   set active_locations=$3::jsonb where company_id=$1 and id=$2`,
+  [company, rowSelectionRelock,
+    JSON.stringify({ [rowSelectionWorkforce]: [kbweStation, klzaStation, station] })]
+);
+const incompleteRowSet = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  )`,
+  [company, periodStart, periodEnd, JSON.stringify([rowSelections[0]])]
+);
+assert.equal(incompleteRowSet.rows[0].eligible, false);
+assert.equal(incompleteRowSet.rows[0].eligibility_code, "publication_stale_or_incomplete");
+await db.query(
+  `update public.workforce_payout_mapping_relocks
+   set active_locations=$3::jsonb where company_id=$1 and id=$2`,
+  [company, rowSelectionRelock,
+    JSON.stringify({ [rowSelectionWorkforce]: [kbweStation, klzaStation] })]
+);
+
+const rowBatchResult = await db.query(
+  `select public.workforce_create_payout_payment_row_batch(
+    $1,$2,$3,$4,$5,$6::date,$7::date,date '2026-10-10',$8::jsonb
+  ) result`,
+  [company, actor, id(156), "9".repeat(64), bank, periodStart, periodEnd,
+    JSON.stringify([rowSelections[0]])]
+);
+const rowBatch = rowBatchResult.rows[0].result;
+assert.equal(rowBatch.items.length, 1);
+assert.equal(rowBatch.items[0].credit_remarks, "KBWE");
+assert.equal(Number(rowBatch.items[0].instruction_amount), 474.01);
+const rowBatchEvidence = await db.query(
+  `select item.location_code_snapshot,allocation.station_id,
+      item.instruction_amount,allocation.instruction_amount_snapshot
+   from public.workforce_payout_payment_items item
+   join public.workforce_payout_payment_allocations allocation
+     on allocation.payment_item_id=item.id
+   where item.batch_id=$1`,
+  [rowBatch.batch_id]
+);
+assert.deepEqual(rowBatchEvidence.rows.map((row) => ({
+  location: row.location_code_snapshot,
+  stationId: row.station_id,
+  instruction: Number(row.instruction_amount),
+  allocation: Number(row.instruction_amount_snapshot)
+})), [{
+  location: "KBWE",
+  stationId: kbweStation,
+  instruction: 474.01,
+  allocation: 474.01
+}]);
+
+// Processing remains a profile-wide interlock even though amounts and row
+// selection are station-specific.
+const siblingWhileProcessing = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  )`,
+  [company, periodStart, periodEnd, JSON.stringify([rowSelections[1]])]
+);
+assert.equal(siblingWhileProcessing.rows[0].eligible, false);
+assert.equal(siblingWhileProcessing.rows[0].eligibility_code, "payment_processing");
+assert.equal(Number(siblingWhileProcessing.rows[0].available_to_pay), 0);
+await assert.rejects(
+  db.query(
+    `select public.workforce_create_payout_payment_row_batch(
+      $1,$2,$3,$4,$5,$6::date,$7::date,date '2026-10-10',$8::jsonb
+    )`,
+    [company, actor, id(163), "1".repeat(64), bank, periodStart, periodEnd,
+      JSON.stringify([rowSelections[1]])]
+  ),
+  /already processing/i
+);
+
+await finalizeProfileItem({
+  operation: id(164),
+  hash: "2".repeat(64),
+  item: rowBatch.items[0],
+  utr: "UTR-ROW-164"
+});
+
+// Paid evidence assigned to a station that no longer belongs to the complete
+// relocked set is not redistributed silently.
+await db.query(
+  `update public.workforce_payout_mapping_relocks
+   set active_locations=$3::jsonb where company_id=$1 and id=$2`,
+  [company, rowSelectionRelock,
+    JSON.stringify({ [rowSelectionWorkforce]: [klzaStation] })]
+);
+const removedPaidStation = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  )`,
+  [company, periodStart, periodEnd, JSON.stringify([rowSelections[1]])]
+);
+assert.equal(removedPaidStation.rows[0].eligible, false);
+assert.equal(
+  removedPaidStation.rows[0].eligibility_code,
+  "payment_history_allocation_reassignment_required"
+);
+await db.query(
+  `update public.workforce_payout_mapping_relocks
+   set active_locations=$3::jsonb where company_id=$1 and id=$2`,
+  [company, rowSelectionRelock,
+    JSON.stringify({ [rowSelectionWorkforce]: [kbweStation, klzaStation] })]
+);
+
+// A revised station target below that station's paid allocation must fail
+// closed; a sibling's positive balance cannot absorb the overpaid delta.
+const reducedKbweSnapshot = JSON.stringify({
+  schema_version: "2", source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true },
+  item: { workforce_id: rowSelectionWorkforce, station_code: "KBWE", net_amount: "400.00" }
+});
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values ($1,$2,$3,$4,2,$5::jsonb,$6,$7,$8,$9,'worksheet',$10,$11)`,
+  [id(165), company, rowSelectionWorkforce, kbweStation, reducedKbweSnapshot,
+    "3".repeat(64), dependencyHash, rowSelectionRelock, rowSelectionReviewKbwe,
+    periodStart, periodEnd]
+);
+const negativePaidDelta = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  )`,
+  [company, periodStart, periodEnd, JSON.stringify([rowSelections[1]])]
+);
+assert.equal(negativePaidDelta.rows[0].eligible, false);
+assert.equal(
+  negativePaidDelta.rows[0].eligibility_code,
+  "payment_history_allocation_reassignment_required"
+);
+
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values ($1,$2,$3,$4,3,$5::jsonb,$6,$7,$8,$9,'worksheet',$10,$11)`,
+  [id(166), company, rowSelectionWorkforce, kbweStation, rowSelectionKbweSnapshot,
+    "4".repeat(64), dependencyHash, rowSelectionRelock, rowSelectionReviewKbwe,
+    periodStart, periodEnd]
+);
+
+// Reference validation reserves the highest version used by every selected
+// row of the same profile. With a 54-character normalized ID, V9 fits the
+// 64-character bank limit but a two-row request reaching V10 must be rejected.
+const boundaryDropxId = "X".repeat(54);
+await db.query(
+  `update public.workforce set dropx_id=$3 where company_id=$1 and id=$2`,
+  [company, rowSelectionWorkforce, boundaryDropxId]
+);
+for (let attempt = 2; attempt <= 8; attempt += 1) {
+  const cancelledBoundaryBatch = await db.query(
+    `select public.workforce_create_payout_payment_row_batch(
+      $1,$2,$3,$4,$5,$6::date,$7::date,date '2026-10-10',$8::jsonb
+    ) result`,
+    [company, actor, id(178 + attempt), attempt.toString(16).repeat(64), bank,
+      periodStart, periodEnd, JSON.stringify([rowSelections[1]])]
+  );
+  assert.equal(
+    cancelledBoundaryBatch.rows[0].result.items[0].payment_version,
+    attempt
+  );
+  await transitionPayment({
+    operation: id(188 + attempt),
+    paymentItemId: cancelledBoundaryBatch.rows[0].result.items[0].item_id,
+    outcome: "cancelled",
+    remarks: "Reference boundary fixture cancellation"
+  });
+}
+const oneRowBoundary = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  )`,
+  [company, periodStart, periodEnd, JSON.stringify([rowSelections[1]])]
+);
+assert.equal(oneRowBoundary.rows[0].eligible, true, "V9 must still fit for one selected row");
+const twoRowBoundary = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  ) order by station_id`,
+  [company, periodStart, periodEnd, JSON.stringify(rowSelections)]
+);
+assert.deepEqual(
+  twoRowBoundary.rows.map((row) => row.eligibility_code),
+  ["no_positive_balance", "payment_reference_invalid"],
+  "the payable row in a two-row request must preflight its final V10 reference, not only the first V9"
+);
+await db.query(
+  `update public.workforce set dropx_id='ROW150' where company_id=$1 and id=$2`,
+  [company, rowSelectionWorkforce]
+);
+
+// Corrupt legacy evidence that allocates more than the immutable paid item is
+// rejected by both per-item and exact profile-outstanding reconciliation.
+await db.query(
+  "select set_config('app.workforce_payout_payment_mutation','allowed',false)"
+);
+try {
+  await db.query(
+    `insert into public.workforce_payout_payment_allocations(
+      company_id,payment_item_id,publication_id,station_id,revision,
+      mapping_relock_id,snapshot_hash,station_code_snapshot,
+      net_amount_snapshot,instruction_amount_snapshot
+    ) values ($1,$2,$3,$4,1,$5,$6,'KLZA',71125.56,1.00)`,
+    [company, rowBatch.items[0].item_id, rowSelectionPublicationKlza, klzaStation,
+      rowSelectionRelock, "8".repeat(64)]
+  );
+} finally {
+  await db.query(
+    "select set_config('app.workforce_payout_payment_mutation','',false)"
+  );
+}
+const unreconciledPaidEvidence = await db.query(
+  `select * from public.workforce_preview_payout_payment_rows(
+    $1,$2::date,$3::date,$4::jsonb
+  )`,
+  [company, periodStart, periodEnd, JSON.stringify([rowSelections[1]])]
+);
+assert.equal(unreconciledPaidEvidence.rows[0].eligible, false);
+assert.equal(
+  unreconciledPaidEvidence.rows[0].eligibility_code,
+  "payment_history_allocation_reassignment_required"
+);
+
 const catalog = await db.query(`
   select
     (select count(*)::int from pg_trigger
@@ -1755,6 +2218,27 @@ const catalog = await db.query(`
       'public.workforce_create_payout_payment_batch(uuid,uuid,uuid,text,uuid,date,date,date,uuid[])',
       'EXECUTE') authenticated_execute,
     has_function_privilege('service_role',
+      'public.workforce_create_payout_payment_row_batch(uuid,uuid,uuid,text,uuid,date,date,date,jsonb)',
+      'EXECUTE') row_create_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_create_payout_payment_row_batch(uuid,uuid,uuid,text,uuid,date,date,date,jsonb)',
+      'EXECUTE') authenticated_row_create_execute,
+    has_function_privilege('service_role',
+      'public.workforce_preview_payout_payment_rows(uuid,date,date,jsonb)',
+      'EXECUTE') row_preview_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_preview_payout_payment_rows(uuid,date,date,jsonb)',
+      'EXECUTE') authenticated_row_preview_execute,
+    has_function_privilege('service_role',
+      'public.workforce_payout_payment_row_candidates(uuid,date,date,jsonb)',
+      'EXECUTE') row_candidate_execute,
+    has_function_privilege('service_role',
+      'public.workforce_claim_selected_payout_publication_row_refresh_jobs(integer,uuid,jsonb,date,date)',
+      'EXECUTE') row_refresh_claim_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_claim_selected_payout_publication_row_refresh_jobs(integer,uuid,jsonb,date,date)',
+      'EXECUTE') authenticated_row_refresh_claim_execute,
+    has_function_privilege('service_role',
       'public.workforce_payout_payment_interval_is_processing(uuid,date,date)',
       'EXECUTE') internal_execute,
     has_function_privilege('service_role',
@@ -1779,11 +2263,19 @@ assert.equal(catalog.rows[0].hold_rls, true);
 assert.equal(catalog.rows[0].hold_select, true);
 assert.equal(catalog.rows[0].hold_insert, false);
 assert.equal(catalog.rows[0].review_insert, false);
-assert.equal(catalog.rows[0].create_execute, true);
+assert.equal(catalog.rows[0].create_execute, true,
+  "the additive row-selection rollout must not revoke the legacy creator before every app instance is upgraded");
 assert.equal(catalog.rows[0].preview_execute, true);
 assert.equal(catalog.rows[0].authenticated_preview_execute, false);
 assert.equal(catalog.rows[0].candidate_execute, false);
 assert.equal(catalog.rows[0].authenticated_execute, false);
+assert.equal(catalog.rows[0].row_create_execute, true);
+assert.equal(catalog.rows[0].authenticated_row_create_execute, false);
+assert.equal(catalog.rows[0].row_preview_execute, true);
+assert.equal(catalog.rows[0].authenticated_row_preview_execute, false);
+assert.equal(catalog.rows[0].row_candidate_execute, false);
+assert.equal(catalog.rows[0].row_refresh_claim_execute, true);
+assert.equal(catalog.rows[0].authenticated_row_refresh_claim_execute, false);
 assert.equal(catalog.rows[0].internal_execute, false);
 assert.equal(catalog.rows[0].hold_execute, true);
 assert.equal(catalog.rows[0].authenticated_hold_execute, false);

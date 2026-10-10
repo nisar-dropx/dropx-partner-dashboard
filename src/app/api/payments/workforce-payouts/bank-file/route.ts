@@ -54,11 +54,22 @@ function completeCalendarMonth(periodStart: string, periodEnd: string) {
   return end.toISOString().slice(0, 10) === periodEnd;
 }
 
-function uniqueWorkforceIds(value: unknown) {
+function uniquePayoutRows(value: unknown) {
   if (!Array.isArray(value)) return null;
-  const ids = value.map((item) => String(item ?? "").trim().toLowerCase());
-  if (!ids.length || ids.some((id) => !UUID.test(id)) || new Set(ids).size !== ids.length) return null;
-  return ids.sort();
+  const rows = value.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const record = item as Record<string, unknown>;
+    const workforceId = String(record.workforceId ?? "").trim().toLowerCase();
+    const stationId = String(record.stationId ?? "").trim().toLowerCase();
+    return UUID.test(workforceId) && UUID.test(stationId) ? { workforceId, stationId } : null;
+  });
+  if (!rows.length || rows.some((row) => !row)) return null;
+  const normalized = rows as Array<{ workforceId: string; stationId: string }>;
+  const keys = normalized.map((row) => `${row.workforceId}|${row.stationId}`);
+  if (new Set(keys).size !== keys.length) return null;
+  return normalized.sort((left, right) =>
+    left.workforceId.localeCompare(right.workforceId) || left.stationId.localeCompare(right.stationId)
+  );
 }
 
 async function jsonBody(request: Request) {
@@ -230,22 +241,21 @@ export async function POST(request: Request) {
     const periodStart = String(body.periodStart ?? "").trim();
     const periodEnd = String(body.periodEnd ?? "").trim();
     const valueDate = String(body.valueDate ?? "").trim();
-    const workforceIds = uniqueWorkforceIds(body.workforceIds);
+    const payoutRows = uniquePayoutRows(body.payoutRows);
     if (!UUID.test(operationId) || !UUID.test(bankId)) return errorResponse("A valid operation and bank are required.", 400);
     if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Bank processing is available only for one complete calendar month.", 400);
     if (!validDate(valueDate)) return errorResponse("Choose a valid bank value date.", 400);
-    if (!workforceIds) return errorResponse("Select at least one unique Workforce profile.", 400);
-
+    if (!payoutRows) return errorResponse("Select at least one unique Workforce payout row.", 400);
     let refreshResult;
     try {
       refreshResult = await refreshWorkforcePayoutPublicationJobs({
         authorization: access.authorization,
         companyId: access.companyId,
-        workforceIds,
+        payoutRows,
         periodStart,
         periodEnd,
         deadlineAtMs: Date.now() + 240_000,
-        // One Workforce profile can own several station refresh jobs.
+        // Refresh only the exact Workforce/location rows selected for payment.
         limit: 100
       });
     } catch (error) {
@@ -264,12 +274,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const requestFingerprint = createHash("sha256").update(JSON.stringify({ bankId, periodStart, periodEnd, valueDate, workforceIds })).digest("hex");
+    const requestFingerprint = createHash("sha256").update(JSON.stringify({ bankId, periodStart, periodEnd, valueDate, payoutRows })).digest("hex");
     // This transactional RPC is the authoritative second gate. Queue counts
     // above are diagnostic only: this gate recalculates every selected payment
     // candidate under lock and rejects unfinished or stale publications, as
     // well as any non-refresh payment blocker.
-    const created = await supabaseAdmin!.rpc("workforce_create_payout_payment_batch", {
+    const created = await supabaseAdmin!.rpc("workforce_create_payout_payment_row_batch", {
       p_company_id: access.companyId,
       p_actor_user_id: access.authorization.userId,
       p_operation_id: operationId,
@@ -278,7 +288,10 @@ export async function POST(request: Request) {
       p_period_start: periodStart,
       p_period_end: periodEnd,
       p_value_date: valueDate,
-      p_workforce_ids: workforceIds
+      p_rows: payoutRows.map((row) => ({
+        workforce_id: row.workforceId,
+        station_id: row.stationId
+      }))
     });
     if (created.error) return errorResponse(created.error.message, databaseStatus(created.error.message));
     return workbookResponse(resultRecord(created.data));

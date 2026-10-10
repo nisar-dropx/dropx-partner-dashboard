@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import type { WorkforcePayoutBankRowSelection } from "@/lib/workforce-payout-action-selection";
 
 export type WorkforcePayoutBankOption = {
   id: string;
@@ -48,7 +49,7 @@ export function WorkforcePayoutBankDialog({
   periodStart,
   publicationRefreshCount = 0,
   totalAmount,
-  workforceIds
+  payoutRows
 }: {
   banks: WorkforcePayoutBankOption[];
   disabled?: boolean;
@@ -57,7 +58,7 @@ export function WorkforcePayoutBankDialog({
   periodEnd: string;
   publicationRefreshCount?: number;
   totalAmount: number;
-  workforceIds: string[];
+  payoutRows: WorkforcePayoutBankRowSelection[];
 }) {
   const router = useRouter();
   const titleId = useId();
@@ -111,7 +112,7 @@ export function WorkforcePayoutBankDialog({
   }
 
   async function createBankFile() {
-    if (busy || !selectedBank || !workforceIds.length) return;
+    if (busy || !selectedBank || !payoutRows.length) return;
     if (!operationIdRef.current) operationIdRef.current = crypto.randomUUID();
     setBusy(true); setError(""); setNotice("");
     try {
@@ -123,8 +124,8 @@ export function WorkforcePayoutBankDialog({
           operationId: operationIdRef.current,
           periodEnd,
           periodStart,
+          payoutRows,
           valueDate,
-          workforceIds
         })
       });
       if (!response.ok) throw new Error(await responseError(response, "Unable to create the Workforce bank file."));
@@ -195,13 +196,13 @@ export function WorkforcePayoutBankDialog({
           {mode === "download" ? <>
             <div className="payout-inline-message warn">
               <strong>Payment Processing lock</strong>
-              <p>Generating this file marks {workforceIds.length} selected profile{workforceIds.length === 1 ? "" : "s"} as Payment Processing. Their payout inputs and ID mapping cannot change until the bank response is finalized.</p>
+              <p>Generating this file marks {payoutRows.length} selected payout row{payoutRows.length === 1 ? "" : "s"} as Payment Processing. Payout inputs and ID mapping for those profiles cannot change until the bank response is finalized.</p>
               <p>Only current Active Workforce profiles are eligible. Under Review and every other profile status are excluded.</p>
-              <p>The complete selected profile is included even when only one bank-eligible table row was checked. Separate location bank lines are created when every location has a non-negative outstanding balance and earlier paid allocations reconcile exactly; otherwise the profile is safely consolidated so deductions and earlier payments are not misapplied.</p>
+              <p>Only the checked payout row and its location balance are included. Other rows for the same DropX ID remain outside this bank file.</p>
             </div>
             {publicationRefreshCount ? <div className="payout-inline-message warn" role="status">
               <strong>Refresh before file generation</strong>
-              <p>{publicationRefreshCount} selected profile{publicationRefreshCount === 1 ? " has" : "s have"} a pending publication refresh. The server will refresh the exact selected month first, then recheck the authoritative balance and every payment blocker. File generation stops if any publication remains stale or another blocker is found.</p>
+              <p>{publicationRefreshCount} selected payout row{publicationRefreshCount === 1 ? " has" : "s have"} a pending publication refresh. The server will refresh the exact selected month first, then recheck each selected location balance and every payment blocker. File generation stops if any selected publication remains stale or another blocker is found.</p>
             </div> : null}
             <div className="form-grid two">
               <label>Debit bank
@@ -212,7 +213,7 @@ export function WorkforcePayoutBankDialog({
               </label>
               <label>File type<input className="field" readOnly value={selectedBank?.fileType?.toLowerCase() === "fedone" ? "Federal Bank - FedOne" : selectedBank ? "Not configured" : "Select bank"} /></label>
               <label>Value date<input className="field" disabled={busy} onChange={(event) => setValueDate(event.target.value)} required type="date" value={valueDate} /></label>
-              <label>Selected profiles<input className="field" readOnly value={workforceIds.length.toLocaleString("en-IN")} /></label>
+              <label>Selected payout rows<input className="field" readOnly value={payoutRows.length.toLocaleString("en-IN")} /></label>
               <label>{publicationRefreshCount ? "Preliminary selected balance" : "Balance in this file"}<input className="field" readOnly value={`Rs ${Number(totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} /></label>
             </div>
           </> : <>
@@ -235,7 +236,7 @@ export function WorkforcePayoutBankDialog({
   ) : null;
 
   return <>
-    <button className="button secondary" disabled={disabled || !workforceIds.length || !banks.length || busy} onClick={(event) => open("download", event.currentTarget)} type="button">Download bank file{workforceIds.length ? ` (${workforceIds.length})` : ""}</button>
+    <button className="button secondary" disabled={disabled || !payoutRows.length || !banks.length || busy} onClick={(event) => open("download", event.currentTarget)} type="button">Download bank file{payoutRows.length ? ` (${payoutRows.length})` : ""}</button>
     <button className="button secondary" disabled={disabled || busy} onClick={(event) => open("finalize", event.currentTarget)} type="button">Finalize bank response</button>
     {modal}
   </>;
