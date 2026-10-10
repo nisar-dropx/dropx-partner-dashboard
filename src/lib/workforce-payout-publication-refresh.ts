@@ -35,31 +35,62 @@ type LatestPublication = {
 };
 
 export type WorkforcePayoutPublicationRefreshWarning = {
+  code?: "claim_failed" | "configuration_unavailable" | "deadline_reached" | "job_failed" | "queue_status_failed";
   jobIds: string[];
   message: string;
 };
 
 export type WorkforcePayoutPublicationRefreshResult = {
   claimed: number;
+  claimRetries: number;
   completed: number;
   published: number;
   publicationIds: string[];
   retrying: number;
   failed: number;
   staleClaims: number;
+  queueStatusChecked: boolean;
+  remainingReady: number;
+  remainingUnfinished: number;
   warnings: WorkforcePayoutPublicationRefreshWarning[];
 };
 
-type WorkforcePayoutPublicationRefreshInput = {
+export type WorkforcePayoutPublicationRefreshInput = {
   authorization?: AuthorizationContext;
   batchId?: string | null;
   companyId?: string | null;
   deadlineAtMs?: number;
   limit?: number;
+  periodEnd?: string;
+  periodStart?: string;
+  workforceIds?: string[];
+};
+
+type TargetedClaimScope = {
+  companyId: string;
+  periodEnd: string;
+  periodStart: string;
+  workforceIds: string[];
 };
 
 const DEFAULT_RUNTIME_BUDGET_MS = 240_000;
 const NEXT_CLAIM_RUNTIME_RESERVE_MS = 30_000;
+const CLAIM_LEASE_TIMEOUT_MS = 10 * 60_000;
+const MAX_CLAIM_REQUEST_ATTEMPTS = 3;
+const CLAIM_RETRY_BASE_DELAY_MS = 150;
+const MAX_TARGETED_WORKFORCE_IDS = 10_000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TRANSIENT_CLAIM_ERROR_CODES = new Set([
+  "40001",
+  "40P01",
+  "55P03",
+  "57014",
+  "DATABASE_UNREACHABLE",
+  "PGRST000",
+  "PGRST001",
+  "PGRST002",
+  "PGRST003"
+]);
 
 function systemAuthorization(companyId: string): AuthorizationContext {
   return {
@@ -90,8 +121,79 @@ function rowIdentity(workforceId: unknown, stationId: unknown) {
 }
 
 function errorMessage(error: unknown) {
-  return (error instanceof Error ? error.message : String(error || "Unable to refresh the published payout."))
+  const objectMessage = error && typeof error === "object" && "message" in error
+    ? String((error as { message?: unknown }).message ?? "")
+    : "";
+  return (error instanceof Error
+    ? error.message
+    : objectMessage || String(error || "Unable to refresh the published payout."))
     .slice(0, 2000);
+}
+
+function targetedClaimScope(input: WorkforcePayoutPublicationRefreshInput): TargetedClaimScope | null {
+  const targeted = input.workforceIds !== undefined || input.periodStart !== undefined || input.periodEnd !== undefined;
+  if (!targeted) return null;
+  const workforceIds = [...new Set((input.workforceIds ?? []).map((id) => id.trim().toLowerCase()).filter(Boolean))];
+  const periodStart = input.periodStart?.trim() ?? "";
+  const periodEnd = input.periodEnd?.trim() ?? "";
+  if (!input.companyId || !workforceIds.length || !periodStart || !periodEnd) {
+    throw new Error("Targeted payout publication refresh requires a company, Workforce IDs, period start, and period end together.");
+  }
+  if (!UUID_PATTERN.test(input.companyId) || workforceIds.some((id) => !UUID_PATTERN.test(id))) {
+    throw new Error("Targeted payout publication refresh requires valid company and Workforce IDs.");
+  }
+  if (workforceIds.length > MAX_TARGETED_WORKFORCE_IDS) {
+    throw new Error(`Targeted payout publication refresh accepts at most ${MAX_TARGETED_WORKFORCE_IDS.toLocaleString("en-US")} Workforce IDs.`);
+  }
+  return { companyId: input.companyId, workforceIds, periodStart, periodEnd };
+}
+
+function isTransientClaimError(error: unknown) {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const code = String(record.code ?? "").toUpperCase();
+  const status = Number(record.status ?? 0);
+  if (TRANSIENT_CLAIM_ERROR_CODES.has(code) || [502, 503, 504, 520].includes(status)) return true;
+  const detail = [record.message, record.details, record.hint, error instanceof Error ? error.message : ""]
+    .filter(Boolean)
+    .join(" ");
+  return /database is not reachable|fetch failed|network|connection (?:closed|reset|refused)|timed? ?out|timeout|statement timeout|canceling statement|deadlock|serialization|temporarily unavailable|\b(?:502|503|504|520)\b/i.test(detail);
+}
+
+function waitForClaimRetry(attempt: number) {
+  return new Promise((resolve) => setTimeout(resolve, CLAIM_RETRY_BASE_DELAY_MS * attempt));
+}
+
+async function claimRefreshJobs(target: TargetedClaimScope | null, input: WorkforcePayoutPublicationRefreshInput) {
+  if (!supabaseAdmin) return { attempts: 0, data: [] as PublicationRefreshJob[], error: null as unknown };
+  let lastError: unknown = null;
+  let attempts = 0;
+  for (let attempt = 1; attempt <= MAX_CLAIM_REQUEST_ATTEMPTS; attempt += 1) {
+    attempts = attempt;
+    try {
+      const claimed = target
+        ? await supabaseAdmin.rpc("workforce_claim_selected_payout_publication_refresh_jobs", {
+          p_limit: 1,
+          p_company_id: target.companyId,
+          p_workforce_ids: target.workforceIds,
+          p_period_start: target.periodStart,
+          p_period_end: target.periodEnd
+        })
+        : await supabaseAdmin.rpc("workforce_claim_payout_publication_refresh_jobs", {
+          p_limit: 1,
+          p_company_id: input.companyId ?? null,
+          p_batch_id: input.batchId ?? null
+        });
+      if (!claimed.error) {
+        return { attempts: attempt, data: (claimed.data ?? []) as PublicationRefreshJob[], error: null as unknown };
+      }
+      lastError = claimed.error;
+    } catch (error) {
+      lastError = error;
+    }
+    if (!isTransientClaimError(lastError) || attempt === MAX_CLAIM_REQUEST_ATTEMPTS) break;
+    await waitForClaimRetry(attempt);
+  }
+  return { attempts, data: [] as PublicationRefreshJob[], error: lastError };
 }
 
 async function failJobs(jobs: PublicationRefreshJob[], error: unknown) {
@@ -135,6 +237,7 @@ function recordFailure(
           ? " The lease was already reclaimed by another worker."
           : "";
   result.warnings.push({
+    code: "job_failed",
     jobIds: jobs.map((job) => job.id),
     message: `${errorMessage(error)}${suffix}`
   });
@@ -160,10 +263,15 @@ async function actorByJob(jobs: PublicationRefreshJob[]) {
 async function surfaceCrashExpiredFailures(
   result: WorkforcePayoutPublicationRefreshResult,
   input: WorkforcePayoutPublicationRefreshInput,
+  target: TargetedClaimScope | null,
   claimStartedAt: string,
   surfacedJobIds: Set<string>
 ) {
   if (!supabaseAdmin) return;
+  // The targeted claim may contain thousands of IDs. Its RPC already scopes
+  // the dead-letter sweep, and the caller's authoritative action fails closed;
+  // avoid an auxiliary REST filter large enough to exceed URL limits.
+  if (target) return;
   let crashExpiredQuery = supabaseAdmin
     .from("workforce_payout_publication_refresh_jobs")
     .select("id,last_error")
@@ -185,11 +293,59 @@ async function surfaceCrashExpiredFailures(
       crashExpiredIds.forEach((jobId) => surfacedJobIds.add(jobId));
       result.failed += crashExpiredIds.length;
       result.warnings.push({
+        code: "job_failed",
         jobIds: crashExpiredIds,
         message: `${crashExpiredIds.length} expired final-attempt refresh job${crashExpiredIds.length === 1 ? " was" : "s were"} moved to failed/dead-letter state before claiming new work. Replay the failed job after resolving the underlying issue.`
       });
     }
   }
+}
+
+async function inspectRemainingRefreshJobs(
+  result: WorkforcePayoutPublicationRefreshResult,
+  input: WorkforcePayoutPublicationRefreshInput,
+  target: TargetedClaimScope | null
+) {
+  if (!supabaseAdmin) return;
+  // Targeted callers can supply thousands of IDs. Avoid turning the health
+  // probe into an oversized PostgREST URL; the caller's authoritative action
+  // still fails closed while any selected refresh job remains unresolved.
+  if (target) return;
+  const now = new Date();
+  const expiredClaimBefore = new Date(now.getTime() - CLAIM_LEASE_TIMEOUT_MS).toISOString();
+  const readyFilter = [
+    `and(status.eq.pending,next_attempt_at.lte.${now.toISOString()})`,
+    `and(status.eq.processing,claimed_at.lt.${expiredClaimBefore})`
+  ].join(",");
+  let readyQuery = supabaseAdmin
+    .from("workforce_payout_publication_refresh_jobs")
+    .select("id", { count: "exact", head: true })
+    .or(readyFilter);
+  let unfinishedQuery = supabaseAdmin
+    .from("workforce_payout_publication_refresh_jobs")
+    .select("id", { count: "exact", head: true })
+    .neq("status", "completed");
+  if (input.companyId) {
+    readyQuery = readyQuery.eq("company_id", input.companyId);
+    unfinishedQuery = unfinishedQuery.eq("company_id", input.companyId);
+  }
+  if (input.batchId) {
+    readyQuery = readyQuery.eq("input_batch_id", input.batchId);
+    unfinishedQuery = unfinishedQuery.eq("input_batch_id", input.batchId);
+  }
+  const [ready, unfinished] = await Promise.all([readyQuery, unfinishedQuery]);
+  if (ready.error || unfinished.error) {
+    const messages = [...new Set([ready.error?.message, unfinished.error?.message].filter(Boolean))];
+    result.warnings.push({
+      code: "queue_status_failed",
+      jobIds: [],
+      message: `Refresh work was processed, but remaining queue health could not be checked: ${messages.join(" ")}`
+    });
+    return;
+  }
+  result.remainingReady = Number(ready.count ?? 0);
+  result.remainingUnfinished = Number(unfinished.count ?? 0);
+  result.queueStatusChecked = true;
 }
 
 async function processClaimedJobs(
@@ -341,18 +497,27 @@ async function processClaimedJobs(
 export async function refreshWorkforcePayoutPublicationJobs(
   input: WorkforcePayoutPublicationRefreshInput = {}
 ): Promise<WorkforcePayoutPublicationRefreshResult> {
+  const target = targetedClaimScope(input);
   const result: WorkforcePayoutPublicationRefreshResult = {
     claimed: 0,
+    claimRetries: 0,
     completed: 0,
     published: 0,
     publicationIds: [],
     retrying: 0,
     failed: 0,
     staleClaims: 0,
+    queueStatusChecked: false,
+    remainingReady: 0,
+    remainingUnfinished: 0,
     warnings: []
   };
   if (!supabaseAdmin) {
-    result.warnings.push({ jobIds: [], message: "Database configuration is unavailable; published payout refresh remains queued." });
+    result.warnings.push({
+      code: "configuration_unavailable",
+      jobIds: [],
+      message: "Database configuration is unavailable; published payout refresh remains queued."
+    });
     return result;
   }
 
@@ -372,22 +537,24 @@ export async function refreshWorkforcePayoutPublicationJobs(
       break;
     }
     const claimStartedAt = new Date().toISOString();
-    const claimed = await supabaseAdmin.rpc("workforce_claim_payout_publication_refresh_jobs", {
-      p_limit: 1,
-      p_company_id: input.companyId ?? null,
-      p_batch_id: input.batchId ?? null
-    });
+    const claimed = await claimRefreshJobs(target, input);
+    result.claimRetries += Math.max(0, claimed.attempts - 1);
     if (claimed.error) {
-      result.warnings.push({ jobIds: [], message: claimed.error.message });
+      result.warnings.push({
+        code: "claim_failed",
+        jobIds: [],
+        message: `Refresh work could not be claimed after ${claimed.attempts} attempt${claimed.attempts === 1 ? "" : "s"}: ${errorMessage(claimed.error)}`
+      });
       break;
     }
     await surfaceCrashExpiredFailures(
       result,
       input,
+      target,
       claimStartedAt,
       surfacedCrashExpiredJobIds
     );
-    const jobs = (claimed.data ?? []) as PublicationRefreshJob[];
+    const jobs = claimed.data;
     if (!jobs.length) break;
     result.claimed += jobs.length;
     await processClaimedJobs(result, jobs, input);
@@ -395,8 +562,18 @@ export async function refreshWorkforcePayoutPublicationJobs(
 
   if (stoppedForDeadline) {
     result.warnings.push({
+      code: "deadline_reached",
       jobIds: [],
       message: "The refresh runtime reserve was reached; remaining published payout updates stay queued for the next worker."
+    });
+  }
+  try {
+    await inspectRemainingRefreshJobs(result, input, target);
+  } catch (error) {
+    result.warnings.push({
+      code: "queue_status_failed",
+      jobIds: [],
+      message: `Refresh work was processed, but remaining queue health could not be checked: ${errorMessage(error)}`
     });
   }
   return result;

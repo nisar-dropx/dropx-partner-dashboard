@@ -46,6 +46,7 @@ export function WorkforcePayoutBankDialog({
   onBusyChange,
   periodEnd,
   periodStart,
+  publicationRefreshCount = 0,
   totalAmount,
   workforceIds
 }: {
@@ -54,6 +55,7 @@ export function WorkforcePayoutBankDialog({
   onBusyChange?: (busy: boolean) => void;
   periodStart: string;
   periodEnd: string;
+  publicationRefreshCount?: number;
   totalAmount: number;
   workforceIds: string[];
 }) {
@@ -135,11 +137,14 @@ export function WorkforcePayoutBankDialog({
       URL.revokeObjectURL(href);
       operationIdRef.current = "";
       setMode(null);
-      router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to create the Workforce bank file.");
     } finally {
       setBusy(false);
+      // A failed authoritative bank preflight can still follow a successful
+      // publication refresh. Reload so repaired rows and any newly surfaced
+      // blocker are never left stale in the table.
+      router.refresh();
     }
   }
 
@@ -192,6 +197,10 @@ export function WorkforcePayoutBankDialog({
               <strong>Payment Processing lock</strong>
               <p>Generating this file marks {workforceIds.length} selected profile{workforceIds.length === 1 ? "" : "s"} as Payment Processing. Their payout inputs and ID mapping cannot change until the bank response is finalized.</p>
             </div>
+            {publicationRefreshCount ? <div className="payout-inline-message warn" role="status">
+              <strong>Refresh before file generation</strong>
+              <p>{publicationRefreshCount} selected profile{publicationRefreshCount === 1 ? " has" : "s have"} a pending publication refresh. The server will refresh the exact selected month first, then recheck the authoritative balance and every payment blocker. File generation stops if any publication remains stale or another blocker is found.</p>
+            </div> : null}
             <div className="form-grid two">
               <label>Debit bank
                 <select className="field" disabled={busy} onChange={(event) => setBankId(event.target.value)} required value={bankId}>
@@ -202,7 +211,7 @@ export function WorkforcePayoutBankDialog({
               <label>File type<input className="field" readOnly value={selectedBank?.fileType?.toLowerCase() === "fedone" ? "Federal Bank - FedOne" : selectedBank ? "Not configured" : "Select bank"} /></label>
               <label>Value date<input className="field" disabled={busy} onChange={(event) => setValueDate(event.target.value)} required type="date" value={valueDate} /></label>
               <label>Selected profiles<input className="field" readOnly value={workforceIds.length.toLocaleString("en-IN")} /></label>
-              <label>Balance in this file<input className="field" readOnly value={`Rs ${Number(totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} /></label>
+              <label>{publicationRefreshCount ? "Preliminary selected balance" : "Balance in this file"}<input className="field" readOnly value={`Rs ${Number(totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} /></label>
             </div>
           </> : <>
             <p className="subtle">Upload the bank Transaction Enquiry Excel file. Paid rows require a UTR/CIN; cancelled rows release the processing lock for a new payment version.</p>
@@ -215,7 +224,7 @@ export function WorkforcePayoutBankDialog({
           <div className="form-actions">
             <button className="button secondary" disabled={busy} onClick={() => setMode(null)} type="button">Cancel</button>
             <button className="button" disabled={busy || (mode === "download" ? !selectedBank || selectedBank.fileType.toLowerCase() !== "fedone" || !valueDate : !responseFile)} onClick={mode === "download" ? createBankFile : finalizeResponse} type="button">
-              {busy ? mode === "download" ? "Creating…" : "Finalizing…" : mode === "download" ? "Create & download" : "Finalize response"}
+              {busy ? mode === "download" ? publicationRefreshCount ? "Refreshing & creating…" : "Creating…" : "Finalizing…" : mode === "download" ? publicationRefreshCount ? "Refresh, create & download" : "Create & download" : "Finalize response"}
             </button>
           </div>
         </div>

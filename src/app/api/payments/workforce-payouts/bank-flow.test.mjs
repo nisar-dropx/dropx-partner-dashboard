@@ -7,6 +7,7 @@ const bankResponseRoute = readFileSync(new URL("./bank-response/route.ts", impor
 const historyRoute = readFileSync(new URL("./payment-history/route.ts", import.meta.url), "utf8");
 const paymentStatusRoute = readFileSync(new URL("./payment-status/route.ts", import.meta.url), "utf8");
 const table = readFileSync(new URL("../../../../components/workforce-payout-table.tsx", import.meta.url), "utf8");
+const bankDialog = readFileSync(new URL("../../../../components/workforce-payout-bank-dialog.tsx", import.meta.url), "utf8");
 const actionSelection = readFileSync(new URL("../../../../lib/workforce-payout-action-selection.ts", import.meta.url), "utf8");
 const historyButton = readFileSync(new URL("../../../../components/workforce-payout-payment-history-button.tsx", import.meta.url), "utf8");
 const page = readFileSync(new URL("../../../../app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
@@ -29,6 +30,24 @@ test("bank-file creation is company-scoped, privileged, transport-bounded and id
   assert.match(bankFileRoute, /p_request_fingerprint: requestFingerprint/);
   assert.match(bankFileRoute, /rpc\("workforce_create_payout_payment_batch"/);
   assert.match(bankFileRoute, /Cache-Control": "private, no-store"/);
+});
+
+test("bank-file creation refreshes only the selected exact-period publications before the authoritative payment gate", () => {
+  assert.match(bankFileRoute, /refreshWorkforcePayoutPublicationJobs\(\{/);
+  assert.match(bankFileRoute, /authorization: access\.authorization/);
+  assert.match(bankFileRoute, /companyId: access\.companyId/);
+  assert.match(bankFileRoute, /workforceIds,[\s\S]*?periodStart,[\s\S]*?periodEnd,/);
+  assert.match(bankFileRoute, /deadlineAtMs: Date\.now\(\) \+ 240_000/);
+  assert.match(bankFileRoute, /limit: 100/);
+  assert.ok(
+    bankFileRoute.indexOf("refreshWorkforcePayoutPublicationJobs({")
+      < bankFileRoute.indexOf('rpc("workforce_create_payout_payment_batch"'),
+    "the selected publication refresh must finish before transactional batch creation"
+  );
+  assert.match(bankFileRoute, /warning\.code !== "queue_status_failed"/);
+  assert.match(bankFileRoute, /blockingRefreshWarning \|\| refreshResult\.failed > 0/);
+  assert.match(bankFileRoute, /No payment batch was created/);
+  assert.match(bankFileRoute, /authoritative second gate/);
 });
 
 test("bank-file re-download is permitted only for a wholly processing immutable batch", () => {
@@ -106,6 +125,19 @@ test("the UI pays only eligible profiles, displays trustworthy ledger balances a
   assert.match(page, /eligibilityMessage: String\(preview\.eligibility_message/);
   assert.match(page, /status: summary\?\.status \?\? row\.status/);
   assert.match(table, /WorkforcePayoutPaymentHistoryButton/);
+});
+
+test("the UI exposes refresh-pending positive balances without treating them as authoritative", () => {
+  assert.match(table, /publicationRefreshPending\(row\) && preliminaryAvailableToPay > 0/);
+  assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
+  assert.match(table, /BANK_PAYMENT_BLOCKED_STATUSES/);
+  assert.match(table, /row\.panAadhaarStatus !== "NOT LINKED"/);
+  assert.match(table, /publicationRefreshCount=\{selectedBankRefreshPendingCount\}/);
+  assert.match(table, /current balance and every payment eligibility rule are checked again/);
+  assert.match(bankDialog, /Refresh before file generation/);
+  assert.match(bankDialog, /File generation stops if any publication remains stale or another blocker is found/);
+  assert.match(bankDialog, /Preliminary selected balance/);
+  assert.match(bankDialog, /finally \{[\s\S]*?router\.refresh\(\)/);
 });
 
 test("new publication snapshots explicitly freeze bank-payment eligibility", () => {

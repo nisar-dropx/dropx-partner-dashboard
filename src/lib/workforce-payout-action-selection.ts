@@ -19,6 +19,55 @@ export type WorkforcePayoutBankSelectionIndexEntry = {
   availableToPay: number;
 };
 
+export type WorkforcePayoutPreliminaryBalanceRow = WorkforcePayoutBankSelectionRow & {
+  netAmount: number;
+  paymentSummary?: {
+    paidAmount: number;
+    processingAmount: number;
+  } | null;
+};
+
+function money(value: number) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+export function buildWorkforcePayoutPreliminaryBalanceIndex<
+  Row extends WorkforcePayoutPreliminaryBalanceRow
+>(rows: readonly Row[]) {
+  const totals = new Map<string, {
+    netAmount: number;
+    paidAmount: number;
+    processingAmount: number;
+    rowIds: Set<string>;
+  }>();
+
+  for (const row of rows) {
+    const workforceId = String(row.reviewSubjectId ?? "").trim();
+    if (!workforceId) continue;
+
+    const current = totals.get(workforceId) ?? {
+      netAmount: 0,
+      paidAmount: 0,
+      processingAmount: 0,
+      rowIds: new Set<string>()
+    };
+    if (!current.rowIds.has(row.id)) {
+      current.rowIds.add(row.id);
+      current.netAmount = money(current.netAmount + (Number(row.netAmount) || 0));
+    }
+    // The server preview is repeated on every location row. Use the largest
+    // ledger value rather than summing duplicates across those rows.
+    current.paidAmount = Math.max(current.paidAmount, Number(row.paymentSummary?.paidAmount ?? 0) || 0);
+    current.processingAmount = Math.max(current.processingAmount, Number(row.paymentSummary?.processingAmount ?? 0) || 0);
+    totals.set(workforceId, current);
+  }
+
+  return new Map([...totals].map(([workforceId, total]) => [
+    workforceId,
+    money(Math.max(0, total.netAmount - total.paidAmount - total.processingAmount))
+  ]));
+}
+
 export function buildWorkforcePayoutBankSelectionIndex<Row extends WorkforcePayoutBankSelectionRow>(
   rows: readonly Row[],
   isEligible: (row: Row) => boolean,

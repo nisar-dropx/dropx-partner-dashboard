@@ -15,6 +15,30 @@ test("publication refresh worker claims bounded durable jobs and recalculates a 
   assert.match(source, /loadWorkforcePayoutRows/);
 });
 
+test("publication refresh worker can claim an exact selected Workforce period without changing canonical claims", () => {
+  assert.match(source, /workforce_claim_selected_payout_publication_refresh_jobs/);
+  assert.match(source, /p_company_id: target\.companyId/);
+  assert.match(source, /p_workforce_ids: target\.workforceIds/);
+  assert.match(source, /p_period_start: target\.periodStart/);
+  assert.match(source, /p_period_end: target\.periodEnd/);
+  assert.match(source, /requires a company, Workforce IDs, period start, and period end together/i);
+  assert.match(source, /MAX_TARGETED_WORKFORCE_IDS\s*=\s*10_000/);
+  assert.match(source, /requires valid company and Workforce IDs/);
+  assert.doesNotMatch(source, /\.in\("workforce_id", target\.workforceIds\)/);
+  assert.match(source, /workforce_claim_payout_publication_refresh_jobs/);
+  assert.match(source, /p_batch_id: input\.batchId \?\? null/);
+});
+
+test("transient claim failures are retried a bounded number of times", () => {
+  assert.match(source, /MAX_CLAIM_REQUEST_ATTEMPTS\s*=\s*3/);
+  assert.match(source, /isTransientClaimError\(lastError\)/);
+  assert.match(source, /attempt === MAX_CLAIM_REQUEST_ATTEMPTS/);
+  assert.match(source, /await waitForClaimRetry\(attempt\)/);
+  assert.match(source, /result\.claimRetries \+= Math\.max\(0, claimed\.attempts - 1\)/);
+  assert.match(source, /code: "claim_failed"/);
+  assert.match(source, /could not be claimed after.*attempt/s);
+});
+
 test("publication refresh jobs are leased just in time within a route deadline", () => {
   assert.match(source, /while \(result\.claimed < maxJobs\)/);
   assert.match(source, /p_limit: 1/);
@@ -61,4 +85,19 @@ test("a protected recurring worker drains publication refresh jobs after request
   assert.match(cronSource, /authorization/);
   assert.match(cronSource, /refreshWorkforcePayoutPublicationJobs\(\{ deadlineAtMs, limit: 100 \}\)/);
   assert.match(vercel, /\/api\/cron\/workforce-payout-publication-refresh/);
+});
+
+test("the worker and cron expose queue health and fail a stalled ready queue observably", () => {
+  assert.match(source, /remainingReady: number/);
+  assert.match(source, /remainingUnfinished: number/);
+  assert.match(source, /queueStatusChecked: boolean/);
+  assert.match(source, /if \(target\) return/);
+  assert.match(source, /status\.eq\.pending,next_attempt_at\.lte/);
+  assert.match(source, /status\.eq\.processing,claimed_at\.lt/);
+  assert.match(source, /code: "queue_status_failed"/);
+  assert.match(cronSource, /result\.remainingReady > 0 && result\.completed === 0/);
+  assert.match(cronSource, /status: degraded \? 503 : 200/);
+  assert.match(cronSource, /console\.warn\(JSON\.stringify\(log\)\)/);
+  assert.match(cronSource, /console\.info\(JSON\.stringify\(log\)\)/);
+  assert.match(cronSource, /workforce_payout_publication_refresh_failed/);
 });

@@ -5,6 +5,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildWorkforceFedOneWorkbook } from "@/lib/workforce-payout-bank-file";
+import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -235,7 +236,39 @@ export async function POST(request: Request) {
     if (!validDate(valueDate)) return errorResponse("Choose a valid bank value date.", 400);
     if (!workforceIds) return errorResponse("Select at least one unique Workforce profile.", 400);
 
+    let refreshResult;
+    try {
+      refreshResult = await refreshWorkforcePayoutPublicationJobs({
+        authorization: access.authorization,
+        companyId: access.companyId,
+        workforceIds,
+        periodStart,
+        periodEnd,
+        deadlineAtMs: Date.now() + 240_000,
+        // One Workforce profile can own several station refresh jobs.
+        limit: 100
+      });
+    } catch (error) {
+      return errorResponse(
+        `The selected payout publications could not be refreshed before bank-file generation. No payment batch was created. ${error instanceof Error ? error.message : "Retry after the publication refresh worker is available."}`,
+        409
+      );
+    }
+    const blockingRefreshWarning = refreshResult.warnings.find((warning) => warning.code !== "queue_status_failed");
+    if (blockingRefreshWarning || refreshResult.failed > 0 || refreshResult.retrying > 0 || refreshResult.staleClaims > 0) {
+      const detail = blockingRefreshWarning?.message
+        ?? "One or more selected publication refreshes did not complete.";
+      return errorResponse(
+        `The selected payout publications are not ready for bank-file generation. No payment batch was created. ${detail}`,
+        409
+      );
+    }
+
     const requestFingerprint = createHash("sha256").update(JSON.stringify({ bankId, periodStart, periodEnd, valueDate, workforceIds })).digest("hex");
+    // This transactional RPC is the authoritative second gate. Queue counts
+    // above are diagnostic only: this gate recalculates every selected payment
+    // candidate under lock and rejects unfinished or stale publications, as
+    // well as any non-refresh payment blocker.
     const created = await supabaseAdmin!.rpc("workforce_create_payout_payment_batch", {
       p_company_id: access.companyId,
       p_actor_user_id: access.authorization.userId,

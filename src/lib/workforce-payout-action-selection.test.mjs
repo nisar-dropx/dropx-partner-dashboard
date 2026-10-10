@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   buildWorkforcePayoutBankSelectionIndex,
+  buildWorkforcePayoutPreliminaryBalanceIndex,
   chunkPayoutRowsBySubject,
   duplicateAdvanceWorkforceIds,
   resolveWorkforcePayoutBankSelection,
@@ -116,6 +117,40 @@ test("large bank selections use one indexed row pass and keep one payment amount
   assert.equal(partialSelection.workforceIds.length, 5_999);
 });
 
+test("pending-publication bank selection uses a profile-level preliminary balance without duplicating ledger totals", () => {
+  const balances = buildWorkforcePayoutPreliminaryBalanceIndex([
+    {
+      id: "worker-1|station-a",
+      reviewSubjectId: "worker-1",
+      netAmount: 800,
+      paymentSummary: { paidAmount: 250, processingAmount: 0 }
+    },
+    {
+      id: "worker-1|station-b",
+      reviewSubjectId: "worker-1",
+      netAmount: 450.25,
+      paymentSummary: { paidAmount: 250, processingAmount: 0 }
+    },
+    {
+      id: "worker-1|station-b",
+      reviewSubjectId: "worker-1",
+      netAmount: 450.25,
+      paymentSummary: { paidAmount: 250, processingAmount: 0 }
+    },
+    {
+      id: "worker-2|station-a",
+      reviewSubjectId: "worker-2",
+      netAmount: 100,
+      paymentSummary: { paidAmount: 25, processingAmount: 75 }
+    },
+    { id: "unmapped", reviewSubjectId: null, netAmount: 9_999 }
+  ]);
+
+  assert.equal(balances.get("worker-1"), 1_000.25);
+  assert.equal(balances.get("worker-2"), 0);
+  assert.equal(balances.has(""), false);
+});
+
 test("payout UI separates one-row advance recovery from complete-location notification selection", () => {
   assert.match(payoutTable, /import\s*\{\s*isWorkforcePayoutDisplayPublishable\s*\}\s*from\s*["']@\/lib\/workforce-payout-publication-eligibility["']/);
   assert.match(
@@ -134,9 +169,19 @@ test("payout UI separates one-row advance recovery from complete-location notifi
   assert.match(payoutTable, /chunkPayoutRowsBySubject\(reviewSelectedRows,\s*MAX_WORKFORCE_PAYOUT_NOTIFICATION_SELECTION\)/);
   assert.match(payoutTable, /items:\s*chunk\.map/);
   assert.doesNotMatch(payoutTable, /bankWorkforceIds[\s\S]{0,400}\.slice\(0,\s*50\)/);
-  assert.match(payoutTable, /buildWorkforcePayoutBankSelectionIndex\(\s*rows,\s*canCreateBankPayment/);
+  assert.match(payoutTable, /buildWorkforcePayoutBankSelectionIndex\(\s*rows,\s*\(row\) => bankActionableIds\.has\(row\.id\)/);
   assert.match(payoutTable, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected,\s*selectedBankWorkforceIds/);
   assert.doesNotMatch(payoutTable, /const bankWorkforceIds[\s\S]{0,500}rows\.(?:filter|find)\(/);
+});
+
+test("publication-refresh-pending rows remain explicit preliminary bank candidates", () => {
+  assert.match(payoutTable, /eligibilityCode\?\.trim\(\)\.toLowerCase\(\) === "publication_refresh_pending"/);
+  assert.match(payoutTable, /publicationRefreshPending\(row\) && preliminaryAvailableToPay > 0/);
+  assert.match(payoutTable, /row\.panAadhaarStatus !== "NOT LINKED"/);
+  assert.match(payoutTable, /BANK_PAYMENT_BLOCKED_STATUSES\.has\(visibleStatus\)/);
+  assert.match(payoutTable, /bankActionableIds\.has\(row\.id\)/);
+  assert.match(payoutTable, /Refresh before bank file · eligibility rechecked/);
+  assert.match(payoutTable, /No stale publication will be paid/);
 });
 
 test("published and mapping-unlocked payouts remain available for manual input editing", () => {

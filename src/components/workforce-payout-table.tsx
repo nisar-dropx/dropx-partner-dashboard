@@ -13,6 +13,7 @@ import {
 } from "@/lib/workforce-payout-filters";
 import {
   buildWorkforcePayoutBankSelectionIndex,
+  buildWorkforcePayoutPreliminaryBalanceIndex,
   chunkPayoutRowsBySubject,
   duplicateAdvanceWorkforceIds,
   resolveWorkforcePayoutBankSelection,
@@ -113,6 +114,7 @@ function workDaysDisplay(value: number, source: string) { return workDaysValue(v
 const PAYOUT_ACTION_REQUEST_CHUNK_SIZE = 50;
 const ADVANCE_ACTION_REQUEST_CHUNK_SIZE = 1000;
 const ADVANCE_DEDUCTION_LOCKED_STATUSES = new Set(["approved", "paid", "finalized", "finalised"]);
+const BANK_PAYMENT_BLOCKED_STATUSES = new Set(["payment processing", "payment on hold", "pan not linked"]);
 function canSendPayoutForReview(row: WorkforcePayoutRow, audience: "workforce" | "helpers") {
   if (row.paymentSummary?.status === "Payment Processing") return false;
   return Boolean(row.reviewSubjectId && row.locationId && row.reviewToken && row.paymentDetailsAvailable)
@@ -130,13 +132,22 @@ function canManuallyEditPayout(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.dropxId)
     && row.paymentSummary?.status !== "Payment Processing";
 }
-function canCreateBankPayment(row: WorkforcePayoutRow) {
+function publicationRefreshPending(row: WorkforcePayoutRow) {
+  return row.paymentSummary?.eligible === false
+    && row.paymentSummary.eligibilityCode?.trim().toLowerCase() === "publication_refresh_pending";
+}
+function canCreateBankPayment(row: WorkforcePayoutRow, preliminaryAvailableToPay = 0) {
+  const visibleStatus = String(row.paymentSummary?.status ?? row.status).trim().toLowerCase();
+  const hasAuthoritativeCandidate = row.publicationPaymentReady === true
+    && row.paymentSummary?.eligible === true
+    && Number(row.paymentSummary?.availableToPay ?? 0) > 0;
+  const canRefreshCandidate = publicationRefreshPending(row) && preliminaryAvailableToPay > 0;
   return Boolean(row.reviewSubjectId && row.paymentDetailsAvailable)
     && row.publicationLockState === "locked"
-    && row.publicationPaymentReady === true
-    && row.paymentSummary?.eligible === true
     && row.paymentSummary?.status !== "Payment Processing"
-    && Number(row.paymentSummary?.availableToPay ?? 0) > 0;
+    && !BANK_PAYMENT_BLOCKED_STATUSES.has(visibleStatus)
+    && row.panAadhaarStatus !== "NOT LINKED"
+    && (hasAuthoritativeCandidate || canRefreshCandidate);
 }
 function missingPayoutNotificationLocations(allRows: WorkforcePayoutRow[], selectedRows: WorkforcePayoutRow[]) {
   const selectedLocations = new Set(selectedRows.map((row) => `${String(row.reviewSubjectId ?? "")}|${String(row.locationId ?? "")}`));
@@ -325,6 +336,16 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status || "-")).values()).sort(), [rows]);
   const methodOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.paymentMethodBreakdown.map((item) => item.label)))).sort((left, right) => left.localeCompare(right)), [rows]);
   const filtered = useMemo(() => rows.filter((row) => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, designations, providers, methods, mappingStatuses, statuses })), [rows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses]);
+  const preliminaryBankBalances = useMemo(
+    () => buildWorkforcePayoutPreliminaryBalanceIndex(rows),
+    [rows]
+  );
+  const bankActionableIds = useMemo(() => new Set(rows
+    .filter((row) => canCreateBankPayment(
+      row,
+      preliminaryBankBalances.get(String(row.reviewSubjectId ?? "").trim()) ?? 0
+    ))
+    .map((row) => row.id)), [preliminaryBankBalances, rows]);
   const pageSize = size === "all" ? Math.max(filtered.length, 1) : Number(size);
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
@@ -333,7 +354,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     || (canDeductAdvances && canDeductAdvanceFromPayout(row))
     || (canManuallyEdit && canManuallyEditPayout(row))
     || (canManageLocks && row.publicationLockState === "locked" && row.paymentSummary?.status !== "Payment Processing")
-    || (canProcessPayments && canCreateBankPayment(row))), [audience, canDeductAdvances, canManageLocks, canManuallyEdit, canProcessPayments, canPublish, canReviewHelpers, filtered]);
+    || (canProcessPayments && bankActionableIds.has(row.id))), [audience, bankActionableIds, canDeductAdvances, canManageLocks, canManuallyEdit, canProcessPayments, canPublish, canReviewHelpers, filtered]);
   const selectableIds = useMemo(() => new Set(selectable.map((row) => row.id)), [selectable]);
   const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
   const reviewSelectedRows = useMemo(() => selectedRows.filter((row) => canSendPayoutForReview(row, audience)), [audience, selectedRows]);
@@ -341,13 +362,15 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const manualSelectedRows = useMemo(() => selectedRows.filter(canManuallyEditPayout), [selectedRows]);
   const bankSelectionIndex = useMemo(() => buildWorkforcePayoutBankSelectionIndex(
     rows,
-    canCreateBankPayment,
-    (row) => Number(row.paymentSummary?.availableToPay ?? 0)
-  ), [rows]);
+    (row) => bankActionableIds.has(row.id),
+    (row) => publicationRefreshPending(row)
+      ? preliminaryBankBalances.get(String(row.reviewSubjectId ?? "").trim()) ?? 0
+      : Number(row.paymentSummary?.availableToPay ?? 0)
+  ), [bankActionableIds, preliminaryBankBalances, rows]);
   const selectedBankWorkforceIds = useMemo(() => new Set(selectedRows
-    .filter(canCreateBankPayment)
+    .filter((row) => bankActionableIds.has(row.id))
     .flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId.trim()] : [])
-    .filter(Boolean)), [selectedRows]);
+    .filter(Boolean)), [bankActionableIds, selectedRows]);
   const bankSelection = useMemo(() => resolveWorkforcePayoutBankSelection(
     bankSelectionIndex,
     selected,
@@ -355,6 +378,12 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   ), [bankSelectionIndex, selected, selectedBankWorkforceIds]);
   const bankWorkforceIds = bankSelection.workforceIds;
   const bankTotalAmount = bankSelection.totalAmount;
+  const bankRefreshPendingWorkforceIds = useMemo(() => new Set(rows
+    .filter((row) => bankActionableIds.has(row.id) && publicationRefreshPending(row))
+    .flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId.trim()] : [])), [bankActionableIds, rows]);
+  const selectedBankRefreshPendingCount = bankWorkforceIds
+    .filter((workforceId) => bankRefreshPendingWorkforceIds.has(workforceId))
+    .length;
   const hasBankSelectionConflict = selectedBankWorkforceIds.size > bankWorkforceIds.length;
   const mappingUnlockWorkforceIds = useMemo(
     () => workforcePayoutMappingLockSelectionIds(selectedRows, "locked"),
@@ -763,7 +792,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         {canManuallyEdit ? <WorkforcePayoutManualEditor buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status }))} toDate={periodEnd} /> : null}
         {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
         {canEdit ? <button className="button" disabled={(audience === "workforce" && !canPublish) || !reviewSelectedRows.length || actionBusy} onClick={sendNotification} title={audience === "workforce" && !canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : audience === "workforce" && !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for ${audience === "workforce" ? "notification" : "review"}; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? audience === "workforce" ? "Queuing…" : "Sending…" : `${audience === "workforce" ? "Send Notification" : "Send for review"}${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
-        {canProcessPayments ? <WorkforcePayoutBankDialog banks={banks} disabled={actionBusy && !bankBusy} onBusyChange={setBankBusy} periodEnd={periodEnd} periodStart={periodStart} totalAmount={bankTotalAmount} workforceIds={bankWorkforceIds} /> : null}
+        {canProcessPayments ? <WorkforcePayoutBankDialog banks={banks} disabled={actionBusy && !bankBusy} onBusyChange={setBankBusy} periodEnd={periodEnd} periodStart={periodStart} publicationRefreshCount={selectedBankRefreshPendingCount} totalAmount={bankTotalAmount} workforceIds={bankWorkforceIds} /> : null}
         <button className="button secondary" type="button" onClick={exportRows}>Export full CSV</button>
       </div>
     </div>
@@ -774,6 +803,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
     {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row, so the extra row may be required for publication.</div> : null}
     {hasBankSelectionConflict ? <div aria-live="polite" className="payout-inline-message warn">Select every published location row for each DropX ID before creating its bank payment. The bank file pays the profile&apos;s complete monthly balance, never one location in isolation.</div> : null}
+    {selectedBankRefreshPendingCount ? <div aria-live="polite" className="payout-inline-message warn"><strong>{selectedBankRefreshPendingCount} selected profile{selectedBankRefreshPendingCount === 1 ? " has" : "s have"} a publication refresh pending.</strong> The refresh runs before bank-file generation, then current balance and every payment eligibility rule are checked again. No stale publication will be paid.</div> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
       <PayoutMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />
@@ -814,9 +844,15 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             const paymentEligibilityLabel = row.paymentSummary
               ? workforcePayoutPaymentEligibilityLabel(row.paymentSummary)
               : null;
+            const preliminaryBankBalance = preliminaryBankBalances.get(String(row.reviewSubjectId ?? "").trim()) ?? 0;
+            const refreshBeforeBankFile = canProcessPayments
+              && bankActionableIds.has(row.id)
+              && publicationRefreshPending(row);
             const hasRowAdvanceSelectionConflict = Boolean(row.reviewSubjectId && advanceSelectionConflictIds.has(row.reviewSubjectId));
             const selectionTitle = hasRowAdvanceSelectionConflict
                 ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all publishable location rows."
+                : refreshBeforeBankFile
+                  ? "Available for bank-file action. The publication refreshes first, then current balance and payment eligibility are checked again."
                 : !canSendPayoutForReview(row, audience) && canDeductAdvances && canDeductAdvanceFromPayout(row)
                   ? canManuallyEdit && canManuallyEditPayout(row)
                     ? "Available for advance deduction or manual payout input editing."
@@ -840,7 +876,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                 <td className="work-days-cell">{row.paymentDetailsAvailable ? <><strong>{workDaysDisplay(row.workDays, row.workDaysSource)}</strong><small>{row.workDaysSource}</small></> : null}</td>
                 <td className="payout-money">{row.paymentDetailsAvailable ? <strong>{money(row.grossPayment)}</strong> : null}</td>
                 <td className="negative payout-money">{row.paymentDetailsAvailable ? row.deductions ? `- ${money(row.deductions)}` : "—" : null}</td>
-                <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <><strong>{money(row.netAmount)}</strong>{row.paymentSummary ? <small className="payout-payment-balance" title={row.paymentSummary.eligibilityMessage ?? undefined}>{row.paymentSummary.processingAmount > 0 ? <span>Frozen profile net {exactMoney(row.paymentSummary.currentNetAmount)}</span> : null}<span>Paid {exactMoney(row.paymentSummary.paidAmount)}</span>{row.paymentSummary.processingAmount > 0 ? <span>Processing {exactMoney(row.paymentSummary.processingAmount)}</span> : null}{paymentBalanceAvailable ? <span>Balance payable {exactMoney(row.paymentSummary.balancePayable)}</span> : <span>Balance payable —</span>}{paymentEligibilityLabel ? <span className="negative">{paymentEligibilityLabel}</span> : null}{row.paymentSummary.overpaidAmount > 0 ? <span className="negative">Overpaid {exactMoney(row.paymentSummary.overpaidAmount)}</span> : null}</small> : null}</> : null}</td>
+                <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <><strong>{money(row.netAmount)}</strong>{row.paymentSummary ? <small className="payout-payment-balance" title={row.paymentSummary.eligibilityMessage ?? undefined}>{row.paymentSummary.processingAmount > 0 ? <span>Frozen profile net {exactMoney(row.paymentSummary.currentNetAmount)}</span> : null}<span>Paid {exactMoney(row.paymentSummary.paidAmount)}</span>{row.paymentSummary.processingAmount > 0 ? <span>Processing {exactMoney(row.paymentSummary.processingAmount)}</span> : null}{refreshBeforeBankFile ? <span>Preliminary balance {exactMoney(preliminaryBankBalance)}</span> : paymentBalanceAvailable ? <span>Balance payable {exactMoney(row.paymentSummary.balancePayable)}</span> : <span>Balance payable —</span>}{refreshBeforeBankFile ? <span>Refresh before bank file · eligibility rechecked</span> : paymentEligibilityLabel ? <span className="negative">{paymentEligibilityLabel}</span> : null}{row.paymentSummary.overpaidAmount > 0 ? <span className="negative">Overpaid {exactMoney(row.paymentSummary.overpaidAmount)}</span> : null}</small> : null}</> : null}</td>
                 <td><div className="payout-status-stack">{reviewDays.length > 0 && <span className="status-pill warn">{reviewDays.length} low-delivery days</span>}<span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span>{row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
                 <td><div className="payout-detail-actions">{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}<PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId || row.providerMemberId || row.name} · ${row.name}`} />{canProcessPayments && row.reviewSubjectId && row.paymentSummary ? <WorkforcePayoutPaymentHistoryButton canManageStatus={canProcessPayments} historyCount={row.paymentSummary.historyCount} periodEnd={periodEnd} periodStart={periodStart} subjectLabel={`${row.dropxId || row.name} · ${row.name}`} workforceId={row.reviewSubjectId} /> : null}</div></td>
               </tr>,

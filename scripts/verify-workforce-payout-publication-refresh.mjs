@@ -16,6 +16,10 @@ const hardeningMigration = readFileSync(
   new URL("../supabase/migrations/20261009050050_workforce_payout_publication_refresh_hardening.sql", import.meta.url),
   "utf8"
 ).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const selectedClaimMigration = readFileSync(
+  new URL("../supabase/migrations/20261010022326_claim_selected_workforce_payout_publication_refresh_jobs.sql", import.meta.url),
+  "utf8"
+).replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 
 assert.match(migration, /security definer\s+set search_path = ''/i);
 assert.match(migration, /for update of job skip locked/i);
@@ -48,6 +52,15 @@ assert.match(hardeningMigration, /status in \('pending', 'processing', 'complete
 assert.match(hardeningMigration, /unresolved publication refresh/i);
 assert.match(hardeningMigration, /submitted_by := old\.submitted_by/i);
 assert.match(hardeningMigration, /input_values_cleared/i);
+assert.match(selectedClaimMigration, /security definer\s+set search_path = ''/i);
+assert.match(selectedClaimMigration, /job\.company_id = p_company_id/i);
+assert.match(selectedClaimMigration, /job\.workforce_id = any\(p_workforce_ids\)/i);
+assert.match(selectedClaimMigration, /job\.period_start = p_period_start[\s\S]*job\.period_end = p_period_end/i);
+assert.match(selectedClaimMigration, /claimed_at < clock_timestamp\(\) - interval '10 minutes'/i);
+assert.match(selectedClaimMigration, /predecessor\.status in \('pending', 'processing'\)/i);
+assert.match(selectedClaimMigration, /target_batch[\s\S]*for update of job skip locked/i);
+assert.match(selectedClaimMigration, /cardinality\(p_workforce_ids\) > 10000/i);
+assert.match(selectedClaimMigration, /count\(distinct supplied\.workforce_id\)/i);
 
 const db = new PGlite();
 
@@ -264,6 +277,7 @@ try {
     ${migration}
     ${stationFkIndexMigration}
     ${hardeningMigration}
+    ${selectedClaimMigration}
   `);
 
   const company = randomUUID();
@@ -1264,6 +1278,345 @@ try {
   await db.exec("reset role; rollback");
   await db.exec("reset role");
 
+  await db.exec("set role service_role");
+  await assert.rejects(
+    db.query(
+      `select *
+       from public.workforce_claim_selected_payout_publication_refresh_jobs(
+         1,$1,array[$2,$2]::uuid[],$3,$4
+       )`,
+      [company, workforce, periodStart, periodEnd]
+    ),
+    /only once/i,
+    "targeted claims reject duplicate Workforce IDs"
+  );
+  await assert.rejects(
+    db.query(
+      `select *
+       from public.workforce_claim_selected_payout_publication_refresh_jobs(
+         1,$1,array[$2]::uuid[],$3,'2026-09-29'
+       )`,
+      [company, workforce, periodStart]
+    ),
+    /complete calendar month/i,
+    "targeted claims require an exact payout month"
+  );
+  const broadSelection = `{${Array.from({ length: 101 }, () => randomUUID()).join(",")}}`;
+  const broadSelectionClaim = await db.query(
+    `select *
+     from public.workforce_claim_selected_payout_publication_refresh_jobs(
+       1,$1,$2::uuid[],$3,$4
+     )`,
+    [company, broadSelection, periodStart, periodEnd]
+  );
+  assert.equal(
+    broadSelectionClaim.rows.length,
+    0,
+    "the Workforce scope is not incorrectly capped at one 100-job claim batch"
+  );
+
+  const selectedWorkforceA = randomUUID();
+  const selectedWorkforceB = randomUUID();
+  const selectedWorkforceNewer = randomUUID();
+  const unselectedWorkforce = randomUUID();
+  const foreignCompany = randomUUID();
+  const foreignStation = randomUUID();
+  const foreignWorkforce = randomUUID();
+  const targetedOldBatch = randomUUID();
+  const targetedNewBatch = randomUUID();
+  const unselectedBatch = randomUUID();
+  const otherPeriodBatch = randomUUID();
+  const foreignBatch = randomUUID();
+  const predecessorJob = randomUUID();
+  const successorJob = randomUUID();
+  const sameBatchJob = randomUUID();
+  const staleReclaimJob = randomUUID();
+  const staleReclaimToken = randomUUID();
+  const finalAttemptJob = randomUUID();
+  const finalAttemptToken = randomUUID();
+  const newerBatchJob = randomUUID();
+  const unselectedFinalJob = randomUUID();
+  const unselectedFinalToken = randomUUID();
+  const otherPeriodJob = randomUUID();
+  const foreignJob = randomUUID();
+  const otherPeriodStart = "2026-10-01";
+  const otherPeriodEnd = "2026-10-31";
+  const targetClock = Date.now();
+  const atMinutes = (minutes) => new Date(targetClock + minutes * 60_000).toISOString();
+
+  await db.exec("reset role; begin");
+  await db.query("insert into public.companies(id) values ($1)", [foreignCompany]);
+  await db.query(
+    "insert into public.stations(id,company_id,station_code) values ($1,$2,'FOREIGN')",
+    [foreignStation, foreignCompany]
+  );
+  await db.query(
+    `insert into public.workforce(id,company_id) values
+      ($1,$6),($2,$6),($3,$6),($4,$6),($5,$7)`,
+    [
+      selectedWorkforceA,
+      selectedWorkforceB,
+      selectedWorkforceNewer,
+      unselectedWorkforce,
+      foreignWorkforce,
+      company,
+      foreignCompany
+    ]
+  );
+  await db.query(
+    `insert into public.workforce_payout_import_batches(
+      id,company_id,effective_from,effective_to,file_name,file_sha256,status,
+      row_count,created_by,committed_at
+    ) values
+      ($1,$6,$8,$9,'targeted-old.csv',$10,'committed',4,$11,clock_timestamp()),
+      ($2,$6,$8,$9,'targeted-new.csv',$10,'committed',2,$11,clock_timestamp()),
+      ($3,$6,$8,$9,'targeted-unselected.csv',$10,'committed',1,$11,clock_timestamp()),
+      ($4,$6,$12,$13,'targeted-other-period.csv',$10,'committed',1,$11,clock_timestamp()),
+      ($5,$7,$8,$9,'targeted-foreign.csv',$10,'committed',1,$11,clock_timestamp())`,
+    [
+      targetedOldBatch,
+      targetedNewBatch,
+      unselectedBatch,
+      otherPeriodBatch,
+      foreignBatch,
+      company,
+      foreignCompany,
+      periodStart,
+      periodEnd,
+      "d".repeat(64),
+      actor,
+      otherPeriodStart,
+      otherPeriodEnd
+    ]
+  );
+
+  const insertPendingTargetJob = async ({
+    id,
+    companyId = company,
+    batchId,
+    workforceId,
+    stationId = station,
+    startsOn = periodStart,
+    endsOn = periodEnd,
+    nextAttemptAt,
+    createdAt
+  }) => db.query(
+    `insert into public.workforce_payout_publication_refresh_jobs(
+      id,company_id,input_batch_id,workforce_id,station_id,period_start,period_end,
+      base_publication_id,base_revision,requested_by,next_attempt_at,created_at,updated_at
+    ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
+    [
+      id,
+      companyId,
+      batchId,
+      workforceId,
+      stationId,
+      startsOn,
+      endsOn,
+      currentPublication.id,
+      currentPublication.revision,
+      actor,
+      nextAttemptAt,
+      createdAt
+    ]
+  );
+  const insertProcessingTargetJob = async ({
+    id,
+    batchId,
+    workforceId,
+    stationId,
+    attempts,
+    token,
+    claimedAt,
+    createdAt
+  }) => db.query(
+    `insert into public.workforce_payout_publication_refresh_jobs(
+      id,company_id,input_batch_id,workforce_id,station_id,period_start,period_end,
+      base_publication_id,base_revision,requested_by,status,claim_attempts,max_attempts,
+      claim_token,claimed_at,created_at,updated_at
+    ) values (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'processing',$11,5,$12,$13,$14,$14
+    )`,
+    [
+      id,
+      company,
+      batchId,
+      workforceId,
+      stationId,
+      periodStart,
+      periodEnd,
+      currentPublication.id,
+      currentPublication.revision,
+      actor,
+      attempts,
+      token,
+      claimedAt,
+      createdAt
+    ]
+  );
+
+  await insertPendingTargetJob({
+    id: predecessorJob,
+    batchId: targetedOldBatch,
+    workforceId: selectedWorkforceA,
+    nextAttemptAt: atMinutes(60),
+    createdAt: atMinutes(-6)
+  });
+  await insertPendingTargetJob({
+    id: sameBatchJob,
+    batchId: targetedOldBatch,
+    workforceId: selectedWorkforceB,
+    nextAttemptAt: atMinutes(-1),
+    createdAt: atMinutes(-5)
+  });
+  await insertProcessingTargetJob({
+    id: staleReclaimJob,
+    batchId: targetedOldBatch,
+    workforceId: selectedWorkforceB,
+    stationId: otherStation,
+    attempts: 1,
+    token: staleReclaimToken,
+    claimedAt: atMinutes(-11),
+    createdAt: atMinutes(-4)
+  });
+  await insertProcessingTargetJob({
+    id: finalAttemptJob,
+    batchId: targetedOldBatch,
+    workforceId: selectedWorkforceA,
+    stationId: otherStation,
+    attempts: 5,
+    token: finalAttemptToken,
+    claimedAt: atMinutes(-11),
+    createdAt: atMinutes(-3)
+  });
+  await insertPendingTargetJob({
+    id: successorJob,
+    batchId: targetedNewBatch,
+    workforceId: selectedWorkforceA,
+    nextAttemptAt: atMinutes(-1),
+    createdAt: atMinutes(-2)
+  });
+  await insertPendingTargetJob({
+    id: newerBatchJob,
+    batchId: targetedNewBatch,
+    workforceId: selectedWorkforceNewer,
+    nextAttemptAt: atMinutes(-1),
+    createdAt: atMinutes(-1)
+  });
+  await insertProcessingTargetJob({
+    id: unselectedFinalJob,
+    batchId: unselectedBatch,
+    workforceId: unselectedWorkforce,
+    stationId: station,
+    attempts: 5,
+    token: unselectedFinalToken,
+    claimedAt: atMinutes(-11),
+    createdAt: atMinutes(-10)
+  });
+  await insertPendingTargetJob({
+    id: otherPeriodJob,
+    batchId: otherPeriodBatch,
+    workforceId: selectedWorkforceA,
+    startsOn: otherPeriodStart,
+    endsOn: otherPeriodEnd,
+    nextAttemptAt: atMinutes(-1),
+    createdAt: atMinutes(-20)
+  });
+  await insertPendingTargetJob({
+    id: foreignJob,
+    companyId: foreignCompany,
+    batchId: foreignBatch,
+    workforceId: foreignWorkforce,
+    stationId: foreignStation,
+    nextAttemptAt: atMinutes(-1),
+    createdAt: atMinutes(-30)
+  });
+
+  await db.exec("set role service_role");
+  const predecessorBlockedClaim = await db.query(
+    `select *
+     from public.workforce_claim_selected_payout_publication_refresh_jobs(
+       100,$1,array[$2]::uuid[],$3,$4
+     )`,
+    [company, selectedWorkforceA, periodStart, periodEnd]
+  );
+  assert.equal(
+    predecessorBlockedClaim.rows.length,
+    0,
+    "a due selected generation cannot leapfrog an older delayed predecessor"
+  );
+  const scopedDeadLetter = (
+    await db.query(
+      "select status,claim_token,claimed_at,failed_at from public.workforce_payout_publication_refresh_jobs where id=$1",
+      [finalAttemptJob]
+    )
+  ).rows[0];
+  assert.equal(scopedDeadLetter.status, "failed");
+  assert.equal(scopedDeadLetter.claim_token, null);
+  assert.equal(scopedDeadLetter.claimed_at, null);
+  assert.ok(scopedDeadLetter.failed_at);
+  const unselectedLease = (
+    await db.query(
+      "select status,claim_attempts,claim_token from public.workforce_payout_publication_refresh_jobs where id=$1",
+      [unselectedFinalJob]
+    )
+  ).rows[0];
+  assert.deepEqual(
+    unselectedLease,
+    { status: "processing", claim_attempts: 5, claim_token: unselectedFinalToken },
+    "the dead-letter sweep cannot mutate an unselected Workforce lease"
+  );
+
+  await db.exec("reset role");
+  await db.query(
+    "update public.workforce_payout_publication_refresh_jobs set next_attempt_at=clock_timestamp() where id=$1",
+    [predecessorJob]
+  );
+  await db.exec("set role service_role");
+  const selectedBatchClaim = await db.query(
+    `select *
+     from public.workforce_claim_selected_payout_publication_refresh_jobs(
+       100,$1,array[$2,$3,$4]::uuid[],$5,$6
+     )`,
+    [
+      company,
+      selectedWorkforceA,
+      selectedWorkforceB,
+      selectedWorkforceNewer,
+      periodStart,
+      periodEnd
+    ]
+  );
+  assert.deepEqual(
+    selectedBatchClaim.rows.map((row) => row.id).sort(),
+    [predecessorJob, sameBatchJob, staleReclaimJob].sort(),
+    "the targeted claim leases only eligible identities from the oldest selected batch"
+  );
+  assert.deepEqual(
+    [...new Set(selectedBatchClaim.rows.map((row) => row.input_batch_id))],
+    [targetedOldBatch]
+  );
+  const reclaimedLease = selectedBatchClaim.rows.find((row) => row.id === staleReclaimJob);
+  assert.equal(reclaimedLease.claim_attempts, 2);
+  assert.notEqual(reclaimedLease.claim_token, staleReclaimToken);
+
+  const untouchedTargetRows = await db.query(
+    `select id,status,claim_attempts
+     from public.workforce_payout_publication_refresh_jobs
+     where id in ($1,$2,$3,$4)
+     order by id`,
+    [successorJob, newerBatchJob, otherPeriodJob, foreignJob]
+  );
+  assert.deepEqual(
+    untouchedTargetRows.rows.map((row) => [row.id, row.status, row.claim_attempts]),
+    [successorJob, newerBatchJob, otherPeriodJob, foreignJob]
+      .sort()
+      .map((id) => [id, "pending", 0]),
+    "newer-batch, other-period, and other-company jobs remain untouched"
+  );
+  await db.exec("reset role; rollback");
+  await db.exec("reset role");
+
   const coveredFailedBatch = randomUUID();
   const successfulNewerBatch = randomUUID();
   const blockingNewerBatch = randomUUID();
@@ -1410,6 +1763,16 @@ try {
     );
     await assert.rejects(
       db.query(
+        `select *
+         from public.workforce_claim_selected_payout_publication_refresh_jobs(
+           1,$1,array[$2]::uuid[],$3,$4
+         )`,
+        [company, workforce, periodStart, periodEnd]
+      ),
+      /permission denied/i
+    );
+    await assert.rejects(
+      db.query(
         `select public.workforce_apply_payout_publication_input_revisions(
           $1,$2,$3,'hash-v2',$4,'[]'::jsonb
         )`,
@@ -1446,6 +1809,10 @@ try {
       has_function_privilege('anon',
         'public.workforce_claim_payout_publication_refresh_jobs(integer,uuid,uuid)', 'execute') as anon_claim,
       has_function_privilege('service_role',
+        'public.workforce_claim_selected_payout_publication_refresh_jobs(integer,uuid,uuid[],date,date)', 'execute') as service_selected_claim,
+      has_function_privilege('anon',
+        'public.workforce_claim_selected_payout_publication_refresh_jobs(integer,uuid,uuid[],date,date)', 'execute') as anon_selected_claim,
+      has_function_privilege('service_role',
         'public.workforce_apply_payout_publication_input_revisions(uuid,date,date,text,uuid,jsonb)', 'execute') as service_apply,
       has_function_privilege('authenticated',
         'public.workforce_apply_payout_publication_input_revisions(uuid,date,date,text,uuid,jsonb)', 'execute') as authenticated_apply,
@@ -1480,6 +1847,8 @@ try {
   assert.equal(security.rows[0].force_rls, true);
   assert.equal(security.rows[0].service_claim, true);
   assert.equal(security.rows[0].anon_claim, false);
+  assert.equal(security.rows[0].service_selected_claim, true);
+  assert.equal(security.rows[0].anon_selected_claim, false);
   assert.equal(security.rows[0].service_apply, true);
   assert.equal(security.rows[0].authenticated_apply, false);
   assert.equal(security.rows[0].service_fail, true);
