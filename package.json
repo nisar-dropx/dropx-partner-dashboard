@@ -23,7 +23,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:request-tracker": "node scripts/verify-request-tracker.mjs && node scripts/verify-request-tracker-api.mjs",
-    "test:station-audits": "node scripts/test-station-audit-progress.mjs && node --experimental-strip-types --test src/lib/ops-pulse/station-audit-planning.test.mjs && node scripts/test-station-audit-reschedule.mjs && node scripts/test-station-audit-access.mjs && node scripts/verify-station-audit-workflow.mjs && node scripts/test-station-audit-tracker.mjs && node scripts/test-station-audit-mail.mjs && node scripts/test-station-audit-upload.mjs && node scripts/test-station-audit-directory.mjs && node scripts/test-station-audit-inspection.mjs && node scripts/test-station-audit-scoring.mjs && node scripts/test-station-audit-report.mjs",
+    "test:station-audits": "node scripts/test-station-audit-progress.mjs && node --experimental-strip-types --test src/lib/ops-pulse/station-audit-planning.test.mjs && node scripts/test-station-audit-reschedule.mjs && node scripts/test-station-audit-access.mjs && node scripts/verify-station-audit-workflow.mjs && node scripts/test-station-audit-tracker.mjs && node scripts/test-station-audit-recipients.mjs && node scripts/test-station-audit-mail.mjs && node scripts/test-station-audit-upload.mjs && node scripts/test-station-audit-directory.mjs && node scripts/test-station-audit-inspection.mjs && node scripts/test-station-audit-scoring.mjs && node scripts/test-station-audit-report.mjs",
     "test:advertising": "node --test src/lib/ops-pulse/advertising.test.mjs src/app/api/ops-pulse/advertising/route.test.mjs"
   },
   "dependencies": {

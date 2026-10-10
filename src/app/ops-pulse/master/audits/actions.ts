@@ -1,5 +1,6 @@
 "use server";
 
+import { validAuditRecipientRule } from "@/lib/ops-pulse/station-audit-recipients";
 import { revalidatePath } from "next/cache";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -196,6 +197,12 @@ export async function saveAuditType(formData: FormData): Promise<Result> {
       is_active: clean(formData.get("is_active")) === "yes",
       updated_by: authorization.userId,
     };
+    if (
+      ![...payload.recipient_rules, ...payload.cc_rules].every(
+        validAuditRecipientRule,
+      )
+    )
+      throw new Error("Choose recipients from the Audit Master directory.");
     if (
       !payload.name ||
       !payload.cadence_unit ||

@@ -1435,7 +1435,7 @@
 .preparationGrid textarea {width:100%;box-sizing:border-box;background:white;border:1px solid #dbe5f3;border-radius:8px;padding:10px;}
 .scoreReport {background:white;border:1px solid #dbe5f3;border-radius:16px;overflow:hidden;padding:18px;}
 .scoreHeadline {background:linear-gradient(120deg,#122b48,#176f76);color:white;border-radius:12px;padding:22px;margin-bottom:16px;}
-.scoreHeadline h2 {font-size:36px;margin:8px 0;}.scoreHeadline h2 span {font-size:20px;margin-left:12px;}.scoreHeadline p {font-size:13px;line-height:1.6;}
+.scoreHeadline h2 { color: #fff;font-size:36px;margin:8px 0;}.scoreHeadline h2 span {font-size:20px;margin-left:12px;}.scoreHeadline p {font-size:13px;line-height:1.6;}
 .scoreArea {border:1px solid #e2e8f0;border-radius:10px;margin-top:10px;overflow:hidden;}
 .scoreArea summary {display:flex;justify-content:space-between;gap:12px;padding:14px;cursor:pointer;font-weight:650;}
 .scoreArea small {display:block;color:#64748b;font-size:12px;margin-top:6px;font-weight:400;}

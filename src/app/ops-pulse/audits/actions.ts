@@ -26,6 +26,7 @@ import {
   type AuthorizationContext,
 } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { resolveStationAuditRecipients } from "@/lib/ops-pulse/station-audit-recipients";
 import { sendStationAuditCompletedEmail } from "@/lib/ops-pulse/station-audit-email";
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
 import {
@@ -1162,13 +1163,27 @@ async function sendAndRecordAuditEmail(
     return ` Audit saved; email needs attention: ${detail}`;
   }
 }
+export async function previewStationAuditEmail(auditId: string) {
+  const { authorization, companyId } = await assertManager("edit");
+  const audit = await readAudit(companyId, auditId, authorization);
+  if (!audit.completed_at)
+    throw new Error("Submit the audit before sending its report.");
+  return resolveStationAuditRecipients(
+    companyId,
+    audit.stations,
+    audit.ops_audit_types.recipient_rules,
+    audit.ops_audit_types.cc_rules,
+  );
+}
+
 export async function retryStationAuditEmail(
   auditId: string,
+  resend = false,
 ): Promise<ActionResult> {
   try {
     const { authorization, companyId } = await assertManager("edit");
     const audit = await readAudit(companyId, auditId, authorization);
-    if (!audit.completed_at || audit.email_status === "sent")
+    if (!audit.completed_at || (audit.email_status === "sent" && !resend))
       throw new Error(
         "Retry is available only for an unsent completed audit report.",
       );

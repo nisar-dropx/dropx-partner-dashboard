@@ -1,7 +1,7 @@
 import "server-only";
 import { buildStationAuditReport } from "./station-audit-report-data";
 import type { AuditReportData } from "./station-audit-report";
-import { loadAuditAssignees } from "./station-audit-people";
+import { resolveStationAuditRecipients } from "./station-audit-recipients";
 import { auditDay } from "./station-audit-planning";
 
 import { randomUUID } from "node:crypto";
@@ -13,22 +13,6 @@ import type {
   StationAudit,
 } from "@/lib/ops-pulse/station-audits";
 
-type RecipientField = keyof Pick<
-  AuditStation,
-  | "station_email"
-  | "station_manager_email"
-  | "cluster_manager_email"
-  | "ops_manager_email"
-  | "finance_manager_email"
->;
-const permittedRecipientFields = new Set<RecipientField>([
-  "station_email",
-  "station_manager_email",
-  "cluster_manager_email",
-  "ops_manager_email",
-  "finance_manager_email",
-]);
-
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -39,18 +23,6 @@ function escapeHtml(value: unknown) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-function recipients(station: AuditStation, configured: string[]) {
-  return Array.from(
-    new Set(
-      configured
-        .filter((field): field is RecipientField =>
-          permittedRecipientFields.has(field as RecipientField),
-        )
-        .map((field) => text(station[field]).toLowerCase())
-        .filter(Boolean),
-    ),
-  );
 }
 function interpolation(
   input: string,
@@ -109,34 +81,12 @@ export async function sendStationAuditCompletedEmail(input: {
   openActions: number;
 }) {
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
-  const to = recipients(input.station, input.type.recipient_rules);
-  const settings = await supabaseAdmin
-    .from("ops_audit_programme_settings")
-    .select("scheduler_role_ids")
-    .eq("company_id", input.companyId)
-    .maybeSingle();
-  if (settings.error) throw new Error(settings.error.message);
-  const managers = await loadAuditAssignees(
+  const { to, cc } = await resolveStationAuditRecipients(
     input.companyId,
-    settings.data?.scheduler_role_ids || [],
-    [input.station.id],
+    input.station,
+    input.type.recipient_rules,
+    input.type.cc_rules,
   );
-  const mappedClusterEmails = managers
-    .filter((p) =>
-      p.roleCodes.some((code) =>
-        ["OPERATIONS_CLM", "OPERATIONS_CM", "OPERATIONS_CLUSTER_HEAD"].includes(
-          code,
-        ),
-      ),
-    )
-    .map((p) => p.email?.trim().toLowerCase())
-    .filter((email): email is string => Boolean(email));
-  const cc = [
-    ...new Set([
-      ...recipients(input.station, input.type.cc_rules),
-      ...mappedClusterEmails,
-    ]),
-  ].filter((email) => !to.includes(email));
   if (!to.length)
     throw new Error(
       "No audit recipient is configured for this station. Add station email or amend the recipient rules in Audit Master.",

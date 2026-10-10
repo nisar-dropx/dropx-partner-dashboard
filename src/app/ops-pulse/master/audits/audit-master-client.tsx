@@ -22,6 +22,8 @@ import type {
   AuditStation,
   AuditType,
 } from "@/lib/ops-pulse/station-audits";
+import type { AuditNotificationUser } from "@/lib/ops-pulse/station-audit-recipients";
+import { AuditRecipientPicker } from "./audit-recipient-picker";
 import styles from "./audit-master.module.css";
 
 type Result = { ok: boolean; message: string };
@@ -94,7 +96,9 @@ export function AuditMasterClient({
   roles,
   locationModels,
   allStations,
+  notificationUsers,
 }: {
+  notificationUsers: AuditNotificationUser[];
   auditTypes: AuditType[];
   sections: AuditSection[];
   checklistItems: AuditChecklistItem[];
@@ -372,27 +376,20 @@ export function AuditMasterClient({
                       spellCheck={false}
                     />
                   </label>
-                  <div className="fin-form-grid">
-                    <label style={fieldStyle}>
-                      To recipient rules{" "}
-                      <small className="subtle">
-                        JSON array of station email fields
-                      </small>
-                      <textarea
-                        name="recipient_rules"
-                        defaultValue={pretty(type.recipient_rules)}
-                        rows={3}
-                      />
-                    </label>
-                    <label style={fieldStyle}>
-                      CC recipient rules
-                      <textarea
-                        name="cc_rules"
-                        defaultValue={pretty(type.cc_rules)}
-                        rows={3}
-                      />
-                    </label>
-                  </div>
+                  <AuditRecipientPicker
+                    name="recipient_rules"
+                    label="To - report recipients"
+                    selected={type.recipient_rules}
+                    users={notificationUsers}
+                    roles={roles}
+                  />
+                  <AuditRecipientPicker
+                    name="cc_rules"
+                    label="CC - station stakeholders"
+                    selected={type.cc_rules}
+                    users={notificationUsers}
+                    roles={roles}
+                  />
                   <label className="fin-label">
                     Video help text
                     <textarea

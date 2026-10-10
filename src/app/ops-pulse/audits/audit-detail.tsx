@@ -4,6 +4,8 @@ import {
   ResponsibilityAssessment,
   ScoreReview,
 } from "./audit-score";
+import { AuditDownloads } from "./audit-downloads";
+import { AuditEmailDelivery } from "./audit-email-delivery";
 import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
@@ -26,7 +28,6 @@ import {
   submitStationAudit,
   rescheduleStationAudit,
   manageAuditAssignment,
-  retryStationAuditEmail,
 } from "./actions";
 import type {
   AuditChecklistItem,
@@ -250,6 +251,9 @@ export function AuditDetail({
           </p>
         </div>
         <div className={styles.actions}>
+          {audit.completed_at && (
+            <AuditDownloads auditId={audit.id} disabled={false} />
+          )}
           {canDelete && (
             <button
               type="button"
@@ -338,16 +342,11 @@ export function AuditDetail({
               {(audit.email_recipients || []).join(", ") || "Not sent yet"}
             </strong>
           </span>
-          {canManage && audit.email_status !== "sent" && (
-            <button
-              className="button secondary compact"
-              disabled={lifecycle.pending}
-              onClick={() =>
-                lifecycle.run(() => retryStationAuditEmail(audit.id))
-              }
-            >
-              Retry report email
-            </button>
+          {canManage && (
+            <AuditEmailDelivery
+              auditId={audit.id}
+              sent={audit.email_status === "sent"}
+            />
           )}
         </div>
       )}
@@ -1436,16 +1435,7 @@ function SavedAudit({
           evidence={workspace.evidence.filter((e) => e.audit_id === audit.id)}
         />
       )}
-      {audit.completed_at && (
-        <a
-          className="button secondary"
-          href={`/api/ops-pulse/audits/report/${audit.id}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Download illustrated audit report (PDF)
-        </a>
-      )}
+
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           {audit.completed_at ? "Audit findings" : "Scheduled audit"}
@@ -1764,13 +1754,13 @@ function SavedAudit({
                 )}
                 {row.event_type === "reassigned" &&
                   Boolean(row.after_data.assigned_name) && (
-                  <p>
-                    {String(row.before_data.assigned_name || "Unassigned")} →{" "}
-                    {String(row.after_data.assigned_name)}
-                    <br />
-                    {String(row.after_data.reason || "")}
-                  </p>
-                )}
+                    <p>
+                      {String(row.before_data.assigned_name || "Unassigned")} →{" "}
+                      {String(row.after_data.assigned_name)}
+                      <br />
+                      {String(row.after_data.reason || "")}
+                    </p>
+                  )}
               </div>
             ))}
         </div>

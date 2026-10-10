@@ -5,9 +5,11 @@ import { useState } from "react";
 export function AuditDownloads({
   params,
   disabled,
+  auditId,
 }: {
-  params: string;
+  params?: string;
   disabled: boolean;
+  auditId?: string;
 }) {
   const [pending, setPending] = useState<"xlsx" | "pdf" | null>(null);
   const [notice, setNotice] = useState("");
@@ -19,7 +21,9 @@ export function AuditDownloads({
     const timer = window.setTimeout(() => controller.abort(), 90000);
     try {
       const response = await fetch(
-        `/api/ops-pulse/audits/export?${params}&format=${format}`,
+        auditId
+          ? `/api/ops-pulse/audits/report/${encodeURIComponent(auditId)}`
+          : `/api/ops-pulse/audits/export?${params}&format=${format}`,
         { signal: controller.signal, cache: "no-store" },
       );
       if (!response.ok) {
@@ -71,19 +75,25 @@ export function AuditDownloads({
         maxWidth: 440,
       }}
     >
-      <button
-        className="button secondary compact"
-        disabled={disabled || !!pending}
-        onClick={() => download("xlsx")}
-      >
-        {pending === "xlsx" ? "Preparing Excel…" : "Download Excel"}
-      </button>
+      {!auditId && (
+        <button
+          className="button secondary compact"
+          disabled={disabled || !!pending}
+          onClick={() => download("xlsx")}
+        >
+          {pending === "xlsx" ? "Preparing Excel…" : "Download Excel"}
+        </button>
+      )}
       <button
         className="button secondary compact"
         disabled={disabled || !!pending}
         onClick={() => download("pdf")}
       >
-        {pending === "pdf" ? "Preparing PDF…" : "Download PDF"}
+        {pending === "pdf"
+          ? "Preparing PDF…"
+          : auditId
+            ? "Download PDF report"
+            : "Download PDF"}
       </button>
       {notice && (
         <small role="status" style={{ flexBasis: "100%", textAlign: "right" }}>
