@@ -95,6 +95,38 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
   assert.equal(sheet.E2.t, "s", "beneficiary account numbers must remain text cells");
 });
 
+test("keeps separate location instructions for the same beneficiary as distinct bank lines", () => {
+  const rows = buildWorkforceFedOneRows({
+    debitAccountNumber: "100000000001",
+    valueDate: "2026-10-10",
+    instructions: [
+      instruction({
+        amountPaise: 47_401,
+        beneficiaryName: "SIDDIQUE M",
+        locationCode: "KBWE",
+        referenceNo: "WPT1013092026V2"
+      }),
+      instruction({
+        amountPaise: 7_112_556,
+        beneficiaryName: "SIDDIQUE M",
+        locationCode: "KLZA",
+        referenceNo: "WPT1013092026V3"
+      })
+    ]
+  });
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => ({
+    account: row["Beneficiary Account Number"],
+    amount: row["Transaction Amount"],
+    creditRemarks: row["Credit Remarks"],
+    reference: row["Unique Customer Reference Number"]
+  })), [
+    { account: "001234567890", amount: 474.01, creditRemarks: "KBWE", reference: "WPT1013092026V2" },
+    { account: "001234567890", amount: 71125.56, creditRemarks: "KLZA", reference: "WPT1013092026V3" }
+  ]);
+});
+
 test("maps every instruction deterministically and validates financial inputs", () => {
   const [row] = buildWorkforceFedOneRows({
     debitAccountNumber: " 100 200 ",

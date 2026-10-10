@@ -89,7 +89,7 @@ function resultRecord(value: unknown) {
 }
 
 function databaseStatus(message: string) {
-  return /processing|changed|refresh|mapping|published|balance|payable|bank detail|operation|already|current payout|review/i.test(message) ? 409 : 400;
+  return /processing|changed|refresh|mapping|published|balance|payable|bank detail|operation|already|current payout|review|active workforce profile/i.test(message) ? 409 : 400;
 }
 
 async function authorize() {

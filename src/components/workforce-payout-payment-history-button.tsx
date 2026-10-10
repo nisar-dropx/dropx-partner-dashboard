@@ -13,6 +13,8 @@ type PaymentHistoryEntry = {
   status: string;
   bankName: string;
   maskedAccount: string;
+  locationCode: string;
+  locationName: string;
   utr: string;
   remarks: string;
   generatedAt: string;
@@ -58,6 +60,13 @@ function statusTone(status: string) {
   if (status === "paid") return "good";
   if (status === "processing") return "warn";
   return "bad";
+}
+
+function locationLabel(entry: PaymentHistoryEntry) {
+  const code = String(entry.locationCode ?? "").trim();
+  const name = String(entry.locationName ?? "").trim();
+  if (code && name && code.toLocaleLowerCase() !== name.toLocaleLowerCase()) return `${code} · ${name}`;
+  return code || name || "—";
 }
 
 export function WorkforcePayoutPaymentHistoryButton({
@@ -227,9 +236,10 @@ export function WorkforcePayoutPaymentHistoryButton({
             </div>
           </div> : null}
           {!loading && !error && entries.length ? <div className="table-wrap"><table>
-            <thead><tr><th>Reference</th><th>Amount</th><th>Status</th><th>Bank / account</th><th>UTR/CIN</th><th>Generated</th><th>Finalized</th><th>Remarks</th>{canManageStatus ? <th>Action</th> : null}</tr></thead>
+            <thead><tr><th>Reference</th><th>Location</th><th>Amount</th><th>Status</th><th>Bank / account</th><th>UTR/CIN</th><th>Generated</th><th>Finalized</th><th>Remarks</th>{canManageStatus ? <th>Action</th> : null}</tr></thead>
             <tbody>{entries.map((entry) => <tr key={entry.id}>
               <td><strong>{entry.referenceNo}</strong><small>Version {entry.version}</small>{entry.redownloadable ? <a className="inline-link" href={`/api/payments/workforce-payouts/bank-file?batch_id=${encodeURIComponent(entry.batchId)}`}>Download again</a> : null}</td>
+              <td>{locationLabel(entry)}</td>
               <td>{money(entry.amount)}</td>
               <td><span className={`status-pill ${statusTone(entry.status)}`}>{titleStatus(entry.status)}</span></td>
               <td>{entry.bankName || "—"}<small>{entry.maskedAccount || "—"}</small></td>

@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     const [itemsResult, holdEventsResult] = await Promise.all([
       supabaseAdmin
         .from("workforce_payout_payment_items")
-        .select("id,batch_id,reference_no,payment_version,instruction_amount,status,bank_account_no_snapshot,utr_cin,bank_processing_remarks,created_at,finalized_at")
+        .select("id,batch_id,reference_no,payment_version,instruction_amount,status,bank_account_no_snapshot,location_id_snapshot,location_code_snapshot,utr_cin,bank_processing_remarks,created_at,finalized_at")
         .eq("company_id", companyId)
         .eq("workforce_id", workforceId)
         .eq("period_start", periodStart)
@@ -79,6 +79,14 @@ export async function GET(request: Request) {
     const items = itemsResult.data ?? [];
     const holdEvents = holdEventsResult.data ?? [];
     const batchIds = [...new Set(items.map((item) => String(item.batch_id)).filter(Boolean))];
+    const locationIds = [...new Set(items.map((item) => String(item.location_id_snapshot)).filter(Boolean))];
+    const locationsPromise = locationIds.length
+      ? supabaseAdmin
+        .from("stations")
+        .select("id,station_name")
+        .eq("company_id", companyId)
+        .in("id", locationIds)
+      : Promise.resolve({ data: [], error: null });
     const batchesResult = batchIds.length
       ? await supabaseAdmin
         .from("workforce_payout_payment_batches")
@@ -89,15 +97,18 @@ export async function GET(request: Request) {
     if (batchesResult.error) return errorResponse(batchesResult.error.message, 400);
     const batches = new Map((batchesResult.data ?? []).map((batch) => [String(batch.id), batch]));
     const bankIds = [...new Set((batchesResult.data ?? []).map((batch) => String(batch.bank_id)).filter(Boolean))];
-    const banksResult = bankIds.length
-      ? await supabaseAdmin
+    const banksPromise = bankIds.length
+      ? supabaseAdmin
         .from("payment_banks")
         .select("id,display_name")
         .eq("company_id", companyId)
         .in("id", bankIds)
-      : { data: [], error: null };
+      : Promise.resolve({ data: [], error: null });
+    const [banksResult, locationsResult] = await Promise.all([banksPromise, locationsPromise]);
     if (banksResult.error) return errorResponse(banksResult.error.message, 400);
     const bankNames = new Map((banksResult.data ?? []).map((bank) => [String(bank.id), String(bank.display_name ?? "Bank")]));
+    if (locationsResult.error) return errorResponse(locationsResult.error.message, 400);
+    const locationNames = new Map((locationsResult.data ?? []).map((location) => [String(location.id), String(location.station_name ?? "").trim()]));
 
     return Response.json({
       hold: {
@@ -121,6 +132,8 @@ export async function GET(request: Request) {
           status: String(item.status),
           bankName: bankNames.get(String(batch?.bank_id ?? "")) ?? "Bank",
           maskedAccount: maskedAccount(item.bank_account_no_snapshot),
+          locationCode: String(item.location_code_snapshot ?? "").trim(),
+          locationName: locationNames.get(String(item.location_id_snapshot ?? "")) ?? "",
           utr: String(item.utr_cin ?? ""),
           remarks: String(item.bank_processing_remarks ?? ""),
           generatedAt: String(batch?.generated_at ?? item.created_at ?? ""),

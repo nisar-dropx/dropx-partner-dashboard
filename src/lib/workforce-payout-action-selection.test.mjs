@@ -244,11 +244,14 @@ test("payout UI separates one-row advance recovery from complete-location notifi
 test("publication-refresh-pending rows remain explicit preliminary bank candidates", () => {
   assert.match(payoutTable, /eligibilityCode\?\.trim\(\)\.toLowerCase\(\) === "publication_refresh_pending"/);
   assert.match(payoutTable, /publicationRefreshPending\(row\) && preliminaryAvailableToPay > 0/);
+  assert.match(payoutTable, /row\.dropxStatus\.trim\(\)\.toLowerCase\(\) === "active"/);
   assert.match(payoutTable, /row\.panAadhaarStatus !== "NOT LINKED"/);
   assert.match(payoutTable, /BANK_PAYMENT_BLOCKED_STATUSES\.has\(visibleStatus\)/);
   assert.match(payoutTable, /bankActionableIds\.has\(row\.id\)/);
   assert.match(payoutTable, /Refresh before bank file · eligibility rechecked/);
   assert.match(payoutTable, /No stale publication will be paid/);
+  assert.match(payoutTable, /Bank file unavailable: only current Active Workforce profiles are eligible/);
+  assert.match(payoutTable, /Bank file: Active profiles only/);
 });
 
 test("published and mapping-unlocked payouts remain available for manual input editing", () => {

@@ -19,13 +19,20 @@ const lifecycleMigrationUrl = new URL(
   "../supabase/migrations/20261009172942_workforce_payout_manual_status_and_holds.sql",
   import.meta.url
 );
+const activeProfileStationLinesMigrationUrl = new URL(
+  "../supabase/migrations/20261010122406_workforce_payout_active_profile_station_bank_lines.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
 const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
 const lifecycleMigration = readFileSync(lifecycleMigrationUrl, "utf8");
+const activeProfileStationLinesMigration = readFileSync(activeProfileStationLinesMigrationUrl, "utf8");
 const executablePublishedSnapshotFreshnessMigration = publishedSnapshotFreshnessMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableLifecycleMigration = lifecycleMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableActiveProfileStationLinesMigration = activeProfileStationLinesMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableMigration = [migration, compatibilityMigration, publishedSnapshotFreshnessMigration]
   .map((sql) => sql.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""))
@@ -152,6 +159,38 @@ assert.match(lifecycleMigration, /eligibility_code := 'pan_not_linked'/i);
 assert.match(lifecycleMigration, /eligibility_code := 'payment_on_hold'/i);
 assert.match(lifecycleMigration, /cardinality\(selected_workforce_ids\) >= 1/i);
 assert.doesNotMatch(lifecycleMigration, /cardinality\(selected_workforce_ids\) <= 1000/i);
+assert.match(
+  activeProfileStationLinesMigration,
+  /eligibility_code := 'profile_not_active'[\s\S]*?Only Active Workforce profiles can be included in a bank file/i
+);
+assert.match(
+  activeProfileStationLinesMigration,
+  /onboarding_status,[\s\S]{0,60}not in \('', 'active'\)/i,
+  "the server gate must exclude Under Review and every other non-Active onboarding state"
+);
+assert.match(
+  activeProfileStationLinesMigration,
+  /paid_item_checks[\s\S]*?paid_allocations[\s\S]*?station_deltas[\s\S]*?delta_amount >= 0[\s\S]*?round\(v_instruction, 2\)/i,
+  "station lines require reconciled paid evidence and an exact nonnegative paise delta"
+);
+assert.match(
+  activeProfileStationLinesMigration,
+  /create unique index workforce_payout_payment_items_active_uidx[\s\S]*?batch_id, location_id_snapshot[\s\S]*?where status = 'processing'/i
+);
+assert.match(
+  activeProfileStationLinesMigration,
+  /existing\.batch_id <> new\.batch_id[\s\S]*?different Workforce bank batch is already processing/i
+);
+assert.match(
+  activeProfileStationLinesMigration,
+  /order by current_station\.station_code,[\s\S]*?v_next_version := v_next_version \+ 1/i,
+  "split references must be assigned sequentially in a stable station order"
+);
+assert.doesNotMatch(
+  activeProfileStationLinesMigration,
+  /grant execute on function public\.workforce_payout_payment_candidates/i,
+  "the internal candidate calculator must remain unavailable to API roles"
+);
 
 const db = new PGlite();
 const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -207,6 +246,9 @@ await db.exec(`
     location_id uuid,
     bank_account_no text,
     ifsc_code text,
+    onboarding_status text not null default 'active',
+    lifecycle_status text not null default 'active',
+    is_active boolean not null default true,
     deleted_at timestamptz,
     migration_state text not null default 'active',
     source_profile_type text,
@@ -1149,7 +1191,7 @@ const signedDeductionPublication = id(85);
 await db.query(
   `insert into public.workforce(
     id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code
-  ) values ($1,$2,'T1013','Signed Balance Worker','t1013@example.com',$3,'5678 901234','FDRL 0000003')`,
+  ) values ($1,$2,'T1013NEG','Signed Balance Worker','t1013neg@example.com',$3,'5678 901234','FDRL 0000003')`,
   [signedWorkforce, company, station]
 );
 await db.query(
@@ -1236,6 +1278,451 @@ assert.equal(
   signedAllocations.rows.reduce((sum, row) => sum + Number(row.instruction_amount_snapshot), 0),
   69125.56
 );
+
+await db.exec(executableActiveProfileStationLinesMigration);
+
+const createProfileBatch = async ({ operation, fingerprint, workforceIds }) => {
+  const result = await db.query(
+    `select public.workforce_create_payout_payment_batch(
+      $1,$2,$3,$4,$5,$6::date,$7::date,date '2026-10-10',$8::uuid[]
+    ) result`,
+    [company, actor, operation, fingerprint, bank, periodStart, periodEnd, workforceIds]
+  );
+  return result.rows[0].result;
+};
+const previewProfile = async (profileId) => {
+  const result = await db.query(
+    `select * from public.workforce_preview_payout_payments(
+      $1,$2::date,$3::date,array[$4::uuid]
+    )`,
+    [company, periodStart, periodEnd, profileId]
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0];
+};
+const finalizeProfileItem = async ({ operation, hash, item, utr }) => {
+  const rows = [{
+    row_number: 2,
+    reference_no: item.reference_no,
+    credit_account: item.bank_account_no,
+    ifsc: item.ifsc,
+    debit_amount_paise: Math.round(Number(item.instruction_amount) * 100),
+    status: "PAID",
+    utr_cin: utr,
+    remarks: "SUCCESS"
+  }];
+  const result = await db.query(
+    `select public.workforce_finalize_payout_payment_response(
+      $1,$2,$3,$4,'station-response.xlsx',$5::jsonb
+    ) result`,
+    [company, actor, operation, hash, JSON.stringify(rows)]
+  );
+  return result.rows[0].result;
+};
+
+// T1013-style positive station rows are unambiguous: one selected profile
+// creates one exact bank instruction per station in deterministic station-code
+// order, with globally sequential profile/month versions.
+const kbweStation = id(100);
+const klzaStation = id(101);
+const splitWorkforce = id(102);
+const splitRelock = id(103);
+const splitReviewKbwe = id(104);
+const splitReviewKlza = id(105);
+const splitPublicationKbweV1 = id(106);
+const splitPublicationKlzaV1 = id(107);
+await db.query(
+  `insert into public.stations(id,company_id,station_code) values
+    ($1,$3,'KBWE'),($2,$3,'KLZA')`,
+  [kbweStation, klzaStation, company]
+);
+await db.query(
+  `insert into public.workforce(
+    id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code,
+    onboarding_status,lifecycle_status,is_active
+  ) values ($1,$2,'T1013','Split Station Worker','t1013@example.com',$3,
+    '1234567890','FDRL0000002','active','active',true)`,
+  [splitWorkforce, company, kbweStation]
+);
+await db.query(
+  `insert into public.connect_profile_verifications(
+    company_id,profile_type,account_id,kind,verified
+  ) values ($1,'workforce',$2,'pan_aadhaar',true)`,
+  [company, splitWorkforce]
+);
+await db.query(
+  `insert into public.workforce_payout_mapping_relocks(
+    id,company_id,period_start,period_end,affected_workforce_ids,active_locations
+  ) values ($1,$2,$3,$4,array[$5::uuid],$6::jsonb)`,
+  [splitRelock, company, periodStart, periodEnd, splitWorkforce,
+    JSON.stringify({ [splitWorkforce]: [kbweStation, klzaStation] })]
+);
+const splitSnapshotKbweV1 = JSON.stringify({
+  schema_version: "2",
+  source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true, payment_status: "Ready for review" },
+  item: { workforce_id: splitWorkforce, station_code: "KBWE", net_amount: "474.00" }
+});
+const splitSnapshotKlzaV1 = JSON.stringify({
+  schema_version: "2",
+  source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true, payment_status: "Ready for review" },
+  item: { workforce_id: splitWorkforce, station_code: "KLZA", net_amount: "71125.57" }
+});
+await db.query(
+  `insert into public.workforce_payout_review_submissions(
+    id,company_id,subject_type,subject_id,location_id,period_start,period_end,status,calculation_snapshot
+  ) values
+    ($1,$3,'workforce',$4,$5,$6,$7,'under_review',$8::jsonb),
+    ($2,$3,'workforce',$4,$9,$6,$7,'under_review',$10::jsonb)`,
+  [splitReviewKbwe, splitReviewKlza, company, splitWorkforce, kbweStation,
+    periodStart, periodEnd, splitSnapshotKbweV1, klzaStation, splitSnapshotKlzaV1]
+);
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values
+    ($1,$3,$4,$5,1,$6::jsonb,$7,$8,$9,$10,'worksheet',$11,$12),
+    ($2,$3,$4,$13,1,$14::jsonb,$15,$8,$9,$16,'worksheet',$11,$12)`,
+  [splitPublicationKbweV1, splitPublicationKlzaV1, company, splitWorkforce,
+    kbweStation, splitSnapshotKbweV1, "a".repeat(64), dependencyHash,
+    splitRelock, splitReviewKbwe, periodStart, periodEnd,
+    klzaStation, splitSnapshotKlzaV1, "b".repeat(64), splitReviewKlza]
+);
+const splitPreview = await previewProfile(splitWorkforce);
+assert.equal(splitPreview.eligible, true);
+assert.equal(Number(splitPreview.current_target_amount), 71599.57);
+assert.equal(Number(splitPreview.available_to_pay), 71599.57);
+const splitBatch = await createProfileBatch({
+  operation: id(108), fingerprint: "a".repeat(64), workforceIds: [splitWorkforce]
+});
+assert.equal(splitBatch.items.length, 2);
+assert.deepEqual(
+  splitBatch.items.map((item) => ({
+    reference: item.reference_no,
+    credit: item.credit_remarks,
+    amount: Number(item.instruction_amount)
+  })),
+  [
+    { reference: "WPT1013092026V1", credit: "KBWE", amount: 474 },
+    { reference: "WPT1013092026V2", credit: "KLZA", amount: 71125.57 }
+  ]
+);
+const splitLedger = await db.query(
+  `select item.reference_no,item.payment_version,item.location_code_snapshot,
+      item.current_target_amount,item.paid_before_amount,item.instruction_amount,
+      count(allocation.id)::int allocation_count,
+      sum(allocation.instruction_amount_snapshot) allocation_total
+   from public.workforce_payout_payment_items item
+   join public.workforce_payout_payment_allocations allocation
+     on allocation.payment_item_id=item.id
+   where item.batch_id=$1
+   group by item.id
+   order by item.payment_version`,
+  [splitBatch.batch_id]
+);
+assert.deepEqual(
+  splitLedger.rows.map((row) => ({
+    version: Number(row.payment_version),
+    location: row.location_code_snapshot,
+    target: Number(row.current_target_amount),
+    paidBefore: Number(row.paid_before_amount),
+    instruction: Number(row.instruction_amount),
+    allocations: Number(row.allocation_count),
+    allocationTotal: Number(row.allocation_total)
+  })),
+  [
+    { version: 1, location: "KBWE", target: 474, paidBefore: 0, instruction: 474, allocations: 1, allocationTotal: 474 },
+    { version: 2, location: "KLZA", target: 71125.57, paidBefore: 0, instruction: 71125.57, allocations: 1, allocationTotal: 71125.57 }
+  ]
+);
+
+// A partially finalized sibling must not collapse the immutable profile target.
+await finalizeProfileItem({
+  operation: id(109), hash: "c".repeat(64), item: splitBatch.items[0], utr: "UTR-SPLIT-1"
+});
+const splitPartialPreview = await previewProfile(splitWorkforce);
+assert.equal(splitPartialPreview.eligibility_code, "payment_processing");
+assert.equal(Number(splitPartialPreview.current_target_amount), 71599.57);
+assert.equal(Number(splitPartialPreview.paid_amount), 474);
+assert.equal(Number(splitPartialPreview.processing_amount), 71125.57);
+assert.equal(Number(splitPartialPreview.balance_payable), 71125.57);
+await assert.rejects(
+  createProfileBatch({
+    operation: id(110), fingerprint: "d".repeat(64), workforceIds: [splitWorkforce]
+  }),
+  /already (?:has|have) a Payment Processing instruction/i,
+  "a second batch must be rejected while a sibling station line remains processing"
+);
+const rejectedConcurrentBatch = await db.query(
+  `select
+    (select count(*)::int from public.workforce_payout_payment_batches where operation_id=$1) batches,
+    (select count(*)::int from public.workforce_payout_payment_items
+      where company_id=$2 and workforce_id=$3 and batch_id<>$4) other_items`,
+  [id(110), company, splitWorkforce, splitBatch.batch_id]
+);
+assert.deepEqual(rejectedConcurrentBatch.rows[0], { batches: 0, other_items: 0 });
+await finalizeProfileItem({
+  operation: id(111), hash: "d".repeat(64), item: splitBatch.items[1], utr: "UTR-SPLIT-2"
+});
+
+// Prior paid allocations are subtracted station by station.  Exact reconciled
+// positive deltas remain separable and continue the reference sequence.
+const splitSnapshotKbweV2 = JSON.stringify({
+  schema_version: "2",
+  source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true, payment_status: "Ready for review" },
+  item: { workforce_id: splitWorkforce, station_code: "KBWE", net_amount: "474.00" }
+});
+const splitSnapshotKlzaV2 = JSON.stringify({
+  schema_version: "2",
+  source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true, payment_status: "Ready for review" },
+  item: { workforce_id: splitWorkforce, station_code: "KLZA", net_amount: "71226.00" }
+});
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values
+    ($1,$3,$4,$5,2,$6::jsonb,$7,$8,$9,$10,'worksheet',$11,$12),
+    ($2,$3,$4,$13,2,$14::jsonb,$15,$8,$9,$16,'worksheet',$11,$12)`,
+  [id(112), id(113), company, splitWorkforce, kbweStation,
+    splitSnapshotKbweV2, "e".repeat(64), dependencyHash, splitRelock,
+    splitReviewKbwe, periodStart, periodEnd, klzaStation,
+    splitSnapshotKlzaV2, "f".repeat(64), splitReviewKlza]
+);
+const stationDeltaPreview = await previewProfile(splitWorkforce);
+assert.equal(stationDeltaPreview.eligible, true);
+assert.equal(Number(stationDeltaPreview.current_target_amount), 71700);
+assert.equal(Number(stationDeltaPreview.paid_amount), 71599.57);
+assert.equal(Number(stationDeltaPreview.available_to_pay), 100.43);
+const stationDeltaBatch = await createProfileBatch({
+  operation: id(114), fingerprint: "1".repeat(64), workforceIds: [splitWorkforce]
+});
+assert.deepEqual(
+  stationDeltaBatch.items.map((item) => ({
+    reference: item.reference_no,
+    credit: item.credit_remarks,
+    target: Number(item.current_target_amount),
+    paidBefore: Number(item.paid_before_amount),
+    amount: Number(item.instruction_amount)
+  })),
+  [
+    { reference: "WPT1013092026V3", credit: "KLZA", target: 71226, paidBefore: 71125.57, amount: 100.43 }
+  ]
+);
+await db.query(
+  `update public.workforce
+   set onboarding_status='under_review',lifecycle_status='onboarding',is_active=false
+   where company_id=$1 and id=$2`,
+  [company, splitWorkforce]
+);
+const processingBeforeProfileGate = await previewProfile(splitWorkforce);
+assert.equal(processingBeforeProfileGate.eligibility_code, "payment_processing",
+  "an already-created immutable bank instruction keeps Payment Processing precedence");
+assert.equal(Number(processingBeforeProfileGate.current_target_amount), 71700);
+assert.equal(Number(processingBeforeProfileGate.paid_amount), 71599.57);
+
+// A signed station set cannot be separated without changing the deduction's
+// meaning, so it remains one safe profile-level instruction.
+const fallbackWorkforce = id(120);
+const fallbackRelock = id(121);
+const fallbackReviewPositive = id(122);
+const fallbackReviewNegative = id(123);
+await db.query(
+  `insert into public.workforce(
+    id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code,
+    onboarding_status,lifecycle_status,is_active
+  ) values ($1,$2,'SIGNED2','Signed Fallback','signed2@example.com',$3,
+    '2234567890','FDRL0000002','active','active',true)`,
+  [fallbackWorkforce, company, kbweStation]
+);
+await db.query(
+  `insert into public.connect_profile_verifications(
+    company_id,profile_type,account_id,kind,verified
+  ) values ($1,'workforce',$2,'pan_aadhaar',true)`,
+  [company, fallbackWorkforce]
+);
+await db.query(
+  `insert into public.workforce_payout_mapping_relocks(
+    id,company_id,period_start,period_end,affected_workforce_ids,active_locations
+  ) values ($1,$2,$3,$4,array[$5::uuid],$6::jsonb)`,
+  [fallbackRelock, company, periodStart, periodEnd, fallbackWorkforce,
+    JSON.stringify({ [fallbackWorkforce]: [kbweStation, klzaStation] })]
+);
+const fallbackPositiveSnapshot = JSON.stringify({
+  schema_version: "2", source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true },
+  item: { workforce_id: fallbackWorkforce, station_code: "KBWE", net_amount: "100.00" }
+});
+const fallbackNegativeSnapshot = JSON.stringify({
+  schema_version: "2", source: "workforce_payout_worksheet",
+  worksheet: { payment_eligible: true },
+  item: { workforce_id: fallbackWorkforce, station_code: "KLZA", net_amount: "-20.00" }
+});
+await db.query(
+  `insert into public.workforce_payout_review_submissions(
+    id,company_id,subject_type,subject_id,location_id,period_start,period_end,status,calculation_snapshot
+  ) values
+    ($1,$3,'workforce',$4,$5,$6,$7,'under_review',$8::jsonb),
+    ($2,$3,'workforce',$4,$9,$6,$7,'under_review',$10::jsonb)`,
+  [fallbackReviewPositive, fallbackReviewNegative, company, fallbackWorkforce,
+    kbweStation, periodStart, periodEnd, fallbackPositiveSnapshot,
+    klzaStation, fallbackNegativeSnapshot]
+);
+await db.query(
+  `insert into public.workforce_payout_publications(
+    id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+    mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+  ) values
+    ($1,$3,$4,$5,1,$6::jsonb,$7,$8,$9,$10,'worksheet',$11,$12),
+    ($2,$3,$4,$13,1,$14::jsonb,$15,$8,$9,$16,'worksheet',$11,$12)`,
+  [id(124), id(125), company, fallbackWorkforce, kbweStation,
+    fallbackPositiveSnapshot, "2".repeat(64), dependencyHash, fallbackRelock,
+    fallbackReviewPositive, periodStart, periodEnd, klzaStation,
+    fallbackNegativeSnapshot, "3".repeat(64), fallbackReviewNegative]
+);
+const fallbackBatch = await createProfileBatch({
+  operation: id(126), fingerprint: "2".repeat(64), workforceIds: [fallbackWorkforce]
+});
+assert.equal(fallbackBatch.items.length, 1);
+assert.equal(Number(fallbackBatch.items[0].instruction_amount), 80);
+const fallbackEvidence = await db.query(
+  `select count(*)::int allocation_count,
+      sum(allocation.instruction_amount_snapshot) instruction_total
+   from public.workforce_payout_payment_items item
+   join public.workforce_payout_payment_allocations allocation
+     on allocation.payment_item_id=item.id
+   where item.batch_id=$1`,
+  [fallbackBatch.batch_id]
+);
+assert.deepEqual(fallbackEvidence.rows[0], { allocation_count: 2, instruction_total: "80.00" });
+
+// Under Review is a live profile status and must not be confused with the
+// publication's valid under_review review status.  A mixed request fails before
+// any batch, item, allocation or event is written.
+const atomicActiveWorkforce = id(130);
+const atomicUnderReviewWorkforce = id(131);
+const atomicActiveRelock = id(132);
+const atomicUnderReviewRelock = id(133);
+const atomicActiveReview = id(134);
+const atomicUnderReviewReview = id(135);
+for (const [profileId, dropxId, onboarding, lifecycle, active] of [
+  [atomicActiveWorkforce, "ACTIVE130", "active", "active", true],
+  [atomicUnderReviewWorkforce, "REVIEW131", "active", "active", true]
+]) {
+  await db.query(
+    `insert into public.workforce(
+      id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code,
+      onboarding_status,lifecycle_status,is_active
+    ) values ($1,$2,$3,$3 || ' Worker',$3 || '@example.com',$4,
+      '3234567890','FDRL0000002',$5,$6,$7)`,
+    [profileId, company, dropxId, kbweStation, onboarding, lifecycle, active]
+  );
+  await db.query(
+    `insert into public.connect_profile_verifications(
+      company_id,profile_type,account_id,kind,verified
+    ) values ($1,'workforce',$2,'pan_aadhaar',true)`,
+    [company, profileId]
+  );
+}
+for (const [profileId, relockId, reviewId, publicationId, amount] of [
+  [atomicActiveWorkforce, atomicActiveRelock, atomicActiveReview, id(136), "50.00"],
+  [atomicUnderReviewWorkforce, atomicUnderReviewRelock, atomicUnderReviewReview, id(137), "60.00"]
+]) {
+  const snapshot = JSON.stringify({
+    schema_version: "2", source: "workforce_payout_worksheet",
+    worksheet: { payment_eligible: true },
+    item: { workforce_id: profileId, station_code: "KBWE", net_amount: amount }
+  });
+  await db.query(
+    `insert into public.workforce_payout_mapping_relocks(
+      id,company_id,period_start,period_end,affected_workforce_ids,active_locations
+    ) values ($1,$2,$3,$4,array[$5::uuid],$6::jsonb)`,
+    [relockId, company, periodStart, periodEnd, profileId,
+      JSON.stringify({ [profileId]: [kbweStation] })]
+  );
+  await db.query(
+    `insert into public.workforce_payout_review_submissions(
+      id,company_id,subject_type,subject_id,location_id,period_start,period_end,status,calculation_snapshot
+    ) values ($1,$2,'workforce',$3,$4,$5,$6,'under_review',$7::jsonb)`,
+    [reviewId, company, profileId, kbweStation, periodStart, periodEnd, snapshot]
+  );
+  await db.query(
+    `insert into public.workforce_payout_publications(
+      id,company_id,workforce_id,station_id,revision,snapshot,snapshot_hash,dependency_hash,
+      mapping_relock_id,review_submission_id,publication_kind,period_start,period_end
+    ) values ($1,$2,$3,$4,1,$5::jsonb,$6,$7,$8,$9,'worksheet',$10,$11)`,
+    [publicationId, company, profileId, kbweStation, snapshot,
+      String(profileId === atomicActiveWorkforce ? "4" : "5").repeat(64), dependencyHash,
+      relockId, reviewId, periodStart, periodEnd]
+  );
+}
+const underReviewHistoryBatch = await createProfileBatch({
+  operation: id(139), fingerprint: "6".repeat(64),
+  workforceIds: [atomicUnderReviewWorkforce]
+});
+assert.equal(underReviewHistoryBatch.items.length, 1);
+await transitionPayment({
+  operation: id(140),
+  paymentItemId: underReviewHistoryBatch.items[0].item_id,
+  outcome: "cancelled",
+  remarks: "Cancelled before profile review"
+});
+await db.query(
+  `update public.workforce
+   set onboarding_status='under_review',lifecycle_status='onboarding',is_active=false
+   where company_id=$1 and id=$2`,
+  [company, atomicUnderReviewWorkforce]
+);
+const activePublicationUnderReviewPreview = await previewProfile(atomicActiveWorkforce);
+assert.equal(activePublicationUnderReviewPreview.eligible, true,
+  "publication review status under_review remains bank eligible for an Active profile");
+const underReviewProfilePreview = await previewProfile(atomicUnderReviewWorkforce);
+assert.equal(underReviewProfilePreview.eligible, false);
+assert.equal(underReviewProfilePreview.eligibility_code, "profile_not_active");
+assert.equal(Number(underReviewProfilePreview.available_to_pay), 0);
+assert.equal(Number(underReviewProfilePreview.current_target_amount), 60);
+assert.equal(Number(underReviewProfilePreview.paid_amount), 0);
+assert.equal(Number(underReviewProfilePreview.balance_payable), 60);
+assert.equal(Number(underReviewProfilePreview.history_count), 1,
+  "profile exclusion must preserve real payment-attempt history");
+const beforeAtomicRejection = await db.query(
+  `select
+    (select count(*)::int from public.workforce_payout_payment_batches) batch_count,
+    (select count(*)::int from public.workforce_payout_payment_items) item_count,
+    (select count(*)::int from public.workforce_payout_payment_allocations) allocation_count,
+    (select count(*)::int from public.workforce_payout_payment_events) event_count`
+);
+await assert.rejects(
+  createProfileBatch({
+    operation: id(138), fingerprint: "3".repeat(64),
+    workforceIds: [atomicActiveWorkforce, atomicUnderReviewWorkforce]
+  }),
+  /Only Active Workforce profiles can be included in a bank file/i
+);
+const atomicRejection = await db.query(
+  `select
+    (select count(*)::int from public.workforce_payout_payment_batches) batch_count,
+    (select count(*)::int from public.workforce_payout_payment_items) item_count,
+    (select count(*)::int from public.workforce_payout_payment_allocations) allocation_count,
+    (select count(*)::int from public.workforce_payout_payment_events) event_count,
+    (select count(*)::int from public.workforce_payout_payment_batches where operation_id=$1) rejected_operation_count`,
+  [id(138)]
+);
+assert.deepEqual(
+  {
+    batch_count: atomicRejection.rows[0].batch_count,
+    item_count: atomicRejection.rows[0].item_count,
+    allocation_count: atomicRejection.rows[0].allocation_count,
+    event_count: atomicRejection.rows[0].event_count
+  },
+  beforeAtomicRejection.rows[0],
+  "mixed Active/Under Review selection must roll back every ledger side effect"
+);
+assert.equal(atomicRejection.rows[0].rejected_operation_count, 0);
 
 const catalog = await db.query(`
   select

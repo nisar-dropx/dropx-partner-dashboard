@@ -119,4 +119,8 @@ test("computed balances remain visible when a separate payment constraint blocks
   const panNotLinked = { eligible: false, eligibilityCode: "pan_not_linked" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(panNotLinked), true);
   assert.equal(workforcePayoutPaymentEligibilityLabel(panNotLinked), "PAN not linked");
+
+  const profileNotActive = { eligible: false, eligibilityCode: "profile_not_active" };
+  assert.equal(isWorkforcePayoutPaymentBalanceAvailable(profileNotActive), true);
+  assert.equal(workforcePayoutPaymentEligibilityLabel(profileNotActive), "Active profiles only");
 });

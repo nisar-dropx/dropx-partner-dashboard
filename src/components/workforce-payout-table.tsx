@@ -137,6 +137,9 @@ function publicationRefreshPending(row: WorkforcePayoutRow) {
   return row.paymentSummary?.eligible === false
     && row.paymentSummary.eligibilityCode?.trim().toLowerCase() === "publication_refresh_pending";
 }
+function hasActiveWorkforceProfileStatus(row: WorkforcePayoutRow) {
+  return row.dropxStatus.trim().toLowerCase() === "active";
+}
 function canCreateBankPayment(row: WorkforcePayoutRow, preliminaryAvailableToPay = 0) {
   const visibleStatus = String(row.paymentSummary?.status ?? row.status).trim().toLowerCase();
   const hasAuthoritativeCandidate = row.publicationPaymentReady === true
@@ -144,6 +147,7 @@ function canCreateBankPayment(row: WorkforcePayoutRow, preliminaryAvailableToPay
     && Number(row.paymentSummary?.availableToPay ?? 0) > 0;
   const canRefreshCandidate = publicationRefreshPending(row) && preliminaryAvailableToPay > 0;
   return Boolean(row.reviewSubjectId && row.paymentDetailsAvailable)
+    && hasActiveWorkforceProfileStatus(row)
     && row.publicationLockState === "locked"
     && row.paymentSummary?.status !== "Payment Processing"
     && !BANK_PAYMENT_BLOCKED_STATUSES.has(visibleStatus)
@@ -805,7 +809,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     {canEdit && audience === "workforce" && !canPublishNotifications ? <div className="payout-inline-message">Send Notification requires all-location access because every publishable location row for a DropX ID must be published and frozen together.</div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
     {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row, so the extra row may be required for publication.</div> : null}
-    {bankProfilesWithImplicitRows ? <div aria-live="polite" className="payout-inline-message warn"><strong>Bank payment is profile-wide.</strong> One bank-eligible checked row is enough to select the DropX ID, but the bank file uses its complete monthly balance across every published location row, including deductions. It creates one bank line per DropX ID, not one line per table row.</div> : null}
+    {bankProfilesWithImplicitRows ? <div aria-live="polite" className="payout-inline-message warn"><strong>Bank payment includes the complete profile.</strong> One bank-eligible checked row selects the DropX ID. When every location has a non-negative outstanding balance and earlier paid allocations reconcile exactly, the file creates a separate bank line for each positive location balance. Otherwise, the complete balance is safely consolidated so deductions and earlier payments are not misapplied.</div> : null}
     {selectedBankRefreshPendingCount ? <div aria-live="polite" className="payout-inline-message warn"><strong>{selectedBankRefreshPendingCount} selected profile{selectedBankRefreshPendingCount === 1 ? " has" : "s have"} a publication refresh pending.</strong> The refresh runs before bank-file generation, then current balance and every payment eligibility rule are checked again. No stale publication will be paid.</div> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
@@ -851,9 +855,12 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             const refreshBeforeBankFile = canProcessPayments
               && bankActionableIds.has(row.id)
               && publicationRefreshPending(row);
+            const activeWorkforceProfile = hasActiveWorkforceProfileStatus(row);
             const hasRowAdvanceSelectionConflict = Boolean(row.reviewSubjectId && advanceSelectionConflictIds.has(row.reviewSubjectId));
             const selectionTitle = hasRowAdvanceSelectionConflict
                 ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all publishable location rows."
+                : canProcessPayments && !activeWorkforceProfile
+                  ? "Bank file unavailable: only current Active Workforce profiles are eligible. This row remains selectable for other permitted actions."
                 : refreshBeforeBankFile
                   ? "Available for bank-file action. The publication refreshes first, then current balance and payment eligibility are checked again."
                 : !canSendPayoutForReview(row, audience) && canDeductAdvances && canDeductAdvanceFromPayout(row)
@@ -870,7 +877,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             return [
               <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
                 {showSelection ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for payout actions`} checked={selected.has(row.id)} disabled={actionBusy || !selectableIds.has(row.id)} onChange={() => toggleSelected(row.id)} title={selectionTitle} type="checkbox" /></td> : null}
-                <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={`DropX ID status: ${row.dropxStatus}`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
+                <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={activeWorkforceProfile ? `DropX ID status: ${row.dropxStatus}` : `DropX ID status: ${row.dropxStatus}. Bank files include current Active profiles only.`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
                 <td>{row.designation ? <strong>{row.designation}</strong> : <span aria-hidden="true">—</span>}</td>
                 <td><strong>{row.location}</strong></td>
@@ -879,7 +886,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                 <td className="work-days-cell">{row.paymentDetailsAvailable ? <><strong>{workDaysDisplay(row.workDays, row.workDaysSource)}</strong><small>{row.workDaysSource}</small></> : null}</td>
                 <td className="payout-money">{row.paymentDetailsAvailable ? <strong>{money(row.grossPayment)}</strong> : null}</td>
                 <td className="negative payout-money">{row.paymentDetailsAvailable ? row.deductions ? `- ${money(row.deductions)}` : "—" : null}</td>
-                <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <><strong>{money(row.netAmount)}</strong>{row.paymentSummary ? <small className="payout-payment-balance" title={row.paymentSummary.eligibilityMessage ?? undefined}>{row.paymentSummary.processingAmount > 0 ? <span>Frozen profile net {exactMoney(row.paymentSummary.currentNetAmount)}</span> : null}<span>Paid {exactMoney(row.paymentSummary.paidAmount)}</span>{row.paymentSummary.processingAmount > 0 ? <span>Processing {exactMoney(row.paymentSummary.processingAmount)}</span> : null}{refreshBeforeBankFile ? <span>Preliminary balance {exactMoney(preliminaryBankBalance)}</span> : paymentBalanceAvailable ? <span>Balance payable {exactMoney(row.paymentSummary.balancePayable)}</span> : <span>Balance payable —</span>}{refreshBeforeBankFile ? <span>Refresh before bank file · eligibility rechecked</span> : paymentEligibilityLabel ? <span className="negative">{paymentEligibilityLabel}</span> : null}{row.paymentSummary.overpaidAmount > 0 ? <span className="negative">Overpaid {exactMoney(row.paymentSummary.overpaidAmount)}</span> : null}</small> : null}</> : null}</td>
+                <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <><strong>{money(row.netAmount)}</strong>{row.paymentSummary ? <small className="payout-payment-balance" title={row.paymentSummary.eligibilityMessage ?? undefined}>{row.paymentSummary.processingAmount > 0 ? <span>Frozen profile net {exactMoney(row.paymentSummary.currentNetAmount)}</span> : null}<span>Paid {exactMoney(row.paymentSummary.paidAmount)}</span>{row.paymentSummary.processingAmount > 0 ? <span>Processing {exactMoney(row.paymentSummary.processingAmount)}</span> : null}{refreshBeforeBankFile ? <span>Preliminary balance {exactMoney(preliminaryBankBalance)}</span> : paymentBalanceAvailable ? <span>Balance payable {exactMoney(row.paymentSummary.balancePayable)}</span> : <span>Balance payable —</span>}{canProcessPayments && !activeWorkforceProfile ? <span className="negative">Bank file: Active profiles only</span> : refreshBeforeBankFile ? <span>Refresh before bank file · eligibility rechecked</span> : paymentEligibilityLabel ? <span className="negative">{paymentEligibilityLabel}</span> : null}{row.paymentSummary.overpaidAmount > 0 ? <span className="negative">Overpaid {exactMoney(row.paymentSummary.overpaidAmount)}</span> : null}</small> : null}</> : null}</td>
                 <td><div className="payout-status-stack">{reviewDays.length > 0 && <span className="status-pill warn">{reviewDays.length} low-delivery days</span>}<span className={`status-pill ${statusTone(row.status)}`}>{row.status}</span>{row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
                 <td><div className="payout-detail-actions">{row.paymentDetailsAvailable ? <button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button> : <span className="sr-only">No payment breakup until mapping and payment setup are complete</span>}<PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId || row.providerMemberId || row.name} · ${row.name}`} />{canProcessPayments && row.reviewSubjectId && row.paymentSummary ? <WorkforcePayoutPaymentHistoryButton canManageStatus={canProcessPayments} historyCount={row.paymentSummary.historyCount} periodEnd={periodEnd} periodStart={periodStart} subjectLabel={`${row.dropxId || row.name} · ${row.name}`} workforceId={row.reviewSubjectId} /> : null}</div></td>
               </tr>,

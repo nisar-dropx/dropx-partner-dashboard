@@ -38,6 +38,7 @@ const PAYMENT_BALANCE_AVAILABLE_CODES = new Set([
   "payment_processing",
   "payment_on_hold",
   "pan_not_linked",
+  "profile_not_active",
   "no_positive_balance",
   "beneficiary_bank_details_missing",
   "beneficiary_bank_account_invalid",
@@ -68,6 +69,8 @@ export function workforcePayoutPaymentEligibilityLabel(
       return "Relock required";
     case "profile_unavailable":
       return "Payment profile unavailable";
+    case "profile_not_active":
+      return "Active profiles only";
     case "no_positive_balance":
       return "No positive balance";
     case "beneficiary_bank_details_missing":

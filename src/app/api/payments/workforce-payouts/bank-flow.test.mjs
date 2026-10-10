@@ -82,6 +82,18 @@ test("payment history is finance-restricted, company-scoped and masks account nu
   assert.match(historyRoute, /onHold: String\(holdEvents\[0\]\?\.action/);
 });
 
+test("payment history identifies split bank lines by their immutable location snapshot", () => {
+  assert.match(historyRoute, /location_id_snapshot,location_code_snapshot/);
+  assert.match(historyRoute, /from\("stations"\)/);
+  assert.match(historyRoute, /\.select\("id,station_name"\)/);
+  assert.match(historyRoute, /locationCode: String\(item\.location_code_snapshot/);
+  assert.match(historyRoute, /locationName: locationNames\.get\(String\(item\.location_id_snapshot/);
+  assert.match(historyButton, /locationCode: string/);
+  assert.match(historyButton, /locationName: string/);
+  assert.match(historyButton, /<th>Location<\/th>/);
+  assert.match(historyButton, /<td>\{locationLabel\(entry\)\}<\/td>/);
+});
+
 test("manual status changes and holds are privileged, reasoned and surfaced from payment history", () => {
   assert.match(paymentStatusRoute, /sameOrigin\(request\)/);
   assert.match(paymentStatusRoute, /hasPermission\(authorization, pageCode, "edit"\)/);
@@ -112,13 +124,19 @@ test("the UI pays only eligible profiles, displays trustworthy ledger balances a
   assert.doesNotMatch(page, /from\("workforce_payout_payment_items"\)[\s\S]{0,300}instruction_amount/);
   assert.match(table, /publicationPaymentReady === true/);
   assert.match(table, /row\.paymentSummary\?\.eligible === true/);
+  assert.match(table, /row\.dropxStatus\.trim\(\)\.toLowerCase\(\) === "active"/);
   assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
   assert.match(table, /selectedWorkforcePayoutBankIds\(selectedRows,\s*\(row\) => bankActionableIds\.has\(row\.id\)\)/);
   assert.match(table, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected,\s*selectedBankWorkforceIds/);
   assert.match(actionSelection, /entry\?\.rowIds\.some\(\(rowId\) => selectedRowIds\.has\(rowId\)\)/);
-  assert.match(table, /One bank-eligible checked row is enough to select the DropX ID/);
-  assert.match(table, /complete monthly balance across every published location row, including deductions/);
-  assert.match(bankDialog, /All published location rows and deductions are included, even when only one bank-eligible table row was checked/);
+  assert.match(table, /One bank-eligible checked row selects the DropX ID/);
+  assert.match(table, /separate bank line for each positive location balance/);
+  assert.match(table, /earlier paid allocations reconcile exactly/);
+  assert.match(table, /complete balance is safely consolidated/);
+  assert.match(bankDialog, /Only current Active Workforce profiles are eligible/);
+  assert.match(bankDialog, /Under Review and every other profile status are excluded/);
+  assert.match(bankDialog, /Separate location bank lines are created/);
+  assert.match(bankDialog, /otherwise the profile is safely consolidated/);
   assert.match(table, /Paid \{exactMoney\(row\.paymentSummary\.paidAmount\)\}/);
   assert.match(table, /Balance payable \{exactMoney\(row\.paymentSummary\.balancePayable\)\}/);
   assert.match(table, /paymentBalanceAvailable \? <span>Balance payable[\s\S]*?<span>Balance payable —<\/span>/);
