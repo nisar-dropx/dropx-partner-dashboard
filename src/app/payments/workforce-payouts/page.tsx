@@ -328,21 +328,102 @@ async function withPayoutPaymentSummaries(
     eligibility_code: string;
     eligibility_message: string;
   };
+  type ProcessingPaymentItem = {
+    id: string;
+    workforce_id: string;
+    location_id_snapshot: string;
+    instruction_amount: number | string;
+  };
+  type ProcessingPaymentAllocation = {
+    id: string;
+    payment_item_id: string;
+    station_id: string;
+    instruction_amount_snapshot: number | string;
+  };
   const previews: PaymentPreview[] = [];
-  const previewResults = await mapWithConcurrency(chunkedValues(payoutRows, 250), 3, async (payoutChunk) => admin.rpc("workforce_preview_payout_payment_rows", {
-      p_company_id: companyId,
-      p_period_start: fromDate,
-      p_period_end: toDate,
-      p_rows: payoutChunk
-    }));
+  const processingItems: ProcessingPaymentItem[] = [];
+  const workforceIds = new Set(payoutRows.map((row) => String(row.workforce_id).toLowerCase()));
+  const [previewResults, processingResult] = await Promise.all([
+    mapWithConcurrency(chunkedValues(payoutRows, 250), 3, async (payoutChunk) => admin.rpc("workforce_preview_payout_payment_rows", {
+        p_company_id: companyId,
+        p_period_start: fromDate,
+        p_period_end: toDate,
+        p_rows: payoutChunk
+      })),
+    (async () => {
+      const pageRows: ProcessingPaymentItem[] = [];
+      for (let offset = 0; ; offset += 1000) {
+        const result = await admin
+          .from("workforce_payout_payment_items")
+          .select("id,workforce_id,location_id_snapshot,instruction_amount")
+          .eq("company_id", companyId)
+          .eq("period_start", fromDate)
+          .eq("period_end", toDate)
+          .eq("status", "processing")
+          .order("id")
+          .range(offset, offset + 999);
+        if (result.error) return { data: null, error: result.error };
+        const currentPage = (result.data ?? []) as ProcessingPaymentItem[];
+        pageRows.push(...currentPage.filter((item) => workforceIds.has(String(item.workforce_id).toLowerCase())));
+        if (currentPage.length < 1000) break;
+      }
+      return { data: pageRows, error: null };
+    })()
+  ]);
   for (const result of previewResults) {
     if (result.error) return { rows, error: result.error.message };
     previews.push(...((result.data ?? []) as PaymentPreview[]));
+  }
+  if (processingResult.error) return { rows, error: processingResult.error.message };
+  processingItems.push(...(processingResult.data ?? []));
+  const allocationResults = await mapWithConcurrency(
+    chunkedValues(processingItems.map((item) => item.id), 250),
+    3,
+    async (paymentItemIds) => readAllRows(admin
+      .from("workforce_payout_payment_allocations")
+      .select("id,payment_item_id,station_id,instruction_amount_snapshot")
+      .eq("company_id", companyId)
+      .in("payment_item_id", paymentItemIds)
+      .order("payment_item_id")
+      .order("id"))
+  );
+  const processingAllocations: ProcessingPaymentAllocation[] = [];
+  for (const result of allocationResults) {
+    if (result.error) return { rows, error: result.error.message };
+    processingAllocations.push(...((result.data ?? []) as ProcessingPaymentAllocation[]));
   }
   const previewByPayoutRow = new Map(previews.map((preview) => [
     `${String(preview.workforce_id).toLowerCase()}|${String(preview.station_id).toLowerCase()}`,
     preview
   ]));
+  const allocationsByPaymentItem = new Map<string, ProcessingPaymentAllocation[]>();
+  for (const allocation of processingAllocations) {
+    const itemId = String(allocation.payment_item_id).toLowerCase();
+    const itemAllocations = allocationsByPaymentItem.get(itemId) ?? [];
+    itemAllocations.push(allocation);
+    allocationsByPaymentItem.set(itemId, itemAllocations);
+  }
+  const processingItemByPayoutRow = new Map<string, { id: string; instructionAmount: number }>();
+  const ambiguousPayoutRows = new Set<string>();
+  for (const item of processingItems) {
+    const key = `${String(item.workforce_id).toLowerCase()}|${String(item.location_id_snapshot).toLowerCase()}`;
+    const allocations = allocationsByPaymentItem.get(String(item.id).toLowerCase()) ?? [];
+    const instructionAmount = Number(item.instruction_amount);
+    const allocationAmount = Number(allocations[0]?.instruction_amount_snapshot);
+    const isExactLocationInstruction = allocations.length === 1
+      && String(allocations[0]?.station_id ?? "").toLowerCase() === String(item.location_id_snapshot).toLowerCase()
+      && Number.isFinite(instructionAmount)
+      && Number.isFinite(allocationAmount)
+      && Math.round(allocationAmount * 100) === Math.round(instructionAmount * 100);
+    if (!isExactLocationInstruction || processingItemByPayoutRow.has(key)) {
+      processingItemByPayoutRow.delete(key);
+      ambiguousPayoutRows.add(key);
+      continue;
+    }
+    if (!ambiguousPayoutRows.has(key)) {
+      processingItemByPayoutRow.set(key, { id: String(item.id), instructionAmount });
+    }
+  }
   return {
     rows: rows.map((row) => {
       const preview = row.reviewSubjectId && row.locationId
@@ -350,7 +431,13 @@ async function withPayoutPaymentSummaries(
         : undefined;
       const currentNetAmount = Number(preview?.current_target_amount ?? 0);
       const paidAmount = Number(preview?.paid_amount ?? 0);
+      const payoutRowKey = row.reviewSubjectId && row.locationId
+        ? `${row.reviewSubjectId.toLowerCase()}|${row.locationId.toLowerCase()}`
+        : "";
+      const processingInstruction = processingItemByPayoutRow.get(payoutRowKey);
       const summary: WorkforcePayoutPaymentSummary | undefined = preview ? {
+        processingPaymentItemId: processingInstruction?.id ?? null,
+        processingInstructionAmount: processingInstruction?.instructionAmount ?? null,
         currentNetAmount,
         paidAmount,
         processingAmount: Number(preview.processing_amount ?? 0),

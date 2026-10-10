@@ -11,10 +11,12 @@ const bankDialog = readFileSync(new URL("../../../../components/workforce-payout
 const actionSelection = readFileSync(new URL("../../../../lib/workforce-payout-action-selection.ts", import.meta.url), "utf8");
 const publicationRefresh = readFileSync(new URL("../../../../lib/workforce-payout-publication-refresh.ts", import.meta.url), "utf8");
 const historyButton = readFileSync(new URL("../../../../components/workforce-payout-payment-history-button.tsx", import.meta.url), "utf8");
+const bulkCancellation = readFileSync(new URL("../../../../components/workforce-payout-bulk-cancellation.tsx", import.meta.url), "utf8");
 const page = readFileSync(new URL("../../../../app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
 const snapshot = readFileSync(new URL("../../../../lib/workforce-payout-publication-snapshot.ts", import.meta.url), "utf8");
 const lifecycleMigration = readFileSync(new URL("../../../../../supabase/migrations/20261009172942_workforce_payout_manual_status_and_holds.sql", import.meta.url), "utf8");
 const rowSelectionMigration = readFileSync(new URL("../../../../../supabase/migrations/20261010130000_workforce_payout_location_row_bank_selection.sql", import.meta.url), "utf8");
+const bulkCancellationMigration = readFileSync(new URL("../../../../../supabase/migrations/20261010150000_workforce_payout_bulk_processing_cancellation.sql", import.meta.url), "utf8");
 
 test("bank-file creation is company-scoped, privileged, transport-bounded and idempotent without a row cap", () => {
   assert.match(bankFileRoute, /sameOrigin\(request\)/);
@@ -125,13 +127,50 @@ test("manual status changes and holds are privileged, reasoned and surfaced from
   assert.match(lifecycleMigration, /eligibility_code := 'payment_on_hold'/);
 });
 
+test("selected processing rows can be cancelled atomically with one mandatory remark", () => {
+  assert.match(page, /\.select\("id,workforce_id,location_id_snapshot,instruction_amount"\)/);
+  assert.match(page, /from\("workforce_payout_payment_allocations"\)/);
+  assert.match(page, /const isExactLocationInstruction = allocations\.length === 1/);
+  assert.match(page, /allocations\[0\]\?\.station_id[\s\S]*?item\.location_id_snapshot/);
+  assert.match(page, /Math\.round\(allocationAmount \* 100\) === Math\.round\(instructionAmount \* 100\)/);
+  assert.match(page, /processingPaymentItemId: processingInstruction\?\.id \?\? null/);
+  assert.match(page, /processingInstructionAmount: processingInstruction\?\.instructionAmount \?\? null/);
+  assert.match(page, /\.eq\("status", "processing"\)/);
+  assert.match(table, /function canCancelProcessingPayment/);
+  assert.match(table, /processingInstructionAmount \?\? 0/);
+  assert.match(table, /const processingSelectedRows = useMemo\(\(\) => selectedRows\.filter\(canCancelProcessingPayment\)/);
+  assert.match(table, /amount: Number\(row\.paymentSummary\?\.processingInstructionAmount \?\? 0\)/);
+  assert.match(table, /bankActionableIds\.has\(row\.id\) \|\| canCancelProcessingPayment\(row\)/);
+  assert.match(table, /<WorkforcePayoutBulkCancellation/);
+  assert.match(bulkCancellation, /paymentItemIds: items\.map\(\(item\) => item\.paymentItemId\)/);
+  assert.match(bulkCancellation, /Cancellation remarks/);
+  assert.match(bulkCancellation, /same remark is recorded against every selected payment/);
+  assert.match(paymentStatusRoute, /MAX_REQUEST_BYTES = 4 \* 1024 \* 1024/);
+  assert.match(paymentStatusRoute, /Array\.isArray\(body\.paymentItemIds\)/);
+  assert.match(paymentStatusRoute, /new Set\(paymentItemIds\)\.size !== paymentItemIds\.length/);
+  assert.match(paymentStatusRoute, /rpc\("workforce_cancel_payout_payment_items"/);
+  assert.match(bulkCancellationMigration, /array_agg\(distinct requested\.item_id order by requested\.item_id\)/);
+  assert.match(bulkCancellationMigration, /workforce\.id in \([\s\S]*?order by workforce\.id[\s\S]*?for update/);
+  assert.match(bulkCancellationMigration, /order by item\.id[\s\S]*?for update/);
+  assert.match(bulkCancellationMigration, /Every selected payment must still be Payment Processing\. No payments were cancelled/);
+  assert.match(bulkCancellationMigration, /Every selected payment must be one exact location instruction\. Legacy combined instructions cannot be bulk-cancelled/);
+  assert.match(bulkCancellationMigration, /update public\.workforce_payout_payment_items item[\s\S]*?item\.id = any\(v_item_ids\)/);
+  assert.match(bulkCancellationMigration, /with batch_counts as \([\s\S]*?batch_states as \([\s\S]*?update public\.workforce_payout_payment_batches batch/);
+  assert.match(bulkCancellationMigration, /insert into public\.workforce_payout_payment_events[\s\S]*?select[\s\S]*?'payment_cancelled_manually'/);
+  assert.doesNotMatch(bulkCancellationMigration, /workforce_transition_payout_payment_item\(/);
+  assert.doesNotMatch(bulkCancellationMigration, /\bfor\s+\w+\s+in\s+select\b/i);
+  assert.match(bulkCancellationMigration, /event_type, event_data, actor_user_id[\s\S]*?'payment_cancelled_bulk'/);
+  assert.match(bulkCancellationMigration, /grant execute on function public\.workforce_cancel_payout_payment_items[\s\S]*?to service_role/);
+  assert.doesNotMatch(bulkCancellationMigration, /to (?:public|anon|authenticated)\s*;/);
+});
+
 test("the UI pays only eligible location rows and displays row-specific ledger balances", () => {
   assert.match(page, /rpc\("workforce_preview_payout_payment_rows"/);
   assert.match(page, /`\$\{String\(preview\.workforce_id\)\.toLowerCase\(\)\}\|\$\{String\(preview\.station_id\)\.toLowerCase\(\)\}`/);
   assert.match(page, /loadError \|\| audience !== "workforce" \|\| !canProcessPayments/);
   assert.match(page, /const \[reviewed, paymentEnriched\] = await Promise\.all/);
   assert.match(page, /canProcessPayments = audience === "workforce"[\s\S]*?period\.mode === "monthly"[\s\S]*?authorization\.hasAllLocationAccess[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
-  assert.doesNotMatch(page, /from\("workforce_payout_payment_items"\)[\s\S]{0,300}instruction_amount/);
+  assert.match(page, /from\("workforce_payout_payment_items"\)[\s\S]{0,300}instruction_amount/);
   assert.match(table, /publicationPaymentReady === true/);
   assert.match(table, /row\.paymentSummary\?\.eligible === true/);
   assert.match(table, /row\.dropxStatus\.trim\(\)\.toLowerCase\(\) === "active"/);

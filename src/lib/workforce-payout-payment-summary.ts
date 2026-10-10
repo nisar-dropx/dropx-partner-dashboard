@@ -12,6 +12,8 @@ export type WorkforcePayoutCurrentAmount = {
 };
 
 export type WorkforcePayoutPaymentSummary = {
+  processingPaymentItemId?: string | null;
+  processingInstructionAmount?: number | null;
   currentNetAmount: number;
   paidAmount: number;
   processingAmount: number;
