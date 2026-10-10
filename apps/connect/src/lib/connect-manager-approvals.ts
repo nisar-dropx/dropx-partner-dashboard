@@ -1075,14 +1075,26 @@ function normalizeRosterSwapDecision(value: unknown): RosterSwapDecisionRow | nu
 }
 
 export async function decideConnectRosterSwapApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) throw new Error("A linked People login is required to approve a shift swap.");
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) throw new Error("A linked People login is required to approve a shift swap.");
   const requestId = clean(requestIdValue);
   const decision = clean(decisionValue);
   const note = clean(noteValue).slice(0, 500);
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Shift swap request is invalid.");
   if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
   const accept = decision === "approved";
+
+  // The inbox lists swaps assigned to any login linked to this person, so decide
+  // as the login the swap is actually assigned to rather than only the primary one.
+  const assigned = await db().from("hr_roster_swap_requests")
+    .select("approver_user_id")
+    .eq("company_id", account.companyId)
+    .eq("id", requestId)
+    .maybeSingle();
+  if (assigned.error) throw new Error(userFacingError(assigned.error.message, "Unable to update this shift swap. Please try again."));
+  if (!assigned.data) throw new Error("Shift swap request was not found.");
+  const assignedUserId = assigned.data.approver_user_id;
+  const actorUserId = actorUserIds.find((id) => id === assignedUserId) ?? actorUserIds[0];
 
   // Keep the dedicated manager wrapper (fixed in People migration). Do not call
   // hr_review_roster_swap from Connect — People owns that path.
