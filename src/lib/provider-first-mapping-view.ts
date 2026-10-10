@@ -24,6 +24,8 @@ export type ProviderFirstWorkerView = {
 };
 
 export type ProviderFirstMappingRowView = {
+  region?: string;
+  clusterKeys?: string[];
   outboundMonths?: string[];
   providerMemberId: string;
   providerMemberName: string;
@@ -112,6 +114,8 @@ export type ProviderFirstPaymentMethodView = {
 };
 
 export type ProviderFirstFilters = {
+  regions?: string[];
+  clusterKeys?: string[];
   outboundMonths?: string[];
   query: string;
   stationIds: string[];
@@ -121,6 +125,21 @@ export type ProviderFirstFilters = {
 };
 
 export type ProviderFirstPageSize = 50 | 100 | 500 | 1000 | "all";
+
+export function providerFirstScopeOptions(
+  rows: ProviderFirstMappingRowView[],
+  regions: string[],
+  clusterKeys: string[],
+  clusterOptions: Array<{ value: string; label: string }>
+) {
+  const regionRows = rows.filter((row) => !regions.length || regions.includes(row.region || "Unassigned"));
+  const validClusters = new Set(regionRows.flatMap((row) => row.clusterKeys ?? []));
+  const locationRows = regionRows.filter((row) => !clusterKeys.length || clusterKeys.some((key) => row.clusterKeys?.includes(key)));
+  return {
+    clusters: clusterOptions.filter((option) => validClusters.has(option.value)),
+    stations: [...new Map(locationRows.map((row) => [row.stationId, row.stationLabel])).entries()]
+  };
+}
 
 const SCIENTIFIC_ID_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/;
 
@@ -377,6 +396,8 @@ export function filterProviderFirstRowIndexes({
     const validationStatus = providerFirstValidationStatus(row, worker, method);
     const matches = (!query || searchable.includes(query))
       && (!filters.outboundMonths?.length || filters.outboundMonths.some((month) => row.outboundMonths?.includes(month)))
+      && (!filters.regions?.length || filters.regions.includes(row.region || "Unassigned"))
+      && (!filters.clusterKeys?.length || filters.clusterKeys.some((key) => row.clusterKeys?.includes(key)))
       && (!filters.stationIds.length || filters.stationIds.includes(row.stationId))
       && (!filters.paymentMethodIds.length || filters.paymentMethodIds.includes(row.paymentMethodId || "unassigned"))
       && (!filters.mappingStatuses.length || filters.mappingStatuses.includes(mappingStatus))
