@@ -36,6 +36,7 @@ import {
   auditTone,
   isFastAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
+import { AuditDownloads } from "./audit-downloads";
 import { AuditRangeReport } from "./audit-range-report";
 import { inAuditReportRange, matchesAuditReportStatus } from "@/lib/ops-pulse/station-audit-progress";
 import { AuditMonthTracker } from "./audit-month-tracker";
@@ -886,16 +887,7 @@ export function AuditWorkspace({
             </button>
           ))}
         </div>
-        {canManage && (
-          <a
-            className="button secondary compact"
-            aria-disabled={navigationPending}
-            onClick={(event) => { if (navigationPending) event.preventDefault(); }}
-            href={`/api/ops-pulse/audits/export?${exportParams}`}
-          >
-            Download Excel
-          </a>
-        )}
+        {canManage && <AuditDownloads params={exportParams.toString()} disabled={navigationPending} />}
       </div>
       <div className={styles.legend}>
         <span className={styles.complete}>● Completed</span>

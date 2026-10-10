@@ -1,7 +1,18 @@
-import { allAuditRows, auditRowsForIds } from "@/lib/ops-pulse/station-audit-query";
+import {
+  allAuditRows,
+  auditRowsForIds,
+} from "@/lib/ops-pulse/station-audit-query";
 import * as XLSX from "xlsx";
-import { auditProgress, auditReportRangeError, matchesAuditReportStatus } from "@/lib/ops-pulse/station-audit-progress";
-import { appendAuditProgressSummary, auditWorkbookSheet } from "@/lib/ops-pulse/station-audit-progress-export";
+import { renderAuditProgressPdf } from "@/lib/ops-pulse/station-audit-progress-pdf";
+import {
+  auditProgress,
+  auditReportRangeError,
+  matchesAuditReportStatus,
+} from "@/lib/ops-pulse/station-audit-progress";
+import {
+  appendAuditProgressSummary,
+  auditWorkbookSheet,
+} from "@/lib/ops-pulse/station-audit-progress-export";
 import { loadAuditAssignees } from "@/lib/ops-pulse/station-audit-people";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -25,6 +36,21 @@ export const maxDuration = 60;
 const workbookSheet = auditWorkbookSheet;
 
 export async function GET(request: Request) {
+  try {
+    return await exportAuditReport(request);
+  } catch (error) {
+    console.error("Audit export failed", error);
+    return Response.json(
+      {
+        error:
+          "The audit report could not be prepared. Please retry or select a shorter date range.",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function exportAuditReport(request: Request) {
   const authorization = await getAuthorization();
   if (
     !authorization ||
@@ -35,14 +61,13 @@ export async function GET(request: Request) {
     return Response.json({ error: "Database unavailable." }, { status: 500 });
   const client = supabaseAdmin;
   const url = new URL(request.url);
+  const format = url.searchParams.get("format") || "xlsx";
+  if (format !== "xlsx" && format !== "pdf")
+    return Response.json({ error: "Choose Excel or PDF." }, { status: 400 });
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to") ?? "";
   const rangeError = auditReportRangeError(from, to);
-  if (rangeError)
-    return Response.json(
-      { error: rangeError },
-      { status: 400 },
-    );
+  if (rangeError) return Response.json({ error: rangeError }, { status: 400 });
   const companyId = requireCompanyId(authorization);
   const master = await loadStationAuditMaster(companyId);
   if (!canManageStationAudits(authorization, master.programmeSettings))
@@ -69,18 +94,21 @@ export async function GET(request: Request) {
       { status: 403 },
     );
   const stationById = new Map(stations.map((station) => [station.id, station]));
-  const auditsResult = await allAuditRows((start, end) => client
-    .from("ops_station_audits")
-    .select(
-      "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,assignment_verified,started_at,completed_at,completed_by,response_due_at,station_response_status,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
-    )
-    .eq("company_id", companyId)
-    .is("deleted_at", null)
-    .in("location_id", stationIds)
-    .gte("scheduled_for", `${from}T00:00:00+05:30`)
-    .lte("scheduled_for", `${to}T23:59:59.999+05:30`)
-    .order("scheduled_for").order("id")
-    .range(start, end));
+  const auditsResult = await allAuditRows((start, end) =>
+    client
+      .from("ops_station_audits")
+      .select(
+        "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,assignment_verified,started_at,completed_at,completed_by,response_due_at,station_response_status,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
+      )
+      .eq("company_id", companyId)
+      .is("deleted_at", null)
+      .in("location_id", stationIds)
+      .gte("scheduled_for", `${from}T00:00:00+05:30`)
+      .lte("scheduled_for", `${to}T23:59:59.999+05:30`)
+      .order("scheduled_for")
+      .order("id")
+      .range(start, end),
+  );
   if (auditsResult.error)
     return Response.json(
       { error: auditsResult.error.message },
@@ -93,10 +121,20 @@ export async function GET(request: Request) {
   const requestedStatus = url.searchParams.get("status") || "all";
   const term = (url.searchParams.get("q") || "").toLowerCase();
   const now = Date.now();
-  const assignees = await loadAuditAssignees(companyId, master.programmeSettings.scheduler_role_ids, stationIds);
+  const assignees = await loadAuditAssignees(
+    companyId,
+    master.programmeSettings.scheduler_role_ids,
+    stationIds,
+  );
   const names = new Map(assignees.map((person) => [person.id, person.name]));
-  const auditorName = (audit: { assigned_to: string | null; assigned_name: string | null; assignment_verified: boolean }) =>
-    audit.assignment_verified && audit.assigned_to ? names.get(audit.assigned_to) || audit.assigned_name || "Former auditor" : `${audit.assigned_name || "Unassigned"}${audit.assigned_name ? " (assignment unconfirmed)" : ""}`;
+  const auditorName = (audit: {
+    assigned_to: string | null;
+    assigned_name: string | null;
+    assignment_verified: boolean;
+  }) =>
+    audit.assignment_verified && audit.assigned_to
+      ? names.get(audit.assigned_to) || audit.assigned_name || "Former auditor"
+      : `${audit.assigned_name || "Unassigned"}${audit.assigned_name ? " (assignment unconfirmed)" : ""}`;
   const audits = (auditsResult.data ?? []).filter(
     (audit) =>
       (requestedType === "all" || audit.audit_type_id === requestedType) &&
@@ -218,57 +256,74 @@ export async function GET(request: Request) {
       : "";
   const book = XLSX.utils.book_new();
   const register = audits.map((audit: any) => ({
-        "Audit number": audit.audit_number,
-        "Audit type": typeName.get(audit.id),
-        Station: stationById.get(audit.location_id)?.station_code,
-        "Station name":
-          stationById.get(audit.location_id)?.station_name ??
-          stationById.get(audit.location_id)?.city,
-        "Scheduled (IST)": localTime(audit.scheduled_for),
-        Status: auditStatusLabel(audit.status_code),
-        Completion: auditProgress(audit, now).completion,
-        "Fieldwork submitted": auditProgress(audit, now).submitted ? "Yes" : "No",
-        "Overdue audit": auditProgress(audit, now).overdue ? "Yes" : "No",
-        "Days overdue": auditProgress(audit, now).daysOverdue,
-        "Station response status": auditResponseLabel(audit, now),
-        "Next action": auditProgress(audit, now).nextAction,
-        "Assigned auditor": auditorName(audit),
-        "Scheduled by":
-          actor(audit.id, "scheduled")?.actor_name || "Not recorded",
-        "Started by":
-          actor(audit.id, "started")?.actor_name ||
-          (audit.started_at ? audit.assigned_name : ""),
-        "Completed by":
-          actor(audit.id, "submitted")?.actor_name ||
-          (audit.completed_by === audit.assigned_to ? audit.assigned_name : ""),
-        "Started (IST)": localTime(audit.started_at),
-        "Completed (IST)": localTime(audit.completed_at),
-        "Duration minutes": auditDuration(audit),
-        "Quality review (10 min or less)": isFastAudit(audit) ? "Yes" : "",
-        "Response due (IST)": localTime(audit.response_due_at),
-        "Open in OpsPulse": `${url.origin}/ops-pulse/audits?audit=${encodeURIComponent(audit.id)}`,
-        "System cash": audit.system_cash_amount,
-        "Physical cash": audit.physical_cash_amount,
-        "Cash variance": audit.cash_variance_amount,
-        "System shipments": audit.system_shipment_count,
-        "Physical shipments": audit.physical_shipment_count,
-        Missing: audit.shipment_missing_count,
-        Excess: audit.shipment_excess_count,
-        "Unresolved shipments": audit.shipment_unresolved_count,
-        "Physical audit score (%)": audit.score,
-        "Score rating": (audit.score_snapshot as any)?.rating || "Not scored",
-        "Score review": (audit.score_snapshot as any)?.provisional ? "Provisional" : audit.score == null ? "Not scored" : "Assessed",
-        Summary: audit.overall_summary,
-        "Station response": audit.station_summary,
-        "Manager note": audit.manager_summary,
-        Email: audit.email_status,
-      }));
+    "Audit number": audit.audit_number,
+    "Audit type": typeName.get(audit.id),
+    Station: stationById.get(audit.location_id)?.station_code,
+    "Station name":
+      stationById.get(audit.location_id)?.station_name ??
+      stationById.get(audit.location_id)?.city,
+    "Scheduled (IST)": localTime(audit.scheduled_for),
+    Status: auditStatusLabel(audit.status_code),
+    Completion: auditProgress(audit, now).completion,
+    "Fieldwork submitted": auditProgress(audit, now).submitted ? "Yes" : "No",
+    "Overdue audit": auditProgress(audit, now).overdue ? "Yes" : "No",
+    "Days overdue": auditProgress(audit, now).daysOverdue,
+    "Station response status": auditResponseLabel(audit, now),
+    "Next action": auditProgress(audit, now).nextAction,
+    "Assigned auditor": auditorName(audit),
+    "Scheduled by": actor(audit.id, "scheduled")?.actor_name || "Not recorded",
+    "Started by":
+      actor(audit.id, "started")?.actor_name ||
+      (audit.started_at ? audit.assigned_name : ""),
+    "Completed by":
+      actor(audit.id, "submitted")?.actor_name ||
+      (audit.completed_by === audit.assigned_to ? audit.assigned_name : ""),
+    "Started (IST)": localTime(audit.started_at),
+    "Completed (IST)": localTime(audit.completed_at),
+    "Duration minutes": auditDuration(audit),
+    "Quality review (10 min or less)": isFastAudit(audit) ? "Yes" : "",
+    "Response due (IST)": localTime(audit.response_due_at),
+    "Open in OpsPulse": `${url.origin}/ops-pulse/audits?audit=${encodeURIComponent(audit.id)}`,
+    "System cash": audit.system_cash_amount,
+    "Physical cash": audit.physical_cash_amount,
+    "Cash variance": audit.cash_variance_amount,
+    "System shipments": audit.system_shipment_count,
+    "Physical shipments": audit.physical_shipment_count,
+    Missing: audit.shipment_missing_count,
+    Excess: audit.shipment_excess_count,
+    "Unresolved shipments": audit.shipment_unresolved_count,
+    "Physical audit score (%)": audit.score,
+    "Score rating": (audit.score_snapshot as any)?.rating || "Not scored",
+    "Score review": (audit.score_snapshot as any)?.provisional
+      ? "Provisional"
+      : audit.score == null
+        ? "Not scored"
+        : "Assessed",
+    Summary: audit.overall_summary,
+    "Station response": audit.station_summary,
+    "Manager note": audit.manager_summary,
+    Email: audit.email_status,
+  }));
   appendAuditProgressSummary(book, audits, {
-    from, to, now, auditorName, register,
+    from,
+    to,
+    now,
+    auditorName,
+    register,
     stations: stations.filter((station) => stationIds.includes(station.id)),
     filters: `Type: ${master.auditTypes.find((type) => type.id === requestedType)?.name || "All"}; status: ${requestedStatus}; auditors: ${selectedAuditors.map((id) => names.get(id) || id).join(", ") || "All"}; search: ${term || "None"}; quick audits only: ${url.searchParams.get("fast") === "true" ? "Yes" : "No"}`,
   });
   XLSX.utils.book_append_sheet(book, workbookSheet(register), "Audit register");
+  if (format === "pdf") {
+    const pdf = await renderAuditProgressPdf(book, from, to);
+    return new Response(new Uint8Array(pdf), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="station-audits-${from}-to-${to}.pdf"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
   const auditLookup = new Map(audits.map((audit) => [audit.id, audit]));
   const metadata = (auditId: string) => {
     const audit: any = auditLookup.get(auditId);
