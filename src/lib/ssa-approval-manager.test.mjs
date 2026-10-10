@@ -128,10 +128,40 @@ test('self-approval is never assigned',async()=>{
   await assert.rejects(f.manager(),/Map a Cluster Manager or Area Operations Manager/);
 });
 
-test('multiple mapped Cluster Managers are rejected instead of arbitrarily assigning one',async()=>{
-  const f=fixture();
-  f.state.tables.hr_people.push({id:'cm-other',company_id:'company',display_name:'other',status:'active'});
-  f.state.tables.hr_engagements.push({id:'e-other',person_id:'cm-other',company_id:'company',status:'active',start_date:'2020-01-01',end_date:null});
+function addOtherClusterManager(f){
+  f.state.tables.hr_people.push({id:'other',company_id:'company',display_name:'other',status:'active'});
+  f.state.tables.hr_engagements.push({id:'e-other',person_id:'other',company_id:'company',status:'active',start_date:'2020-01-01',end_date:null});
   f.state.tables.hr_work_assignments.push({id:'a-other',engagement_id:'e-other',company_id:'company',designation_id:'CLM',location_id:'station',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  f.state.logins.set('other','other-login');
+}
+test('with several mapped Cluster Managers the requester keeps the one in their own reporting line',async()=>{
+  const f=fixture();addOtherClusterManager(f);
+  // Even when the other manager covers more of the station.
+  f.state.tables.hr_people.push({id:'x1',company_id:'company',display_name:'x1',status:'active'});
+  f.state.tables.hr_engagements.push({id:'e-x1',person_id:'x1',company_id:'company',status:'active',start_date:'2020-01-01',end_date:null});
+  f.state.tables.hr_work_assignments.push({id:'a-x1',engagement_id:'e-x1',company_id:'company',designation_id:'TL',location_id:'station',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  f.state.tables.hr_reporting_relationships.push({company_id:'company',subject_assignment_id:'a-x1',manager_assignment_id:'a-other',relationship_type:'solid_line',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  f.state.tables.hr_people.push({id:'x2',company_id:'company',display_name:'x2',status:'active'});
+  f.state.tables.hr_engagements.push({id:'e-x2',person_id:'x2',company_id:'company',status:'active',start_date:'2020-01-01',end_date:null});
+  f.state.tables.hr_work_assignments.push({id:'a-x2',engagement_id:'e-x2',company_id:'company',designation_id:'TL',location_id:'station',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  f.state.tables.hr_reporting_relationships.push({company_id:'company',subject_assignment_id:'a-x2',manager_assignment_id:'a-other',relationship_type:'solid_line',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  f.state.tables.hr_people.push({id:'x3',company_id:'company',display_name:'x3',status:'active'});
+  f.state.tables.hr_engagements.push({id:'e-x3',person_id:'x3',company_id:'company',status:'active',start_date:'2020-01-01',end_date:null});
+  f.state.tables.hr_work_assignments.push({id:'a-x3',engagement_id:'e-x3',company_id:'company',designation_id:'TL',location_id:'station',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  f.state.tables.hr_reporting_relationships.push({company_id:'company',subject_assignment_id:'a-x3',manager_assignment_id:'a-other',relationship_type:'solid_line',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  assert.equal((await f.manager()).personId,'cm');
+});
+test('without a reporting line the Cluster Manager most of the station reports to owns the request',async()=>{
+  const f=fixture();addOtherClusterManager(f);
+  f.state.tables.hr_reporting_relationships=f.state.tables.hr_reporting_relationships.filter(r=>r.subject_assignment_id!=='a-worker');
+  f.state.tables.hr_people.push({id:'x1',company_id:'company',display_name:'x1',status:'active'});
+  f.state.tables.hr_engagements.push({id:'e-x1',person_id:'x1',company_id:'company',status:'active',start_date:'2020-01-01',end_date:null});
+  f.state.tables.hr_work_assignments.push({id:'a-x1',engagement_id:'e-x1',company_id:'company',designation_id:'TL',location_id:'station',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  f.state.tables.hr_reporting_relationships.push({company_id:'company',subject_assignment_id:'a-x1',manager_assignment_id:'a-cm',relationship_type:'solid_line',is_primary:true,effective_from:'2020-01-01',effective_to:null});
+  assert.equal((await f.manager()).personId,'cm');
+});
+test('evenly split Cluster Managers with no reporting line are still left for People to settle',async()=>{
+  const f=fixture();addOtherClusterManager(f);
+  f.state.tables.hr_reporting_relationships=f.state.tables.hr_reporting_relationships.filter(r=>r.subject_assignment_id!=='a-worker');
   await assert.rejects(f.manager(),/More than one request approver/);
 });

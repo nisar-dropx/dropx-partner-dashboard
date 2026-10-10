@@ -448,8 +448,7 @@ export async function POST(request: NextRequest) {
       "incorrect_in",
       "incorrect_out",
       "late_in_permission",
-      "early_out_permission",
-      "other"
+      "early_out_permission"
     ].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }

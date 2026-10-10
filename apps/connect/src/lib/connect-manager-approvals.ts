@@ -1093,7 +1093,16 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
     .maybeSingle();
   if (assigned.error) throw new Error(userFacingError(assigned.error.message, "Unable to update this shift swap. Please try again."));
   if (!assigned.data) throw new Error("Shift swap request was not found.");
-  const assignedUserId = assigned.data.approver_user_id;
+  // hr_review_roster_swap authorises against the open approval step when one exists.
+  const openStep = await db().from("hr_roster_swap_approval_steps")
+    .select("approver_user_id")
+    .eq("company_id", account.companyId)
+    .eq("request_id", requestId)
+    .eq("status", "pending")
+    .order("step_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const assignedUserId = openStep.data?.approver_user_id ?? assigned.data.approver_user_id;
   const actorUserId = actorUserIds.find((id) => id === assignedUserId) ?? actorUserIds[0];
 
   // Keep the dedicated manager wrapper (fixed in People migration). Do not call

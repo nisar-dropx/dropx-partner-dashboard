@@ -24,6 +24,7 @@ function PayrollDays({ attendance }: { attendance: NonNullable<InterimSalary["at
   }, [open]);
   return <>
     <div className={styles.days}>
+      <div className={styles.payableDays}><span>Payable days</span><b>{attendance.payable} of {attendance.expected}</b></div>
       {rows.slice(0, 3).map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
       {split.length ? <button type="button" className={styles.daySplit} aria-expanded={open} aria-controls="paid-leave-split" onClick={() => setOpen(value => !value)}><span>Paid leave<small>{open ? "Hide split" : "View split"}</small></span><b>{attendance.leave}<ChevronDown size={15} aria-hidden="true"/></b></button> : <div><span>Paid leave</span><b>{attendance.leave}</b></div>}
       {rows.slice(3).map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}

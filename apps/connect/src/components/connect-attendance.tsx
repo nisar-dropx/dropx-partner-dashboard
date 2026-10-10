@@ -905,7 +905,7 @@ function RegularizationSheet({
   const missingReason = missingPunchReason(row.inTime, row.outTime);
   const [reason, setReason] = useState(() => {
     const previous = row.regularization?.reasonCode;
-    return previous && !(previous === "other" && missingReason) ? previous : missingReason;
+    return previous && previous !== "other" ? previous : missingReason;
   });
   const [remarks, setRemarks] = useState(row.regularization?.remarks || "");
   const [attachment, setAttachment] = useState<File | null>(null);
@@ -999,13 +999,12 @@ function RegularizationSheet({
           <option value="incorrect_out">Incorrect OUT time</option>
           <option value="late_in_permission">Permission – late IN</option>
           <option value="early_out_permission">Permission – early OUT</option>
-          <option value="other" disabled={Boolean(missingReason)}>Other (remarks only{missingReason ? " · needs both punches" : ""})</option>
         </select></label>
-        {missingReason ? <p className="dx-time-prompt">{missingReason === "missed_both" ? "No punches recorded. Enter your actual IN and OUT times." : "Enter the actual time of the missing punch."} Other cannot correct missing punches.</p> : null}
+        {missingReason ? <p className="dx-time-prompt">{missingReason === "missed_both" ? "No punches recorded. Enter your actual IN and OUT times." : "Enter the actual time of the missing punch."}</p> : null}
         {reason && (requestsInTime || requestsOutTime) ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
           {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
           {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}
-        </div> : reason === "other" ? <p className="dx-time-prompt">Other keeps recorded times unchanged. Explain the correction in remarks and attach proof.</p> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
+        </div> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">
           <Info aria-hidden="true" />

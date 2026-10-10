@@ -52,7 +52,7 @@ function request(overrides = {}, proofCount = 2) {
 }
 test('screenshot failure returns specific guidance before storage/RPC (also protects old clients)', async () => {
   const f = fixture(); const response = await f.POST(request({ reasonCode: 'other', requestedInTime: '', requestedOutTime: '' }, 1));
-  assert.equal(response.status, 400); assert.match((await response.json()).error, /Select Missed both punches/);
+  assert.equal(response.status, 400); assert.match((await response.json()).error, /Select a regularization reason/);
   assert.equal(f.state.uploaded.length, 0); assert.equal(f.state.rpc.length, 0);
 });
 test('valid missed-both request keeps both proofs and enters manager approval, never auto-approves', async () => {
@@ -77,10 +77,10 @@ test('returned dual-proof request reuses both existing proofs, not only the IN p
   f.state.existing.attachment_path_out = null; f.state.rpc = [];
   assert.equal((await f.POST(request({}, 0))).status, 400); assert.equal(f.state.rpc.length, 0);
 });
-test('returned Other keeps current times unchanged', async () => {
+test('Other (remarks only) is no longer accepted, even for a returned request', async () => {
   const f = fixture(); f.state.existing = { status: 'returned', attachment_path: 'existing-proof' };
-  assert.equal((await f.POST(request({ reasonCode: 'other', currentInTime: '09:30', currentOutTime: '17:45' }, 0))).status, 200);
-  assert.equal(f.state.rpc[0].args.p_requested_in_time, '09:30'); assert.equal(f.state.rpc[0].args.p_requested_out_time, '17:45');
+  assert.equal((await f.POST(request({ reasonCode: 'other', currentInTime: '09:30', currentOutTime: '17:45' }, 0))).status, 400);
+  assert.equal(f.state.rpc.length, 0);
 });
 test('duplicate pending and unauthenticated requests cannot upload or create', async () => {
   const f = fixture(); f.state.existing = { status: 'pending_manager' };
