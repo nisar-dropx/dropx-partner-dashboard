@@ -526,14 +526,9 @@ export function AuditDetail({
                     <label className={styles.inputLabel}>
                       Google Drive evidence folder *
                       <small>
-                        Upload the video-call screen recording and audit photos
-                        to one Google Drive folder. Set General access to
-                        “Anyone with the link” and role to “Viewer”, then paste
-                        the folder link here.
+                        {type.video_link_help ||
+                          "Upload the video-call screen recording and audit photos to one Google Drive folder. Set General access to Anyone with the link and role to Viewer, then paste the folder link here."}
                       </small>
-                      {type.video_link_help && (
-                        <small>{type.video_link_help}</small>
-                      )}
                       <input
                         name="video_call_url"
                         type="url"
@@ -553,8 +548,7 @@ export function AuditDetail({
                           Confirm access
                         </option>
                         <option value="yes">
-                          Uploaded recording and photos · Anyone with the link —
-                          Viewer
+                          Confirmed — uploaded and shared for viewing
                         </option>
                       </select>
                     </label>
