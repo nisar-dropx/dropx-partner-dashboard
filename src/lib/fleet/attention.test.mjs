@@ -9,7 +9,7 @@ test('Missing rent has a specific actionable field, and saving either period cle
  assert.equal(fleetAttention({...data,vehicles:[{...vehicle,rentAmount:15000,rentPeriod:null}]}).length,1);
 });
 test('Terminal and unauthorized vehicles do not generate rent setup tasks',()=>{
- for(const status of ['sold','disposed','returned'])assert.equal(fleetAttention({...data,vehicles:[{...vehicle,status}]}).length,0);
+ for(const status of ['sold','disposed','returned','archived'])assert.equal(fleetAttention({...data,vehicles:[{...vehicle,status}]}).length,0);
  assert.equal(fleetAttention({...data,capabilities:{visibleSections:[]}}).length,0);
 });
 test('Document action carries the exact missing document; saved copy clears it',()=>{

@@ -34,7 +34,7 @@ export async function mappingScope(auth:AuthorizationContext,date?:string){
  ]);
  if(vr.error||sr.error)throw new FleetReportError('Unable to check active vehicles. Retry.');
  let vehicles=(vr.data??[]).filter(v=>isMappingVehicleActive(v,sr.data??[]));
- const unavailable=(v:typeof vehicles[number])=>(v.deployment_status==null||v.deployment_status==='deployed')&&!isMappingVehicleActive(v,sr.data??[])&&!['sold','disposed','returned'].includes(v.status);
+ const unavailable=(v:typeof vehicles[number])=>(v.deployment_status==null||v.deployment_status==='deployed')&&!isMappingVehicleActive(v,sr.data??[])&&!['sold','disposed','returned','archived'].includes(v.status);
  let unavailableVehicles=(vr.data??[]).filter(unavailable),placementRecorded=true;
  if(date&&date<istDate()){
   const history=await readAllRows(supabaseAdmin!.from('fleet_da_mapping_periods').select('snapshot,eligible').eq('company_id',companyId).in('station_code',stations.map(s=>s.code)).lte('effective_from',date).or(`effective_to.is.null,effective_to.gt.${date}`).order('vehicle_id'));
@@ -45,7 +45,7 @@ export async function mappingScope(auth:AuthorizationContext,date?:string){
   if(placementRecorded){vehicles=(history.data??[]).filter(p=>p.eligible).map(p=>p.snapshot as typeof vehicles[number]);unavailableVehicles=(history.data??[]).filter(p=>!p.eligible).map(p=>p.snapshot as typeof vehicles[number]).filter(unavailable);}
  }
  const codes=new Set([...vehicles,...unavailableVehicles].map(v=>v.station_code));
- return{companyId,stations:stations.filter(s=>codes.has(s.code)),vehicles,unavailableVehicles,placementRecorded,dayStatuses:(sr.data??[]).filter(s=>s.is_active&&!s.is_operational&&!['sold','disposed','returned'].includes(s.status_key)).map(s=>({key:s.status_key,label:s.status_key==='on_leave'?'Absent / On leave':s.label}))};
+ return{companyId,stations:stations.filter(s=>codes.has(s.code)),vehicles,unavailableVehicles,placementRecorded,dayStatuses:(sr.data??[]).filter(s=>s.is_active&&!s.is_operational&&!['sold','disposed','returned','archived'].includes(s.status_key)).map(s=>({key:s.status_key,label:s.status_key==='on_leave'?'Absent / On leave':s.label}))};
 }
 export async function loadMapping(auth:AuthorizationContext,date:string,requestedStation:string,registry=false,includeHierarchy=true):Promise<MappingData>{
  const scope=await mappingScope(auth,date),today=istDate();

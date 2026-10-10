@@ -1,3 +1,5 @@
+import { fleetAuditContext } from "@/lib/fleet/audit-context";
+import { availabilityDateError, registrationNumber } from "@/lib/fleet/vehicle-maintenance";
 import { withFleetSystemLog } from "@/lib/fleet/system-log";
 import { resolveVehicleSource } from "@/lib/fleet/vehicle-sources-server";
 import { parseVehicleContact } from "@/lib/fleet/vehicle-contact";
@@ -8,7 +10,7 @@ import { type AuthorizationContext, getAuthorization, hasPermission } from "@/li
 import { requireCompanyId } from "@/lib/company-scope";
 import { writeEventLog } from "@/lib/event-log";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { hasActiveFleetMembership } from "@/lib/fleet-control";
+import { hasActiveFleetMembership, mapVehicle } from "@/lib/fleet-control";
 
 const editableFields = [
   "vehicle_no",
@@ -56,8 +58,11 @@ async function handlePOST(request: Request) {
   const dateError = deploymentDateError(payload.deployment_date ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()), new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
   if (dateError) return NextResponse.json({error:dateError},{status:400});
   if (!payload.status) payload.status = "active";
+  if (payload.status === "archived") return NextResponse.json({error:"Create a current vehicle before archiving it."},{status:400});
   if (!payload.ownership_type) payload.ownership_type = "own";
   if (!payload.vehicle_no) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
+  const conflict=await registrationConflict(access.companyId,payload.vehicle_no);
+  if(conflict)return conflict;
   if (!payload.station_code) return NextResponse.json({ error: "Location is required." }, { status: 400 });
   if (!payload.model) payload.model = "";
   if (!payload.fuel_type) return NextResponse.json({ error: "Fuel type is required." }, { status: 400 });
@@ -115,10 +120,13 @@ async function handlePATCH(request: Request) {
   const guard = await requireVehicleScope(access.companyId, vehicleNo, access.stationCodes);
   if ("error" in guard) return guard.error;
   if (normalizeText(body.registration_number)) {
-    if(!vehicleNo.startsWith("PENDING-"))return NextResponse.json({error:"Registration can be completed here only for a pending entry."},{status:400});
-    const registration=normalizeText(body.registration_number).replace(/\s/g,"").toUpperCase();
-    if(!/^[A-Z0-9]{6,20}$/.test(registration))return NextResponse.json({error:"Enter the actual vehicle registration number."},{status:400});
-    payload.vehicle_no=registration;
+    const registration=registrationNumber(body.registration_number);
+    if(!registration)return NextResponse.json({error:"Enter the actual vehicle registration number."},{status:400});
+    if (registration !== vehicleNo) {
+      const conflict=await registrationConflict(access.companyId,registration,guard.vehicle.id);
+      if(conflict)return conflict;
+      payload.vehicle_no=registration;
+    }
   }
   if (payload.station_code && !canAccessStation(access.stationCodes, payload.station_code)) {
     return NextResponse.json({ error: "This location is not allocated to your user." }, { status: 403 });
@@ -132,31 +140,38 @@ async function handlePATCH(request: Request) {
   if (("deployment_status" in payload || "current_location_type" in payload || "current_location_label" in payload) && !payload.current_location_label) {
     return NextResponse.json({ error: "Enter where the vehicle is currently located." }, { status: 400 });
   }
+  if (guard.vehicle.status === "archived") return NextResponse.json({error:"This vehicle is archived. Restore it before editing."},{status:409});
+  if (payload.status === "archived") return NextResponse.json({error:"Use Delete / archive vehicle and provide a reason."},{status:400});
   if (payload.status) {
-    const definition = await supabaseAdmin.from("fleet_vehicle_status_master").select("id,status_key,label,is_operational,requires_reason,requires_expected_date").eq("company_id", access.companyId).eq("status_key", payload.status).eq("is_active", true).maybeSingle();
+    const definition = await supabaseAdmin.from("fleet_vehicle_status_master").select("id,status_key,label,is_active,is_operational,requires_reason,requires_expected_date").eq("company_id", access.companyId).eq("status_key", payload.status).maybeSingle();
     if (definition.error) return mutationError(definition.error.message);
-    if (!definition.data) return NextResponse.json({ error: "Choose an active status from Fleet Masters." }, { status: 400 });
+    if (!definition.data || (definition.data.is_active === false && payload.status !== guard.vehicle.status)) return NextResponse.json({ error: "Choose an active status from Fleet Masters." }, { status: 400 });
     const operational = Boolean(definition.data.is_operational);
     let reason: { id: string; reason_key: string; label: string } | null = null;
-    const reasonId = normalizeText(body.status_reason_id);
+    const reasonId = normalizeText("status_reason_id" in body ? body.status_reason_id : guard.vehicle.status === payload.status ? guard.vehicle.status_reason_id : null);
     if (!operational && reasonId) {
-      const result = await supabaseAdmin.from("fleet_vehicle_status_reason_master").select("id,reason_key,label").eq("company_id", access.companyId).eq("status_id", definition.data.id).eq("id", reasonId).eq("is_active", true).maybeSingle();
+      const result = await supabaseAdmin.from("fleet_vehicle_status_reason_master").select("id,reason_key,label,is_active").eq("company_id", access.companyId).eq("status_id", definition.data.id).eq("id", reasonId).maybeSingle();
       if (result.error) return mutationError(result.error.message);
-      reason = result.data;
+      reason = result.data && (result.data.is_active !== false || (payload.status === guard.vehicle.status && reasonId === guard.vehicle.status_reason_id)) ? result.data : null;
     }
     if (!operational && definition.data.requires_reason && !reason) return NextResponse.json({ error: `Choose a reason for ${definition.data.label}.` }, { status: 400 });
     payload.status_reason_id = operational ? null : reason?.id ?? null;
     payload.status_reason_key = operational ? null : reason?.reason_key ?? null;
-    payload.status_comment = operational ? null : (payload.status_comment || null);
-    payload.non_operational_since = operational ? null : (payload.non_operational_since || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
-    payload.expected_operational_date = operational ? null : (payload.expected_operational_date || null);
+    payload.status_comment = operational ? null : ("status_comment" in payload ? payload.status_comment : guard.vehicle.status_comment);
+    payload.non_operational_since = operational ? null : (payload.non_operational_since || (guard.vehicle.status === payload.status ? guard.vehicle.non_operational_since : null) || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
+    payload.expected_operational_date = operational ? null : ("expected_operational_date" in payload ? payload.expected_operational_date : guard.vehicle.status === payload.status ? guard.vehicle.expected_operational_date : null);
     if (!operational && definition.data.requires_expected_date && !payload.expected_operational_date) return NextResponse.json({ error: `Expected operational date is required for ${definition.data.label}.` }, { status: 400 });
     body.status_reason_label = reason?.label ?? "";
   }
 
+  const dateError = availabilityDateError("non_operational_since" in payload ? payload.non_operational_since : guard.vehicle.non_operational_since, "expected_operational_date" in payload ? payload.expected_operational_date : guard.vehicle.expected_operational_date, new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Kolkata"}).format(new Date()));
+  if (("non_operational_since" in payload || "expected_operational_date" in payload) && dateError) return NextResponse.json({error:dateError},{status:400});
+
+  const availabilityStamp = ["status","expected_operational_date","non_operational_since","status_comment","status_reason_id"].some(key=>key in payload) ? {status_updated_at:new Date().toISOString(),status_updated_by:access.authorization.userId} : {};
+  const placementStamp = ["deployment_status","current_location_type","current_location_label"].some(key=>key in payload) ? {current_location_updated_at:new Date().toISOString(),current_location_updated_by:access.authorization.userId} : {};
   let { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .update({ ...payload, ...(payload.status ? { status_updated_at: new Date().toISOString(), status_updated_by: access.authorization.userId } : {}), ...(("deployment_status" in payload || "current_location_type" in payload || "current_location_label" in payload) ? { current_location_updated_at: new Date().toISOString(), current_location_updated_by: access.authorization.userId } : {}), updated_at: new Date().toISOString() })
+    .update({ ...payload, ...availabilityStamp, ...placementStamp, updated_at: new Date().toISOString() })
     .eq("company_id", access.companyId)
     .eq("vehicle_no", vehicleNo)
     .select()
@@ -169,7 +184,7 @@ async function handlePATCH(request: Request) {
     delete fallbackPayload.dispose_date;
     const fallback = await supabaseAdmin
       .from("fleet_vehicles")
-      .update({ ...fallbackPayload, updated_at: new Date().toISOString() })
+      .update({ ...fallbackPayload, ...availabilityStamp, ...placementStamp, updated_at: new Date().toISOString() })
       .eq("company_id", access.companyId)
       .eq("vehicle_no", vehicleNo)
       .select()
@@ -234,7 +249,7 @@ async function handlePATCH(request: Request) {
   const fromStatus = normalizeText(guard.vehicle.status).toLowerCase();
   const toStatus = normalizeText(data?.status).toLowerCase() || fromStatus;
   const reasonChanged = normalizeText(guard.vehicle.status_reason_id) !== normalizeText(data?.status_reason_id) || normalizeText(guard.vehicle.status_comment) !== normalizeText(data?.status_comment);
-  if (fromStatus !== toStatus || reasonChanged) {
+  if (fromStatus !== toStatus || reasonChanged || guard.vehicle.expected_operational_date !== data?.expected_operational_date || guard.vehicle.non_operational_since !== data?.non_operational_since) {
     await writeEventLog({
       companyId: access.companyId,
       platform: "dashboard",
@@ -252,31 +267,89 @@ async function handlePATCH(request: Request) {
       subjectLabel: vehicleNo,
       route: "/api/fleet/vehicles",
       method: "PATCH",
-      metadata: { from_status: fromStatus, to_status: toStatus, reason_key: normalizeText(data?.status_reason_key), reason: normalizeText(body.status_reason_label) || "Status updated in Fleet", comment: normalizeText(data?.status_comment) },
+      metadata: { previous_expected_operational_date:guard.vehicle.expected_operational_date, expected_operational_date:data?.expected_operational_date, previous_non_operational_since:guard.vehicle.non_operational_since, non_operational_since:data?.non_operational_since, from_status: fromStatus, to_status: toStatus, reason_key: normalizeText(data?.status_reason_key), reason: normalizeText(body.status_reason_label) || "Status updated in Fleet", comment: normalizeText(data?.status_comment) },
       request
     });
   }
-  return NextResponse.json({ vehicle: data });
+  const before:Record<string,unknown>={}, after:Record<string,unknown>={};
+  for (const key of ["da_name","da_contact_number","vendor_name","vendor_contact_number"] as const) {
+    if (guard.vehicle[key] !== data?.[key]) {before[key]=guard.vehicle[key];after[key]=data?.[key];}
+  }
+  let warning:string|undefined;
+  if(Object.keys(after).length){
+    const context=fleetAuditContext.getStore();
+    const log=await supabaseAdmin.from("fleet_system_logs").insert({company_id:access.companyId,entity:"fleet_vehicles",entity_id:guard.vehicle.id,event_kind:"change",subject:data.vehicle_no,station_code:data.station_code,action:"update",actor_user_id:context?.actorId||access.authorization.userId,actor_label:context?.actorLabel||access.authorization.fullName||access.authorization.email,request_id:context?.requestId,route:"/api/fleet/vehicles",before_values:before,after_values:after});
+    if(log.error){console.error("Vehicle contact history unavailable",log.error.code);warning="Details saved, but contact-change history could not be recorded. Contact your administrator.";}
+  }
+  return NextResponse.json({ vehicle: data, warning });
 }
 
+// Soft deletion uses a reserved lifecycle state; linked rows and historical numbers remain intact.
 async function handleDELETE(request: Request) {
-  if (!supabaseAdmin) return setupError("Supabase service role key is not configured.");
+  if (!supabaseAdmin) return setupError("Fleet data is unavailable.");
   const access = await requireFleetMutationPermission("edit");
   if ("error" in access) return access.error;
-  const { searchParams } = new URL(request.url);
-  const vehicleNo = normalizeText(searchParams.get("vehicle_no")).toUpperCase();
-  if (!vehicleNo) return NextResponse.json({ error: "Vehicle number is required." }, { status: 400 });
+  const body = await request.json().catch(() => ({}));
+  const vehicleNo = normalizeText(body.vehicle_no || new URL(request.url).searchParams.get("vehicle_no")).toUpperCase();
+  const reason = normalizeText(body.reason);
+  if (!vehicleNo || reason.length < 5 || reason.length > 500) return NextResponse.json({error:"Enter the vehicle number and an archive reason (5–500 characters)."},{status:400});
   const guard = await requireVehicleScope(access.companyId, vehicleNo, access.stationCodes);
   if ("error" in guard) return guard.error;
-
-  const { error } = await supabaseAdmin
-    .from("fleet_vehicles")
-    .delete()
-    .eq("company_id", access.companyId)
-    .eq("vehicle_no", vehicleNo);
-
+  if (guard.vehicle.status === "archived") return NextResponse.json({ok:true,archived:true});
+  const [audits,service,findings] = await Promise.all([
+    supabaseAdmin.from("fleet_audits").select("id").eq("company_id",access.companyId).eq("vehicle_id",guard.vehicle.id).in("status",["scheduled","in_progress"]).limit(1),
+    supabaseAdmin.from("fleet_service_history").select("id").eq("company_id",access.companyId).eq("vehicle_id",guard.vehicle.id).in("status",["scheduled","in_progress"]).limit(1),
+    supabaseAdmin.from("fleet_audit_findings").select("id,fleet_audits!inner(vehicle_id)").eq("company_id",access.companyId).eq("fleet_audits.vehicle_id",guard.vehicle.id).in("status",["open","in_progress"]).limit(1),
+  ]);
+  if ([audits,service,findings].some(r=>r.error)) return NextResponse.json({error:"Unable to check outstanding vehicle work. Retry; the vehicle has not been archived."},{status:503});
+  if ([audits,service,findings].some(r=>r.data?.length)) return NextResponse.json({error:"Complete or cancel scheduled audits/service and close open audit findings before archiving this vehicle."},{status:409});
+  const now = new Date().toISOString();
+  const {data,error} = await supabaseAdmin.from("fleet_vehicles").update({status:"archived",deployment_status:"not_deployed",status_reason_id:null,status_reason_key:null,status_comment:reason,expected_operational_date:null,status_updated_at:now,status_updated_by:access.authorization.userId,updated_at:now})
+    .eq("company_id",access.companyId).eq("id",guard.vehicle.id).eq("status",guard.vehicle.status).select("id").maybeSingle();
   if (error) return mutationError(error.message);
-  return NextResponse.json({ ok: true });
+  if (!data) return NextResponse.json({error:"The vehicle changed while you were editing. Refresh and retry."},{status:409});
+  return NextResponse.json({ok:true,archived:true});
+}
+
+async function handlePUT(request: Request) {
+  if (!supabaseAdmin) return setupError("Fleet data is unavailable.");
+  const access=await requireFleetMutationPermission("edit");
+  if ("error" in access) return access.error;
+  const body=await request.json();
+  const vehicleNo=normalizeText(body.vehicle_no).toUpperCase(), reason=normalizeText(body.reason);
+  if(reason.length<5||reason.length>500)return NextResponse.json({error:"Enter a restore reason (5–500 characters)."},{status:400});
+  const guard=await requireVehicleScope(access.companyId,vehicleNo,access.stationCodes);
+  if("error" in guard)return guard.error;
+  if(guard.vehicle.status!=="archived")return NextResponse.json({error:"Only archived vehicles can be restored."},{status:409});
+  const now=new Date().toISOString();
+  const result=await supabaseAdmin.from("fleet_vehicles").update({status:"inactive",deployment_status:"not_deployed",status_comment:`Restored: ${reason}`,status_reason_id:null,status_reason_key:null,non_operational_since:new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata"}).format(new Date()),expected_operational_date:null,status_updated_at:now,status_updated_by:access.authorization.userId,updated_at:now}).eq("company_id",access.companyId).eq("id",guard.vehicle.id).eq("status","archived").select("id").maybeSingle();
+  if(result.error)return mutationError(result.error.message);
+  if(!result.data)return NextResponse.json({error:"This vehicle changed. Refresh and retry."},{status:409});
+  return NextResponse.json({ok:true,message:"Restored as inactive and not deployed. Review availability and placement before use."});
+}
+
+export async function GET(request: Request) {
+  if (!supabaseAdmin) return setupError("Fleet data is unavailable.");
+  const access = await requireFleetMutationPermission("edit");
+  if ("error" in access) return access.error;
+  const params = new URL(request.url).searchParams;
+  const historyNo=normalizeText(params.get("history")).toUpperCase();
+  if(historyNo){
+    const guard=await requireVehicleScope(access.companyId,historyNo,access.stationCodes);
+    if("error" in guard)return guard.error;
+    const page=Math.max(1,Math.min(10000,Math.floor(Number(params.get("page")))||1));
+    const result=await supabaseAdmin.from("fleet_system_logs").select("id,created_at,actor_label,action,before_values,after_values",{count:"exact"}).eq("company_id",access.companyId).eq("entity","fleet_vehicles").eq("entity_id",guard.vehicle.id).eq("event_kind","change").order("created_at",{ascending:false}).order("id").range((page-1)*20,page*20-1);
+    if(result.error)return NextResponse.json({error:"Unable to load vehicle history."},{status:503});
+    return NextResponse.json({rows:result.data,total:result.count},{headers:{"Cache-Control":"private, no-store"}});
+  }
+  const page = Math.max(1,Math.min(10000,Math.floor(Number(params.get("page")))||1));
+  let query = supabaseAdmin.from("fleet_vehicles").select("*",{count:"exact"}).eq("company_id",access.companyId).eq("status","archived").order("status_updated_at",{ascending:false}).order("id");
+  if (access.stationCodes) query=query.in("station_code",access.stationCodes);
+  const search=normalizeText(params.get("search")).replace(/[^a-zA-Z0-9 -]/g,"").slice(0,80);
+  if (search) query=query.or(`vehicle_no.ilike.%${search}%,station_code.ilike.%${search}%,model.ilike.%${search}%`);
+  const result=await query.range((page-1)*20,page*20-1);
+  if(result.error)return mutationError(result.error.message);
+  return NextResponse.json({vehicles:(result.data??[]).map(row=>({id:row.id,vehicle_no:row.vehicle_no,model:row.model,station_code:row.station_code,status_comment:row.status_comment,status_updated_at:row.status_updated_at,vehicle:{...mapVehicle(row as any,new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata"}).format(new Date())),sourceId:row.source_id}})),total:result.count,page},{headers:{"Cache-Control":"private, no-store"}});
 }
 
 async function requireFleetMutationPermission(action: "add" | "edit") {
@@ -317,7 +390,7 @@ async function requireVehicleScope(companyId: string, vehicleNo: string, station
   if (!supabaseAdmin) return { error: setupError("Supabase service role key is not configured.") };
   const { data, error } = await supabaseAdmin
     .from("fleet_vehicles")
-    .select("id,station_code,status,deployment_status,current_location_type,current_location_code,current_location_label,non_operational_since,expected_operational_date,status_comment,status_reason_id,status_reason_key")
+    .select("id,vehicle_no,da_name,da_contact_number,vendor_name,vendor_contact_number,station_code,status,deployment_status,current_location_type,current_location_code,current_location_label,non_operational_since,expected_operational_date,status_comment,status_reason_id,status_reason_key")
     .eq("company_id", companyId)
     .eq("vehicle_no", vehicleNo)
     .maybeSingle();
@@ -328,6 +401,18 @@ async function requireVehicleScope(companyId: string, vehicleNo: string, station
     return { error: NextResponse.json({ error: "This vehicle is not allocated to your user." }, { status: 403 }) };
   }
   return { ok: true, vehicle: data };
+}
+
+async function registrationConflict(companyId:string, number:string, vehicleId?:string) {
+  const current=await supabaseAdmin!.from("fleet_vehicles").select("id").eq("vehicle_no",number).limit(1);
+  if(current.error)return mutationError(current.error.message);
+  if(current.data?.some(v=>v.id!==vehicleId))return NextResponse.json({error:"This registration already belongs to a vehicle. Check the existing entry."},{status:409});
+  let query=supabaseAdmin!.from("fleet_system_logs").select("entity_id").eq("company_id",companyId).eq("entity","fleet_vehicles").eq("event_kind","change").eq("before_values->>vehicle_no",number);
+  if(vehicleId)query=query.neq("entity_id",vehicleId);
+  const prior=await query.limit(1);
+  if(prior.error)return NextResponse.json({error:"Unable to check registration history. Retry; nothing has been changed."},{status:503});
+  if(prior.data?.length)return NextResponse.json({error:"This number belongs to another vehicle’s history. Restore or correct that vehicle instead of reusing the number."},{status:409});
+  return null;
 }
 
 function sanitizePayload(input: Record<string, unknown>) {
@@ -352,6 +437,8 @@ function setupError(error: string) {
 }
 
 function mutationError(error: string) {
+  if (/duplicate key|unique constraint/i.test(error)) return NextResponse.json({error:"This registration is already in use. Open the existing vehicle or enter a different number."},{status:409});
+  if (/foreign key/i.test(error)) return NextResponse.json({error:"This vehicle has linked records that prevent this change. No vehicle data was removed."},{status:409});
   if (error.includes("fleet_vehicles")) {
     return NextResponse.json({ error: `${error} Run scripts/fleet_vehicles_v1.sql in Supabase SQL Editor.` }, { status: 500 });
   }
@@ -367,3 +454,5 @@ export const POST = withFleetSystemLog(handlePOST);
 export const PATCH = withFleetSystemLog(handlePATCH);
 
 export const DELETE = withFleetSystemLog(handleDELETE);
+
+export const PUT = withFleetSystemLog(handlePUT);

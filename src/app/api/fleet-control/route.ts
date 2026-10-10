@@ -139,9 +139,10 @@ async function handlePOST(request: Request) {
 }
 
 async function assertVehicle(companyId: string, vehicleId: string) {
-  const result = await supabaseAdmin!.from("fleet_vehicles").select("id,vehicle_no,station_code,model,ownership_type").eq("company_id", companyId).eq("id", vehicleId).maybeSingle();
+  const result = await supabaseAdmin!.from("fleet_vehicles").select("id,vehicle_no,station_code,model,ownership_type,status").eq("company_id", companyId).eq("id", vehicleId).maybeSingle();
   if (result.error) throw new Error(result.error.message);
   if (!result.data) throw new Error("Vehicle was not found in this company.");
+  if (result.data.status === "archived") throw new Error("Restore this archived vehicle before scheduling new work.");
   return result.data;
 }
 
@@ -514,6 +515,7 @@ function masterKey(value: unknown, label: string) {
 async function upsertVehicleStatus(companyId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet Masters permission denied." }, { status: 403 });
   const id = clean(body.id);
+  if (masterKey(body.key || body.label, "Status key") === "archived") return NextResponse.json({error:"Archived is reserved for recoverable vehicle deletion."},{status:400});
   const values = {
     company_id: companyId,
     status_key: masterKey(body.key || body.label, "Status key"),

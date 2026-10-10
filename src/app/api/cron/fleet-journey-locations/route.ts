@@ -31,7 +31,7 @@ export async function GET(request:Request){
    const saved=await readAllRows(supabaseAdmin.from('fleet_daily_km').select('id,vehicle_no,movement_date,journey_location_check').eq('company_id',companyId).eq('source','wheelseye').gte('movement_date',yesterday).lte('movement_date',today).order('id'));
    if(saved.error){failed++;continue;}
    const checks=new Map((saved.data??[]).map(row=>[`${row.vehicle_no}|${row.movement_date}`,row.journey_location_check]));
-   const pairs=(vehicles.data??[]).filter(v=>devices.has(normalize(v.vehicle_no))&&!['sold','disposed','returned'].includes(v.status)).flatMap(v=>[yesterday,today].map(date=>({vehicle:v.vehicle_no,date,check:checks.get(`${v.vehicle_no}|${date}`)}))).filter(p=>p.date===today||!p.check||p.check.end?.state==='pending'||p.check.end?.state==='unverified').sort((a,b)=>(a.check?.checkedAt||'').localeCompare(b.check?.checkedAt||''));
+   const pairs=(vehicles.data??[]).filter(v=>devices.has(normalize(v.vehicle_no))&&!['sold','disposed','returned','archived'].includes(v.status)).flatMap(v=>[yesterday,today].map(date=>({vehicle:v.vehicle_no,date,check:checks.get(`${v.vehicle_no}|${date}`)}))).filter(p=>p.date===today||!p.check||p.check.end?.state==='pending'||p.check.end?.state==='unverified').sort((a,b)=>(a.check?.checkedAt||'').localeCompare(b.check?.checkedAt||''));
    for(let i=0;i<pairs.length;i+=3){
     if(Date.now()-started>85000){deferred+=pairs.length-i;break;}
     await Promise.all(pairs.slice(i,i+3).map(async p=>{try{const movement=await loadWheelseyeMovement(token,p.vehicle,p.date,policy);const result=await saveDailyWheelseyeKm(companyId,p.vehicle,p.date,movement.summary);if(result==='updated'||result==='needs_review')updated++;else failed++;}catch{failed++;}}));

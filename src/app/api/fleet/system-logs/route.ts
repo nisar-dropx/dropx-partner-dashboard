@@ -20,7 +20,7 @@ export async function GET(request:Request){
  if(p.get('entity'))query=query.eq('entity',p.get('entity'));
  if(p.get('kind'))query=query.eq('event_kind',p.get('kind'));
  const search=(p.get('search')||'').replace(/[^\p{L}\p{N} .@_-]/gu,' ').trim().slice(0,100);
- if(search)query=query.or(`actor_label.ilike.%${search}%,subject.ilike.%${search}%,action.ilike.%${search}%,route.ilike.%${search}%`);
+ if(search)query=query.or(`actor_label.ilike.%${search}%,subject.ilike.%${search}%,action.ilike.%${search}%,route.ilike.%${search}%,before_values->>vehicle_no.ilike.%${search}%,after_values->>vehicle_no.ilike.%${search}%`);
  const result=await query.range((page-1)*size,page*size-1);
  if(result.error)return NextResponse.json({error:'Unable to load System Logs.'},{status:503});
  return NextResponse.json({rows:result.data,total:result.count,page,pageSize:size},{headers:{'Cache-Control':'private, no-store'}});

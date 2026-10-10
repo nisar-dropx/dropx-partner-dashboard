@@ -38,7 +38,7 @@ const modeMeta = {
 
 const dateLabel = (value: string) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}T12:00:00+05:30`));
 const monthLabel = (value: string) => new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}-01T12:00:00+05:30`));
-const isClosedVehicle = (vehicle: FleetControlVehicle) => ["sold", "disposed", "returned"].includes(vehicle.status);
+const isClosedVehicle = (vehicle: FleetControlVehicle) => ["sold", "disposed", "returned", "archived"].includes(vehicle.status);
 
 
 function monthShift(month: string, delta: number) {

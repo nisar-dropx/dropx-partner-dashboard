@@ -15,7 +15,7 @@ export const maxDuration = 60;
 const clean = (value: unknown) => String(value ?? "").trim();
 const email = (value: unknown) => { const result = clean(value).toLowerCase(); return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(result) ? result : null; };
 const active = (status: unknown) => clean(status).toLowerCase() === "active";
-const closed = (status: unknown) => ["sold", "disposed", "returned"].includes(clean(status).toLowerCase());
+const closed = (status: unknown) => ["sold", "disposed", "returned", "archived"].includes(clean(status).toLowerCase());
 const own = (type: unknown) => clean(type).toLowerCase() === "own";
 const approved = (status: unknown, source: string) => {
   const value = clean(status).toLowerCase();

@@ -17,7 +17,7 @@ export async function loadDayTracking(auth:AuthorizationContext,from:string,to:s
  ]);
  if(gps.error||assignments.error||fuel.error)throw new FleetReportError('Unable to load complete day tracking. Try again.');
  const present=new Set(report.rows.map(r=>`${r.vehicle_no}|${r.date}`));
- const missing=buildDailyFleetRows(report.vehicles.filter(v=>!['sold','disposed','returned'].includes(v.status??'')).map(v=>({...v,status:'active'})),[],[],from,to).filter(r=>!present.has(`${r.vehicle_no}|${r.date}`));
+ const missing=buildDailyFleetRows(report.vehicles.filter(v=>!['sold','disposed','returned','archived'].includes(v.status??'')).map(v=>({...v,status:'active'})),[],[],from,to).filter(r=>!present.has(`${r.vehicle_no}|${r.date}`));
  report.rows.push(...missing);
  const items=(assignments.data??[]) as DayAssignment[];
  const ids=[...new Set(items.map(a=>a.provider_employee_id).filter((v):v is string=>Boolean(v)))];
