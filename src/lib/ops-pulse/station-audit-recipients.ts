@@ -227,7 +227,7 @@ export async function resolveStationAuditRecipients(
           )
             .split(/[,;]/)
             .map((v) => v.trim().toLowerCase())
-            .filter(Boolean);
+            .filter((email) => Boolean(email) && (rule === "station_email" || scoped.some((u) => u.email === email)));
         return [];
       }),
     ),

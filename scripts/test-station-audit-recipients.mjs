@@ -205,6 +205,7 @@ assert.deepEqual(
   ),
   { to: ["user11@example.test"], cc: ["user15@example.test"] },
 );
+assert.deepEqual(await resolveStationAuditRecipients(company, {...st, station_manager_email:'user13@example.test', finance_manager_email:'user15@example.test'}, ['station_email'], ['station_manager_email','finance_manager_email']), {to:['station@example.test'], cc:['user15@example.test']});
 failure = "role_page_permissions";
 await assert.rejects(loadAuditNotificationUsers(company), /DB unavailable/);
 failure = "";
