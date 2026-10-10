@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { supabaseAdmin } from "./supabase-admin";
 
-export async function sendConnectEmail(input: { companyId: string; to: string[]; cc?: string[]; subject: string; body: string }) {
+export async function sendConnectEmail(input: { companyId: string; to: string[]; cc?: string[]; subject: string; body: string; html?: string }) {
   if (!supabaseAdmin) throw new Error("Database is unavailable.");
   const { data, error } = await supabaseAdmin.from("email_notification_settings").select("*").eq("company_id", input.companyId).maybeSingle();
   if (error) throw new Error(error.message);
@@ -13,5 +13,5 @@ export async function sendConnectEmail(input: { companyId: string; to: string[];
   const cc = Array.from(new Set((input.cc ?? []).map((item) => item.trim().toLowerCase()).filter((item) => item && !to.includes(item))));
   if (!to.length) throw new Error("No notification recipients were resolved.");
   const transporter = nodemailer.createTransport({ host: data.smtp_host, port: Number(data.smtp_port ?? 587), secure: Number(data.smtp_port) === 465 || Boolean(data.smtp_secure), auth: data.smtp_user && data.smtp_pass ? { user: data.smtp_user, pass: data.smtp_pass } : undefined });
-  await transporter.sendMail({ from: name ? `"${name}" <${fromAddress}>` : fromAddress, to, cc: cc.length ? cc : undefined, subject: input.subject, text: input.body });
+  await transporter.sendMail({ from: name ? `"${name}" <${fromAddress}>` : fromAddress, to, cc: cc.length ? cc : undefined, subject: input.subject, text: input.body, html: input.html });
 }

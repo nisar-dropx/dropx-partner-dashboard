@@ -2,6 +2,7 @@ import { sendConnectEmail } from "./connect-email";
 import { notifyApproverMobile, notifyApproversMobile } from "./approver-mobile-notifications";
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
+import { loadExitNoticeContext, renderExitNotice, resolveExitNoticeRecipients } from "./exit-notification-context";
 
 function fill(template: string, values: Record<string, string>) { return template.replaceAll("Open People > Approval Inbox to review it.", `Open DropX One → Approval Inbox → More → Exits to review it: ${process.env.ONE_APP_URL?.replace(/\/$/, "") || "https://one.dropxlogistics.com"}/approvals?section=exits`).replace(/{{\s*([a-z0-9_]+)\s*}}/gi, (_, key: string) => values[key] ?? ""); }
 
@@ -9,26 +10,20 @@ type EmployeeExitNotice = { companyId: string; caseId: string; employee: { emplo
 
 async function notifyEmployeeExit(input: EmployeeExitNotice, eventCode: "CASE_SUBMITTED" | "WITHDRAWAL_REQUESTED") {
   if (!supabaseAdmin) return;
-  const [{ data: template }, { data: exitCase }, { data: employeeProfile }, { data: access }] = await Promise.all([
-    supabaseAdmin.from("hr_exit_notification_templates").select("*").eq("company_id", input.companyId).eq("event_code", eventCode).eq("is_enabled", true).maybeSingle(),
-    supabaseAdmin.from("hr_exit_cases").select("case_number").eq("id", input.caseId).single(),
-    input.employee.employee_code ? supabaseAdmin.from("profiles").select("reports_to_user_id").eq("company_id", input.companyId).eq("employee_id", input.employee.employee_code).maybeSingle() : Promise.resolve({ data: null }),
-    supabaseAdmin.from("hr_user_access").select("user_id").eq("company_id", input.companyId).eq("is_active", true).in("role_code", ["HRMS_ADMIN","HR_MANAGER"])
-  ]);
-  if (!template || !exitCase) return;
-  const hrIds = (access ?? []).map((row) => row.user_id);
-  const [{ data: hrProfiles }, { data: ownerProfiles }, { data: manager }] = await Promise.all([
-    hrIds.length ? supabaseAdmin.from("profiles").select("email").eq("company_id", input.companyId).in("id", hrIds).eq("is_active", true) : Promise.resolve({ data: [] }),
-    supabaseAdmin.from("profiles").select("email").eq("company_id", input.companyId).eq("is_master_owner", true).eq("is_active", true),
-    employeeProfile?.reports_to_user_id ? supabaseAdmin.from("profiles").select("email").eq("company_id", input.companyId).eq("id", employeeProfile.reports_to_user_id).maybeSingle() : Promise.resolve({ data: null })
-  ]);
-  const groups: Record<string, string[]> = { EMPLOYEE: input.employee.email ? [input.employee.email] : [], REPORTING_MANAGER: manager?.email ? [manager.email] : [], HR_TEAM: [...(hrProfiles ?? []), ...(ownerProfiles ?? [])].map((row) => row.email).filter(Boolean), HR_OWNER: [], TASK_OWNER: [] };
-  const resolve = (roles: string[], custom: string[]) => Array.from(new Set([...roles.flatMap((role) => groups[role] ?? []), ...custom].map((email) => email.trim().toLowerCase()).filter(Boolean)));
-  const to = resolve(template.to_recipients ?? [], template.custom_to_emails ?? []); const cc = resolve(template.cc_recipients ?? [], template.custom_cc_emails ?? []).filter((email) => !to.includes(email));
-  const values = { case_number: exitCase.case_number, employee_name: input.employee.full_name, employee_code: input.employee.employee_code ?? "", requested_last_working_date: input.requestedDate, last_working_date: input.requestedDate };
-  const subject = fill(template.subject_template, values); const body = fill(template.body_template, values);
+  let to: string[] = []; let cc: string[] = []; let subject = `${eventCode} · ${input.caseId}`;
   let status = "sent"; let errorMessage: string | null = null;
-  try { if (!to.length) { status = "skipped"; errorMessage = "No recipients resolved."; } else await sendConnectEmail({ companyId: input.companyId, to, cc, subject, body }); }
+  try {
+    const result = await supabaseAdmin.from("hr_exit_notification_templates").select("*").eq("company_id", input.companyId).eq("event_code", eventCode).eq("is_enabled", true).maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    const template = result.data;
+    if (!template) return;
+    const context = await loadExitNoticeContext(supabaseAdmin, input.companyId, input.caseId);
+    ({ to, cc } = resolveExitNoticeRecipients(template, context.groups));
+    subject = fill(template.subject_template, context.values);
+    const body = fill(template.body_template, context.values).replaceAll("Open the HRMS to review it.", "Use the review links below.");
+    if (!to.length) { status = "skipped"; errorMessage = "No recipients resolved. " + context.warnings.join(" "); }
+    else await sendConnectEmail({ companyId: input.companyId, to, cc, subject, ...renderExitNotice(body, context) });
+  }
   catch (error) { status = "failed"; errorMessage = error instanceof Error ? error.message : "Email failed."; }
   await supabaseAdmin.from("hr_exit_notification_log").insert({ company_id: input.companyId, case_id: input.caseId, event_code: eventCode, to_emails: to, cc_emails: cc, subject, status, error_message: errorMessage });
 }
