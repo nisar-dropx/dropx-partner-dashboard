@@ -77,8 +77,7 @@ export function payoutReviewPresentation(
       : persistedStatus === "returned" ? "Returned"
         : persistedStatus === "cancelled" ? "Cancelled"
           : calculatedStatus;
-  const calculationPublishable = calculatedStatus === "Ready for review"
-    || (subjectType === "workforce" && isWorkforcePayoutCalculationPublishable(calculatedStatus));
+  const calculationPublishable = isWorkforcePayoutCalculationPublishable(calculatedStatus);
   const tokenStatus = calculationPublishable
     && (status === calculatedStatus || status === "Ready for review" || status === "Returned")
     ? status === "Returned" ? "Returned" : "Ready for review"

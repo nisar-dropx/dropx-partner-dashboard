@@ -4,7 +4,7 @@ import {buildReviewDigest} from '@/lib/review-digest';
 import {isEddCronHost} from '@/lib/ops-pulse/edd-cron-scope';
 import {processPerformanceDataUpdates} from '@/lib/performance-data-updates';
 import {buildAdHocDigest} from '@/lib/adhoc-digest';
-import {processPayoutReviewNotifications} from '@/lib/payout-review-notifications';
+import {processHelperPayoutReviewNotifications,processPayoutReviewNotifications} from '@/lib/payout-review-notifications';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 export const fetchCache='force-no-store';
@@ -13,14 +13,14 @@ export async function GET(request:Request){
  if(!cronAuthorized(request))return Response.json({error:'Unauthorized'},{status:401});
  if(!isEddCronHost(new URL(request.url).hostname))return Response.json({skipped:'Ops Pulse only'});
  try{
-  const results=await Promise.allSettled([processPortalDigests('ops','review_digest',buildReviewDigest,false),processPerformanceDataUpdates(),processPortalDigests('ops','adhoc_usage_digest',buildAdHocDigest,false),processPayoutReviewNotifications(),processPortalDigests('ops','cod_pending_evening',buildCodPendingDigest,false),processPortalDigests('ops','cod_pending_morning',buildCodPendingDigest,false)]);
-  const reports=results.map((result,index)=>result.status==='fulfilled'?result.value:{errors:[`${['Review digest','Performance update','Ad hoc digest','Payout review','Evening COD','Morning COD'][index]} processing failed`]});
+  const results=await Promise.allSettled([processPortalDigests('ops','review_digest',buildReviewDigest,false),processPerformanceDataUpdates(),processPortalDigests('ops','adhoc_usage_digest',buildAdHocDigest,false),processPayoutReviewNotifications(),processHelperPayoutReviewNotifications(),processPortalDigests('ops','cod_pending_evening',buildCodPendingDigest,false),processPortalDigests('ops','cod_pending_morning',buildCodPendingDigest,false)]);
+  const reports=results.map((result,index)=>result.status==='fulfilled'?result.value:{errors:[`${['Review digest','Performance update','Ad hoc digest','Workforce payout review','Helper payout review','Evening COD','Morning COD'][index]} processing failed`]});
   results.forEach(result=>{if(result.status==='rejected')console.error('Ops notification worker failed',result.reason instanceof Error?result.reason.message:'Unknown error');});
-  const codEvening=reports[4],codMorning=reports[5];
+  const codEvening=reports[5],codMorning=reports[6];
   const delivery=await deliverPortalDigestQueue(digestDatabase(),'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});
   reports.push(delivery);
   console.info('Ops notifications completed',JSON.stringify(reports));
-  return Response.json({reviewDigest:reports[0],performanceDataUpdated:reports[1],adHocDigest:reports[2],payoutReview:reports[3],codEvening,codMorning,delivery},{status:reports.some(r=>r.errors.length)?500:200});
+  return Response.json({reviewDigest:reports[0],performanceDataUpdated:reports[1],adHocDigest:reports[2],payoutReview:reports[3],helperPayoutReview:reports[4],codEvening,codMorning,delivery},{status:reports.some(r=>r.errors.length)?500:200});
  }
  catch(error){console.error('Ops recurring notification failed',error instanceof Error?error.message:'Unknown error');return Response.json({error:'Notification processing failed. Check server logs.'},{status:500});}
 }

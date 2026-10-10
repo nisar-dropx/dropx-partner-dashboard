@@ -28,6 +28,7 @@ import {
 } from "@/lib/workforce-payout-import";
 import { refreshWorkforcePayoutPublicationJobs } from "@/lib/workforce-payout-publication-refresh";
 import { workforcePayoutImportFingerprint } from "@/lib/workforce-payout-import-fingerprint";
+import { processHelperPayoutImport } from "@/lib/helper-payout-import-server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -521,6 +522,11 @@ export async function POST(request: Request) {
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
     const form = await request.formData();
+    const audience = String(form.get("audience") ?? "workforce").trim().toLowerCase();
+    if (audience === "helpers") {
+      return processHelperPayoutImport({ authorization, companyId, form });
+    }
+    if (audience !== "workforce") return errorResponse("Payout audience is not supported.", 400);
     const mode = String(form.get("mode") ?? "preview");
     const batchFrom = String(form.get("effective_from") ?? "");
     const batchTo = String(form.get("effective_to") ?? "");

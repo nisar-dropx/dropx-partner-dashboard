@@ -70,6 +70,7 @@ function locationLabel(entry: PaymentHistoryEntry) {
 }
 
 export function WorkforcePayoutPaymentHistoryButton({
+  audience = "workforce",
   canManageStatus,
   historyCount,
   periodEnd,
@@ -78,6 +79,7 @@ export function WorkforcePayoutPaymentHistoryButton({
   subjectLabel,
   workforceId
 }: {
+  audience?: "workforce" | "helpers";
   canManageStatus: boolean;
   historyCount: number;
   periodStart: string;
@@ -105,7 +107,7 @@ export function WorkforcePayoutPaymentHistoryButton({
     setLoading(true);
     setError("");
     try {
-      const query = new URLSearchParams({ workforceId, stationId, periodStart, periodEnd });
+      const query = new URLSearchParams({ audience, workforceId, stationId, periodStart, periodEnd });
       const response = await fetch(`/api/payments/workforce-payouts/payment-history?${query}`, { signal });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || "Unable to load payment history.");
@@ -121,7 +123,7 @@ export function WorkforcePayoutPaymentHistoryButton({
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [periodEnd, periodStart, stationId, workforceId]);
+  }, [audience, periodEnd, periodStart, stationId, workforceId]);
 
   useEffect(() => {
     if (!open) return;
@@ -161,6 +163,7 @@ export function WorkforcePayoutPaymentHistoryButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: pendingAction.action,
+          audience,
           operationId: pendingAction.operationId,
           paymentItemId: pendingAction.paymentItemId,
           workforceId,
@@ -240,7 +243,7 @@ export function WorkforcePayoutPaymentHistoryButton({
           {!loading && !error && entries.length ? <div className="table-wrap"><table>
             <thead><tr><th>Reference</th><th>Location</th><th>Amount</th><th>Status</th><th>Bank / account</th><th>UTR/CIN</th><th>Generated</th><th>Finalized</th><th>Remarks</th>{canManageStatus ? <th>Action</th> : null}</tr></thead>
             <tbody>{entries.map((entry) => <tr key={entry.id}>
-              <td><strong>{entry.referenceNo}</strong><small>Version {entry.version}</small>{entry.redownloadable ? <a className="inline-link" href={`/api/payments/workforce-payouts/bank-file?batch_id=${encodeURIComponent(entry.batchId)}`}>Download again</a> : null}</td>
+              <td><strong>{entry.referenceNo}</strong><small>Version {entry.version}</small>{entry.redownloadable ? <a className="inline-link" href={`/api/payments/workforce-payouts/bank-file?audience=${encodeURIComponent(audience)}&batch_id=${encodeURIComponent(entry.batchId)}`}>Download again</a> : null}</td>
               <td>{locationLabel(entry)}</td>
               <td>{money(entry.amount)}</td>
               <td><span className={`status-pill ${statusTone(entry.status)}`}>{titleStatus(entry.status)}</span></td>

@@ -487,7 +487,7 @@ test("advance deduction and review submission use separate row eligibility", () 
   assert.match(payoutTable, /skippedReviewSelectionCount\s*=\s*selectedRows\.length\s*-\s*reviewSelectedRows\.length/);
   assert.match(payoutTable, /reviewSelectedRows\.length\} of \{selectedRows\.length\} selected eligible for/);
   assert.match(payoutTable, /chunkPayoutRowsBySubject\(reviewSelectedRows,[\s\S]*?items:\s*chunk\.map/);
-  assert.match(payoutTable, /disabled=\{\(audience === "workforce" && !canPublish\)\s*\|\|\s*!reviewSelectedRows\.length/);
+  assert.match(payoutTable, /disabled=\{!canPublish\s*\|\|\s*!reviewSelectedRows\.length/);
   assert.match(payoutTable, /chunkedValues\(advanceSelectedRows,[\s\S]*?items:\s*chunk\.map/);
   assert.match(payoutTable, /Available for advance deduction only\./);
 });

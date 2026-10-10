@@ -71,10 +71,11 @@ test("manual editor dialogs trap focus, hide the inactive layer and restore the 
   assert.match(source, /launcherRef\.current\?\.focus\(\)/);
 });
 
-test("Workforce payout selection exposes manual editing independently of notification publishability", () => {
-  assert.match(tableSource, /const canManuallyEdit = canEdit && audience === "workforce"/);
+test("Workforce and Helper payout selection expose manual editing independently of notification publishability", () => {
+  assert.match(tableSource, /const canManuallyEdit = canEdit/);
   assert.match(tableSource, /\|\| \(canManuallyEdit && canManuallyEditPayout\(row\)\)/);
   assert.match(tableSource, /<WorkforcePayoutManualEditor/);
+  assert.match(tableSource, /audience=\{audience\}/);
   assert.match(tableSource, /buttonLabel="Edit payout inputs"/);
   assert.match(tableSource, /manualSelectedRows\.map/);
   assert.match(tableSource, /if \(!reviewSelectedRows\.length \|\| reviewState\.busy\) return/);

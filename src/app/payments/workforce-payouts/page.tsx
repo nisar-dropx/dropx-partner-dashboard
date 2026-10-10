@@ -13,6 +13,8 @@ import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
+import { helperPayoutPublicationSnapshotHash } from "@/lib/helper-payout-publication";
+import { buildHelperPayoutPublicationSnapshot } from "@/lib/helper-payout-publication-snapshot";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
@@ -145,7 +147,14 @@ async function withPayoutReviewStatuses(
   const ids = [...new Set(rows.flatMap((row) => row.reviewSubjectId ? [row.reviewSubjectId] : []))];
   if (!ids.length) return { rows, error: null as string | null };
   const submissions: Array<{ subject_id: string; location_id: string; status: string }> = [];
-  const publications: Array<{ workforce_id: string; station_id: string; notification_status: string; dependency_hash: string | null }> = [];
+  const publications: Array<{
+    subject_id: string;
+    station_id: string;
+    notification_status: string;
+    version_hash: string | null;
+    dependency_hash: string | null;
+    source_change_id: string | null;
+  }> = [];
   const reviewChunks = await mapWithConcurrency(chunkedValues(ids, 100), 4, async (idChunk) => {
     const [result, publicationResult] = await Promise.all([
       readAllRows(admin
@@ -172,7 +181,18 @@ async function withPayoutReviewStatuses(
           .order("revision", { ascending: false })
           .order("published_at", { ascending: false })
           .order("id", { ascending: false }))
-        : Promise.resolve({ data: [], error: null })
+        : readAllRows(admin
+          .from("helper_payout_publications")
+          .select("helper_id,station_id,notification_status,snapshot_hash,payout_dependency_hash,payout_source_change_id")
+          .eq("company_id", companyId)
+          .eq("period_start", fromDate)
+          .eq("period_end", toDate)
+          .in("helper_id", idChunk)
+          .order("helper_id")
+          .order("station_id")
+          .order("revision", { ascending: false })
+          .order("published_at", { ascending: false })
+          .order("id", { ascending: false }))
     ]);
     return { result, publicationResult };
   });
@@ -180,18 +200,79 @@ async function withPayoutReviewStatuses(
     if (chunk.result.error) return { rows, error: chunk.result.error.message };
     if (chunk.publicationResult.error) return { rows, error: chunk.publicationResult.error.message };
     submissions.push(...((chunk.result.data ?? []) as Array<{ subject_id: string; location_id: string; status: string }>));
-    publications.push(...((chunk.publicationResult.data ?? []) as Array<{ workforce_id: string; station_id: string; notification_status: string; dependency_hash: string | null }>));
+    publications.push(...((chunk.publicationResult.data ?? []).map((entry) => {
+      const publication = entry as Record<string, unknown>;
+      return {
+        subject_id: String(audience === "helpers" ? publication.helper_id : publication.workforce_id),
+        station_id: String(publication.station_id),
+        notification_status: String(publication.notification_status),
+        version_hash: publication[audience === "helpers" ? "snapshot_hash" : "dependency_hash"] == null
+          ? null
+          : String(publication[audience === "helpers" ? "snapshot_hash" : "dependency_hash"]),
+        dependency_hash: audience === "helpers" && publication.payout_dependency_hash != null
+          ? String(publication.payout_dependency_hash)
+          : null,
+        source_change_id: audience === "helpers" && publication.payout_source_change_id != null
+          ? String(publication.payout_source_change_id)
+          : null
+      };
+    })));
+  }
+  const currentHelperDependencyBySubject = new Map<string, {
+    dependencyHash: string;
+    sourceChangeId: string;
+  }>();
+  if (audience === "helpers") {
+    const helperIdentityRows = [...new Map(rows.flatMap((row) => row.reviewSubjectId && row.locationId
+      ? [[`${row.reviewSubjectId.toLowerCase()}|${row.locationId.toLowerCase()}`, {
+        helper_id: row.reviewSubjectId,
+        station_id: row.locationId
+      }] as const]
+      : [])).values()];
+    const dependencyChunks = await mapWithConcurrency(
+      chunkedValues(helperIdentityRows, 250),
+      4,
+      async (identityChunk) => admin.rpc("helper_payout_dependency_state", {
+        p_company_id: companyId,
+        p_period_start: fromDate,
+        p_period_end: toDate,
+        p_rows: identityChunk
+      })
+    );
+    for (const dependencyChunk of dependencyChunks) {
+      if (dependencyChunk.error) return { rows, error: dependencyChunk.error.message };
+      for (const entry of dependencyChunk.data ?? []) {
+        const dependency = entry as Record<string, unknown>;
+        const helperId = String(dependency.helper_id ?? "");
+        const stationId = String(dependency.station_id ?? "");
+        const dependencyHash = String(dependency.payout_dependency_hash ?? "");
+        const sourceChangeId = String(dependency.payout_source_change_id ?? "");
+        if (!helperId || !stationId || !dependencyHash || !sourceChangeId) continue;
+        currentHelperDependencyBySubject.set(`${helperId}|${stationId}`, {
+          dependencyHash,
+          sourceChangeId
+        });
+      }
+    }
   }
   const statusBySubject = new Map(submissions.map((entry) => [`${String(entry.subject_id)}|${String(entry.location_id)}`, String(entry.status)]));
-  const publicationBySubject = new Map<string, string>();
-  const currentPublicationKeys = new Set<string>();
-  const publishedWorkforceIds = new Set<string>();
+  const publicationBySubject = new Map<string, {
+    status: string;
+    versionHash: string | null;
+    dependencyHash: string | null;
+    sourceChangeId: string | null;
+  }>();
+  const publishedSubjectIds = new Set<string>();
   publications.forEach((entry) => {
-    publishedWorkforceIds.add(String(entry.workforce_id));
-    const key = `${String(entry.workforce_id)}|${String(entry.station_id)}`;
+    publishedSubjectIds.add(String(entry.subject_id));
+    const key = `${String(entry.subject_id)}|${String(entry.station_id)}`;
     if (!publicationBySubject.has(key)) {
-      publicationBySubject.set(key, String(entry.notification_status));
-      if (String(entry.dependency_hash ?? "") === dependencyHash) currentPublicationKeys.add(key);
+      publicationBySubject.set(key, {
+        status: String(entry.notification_status),
+        versionHash: entry.version_hash,
+        dependencyHash: entry.dependency_hash,
+        sourceChangeId: entry.source_change_id
+      });
     }
   });
   const publishedStatus = (status: string | undefined) => status === "pending" || status === "sending"
@@ -205,29 +286,62 @@ async function withPayoutReviewStatuses(
           : null;
   const publishableLocationsBySubject = new Map<string, Array<{ id: string; label: string }>>();
   const paymentRowsBySubject = new Map<string, WorkforcePayoutRow[]>();
-  if (audience === "workforce") {
-    rows.forEach((row) => {
-      const subjectId = String(row.reviewSubjectId ?? "");
-      const locationId = String(row.locationId ?? "");
-      if (!subjectId || !locationId) return;
-      paymentRowsBySubject.set(subjectId, [...(paymentRowsBySubject.get(subjectId) ?? []), row]);
-      if (!row.paymentDetailsAvailable || !isWorkforcePayoutCalculationPublishable(row.status)) return;
-      const locations = publishableLocationsBySubject.get(subjectId) ?? [];
-      if (!locations.some((location) => location.id === locationId)) {
-        locations.push({ id: locationId, label: row.location || "Unassigned location" });
+  rows.forEach((row) => {
+    const subjectId = String(row.reviewSubjectId ?? "");
+    const locationId = String(row.locationId ?? "");
+    if (!subjectId || !locationId) return;
+    paymentRowsBySubject.set(subjectId, [...(paymentRowsBySubject.get(subjectId) ?? []), row]);
+    if (!row.paymentDetailsAvailable || !isWorkforcePayoutCalculationPublishable(row.status)) return;
+    const locations = publishableLocationsBySubject.get(subjectId) ?? [];
+    if (!locations.some((location) => location.id === locationId)) {
+      locations.push({ id: locationId, label: row.location || "Unassigned location" });
+    }
+    publishableLocationsBySubject.set(subjectId, locations);
+  });
+  const helperSubjectsNeedingPublication = new Set<string>();
+  const helperPublicationMatchesCurrent = (key: string, snapshotHash: string) => {
+    const publication = publicationBySubject.get(key);
+    const dependency = currentHelperDependencyBySubject.get(key);
+    return publication?.versionHash === snapshotHash
+      && publication.dependencyHash === dependency?.dependencyHash
+      && publication.sourceChangeId === dependency?.sourceChangeId;
+  };
+  if (audience === "helpers") {
+    paymentRowsBySubject.forEach((paymentRows, subjectId) => {
+      const publishableRows = paymentRows.filter((row) => row.paymentDetailsAvailable
+        && isWorkforcePayoutCalculationPublishable(row.status));
+      const hasExistingReview = publishableRows.some((row) => {
+        const key = `${subjectId}|${String(row.locationId)}`;
+        return ["under_review", "approved"].includes(String(statusBySubject.get(key) ?? ""));
+      });
+      const hasMissingOrChangedPublication = publishableRows.some((row) => {
+        const key = `${subjectId}|${String(row.locationId)}`;
+        const currentHash = helperPayoutPublicationSnapshotHash(
+          buildHelperPayoutPublicationSnapshot(row, fromDate, toDate)
+        );
+        return !helperPublicationMatchesCurrent(key, currentHash);
+      });
+      if (publishableRows.length && hasExistingReview && hasMissingOrChangedPublication) {
+        helperSubjectsNeedingPublication.add(subjectId);
       }
-      publishableLocationsBySubject.set(subjectId, locations);
     });
   }
-  const paymentReadyWorkforceIds = new Set<string>();
-  paymentRowsBySubject.forEach((paymentRows, workforceId) => {
+  const paymentReadySubjectIds = new Set<string>();
+  paymentRowsBySubject.forEach((paymentRows, subjectId) => {
     if (paymentRows.length && paymentRows.every((row) => {
-      const key = `${workforceId}|${String(row.locationId)}`;
-      return currentPublicationKeys.has(key)
+      const key = `${subjectId}|${String(row.locationId)}`;
+      const publication = publicationBySubject.get(key);
+      const expectedVersionHash = audience === "workforce"
+        ? dependencyHash
+        : helperPayoutPublicationSnapshotHash(buildHelperPayoutPublicationSnapshot(row, fromDate, toDate));
+      const publicationIsCurrent = audience === "workforce"
+        ? publication?.versionHash === expectedVersionHash
+        : helperPublicationMatchesCurrent(key, expectedVersionHash);
+      return publicationIsCurrent
         && row.paymentDetailsAvailable
         && isWorkforcePayoutCalculationPublishable(row.status)
         && ["under_review", "approved"].includes(String(statusBySubject.get(key) ?? ""));
-    })) paymentReadyWorkforceIds.add(workforceId);
+    })) paymentReadySubjectIds.add(subjectId);
   });
   return {
     rows: rows.map((row) => {
@@ -238,23 +352,32 @@ async function withPayoutReviewStatuses(
       const presentation = payoutReviewPresentation(row.status, reviewStatus, subjectType);
       const workforceId = String(row.reviewSubjectId ?? "");
       const mappingUnlocked = audience === "workforce" && unlockedWorkforceIds.has(workforceId);
+      const helperNeedsPublication = audience === "helpers"
+        && helperSubjectsNeedingPublication.has(workforceId)
+        && isWorkforcePayoutCalculationPublishable(row.status)
+        && row.paymentDetailsAvailable;
       const status = mappingUnlocked
         ? "Mapping unlocked"
+        : helperNeedsPublication
+          ? "Republish required"
         : presentation.status === "Under Review" && subjectKey
-          ? publishedStatus(publicationBySubject.get(subjectKey)) ?? presentation.status
+          ? publishedStatus(publicationBySubject.get(subjectKey)?.status) ?? presentation.status
           : presentation.status;
-      const publicationSnapshot = audience === "workforce"
-        ? buildWorkforcePayoutPublicationSnapshot(row, fromDate, toDate, dependencyHash)
-        : null;
-      const publicationLockState: WorkforcePayoutRow["publicationLockState"] = audience !== "workforce"
-        ? null
-        : mappingUnlocked
+      const publicationSnapshotHash = audience === "workforce"
+        ? workforcePayoutPublicationSnapshotHash(
+          buildWorkforcePayoutPublicationSnapshot(row, fromDate, toDate, dependencyHash)
+        )
+        : helperPayoutPublicationSnapshotHash(
+          buildHelperPayoutPublicationSnapshot(row, fromDate, toDate)
+        );
+      const publicationLockState: WorkforcePayoutRow["publicationLockState"] = mappingUnlocked
           ? "unlocked"
-          : publishedWorkforceIds.has(workforceId)
+          : publishedSubjectIds.has(workforceId)
             ? "locked"
             : null;
+      const tokenStatus = helperNeedsPublication ? "Ready for review" : presentation.tokenStatus;
       const reviewToken = row.reviewSubjectId && row.reviewSubjectType && row.locationId
-        && presentation.tokenStatus
+        && tokenStatus
         ? createWorkforcePayoutReviewToken({
           companyId,
           subjectType: row.reviewSubjectType,
@@ -262,29 +385,23 @@ async function withPayoutReviewStatuses(
           locationId: row.locationId,
           periodStart: fromDate,
           periodEnd: toDate,
-          status: presentation.tokenStatus,
+          status: tokenStatus,
           dependencyHash,
           calculationHash: audience === "workforce"
             ? workforcePayoutCalculationHash(row, fromDate, toDate)
             : null,
-          publicationSnapshotHash: publicationSnapshot
-            ? workforcePayoutPublicationSnapshotHash(publicationSnapshot)
-            : null,
-          locationSetHash: audience === "workforce"
-            ? workforcePayoutLocationSetHash((publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []).map((location) => location.id))
-            : null
+          publicationSnapshotHash,
+          locationSetHash: workforcePayoutLocationSetHash((publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []).map((location) => location.id))
         })
         : null;
       return {
         ...row,
         status,
         publicationLockState,
-        publicationPaymentReady: audience === "workforce" && paymentReadyWorkforceIds.has(workforceId),
+        publicationPaymentReady: paymentReadySubjectIds.has(workforceId),
         reviewToken,
         publicationDependencyHash: audience === "workforce" ? dependencyHash : null,
-        publicationLocations: audience === "workforce"
-          ? publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []
-          : []
+        publicationLocations: publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []
       };
     }),
     error: null as string | null
@@ -301,6 +418,7 @@ type WorkforcePayoutBank = {
 
 async function withPayoutPaymentSummaries(
   companyId: string,
+  audience: "workforce" | "helpers",
   fromDate: string,
   toDate: string,
   rows: WorkforcePayoutRow[],
@@ -311,7 +429,13 @@ async function withPayoutPaymentSummaries(
   const payoutRows = [...new Map(rows.flatMap((row) => row.reviewSubjectId && row.locationId
     ? [[`${row.reviewSubjectId.toLowerCase()}|${row.locationId.toLowerCase()}`, {
       workforce_id: row.reviewSubjectId,
-      station_id: row.locationId
+      station_id: row.locationId,
+      ...(audience === "helpers" ? {
+        current_target_amount: row.netAmount,
+        current_snapshot_hash: helperPayoutPublicationSnapshotHash(
+          buildHelperPayoutPublicationSnapshot(row, fromDate, toDate)
+        )
+      } : {})
     }] as const]
     : [])).values()];
   if (!payoutRows.length) return { rows, error: null as string | null };
@@ -331,7 +455,7 @@ async function withPayoutPaymentSummaries(
   };
   type ProcessingPaymentItem = {
     id: string;
-    workforce_id: string;
+    subject_id: string;
     location_id_snapshot: string;
     instruction_amount: number | string;
   };
@@ -350,8 +474,10 @@ async function withPayoutPaymentSummaries(
     const pageRows: ProcessingPaymentItem[] = [];
     for (let offset = 0; ; offset += 1000) {
       const result = await admin
-        .from("workforce_payout_payment_items")
-        .select("id,workforce_id,location_id_snapshot,instruction_amount")
+        .from(audience === "helpers" ? "helper_payout_payment_items" : "workforce_payout_payment_items")
+        .select(audience === "helpers"
+          ? "id,helper_id,location_id_snapshot,instruction_amount"
+          : "id,workforce_id,location_id_snapshot,instruction_amount")
         .eq("company_id", companyId)
         .eq("period_start", fromDate)
         .eq("period_end", toDate)
@@ -359,16 +485,26 @@ async function withPayoutPaymentSummaries(
         .order("id")
         .range(offset, offset + 999);
       if (result.error) return { data: null, error: result.error };
-      const currentPage = (result.data ?? []) as ProcessingPaymentItem[];
+      const currentPage = (result.data ?? []).map((entry) => {
+        const item = entry as Record<string, unknown>;
+        return {
+          id: String(item.id),
+          subject_id: String(audience === "helpers" ? item.helper_id : item.workforce_id),
+          location_id_snapshot: String(item.location_id_snapshot),
+          instruction_amount: Number(item.instruction_amount)
+        } satisfies ProcessingPaymentItem;
+      });
       pageRows.push(...currentPage.filter((item) => visiblePayoutKeys.has(
-        `${String(item.workforce_id).toLowerCase()}|${String(item.location_id_snapshot).toLowerCase()}`
+        `${item.subject_id.toLowerCase()}|${item.location_id_snapshot.toLowerCase()}`
       )));
       if (currentPage.length < 1000) break;
     }
     return { data: pageRows, error: null };
   };
   const [previewResults, processingResult] = await Promise.all([
-    mapWithConcurrency(chunkedValues(payoutRows, 250), 3, async (payoutChunk) => admin.rpc("workforce_preview_payout_payment_rows", {
+    mapWithConcurrency(chunkedValues(payoutRows, 250), 3, async (payoutChunk) => admin.rpc(audience === "helpers"
+      ? "helper_preview_payout_payment_rows"
+      : "workforce_preview_payout_payment_rows", {
         p_company_id: companyId,
         p_period_start: fromDate,
         p_period_end: toDate,
@@ -384,17 +520,19 @@ async function withPayoutPaymentSummaries(
   }
   if (processingResult.error) return { rows, error: processingResult.error.message };
   processingItems.push(...(processingResult.data ?? []));
-  const allocationResults = await mapWithConcurrency(
-    chunkedValues(processingItems.map((item) => item.id), 250),
-    3,
-    async (paymentItemIds) => readAllRows(admin
-      .from("workforce_payout_payment_allocations")
-      .select("id,payment_item_id,station_id,instruction_amount_snapshot")
-      .eq("company_id", companyId)
-      .in("payment_item_id", paymentItemIds)
-      .order("payment_item_id")
-      .order("id"))
-  );
+  const allocationResults = audience === "workforce"
+    ? await mapWithConcurrency(
+      chunkedValues(processingItems.map((item) => item.id), 250),
+      3,
+      async (paymentItemIds) => readAllRows(admin
+        .from("workforce_payout_payment_allocations")
+        .select("id,payment_item_id,station_id,instruction_amount_snapshot")
+        .eq("company_id", companyId)
+        .in("payment_item_id", paymentItemIds)
+        .order("payment_item_id")
+        .order("id"))
+    )
+    : [];
   const processingAllocations: ProcessingPaymentAllocation[] = [];
   for (const result of allocationResults) {
     if (result.error) return { rows, error: result.error.message };
@@ -414,7 +552,19 @@ async function withPayoutPaymentSummaries(
   const processingItemByPayoutRow = new Map<string, { id: string; instructionAmount: number }>();
   const ambiguousPayoutRows = new Set<string>();
   for (const item of processingItems) {
-    const key = `${String(item.workforce_id).toLowerCase()}|${String(item.location_id_snapshot).toLowerCase()}`;
+    const key = `${item.subject_id.toLowerCase()}|${item.location_id_snapshot.toLowerCase()}`;
+    if (audience === "helpers") {
+      if (processingItemByPayoutRow.has(key)) {
+        processingItemByPayoutRow.delete(key);
+        ambiguousPayoutRows.add(key);
+      } else if (!ambiguousPayoutRows.has(key)) {
+        processingItemByPayoutRow.set(key, {
+          id: item.id,
+          instructionAmount: Number(item.instruction_amount)
+        });
+      }
+      continue;
+    }
     const allocations = allocationsByPaymentItem.get(String(item.id).toLowerCase()) ?? [];
     const instructionAmount = Number(item.instruction_amount);
     const allocationAmount = Number(allocations[0]?.instruction_amount_snapshot);
@@ -501,14 +651,12 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
-  const canProcessPayments = audience === "workforce"
-    && period.mode === "monthly"
+  const canProcessPayments = period.mode === "monthly"
     && canEdit
     && authorization.hasAllLocationAccess
     && hasPermission(authorization, "payment_process", "edit")
     && !authorization.readOnly;
-  const canLoadPaymentSummaries = audience === "workforce"
-    && period.mode === "monthly"
+  const canLoadPaymentSummaries = period.mode === "monthly"
     && canEdit;
   const canManageMappingLocks = audience === "workforce"
     && canEdit
@@ -552,7 +700,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       ),
     loadError || !canLoadPaymentSummaries
       ? Promise.resolve({ rows: loaded.rows, error: loadError })
-      : withPayoutPaymentSummaries(companyId, period.fromDate, period.toDate, loaded.rows, {
+      : withPayoutPaymentSummaries(companyId, audience, period.fromDate, period.toDate, loaded.rows, {
         includeProcessingActionDetails: canProcessPayments
       })
   ]);
@@ -588,13 +736,13 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   return <AppShell active="Workforce Payouts" pageCode={pageCode}>
     <div className="workforce-payout-page">
       <div className="payout-page-titlebar">
-        <PageHead title="Workforce Payments" />
+        <PageHead title="Workforce & Helper Payments" />
         <nav aria-label="Payment population" className="performance-tabs">
           <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
           <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
         </nav>
       </div>
-      {canEdit && audience === "workforce" ? <WorkforcePayoutBulkUpload fromDate={period.fromDate} toDate={period.toDate} /> : null}
+      {canEdit ? <WorkforcePayoutBulkUpload audience={audience} fromDate={period.fromDate} toDate={period.toDate} /> : null}
       {provisional && !error
         ? <section className="panel message-panel warn"><div className="panel-body"><strong>Live payout updates are in progress</strong><p className="subtle">The latest worksheet is shown. Every selected payout will be rechecked before its notification is sent.</p></div></section>
         : null}

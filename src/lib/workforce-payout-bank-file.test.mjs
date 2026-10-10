@@ -127,6 +127,27 @@ test("keeps separate location instructions for the same beneficiary as distinct 
   ]);
 });
 
+test("reuses the FedOne format for Helper references without weakening the Workforce default", () => {
+  const [helperRow] = buildWorkforceFedOneRows({
+    debitAccountNumber: "100000000001",
+    referencePrefix: "HP",
+    valueDate: "2026-10-10",
+    instructions: [instruction({ referenceNo: "HPD1001102026V1" })]
+  });
+  assert.equal(helperRow["Unique Customer Reference Number"], "HPD1001102026V1");
+  assert.equal(isValidWorkforceBankReference("HPD1001102026V1", "HP"), true);
+  assert.equal(isValidWorkforceBankReference("HPD1001102026V1"), false);
+
+  const response = responseWorkbook([
+    ["HPD1001102026V1", "001234567890", "FDRL0000123", 12345.67, "PAID", "HELPERUTR1", "Success"]
+  ]);
+  assert.equal(parseWorkforceFedOneResponse(response, { referencePrefix: "HP" })[0].referenceNo, "HPD1001102026V1");
+  assert.throws(
+    () => parseWorkforceFedOneResponse(response),
+    /not a valid Workforce payment reference/i
+  );
+});
+
 test("maps every instruction deterministically and validates financial inputs", () => {
   const [row] = buildWorkforceFedOneRows({
     debitAccountNumber: " 100 200 ",

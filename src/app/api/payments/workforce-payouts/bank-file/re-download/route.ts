@@ -40,6 +40,13 @@ type RedownloadItem = {
   debit_remarks: string;
 };
 
+type PayoutAudience = "workforce" | "helpers";
+
+function payoutAudience(value: unknown): PayoutAudience | null {
+  const normalized = String(value ?? "workforce").trim().toLowerCase();
+  return normalized === "workforce" || normalized === "helpers" ? normalized : null;
+}
+
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
 }
@@ -101,9 +108,10 @@ function databaseStatus(message: string) {
   return /processing|selected|company|month|legacy|download|changed/i.test(message) ? 409 : 400;
 }
 
-async function authorize() {
+async function authorize(audience: PayoutAudience) {
+  const label = audience === "helpers" ? "Helper" : "Workforce";
   const authorization = await getAuthorization();
-  if (!authorization) return { error: errorResponse("Sign in to re-download Workforce bank files.", 401) } as const;
+  if (!authorization) return { error: errorResponse(`Sign in to re-download ${label} bank files.`, 401) } as const;
   const payoutPageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
   if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !hasPermission(authorization, "payment_process", "edit")) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
@@ -115,7 +123,7 @@ async function authorize() {
   return { authorization, companyId: requireCompanyId(authorization) } as const;
 }
 
-function buildBatchWorkbook(items: RedownloadItem[]) {
+function buildBatchWorkbook(items: RedownloadItem[], audience: PayoutAudience) {
   const first = items[0];
   if (!first) throw new Error("No processing payments are available for re-download.");
   if (String(first.file_type).trim().toLowerCase() !== "fedone") {
@@ -134,6 +142,7 @@ function buildBatchWorkbook(items: RedownloadItem[]) {
   }
   return buildWorkforceFedOneWorkbook({
     debitAccountNumber,
+    referencePrefix: audience === "helpers" ? "HP" : "WP",
     valueDate,
     instructions: items.map((item) => ({
       amountPaise: paise(item.instruction_amount),
@@ -147,19 +156,17 @@ function buildBatchWorkbook(items: RedownloadItem[]) {
   });
 }
 
-function batchFilename(periodStart: string, item: RedownloadItem) {
+function batchFilename(periodStart: string, item: RedownloadItem, audience: PayoutAudience) {
   const valueDate = String(item.value_date ?? "").replaceAll("-", "");
   const batchId = String(item.batch_id ?? "").toLowerCase();
   const suffix = UUID.test(batchId) ? batchId : "batch";
-  return `workforce-payouts-${periodStart.slice(0, 7)}-${valueDate}-${suffix}-redownload.xlsx`;
+  const prefix = audience === "helpers" ? "helper-payouts" : "workforce-payouts";
+  return `${prefix}-${periodStart.slice(0, 7)}-${valueDate}-${suffix}-redownload.xlsx`;
 }
 
 export async function POST(request: Request) {
   try {
     if (!sameOrigin(request)) return errorResponse("Invalid request origin.", 403);
-    const access = await authorize();
-    if ("error" in access) return access.error;
-
     let body: Record<string, unknown>;
     try {
       const parsed = await jsonBody(request);
@@ -174,6 +181,11 @@ export async function POST(request: Request) {
       return errorResponse("Submit a valid bank-file re-download request.", 400);
     }
 
+    const audience = payoutAudience(body.audience);
+    if (!audience) return errorResponse("Choose a valid payout audience.", 400);
+    const access = await authorize(audience);
+    if ("error" in access) return access.error;
+
     const periodStart = String(body.periodStart ?? "").trim();
     const periodEnd = String(body.periodEnd ?? "").trim();
     const paymentItemIds = uniquePaymentItemIds(body.paymentItemIds);
@@ -182,12 +194,15 @@ export async function POST(request: Request) {
     }
     if (!paymentItemIds) return errorResponse("Select at least one unique Payment Processing item.", 400);
 
-    const result = await supabaseAdmin!.rpc("workforce_get_payout_payment_redownload", {
+    const rpcParameters = {
       p_company_id: access.companyId,
       p_payment_item_ids: paymentItemIds,
       p_period_start: periodStart,
       p_period_end: periodEnd
-    });
+    };
+    const result = audience === "helpers"
+      ? await supabaseAdmin!.rpc("helper_get_payout_payment_redownload", rpcParameters)
+      : await supabaseAdmin!.rpc("workforce_get_payout_payment_redownload", rpcParameters);
     if (result.error) return errorResponse(result.error.message, databaseStatus(result.error.message));
     const payload = resultRecord(result.data);
     const items = Array.isArray(payload.items) ? payload.items.map(resultRecord) as unknown as RedownloadItem[] : [];
@@ -220,8 +235,8 @@ export async function POST(request: Request) {
 
     if (orderedGroups.length === 1) {
       const batchItems = orderedGroups[0][1];
-      const workbook = buildBatchWorkbook(batchItems);
-      const filename = batchFilename(periodStart, batchItems[0]);
+      const workbook = buildBatchWorkbook(batchItems, audience);
+      const filename = batchFilename(periodStart, batchItems[0], audience);
       return new Response(Buffer.from(workbook), {
         headers: {
           ...responseHeaders,
@@ -235,14 +250,15 @@ export async function POST(request: Request) {
 
     const archive = new JSZip();
     for (const [, batchItems] of orderedGroups) {
-      archive.file(batchFilename(periodStart, batchItems[0]), buildBatchWorkbook(batchItems));
+      archive.file(batchFilename(periodStart, batchItems[0], audience), buildBatchWorkbook(batchItems, audience));
     }
     const zip = await archive.generateAsync({
       type: "uint8array",
       compression: "DEFLATE",
       compressionOptions: { level: 6 }
     });
-    const filename = `workforce-payouts-${periodStart.slice(0, 7)}-${orderedGroups.length}-bank-files-redownload.zip`;
+    const prefix = audience === "helpers" ? "helper-payouts" : "workforce-payouts";
+    const filename = `${prefix}-${periodStart.slice(0, 7)}-${orderedGroups.length}-bank-files-redownload.zip`;
     return new Response(Buffer.from(zip), {
       headers: {
         ...responseHeaders,

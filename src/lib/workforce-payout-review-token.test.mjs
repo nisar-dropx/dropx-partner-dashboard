@@ -76,7 +76,7 @@ test("persisted review state cannot make a non-ready calculation submit-ready", 
   });
 });
 
-test("configured zero payouts receive Workforce publication tokens while Helpers stay unchanged", () => {
+test("configured zero payouts receive publication tokens for Workforce and Helpers", () => {
   for (const status of ["No eligible accrual", "No eligible attendance", "Awaiting production"]) {
     assert.deepEqual(payoutReviewPresentation(status, null, "workforce"), {
       status,
@@ -88,7 +88,7 @@ test("configured zero payouts receive Workforce publication tokens while Helpers
     });
     assert.deepEqual(payoutReviewPresentation(status, null, "helper"), {
       status,
-      tokenStatus: null
+      tokenStatus: "Ready for review"
     });
   }
 });

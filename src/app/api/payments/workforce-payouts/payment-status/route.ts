@@ -13,6 +13,13 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 const actions = new Set(["failed", "cancelled", "hold", "release_hold"]);
 
+type PayoutAudience = "workforce" | "helpers";
+
+function payoutAudience(value: unknown): PayoutAudience | null {
+  const normalized = String(value ?? "workforce").trim().toLowerCase();
+  return normalized === "workforce" || normalized === "helpers" ? normalized : null;
+}
+
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
 }
@@ -88,6 +95,8 @@ export async function POST(request: Request) {
     }
 
     const action = String(body.action ?? "").trim().toLowerCase();
+    const audience = payoutAudience(body.audience);
+    if (!audience) return errorResponse("Choose a valid payout audience.", 400);
     const operationId = String(body.operationId ?? "").trim().toLowerCase();
     const remarks = String(body.remarks ?? "").trim();
     if (!actions.has(action)) return errorResponse("Choose a valid payment status action.", 400);
@@ -110,7 +119,7 @@ export async function POST(request: Request) {
         if (new Set(paymentItemIds).size !== paymentItemIds.length) {
           return errorResponse("Each processing payment may be selected only once.", 400);
         }
-        const result = await supabaseAdmin.rpc("workforce_cancel_payout_payment_items", {
+        const rpcParameters = {
           p_company_id: companyId,
           p_actor_user_id: authorization.userId,
           p_operation_id: operationId,
@@ -118,20 +127,26 @@ export async function POST(request: Request) {
           p_period_start: periodStart,
           p_period_end: periodEnd,
           p_remarks: remarks
-        });
+        };
+        const result = audience === "helpers"
+          ? await supabaseAdmin.rpc("helper_cancel_payout_payment_items", rpcParameters)
+          : await supabaseAdmin.rpc("workforce_cancel_payout_payment_items", rpcParameters);
         if (result.error) return errorResponse(result.error.message, databaseStatus(result.error.message));
         return Response.json(resultRecord(result.data), { headers: noStore });
       }
       const paymentItemId = String(body.paymentItemId ?? "").trim().toLowerCase();
       if (!UUID.test(paymentItemId)) return errorResponse("A valid processing payment is required.", 400);
-      const result = await supabaseAdmin.rpc("workforce_transition_payout_payment_item", {
+      const rpcParameters = {
         p_company_id: companyId,
         p_actor_user_id: authorization.userId,
         p_operation_id: operationId,
         p_payment_item_id: paymentItemId,
         p_outcome: action,
         p_remarks: remarks
-      });
+      };
+      const result = audience === "helpers"
+        ? await supabaseAdmin.rpc("helper_transition_payout_payment_item", rpcParameters)
+        : await supabaseAdmin.rpc("workforce_transition_payout_payment_item", rpcParameters);
       if (result.error) return errorResponse(result.error.message, databaseStatus(result.error.message));
       return Response.json(resultRecord(result.data), { headers: noStore });
     }
@@ -141,7 +156,7 @@ export async function POST(request: Request) {
     const periodEnd = String(body.periodEnd ?? "").trim();
     if (!UUID.test(workforceId)) return errorResponse("A valid Workforce profile is required.", 400);
     if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
-    const result = await supabaseAdmin.rpc("workforce_set_payout_payment_hold", {
+    const rpcParameters = {
       p_company_id: companyId,
       p_actor_user_id: authorization.userId,
       p_operation_id: operationId,
@@ -150,7 +165,10 @@ export async function POST(request: Request) {
       p_period_end: periodEnd,
       p_hold: action === "hold",
       p_remarks: remarks
-    });
+    };
+    const result = audience === "helpers"
+      ? await supabaseAdmin.rpc("helper_set_payout_payment_hold", rpcParameters)
+      : await supabaseAdmin.rpc("workforce_set_payout_payment_hold", rpcParameters);
     if (result.error) return errorResponse(result.error.message, databaseStatus(result.error.message));
     return Response.json(resultRecord(result.data), { headers: noStore });
   } catch (error) {

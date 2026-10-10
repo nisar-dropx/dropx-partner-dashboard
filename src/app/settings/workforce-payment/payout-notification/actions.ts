@@ -133,7 +133,7 @@ export async function saveWorkforcePayoutWhatsAppConfiguration(formData: FormDat
     if (isRedirectError(error)) throw error;
     settingsRedirect({ error: error instanceof Error ? error.message : "Unable to save payout notification settings." });
   }
-  settingsRedirect({ notice: "Workforce payout notification configuration saved." });
+  settingsRedirect({ notice: "Workforce and Helper payout notification configuration saved." });
 }
 
 export async function syncWorkforcePayoutWhatsAppTemplates(profileId: string) {

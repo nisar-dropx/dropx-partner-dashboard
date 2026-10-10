@@ -720,8 +720,16 @@ export function payoutImportRowsOverlap(
 
 export function buildWorkforcePayoutImportTemplate(
   fields: WorkforcePayoutImportTemplateField[],
-  options: { effectiveFrom?: string; effectiveTo?: string; locations?: Array<{ code: string }> } = {}
+  options: {
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    locations?: Array<{ code: string }>;
+    subjectLabel?: string;
+    supportedInputTypes?: readonly WorkforcePayoutInputType[];
+  } = {}
 ) {
+  const subjectLabel = String(options.subjectLabel ?? "Workforce").trim() || "Workforce";
+  const supportedInputTypes = new Set(options.supportedInputTypes ?? workforcePayoutInputTypes);
   const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "EFFECTIVE_TO", "VALUE", "REMARK"];
   const columnWidths = [12, 24, 16, 24, 24, 18, 18, 18, 42].map((wch) => ({ wch }));
   const upload = XLSX.utils.aoa_to_sheet([headers]);
@@ -741,20 +749,38 @@ export function buildWorkforcePayoutImportTemplate(
   const dateHint = options.effectiveFrom && options.effectiveTo
     ? `This template was downloaded for ${displaySpreadsheetDate(options.effectiveFrom)} to ${displaySpreadsheetDate(options.effectiveTo)}. Every row needs EFFECTIVE_DATE and EFFECTIVE_TO inside that selected payout period.`
     : "Every Excel row needs EFFECTIVE_DATE and EFFECTIVE_TO inside the payout period selected on the worksheet page.";
-  const instructions = XLSX.utils.aoa_to_sheet([
-    ["WORKFORCE PAYOUT BULK UPLOAD"],
+  const instructionRows: string[][] = [
+    [`${subjectLabel.toUpperCase()} PAYOUT BULK UPLOAD`],
     [dateHint],
-    ["Replacement scope", "Each UPSERT or CLEAR row changes only the matching stored input: the same Workforce person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged. For example, a DELIVERY row, when DELIVERY is enabled for upload, does not replace attendance, additions, or other production fields."],
+    ["Replacement scope", `Each UPSERT or CLEAR row changes only the matching stored input: the same ${subjectLabel} person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged.`],
     ["ACTION", "Use UPSERT to create or replace the matching input. Use CLEAR with a blank VALUE to remove only that matching input."],
     ["EFFECTIVE_DATE / EFFECTIVE_TO", "Both dates are compulsory. EFFECTIVE_DATE is the start date and EFFECTIVE_TO is the end date. Enter each as DD-MM-YYYY or DD/MM/YYYY. EFFECTIVE_TO cannot be earlier than EFFECTIVE_DATE, and both dates must be inside the selected payout period."],
-    ["ATTENDANCE", "Set FIELD_CODE to WORK_HOURS or WORK_DAYS and enter the total quantity for the effective range in VALUE. Use WORK_HOURS for hourly attendance pay and WORK_DAYS for daily or monthly attendance pay. The upload rejects a unit that does not match the person's payment setup."],
-    ["PRODUCTION_UNITS", "Use a production FIELD_CODE from Field Reference. Production is stored per work date, so enter the same date in EFFECTIVE_DATE and EFFECTIVE_TO. VALUE replaces only that field for that person, location and date; provider-reported values remain the fallback when no override exists."],
-    ["PAYMENT_FIELD_VALUE", "Use a FIELD_CODE from Field Reference. VALUE overrides that configured rate or input for the entered effective range; it is not a final payout amount."],
-    ["ADDITIONAL_PAYMENT", "Use a FIELD_CODE from Field Reference. VALUE is applied once to the complete payout period selected on the worksheet page."],
-    ["DEDUCTION", "Use an active manual deduction FIELD_CODE from Field Reference. VALUE is applied once to the complete selected payout period and may have at most two decimal places. Automatic fixed, percentage and system deductions cannot be uploaded or replaced."],
-    ["Important", "Zero is a real value. A blank value is not zero. Formula cells and negative values are rejected."],
-    ["Matching", "People are matched only by the company Workforce DROPX_ID. LOCATION is optional. ADDITIONAL_PAYMENT and DEDUCTION default to the Workforce current location; an explicit location must be current or overlap a historical provider/direct setup. Setup-based inputs may require LOCATION when the same ID has simultaneous payment setups."]
+  ];
+  if (supportedInputTypes.has("ATTENDANCE")) instructionRows.push([
+    "ATTENDANCE",
+    "Set FIELD_CODE to WORK_HOURS or WORK_DAYS and enter the total quantity for the effective range in VALUE. Use WORK_HOURS for hourly attendance pay and WORK_DAYS for daily or monthly attendance pay. The upload rejects a unit that does not match the person's payment setup."
   ]);
+  if (supportedInputTypes.has("PRODUCTION_UNITS")) instructionRows.push([
+    "PRODUCTION_UNITS",
+    "Use a production FIELD_CODE from Field Reference. Production is stored per work date, so enter the same date in EFFECTIVE_DATE and EFFECTIVE_TO. VALUE replaces only that field for that person, location and date; provider-reported values remain the fallback when no override exists."
+  ]);
+  if (supportedInputTypes.has("PAYMENT_FIELD_VALUE")) instructionRows.push([
+    "PAYMENT_FIELD_VALUE",
+    "Use a FIELD_CODE from Field Reference. VALUE overrides that configured rate or input for the entered effective range; it is not a final payout amount."
+  ]);
+  if (supportedInputTypes.has("ADDITIONAL_PAYMENT")) instructionRows.push([
+    "ADDITIONAL_PAYMENT",
+    "Use a FIELD_CODE from Field Reference. VALUE is applied once to the complete payout period selected on the worksheet page."
+  ]);
+  if (supportedInputTypes.has("DEDUCTION")) instructionRows.push([
+    "DEDUCTION",
+    "Use an active manual deduction FIELD_CODE from Field Reference. VALUE is applied once to the complete selected payout period and may have at most two decimal places. Automatic fixed, percentage and system deductions cannot be uploaded or replaced."
+  ]);
+  instructionRows.push(
+    ["Important", "Zero is a real value. A blank value is not zero. Formula cells and negative values are rejected."],
+    ["Matching", `People are matched only by the company ${subjectLabel} DROPX_ID. LOCATION is optional. ADDITIONAL_PAYMENT and DEDUCTION default to the ${subjectLabel} current location; an explicit location must be current or overlap a historical payment allocation. Setup-based inputs may require LOCATION when the same ID has payment history at another location.`]
+  );
+  const instructions = XLSX.utils.aoa_to_sheet(instructionRows);
   instructions["!cols"] = [{ wch: 24 }, { wch: 110 }];
 
   const exampleDate = displaySpreadsheetDate(options.effectiveFrom ?? "");

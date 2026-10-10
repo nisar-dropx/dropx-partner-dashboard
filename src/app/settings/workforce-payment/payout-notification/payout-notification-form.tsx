@@ -161,7 +161,7 @@ export function WorkforcePayoutNotificationForm({
             onChange={(event) => setAppNotificationEnabled(event.target.checked)}
             type="checkbox"
           />
-          <span>Send a DropX One App notification when a workforce payout is published for review</span>
+          <span>Send a DropX One App notification when a Workforce or Helper payout is published</span>
         </label>
 
         <label className="toggle-field">
@@ -172,7 +172,7 @@ export function WorkforcePayoutNotificationForm({
             onChange={(event) => setEnabled(event.target.checked)}
             type="checkbox"
           />
-          <span>Send a WhatsApp notification when a workforce payout is published for review</span>
+          <span>Send a WhatsApp notification when a Workforce or Helper payout is published</span>
         </label>
 
         {appNotificationEnabled ? (
@@ -272,7 +272,7 @@ export function WorkforcePayoutNotificationForm({
               Save notification settings
             </SubmitButton>
           </div>
-        ) : <p className="subtle">You have view-only access to Workforce Payment settings.</p>}
+        ) : <p className="subtle">You have view-only access to Workforce &amp; Helper Payment settings.</p>}
       </div>
     </form>
   );

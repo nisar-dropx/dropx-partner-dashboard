@@ -22,12 +22,14 @@ async function responseError(response: Response) {
 }
 
 export function WorkforcePayoutBankRedownloadButton({
+  audience = "workforce",
   disabled,
   onBusyChange,
   paymentItemIds,
   periodEnd,
   periodStart
 }: {
+  audience?: "workforce" | "helpers";
   disabled: boolean;
   onBusyChange?: (busy: boolean) => void;
   paymentItemIds: readonly string[];
@@ -88,6 +90,7 @@ export function WorkforcePayoutBankRedownloadButton({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          audience,
           paymentItemIds: exactPaymentItemIds,
           periodStart,
           periodEnd
@@ -95,7 +98,7 @@ export function WorkforcePayoutBankRedownloadButton({
       });
       if (!response.ok) throw new Error(await responseError(response));
       const blob = await response.blob();
-      const fallback = `workforce-payouts-${periodStart.slice(0, 7)}-redownload.${blob.type === "application/zip" ? "zip" : "xlsx"}`;
+      const fallback = `${audience}-payouts-${periodStart.slice(0, 7)}-redownload.${blob.type === "application/zip" ? "zip" : "xlsx"}`;
       const filename = attachmentFilename(response.headers.get("content-disposition"), fallback);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -119,7 +122,7 @@ export function WorkforcePayoutBankRedownloadButton({
       <section aria-labelledby={titleId} aria-modal="true" className="modal-panel" ref={dialogRef} role="dialog">
         <div className="panel-head">
           <div>
-            <span className="eyebrow">Workforce payments</span>
+            <span className="eyebrow">{audience === "helpers" ? "Helper" : "Workforce"} payments</span>
             <h2 id={titleId}>Re-download bank file</h2>
           </div>
           <button className="button secondary compact" disabled={busy} onClick={() => setOpen(false)} ref={closeRef} type="button">Close</button>

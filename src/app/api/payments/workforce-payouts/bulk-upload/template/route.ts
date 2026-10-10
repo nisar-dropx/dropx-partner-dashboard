@@ -27,6 +27,10 @@ export async function GET(request: Request) {
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
     const url = new URL(request.url);
+    const audience = (url.searchParams.get("audience") ?? "workforce").trim().toLowerCase();
+    if (audience !== "workforce" && audience !== "helpers") {
+      return errorResponse("Payout audience is not supported.", 400);
+    }
     const requestedFrom = url.searchParams.get("effective_from") ?? "";
     const requestedTo = url.searchParams.get("effective_to") ?? "";
     const effectiveFrom = isValidWorkforcePayoutDate(requestedFrom) ? requestedFrom : undefined;
@@ -36,12 +40,14 @@ export async function GET(request: Request) {
     }
 
     const [paymentFieldsResult, additionalFieldsResult, deductionHeadsResult, stationsResult] = await Promise.all([
-      supabaseAdmin
-        .from("payment_fields")
-        .select("code,label,field_type,calculation_type,pay_schedule,is_custom_production")
-        .eq("company_id", companyId)
-        .eq("is_active", true)
-        .order("code"),
+      audience === "helpers"
+        ? Promise.resolve({ data: [], error: null })
+        : supabaseAdmin
+          .from("payment_fields")
+          .select("code,label,field_type,calculation_type,pay_schedule,is_custom_production")
+          .eq("company_id", companyId)
+          .eq("is_active", true)
+          .order("code"),
       supabaseAdmin
         .from("workforce_additional_payment_fields")
         .select("code,name,calculation_type,default_rate_value")
@@ -117,11 +123,19 @@ export async function GET(request: Request) {
       .filter((station) => allLocations || allowedLocationIds.has(String(station.id)))
       .map((station) => ({ code: normalizeWorkforcePayoutCode(station.station_code) }))
       .filter((station) => station.code);
-    const bytes = buildWorkforcePayoutImportTemplate(fields, { effectiveFrom, effectiveTo, locations });
+    const bytes = buildWorkforcePayoutImportTemplate(fields, {
+      effectiveFrom,
+      effectiveTo,
+      locations,
+      subjectLabel: audience === "helpers" ? "Helper" : "Workforce",
+      supportedInputTypes: audience === "helpers"
+        ? ["ATTENDANCE", "ADDITIONAL_PAYMENT", "DEDUCTION"]
+        : undefined
+    });
     return new Response(Buffer.from(bytes), {
       headers: {
         "Cache-Control": "private, no-store",
-        "Content-Disposition": `attachment; filename="workforce-payout-inputs${effectiveFrom && effectiveTo ? `-${effectiveFrom}-to-${effectiveTo}` : ""}.xlsx"`,
+        "Content-Disposition": `attachment; filename="${audience === "helpers" ? "helper" : "workforce"}-payout-inputs${effectiveFrom && effectiveTo ? `-${effectiveFrom}-to-${effectiveTo}` : ""}.xlsx"`,
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       }
     });

@@ -3,9 +3,25 @@ import { waitUntil } from "@vercel/functions";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { processPayoutReviewNotifications } from "@/lib/payout-review-notifications";
+import {
+  processHelperPayoutReviewNotifications,
+  processPayoutReviewNotifications
+} from "@/lib/payout-review-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { processWorkforcePayoutAppNotifications } from "@/lib/workforce-payout-app-notifications";
+import {
+  buildHelperPayoutPublicationSnapshot,
+  helperPayoutPublicationSnapshotHash,
+  type HelperPayoutPublicationSnapshot
+} from "@/lib/helper-payout-publication";
+import { loadHelperPayoutRows } from "@/lib/helper-payout-loader";
+import {
+  helperPayoutDependencyStateKey,
+  loadHelperPayoutDependencyState,
+  type HelperPayoutDependencyState
+} from "@/lib/helper-payout-dependency";
+import { isWorkforcePayoutCalculationPublishable } from "@/lib/workforce-payout-publication-eligibility";
+import { readAllRows } from "@/lib/supabase-pagination";
 import { revalidateWorkforcePayoutPublicationSelections } from "@/lib/workforce-payout-publication-revalidation";
 import {
   workforcePayoutLocationSetHash,
@@ -87,6 +103,29 @@ function verifiedPublicationSnapshot(value: unknown, expected: {
   return snapshot as PublicationSnapshot;
 }
 
+function verifiedHelperPublicationSnapshot(value: unknown, expected: {
+  helperId: string;
+  locationId: string;
+  periodEnd: string;
+  periodStart: string;
+  snapshotHash: string;
+}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const snapshot = value as Partial<HelperPayoutPublicationSnapshot>;
+  if (snapshot.schema_version !== 2
+    || snapshot.source !== "helper_payout_worksheet"
+    || snapshot.run?.period_start !== expected.periodStart
+    || snapshot.run?.period_end !== expected.periodEnd
+    || snapshot.item?.helper_id !== expected.helperId
+    || snapshot.item?.station_id !== expected.locationId
+    || !Array.isArray(snapshot.lines)
+    || !snapshot.worksheet
+    || helperPayoutPublicationSnapshotHash(snapshot as HelperPayoutPublicationSnapshot) !== expected.snapshotHash) {
+    return null;
+  }
+  return snapshot as HelperPayoutPublicationSnapshot;
+}
+
 async function loadNotificationRecipients(companyId: string, workforceIds: string[]) {
   const recipients: Array<{
     id: string;
@@ -108,10 +147,126 @@ async function loadNotificationRecipients(companyId: string, workforceIds: strin
   return { data: recipients, error: null, expected: uniqueIds.length };
 }
 
+async function loadHelperNotificationRecipients(companyId: string, helperIds: string[]) {
+  const recipients: Array<{
+    id: string;
+    full_name: string | null;
+    dropx_id: string | null;
+    mobile: string | null;
+    mobile_country_code: string | null;
+  }> = [];
+  const uniqueIds = [...new Set(helperIds)];
+  for (const idChunk of chunkValues(uniqueIds, WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK)) {
+    const page = await supabaseAdmin!
+      .from("helpers")
+      .select("id,full_name,dropx_id,mobile,mobile_country_code")
+      .eq("company_id", companyId)
+      .in("id", idChunk);
+    if (page.error) return { data: recipients, error: page.error, expected: uniqueIds.length };
+    recipients.push(...(page.data ?? []));
+  }
+  return { data: recipients, error: null, expected: uniqueIds.length };
+}
+
+async function helperPublicationReplayState({
+  companyId,
+  periodEnd,
+  periodStart,
+  selections
+}: {
+  companyId: string;
+  periodEnd: string;
+  periodStart: string;
+  selections: Array<{
+    dependencyHash: string;
+    helperId: string;
+    locationId: string;
+    snapshotHash: string;
+    sourceChangeId: string;
+  }>;
+}) {
+  const helperIds = [...new Set(selections.map((selection) => selection.helperId))];
+  const publications: Array<{
+    id: string;
+    helper_id: string;
+    station_id: string;
+    snapshot_hash: string;
+    payout_dependency_hash: string;
+    payout_source_change_id: number | string;
+  }> = [];
+  const reviews: Array<{ subject_id: string; location_id: string; status: string }> = [];
+  for (const idChunk of chunkValues(helperIds, WORKFORCE_NOTIFICATION_RECIPIENT_QUERY_CHUNK)) {
+    const [publicationResult, reviewResult] = await Promise.all([
+      readAllRows(supabaseAdmin!
+        .from("helper_payout_publications")
+        .select("id,helper_id,station_id,snapshot_hash,payout_dependency_hash,payout_source_change_id")
+        .eq("company_id", companyId)
+        .eq("period_start", periodStart)
+        .eq("period_end", periodEnd)
+        .in("helper_id", idChunk)
+        .order("helper_id")
+        .order("station_id")
+        .order("revision", { ascending: false })
+        .order("published_at", { ascending: false })
+        .order("id", { ascending: false })),
+      readAllRows(supabaseAdmin!
+        .from("workforce_payout_review_submissions")
+        .select("subject_id,location_id,status")
+        .eq("company_id", companyId)
+        .eq("subject_type", "helper")
+        .eq("period_start", periodStart)
+        .eq("period_end", periodEnd)
+        .in("subject_id", idChunk)
+        .order("subject_id")
+        .order("location_id"))
+    ]);
+    if (publicationResult.error || reviewResult.error) {
+      return {
+        exactReplay: false,
+        publicationIds: [] as string[],
+        error: publicationResult.error?.message ?? reviewResult.error?.message ?? "Helper publication state is unavailable."
+      };
+    }
+    publications.push(...((publicationResult.data ?? []) as typeof publications));
+    reviews.push(...((reviewResult.data ?? []) as typeof reviews));
+  }
+
+  const latestByIdentity = new Map<string, (typeof publications)[number]>();
+  for (const publication of publications) {
+    const key = `${publication.helper_id.toLowerCase()}|${publication.station_id.toLowerCase()}`;
+    if (!latestByIdentity.has(key)) latestByIdentity.set(key, publication);
+  }
+  const reviewByIdentity = new Map(reviews.map((review) => [
+    `${review.subject_id.toLowerCase()}|${review.location_id.toLowerCase()}`,
+    review.status
+  ]));
+  const exactReplay = selections.every((selection) => {
+    const key = `${selection.helperId.toLowerCase()}|${selection.locationId.toLowerCase()}`;
+    const latest = latestByIdentity.get(key);
+    return latest?.snapshot_hash === selection.snapshotHash
+      && latest?.payout_dependency_hash === selection.dependencyHash
+      && String(latest?.payout_source_change_id ?? "") === selection.sourceChangeId
+      && ["under_review", "approved"].includes(String(reviewByIdentity.get(key) ?? ""));
+  });
+  if (!exactReplay) return { exactReplay: false, publicationIds: [] as string[], error: null };
+
+  const primaryIds: string[] = [];
+  for (const helperId of helperIds) {
+    const primary = selections
+      .filter((selection) => selection.helperId === helperId)
+      .sort((left, right) => left.locationId.localeCompare(right.locationId))[0];
+    if (!primary) continue;
+    const publication = latestByIdentity.get(`${primary.helperId.toLowerCase()}|${primary.locationId.toLowerCase()}`);
+    if (publication) primaryIds.push(publication.id);
+  }
+  return { exactReplay: true, publicationIds: primaryIds, error: null };
+}
+
 async function notificationPreflight(
   companyId: string,
   snapshots: Array<{ workforceId: string; snapshot: PublicationSnapshot }>,
-  reviewUntil: string
+  reviewUntil: string,
+  recipientKind: "workforce" | "helper" = "workforce"
 ) {
   const config = await supabaseAdmin!
     .from("whatsapp_notification_configs")
@@ -120,7 +275,7 @@ async function notificationPreflight(
     .eq("event_code", WORKFORCE_PAYOUT_WHATSAPP_EVENT)
     .maybeSingle();
   if (config.error || !config.data) {
-    throw new Error("Save the Workforce payout notification setting before publishing payouts.");
+    throw new Error("Save the Workforce & Helper payout notification setting before publishing payouts.");
   }
   const whatsappNotificationEnabled = Boolean(config.data.is_enabled);
   const appNotificationEnabled = Boolean(config.data.app_notification_enabled);
@@ -128,9 +283,11 @@ async function notificationPreflight(
     throw new Error("Enable App or WhatsApp notifications before publishing payouts.");
   }
 
-  const people = await loadNotificationRecipients(companyId, snapshots.map((entry) => entry.workforceId));
+  const people = recipientKind === "helper"
+    ? await loadHelperNotificationRecipients(companyId, snapshots.map((entry) => entry.workforceId))
+    : await loadNotificationRecipients(companyId, snapshots.map((entry) => entry.workforceId));
   if (people.error || people.data.length !== people.expected) {
-    throw new Error("One or more selected Workforce recipients are unavailable.");
+    throw new Error(`One or more selected ${recipientKind === "helper" ? "Helper" : "Workforce"} recipients are unavailable.`);
   }
 
   const personById = new Map((people.data ?? []).map((person) => [String(person.id), person]));
@@ -193,7 +350,7 @@ async function notificationPreflight(
     if (whatsappNotificationEnabled && activeProfile && approvedTemplate) {
       const recipient = normalizeWorkforceWhatsAppRecipient(person?.mobile, person?.mobile_country_code);
       if (!recipient) {
-        throw new Error(`${person?.dropx_id || person?.full_name || "A selected Workforce member"} does not have a valid WhatsApp mobile number.`);
+        throw new Error(`${person?.dropx_id || person?.full_name || `A selected ${recipientKind === "helper" ? "Helper" : "Workforce member"}`} does not have a valid WhatsApp mobile number.`);
       }
       buildWorkforcePayoutTemplateComponents(
         Array.isArray(approvedTemplate.components) ? approvedTemplate.components : [],
@@ -301,36 +458,272 @@ export async function POST(request: Request) {
     }
 
     if (subjectTypes.has("helper")) {
-      const helperItems = normalized.map((item) => ({
-        ...item,
-        expected_status: workforcePayoutReviewTokenDetails(item.review_token, {
+      if (!authorization.hasAllLocationAccess) {
+        return responseError("Send Notification requires all-location access so every payout row for the Helper can be published together.", 403);
+      }
+      if (!completeCalendarMonth(periodStart, periodEnd)) {
+        return responseError("Send Notification is available only for one complete calendar month.", 400);
+      }
+
+      const helperItems = normalized.map((item) => {
+        const token = workforcePayoutReviewTokenDetails(item.review_token, {
           companyId,
           subjectType: "helper",
           subjectId: item.subject_id,
           locationId: item.location_id!,
           periodStart,
           periodEnd
-        })?.status ?? null
-      }));
-      if (helperItems.some((item) => !item.expected_status)) {
-        return responseError("One or more Helper payouts are no longer ready for review. Refresh the page and select them again.", 409);
+        });
+        return { ...item, token };
+      });
+      if (helperItems.some((item) => !item.token?.publicationSnapshotHash || !item.token.locationSetHash)) {
+        return responseError("One or more Helper payouts are no longer ready. Refresh the page and review the recalculated amounts.", 409);
       }
-      const helperResult = await supabaseAdmin.rpc("workforce_send_payouts_for_review", {
+
+      const helperEntries = helperItems.map((item) => ({
+        item,
+        snapshot: verifiedHelperPublicationSnapshot(item.calculation_snapshot, {
+          helperId: item.subject_id,
+          locationId: item.location_id!,
+          periodEnd,
+          periodStart,
+          snapshotHash: item.token!.publicationSnapshotHash
+        })
+      }));
+      if (helperEntries.some((entry) => !entry.snapshot)) {
+        return responseError("One or more selected Helper payout amounts changed after this worksheet was displayed. Refresh and review the recalculated amounts.", 409);
+      }
+
+      const dependencyIdentities = helperItems.map((item) => ({
+        helperId: item.subject_id,
+        stationId: item.location_id!
+      }));
+      let refreshedHelpers: Awaited<ReturnType<typeof loadHelperPayoutRows>> | null = null;
+      let acceptedDependencyState: HelperPayoutDependencyState[] | null = null;
+      let dependencyError: string | null = null;
+      for (let attempt = 0; attempt < MAX_DEPENDENCY_REVALIDATION_ATTEMPTS; attempt += 1) {
+        const before = await loadHelperPayoutDependencyState({
+          companyId,
+          periodEnd,
+          periodStart,
+          rows: dependencyIdentities
+        });
+        if (before.error || !before.data) {
+          dependencyError = before.error ?? "Helper payout dependency state is unavailable.";
+          break;
+        }
+        const loaded = await loadHelperPayoutRows(companyId, authorization, periodStart, periodEnd);
+        if (loaded.error) {
+          return responseError(`Helper payouts could not be revalidated: ${loaded.error}`, 503);
+        }
+        const after = await loadHelperPayoutDependencyState({
+          companyId,
+          periodEnd,
+          periodStart,
+          rows: dependencyIdentities
+        });
+        if (after.error || !after.data) {
+          dependencyError = after.error ?? "Helper payout dependency state is unavailable.";
+          break;
+        }
+        if (helperPayoutDependencyStateKey(before.data) === helperPayoutDependencyStateKey(after.data)) {
+          refreshedHelpers = loaded;
+          acceptedDependencyState = after.data;
+          break;
+        }
+      }
+      if (!refreshedHelpers || !acceptedDependencyState) {
+        return responseError(
+          dependencyError
+            ? `Helper payouts could not be revalidated: ${dependencyError}`
+            : "Helper payout inputs changed while payouts were loading. Refresh and review the recalculated amounts.",
+          dependencyError ? 503 : 409
+        );
+      }
+      const dependencyByIdentity = new Map(acceptedDependencyState.map((state) => [
+        `${state.helperId.toLowerCase()}|${state.stationId.toLowerCase()}`,
+        state
+      ]));
+      const publishableHelperRows = refreshedHelpers.rows.filter((row) => Boolean(
+        row.reviewSubjectType === "helper"
+        && row.reviewSubjectId
+        && row.locationId
+        && row.paymentDetailsAvailable
+        && isWorkforcePayoutCalculationPublishable(row.status)
+      ));
+      const refreshedByIdentity = new Map(publishableHelperRows.map((row) => [
+        `${String(row.reviewSubjectId).toLowerCase()}|${String(row.locationId).toLowerCase()}`,
+        row
+      ]));
+      const refreshedHelperEntries = helperItems.map((item) => {
+        const row = refreshedByIdentity.get(`${item.subject_id.toLowerCase()}|${item.location_id!.toLowerCase()}`);
+        if (!row) return null;
+        const snapshot = buildHelperPayoutPublicationSnapshot(row, periodStart, periodEnd);
+        if (helperPayoutPublicationSnapshotHash(snapshot) !== item.token!.publicationSnapshotHash) return null;
+        return { item, snapshot };
+      });
+      if (refreshedHelperEntries.some((entry) => !entry)) {
+        return responseError("One or more selected Helper payout inputs changed after this worksheet was displayed. Refresh and review the recalculated amounts.", 409);
+      }
+
+      const selectedHelpers = new Set(helperItems.map((item) => item.subject_id));
+      for (const helperId of selectedHelpers) {
+        const subjectItems = helperItems.filter((item) => item.subject_id === helperId);
+        const expectedLocationHashes = new Set(subjectItems.map((item) => item.token!.locationSetHash));
+        const submittedLocations = subjectItems.map((item) => String(item.location_id));
+        if (expectedLocationHashes.size !== 1
+          || workforcePayoutLocationSetHash(submittedLocations) !== [...expectedLocationHashes][0]) {
+          return responseError("Select every publishable location row for each Helper before sending its notification.", 409);
+        }
+        const currentLocations = publishableHelperRows
+          .filter((row) => row.reviewSubjectId === helperId)
+          .map((row) => row.locationId!);
+        if (workforcePayoutLocationSetHash(currentLocations) !== [...expectedLocationHashes][0]) {
+          return responseError("The Helper's publishable payout locations changed after this worksheet was displayed. Refresh and review the recalculated payouts.", 409);
+        }
+      }
+
+      // If the first request committed but its HTTP response was lost, retrying
+      // the exact signed snapshot is a read-only success. This check happens
+      // after the full server reload and location-set validation, and it never
+      // turns a changed snapshot into an idempotent replay.
+      const replaySelections = refreshedHelperEntries.map((entry) => {
+        const key = `${entry!.item.subject_id.toLowerCase()}|${entry!.item.location_id!.toLowerCase()}`;
+        const dependency = dependencyByIdentity.get(key)!;
+        return {
+          dependencyHash: dependency.dependencyHash,
+          helperId: entry!.item.subject_id,
+          locationId: entry!.item.location_id!,
+          snapshotHash: helperPayoutPublicationSnapshotHash(entry!.snapshot),
+          sourceChangeId: dependency.sourceChangeId
+        };
+      });
+      const replay = await helperPublicationReplayState({
+        companyId,
+        periodEnd,
+        periodStart,
+        selections: replaySelections
+      });
+      if (replay.error) {
+        return responseError(`Helper publication state could not be revalidated: ${replay.error}`, 503);
+      }
+      if (replay.exactReplay) {
+        return Response.json({
+          submitted: refreshedHelperEntries.length,
+          alreadyPublished: true,
+          appNotifications: 0,
+          notifications: 0,
+          publicationIds: replay.publicationIds,
+          whatsappNotifications: 0,
+          status: "Already published"
+        }, { headers: noStore });
+      }
+
+      const reviewUntil = new Date(Date.now() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const snapshotsByHelper = new Map<string, PublicationSnapshot[]>();
+      refreshedHelperEntries.forEach((entry) => {
+        const { item, snapshot } = entry!;
+        snapshotsByHelper.set(item.subject_id, [
+          ...(snapshotsByHelper.get(item.subject_id) ?? []),
+          snapshot as unknown as PublicationSnapshot
+        ]);
+      });
+      const notificationSnapshots = [...snapshotsByHelper].map(([helperId, grouped]) => ({
+        workforceId: helperId,
+        snapshot: aggregateNotificationSnapshot(grouped)
+      }));
+      const notification = await notificationPreflight(companyId, notificationSnapshots, reviewUntil, "helper");
+      const notificationPrimary = new Map<string, string>();
+      for (const helperId of selectedHelpers) {
+        notificationPrimary.set(helperId, helperItems
+          .filter((item) => item.subject_id === helperId)
+          .map((item) => item.location_id!)
+          .sort()[0]);
+      }
+
+      const publicationArguments = {
         p_company: companyId,
         p_actor: authorization.userId,
         p_period_start: periodStart,
         p_period_end: periodEnd,
-        p_items: helperItems.map(({
-          review_token: _reviewToken,
-          calculation_snapshot: _calculationSnapshot,
-          ...item
-        }) => item),
-        p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
-      });
-      if (helperResult.error) return responseError(helperResult.error.message, 400);
+        p_items: refreshedHelperEntries.map((entry) => {
+          const { item, snapshot } = entry!;
+          const dependency = dependencyByIdentity.get(
+            `${item.subject_id.toLowerCase()}|${item.location_id!.toLowerCase()}`
+          )!;
+          return {
+            subject_type: "helper",
+            subject_id: item.subject_id,
+            location_id: item.location_id,
+            expected_status: item.token!.status,
+            expected_dependency_hash: dependency.dependencyHash,
+            expected_source_change_id: dependency.sourceChangeId,
+            calculation_snapshot: snapshot,
+            snapshot_hash: item.token!.publicationSnapshotHash,
+            notification_config_snapshot: notification.notifications.get(item.subject_id),
+            notification_primary: notificationPrimary.get(item.subject_id) === item.location_id
+          };
+        }),
+        p_locations: null,
+        p_review_until: reviewUntil,
+        p_notify_at: new Date().toISOString(),
+        p_notification_config_id: notification.config.id,
+        p_notification_config_updated_at: notification.config.updated_at
+      };
+      if (serializedJsonByteLength(publicationArguments) > MAX_WORKFORCE_PAYOUT_PUBLICATION_RPC_BYTES) {
+        return responseError("The selected Helper payout details are too large to publish safely in one batch. Select fewer rows and try again; no payouts were published.", 413);
+      }
+      const helperResult = await supabaseAdmin.rpc("helper_publish_payout_notifications", publicationArguments);
+      if (helperResult.error) {
+        // A concurrent identical request can commit while this request waits on
+        // the Helper publication lock. Re-read after the RPC failure so the
+        // same immutable result is returned instead of creating a duplicate.
+        const concurrentReplay = await helperPublicationReplayState({
+          companyId,
+          periodEnd,
+          periodStart,
+          selections: replaySelections
+        });
+        if (!concurrentReplay.error && concurrentReplay.exactReplay) {
+          return Response.json({
+            submitted: refreshedHelperEntries.length,
+            alreadyPublished: true,
+            appNotifications: 0,
+            notifications: 0,
+            publicationIds: concurrentReplay.publicationIds,
+            whatsappNotifications: 0,
+            status: "Already published"
+          }, { headers: noStore });
+        }
+        return responseError(helperResult.error.message, 400);
+      }
+
+      const publicationIds = Array.isArray(helperResult.data?.publication_ids)
+        ? helperResult.data.publication_ids.map(String)
+        : [];
+      const whatsappPublicationIds = Array.isArray(helperResult.data?.whatsapp_publication_ids)
+        ? helperResult.data.whatsapp_publication_ids.map(String)
+        : [];
+      const appNotificationIds = Array.isArray(helperResult.data?.app_notification_ids)
+        ? helperResult.data.app_notification_ids.map(String)
+        : [];
+      const deliveryTasks: Array<Promise<unknown>> = [];
+      if (whatsappPublicationIds.length) {
+        deliveryTasks.push(processHelperPayoutReviewNotifications({ publicationIds: whatsappPublicationIds }));
+      }
+      if (appNotificationIds.length) {
+        deliveryTasks.push(processWorkforcePayoutAppNotifications({ notificationIds: appNotificationIds }));
+      }
+      if (deliveryTasks.length) {
+        waitUntil(Promise.allSettled(deliveryTasks).then(() => undefined));
+      }
       return Response.json({
-        submitted: Number(helperResult.data ?? helperItems.length),
-        status: "Under Review"
+        submitted: Number(helperResult.data?.published ?? publicationIds.length),
+        appNotifications: appNotificationIds.length,
+        notifications: whatsappPublicationIds.length,
+        publicationIds,
+        whatsappNotifications: whatsappPublicationIds.length,
+        status: "Notification queued"
       }, { headers: noStore });
     }
 

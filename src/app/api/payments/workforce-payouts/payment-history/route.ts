@@ -10,6 +10,13 @@ const noStore = { "Cache-Control": "private, no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+type PayoutAudience = "workforce" | "helpers";
+
+function payoutAudience(value: string | null): PayoutAudience | null {
+  const normalized = String(value ?? "workforce").trim().toLowerCase();
+  return normalized === "workforce" || normalized === "helpers" ? normalized : null;
+}
+
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
 }
@@ -46,6 +53,8 @@ export async function GET(request: Request) {
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
 
     const params = new URL(request.url).searchParams;
+    const audience = payoutAudience(params.get("audience"));
+    if (!audience) return errorResponse("Choose a valid payout audience.", 400);
     const workforceId = String(params.get("workforceId") ?? "").trim().toLowerCase();
     const stationId = String(params.get("stationId") ?? "").trim().toLowerCase();
     const periodStart = String(params.get("periodStart") ?? "").trim();
@@ -54,23 +63,28 @@ export async function GET(request: Request) {
     if (!UUID.test(stationId)) return errorResponse("A valid payout location is required.", 400);
     if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
     const companyId = requireCompanyId(authorization);
+    const subjectColumn = audience === "helpers" ? "helper_id" : "workforce_id";
+    const itemQuery = audience === "helpers"
+      ? supabaseAdmin.from("helper_payout_payment_items")
+      : supabaseAdmin.from("workforce_payout_payment_items");
+    const holdQuery = audience === "helpers"
+      ? supabaseAdmin.from("helper_payout_payment_hold_events")
+      : supabaseAdmin.from("workforce_payout_payment_hold_events");
 
     const [itemsResult, holdEventsResult] = await Promise.all([
-      supabaseAdmin
-        .from("workforce_payout_payment_items")
+      itemQuery
         .select("id,batch_id,reference_no,payment_version,instruction_amount,status,bank_account_no_snapshot,location_id_snapshot,location_code_snapshot,utr_cin,bank_processing_remarks,created_at,finalized_at")
         .eq("company_id", companyId)
-        .eq("workforce_id", workforceId)
+        .eq(subjectColumn, workforceId)
         .eq("location_id_snapshot", stationId)
         .eq("period_start", periodStart)
         .eq("period_end", periodEnd)
         .order("payment_version", { ascending: false })
         .limit(100),
-      supabaseAdmin
-        .from("workforce_payout_payment_hold_events")
+      holdQuery
         .select("id,action,remarks,created_at")
         .eq("company_id", companyId)
-        .eq("workforce_id", workforceId)
+        .eq(subjectColumn, workforceId)
         .eq("period_start", periodStart)
         .eq("period_end", periodEnd)
         .order("created_at", { ascending: false })
@@ -90,9 +104,11 @@ export async function GET(request: Request) {
         .eq("company_id", companyId)
         .in("id", locationIds)
       : Promise.resolve({ data: [], error: null });
+    const batchQuery = audience === "helpers"
+      ? supabaseAdmin.from("helper_payout_payment_batches")
+      : supabaseAdmin.from("workforce_payout_payment_batches");
     const batchesResult = batchIds.length
-      ? await supabaseAdmin
-        .from("workforce_payout_payment_batches")
+      ? await batchQuery
         .select("id,bank_id,status,generated_at")
         .eq("company_id", companyId)
         .in("id", batchIds)

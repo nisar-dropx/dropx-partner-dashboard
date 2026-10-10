@@ -6,7 +6,7 @@ import {
 export const WORKFORCE_PAYOUT_WHATSAPP_EVENT = "workforce_payout_review";
 
 export const WORKFORCE_PAYOUT_WHATSAPP_FIELDS = [
-  { value: "full_name", label: "Workforce name" },
+  { value: "full_name", label: "Associate name" },
   { value: "dropx_id", label: "DropX ID" },
   { value: "station_code", label: "Station code" },
   { value: "payment_label", label: "Payment label" },

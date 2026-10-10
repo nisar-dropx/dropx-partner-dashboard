@@ -10,6 +10,7 @@ import {
 } from "./payout-mapping-relocks";
 
 type Row = Record<string, any>;
+export type PayoutSubjectType = "workforce" | "helper";
 
 export async function payoutIdentity(request: NextRequest) {
   const account = await requireConnectAccount(
@@ -19,13 +20,25 @@ export async function payoutIdentity(request: NextRequest) {
   if (account.workspace !== "workforce" || !account.pageAccess.includes("earnings") || !supabaseAdmin) {
     throw new Error("Payout access is unavailable.");
   }
+  if (account.profileType === "worker") {
+    const helper = await supabaseAdmin
+      .from("helpers")
+      .select("id")
+      .eq("company_id", account.companyId)
+      .eq("id", account.id)
+      .eq("is_active", true)
+      .eq("onboarding_status", "active")
+      .maybeSingle();
+    if (helper.error || !helper.data) throw new Error("Your Helper identity could not be verified.");
+    return { company: account.companyId, worker: helper.data.id, subjectType: "helper" as const };
+  }
   let query = supabaseAdmin.from("workforce").select("id").eq("company_id", account.companyId).is("deleted_at", null).neq("migration_state", "reclassified");
   query = account.profileType === "workforce"
     ? query.eq("id", account.id)
     : query.eq("source_profile_type", account.profileType).eq("source_profile_id", account.id);
   const result = await query.maybeSingle();
   if (result.error || !result.data) throw new Error("Your Workforce identity could not be verified.");
-  return { company: account.companyId, worker: result.data.id };
+  return { company: account.companyId, worker: result.data.id, subjectType: "workforce" as const };
 }
 
 async function rows(query: any): Promise<Row[]> {
@@ -148,7 +161,52 @@ function payoutOutput({
   };
 }
 
-export async function loadAssociatePayouts(company: string, worker: string): Promise<Row[]> {
+async function loadHelperAssociatePayouts(company: string, helper: string): Promise<Row[]> {
+  const db = supabaseAdmin!;
+  const publications = await rows(db
+    .from("helper_payout_publications")
+    .select("*")
+    .eq("company_id", company)
+    .eq("helper_id", helper)
+    .order("revision", { ascending: false, nullsFirst: false })
+    .order("published_at", { ascending: false })
+    .order("id", { ascending: false }));
+  const output: Row[] = [];
+  const latestKeys = new Set<string>();
+  for (const publication of publications) {
+    const snapshot = publication.snapshot ?? {};
+    if (snapshot.schema_version !== 2 || snapshot.source !== "helper_payout_worksheet") continue;
+    const from = String(publication.period_start ?? snapshot.run?.period_start ?? "");
+    const to = String(publication.period_end ?? snapshot.run?.period_end ?? "");
+    const stationId = String(publication.station_id ?? snapshot.item?.station_id ?? "");
+    const key = `${publication.helper_id}|${stationId}|${from}|${to}`;
+    if (latestKeys.has(key)) continue;
+    latestKeys.add(key);
+    if (!snapshot.item || !from || !to) continue;
+    output.push(payoutOutput({
+      id: `helper:${publication.id}`,
+      publication: { ...publication, publication_kind: "worksheet" },
+      item: snapshot.item,
+      lines: snapshot.lines ?? [],
+      from,
+      to,
+      status: "Published",
+      runStatus: "published",
+      revisionPending: false,
+      disputes: [],
+      payoutSlipAvailable: false,
+      snapshot,
+    }));
+  }
+  return output.sort((left, right) => right.to.localeCompare(left.to));
+}
+
+export async function loadAssociatePayouts(
+  company: string,
+  worker: string,
+  subjectType: PayoutSubjectType = "workforce"
+): Promise<Row[]> {
+  if (subjectType === "helper") return loadHelperAssociatePayouts(company, worker);
   const db = supabaseAdmin!;
   // Read publications before their relock authority. If a relock commits between
   // the two reads we fail closed (old rows are hidden) instead of pairing new

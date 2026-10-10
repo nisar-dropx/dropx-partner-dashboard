@@ -32,6 +32,10 @@ export async function GET(request: Request) {
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
     const url = new URL(request.url);
+    const audience = (url.searchParams.get("audience") ?? "workforce").trim().toLowerCase();
+    if (audience !== "workforce" && audience !== "helpers") {
+      return errorResponse("Payout audience is not supported.", 400);
+    }
     const effectiveFrom = url.searchParams.get("effective_from") ?? "";
     const effectiveTo = url.searchParams.get("effective_to") ?? "";
     if (!isValidWorkforcePayoutDate(effectiveFrom)
@@ -41,12 +45,14 @@ export async function GET(request: Request) {
     }
 
     const [paymentFieldsResult, additionalFieldsResult, deductionHeadsResult, stationsResult] = await Promise.all([
-      supabaseAdmin
-        .from("payment_fields")
-        .select("code,label,field_type,calculation_type,pay_schedule,is_custom_production")
-        .eq("company_id", companyId)
-        .eq("is_active", true)
-        .order("code"),
+      audience === "helpers"
+        ? Promise.resolve({ data: [], error: null })
+        : supabaseAdmin
+          .from("payment_fields")
+          .select("code,label,field_type,calculation_type,pay_schedule,is_custom_production")
+          .eq("company_id", companyId)
+          .eq("is_active", true)
+          .order("code"),
       supabaseAdmin
         .from("workforce_additional_payment_fields")
         .select("code,name,calculation_type,default_rate_value")

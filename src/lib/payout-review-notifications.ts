@@ -10,6 +10,7 @@ import {
 } from "@/lib/workforce-payout-whatsapp";
 
 const PUBLICATION_COLUMNS = "id,company_id,workforce_id,payroll_run_id,source_calculated_at,snapshot,review_until,period_start,period_end,notify_at,notification_config_snapshot,publication_kind";
+const HELPER_PUBLICATION_COLUMNS = "id,company_id,helper_id,snapshot,review_until,period_start,period_end,notify_at,notification_config_snapshot";
 
 type PayoutPublication = {
   id: string;
@@ -24,6 +25,18 @@ type PayoutPublication = {
   notify_at: string;
   notification_config_snapshot: unknown;
   publication_kind: "legacy_payroll" | "worksheet";
+};
+
+type HelperPayoutPublication = {
+  id: string;
+  company_id: string;
+  helper_id: string;
+  snapshot: Record<string, unknown>;
+  review_until: string;
+  period_start: string;
+  period_end: string;
+  notify_at: string;
+  notification_config_snapshot: unknown;
 };
 
 type NotificationConfig = {
@@ -330,6 +343,203 @@ export async function processPayoutReviewNotifications(options: ProcessPayoutRev
         .eq("id", publication.id)
         .eq("notification_status", "sending");
       errors.push(`Payout notification ${publication.id}: ${message}`);
+    }
+  });
+  return { processed, sent, errors };
+}
+
+/**
+ * Helper payout publications have their own ledger because Helpers do not have
+ * canonical Workforce IDs. Delivery deliberately shares the frozen template
+ * parser and Meta send contract above, while recipient lookup stays on the
+ * Helpers master and audit payloads identify the DropX One `worker` profile.
+ */
+export async function processHelperPayoutReviewNotifications(options: ProcessPayoutReviewNotificationOptions = {}) {
+  const errors: string[] = [];
+  const db = supabaseAdmin;
+  if (!db) return { processed: 0, sent: 0, errors: ["Database unavailable"] };
+  const publicationIds = [...new Set((options.publicationIds ?? []).map((id) => String(id).trim()).filter(Boolean))].slice(0, 1000);
+  const targeted = publicationIds.length > 0;
+
+  if (!targeted) {
+    await db
+      .from("helper_payout_publications")
+      .update({ notification_status: "uncertain", notification_error: "Delivery outcome needs operator verification." })
+      .eq("notification_status", "sending")
+      .lt("notification_attempted_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
+  }
+
+  const batchSize = boundedNumber(options.batchSize, targeted ? publicationIds.length : 50, targeted ? 1000 : 200);
+  const now = new Date().toISOString();
+  const queueRows: HelperPayoutPublication[] = [];
+  if (targeted) {
+    for (let offset = 0; offset < publicationIds.length && queueRows.length < batchSize; offset += 100) {
+      const chunk = publicationIds.slice(offset, offset + 100);
+      const result = await db
+        .from("helper_payout_publications")
+        .select(HELPER_PUBLICATION_COLUMNS)
+        .in("id", chunk)
+        .eq("notification_status", "pending")
+        .lte("notify_at", now);
+      if (result.error) return { processed: 0, sent: 0, errors: ["Helper payout notification queue unavailable"] };
+      queueRows.push(...(result.data ?? []) as HelperPayoutPublication[]);
+    }
+    queueRows.sort((left, right) => left.notify_at.localeCompare(right.notify_at));
+  } else {
+    const result = await db
+      .from("helper_payout_publications")
+      .select(HELPER_PUBLICATION_COLUMNS)
+      .eq("notification_status", "pending")
+      .lte("notify_at", now)
+      .order("notify_at")
+      .limit(batchSize);
+    if (result.error) return { processed: 0, sent: 0, errors: ["Helper payout notification queue unavailable"] };
+    queueRows.push(...(result.data ?? []) as HelperPayoutPublication[]);
+  }
+  const queue = queueRows.slice(0, batchSize);
+
+  let processed = 0;
+  let sent = 0;
+  await concurrently(queue, targeted ? 12 : 8, async (publication) => {
+    const attemptedAt = new Date().toISOString();
+    const claim = await db.rpc("helper_claim_payout_review_notification", {
+      p_publication_id: publication.id,
+      p_attempted_at: attemptedAt
+    });
+    if (claim.error || !claim.data) return;
+    processed += 1;
+
+    let attempted = false;
+    try {
+      if (new Date(publication.review_until).getTime() <= Date.now()) {
+        throw new Error("The review window has ended. Publish a revised review window before notifying.");
+      }
+
+      const config = frozenNotificationConfig(publication.notification_config_snapshot);
+      const [settingsResult, personResult, profileResult, tokenResult, templateResult] = await Promise.all([
+        db.from("whatsapp_settings").select("is_enabled").eq("company_id", publication.company_id).eq("id", true).maybeSingle(),
+        db
+          .from("helpers")
+          .select("mobile,mobile_country_code,full_name,dropx_id")
+          .eq("company_id", publication.company_id)
+          .eq("id", publication.helper_id)
+          .single(),
+        db
+          .from("whatsapp_profiles")
+          .select("id,profile_name,phone_number_id,graph_api_version,default_country_code,is_active")
+          .eq("company_id", publication.company_id)
+          .eq("id", config.whatsapp_profile_id)
+          .maybeSingle(),
+        db.rpc("get_whatsapp_profile_access_token", { profile_id: config.whatsapp_profile_id }),
+        db
+          .from("whatsapp_template_cache")
+          .select("template_id,whatsapp_profile_id,name,language,status,components")
+          .eq("company_id", publication.company_id)
+          .eq("template_id", config.template_id)
+          .eq("whatsapp_profile_id", config.whatsapp_profile_id)
+          .maybeSingle()
+      ]);
+      if (settingsResult.error || !settingsResult.data?.is_enabled) throw new Error("WhatsApp messaging is disabled.");
+      if (personResult.error) throw new Error("The Helper notification recipient is unavailable.");
+      if (profileResult.error || !profileResult.data?.is_active || !profileResult.data.phone_number_id || !profileResult.data.graph_api_version) {
+        throw new Error("The configured WhatsApp sender is incomplete or inactive.");
+      }
+      if (tokenResult.error || !tokenResult.data) throw new Error("The configured WhatsApp sender token is unavailable.");
+      if (templateResult.error || !templateResult.data || templateResult.data.status !== "APPROVED") {
+        throw new Error("The configured payout template is no longer approved. Sync templates and review the setting.");
+      }
+      if (templateResult.data.name !== config.template_name || templateResult.data.language !== config.template_language) {
+        throw new Error("The configured payout template changed. Review and publish the payout again.");
+      }
+      if (config.template_components && JSON.stringify(templateResult.data.components ?? []) !== JSON.stringify(config.template_components)) {
+        throw new Error("The approved payout template content changed. Sync settings and publish the payout again.");
+      }
+
+      const values = config.resolved_values ?? workforcePayoutWhatsAppValues({
+        snapshot: publication.snapshot as Parameters<typeof workforcePayoutWhatsAppValues>[0]["snapshot"],
+        person: personResult.data,
+        reviewUntil: publication.review_until
+      });
+      const components = config.template_components ?? (templateResult.data.components ?? []) as WhatsAppTemplateComponent[];
+      const messageComponents = buildWorkforcePayoutTemplateComponents(components, config.variable_mappings, values);
+      const recipient = config.recipient ?? normalizeWorkforceWhatsAppRecipient(
+        personResult.data.mobile,
+        personResult.data.mobile_country_code || profileResult.data.default_country_code
+      );
+      if (!recipient) throw new Error("Helper mobile number is invalid.");
+      const requestPayload = {
+        messaging_product: "whatsapp",
+        to: recipient,
+        type: "template",
+        template: {
+          name: config.template_name,
+          language: { code: config.template_language },
+          components: messageComponents
+        }
+      };
+
+      attempted = true;
+      const response = await fetch(
+        `https://graph.facebook.com/${profileResult.data.graph_api_version}/${profileResult.data.phone_number_id}/messages`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${tokenResult.data}`, "Content-Type": "application/json" },
+          body: JSON.stringify(requestPayload),
+          signal: AbortSignal.timeout(20_000)
+        }
+      );
+      const responsePayload = await response.json().catch(() => ({})) as {
+        messages?: Array<{ id?: string }>;
+        error?: { message?: string };
+      };
+      if (!response.ok) {
+        attempted = false;
+        throw new Error(responsePayload.error?.message || "WhatsApp rejected this notification. Check the approved sending configuration.");
+      }
+      const reference = responsePayload.messages?.[0]?.id;
+      if (!reference) throw new Error("WhatsApp did not return a message receipt.");
+
+      const saved = await db
+        .from("helper_payout_publications")
+        .update({ notification_status: "sent", notification_reference: reference, notification_error: null })
+        .eq("id", publication.id)
+        .eq("notification_status", "sending");
+      if (saved.error) throw new Error("Message receipt could not be saved.");
+
+      const messageLog = await db.from("whatsapp_message_logs").insert({
+        company_id: publication.company_id,
+        event_code: WORKFORCE_PAYOUT_WHATSAPP_EVENT,
+        whatsapp_profile_id: profileResult.data.id,
+        whatsapp_profile_name: profileResult.data.profile_name,
+        recipient,
+        template_name: config.template_name,
+        status: "sent",
+        provider_message_id: reference,
+        request_payload: {
+          publication_id: publication.id,
+          helper_id: publication.helper_id,
+          recipient_profile_type: "worker",
+          template_id: config.template_id,
+          variable_mappings: config.variable_mappings,
+          values,
+          request: requestPayload
+        },
+        response_payload: responsePayload
+      });
+      if (messageLog.error) {
+        const logError = `Helper payout notification ${publication.id} was accepted by WhatsApp, but its message audit log could not be saved: ${messageLog.error.message}`;
+        console.error(logError);
+        errors.push(logError);
+      }
+      sent += 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Notification failed";
+      await db
+        .from("helper_payout_publications")
+        .update({ notification_status: attempted ? "uncertain" : "failed", notification_error: message })
+        .eq("id", publication.id)
+        .eq("notification_status", "sending");
+      errors.push(`Helper payout notification ${publication.id}: ${message}`);
     }
   });
   return { processed, sent, errors };

@@ -206,8 +206,8 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
     <AppShell active="Settings" pageCode="payment_settings">
       <PageHead
         eyebrow="Configuration"
-        title="Attendance Capture"
-        subtitle="Choose the source that qualifies daily attendance for attendance-based workforce payment."
+        title="Workforce Attendance Capture"
+        subtitle="Choose the source that qualifies daily Workforce attendance. Helpers always use biometric attendance."
         action={(
           <span className="listing-head-actions">
             <span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>
@@ -241,8 +241,8 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <h2>Daily attendance source</h2>
-                <p className="subtle">Changes are effective-dated so payroll review can preserve which source qualified each day.</p>
+                <h2>Workforce daily attendance source</h2>
+                <p className="subtle">Changes are effective-dated so Workforce payout review can preserve which source qualified each day. This setting does not change Helper attendance.</p>
               </div>
             </div>
             <WorkforceAttendanceCaptureForm
@@ -263,7 +263,7 @@ export default async function WorkforceAttendanceCaptureSettingsPage() {
             <div className="panel-head">
               <div>
                 <h2>How each source works</h2>
-                <p className="subtle">Only the shipment source uses a minimum daily delivery threshold.</p>
+                <p className="subtle">Only the Workforce shipment source uses a minimum daily delivery threshold. Helper payouts continue to use biometric workdays.</p>
                 <p className="subtle">The effective-dated setting applies to every Workforce payment path. When shipment data is selected, a person without matched delivery data is absent unless an explicit payout attendance upload covers the period.</p>
               </div>
             </div>

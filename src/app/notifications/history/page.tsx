@@ -26,7 +26,7 @@ async function loadNotificationHistory(companyId: string) {
     };
   }
 
-  const [campaignProfiles, campaigns, appCampaigns, payoutPublications, payoutMessageLogs] = await Promise.all([
+  const [campaignProfiles, campaigns, appCampaigns, payoutPublications, helperPayoutPublications, payoutMessageLogs] = await Promise.all([
     supabaseAdmin.from("whatsapp_profiles").select("id, profile_name").eq("company_id", companyId),
     supabaseAdmin
       .from("whatsapp_campaigns")
@@ -49,6 +49,12 @@ async function loadNotificationHistory(companyId: string) {
       .order("published_at", { ascending: false })
       .limit(1000),
     supabaseAdmin
+      .from("helper_payout_publications")
+      .select("id, helper_id, station_id, published_by, published_at, period_start, period_end, notification_status, notification_error, notification_reference, notification_attempted_at, notification_config_snapshot")
+      .eq("company_id", companyId)
+      .order("published_at", { ascending: false })
+      .limit(1000),
+    supabaseAdmin
       .from("whatsapp_message_logs")
       .select("id, status, provider_message_id, error_message, request_payload, created_at")
       .eq("company_id", companyId)
@@ -58,7 +64,10 @@ async function loadNotificationHistory(companyId: string) {
   ]);
 
   const appRows = (appCampaigns.data ?? []) as unknown as PayoutAppNotificationCampaignRow[];
-  const payoutPublicationRows = (payoutPublications.data ?? []) as unknown as PayoutWhatsappPublicationHistoryRow[];
+  const payoutPublicationRows = [
+    ...(payoutPublications.data ?? []),
+    ...(helperPayoutPublications.data ?? [])
+  ] as unknown as PayoutWhatsappPublicationHistoryRow[];
   const payoutMessageLogRows = (payoutMessageLogs.data ?? []) as unknown as PayoutWhatsappMessageLogHistoryRow[];
 
   const profileNameById = new Map(((campaignProfiles.data ?? []) as Array<{ id: string; profile_name: string }>).map((profile) => [profile.id, profile.profile_name]));
@@ -69,6 +78,7 @@ async function loadNotificationHistory(companyId: string) {
     ?? (campaignSetupMissing ? `${campaigns.error?.message} Run scripts/whatsapp_campaigns_v1.sql in Supabase SQL Editor.` : campaigns.error?.message)
     ?? (appCampaignSetupMissing ? `${appCampaigns.error?.message} Apply the Workforce payout App notification history migration.` : appCampaigns.error?.message)
     ?? payoutPublications.error?.message
+    ?? helperPayoutPublications.error?.message
     ?? payoutMessageLogs.error?.message
     ?? null;
 

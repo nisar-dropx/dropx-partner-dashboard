@@ -14,6 +14,13 @@ const noStore = { "Cache-Control": "private, no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+type PayoutAudience = "workforce" | "helpers";
+
+function payoutAudience(value: FormDataEntryValue | null): PayoutAudience | null {
+  const normalized = String(value ?? "workforce").trim().toLowerCase();
+  return normalized === "workforce" || normalized === "helpers" ? normalized : null;
+}
+
 function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
 }
@@ -49,6 +56,8 @@ export async function POST(request: Request) {
     const declaredLength = Number(request.headers.get("content-length") ?? 0);
     if (Number.isFinite(declaredLength) && declaredLength > MAX_FILE_BYTES + 128 * 1024) return errorResponse("The bank response file is too large.", 413);
     const form = await request.formData();
+    const audience = payoutAudience(form.get("audience"));
+    if (!audience) return errorResponse("Choose a valid payout audience.", 400);
     const file = form.get("bank_response_file");
     const operationId = String(form.get("operation_id") ?? "").trim().toLowerCase();
     if (!(file instanceof File) || file.size <= 0) return errorResponse("Upload the bank response Excel file.", 400);
@@ -57,9 +66,11 @@ export async function POST(request: Request) {
     if (!/\.xlsx?$/i.test(file.name)) return errorResponse("Upload an .xlsx or .xls bank response file.", 400);
 
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const rows = parseWorkforceFedOneResponse(bytes);
+    const rows = parseWorkforceFedOneResponse(bytes, {
+      referencePrefix: audience === "helpers" ? "HP" : "WP"
+    });
     const fileSha256 = createHash("sha256").update(bytes).digest("hex");
-    const finalized = await supabaseAdmin.rpc("workforce_finalize_payout_payment_response", {
+    const rpcParameters = {
       p_company_id: companyId,
       p_actor_user_id: authorization.userId,
       p_operation_id: operationId,
@@ -75,7 +86,10 @@ export async function POST(request: Request) {
         utr_cin: row.utrCin,
         remarks: row.remarks
       }))
-    });
+    };
+    const finalized = audience === "helpers"
+      ? await supabaseAdmin.rpc("helper_finalize_payout_payment_response", rpcParameters)
+      : await supabaseAdmin.rpc("workforce_finalize_payout_payment_response", rpcParameters);
     if (finalized.error) return errorResponse(finalized.error.message, databaseStatus(finalized.error.message));
     const result = resultRecord(finalized.data);
     return Response.json(result, { headers: noStore });

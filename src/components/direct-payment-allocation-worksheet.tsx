@@ -34,12 +34,14 @@ function AllocationCells({
   canEdit,
   formId,
   methods,
+  permissionScope,
   row
 }: {
   audience: "workforce" | "helpers";
   canEdit: boolean;
   formId: string;
   methods: DirectPaymentMethod[];
+  permissionScope: "provider_mapping" | "payment_settings";
   row: DirectPaymentAllocationRow;
 }) {
   const currentMethodAvailable = methods.some((method) => method.id === row.paymentMethodId);
@@ -56,6 +58,7 @@ function AllocationCells({
     <>
       <td style={{ minWidth: 210 }}>
         <input form={formId} name="subject_type" type="hidden" value={audience} />
+        <input form={formId} name="permission_scope" type="hidden" value={permissionScope} />
         <input form={formId} name={audience === "helpers" ? "helper_id" : "workforce_id"} type="hidden" value={row.personId} />
         <input form={formId} name="payment_values_json" type="hidden" value={JSON.stringify(methodValues)} />
         <select
@@ -118,6 +121,7 @@ export function DirectPaymentAllocationWorksheet({
   canEdit,
   initialQuery = "",
   methods,
+  permissionScope = "provider_mapping",
   productionMethodCount,
   rows
 }: {
@@ -125,6 +129,7 @@ export function DirectPaymentAllocationWorksheet({
   canEdit: boolean;
   initialQuery?: string;
   methods: DirectPaymentMethod[];
+  permissionScope?: "provider_mapping" | "payment_settings";
   productionMethodCount: number;
   rows: DirectPaymentAllocationRow[];
 }) {
@@ -179,7 +184,7 @@ export function DirectPaymentAllocationWorksheet({
               <td>{row.fullName}</td>
               <td>{row.stationLabel}</td>
               <td>{row.designationLabel}</td>
-              <AllocationCells audience={audience} canEdit={canEdit} formId={`direct-allocation-${audience}-${row.personId}`} methods={methods} row={row} />
+              <AllocationCells audience={audience} canEdit={canEdit} formId={`direct-allocation-${audience}-${row.personId}`} methods={methods} permissionScope={permissionScope} row={row} />
             </tr>) : <tr><td className="empty-cell" colSpan={10}>No direct-pay {subjectLabel} records match this search.</td></tr>}
           </tbody>
         </table>

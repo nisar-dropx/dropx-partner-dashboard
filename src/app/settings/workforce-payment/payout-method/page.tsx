@@ -151,8 +151,8 @@ export default async function WorkforcePaymentSettingsPage() {
     <AppShell active="Settings" pageCode="payment_settings">
       <PageHead
         eyebrow="Configuration"
-        title="Payout Method"
-        subtitle="Choose how attendance-based monthly workforce payment heads account for paid weekly offs."
+        title="Shared Payout Policy"
+        subtitle="Choose how attendance-based monthly Workforce and Helper payment heads account for paid weekly offs."
         action={(
           <span className="listing-head-actions">
             <span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>
@@ -166,7 +166,7 @@ export default async function WorkforcePaymentSettingsPage() {
       {data.error ? (
         <section aria-live="assertive" className="panel message-panel error" role="alert">
           <div className="panel-body">
-            <strong>Workforce payment settings are unavailable</strong>
+            <strong>Shared payout settings are unavailable</strong>
             <p className="subtle" style={{ marginTop: 6 }}>{data.error}</p>
           </div>
         </section>
@@ -187,7 +187,7 @@ export default async function WorkforcePaymentSettingsPage() {
             <div className="panel-head">
               <div>
                 <h2>Monthly attendance policy</h2>
-                <p className="subtle">A full day is 1 unit, a half day is 0.5, and an absence is 0. Each month remains editable until that month&apos;s payroll is finalized.</p>
+                <p className="subtle">This policy is shared by Workforce and Helpers. A full day is 1 unit, a half day is 0.5, and an absence is 0. Each month remains editable until that month&apos;s payroll is finalized.</p>
               </div>
             </div>
             <WorkforcePaymentPolicyForm
@@ -232,7 +232,7 @@ export default async function WorkforcePaymentSettingsPage() {
             <div className="panel-head">
               <div>
                 <h2>Policy history</h2>
-                <p className="subtle">Effective-dated records preserve which rule applies to each workforce payment month.</p>
+                <p className="subtle">Effective-dated records preserve which shared rule applies to each Workforce and Helper payment month.</p>
               </div>
             </div>
             <div className="table-wrap">

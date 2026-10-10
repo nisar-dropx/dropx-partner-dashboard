@@ -96,19 +96,23 @@ export const dynamic = "force-dynamic";
 export default async function DirectPaymentAllocationsPage({
   searchParams = {}
 }: {
-  searchParams?: { audience?: string; q?: string };
+  searchParams?: { audience?: string; q?: string; source?: string };
 }) {
   const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
   const pageCode = currentProviderMappingPageCode();
-  const authorization = await requirePagePermission(pageCode, "access");
+  const paymentSettingsEntry = audience === "helpers" && searchParams.source === "payment-settings";
+  const accessPageCode = paymentSettingsEntry ? "payment_settings" : pageCode;
+  const authorization = await requirePagePermission(accessPageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const permission = authorization.permissions[pageCode];
-  const canEdit = Boolean(permission?.canAdd || permission?.canEdit);
+  const permission = authorization.permissions[accessPageCode];
+  const canEdit = paymentSettingsEntry
+    ? Boolean(permission?.canEdit)
+    : Boolean(permission?.canAdd || permission?.canEdit);
   const flash = loadFlash();
 
   if (!supabaseAdmin) {
-    return <AppShell active="ID Mapping" pageCode={pageCode}>
-      <PageHead eyebrow="Direct workforce pay" title="Direct pay allocations" />
+    return <AppShell active={paymentSettingsEntry ? "Settings" : "ID Mapping"} pageCode={accessPageCode}>
+      <PageHead eyebrow="Direct workforce pay" title={paymentSettingsEntry ? "Helper Payment Setup" : "Direct pay allocations"} />
       <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section>
     </AppShell>;
   }
@@ -267,22 +271,25 @@ export default async function DirectPaymentAllocationsPage({
   const migrationMissing = loadError?.message?.includes(audience === "helpers" ? "helper_payment_allocations" : "workforce_payment_allocations")
     || loadError?.message?.includes("provider_mapping_required");
 
-  return <AppShell active="ID Mapping" pageCode={pageCode}>
+  return <AppShell active={paymentSettingsEntry ? "Settings" : "ID Mapping"} pageCode={accessPageCode}>
     <PageHead
-      eyebrow="Provider-independent pay"
+      action={paymentSettingsEntry ? <Link className="button secondary" href="/settings/workforce-payment">Back</Link> : undefined}
+      eyebrow={paymentSettingsEntry ? "Workforce & Helper Payment" : "Provider-independent pay"}
       subtitle={audience === "helpers"
-        ? "Assign attendance, workday or fixed-amount payment methods to Helpers. Provider mapping is never required."
+        ? "Assign attendance, workday or fixed-amount payment methods to Helpers. This setup is provider-independent and does not grant access to ID mapping."
         : "Assign attendance, workday or fixed-amount payment methods to Field Operations designations that do not require provider mapping."}
-      title="Direct pay allocations"
+      title={paymentSettingsEntry ? "Helper Payment Setup" : "Direct pay allocations"}
     />
-    <nav aria-label="ID mapping views" className="performance-tabs">
-      <Link href="/provider-id-mapping">Provider member first</Link>
-      <Link className="active" href="/provider-mapping/direct-pay">Direct pay allocations</Link>
-    </nav>
-    <nav aria-label="Direct pay allocation categories" className="performance-tabs">
-      <Link className={audience === "workforce" ? "active" : undefined} href="/provider-mapping/direct-pay">Workforce</Link>
-      <Link className={audience === "helpers" ? "active" : undefined} href="/provider-mapping/direct-pay?audience=helpers">Helpers</Link>
-    </nav>
+    {!paymentSettingsEntry ? <>
+      <nav aria-label="ID mapping views" className="performance-tabs">
+        <Link href="/provider-id-mapping">Provider member first</Link>
+        <Link className="active" href="/provider-mapping/direct-pay">Direct pay allocations</Link>
+      </nav>
+      <nav aria-label="Direct pay allocation categories" className="performance-tabs">
+        <Link className={audience === "workforce" ? "active" : undefined} href="/provider-mapping/direct-pay">Workforce</Link>
+        <Link className={audience === "helpers" ? "active" : undefined} href="/provider-mapping/direct-pay?audience=helpers">Helpers</Link>
+      </nav>
+    </> : null}
     {loadError ? <section className="panel message-panel error"><div className="panel-body">
       <strong>{migrationMissing ? "Database update required" : "Unable to load direct pay allocations"}</strong>
       <p className="subtle">{migrationMissing ? "Apply the direct payment allocation database migration, then refresh this page." : loadError.message}</p>
@@ -296,6 +303,6 @@ export default async function DirectPaymentAllocationsPage({
       <p className="subtle">No active payment method contains only attendance, workday or fixed-amount fields. Production fields cannot be used here.</p>
       <Link className="button secondary compact" href="/master/payment-methods">Open Payment Methods</Link>
     </div></section> : null}
-    {!loadError ? <DirectPaymentAllocationWorksheet audience={audience} canEdit={canEdit} initialQuery={searchParams.q} methods={eligibleMethods} productionMethodCount={productionMethodCount} rows={rows} /> : null}
+    {!loadError ? <DirectPaymentAllocationWorksheet audience={audience} canEdit={canEdit} initialQuery={searchParams.q} methods={eligibleMethods} permissionScope={paymentSettingsEntry ? "payment_settings" : "provider_mapping"} productionMethodCount={productionMethodCount} rows={rows} /> : null}
   </AppShell>;
 }

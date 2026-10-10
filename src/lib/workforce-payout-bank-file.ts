@@ -38,7 +38,12 @@ export type WorkforceFedOnePaymentInstruction = {
 export type WorkforceFedOneWorkbookOptions = {
   debitAccountNumber: string;
   instructions: readonly WorkforceFedOnePaymentInstruction[];
+  referencePrefix?: "WP" | "HP";
   valueDate: string;
+};
+
+export type WorkforceFedOneResponseOptions = {
+  referencePrefix?: "WP" | "HP";
 };
 
 export type WorkforceFedOneRow = {
@@ -106,9 +111,12 @@ export function isValidWorkforceBankIfsc(value: unknown) {
   return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizeWorkforceBankIfsc(value));
 }
 
-export function isValidWorkforceBankReference(value: unknown) {
+export function isValidWorkforceBankReference(value: unknown, referencePrefix: "WP" | "HP" = "WP") {
   const reference = normalizeWorkforceBankReference(value);
-  return reference.length <= 64 && /^WP[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/.test(reference);
+  const pattern = referencePrefix === "HP"
+    ? /^HP[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/
+    : /^WP[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/;
+  return reference.length <= 64 && pattern.test(reference);
 }
 
 function daysInMonth(year: number, month: number) {
@@ -170,7 +178,7 @@ export function buildWorkforceFedOneRows(options: WorkforceFedOneWorkbookOptions
     if (!isValidWorkforceBankIfsc(beneficiaryIfsc)) {
       throw new Error(`${instructionLabel}: IFSC Code must use the standard 11-character format (for example FDRL0000123).`);
     }
-    if (!isValidWorkforceBankReference(referenceNo)) {
+    if (!isValidWorkforceBankReference(referenceNo, options.referencePrefix)) {
       throw new Error(`${instructionLabel}: Unique Customer Reference Number is invalid.`);
     }
 
@@ -245,7 +253,10 @@ function parseErrorList(errors: string[]) {
   return `The bank response file cannot be processed:\n${shown.map((error) => `- ${error}`).join("\n")}`;
 }
 
-export function parseWorkforceFedOneResponse(bytes: ArrayBuffer | Uint8Array): WorkforceFedOneResponseRow[] {
+export function parseWorkforceFedOneResponse(
+  bytes: ArrayBuffer | Uint8Array,
+  options: WorkforceFedOneResponseOptions = {}
+): WorkforceFedOneResponseRow[] {
   let workbook: XLSX.WorkBook;
   try {
     workbook = XLSX.read(workbookInput(bytes), { type: "array", raw: true });
@@ -310,7 +321,10 @@ export function parseWorkforceFedOneResponse(bytes: ArrayBuffer | Uint8Array): W
     const ifsc = normalizeWorkforceBankIfsc(values["IFSC Code"]);
     const status = cleanCell(values.Status).toUpperCase();
     if (!referenceNo) errors.push(`Row ${rowNumber}: Customer Ref. No. is required.`);
-    else if (!isValidWorkforceBankReference(referenceNo)) errors.push(`Row ${rowNumber}: Customer Ref. No. is not a valid Workforce payment reference.`);
+    else if (!isValidWorkforceBankReference(referenceNo, options.referencePrefix)) {
+      const subject = options.referencePrefix === "HP" ? "Helper" : "Workforce";
+      errors.push(`Row ${rowNumber}: Customer Ref. No. is not a valid ${subject} payment reference.`);
+    }
     if (!creditAccount) errors.push(`Row ${rowNumber}: Credit Account is required.`);
     else if (!isValidWorkforceBankAccount(creditAccount)) errors.push(`Row ${rowNumber}: Credit Account must contain 4 to 30 letters or digits.`);
     if (!ifsc) errors.push(`Row ${rowNumber}: IFSC Code is required.`);

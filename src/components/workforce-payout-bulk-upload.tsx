@@ -49,7 +49,15 @@ async function readResponse(response: Response): Promise<PreviewResponse> {
   }
 }
 
-export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: string; toDate: string }) {
+export function WorkforcePayoutBulkUpload({
+  fromDate,
+  toDate,
+  audience = "workforce"
+}: {
+  fromDate: string;
+  toDate: string;
+  audience?: "workforce" | "helpers";
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -62,7 +70,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
     setPreview(null);
     setError(null);
     setConfirmationOpen(false);
-  }, [fromDate, toDate]);
+  }, [audience, fromDate, toDate]);
 
   useEffect(() => {
     if (!confirmationOpen) return;
@@ -95,6 +103,7 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
       body.set("mode", mode);
       body.set("effective_from", fromDate);
       body.set("effective_to", toDate);
+      body.set("audience", audience);
       body.set("file", file);
       const response = await fetch("/api/payments/workforce-payouts/bulk-upload", { method: "POST", body });
       const result = await readResponse(response);
@@ -118,7 +127,8 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
   const uploadedInputTypes = Object.entries(preview?.counts ?? {})
     .filter(([, count]) => count > 0)
     .map(([inputType]) => inputType.toLowerCase().replaceAll("_", " "));
-  const templateUrl = `/api/payments/workforce-payouts/bulk-upload/template?effective_from=${encodeURIComponent(fromDate)}&effective_to=${encodeURIComponent(toDate)}`;
+  const templateUrl = `/api/payments/workforce-payouts/bulk-upload/template?effective_from=${encodeURIComponent(fromDate)}&effective_to=${encodeURIComponent(toDate)}&audience=${encodeURIComponent(audience)}`;
+  const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
 
   return (
     <div className="workforce-payout-bulk-upload">
@@ -131,7 +141,9 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
           <div className="panel-head">
             <div>
               <h2>Bulk upload payout inputs</h2>
-              <p className="subtle">Preview attendance, configured field values, production units, additional payments and manual deductions before applying them.</p>
+              <p className="subtle">{audience === "helpers"
+                ? "Preview attendance, additional payments and manual deductions before applying them."
+                : "Preview attendance, configured field values, production units, additional payments and manual deductions before applying them."}</p>
             </div>
             <a className="template-download-link" download href={templateUrl}>Download current Excel template</a>
           </div>
@@ -174,10 +186,10 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
               <div className="compensation-preview">
                 <div className="compensation-preview-summary">
                   <span><strong>{preview.totalRows}</strong> workbook rows</span>
-                  <span><strong>{preview.matchedRows ?? 0}</strong> Workforce matches</span>
+                  <span><strong>{preview.matchedRows ?? 0}</strong> {subjectLabel} matches</span>
                   <span><strong>{preview.counts?.ATTENDANCE ?? 0}</strong> attendance</span>
-                  <span><strong>{preview.counts?.PRODUCTION_UNITS ?? 0}</strong> production</span>
-                  <span><strong>{preview.counts?.PAYMENT_FIELD_VALUE ?? 0}</strong> field values</span>
+                  {audience === "workforce" ? <span><strong>{preview.counts?.PRODUCTION_UNITS ?? 0}</strong> production</span> : null}
+                  {audience === "workforce" ? <span><strong>{preview.counts?.PAYMENT_FIELD_VALUE ?? 0}</strong> field values</span> : null}
                   <span><strong>{preview.counts?.ADDITIONAL_PAYMENT ?? 0}</strong> additions</span>
                   <span><strong>{preview.counts?.DEDUCTION ?? 0}</strong> deductions</span>
                 </div>
@@ -259,11 +271,17 @@ export function WorkforcePayoutBulkUpload({ fromDate, toDate }: { fromDate: stri
                 {uploadedInputTypes.length ? ` (${uploadedInputTypes.join(", ")})` : ""}?
               </p>
               <p>
-                Each row replaces only its matching stored payout input: the same Workforce person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged.
+                {audience === "helpers"
+                  ? "Each row replaces only its matching stored payout input: the same Helper person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged."
+                  : "Each row replaces only its matching stored payout input: the same Workforce person, input type or field, date or period, and location where applicable. Inputs not represented by an uploaded row remain unchanged."}
               </p>
-              <p>
-                For example, an uploaded DELIVERY row changes only that matching production field and date. It does not replace C-return, attendance, deductions, additional payments, or any other production field.
-              </p>
+              {audience === "workforce" ? (
+                <p>
+                  For example, an uploaded DELIVERY row changes only that matching production field and date. It does not replace C-return, attendance, deductions, additional payments, or any other production field.
+                </p>
+              ) : (
+                <p>Helper uploads support attendance, additional payments and manual deductions. Each stored input remains independent.</p>
+              )}
             </div>
             <div className="form-actions modal-actions confirmation-actions">
               <button autoFocus className="button secondary" disabled={Boolean(busy)} onClick={() => setConfirmationOpen(false)} type="button">

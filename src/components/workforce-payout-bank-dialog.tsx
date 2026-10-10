@@ -42,6 +42,7 @@ async function responseError(response: Response, fallback: string) {
 }
 
 export function WorkforcePayoutBankDialog({
+  audience = "workforce",
   banks,
   disabled = false,
   onBusyChange,
@@ -51,6 +52,7 @@ export function WorkforcePayoutBankDialog({
   totalAmount,
   payoutRows
 }: {
+  audience?: "workforce" | "helpers";
   banks: WorkforcePayoutBankOption[];
   disabled?: boolean;
   onBusyChange?: (busy: boolean) => void;
@@ -60,6 +62,7 @@ export function WorkforcePayoutBankDialog({
   totalAmount: number;
   payoutRows: WorkforcePayoutBankRowSelection[];
 }) {
+  const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const router = useRouter();
   const titleId = useId();
   const [mode, setMode] = useState<"download" | "finalize" | null>(null);
@@ -120,6 +123,7 @@ export function WorkforcePayoutBankDialog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          audience,
           bankId: selectedBank.id,
           operationId: operationIdRef.current,
           periodEnd,
@@ -128,7 +132,7 @@ export function WorkforcePayoutBankDialog({
           valueDate,
         })
       });
-      if (!response.ok) throw new Error(await responseError(response, "Unable to create the Workforce bank file."));
+      if (!response.ok) throw new Error(await responseError(response, `Unable to create the ${subjectLabel} bank file.`));
       const blob = await response.blob();
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -139,7 +143,7 @@ export function WorkforcePayoutBankDialog({
       operationIdRef.current = "";
       setMode(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to create the Workforce bank file.");
+      setError(caught instanceof Error ? caught.message : `Unable to create the ${subjectLabel} bank file.`);
     } finally {
       setBusy(false);
       // A failed authoritative bank preflight can still follow a successful
@@ -155,10 +159,11 @@ export function WorkforcePayoutBankDialog({
     setBusy(true); setError(""); setNotice("");
     try {
       const body = new FormData();
+      body.set("audience", audience);
       body.set("bank_response_file", responseFile);
       body.set("operation_id", responseOperationIdRef.current);
       const response = await fetch("/api/payments/workforce-payouts/bank-response", { method: "POST", body });
-      if (!response.ok) throw new Error(await responseError(response, "Unable to finalize the Workforce bank response."));
+      if (!response.ok) throw new Error(await responseError(response, `Unable to finalize the ${subjectLabel} bank response.`));
       const payload = await response.json();
       responseOperationIdRef.current = "";
       setResponseFile(null);
@@ -176,7 +181,7 @@ export function WorkforcePayoutBankDialog({
       );
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to finalize the Workforce bank response.");
+      setError(caught instanceof Error ? caught.message : `Unable to finalize the ${subjectLabel} bank response.`);
     } finally {
       setBusy(false);
     }
@@ -187,7 +192,7 @@ export function WorkforcePayoutBankDialog({
       <section aria-labelledby={titleId} aria-modal="true" className="modal-panel" ref={modalRef} role="dialog">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Workforce payments</p>
+            <p className="eyebrow">{subjectLabel} payments</p>
             <h2 id={titleId}>{mode === "download" ? "Download bank file" : "Finalize bank payments"}</h2>
           </div>
           <button className="button secondary compact" disabled={busy} onClick={() => setMode(null)} ref={closeRef} type="button">Close</button>
@@ -196,8 +201,8 @@ export function WorkforcePayoutBankDialog({
           {mode === "download" ? <>
             <div className="payout-inline-message warn">
               <strong>Payment Processing lock</strong>
-              <p>Generating this file marks {payoutRows.length} selected payout row{payoutRows.length === 1 ? "" : "s"} as Payment Processing. Payout inputs and ID mapping for those profiles cannot change until the bank response is finalized.</p>
-              <p>Only current Active Workforce profiles are eligible. Under Review and every other profile status are excluded.</p>
+              <p>Generating this file marks {payoutRows.length} selected payout row{payoutRows.length === 1 ? "" : "s"} as Payment Processing. {audience === "helpers" ? "Helper payout inputs for those locations" : "Payout inputs and ID mapping for those profiles"} cannot change until the bank response is finalized.</p>
+              <p>Only current Active {subjectLabel} profiles are eligible. Under Review and every other profile status are excluded.</p>
               <p>Only the checked payout row and its location balance are included. Other rows for the same DropX ID remain outside this bank file.</p>
             </div>
             {publicationRefreshCount ? <div className="payout-inline-message warn" role="status">

@@ -12,8 +12,8 @@ export default async function WorkforcePaymentSettingsHubPage() {
     <AppShell active="Settings" pageCode="payment_settings">
       <PageHead
         eyebrow="Configuration"
-        title="Workforce Payment"
-        subtitle="Choose how attendance is captured and how monthly workforce payouts account for paid weekly offs."
+        title="Workforce & Helper Payment"
+        subtitle="Configure shared payout rules, Workforce attendance capture, Helper payment setup, and payout notifications."
         action={<PendingLink className="button secondary" href="/settings">Back</PendingLink>}
       />
 
@@ -27,8 +27,8 @@ export default async function WorkforcePaymentSettingsHubPage() {
         <div className="settings-grid">
           <PendingLink className="settings-tile actionable" href="/settings/workforce-payment/payout-method">
             <div>
-              <h3>Payout Method</h3>
-              <p className="subtle">Configure attendance-based monthly pay and paid weekly-off rules.</p>
+              <h3>Shared Payout Policy</h3>
+              <p className="subtle">Configure attendance-based monthly pay and paid weekly-off rules used by both Workforce and Helpers.</p>
             </div>
             <span className="settings-tile-actions">
               <span className="button secondary compact">Configure</span>
@@ -36,8 +36,17 @@ export default async function WorkforcePaymentSettingsHubPage() {
           </PendingLink>
           <PendingLink className="settings-tile actionable" href="/settings/workforce-payment/attendance-capture">
             <div>
-              <h3>Attendance Capture</h3>
-              <p className="subtle">Choose biometric punches or a minimum delivered-shipment threshold for daily attendance.</p>
+              <h3>Workforce Attendance Capture</h3>
+              <p className="subtle">Choose biometric punches or a delivered-shipment threshold for Workforce attendance. Helpers continue to use biometric attendance.</p>
+            </div>
+            <span className="settings-tile-actions">
+              <span className="button secondary compact">Configure</span>
+            </span>
+          </PendingLink>
+          <PendingLink className="settings-tile actionable" href="/provider-mapping/direct-pay?audience=helpers&source=payment-settings">
+            <div>
+              <h3>Helper Payment Setup</h3>
+              <p className="subtle">Assign Helpers to locations, designations, and effective-dated payment methods without opening Workforce provider mapping.</p>
             </div>
             <span className="settings-tile-actions">
               <span className="button secondary compact">Configure</span>
@@ -46,7 +55,7 @@ export default async function WorkforcePaymentSettingsHubPage() {
           <PendingLink className="settings-tile actionable" href="/settings/workforce-payment/payout-notification">
             <div>
               <h3>Payout Notifications</h3>
-              <p className="subtle">Enable DropX One App alerts and configure the approved WhatsApp template used for published payouts.</p>
+              <p className="subtle">Enable DropX One App alerts and configure the approved WhatsApp template used for Workforce and Helper payouts.</p>
             </div>
             <span className="settings-tile-actions">
               <span className="button secondary compact">Configure</span>

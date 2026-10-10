@@ -45,7 +45,7 @@ export function payoutAppNotificationCampaigns(
       return {
         id: notification.id,
         row_no: index + 1,
-        recipient_name: snapshotName || "Workforce account",
+        recipient_name: snapshotName || "Payout recipient",
         recipient_mobile: snapshotDropxId || notification.recipient_account_id,
         country_code: null,
         status: recipientStatus(notification),

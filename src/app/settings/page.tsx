@@ -227,8 +227,8 @@ export default async function SettingsPage() {
           {canViewWorkforcePayment ? (
             <PendingLink className="settings-tile actionable" href="/settings/workforce-payment">
               <div>
-                <h3>Workforce Payment</h3>
-                <p className="subtle">Configure attendance capture and attendance-based monthly payout rules.</p>
+                <h3>Workforce &amp; Helper Payment</h3>
+                <p className="subtle">Configure shared payout policies, Helper payment setup, Workforce attendance capture, and notifications.</p>
               </div>
               <span className="settings-tile-actions">
                 <span className="button secondary compact">Configure</span>

@@ -61,6 +61,11 @@ const INPUT_LABELS: Record<WorkforcePayoutManualInputType, string> = {
 };
 
 const MANUAL_INPUT_REQUEST_CHUNK_SIZE = 1000;
+const HELPER_PAYOUT_MANUAL_INPUT_TYPES: WorkforcePayoutManualInputType[] = [
+  "ATTENDANCE",
+  "ADDITIONAL_PAYMENT",
+  "DEDUCTION"
+];
 
 async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text();
@@ -75,6 +80,7 @@ export type WorkforcePayoutManualEditorProps = {
   fromDate: string;
   toDate: string;
   selectedRows: WorkforcePayoutManualSelection[];
+  audience?: "workforce" | "helpers";
   buttonLabel?: string;
   onCommitted?: () => void;
 };
@@ -83,6 +89,7 @@ export function WorkforcePayoutManualEditor({
   fromDate,
   toDate,
   selectedRows,
+  audience = "workforce",
   buttonLabel = "Manual entry",
   onCommitted
 }: WorkforcePayoutManualEditorProps) {
@@ -127,14 +134,14 @@ export function WorkforcePayoutManualEditor({
     setShowClientIssues(false);
     setConfirmationOpen(false);
     operationIdsRef.current = [];
-  }, [fromDate, open, selectionSignature, toDate]); // selectedRows is intentionally represented by its stable identity signature.
+  }, [audience, fromDate, open, selectionSignature, toDate]); // selectedRows is intentionally represented by its stable identity signature.
 
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
     setCatalogBusy(true);
     setCatalog(null);
-    const query = new URLSearchParams({ effective_from: fromDate, effective_to: toDate });
+    const query = new URLSearchParams({ effective_from: fromDate, effective_to: toDate, audience });
     fetch(`/api/payments/workforce-payouts/manual-inputs/catalog?${query}`, { signal: controller.signal })
       .then(async (response) => {
         const result = await readJson<WorkforcePayoutManualCatalog & { error?: string }>(response);
@@ -149,7 +156,7 @@ export function WorkforcePayoutManualEditor({
         if (!controller.signal.aborted) setCatalogBusy(false);
       });
     return () => controller.abort();
-  }, [fromDate, open, toDate]);
+  }, [audience, fromDate, open, toDate]);
 
   useEffect(() => {
     if (!open && !confirmationOpen) return;
@@ -291,6 +298,7 @@ export function WorkforcePayoutManualEditor({
         body.set("mode", mode);
         body.set("effective_from", fromDate);
         body.set("effective_to", toDate);
+        body.set("audience", audience);
         body.set("input_source", "manual");
         body.set("manual_operation_id", operationIdsRef.current[chunkIndex]);
         body.set("file", new File([csv], `manual-payout-inputs-${fromDate}-to-${toDate}-${chunkIndex + 1}.csv`, { type: "text/csv" }));
@@ -354,6 +362,7 @@ export function WorkforcePayoutManualEditor({
     });
     return grouped;
   }, [clientIssues, lines, preview?.issues, showClientIssues]);
+  const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
 
   return (
     <>
@@ -423,7 +432,7 @@ export function WorkforcePayoutManualEditor({
                 <table className="workforce-payout-manual-table">
                   <thead>
                     <tr>
-                      <th>Workforce payout</th>
+                      <th>{subjectLabel} payout</th>
                       <th>Action</th>
                       <th>Input type</th>
                       <th>Field</th>
@@ -444,7 +453,7 @@ export function WorkforcePayoutManualEditor({
                         <tr className={lineIssues.length ? "has-error" : ""} key={line.id}>
                           <td className="workforce-payout-manual-person">
                             <select
-                              aria-label={`Workforce payout for line ${index + 1}`}
+                              aria-label={`${subjectLabel} payout for line ${index + 1}`}
                               className="field"
                               onChange={(event) => changeSelection(line.id, event.target.value)}
                               value={line.selectionKey}
@@ -475,9 +484,13 @@ export function WorkforcePayoutManualEditor({
                               value={line.inputType}
                             >
                               <option value="">Select type</option>
-                              {WORKFORCE_PAYOUT_MANUAL_INPUT_TYPES.map((inputType) => (
-                                <option key={inputType} value={inputType}>{INPUT_LABELS[inputType]}</option>
-                              ))}
+                              {audience === "workforce"
+                                ? WORKFORCE_PAYOUT_MANUAL_INPUT_TYPES.map((inputType) => (
+                                  <option key={inputType} value={inputType}>{INPUT_LABELS[inputType]}</option>
+                                ))
+                                : HELPER_PAYOUT_MANUAL_INPUT_TYPES.map((inputType) => (
+                                  <option key={inputType} value={inputType}>{INPUT_LABELS[inputType]}</option>
+                                ))}
                             </select>
                           </td>
                           <td>

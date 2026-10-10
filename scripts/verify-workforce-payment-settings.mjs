@@ -653,7 +653,12 @@ const settingsPageSource = readFileSync(
   new URL("../src/app/settings/page.tsx", import.meta.url),
   "utf8"
 );
-assert.match(settingsPageSource, /Configure attendance capture and attendance-based monthly payout rules/);
+assert.match(settingsPageSource, /Workforce &amp; Helper Payment/);
+assert.match(settingsPageSource, /Configure shared payout policies, Helper payment setup, Workforce attendance capture, and notifications/);
+assert.match(hubSource, /Shared Payout Policy/);
+assert.match(hubSource, /Workforce Attendance Capture/);
+assert.match(hubSource, /Helper Payment Setup/);
+assert.match(hubSource, /audience=helpers&source=payment-settings/);
 
 const attendancePageSource = readFileSync(
   new URL("../src/app/settings/workforce-payment/attendance-capture/page.tsx", import.meta.url),

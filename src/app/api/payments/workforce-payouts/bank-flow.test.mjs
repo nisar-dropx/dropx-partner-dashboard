@@ -100,7 +100,7 @@ test("payment history identifies split bank lines by their immutable location sn
   assert.match(historyRoute, /locationName: locationNames\.get\(String\(item\.location_id_snapshot/);
   assert.match(historyButton, /locationCode: string/);
   assert.match(historyButton, /locationName: string/);
-  assert.match(historyButton, /new URLSearchParams\(\{ workforceId, stationId, periodStart, periodEnd \}\)/);
+  assert.match(historyButton, /new URLSearchParams\(\{ audience, workforceId, stationId, periodStart, periodEnd \}\)/);
   assert.match(historyButton, /<th>Location<\/th>/);
   assert.match(historyButton, /<td>\{locationLabel\(entry\)\}<\/td>/);
 });
@@ -128,7 +128,8 @@ test("manual status changes and holds are privileged, reasoned and surfaced from
 });
 
 test("selected processing rows can be cancelled atomically with one mandatory remark", () => {
-  assert.match(page, /\.select\("id,workforce_id,location_id_snapshot,instruction_amount"\)/);
+  assert.match(page, /"id,workforce_id,location_id_snapshot,instruction_amount"/);
+  assert.match(page, /"id,helper_id,location_id_snapshot,instruction_amount"/);
   assert.match(page, /from\("workforce_payout_payment_allocations"\)/);
   assert.match(page, /const isExactLocationInstruction = allocations\.length === 1/);
   assert.match(page, /allocations\[0\]\?\.station_id[\s\S]*?item\.location_id_snapshot/);
@@ -165,14 +166,14 @@ test("selected processing rows can be cancelled atomically with one mandatory re
 });
 
 test("the UI pays only eligible location rows and displays row-specific ledger balances", () => {
-  assert.match(page, /rpc\("workforce_preview_payout_payment_rows"/);
+  assert.match(page, /"helper_preview_payout_payment_rows"[\s\S]{0,100}"workforce_preview_payout_payment_rows"/);
   assert.match(page, /`\$\{String\(preview\.workforce_id\)\.toLowerCase\(\)\}\|\$\{String\(preview\.station_id\)\.toLowerCase\(\)\}`/);
-  assert.match(page, /const canLoadPaymentSummaries = audience === "workforce"[\s\S]*?period\.mode === "monthly"[\s\S]*?&& canEdit/);
+  assert.match(page, /const canLoadPaymentSummaries = period\.mode === "monthly"[\s\S]*?&& canEdit/);
   assert.match(page, /loadError \|\| !canLoadPaymentSummaries/);
   assert.match(page, /includeProcessingActionDetails: canProcessPayments/);
   assert.match(page, /const \[reviewed, paymentEnriched\] = await Promise\.all/);
-  assert.match(page, /canProcessPayments = audience === "workforce"[\s\S]*?period\.mode === "monthly"[\s\S]*?authorization\.hasAllLocationAccess[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
-  assert.match(page, /from\("workforce_payout_payment_items"\)[\s\S]{0,300}instruction_amount/);
+  assert.match(page, /canProcessPayments = period\.mode === "monthly"[\s\S]*?authorization\.hasAllLocationAccess[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(page, /"helper_payout_payment_items" : "workforce_payout_payment_items"[\s\S]{0,300}instruction_amount/);
   assert.match(table, /publicationPaymentReady === true/);
   assert.match(table, /row\.paymentSummary\?\.eligible === true/);
   assert.match(table, /row\.dropxStatus\.trim\(\)\.toLowerCase\(\) === "active"/);
@@ -181,7 +182,7 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
   assert.match(actionSelection, /index\.set\(row\.id,/);
   assert.match(actionSelection, /payoutRows\.push\(\{ workforceId: entry\.workforceId, stationId: entry\.stationId \}\)/);
   assert.doesNotMatch(table, /complete profile/i);
-  assert.match(bankDialog, /Only current Active Workforce profiles are eligible/);
+  assert.match(bankDialog, /Only current Active \{subjectLabel\} profiles are eligible/);
   assert.match(bankDialog, /Under Review and every other profile status are excluded/);
   assert.match(bankDialog, /Only the checked payout row and its location balance are included/);
   assert.match(bankDialog, /Other rows for the same DropX ID remain outside this bank file/);

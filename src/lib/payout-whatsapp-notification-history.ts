@@ -2,7 +2,8 @@ import type { Campaign, CampaignRecipient } from "@/components/campaign-report";
 
 export type PayoutWhatsappPublicationHistoryRow = {
   id: string;
-  workforce_id: string;
+  workforce_id?: string | null;
+  helper_id?: string | null;
   station_id: string | null;
   published_by: string | null;
   published_at: string;
@@ -14,6 +15,17 @@ export type PayoutWhatsappPublicationHistoryRow = {
   notification_attempted_at: string | null;
   notification_config_snapshot: Record<string, unknown> | null;
 };
+
+function publicationRecipientKey(publication: PayoutWhatsappPublicationHistoryRow) {
+  const workforceId = text(publication.workforce_id);
+  if (workforceId) return `workforce:${workforceId}`;
+  const helperId = text(publication.helper_id);
+  return helperId ? `helper:${helperId}` : `publication:${publication.id}`;
+}
+
+function publicationRecipientId(publication: PayoutWhatsappPublicationHistoryRow) {
+  return text(publication.workforce_id) || text(publication.helper_id) || publication.id;
+}
 
 export type PayoutWhatsappMessageLogHistoryRow = {
   id: string;
@@ -115,14 +127,15 @@ export function payoutWhatsappNotificationCampaigns(
   }
 
   return [...batches.values()].map((batch) => {
-    const primaryByWorkforce = new Map<string, PayoutWhatsappPublicationHistoryRow>();
+    const primaryByRecipient = new Map<string, PayoutWhatsappPublicationHistoryRow>();
     for (const publication of batch) {
-      primaryByWorkforce.set(
-        publication.workforce_id,
-        notificationPrimary(primaryByWorkforce.get(publication.workforce_id), publication)
+      const recipientKey = publicationRecipientKey(publication);
+      primaryByRecipient.set(
+        recipientKey,
+        notificationPrimary(primaryByRecipient.get(recipientKey), publication)
       );
     }
-    const primaryRows = [...primaryByWorkforce.values()]
+    const primaryRows = [...primaryByRecipient.values()]
       .sort((left, right) => left.id.localeCompare(right.id));
     const first = primaryRows[0];
     const firstConfig = record(first.notification_config_snapshot) ?? {};
@@ -133,8 +146,8 @@ export function payoutWhatsappNotificationCampaigns(
       return {
         id: messageLog?.id ?? publication.id,
         row_no: index + 1,
-        recipient_name: text(values.full_name) || "Workforce account",
-        recipient_mobile: text(config.recipient) || text(values.dropx_id) || publication.workforce_id,
+        recipient_name: text(values.full_name) || "Payout recipient",
+        recipient_mobile: text(config.recipient) || text(values.dropx_id) || publicationRecipientId(publication),
         country_code: null,
         status: recipientStatus(publication, messageLog),
         provider_message_id: messageLog?.provider_message_id ?? publication.notification_reference,

@@ -1,7 +1,8 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import {
   allocationActiveOn,
-  cumulativeDirectPayAttendanceUnitsBefore,
+  cumulativeDirectPayUnitsBefore,
+  directPayAttendanceUnit,
   directPayForDay,
   preferredDirectPayAttendance,
   type DirectPayComponent
@@ -15,7 +16,7 @@ import {
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
-import { calculateAutomaticDeductionLines, type AutomaticDeductionHead } from "@/lib/workforce-deductions";
+import type { AutomaticDeductionHead } from "@/lib/workforce-deductions";
 import { workforcePaymentMonthStart, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
 import { summarizePaymentMethodAmounts, summarizePayoutBreakdownLines, summarizeWorkDays } from "@/lib/workforce-payout-summary";
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
@@ -23,6 +24,15 @@ import { workforcePayoutDropxStatus } from "@/lib/workforce-payout-population";
 import { normalizePaymentFieldCode, paymentComponentOrderMap, sortByPaymentFieldOrder } from "@/lib/payment-field-order";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { groupPayoutItemsBySubjectLocation } from "@/lib/workforce-payout-location-groups";
+import {
+  calculateHelperPayoutAdjustments,
+  helperPayoutAttendanceInputForDate,
+  helperPayoutAttendancePeriodForDate,
+  type HelperAdditionalPaymentValue,
+  type HelperPayoutAttendanceValue,
+  type HelperPayoutDeductionValue
+} from "@/lib/helper-payout-input-overlays";
+import type { WorkforceAdditionalPaymentField } from "@/lib/workforce-additional-payment-overlay";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 
@@ -69,10 +79,9 @@ export async function loadHelperPayoutRows(
       .order("id")),
     supabaseAdmin
       .from("workforce_deduction_heads")
-      .select("code,name,calculation_type,default_value,percentage_without_pan,workforce_category_codes,applies_to_all,is_system,is_active")
+      .select("id,code,name,calculation_type,default_value,percentage_without_pan,workforce_category_codes,applies_to_all,is_system,is_active")
       .eq("company_id", companyId)
-      .eq("is_active", true)
-      .eq("applies_to_all", true),
+      .eq("is_active", true),
     supabaseAdmin
       .from("workforce_payment_settings")
       .select("id,calculation_method,paid_off_days,work_units_per_paid_off,cap_at_monthly_amount,effective_from")
@@ -101,7 +110,16 @@ export async function loadHelperPayoutRows(
   const paymentMethodIds = [...new Set(allAllocations.map((allocation: any) => String(allocation.payment_method_id)).filter(Boolean))];
 
   const attendanceFromDate = workforcePaymentMonthStart(fromDate);
-  const [helpersResult, verificationResult, componentsResult, helperEnrolmentsResult] = await Promise.all([
+  const [
+    helpersResult,
+    verificationResult,
+    componentsResult,
+    helperEnrolmentsResult,
+    attendanceValuesResult,
+    additionalFieldsResult,
+    additionalValuesResult,
+    deductionValuesResult
+  ] = await Promise.all([
     helperIds.length
       ? readAllRows(supabaseAdmin
         .from("helpers")
@@ -142,13 +160,56 @@ export async function loadHelperPayoutRows(
         .or(`effective_to.is.null,effective_to.gte.${attendanceFromDate}`)
         .order("effective_from")
         .order("id"))
+      : Promise.resolve({ data: [], error: null }),
+    helperIds.length
+      ? readAllRows(supabaseAdmin
+        .from("helper_payout_attendance_values")
+        .select("id,helper_id,station_id,attendance_basis,effective_from,effective_to,quantity")
+        .eq("company_id", companyId)
+        .in("helper_id", helperIds)
+        .lte("effective_from", toDate)
+        .gte("effective_to", attendanceFromDate)
+        .order("effective_from")
+        .order("id"))
+      : Promise.resolve({ data: [], error: null }),
+    readAllRows(supabaseAdmin
+      .from("workforce_additional_payment_fields")
+      .select("id,code,name,calculation_type,default_rate_value,is_active")
+      .eq("company_id", companyId)
+      .order("name")
+      .order("code")),
+    helperIds.length
+      ? readAllRows(supabaseAdmin
+        .from("helper_additional_payment_values")
+        .select("id,additional_payment_field_id,helper_id,station_id,field_code_snapshot,field_name_snapshot,calculation_type_snapshot,input_value,rate_value,final_amount")
+        .eq("company_id", companyId)
+        .in("helper_id", helperIds)
+        .eq("effective_from", fromDate)
+        .eq("effective_to", toDate)
+        .order("created_at")
+        .order("id"))
+      : Promise.resolve({ data: [], error: null }),
+    helperIds.length
+      ? readAllRows(supabaseAdmin
+        .from("helper_payout_deduction_values")
+        .select("id,deduction_head_id,helper_id,station_id,head_code_snapshot,head_name_snapshot,amount")
+        .eq("company_id", companyId)
+        .in("helper_id", helperIds)
+        .eq("effective_from", fromDate)
+        .eq("effective_to", toDate)
+        .order("created_at")
+        .order("id"))
       : Promise.resolve({ data: [], error: null })
   ]);
 
   const relatedError = helpersResult.error?.message
     || verificationResult.error?.message
     || componentsResult.error?.message
-    || helperEnrolmentsResult.error?.message;
+    || helperEnrolmentsResult.error?.message
+    || attendanceValuesResult.error?.message
+    || additionalFieldsResult.error?.message
+    || additionalValuesResult.error?.message
+    || deductionValuesResult.error?.message;
   if (relatedError) return { rows: [] as WorkforcePayoutRow[], error: relatedError };
 
   const helpers = helpersResult.data ?? [];
@@ -248,6 +309,24 @@ export async function loadHelperPayoutRows(
 
   const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
   const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
+  const attendanceValues = (attendanceValuesResult.data ?? [])
+    .filter((value: any) => allowedLocationIds.has(String(value.station_id))) as HelperPayoutAttendanceValue[];
+  const additionalFields = (additionalFieldsResult.data ?? []) as WorkforceAdditionalPaymentField[];
+  const additionalValues = (additionalValuesResult.data ?? [])
+    .filter((value: any) => allowedLocationIds.has(String(value.station_id))) as HelperAdditionalPaymentValue[];
+  const deductionValues = (deductionValuesResult.data ?? [])
+    .filter((value: any) => allowedLocationIds.has(String(value.station_id))) as HelperPayoutDeductionValue[];
+  const inputIdentity = (helperId: unknown, stationId: unknown) => `${String(helperId ?? "")}|${String(stationId ?? "")}`;
+  const additionalValuesByIdentity = new Map<string, HelperAdditionalPaymentValue[]>();
+  const deductionValuesByIdentity = new Map<string, HelperPayoutDeductionValue[]>();
+  for (const value of additionalValues) {
+    const key = inputIdentity(value.helper_id, value.station_id);
+    additionalValuesByIdentity.set(key, [...(additionalValuesByIdentity.get(key) ?? []), value]);
+  }
+  for (const value of deductionValues) {
+    const key = inputIdentity(value.helper_id, value.station_id);
+    deductionValuesByIdentity.set(key, [...(deductionValuesByIdentity.get(key) ?? []), value]);
+  }
   const verificationByHelperId = new Map((verificationResult.data ?? []).map((row: any) => [String(row.account_id), row.verified === true]));
   const locationById = new Map(locations.map((location: any) => [String(location.id), location]));
   const historyByHelperId = new Map<string, PaymentAllocationHistoryEntry[]>();
@@ -310,6 +389,12 @@ export async function loadHelperPayoutRows(
       return activeFrom <= activeTo
         ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
           const helperDateKey = `${helperId}|${date}`;
+          const aggregateAttendancePeriod = helperPayoutAttendancePeriodForDate(attendanceValues, {
+            helperId,
+            stationId: String(allocation.station_id),
+            date
+          });
+          const aggregateAttendanceInput = helperPayoutAttendanceInputForDate(aggregateAttendancePeriod, date);
           const hasBiometricEnrolment = (helperEnrolmentsByHelper.get(helperId) ?? [])
             .some((enrolment) => enrolmentActiveOn(enrolment, date));
           const calculation = directPayForDay(
@@ -319,35 +404,53 @@ export async function loadHelperPayoutRows(
             attendanceByHelperDate.get(helperDateKey),
             {
               policyHistory: paymentPolicyHistory,
-              cumulativeAttendanceUnitsBefore: cumulativeDirectPayAttendanceUnitsBefore(
+              cumulativeAttendanceUnitsBefore: cumulativeDirectPayUnitsBefore(
                 date,
                 [String(allocation.effective_from), String(helper?.date_of_join ?? allocation.effective_from)].sort().at(-1)!,
-                (candidateDate) => allocationActiveOn(allocation, candidateDate)
-                  ? attendanceByHelperDate.get(`${helperId}|${candidateDate}`)
-                  : null
+                (candidateDate) => {
+                  if (!allocationActiveOn(allocation, candidateDate)) return 0;
+                  const candidatePeriod = helperPayoutAttendancePeriodForDate(attendanceValues, {
+                    helperId,
+                    stationId: String(allocation.station_id),
+                    date: candidateDate
+                  });
+                  const candidateInput = helperPayoutAttendanceInputForDate(candidatePeriod, candidateDate);
+                  return candidateInput?.basis === "days"
+                    ? candidateInput.quantity
+                    : directPayAttendanceUnit(attendanceByHelperDate.get(`${helperId}|${candidateDate}`));
+                }
               ),
-              attendanceSource: "biometric"
+              attendanceSource: "biometric",
+              attendanceInput: aggregateAttendanceInput
             }
           );
           return {
             date,
             baseAmount: calculation.total,
-            missing: calculation.missing || (needsAttendanceSource && !hasBiometricEnrolment),
+            missing: calculation.missing || (needsAttendanceSource && !hasBiometricEnrolment && !aggregateAttendancePeriod),
             lines: sortByPaymentFieldOrder(
               calculation.lines.map((line) => ({ code: line.code, label: line.label, componentType: "amount" as const, count: line.count, rate: line.rate, amount: line.amount, sortOrder: line.sortOrder })),
               currentComponentOrder,
               (line) => normalizePaymentFieldCode(line.code)
             ),
             workDayUnits: calculation.attendanceUnit,
-            attendanceSource: hasBiometricEnrolment ? "Biometric" : "Biometric enrolment unavailable",
+            attendanceSource: aggregateAttendancePeriod ? "Bulk upload range" : hasBiometricEnrolment ? "Biometric" : "Biometric enrolment unavailable",
             captureMethod: "biometric" as const,
+            workDaysSummarySource: aggregateAttendancePeriod?.attendance_basis === "days" ? "bulk_upload_range" as const : "biometric" as const,
+            aggregateWorkDays: aggregateAttendancePeriod?.attendance_basis === "days" && date === aggregateAttendancePeriod.effective_to,
+            attendanceRange: aggregateAttendancePeriod && date === aggregateAttendancePeriod.effective_to ? {
+              basis: aggregateAttendancePeriod.attendance_basis as "hours" | "days",
+              quantity: Number(aggregateAttendancePeriod.quantity),
+              effectiveFrom: aggregateAttendancePeriod.effective_from,
+              effectiveTo: aggregateAttendancePeriod.effective_to
+            } : undefined,
             methodAmounts: summarizePaymentMethodAmounts([{ methodId, label: methodName, amount: calculation.total }])
           };
         })
         : [];
     }).sort((left, right) => right.date.localeCompare(left.date));
 
-    const dailyByDate = new Map<string, WorkforcePayoutRow["dailyBreakdown"][number] & { missing: boolean; captureMethod: "biometric" | "shipment_data" }>();
+    const dailyByDate = new Map<string, (typeof rawDailyBreakdown)[number]>();
     for (const day of rawDailyBreakdown) {
       const current = dailyByDate.get(day.date);
       dailyByDate.set(day.date, {
@@ -357,7 +460,10 @@ export async function loadHelperPayoutRows(
         lines: [...(current?.lines ?? []), ...day.lines],
         workDayUnits: Math.max(current?.workDayUnits ?? 0, day.workDayUnits),
         attendanceSource: current && current.attendanceSource !== day.attendanceSource ? "Mixed" : day.attendanceSource,
-        captureMethod: current && current.captureMethod !== day.captureMethod ? "shipment_data" : day.captureMethod,
+        captureMethod: day.captureMethod,
+        workDaysSummarySource: current?.workDaysSummarySource ?? day.workDaysSummarySource,
+        aggregateWorkDays: Boolean(current?.aggregateWorkDays || day.aggregateWorkDays),
+        attendanceRange: current?.attendanceRange ?? day.attendanceRange,
         methodAmounts: summarizePaymentMethodAmounts([
           ...(current?.methodAmounts ?? []).map((item) => ({ methodId: item.id, label: item.label, amount: item.amount })),
           ...day.methodAmounts.map((item) => ({ methodId: item.id, label: item.label, amount: item.amount }))
@@ -371,7 +477,8 @@ export async function loadHelperPayoutRows(
     const workDaySummary = summarizeWorkDays(rawDailyBreakdown.map((day) => ({
       date: day.date,
       attendanceUnit: day.workDayUnits,
-      source: day.captureMethod
+      source: day.workDaysSummarySource,
+      aggregateRange: day.aggregateWorkDays
     })));
     const biometricConfigurationMissing = rawDailyBreakdown.some((day) => day.attendanceSource.includes("unavailable"));
     const configuredMethodAmounts = helperAllocations.map((allocation: any) => {
@@ -382,22 +489,29 @@ export async function loadHelperPayoutRows(
       ...configuredMethodAmounts,
       ...rawDailyBreakdown.flatMap((day) => day.methodAmounts.map((item) => ({ methodId: item.id, label: item.label, amount: item.amount })))
     ]);
-    const deductionBreakdown = helperAllocations.length
-      ? calculateAutomaticDeductionLines(baseAmount, automaticDeductions, {
-        categoryCode: "workers",
-        panNumber: helper?.pan_number ?? null
-      })
-      : [];
-    const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
     const resolvedLocationId = locationId || String(helper?.location_id ?? "");
     const location: any = resolvedLocationId ? locationById.get(resolvedLocationId) : null;
-    const dailyBreakdown = dailyBreakdownWithState.map(({ date, baseAmount: dailyBaseAmount, lines, workDayUnits, attendanceSource, methodAmounts }) => ({
+    const adjustmentIdentity = inputIdentity(helperId, resolvedLocationId);
+    const helperAdditionalValues = additionalValuesByIdentity.get(adjustmentIdentity) ?? [];
+    const helperDeductionValues = deductionValuesByIdentity.get(adjustmentIdentity) ?? [];
+    const hasAdjustments = helperAdditionalValues.length > 0 || helperDeductionValues.length > 0;
+    const adjustments = calculateHelperPayoutAdjustments({
+      baseAmount,
+      additionalFields,
+      additionalValues: helperAdditionalValues,
+      deductionHeads: automaticDeductions,
+      deductionValues: helperDeductionValues,
+      deductionContext: { categoryCode: "workers", panNumber: helper?.pan_number ?? null },
+      includeAutomaticDeductions: helperAllocations.length > 0 || helperAdditionalValues.length > 0
+    });
+    const dailyBreakdown = dailyBreakdownWithState.map(({ date, baseAmount: dailyBaseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange }) => ({
       date,
       baseAmount: dailyBaseAmount,
       lines,
       workDayUnits,
       attendanceSource,
-      methodAmounts
+      methodAmounts,
+      attendanceRange
     }));
 
     return {
@@ -413,8 +527,12 @@ export async function loadHelperPayoutRows(
       locationId: resolvedLocationId || null,
       location: String(location?.station_code ?? "-"),
       provider: "Direct",
-      model: helperAllocations.length ? "Attendance / fixed" : "No payment method",
-      paymentMethod: paymentMethodBreakdown.map((item) => item.label).join(" / ") || "Not allocated",
+      model: helperAllocations.length ? "Attendance / fixed" : hasAdjustments ? "Payout adjustments" : "No payment method",
+      paymentMethod: paymentMethodBreakdown.map((item) => item.label).join(" / ")
+        || (helperAdditionalValues.length && helperDeductionValues.length
+          ? "Payout adjustments"
+          : helperAdditionalValues.length ? "Additional payments only"
+            : helperDeductionValues.length ? "Manual deductions only" : "Not allocated"),
       mappingStatus: "Not required",
       paymentDetailsAvailable: true,
       workDays: workDaySummary.workDays,
@@ -429,17 +547,18 @@ export async function loadHelperPayoutRows(
       productionBreakdown,
       dailyBreakdown,
       baseAmount,
-      additions: 0,
-      grossPayment: baseAmount,
-      deductions,
-      deductionBreakdown,
+      additionalPaymentBreakdown: adjustments.additionalPaymentBreakdown,
+      additions: adjustments.additions,
+      grossPayment: adjustments.grossPayment,
+      deductions: adjustments.deductions,
+      deductionBreakdown: adjustments.deductionBreakdown,
       panAadhaarStatus: verificationByHelperId.get(helperId) === true ? "LINKED" : "NOT LINKED",
-      netAmount: baseAmount - deductions,
-      status: !helperAllocations.length
+      netAmount: adjustments.netAmount,
+      status: !helperAllocations.length && !hasAdjustments
         ? "Payment method not allocated"
         : biometricConfigurationMissing || dailyBreakdownWithState.some((day) => day.missing)
           ? "Configuration incomplete"
-          : baseAmount > 0
+          : adjustments.grossPayment > 0 || helperDeductionValues.length > 0
             ? "Ready for review"
             : "No eligible accrual"
     } satisfies WorkforcePayoutRow;

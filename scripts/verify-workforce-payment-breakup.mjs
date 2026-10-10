@@ -130,7 +130,7 @@ assert.match(helperPayoutLoader, /\.eq\("is_active", true\)[\s\S]*\.eq\("onboard
 assert.match(helperPayoutLoader, /helperPayoutPopulationIds\(currentHelpers, allocations\)/, "Unallocated current Helpers and allocated historical Helpers must share one payout population");
 assert.match(helperPayoutLoader, /Payment method not allocated/, "Unallocated Helpers must remain visible with a clear setup status");
 assert.match(helperPayoutLoader, /\.in\("account_id", allocatedHelperIds\)/, "Unallocated Helpers must not trigger biometric payout validation before a payment method is assigned");
-assert.match(helperPayoutLoader, /const deductionBreakdown = helperAllocations\.length[\s\S]*\? calculateAutomaticDeductionLines[\s\S]*:\s*\[\]/, "Unallocated Helpers must not receive deductions or a negative net payout");
+assert.match(helperPayoutLoader, /calculateHelperPayoutAdjustments\([\s\S]*includeAutomaticDeductions:\s*helperAllocations\.length > 0 \|\| helperAdditionalValues\.length > 0/, "Unallocated Helpers must not receive automatic deductions, while explicit Helper payout adjustments remain supported");
 assert.match(helperPayoutLoader, /\.eq\("profile_type", "worker"\)/, "Helper PAN-Aadhaar verification must use the worker profile type");
 assert.match(helperPayoutLoader, /categoryCode:\s*"workers"/, "Helper deductions must use the Helpers category code");
 assert.match(helperPayoutLoader, /\.in\("enrolment_id", biometricVariants/, "Helper work days must resolve recorded biometric attendance");

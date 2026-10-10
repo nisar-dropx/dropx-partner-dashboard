@@ -85,7 +85,7 @@ export default async function WorkforcePayoutNotificationSettingsPage() {
       <PageHead
         eyebrow="Configuration"
         title="Payout Notifications"
-        subtitle="Configure WhatsApp and DropX One App notifications for frozen workforce payout details."
+        subtitle="Configure WhatsApp and DropX One App notifications for frozen Workforce and Helper payout details."
         action={(
           <span className="listing-head-actions">
             <span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>
@@ -119,7 +119,7 @@ export default async function WorkforcePayoutNotificationSettingsPage() {
           <div className="panel-head">
             <div>
               <h2>Notification configuration</h2>
-              <p className="subtle">App notifications open the exact payout month in DropX One. WhatsApp uses the approved template and sender configured below.</p>
+              <p className="subtle">The same configuration is used when a Workforce or Helper payout is published. App notifications open the exact payout month in DropX One; WhatsApp uses the approved template and sender below.</p>
             </div>
           </div>
           <WorkforcePayoutNotificationForm

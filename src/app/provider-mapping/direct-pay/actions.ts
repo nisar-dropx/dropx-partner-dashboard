@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
-import { getAuthorization } from "@/lib/authorization";
+import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -34,25 +34,37 @@ function dateValue(formData: FormData, key: string, label: string, optional = fa
   return value;
 }
 
-function directAllocationRedirect(params: { error?: string; notice?: string }, audience: "workforce" | "helpers" = "workforce") {
+function directAllocationRedirect(
+  params: { error?: string; notice?: string },
+  audience: "workforce" | "helpers" = "workforce",
+  permissionScope: "provider_mapping" | "payment_settings" = "provider_mapping"
+) {
   cookies().set("dropx_direct_payment_allocation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 15,
     path: "/provider-mapping/direct-pay",
     sameSite: "lax"
   });
-  redirect(audience === "helpers" ? "/provider-mapping/direct-pay?audience=helpers" : "/provider-mapping/direct-pay");
+  redirect(audience === "helpers"
+    ? `/provider-mapping/direct-pay?audience=helpers${permissionScope === "payment_settings" ? "&source=payment-settings" : ""}`
+    : "/provider-mapping/direct-pay");
 }
 
 export async function saveDirectPaymentAllocation(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
-  if (!canEditProviderMappings(authorization)) {
+  const audience = text(formData.get("subject_type")) === "helpers" ? "helpers" : "workforce";
+  const permissionScope = text(formData.get("permission_scope")) === "payment_settings"
+    ? "payment_settings"
+    : "provider_mapping";
+  if (permissionScope === "payment_settings") {
+    if (audience !== "helpers" || !hasPermission(authorization, "payment_settings", "edit")) {
+      redirect("/unauthorized?page=payment_settings&action=edit");
+    }
+  } else if (!canEditProviderMappings(authorization)) {
     redirect(`/unauthorized?page=${currentProviderMappingPageCode()}&action=edit`);
   }
-
-  const audience = text(formData.get("subject_type")) === "helpers" ? "helpers" : "workforce";
 
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -184,8 +196,8 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
   } catch (error) {
     directAllocationRedirect({
       error: error instanceof Error ? error.message : "Unable to save the direct payment allocation."
-    }, audience);
+    }, audience, permissionScope);
   }
 
-  directAllocationRedirect({ notice: `${audience === "helpers" ? "Helper" : "Workforce"} payment allocation saved with effective-dated history.` }, audience);
+  directAllocationRedirect({ notice: `${audience === "helpers" ? "Helper" : "Workforce"} payment allocation saved with effective-dated history.` }, audience, permissionScope);
 }

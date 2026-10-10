@@ -231,8 +231,8 @@ test("payout UI separates one-row advance recovery from complete-location notifi
   assert.match(payoutTable, /import\s*\{\s*isWorkforcePayoutDisplayPublishable\s*\}\s*from\s*["']@\/lib\/workforce-payout-publication-eligibility["']/);
   assert.match(
     payoutTable,
-    /function\s+canSendPayoutForReview\(row:[^)]+,\s*audience:[^)]+\)[\s\S]*?audience\s*===\s*["']workforce["']\s*\?\s*isWorkforcePayoutDisplayPublishable\(row\.status\)\s*:\s*row\.status\s*===\s*["']Ready for review["']\s*\|\|\s*row\.status\s*===\s*["']Returned["']/,
-    "Workforce selection must use shared zero-payout eligibility while Helper selection remains Ready/Returned only."
+    /function\s+canSendPayoutForReview\(row:[^)]+,\s*audience:[^)]+\)[\s\S]*?isWorkforcePayoutDisplayPublishable\(row\.status\)/,
+    "Workforce and Helper notification selection must use the shared zero-payout eligibility rule."
   );
   assert.match(payoutTable, /advanceSelectionConflictIds\s*=\s*useMemo\(\(\)\s*=>\s*duplicateAdvanceWorkforceIds\(advanceSelectedRows\)/);
   assert.match(payoutTable, /if\s*\(hasAdvanceSelectionConflict\)[\s\S]*?Select one location row per Workforce member[\s\S]*?return;/);
@@ -259,7 +259,7 @@ test("publication-refresh-pending rows remain explicit preliminary bank candidat
   assert.match(payoutTable, /bankActionableIds\.has\(row\.id\)/);
   assert.match(payoutTable, /Refresh before bank file · eligibility rechecked/);
   assert.match(payoutTable, /No stale publication will be paid/);
-  assert.match(payoutTable, /Bank file unavailable: only current Active Workforce profiles are eligible/);
+  assert.match(payoutTable, /Bank file unavailable: only current Active \$\{subjectLabel\} profiles are eligible/);
   assert.match(payoutTable, /Bank file: Active profiles only/);
 });
 

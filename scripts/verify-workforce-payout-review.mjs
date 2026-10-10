@@ -77,11 +77,12 @@ assert.ok(
 assert.match(routeSource, /deliveryTasks\.push\(processPayoutReviewNotifications/);
 assert.match(routeSource, /waitUntil\(Promise\.allSettled\(deliveryTasks\)/);
 assert.match(routeSource, /subjectTypes\.has\(["']helper["']\)/);
-assert.match(routeSource, /workforce_send_payouts_for_review/);
-assert.match(tableSource, /audience === "workforce" \? "Send Notification" : "Send for review"/);
-assert.match(tableSource, /const canReviewHelpers = canEdit && audience === "helpers"/);
-assert.match(tableSource, /canPublish \|\| canReviewHelpers/);
-assert.match(tableSource, /audience === "workforce"[\s\S]*?isWorkforcePayoutDisplayPublishable\(row\.status\)[\s\S]*?row\.status === "Ready for review" \|\| row\.status === "Returned"/);
+assert.match(routeSource, /rpc\("workforce_publish_payout_notifications"/);
+assert.match(routeSource, /rpc\("helper_publish_payout_notifications"/);
+assert.match(tableSource, /`Send Notification\$\{reviewSelectedRows\.length/);
+assert.match(tableSource, /const canPublishPeriod = canEdit && calendarMonthEnd === periodEnd/);
+assert.match(tableSource, /const showSelection = canPublish \|\| canDeductAdvances \|\| canManuallyEdit/);
+assert.match(tableSource, /function canSendPayoutForReview[\s\S]*?isWorkforcePayoutDisplayPublishable\(row\.status\)/);
 assert.match(pageSource, /loadStablePayoutWorksheet/);
 assert.match(pageSource, /audience === "workforce" && !loaded\.dependencyHash/);
 assert.match(pageSource, /publicationSnapshotHash/);

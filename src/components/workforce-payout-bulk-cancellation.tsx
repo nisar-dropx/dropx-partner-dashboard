@@ -17,6 +17,7 @@ function money(value: number) {
 }
 
 export function WorkforcePayoutBulkCancellation({
+  audience = "workforce",
   disabled,
   items,
   onBusyChange,
@@ -24,6 +25,7 @@ export function WorkforcePayoutBulkCancellation({
   periodEnd,
   periodStart
 }: {
+  audience?: "workforce" | "helpers";
   disabled: boolean;
   items: WorkforcePayoutProcessingSelection[];
   onBusyChange: (busy: boolean) => void;
@@ -102,6 +104,7 @@ export function WorkforcePayoutBulkCancellation({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "cancelled",
+          audience,
           operationId,
           paymentItemIds: items.map((item) => item.paymentItemId),
           periodStart,
@@ -128,7 +131,7 @@ export function WorkforcePayoutBulkCancellation({
       <section aria-labelledby={titleId} aria-modal="true" className="modal-panel confirmation-dialog" ref={modalRef} role="alertdialog">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Workforce payments</p>
+            <p className="eyebrow">{audience === "helpers" ? "Helper" : "Workforce"} payments</p>
             <h2 id={titleId}>Cancel processing payments</h2>
           </div>
           <button aria-label="Close bulk cancellation dialog" className="button secondary compact" disabled={busy} onClick={closeDialog} ref={closeRef} type="button">Close</button>

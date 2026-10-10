@@ -39,13 +39,14 @@ async function ownReviewPublication(company:string,worker:string,publicationId:s
  return publication.data;
 }
 export async function GET(request:NextRequest){
- try{const {company,worker}=await payoutIdentity(request);const payouts=await loadAssociatePayouts(company,worker);return NextResponse.json({payouts:payouts.map(p=>({...p,bankAccount:p.bankAccount?'•••• '+p.bankAccount.slice(-4):'Not recorded'}))},{headers});}
+ try{const {company,worker,subjectType}=await payoutIdentity(request);const payouts=await loadAssociatePayouts(company,worker,subjectType);return NextResponse.json({payouts:payouts.map(p=>({...p,bankAccount:p.bankAccount?'•••• '+p.bankAccount.slice(-4):'Not recorded'}))},{headers});}
  catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unable to load payouts.'},{status:400,headers});}
 }
 export async function POST(request:NextRequest){
  try{
   if(request.headers.get('origin')!==request.nextUrl.origin)return NextResponse.json({error:'Invalid request origin'},{status:403,headers});
-  const {company,worker}=await payoutIdentity(request),body=await request.json();
+  const {company,worker,subjectType}=await payoutIdentity(request),body=await request.json();
+  if(subjectType==='helper')throw new Error('Helper payout disputes are not available from DropX One. Contact Workforce for assistance.');
   if(body.operation!=='create')throw new Error('Unsupported dispute action.');
    const publicationId=text(body.publicationId);
    await ownReviewPublication(company,worker,publicationId);
