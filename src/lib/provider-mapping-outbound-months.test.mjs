@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { canonicalizeProviderFirstMembers, filterProviderFirstRowIndexes, providerMappingMonthOptions, providerSourceMemberKey } from './provider-first-mapping-view.ts';
+import { canonicalizeProviderFirstMembers, providerFirstScopeOptions, filterProviderFirstRowIndexes, providerMappingMonthOptions, providerSourceMemberKey } from './provider-first-mapping-view.ts';
+
+import { isProviderMappingLocation } from './provider-mapping-location-scope.ts';
 
 const filters = { query: '', stationIds: [], paymentMethodIds: [], mappingStatuses: [], validationStatuses: [] };
 const row = { providerMemberId: '12345678901', providerMemberName: 'Asha', stationId: 'a', stationLabel: 'A', workforceId: '', dropxId: '', dropxName: '', paymentMethodId: '', paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '', effectiveTo: '' };
@@ -26,6 +28,46 @@ test('available month options are unique, searchable by name or year/month, and 
     { value: '2026-09', label: 'September 2026', searchText: 'September 2026 2026-09' },
     { value: '2025-09', label: 'September 2025', searchText: 'September 2025 2025-09' }
   ]);
+});
+
+test('region and People cluster/AOM filters intersect month, status and location filters', () => {
+  const rows = [
+    { ...row, region: 'North', clusterKeys: ['cm:1'], outboundMonths: ['2026-10'] },
+    { ...row, stationId: 'b', region: 'South', clusterKeys: ['aom:2'], outboundMonths: ['2026-10'] },
+    { ...row, region: 'North', clusterKeys: ['cm:3'], outboundMonths: ['2026-09'] },
+    { ...row, region: 'North', clusterKeys: ['cm:1'], outboundMonths: ['2026-10'], workforceId: 'mapped' },
+    { ...row, region: 'Unassigned', clusterKeys: ['unmapped'], outboundMonths: [] }
+  ];
+  assert.deepEqual(visible(rows, { regions: ['North', 'South'], clusterKeys: ['cm:1', 'aom:2'], outboundMonths: ['2026-10'], mappingStatuses: ['unmapped'] }), [0, 1]);
+  assert.deepEqual(visible(rows, { regions: ['South'], clusterKeys: ['aom:2'], stationIds: ['b'] }), [1]);
+  assert.deepEqual(visible(rows, { regions: ['North'], clusterKeys: ['aom:2'] }), []);
+  assert.deepEqual(visible(rows, { regions: ['Unassigned'], clusterKeys: ['unmapped'] }), [4]);
+});
+
+test('mapping scope admits Amazon EDSP/XPT and Flipkart hubs but excludes Amazon Now and unrelated models', () => {
+  const location = (provider, model) => ({ providers: { code: provider }, location_models: { code: model } });
+  for (const model of ['EDSP', 'XPT', 'XPD']) assert.equal(isProviderMappingLocation(location('AMAZON', model)), true);
+  for (const model of ['ODH', 'MDH']) assert.equal(isProviderMappingLocation(location('FLIPKART', model)), true);
+  for (const model of ['NOW', 'AMXL', 'DROPX_HO', '']) assert.equal(isProviderMappingLocation(location('AMAZON', model)), false);
+  assert.equal(isProviderMappingLocation(location('AMAZON NOW', 'EDSP')), false);
+  assert.equal(isProviderMappingLocation(location('FLIPKART', 'NOW')), false);
+  assert.equal(isProviderMappingLocation({}), false);
+  assert.equal(isProviderMappingLocation({ providers: [{ name: 'Amazon' }], location_models: [{ code: 'XPT' }] }), true);
+});
+
+test('Region cascades to Cluster/AOM and Location options without mixing same-named people', () => {
+  const rows = [
+    { ...row, stationLabel: 'A', region: 'AP', clusterKeys: ['cm:ap'] },
+    { ...row, stationId: 'b', stationLabel: 'B', region: 'ODCG', clusterKeys: ['cm:od'] },
+    { ...row, stationId: 'c', stationLabel: 'C', region: 'ODCG', clusterKeys: ['aom:od'] }
+  ];
+  const options = [{ value: 'cm:ap', label: 'Same name' }, { value: 'cm:od', label: 'Same name' }, { value: 'aom:od', label: 'Area manager (AOM)' }, { value: 'cm:now', label: 'Amazon Now manager' }];
+  assert.deepEqual(providerFirstScopeOptions(rows, ['ODCG'], [], options), {
+    clusters: options.slice(1, 3), stations: [['b', 'B'], ['c', 'C']]
+  });
+  assert.deepEqual(providerFirstScopeOptions(rows, ['ODCG'], ['aom:od'], options).stations, [['c', 'C']]);
+  assert.deepEqual(providerFirstScopeOptions(rows, ['AP', 'ODCG'], [], options).clusters, options.slice(0, 3));
+  assert.deepEqual(providerFirstScopeOptions(rows, ['KL'], [], options), { clusters: [], stations: [] });
 });
 
 test('rounded legacy IDs contribute months only to an unambiguous canonical ID', () => {

@@ -10,6 +10,7 @@ import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-sna
 import {
   filterProviderFirstRowIndexes,
   providerMappingMonthOptions,
+  providerFirstScopeOptions,
   isScientificProviderMemberId,
   providerFirstNamesMatch,
   providerFirstLocationRemap,
@@ -85,7 +86,9 @@ function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches || busy} onClick={() => onSave(index)} type="button">{busy ? "Saving..." : dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialMonth, canEdit, mappings, workers, paymentMethods, shipmentMonths, clusterOptions }: {
+  clusterOptions: Array<{ value: string; label: string }>;
+  initialMonth: string;
   shipmentMonths: string[];
   initialQuery?: string;
   initialStationId?: string;
@@ -100,8 +103,11 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [query, setQuery] = useState(initialQuery);
   const deferredQuery = useDeferredValue(query);
   const [stationFilters, setStationFilters] = useState<string[]>(initialStationId ? [initialStationId] : []);
-  const [monthFilters, setMonthFilters] = useState<string[]>([]);
-  const monthOptions = useMemo(() => providerMappingMonthOptions(shipmentMonths), [shipmentMonths]);
+  const [monthFilters, setMonthFilters] = useState<string[]>([initialMonth]);
+  const [regionFilters, setRegionFilters] = useState<string[]>([]);
+  const [clusterFilters, setClusterFilters] = useState<string[]>([]);
+  const regionOptions = useMemo(() => [...new Set(mappings.map((row) => row.region || "Unassigned"))].sort().map((region) => ({ value: region, label: region })), [mappings]);
+  const monthOptions = useMemo(() => providerMappingMonthOptions([initialMonth, ...shipmentMonths]), [initialMonth, shipmentMonths]);
   const [methodFilters, setMethodFilters] = useState<string[]>([]);
   const [mappingFilters, setMappingFilters] = useState<string[]>(["unmapped"]);
   const [validationFilters, setValidationFilters] = useState<string[]>([]);
@@ -122,7 +128,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       ? `Mapped: ${worker.locationLabel} · Profile: ${worker.profileLocationLabel ?? "No location"}`
       : worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
   })), [workerRows]);
-  const stations = useMemo(() => Array.from(new Map(rows.map((row) => [row.stationId, row.stationLabel])).entries()), [rows]);
+  const scopeOptions = useMemo(() => providerFirstScopeOptions(rows, regionFilters, clusterFilters, clusterOptions), [rows, regionFilters, clusterFilters, clusterOptions]);
+  const stations = scopeOptions.stations;
   const dirtyRows = useMemo(() => rows.map((row, index) => {
     const thresholdConfig = row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig ?? null;
     const minimumUnits = Number(row.productionThresholdMinimumUnits);
@@ -146,6 +153,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     workerById,
     paymentMethodById,
     filters: {
+      regions: regionFilters,
+      clusterKeys: clusterFilters,
       outboundMonths: monthFilters,
       query: deferredQuery,
       stationIds: stationFilters,
@@ -153,17 +162,36 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       mappingStatuses: mappingFilters,
       validationStatuses: validationFilters
     }
-  }), [rows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
+  }), [rows, workerById, paymentMethodById, deferredQuery, monthFilters, regionFilters, clusterFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
-  const hasFilters = Boolean(query || monthFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
+  const hasFilters = Boolean(query || monthFilters.length || regionFilters.length || clusterFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
 
   function resetPage() { setCurrentPage(1); }
+
+  function changeRegions(values: string[]) {
+    const available = providerFirstScopeOptions(rows, values, [], clusterOptions);
+    const nextClusters = clusterFilters.filter((key) => available.clusters.some((option) => option.value === key));
+    const next = providerFirstScopeOptions(rows, values, nextClusters, clusterOptions);
+    setRegionFilters(values);
+    setClusterFilters(nextClusters);
+    setStationFilters((current) => current.filter((id) => next.stations.some(([value]) => value === id)));
+    resetPage();
+  }
+
+  function changeClusters(values: string[]) {
+    const next = providerFirstScopeOptions(rows, regionFilters, values, clusterOptions);
+    setClusterFilters(values);
+    setStationFilters((current) => current.filter((id) => next.stations.some(([value]) => value === id)));
+    resetPage();
+  }
 
   function clearFilters() {
     setQuery("");
     setStationFilters([]);
     setMonthFilters([]);
+    setRegionFilters([]);
+    setClusterFilters([]);
     setMethodFilters([]);
     setMappingFilters([]);
     setValidationFilters([]);
@@ -453,6 +481,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       <div className="provider-first-filters">
         <label className="provider-first-search"><span>Search</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); resetPage(); }} placeholder="Provider member, DropX ID or name" /></label>
         <MappingMultiFilter allLabel="All months" label="Outbound month" options={monthOptions} selected={monthFilters} setSelected={(values) => { setMonthFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All regions" label="Region" options={regionOptions} selected={regionFilters} setSelected={changeRegions} />
+        <MappingMultiFilter allLabel="All clusters / AOMs" label="Cluster / AOM" options={scopeOptions.clusters} selected={clusterFilters} setSelected={changeClusters} />
         <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
