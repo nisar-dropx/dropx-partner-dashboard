@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { reconcileBiometricAttendance } from "@/lib/biometric/attendance-reconciliation";
 import {
@@ -6,6 +7,7 @@ import {
   parsePositiveInteger,
   resolveAttendanceReconciliationWindow
 } from "@/lib/biometric/attendance-reconciliation-policy";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -15,6 +17,7 @@ export const maxDuration = 300;
 
 const noStore = { "Cache-Control": "private, no-store" };
 const SHA256 = /^[0-9a-f]{64}$/i;
+const BROWSER_RECONCILIATION_LEASE_SECONDS = 360;
 
 function reply(body: unknown, status = 200) {
   return Response.json(body, { status, headers: noStore });
@@ -99,19 +102,56 @@ export async function POST(request: Request) {
       return reply({ error: error instanceof Error ? error.message : "Invalid attendance reconciliation request." }, 400);
     }
 
-    const result = await reconcileBiometricAttendance({
-      batchSize: parsed.batchSize,
-      companyId: authorization.companyId,
-      cursor: parsed.cursor,
-      deadlineAtMs: startedAtMs + (maxDuration - 45) * 1000,
-      expectedSnapshotToken: parsed.snapshotToken,
-      fromDate: parsed.fromDate,
-      leaseContention: "fail",
-      leaseOwnerId: authorization.userId,
-      serializeByCompany: true,
-      toDate: parsed.toDate
-    });
-    return reply({ ...result, healthy: result.failures.length === 0 });
+    const admin = supabaseAdmin;
+    if (!admin) throw new Error("Supabase service role key is not configured.");
+    const leaseToken = randomUUID();
+    let leaseHeld = false;
+    try {
+      const claimed = await admin.rpc("attendance_try_acquire_reconciliation_run", {
+        p_company_id: authorization.companyId,
+        p_lease_seconds: BROWSER_RECONCILIATION_LEASE_SECONDS,
+        p_owner_user_id: authorization.userId,
+        p_token: leaseToken
+      });
+      if (claimed.error) throw new Error(`Unable to reserve attendance repair: ${claimed.error.message}`);
+      leaseHeld = claimed.data === true;
+      if (!leaseHeld) {
+        return reply({ error: "Attendance repair is busy for this company. Run the repair again." }, 409);
+      }
+
+      // Keep one company lease across the complete browser page. The worker
+      // loads and validates its mapping snapshot while the database guard
+      // blocks mapping writes, so it need not reacquire the same lease or
+      // reload every company mapping for each ownership window.
+      const result = await reconcileBiometricAttendance({
+        batchSize: parsed.batchSize,
+        companyId: authorization.companyId,
+        cursor: parsed.cursor,
+        deadlineAtMs: startedAtMs + (maxDuration - 45) * 1000,
+        expectedSnapshotToken: parsed.snapshotToken,
+        fromDate: parsed.fromDate,
+        serializeByCompany: false,
+        toDate: parsed.toDate
+      });
+      return reply({ ...result, healthy: result.failures.length === 0 });
+    } finally {
+      if (leaseHeld) {
+        try {
+          const released = await admin.rpc("attendance_release_reconciliation_run", {
+            p_company_id: authorization.companyId,
+            p_owner_user_id: authorization.userId,
+            p_token: leaseToken
+          });
+          if (released.error) throw new Error(released.error.message);
+        } catch (error) {
+          console.warn(JSON.stringify({
+            companyId: authorization.companyId,
+            event: "attendance_reconciliation_batch_lease_release_failed",
+            message: error instanceof Error ? error.message : "Unable to release attendance reconciliation lease."
+          }));
+        }
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to reconcile biometric attendance.";
     return reply({ error: message }, /mappings changed/i.test(message) ? 409 : 500);

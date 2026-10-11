@@ -50,7 +50,12 @@ function routeFixture() {
   const state = {
     auth: authorizedUser(),
     calls: [],
+    claimError: null,
+    leaseClaimed: true,
     permission: true,
+    releaseError: null,
+    rpcCalls: [],
+    workerResult: null,
     workerError: null
   };
   const route = compile(new URL("./route.ts", import.meta.url), {
@@ -63,7 +68,7 @@ function routeFixture() {
       reconcileBiometricAttendance: async (options) => {
         state.calls.push(options);
         if (state.workerError) throw state.workerError;
-        return {
+        return state.workerResult ?? {
           attempted: 1,
           completed: 1,
           failures: [],
@@ -77,7 +82,28 @@ function routeFixture() {
         };
       }
     },
-    "@/lib/biometric/attendance-reconciliation-policy": reconciliationPolicy
+    "@/lib/biometric/attendance-reconciliation-policy": reconciliationPolicy,
+    "@/lib/supabase-admin": {
+      supabaseAdmin: {
+        async rpc(name, args) {
+          state.rpcCalls.push({ args, name });
+          if (name === "attendance_try_acquire_reconciliation_run") {
+            return state.claimError
+              ? { data: null, error: state.claimError }
+              : { data: state.leaseClaimed, error: null };
+          }
+          if (name === "attendance_release_reconciliation_run") {
+            return state.releaseError
+              ? { data: null, error: state.releaseError }
+              : { data: true, error: null };
+          }
+          throw new Error(`Unexpected RPC: ${name}`);
+        }
+      }
+    },
+    "node:crypto": {
+      randomUUID: () => "11111111-1111-4111-8111-111111111111"
+    }
   });
   return { route, state };
 }
@@ -148,8 +174,6 @@ test("browser reconciliation passes the authenticated company and validated page
       cursor: state.calls[0].cursor,
       expectedSnapshotToken: state.calls[0].expectedSnapshotToken,
       fromDate: state.calls[0].fromDate,
-      leaseContention: state.calls[0].leaseContention,
-      leaseOwnerId: state.calls[0].leaseOwnerId,
       serializeByCompany: state.calls[0].serializeByCompany,
       toDate: state.calls[0].toDate
     },
@@ -159,16 +183,64 @@ test("browser reconciliation passes the authenticated company and validated page
       cursor: 4,
       expectedSnapshotToken: snapshotToken,
       fromDate: "2020-09-01",
-      leaseContention: "fail",
-      leaseOwnerId: "22222222-2222-4222-8222-222222222222",
-      serializeByCompany: true,
+      serializeByCompany: false,
       toDate: "2020-09-30"
     }
   );
   assert.ok(state.calls[0].deadlineAtMs > Date.now());
+  assert.deepEqual(
+    state.rpcCalls.map(({ args, name }) => [name, args.p_company_id, args.p_owner_user_id, args.p_token]),
+    [
+      ["attendance_try_acquire_reconciliation_run", "company-a", "22222222-2222-4222-8222-222222222222", "11111111-1111-4111-8111-111111111111"],
+      ["attendance_release_reconciliation_run", "company-a", "22222222-2222-4222-8222-222222222222", "11111111-1111-4111-8111-111111111111"]
+    ]
+  );
 });
 
-test("browser reconciliation reports worker failures without managing a batch lease", async () => {
+test("browser reconciliation acquires one lease for a multi-window batch", async () => {
+  const { route, state } = routeFixture();
+  state.workerResult = {
+    attempted: 5,
+    completed: 5,
+    failures: [],
+    fromDate: "2020-09-01",
+    nextCursor: 5,
+    punchesReconciled: 25,
+    skipped: 0,
+    startCursor: 0,
+    toDate: "2020-09-30",
+    totalMappings: 12
+  };
+
+  const response = await route.POST(request({ cursor: 0, limit: 5 }));
+
+  assert.equal(response.status, 200);
+  assert.equal(state.calls.length, 1);
+  assert.equal(state.calls[0].serializeByCompany, false);
+  assert.deepEqual(state.rpcCalls.map(({ name }) => name), [
+    "attendance_try_acquire_reconciliation_run",
+    "attendance_release_reconciliation_run"
+  ]);
+});
+
+test("browser reconciliation returns conflict without invoking the worker when its company lease is busy", async () => {
+  const { route, state } = routeFixture();
+  state.leaseClaimed = false;
+
+  const response = await route.POST(request({ cursor: 0, limit: 5 }));
+
+  assert.equal(response.status, 409);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await response.json(), {
+    error: "Attendance repair is busy for this company. Run the repair again."
+  });
+  assert.equal(state.calls.length, 0);
+  assert.deepEqual(state.rpcCalls.map(({ name }) => name), [
+    "attendance_try_acquire_reconciliation_run"
+  ]);
+});
+
+test("browser reconciliation releases its company lease when the worker fails", async () => {
   const { route, state } = routeFixture();
   state.workerError = new Error("backfill failed");
 
@@ -178,6 +250,10 @@ test("browser reconciliation reports worker failures without managing a batch le
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), { error: "backfill failed" });
   assert.equal(state.calls.length, 1);
+  assert.deepEqual(state.rpcCalls.map(({ name }) => name), [
+    "attendance_try_acquire_reconciliation_run",
+    "attendance_release_reconciliation_run"
+  ]);
 });
 
 test("reconciliation worker applies an optional company filter before paging", async () => {

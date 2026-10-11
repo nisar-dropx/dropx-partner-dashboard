@@ -13,10 +13,13 @@ import {
 } from "./enrolment-resolution";
 import {
   buildAttendancePunchMergePlan,
+  historicalBackfillHealth,
   isPendingAttendanceReviewPunch,
   RECONCILIATION_PROMOTABLE_PUNCH_FILTER,
   selectAttendancePunchSummaryRows,
-  shouldClearStalePresentDaily
+  shouldClearStalePresentDaily,
+  type HistoricalBackfillDaily,
+  type HistoricalBackfillPunch
 } from "./attendance-rebuild-policy";
 import { wfhCreditState, wfhCreditLabel, type WfhCreditState } from "../wfh-attendance-credit";
 import { formatShiftClock, preferActiveRosterRow, preferActiveRosterRowsByKey, type RosterPlanPreference } from "../roster-plan-preference";
@@ -1336,26 +1339,19 @@ export async function backfillHistoricalPunches(args: HistoricalBackfillArgs) {
   return processed;
 }
 
-async function backfillResolvedHistoricalPunches({
-  accountId,
+async function loadHistoricalRawPunches({
   companyId,
-  employeeId,
-  enrolmentId,
-  fieldExecutiveId,
-  isActive,
-  locationId,
-  profileType,
-  workerStatus,
-  workerType
-}: HistoricalBackfillArgs, window: ReturnType<typeof historicalPunchTimeWindow>) {
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-
-  const enrolmentIds = biometricIdVariants([enrolmentId]);
-  const rawPunches: HistoricalRawPunchRow[] = [];
+  enrolmentIds,
+  window
+}: {
+  companyId: string;
+  enrolmentIds: string[];
+  window: ReturnType<typeof historicalPunchTimeWindow>;
+}) {
+  const rows: HistoricalRawPunchRow[] = [];
   const pageSize = 500;
-
   for (let from = 0; ; from += pageSize) {
-    let rawQuery = supabaseAdmin
+    let rawQuery = supabaseAdmin!
       .from("biometric_raw_events")
       .select("id, device_id, device_serial, enrolment_id, punch_time")
       .eq("company_id", companyId)
@@ -1371,11 +1367,173 @@ async function backfillResolvedHistoricalPunches({
     const result = await rawQuery;
     if (result.error) throw new Error(result.error.message);
     const page = (result.data ?? []) as HistoricalRawPunchRow[];
-    rawPunches.push(...page);
+    rows.push(...page);
     if (page.length < pageSize) break;
   }
+  return rows;
+}
 
+async function loadHistoricalBackfillPunchHealthRows({
+  companyId,
+  enrolmentIds,
+  fromDate,
+  toDate
+}: {
+  companyId: string;
+  enrolmentIds: string[];
+  fromDate: string;
+  toDate: string;
+}): Promise<HistoricalBackfillPunch[] | null> {
+  const rows: HistoricalBackfillPunch[] = [];
+  const pageSize = 500;
+  for (let from = 0; ; from += pageSize) {
+    const result = await supabaseAdmin!
+      .from("attendance_punches")
+      .select("id,raw_event_id,device_serial,punch_time,punch_date,punch_order,punch_label,enrolment_id,worker_type,profile_type,account_id,employee_id,field_executive_id,location_id,calculated,is_flagged,source")
+      .eq("company_id", companyId)
+      .in("enrolment_id", enrolmentIds)
+      .gte("punch_date", fromDate)
+      .lte("punch_date", toDate)
+      .order("punch_date", { ascending: true })
+      .order("punch_time", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    // The optimization must never make repair less available. If a replica or
+    // rolling schema cannot serve the proof query, use the established path.
+    if (result.error) return null;
+    const page = (result.data ?? []).map((row) => ({
+      ...row,
+      owner_key: biometricCandidateOwnerKey(row)
+    })) as HistoricalBackfillPunch[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function loadHistoricalBackfillDailyHealthRows({
+  companyId,
+  enrolmentIds,
+  fromDate,
+  toDate
+}: {
+  companyId: string;
+  enrolmentIds: string[];
+  fromDate: string;
+  toDate: string;
+}): Promise<HistoricalBackfillDaily[] | null> {
+  const result = await supabaseAdmin!
+    .from("attendance_daily")
+    .select("enrolment_id,punch_date,in_time,out_time,punch_count,work_minutes,status,remark,work_mode,worker_type,employee_id,field_executive_id,location_id,employee_code,worker_name,station_code,in_source,out_source,manual_in_request_id,manual_out_request_id")
+    .eq("company_id", companyId)
+    .in("enrolment_id", enrolmentIds)
+    .gte("punch_date", fromDate)
+    .lte("punch_date", toDate);
+  return result.error ? null : (result.data ?? []) as HistoricalBackfillDaily[];
+}
+
+async function resolveHistoricalUnknownEnrolmentAlerts(companyId: string, rawEventIds: string[]) {
+  for (let offset = 0; offset < rawEventIds.length; offset += 100) {
+    const resolve = await supabaseAdmin!
+      .from("biometric_alerts")
+      .update({ resolved_at: new Date().toISOString() })
+      .eq("company_id", companyId)
+      .eq("alert_type", "unknown_enrolment")
+      .in("raw_event_id", rawEventIds.slice(offset, offset + 100))
+      .is("resolved_at", null);
+    if (resolve.error) throw new Error(resolve.error.message);
+  }
+}
+
+async function backfillResolvedHistoricalPunches({
+  accountId,
+  companyId,
+  employeeId,
+  enrolmentId,
+  fieldExecutiveId,
+  isActive,
+  locationId,
+  profileType,
+  workerStatus,
+  workerType
+}: HistoricalBackfillArgs, window: ReturnType<typeof historicalPunchTimeWindow>) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+
+  const enrolmentIds = biometricIdVariants([enrolmentId]);
+  const healthFromDate = window.fromDate;
+  const healthToDate = window.toDate ?? istDate(new Date());
+  const rawPunches = await loadHistoricalRawPunches({ companyId, enrolmentIds, window });
   if (!rawPunches.length) return 0;
+
+  const [existingPunches, existingDailyRows, expectedWorkerSnapshot] = await Promise.all([
+    healthFromDate
+      ? loadHistoricalBackfillPunchHealthRows({
+        companyId,
+        enrolmentIds,
+        fromDate: healthFromDate,
+        toDate: healthToDate
+      })
+      : Promise.resolve(null),
+    healthFromDate
+      ? loadHistoricalBackfillDailyHealthRows({
+        companyId,
+        enrolmentIds,
+        fromDate: healthFromDate,
+        toDate: healthToDate
+      })
+      : Promise.resolve(null),
+    healthFromDate
+      ? loadDailyWorkerSnapshot({
+        accountId,
+        companyId,
+        employeeId,
+        fallbackLocationId: locationId,
+        fieldExecutiveId,
+        profileType
+      })
+      : Promise.resolve(null)
+  ]);
+
+  if (healthFromDate && existingPunches && existingDailyRows && expectedWorkerSnapshot) {
+    const expectedOwnerKey = biometricCandidateOwnerKey({
+      account_id: accountId,
+      employee_id: employeeId,
+      field_executive_id: fieldExecutiveId,
+      profile_type: profileType,
+      worker_type: workerType
+    });
+    const health = historicalBackfillHealth({
+      canonicalEnrolmentId: normalizeBiometricId(enrolmentId),
+      dailyRows: existingDailyRows,
+      expectedLocationId: locationId,
+      expectedOwnerKey,
+      expectedWorkerSnapshot,
+      expectedWorkerSnapshotInput: {
+        accountId,
+        employeeId,
+        fieldExecutiveId,
+        locationId,
+        profileType
+      },
+      punches: existingPunches,
+      rawEvents: rawPunches.map((rawPunch) => ({
+        deviceSerial: rawPunch.device_serial,
+        id: rawPunch.id,
+        punchTime: rawPunch.punch_time
+      })),
+      windowFromDate: healthFromDate,
+      windowToDate: healthToDate
+    });
+    if (health.healthy) {
+      // Alert cleanup is part of successful reconciliation even when every
+      // attendance row was already healthy.
+      await resolveHistoricalUnknownEnrolmentAlerts(
+        companyId,
+        rawPunches.map((rawPunch) => rawPunch.id)
+      );
+      return rawPunches.length;
+    }
+  }
 
   const affectedDates = new Set<string>();
   const rawPunchesByCalendarDate = new Map<string, HistoricalRawPunchRow[]>();
@@ -1487,17 +1645,10 @@ async function backfillResolvedHistoricalPunches({
     }
   }
 
-  const processedRawEventIds = rawPunches.map((rawPunch) => rawPunch.id);
-  for (let offset = 0; offset < processedRawEventIds.length; offset += 100) {
-    const resolve = await supabaseAdmin
-      .from("biometric_alerts")
-      .update({ resolved_at: new Date().toISOString() })
-      .eq("company_id", companyId)
-      .eq("alert_type", "unknown_enrolment")
-      .in("raw_event_id", processedRawEventIds.slice(offset, offset + 100))
-      .is("resolved_at", null);
-    if (resolve.error) throw new Error(resolve.error.message);
-  }
+  await resolveHistoricalUnknownEnrolmentAlerts(
+    companyId,
+    rawPunches.map((rawPunch) => rawPunch.id)
+  );
 
   if (rebuildFailures.length) {
     const details = rebuildFailures
