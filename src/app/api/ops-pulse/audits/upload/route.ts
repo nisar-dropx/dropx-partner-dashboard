@@ -21,6 +21,16 @@ const proofTypes = new Set([
   "image/heif",
   "application/pdf",
 ]);
+// Supporting documents (reconciliation sheets and the like). Never accepted as a
+// checklist photo, ERP screenshot or cash-variance proof.
+const documentTypes = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+]);
+const proofTypeError = "Use a JPG, PNG, WEBP, HEIC or PDF proof.";
+const documentTypeError =
+  "Use a JPG, PNG, WEBP, HEIC, PDF, Excel or CSV file as evidence.";
 export async function POST(request: Request) {
   try {
     const auth = await getAuthorization();
@@ -109,8 +119,10 @@ export async function POST(request: Request) {
       );
     const prefix = `${auth.companyId}/station-audits/${audit.id}/proof/${auth.userId}/${checkId ? `${checkId}/` : ""}`;
     if (input.phase === "prepare") {
-      if (!proofTypes.has(String(input.contentType)))
-        throw new Error("Use a JPG, PNG, WEBP, HEIC or PDF proof.");
+      const requested = String(input.contentType);
+      const supporting = !checkId && input.kind === "document";
+      if (!proofTypes.has(requested) && !(supporting && documentTypes.has(requested)))
+        throw new Error(supporting ? documentTypeError : proofTypeError);
       const size = Number(input.size);
       const fileName = String(input.fileName || "")
         .replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -156,8 +168,10 @@ export async function POST(request: Request) {
     const file = object.data.find((f) => f.name === name);
     if (!file || !file.metadata?.size || Number(file.metadata.size) > maxSize)
       throw new Error("The proof upload is incomplete. Please try again.");
-    if (!proofTypes.has(String(file.metadata.mimetype)))
-      throw new Error("Use a JPG, PNG, WEBP, HEIC or PDF proof.");
+    const stored = String(file.metadata.mimetype);
+    const supportingDocument = !checkId && input.kind === "document";
+    if (!proofTypes.has(stored) && !(supportingDocument && documentTypes.has(stored)))
+      throw new Error(supportingDocument ? documentTypeError : proofTypeError);
     if (checkId && !auditPhotoTypes.has(String(file.metadata.mimetype)))
       throw new Error("Attach an image for this check.");
     const kind = checkId

@@ -1,4 +1,44 @@
 import { supabase } from "@/lib/supabase";
+
+const proofMime = /^(image\/(jpeg|png|webp|heic|heif)|application\/pdf)$/;
+const documentMimeByExtension: Record<string, string> = {
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  csv: "text/csv",
+};
+const proofMimeByExtension: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  pdf: "application/pdf",
+};
+const kindFor = (field: string) =>
+  field === "erp_evidence"
+    ? "erp_screenshot"
+    : field === "variance_evidence"
+      ? "cash_variance"
+      : "document";
+/** Browsers often report no type for spreadsheets, so fall back to the file extension. */
+function auditFileType(field: string, file: File) {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const supporting = field === "evidence_files" || field === "response_evidence";
+  const type =
+    proofMime.test(file.type)
+      ? file.type
+      : proofMimeByExtension[extension] ||
+        (supporting ? documentMimeByExtension[extension] : "") ||
+        "";
+  if (!type)
+    throw new Error(
+      supporting
+        ? `${file.name}: this file type cannot be attached. Use a JPG, PNG, WEBP, HEIC, PDF, Excel or CSV file.`
+        : `${file.name}: this file type cannot be attached here. Use a JPG, PNG, WEBP, HEIC or PDF.`,
+    );
+  return type;
+}
 /** Stage files privately before the small report action, avoiding serverless body limits. */
 export async function uploadAuditFiles(
   data: FormData,
@@ -31,9 +71,12 @@ export async function uploadAuditFiles(
     throw new Error("Keep the combined proof files under 120 MB.");
   let done = 0;
   onProgress?.(done, files.length);
-  for (const { file } of files)
+  for (const { field, file } of files) {
     if (file.size > 30 * 1024 * 1024)
       throw new Error(`${file.name}: choose a file up to 30 MB.`);
+    // Reject an unsupported file before anything is uploaded, naming the file.
+    auditFileType(field, file);
+  }
   const upload = async ({ field, file }: { field: string; file: File }) => {
     if (!supabase)
       throw new Error("Upload service unavailable. Refresh and try again.");
@@ -54,27 +97,25 @@ export async function uploadAuditFiles(
         throw new Error(result.error || "Unable to upload proof.");
       return result;
     };
+    const contentType = auditFileType(field, file);
+    const kind = kindFor(field);
     const signed = await call({
       phase: "prepare",
       fileName: file.name,
       size: file.size,
-      contentType: file.type,
+      contentType,
+      kind,
     });
     const uploaded = await supabase.storage
       .from(signed.bucket)
       .uploadToSignedUrl(signed.path, signed.token, file, {
-        contentType: file.type || "application/octet-stream",
+        contentType,
       });
     if (uploaded.error) throw new Error(uploaded.error.message);
     const completed = await call({
       phase: "complete",
       path: signed.path,
-      kind:
-        field === "erp_evidence"
-          ? "erp_screenshot"
-          : field === "variance_evidence"
-            ? "cash_variance"
-            : "document",
+      kind,
     });
     if (field.startsWith("assessment_proof_"))
       data.set(

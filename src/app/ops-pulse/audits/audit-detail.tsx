@@ -755,7 +755,13 @@ export function AuditDetail({
                 <div className={styles.twoCol}>
                   <label className={styles.inputLabel}>
                     Evidence files
-                    <input type="file" name="evidence_files" multiple />
+                    <input
+                      type="file"
+                      name="evidence_files"
+                      multiple
+                      accept="image/*,application/pdf,.xlsx,.xls,.csv"
+                    />
+                    <small>Images, PDF, Excel or CSV · up to 30 MB each</small>
                   </label>
                   <label className={styles.inputLabel}>
                     Evidence caption
