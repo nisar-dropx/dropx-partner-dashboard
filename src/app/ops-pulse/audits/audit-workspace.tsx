@@ -164,12 +164,15 @@ function Modal({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
+  const unmounting = useRef(false);
   useEffect(() => {
     const dialog = ref.current!;
     const previous = document.body.style.overflow;
+    unmounting.current = false;
     dialog.showModal();
     document.body.style.overflow = "hidden";
     return () => {
+      unmounting.current = true;
       dialog.close();
       document.body.style.overflow = previous;
     };
@@ -182,6 +185,12 @@ function Modal({
       // The window closes only from its close button, so a stray click outside
       // or the Escape key cannot discard an audit that is being filled in.
       onCancel={(event) => event.preventDefault()}
+      // A browser may still force the window shut on a repeated Escape. Put it
+      // back, otherwise the page stays locked behind a window nobody can see.
+      onClose={() => {
+        const dialog = ref.current;
+        if (dialog && !unmounting.current && !dialog.open) dialog.showModal();
+      }}
     >
       <header className={styles.modalHead}>
         <h2 id={id}>{title}</h2>

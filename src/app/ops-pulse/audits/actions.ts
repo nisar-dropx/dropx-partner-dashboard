@@ -225,7 +225,7 @@ export async function scheduleStationAudit(
       if (existing) {
         return {
           ok: false,
-          message: `This station already has an audit in this date window: ${existing}. Open that audit from Team tracker or Calendar to reschedule it instead of scheduling a new one.`,
+          message: `This station already has an audit in this date window. Booked for this station this month: ${existing}. Open the one in this window from Team tracker or Calendar to reschedule it instead of scheduling a new one.`,
         };
       }
     }

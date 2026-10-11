@@ -449,6 +449,12 @@ export function AuditDetail({
         {canPerform && (audit.status_code === "in_progress" || editing) ? (
           <form
             ref={formRef}
+            // Buttons inside the form (bulk fill, scan, add a row) change entries
+            // without a field event, so a click schedules the draft save as well.
+            onClickCapture={() => {
+              if (draftTimer.current) window.clearTimeout(draftTimer.current);
+              draftTimer.current = window.setTimeout(() => saveDraft(false), 1500);
+            }}
             onChange={(event) => {
               if (draftTimer.current) window.clearTimeout(draftTimer.current);
               draftTimer.current = window.setTimeout(() => saveDraft(false), 1500);
