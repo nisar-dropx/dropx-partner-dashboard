@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { MouseEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 type PendingLinkProps = {
   href: string;
@@ -21,6 +22,13 @@ type PendingLinkProps = {
    * forcing a fresh server render every time.
    */
   refresh?: boolean;
+  /**
+   * Defaults to true. Set to false on long lists of links to a heavy page:
+   * otherwise every visible row asks the server to render that page in advance.
+   */
+  prefetch?: boolean;
+  /** Shown in a placeholder dialog as soon as the link is clicked, until the page arrives. */
+  pendingOverlay?: string;
 };
 
 export function PendingLink({
@@ -29,6 +37,8 @@ export function PendingLink({
   className,
   disableWhenCurrent = false,
   href,
+  pendingOverlay,
+  prefetch = true,
   refresh = true,
   scroll,
   title
@@ -78,14 +88,25 @@ export function PendingLink({
       className={`${className ?? ""} ${loading ? "loading" : ""} ${isCurrent ? "current disabled-current" : ""}`.trim()}
       href={href}
       onClick={handleClick}
-      onFocus={() => router.prefetch(href)}
-      onMouseEnter={() => router.prefetch(href)}
-      prefetch
+      onFocus={prefetch ? () => router.prefetch(href) : undefined}
+      onMouseEnter={prefetch ? () => router.prefetch(href) : undefined}
+      prefetch={prefetch}
       scroll={scroll}
       title={title}
     >
       {loading ? <span className="inline-spinner" aria-hidden="true" /> : null}
       {loading && iconOnly ? null : children}
+      {loading && pendingOverlay
+        ? createPortal(
+            <div className="modal-backdrop" role="status" aria-live="polite">
+              <section className="modal-panel pending-overlay-panel">
+                <span className="inline-spinner" aria-hidden="true" />
+                <strong>{pendingOverlay}</strong>
+              </section>
+            </div>,
+            document.body
+          )
+        : null}
     </Link>
   );
 }

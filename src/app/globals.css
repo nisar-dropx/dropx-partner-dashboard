@@ -23549,3 +23549,12 @@ td strong,
   .team-org-scroll{padding:20px 10px 26px}
   .team-org-intro dl>div{flex:1 1 104px}
 }
+
+.modal-panel.pending-overlay-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: auto;
+  max-width: 90vw;
+  padding: 20px 26px;
+}

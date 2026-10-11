@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { waitUntil } from "@vercel/functions";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
@@ -10,6 +11,18 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
 import { effectiveApprovalStepOrder } from "@/lib/payment-stage-policy";
+
+/**
+ * Notification emails are sent after the decision is saved, without making the
+ * approver wait for the mail server. A failure is logged, never shown as a failed decision.
+ */
+function notifyInBackground(label: string, task: () => Promise<unknown>) {
+  waitUntil(
+    task().catch((error) => {
+      console.error(`Payment approval email failed (${label}):`, error);
+    })
+  );
+}
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -536,27 +549,30 @@ export async function approvePaymentRequest(formData: FormData) {
   revalidatePath("/payments/requests");
   revalidatePath("/payments/process");
   revalidatePath("/payments/report");
-  const emailResult = await sendPaymentNotification({
-    actorUserId: authorization.userId,
-    companyId,
-    eventType: "payment_approve",
-    remarks: comments,
-    requestId: request.id
-  });
-  const finalState = await supabaseAdmin
-    .from("payment_requests")
-    .select("approval_status,current_approver_user_id")
-    .eq("company_id", companyId)
-    .eq("id", request.id)
-    .single();
-  if (!finalState.error && String(finalState.data?.approval_status ?? "").toUpperCase() === "FINAL_APPROVED" && !finalState.data?.current_approver_user_id) {
-    await sendPaymentLocationNotification({
+  const admin = supabaseAdmin;
+  notifyInBackground("payment_approve", async () => {
+    const emailResult = await sendPaymentNotification({
+      actorUserId: authorization.userId,
       companyId,
-      eventType: "payment_details_required",
+      eventType: "payment_approve",
+      remarks: comments,
       requestId: request.id
     });
-  }
-  return emailResult.sent ? undefined : emailResult.reason;
+    if (!emailResult.sent) console.error("Payment approval email not sent:", emailResult.reason);
+    const finalState = await admin
+      .from("payment_requests")
+      .select("approval_status,current_approver_user_id")
+      .eq("company_id", companyId)
+      .eq("id", request.id)
+      .single();
+    if (!finalState.error && String(finalState.data?.approval_status ?? "").toUpperCase() === "FINAL_APPROVED" && !finalState.data?.current_approver_user_id) {
+      await sendPaymentLocationNotification({
+        companyId,
+        eventType: "payment_details_required",
+        requestId: request.id
+      });
+    }
+  });
 }
 
 export async function rejectPaymentRequest(formData: FormData) {
@@ -600,14 +616,16 @@ export async function rejectPaymentRequest(formData: FormData) {
   revalidatePath("/payments/approvals");
   revalidatePath("/payments/requests");
   revalidatePath("/payments/report");
-  const emailResult = await sendPaymentNotification({
-    actorUserId: authorization.userId,
-    companyId,
-    eventType: "payment_reject",
-    remarks: comments,
-    requestId: request.id
+  notifyInBackground("payment_reject", async () => {
+    const emailResult = await sendPaymentNotification({
+      actorUserId: authorization.userId,
+      companyId,
+      eventType: "payment_reject",
+      remarks: comments,
+      requestId: request.id
+    });
+    if (!emailResult.sent) console.error("Payment approval email not sent:", emailResult.reason);
   });
-  return emailResult.sent ? undefined : emailResult.reason;
 }
 
 export async function returnPaymentRequest(formData: FormData) {
@@ -659,14 +677,16 @@ export async function returnPaymentRequest(formData: FormData) {
   revalidatePath("/payments/approvals");
   revalidatePath("/payments/requests");
   revalidatePath("/payments/report");
-  const emailResult = await sendPaymentNotification({
-    actorUserId: authorization.userId,
-    companyId,
-    eventType: "payment_return",
-    remarks: comments,
-    requestId: request.id
+  notifyInBackground("payment_return", async () => {
+    const emailResult = await sendPaymentNotification({
+      actorUserId: authorization.userId,
+      companyId,
+      eventType: "payment_return",
+      remarks: comments,
+      requestId: request.id
+    });
+    if (!emailResult.sent) console.error("Payment approval email not sent:", emailResult.reason);
   });
-  return emailResult.sent ? undefined : emailResult.reason;
 }
 
 export async function handlePaymentApprovalAction(formData: FormData) {

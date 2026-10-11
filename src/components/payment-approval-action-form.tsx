@@ -44,7 +44,7 @@ function PaymentApprovalButton({
       type="submit"
     >
       {isPending ? <span className="button-spinner" aria-hidden="true" /> : null}
-      <span>{isPending ? "Working" : children}</span>
+      <span>{isPending ? (actionName === "approve" ? "Approving…" : actionName === "return" ? "Returning…" : "Rejecting…") : children}</span>
     </button>
   );
 }

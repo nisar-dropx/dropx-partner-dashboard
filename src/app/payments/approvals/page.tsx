@@ -246,12 +246,14 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     );
   }
 
-  const requestsResult = await query;
-  const processHeadsResult = authorization.roleId ? await supabaseAdmin
-    .from("payment_heads")
-    .select("id", { count: "exact", head: true })
-    .eq("company_id", companyId)
-    .contains("payment_process_role_ids", [authorization.roleId]) : { count: 0, error: null };
+  const [requestsResult, processHeadsResult] = await Promise.all([
+    query,
+    authorization.roleId ? supabaseAdmin
+      .from("payment_heads")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .contains("payment_process_role_ids", [authorization.roleId]) : { count: 0, error: null }
+  ]);
   const unscopedRequests = ((requestsResult.data ?? []) as unknown as RequestRow[]).map((request) => ({
     ...request,
     payment_heads: firstRelation(request.payment_heads),
@@ -402,7 +404,8 @@ export default async function PaymentApprovalsPage({
       .select("id, answer_value, file_path, file_name, file_size, attachments, payment_head_questions ( question_text, answer_type )")
       .eq("company_id", companyId)
       .eq("payment_request_id", selectedRequest.id),
-    loadApprovalLogs(companyId, selectedRequest.id)
+    loadApprovalLogs(companyId, selectedRequest.id),
+    supabaseAdmin.from("payment_requests").select("adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date").eq("company_id",companyId).eq("id",selectedRequest.id).single()
   ]) : null;
   const selectedLocationResult = selectedDetailData?.[0] ?? null;
   const selectedLocationName = selectedLocationResult?.data?.station_name || selectedLocationResult?.data?.city || "";
@@ -413,7 +416,7 @@ export default async function PaymentApprovalsPage({
     ...answer,
     payment_head_questions: firstRelation(answer.payment_head_questions)
   }));
-  const replacementResult = selectedRequest && supabaseAdmin ? await supabaseAdmin.from("payment_requests").select("adhoc_vehicle_snapshot,adhoc_reason_key,adhoc_deployment_date").eq("company_id",companyId).eq("id",selectedRequest.id).single() : null;
+  const replacementResult = selectedDetailData?.[3] ?? null;
   const replacement = replacementResult?.data?.adhoc_vehicle_snapshot as {number:string;model:string;partner:string|null;source:string;status:string;reason:string;date:string}|null;
   const shipmentCount = paymentShipmentCount(answers);
   const trackingIds = [...new Set(answers.filter(answer => isPaymentTrackingQuestion(answer.payment_head_questions)).flatMap(answer => parsePaymentTrackingIds(answer.answer_value ?? "")))];
@@ -566,7 +569,7 @@ export default async function PaymentApprovalsPage({
                       <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
                       <td><StatusPill status={paymentStatusLabel(request)} tone={paymentApprovalStatusTone(request)} /></td>
                       <td>{formatDashboardDate(request.created_at)}</td>
-                      {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false}>Review</PendingLink></td> : null}
+                      {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false} prefetch={false} refresh={false} pendingOverlay={`Opening ${request.request_no}…`}>Review</PendingLink></td> : null}
                     </tr>
                   );
                 }) : (
@@ -589,7 +592,7 @@ export default async function PaymentApprovalsPage({
                   <strong className="payment-location-highlight">{selectedLocationLabel}</strong>
                 </div>
               </div>
-              <PendingLink className="icon-button" href={`/payments/approvals?${currentParams.toString()}`} scroll={false} aria-label="Close">x</PendingLink>
+              <PendingLink className="icon-button" href={`/payments/approvals?${currentParams.toString()}`} scroll={false} prefetch={false} refresh={false} aria-label="Close">x</PendingLink>
             </div>
             <div className="panel-body">
               {firstSearchParam(searchParams?.approvalError) ? (
