@@ -10,7 +10,9 @@ const status = read("./payment-status/route.ts");
 const history = read("./payment-history/route.ts");
 const fedOne = read("../../../../lib/workforce-payout-bank-file.ts");
 const ledger = read("../../../../../supabase/migrations/20261010210000_helper_payout_bank_payment_ledger.sql");
+const positiveBalanceEligibility = read("../../../../../supabase/migrations/20261011154500_helper_positive_balance_bank_eligibility.sql");
 const publication = read("../../../../../supabase/migrations/20261010200000_helper_payout_publication_notifications.sql");
+const payoutTable = read("../../../../components/workforce-payout-table.tsx");
 
 test("bank APIs opt into Helper ledgers without changing the Workforce default", () => {
   for (const route of [bankFile, redownload, response, status, history]) {
@@ -59,7 +61,7 @@ test("bank APIs opt into Helper ledgers without changing the Workforce default",
   assert.match(fedOne, /referencePrefix === "HP"[\s\S]*?\^HP/);
 });
 
-test("Helper bank ledger is isolated, location-scoped and publication-backed", () => {
+test("base Helper bank ledger establishes isolated location-scoped history", () => {
   for (const table of [
     "helper_payout_payment_batches",
     "helper_payout_payment_response_imports",
@@ -82,7 +84,7 @@ test("Helper bank ledger is isolated, location-scoped and publication-backed", (
   assert.doesNotMatch(ledger, /workforce_payout_mapping_(?:relocks|revision_state)/);
 });
 
-test("Helper bank lifecycle enforces active, PAN, hold and delta-payment gates", () => {
+test("base Helper ledger retains its historical gates and immutable lifecycle controls", () => {
   assert.match(ledger, /v_helper\.is_active is distinct from true/);
   assert.match(ledger, /onboarding_status[\s\S]*?<> 'active'/);
   assert.match(ledger, /verification\.profile_type = 'worker'/);
@@ -103,6 +105,68 @@ test("Helper bank lifecycle enforces active, PAN, hold and delta-payment gates",
   assert.match(ledger, /debit_remarks_snapshot = 'NET PAY'/);
   assert.match(ledger, /credit_remarks_snapshot = location_code_snapshot/);
   assert.match(ledger, /value_date between date '1900-01-01' and date '9999-12-31'/);
+});
+
+test("current Helper eligibility uses positive live balance without Workforce workflow gates", () => {
+  const start = positiveBalanceEligibility.indexOf(
+    "create or replace function public.helper_payout_payment_row_candidates("
+  );
+  const end = positiveBalanceEligibility.indexOf("$function$;", start);
+  assert.ok(start >= 0 && end > start, "missing current Helper candidate override");
+  const candidate = positiveBalanceEligibility.slice(start, end);
+
+  assert.match(positiveBalanceEligibility, /alter column helper_publication_id drop not null/);
+  assert.match(candidate, /current_target_amount := v_selected\.target/);
+  assert.match(candidate, /target_snapshot_hash := v_selected\.live_snapshot_hash/);
+  assert.match(candidate, /balance_payable := greatest\(current_target_amount - paid_amount, 0\)/);
+  assert.match(candidate, /if current_target_amount <= 0 or balance_payable <= 0/);
+  assert.match(candidate, /eligibility_code := 'payment_processing'/);
+  assert.match(candidate, /eligibility_code := 'payment_on_hold'/);
+  assert.match(candidate, /eligibility_code := 'bank_details_missing'/);
+  assert.match(candidate, /eligible := true/);
+
+  for (const forbiddenGate of [
+    /connect_profile_verifications/,
+    /helper_payment_allocations/,
+    /v_helper\.is_active/,
+    /v_station\.is_active/,
+    /onboarding_status/,
+    /publication_(?:unavailable|outdated)/,
+    /review\.status/
+  ]) {
+    assert.doesNotMatch(candidate, forbiddenGate);
+  }
+});
+
+test("Helper UI keeps bank selection audience-aware and always shows an authoritative balance", () => {
+  const selectionStart = payoutTable.indexOf("function canCreateBankPayment(");
+  const selectionEnd = payoutTable.indexOf("function canCancelProcessingPayment(", selectionStart);
+  assert.ok(selectionStart >= 0 && selectionEnd > selectionStart, "missing bank-selection policy");
+  const selection = payoutTable.slice(selectionStart, selectionEnd);
+
+  assert.match(selection, /audience: "workforce" \| "helpers"/);
+  assert.match(selection, /row\.publicationPaymentReady === true/);
+  assert.match(selection, /row\.paymentSummary\?\.eligible === true/);
+  assert.match(selection, /Number\(row\.paymentSummary\?\.availableToPay \?\? 0\) > 0/);
+  assert.match(selection, /visibleStatus === "payment processing"/);
+  assert.match(selection, /visibleStatus === "payment on hold"/);
+  assert.match(selection, /audience === "workforce" && visibleStatus === "pan not linked"/);
+  assert.match(selection, /audience === "helpers" \|\| hasActiveWorkforceProfileStatus\(row\)/);
+  assert.match(selection, /audience === "helpers" \|\| row\.publicationLockState === "locked"/);
+  assert.match(selection, /audience === "helpers" \|\| row\.paymentDetailsAvailable/);
+  assert.match(selection, /audience === "helpers" \|\| row\.panAadhaarStatus !== "NOT LINKED"/);
+  assert.match(selection, /audience === "workforce"[\s\S]*?publicationRefreshPending\(row\)/);
+
+  assert.match(
+    payoutTable,
+    /paymentBalanceAvailable = row\.paymentSummary[\s\S]*?audience === "helpers" \|\| isWorkforcePayoutPaymentBalanceAvailable/
+  );
+  assert.match(
+    payoutTable,
+    /audience === "helpers" && row\.status\.trim\(\)\.toLowerCase\(\) === "ready for review"[\s\S]*?"Ready for Payment"/
+  );
+  assert.match(payoutTable, /audience === "workforce" && row\.panAadhaarStatus === "NOT LINKED"/);
+  assert.match(payoutTable, /audience === "workforce" && row\.paymentDetailsAvailable && row\.panAadhaarStatus/);
 });
 
 test("all Helper payment mutations are service-only and audited", () => {

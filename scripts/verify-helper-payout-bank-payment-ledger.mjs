@@ -9,6 +9,11 @@ const migration = readFileSync(new URL(
 ), "utf8")
   .replace(/create extension if not exists pgcrypto\s*;/gi, "")
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const positiveBalanceEligibilityMigration = readFileSync(new URL(
+  "../supabase/migrations/20261011154500_helper_positive_balance_bank_eligibility.sql",
+  import.meta.url
+), "utf8")
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 
 const db = new PGlite();
 await db.exec(`
@@ -712,5 +717,182 @@ await assert.rejects(
   /already recorded for another paid instruction/
 );
 
+await db.exec(positiveBalanceEligibilityMigration);
+
+// These Helpers deliberately have no review, publication, allocation, or PAN
+// verification. The first is also inactive/pending: a positive live balance
+// plus valid bank-routing details must still be payable.
+await db.exec(`
+  insert into public.helpers(
+    id, company_id, dropx_id, full_name, email, bank_account_no, ifsc_code,
+    onboarding_status, is_active
+  ) values
+    (
+      '10000000-0000-4000-8000-000000000020',
+      '10000000-0000-4000-8000-000000000001',
+      'H2001', 'Special Helper', null, '99887766', 'FDRL0000123',
+      'pending', false
+    ),
+    (
+      '10000000-0000-4000-8000-000000000021',
+      '10000000-0000-4000-8000-000000000001',
+      'H2002', 'Missing Bank Helper', null, null, null,
+      'pending', false
+    ),
+    (
+      '10000000-0000-4000-8000-000000000022',
+      '10000000-0000-4000-8000-000000000001',
+      'H2003', 'Held Helper', null, '88776655', 'FDRL0000123',
+      'pending', false
+    );
+`);
+
+const unrestrictedPreview = await db.query(`
+  select eligible, eligibility_code, current_target_amount, paid_amount,
+    processing_amount, balance_payable, available_to_pay
+  from public.helper_preview_payout_payment_rows(
+    '10000000-0000-4000-8000-000000000001', '2026-11-01', '2026-11-30',
+    jsonb_build_array(jsonb_build_object(
+      'workforce_id', '10000000-0000-4000-8000-000000000020',
+      'station_id', '10000000-0000-4000-8000-000000000005',
+      'current_target_amount', 3600,
+      'current_snapshot_hash', repeat('c', 64)
+    ))
+  )
+`);
+assert.deepEqual(unrestrictedPreview.rows, [{
+  eligible: true,
+  eligibility_code: "eligible",
+  current_target_amount: "3600.00",
+  paid_amount: "0.00",
+  processing_amount: "0.00",
+  balance_payable: "3600.00",
+  available_to_pay: "3600.00"
+}]);
+
+const technicalBankBlocker = await db.query(`
+  select eligible, eligibility_code, balance_payable, available_to_pay
+  from public.helper_preview_payout_payment_rows(
+    '10000000-0000-4000-8000-000000000001', '2026-11-01', '2026-11-30',
+    jsonb_build_array(jsonb_build_object(
+      'workforce_id', '10000000-0000-4000-8000-000000000021',
+      'station_id', '10000000-0000-4000-8000-000000000005',
+      'current_target_amount', 900,
+      'current_snapshot_hash', repeat('d', 64)
+    ))
+  )
+`);
+assert.equal(technicalBankBlocker.rows[0]?.eligible, false);
+assert.equal(technicalBankBlocker.rows[0]?.eligibility_code, "bank_details_missing");
+assert.equal(Number(technicalBankBlocker.rows[0]?.balance_payable), 900);
+assert.equal(Number(technicalBankBlocker.rows[0]?.available_to_pay), 0);
+
+const zeroPreview = await db.query(`
+  select eligible, eligibility_code, balance_payable, available_to_pay
+  from public.helper_preview_payout_payment_rows(
+    '10000000-0000-4000-8000-000000000001', '2026-11-01', '2026-11-30',
+    jsonb_build_array(jsonb_build_object(
+      'workforce_id', '10000000-0000-4000-8000-000000000020',
+      'station_id', '10000000-0000-4000-8000-000000000005',
+      'current_target_amount', 0,
+      'current_snapshot_hash', repeat('e', 64)
+    ))
+  )
+`);
+assert.equal(zeroPreview.rows[0]?.eligible, false);
+assert.equal(zeroPreview.rows[0]?.eligibility_code, "no_positive_balance");
+assert.equal(Number(zeroPreview.rows[0]?.balance_payable), 0);
+assert.equal(Number(zeroPreview.rows[0]?.available_to_pay), 0);
+
+await db.query(`
+  select public.helper_set_payout_payment_hold(
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000023',
+    '10000000-0000-4000-8000-000000000022',
+    '2026-11-01', '2026-11-30', true, 'Verifier payment hold'
+  )
+`);
+const heldPreview = await db.query(`
+  select eligible, eligibility_code, payment_status, balance_payable, available_to_pay
+  from public.helper_preview_payout_payment_rows(
+    '10000000-0000-4000-8000-000000000001', '2026-11-01', '2026-11-30',
+    jsonb_build_array(jsonb_build_object(
+      'workforce_id', '10000000-0000-4000-8000-000000000022',
+      'station_id', '10000000-0000-4000-8000-000000000005',
+      'current_target_amount', 1200,
+      'current_snapshot_hash', repeat('f', 64)
+    ))
+  )
+`);
+assert.equal(heldPreview.rows[0]?.eligible, false);
+assert.equal(heldPreview.rows[0]?.eligibility_code, "payment_on_hold");
+assert.equal(heldPreview.rows[0]?.payment_status, "Payment On Hold");
+assert.equal(Number(heldPreview.rows[0]?.balance_payable), 1200);
+assert.equal(Number(heldPreview.rows[0]?.available_to_pay), 0);
+
+const unrestrictedBatch = await db.query(`
+  select public.helper_create_payout_payment_row_batch(
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000024',
+    repeat('a', 64),
+    '10000000-0000-4000-8000-000000000003',
+    '2026-11-01', '2026-11-30', '2026-11-15',
+    jsonb_build_array(jsonb_build_object(
+      'workforce_id', '10000000-0000-4000-8000-000000000020',
+      'station_id', '10000000-0000-4000-8000-000000000005',
+      'current_target_amount', 3600,
+      'current_snapshot_hash', repeat('c', 64),
+      'expected_dependency_hash', repeat('f', 32),
+      'expected_source_change_id', '0'
+    ))
+  ) as result
+`);
+assert.equal(unrestrictedBatch.rows[0]?.result?.items?.length, 1);
+assert.equal(Number(unrestrictedBatch.rows[0]?.result?.items?.[0]?.instruction_amount), 3600);
+
+const unrestrictedItem = await db.query(`
+  select helper_publication_id, target_snapshot_hash, instruction_amount
+  from public.helper_payout_payment_items
+  where company_id = '10000000-0000-4000-8000-000000000001'
+    and helper_id = '10000000-0000-4000-8000-000000000020'
+    and period_start = '2026-11-01'
+`);
+assert.deepEqual(unrestrictedItem.rows, [{
+  helper_publication_id: null,
+  target_snapshot_hash: "c".repeat(64),
+  instruction_amount: "3600.00"
+}]);
+
+const processingPreview = await db.query(`
+  select eligible, eligibility_code, payment_status, processing_amount,
+    balance_payable, available_to_pay
+  from public.helper_preview_payout_payment_rows(
+    '10000000-0000-4000-8000-000000000001', '2026-11-01', '2026-11-30',
+    jsonb_build_array(jsonb_build_object(
+      'workforce_id', '10000000-0000-4000-8000-000000000020',
+      'station_id', '10000000-0000-4000-8000-000000000005',
+      'current_target_amount', 3600,
+      'current_snapshot_hash', repeat('c', 64)
+    ))
+  )
+`);
+assert.equal(processingPreview.rows[0]?.eligible, false);
+assert.equal(processingPreview.rows[0]?.eligibility_code, "payment_processing");
+assert.equal(processingPreview.rows[0]?.payment_status, "Payment Processing");
+assert.equal(Number(processingPreview.rows[0]?.processing_amount), 3600);
+assert.equal(Number(processingPreview.rows[0]?.balance_payable), 3600);
+assert.equal(Number(processingPreview.rows[0]?.available_to_pay), 0);
+
+const publicationColumn = await db.query(`
+  select is_nullable
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'helper_payout_payment_items'
+    and column_name = 'helper_publication_id'
+`);
+assert.equal(publicationColumn.rows[0]?.is_nullable, "YES");
+
 await db.close();
-console.log("Helper payout bank payment ledger migration verified.");
+console.log("Helper payout bank payment ledger and positive-balance eligibility verified.");

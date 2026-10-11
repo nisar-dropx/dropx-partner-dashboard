@@ -220,10 +220,15 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
 });
 
 test("the UI exposes refresh-pending positive balances without treating them as authoritative", () => {
-  assert.match(table, /publicationRefreshPending\(row\) && preliminaryAvailableToPay > 0/);
+  assert.match(
+    table,
+    /const canRefreshCandidate = audience === "workforce"[\s\S]*?publicationRefreshPending\(row\)[\s\S]*?preliminaryAvailableToPay > 0/
+  );
   assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
-  assert.match(table, /BANK_PAYMENT_BLOCKED_STATUSES/);
-  assert.match(table, /row\.panAadhaarStatus !== "NOT LINKED"/);
+  assert.match(table, /visibleStatus === "payment processing"/);
+  assert.match(table, /visibleStatus === "payment on hold"/);
+  assert.match(table, /audience === "workforce" && visibleStatus === "pan not linked"/);
+  assert.match(table, /audience === "helpers" \|\| row\.panAadhaarStatus !== "NOT LINKED"/);
   assert.match(table, /publicationRefreshCount=\{selectedBankRefreshPendingCount\}/);
   assert.match(table, /row balance and every payment eligibility rule are checked again/);
   assert.match(bankDialog, /Refresh before file generation/);

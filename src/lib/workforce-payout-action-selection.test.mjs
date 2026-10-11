@@ -252,10 +252,16 @@ test("payout UI separates one-row advance recovery from complete-location notifi
 
 test("publication-refresh-pending rows remain explicit preliminary bank candidates", () => {
   assert.match(payoutTable, /eligibilityCode\?\.trim\(\)\.toLowerCase\(\) === "publication_refresh_pending"/);
-  assert.match(payoutTable, /publicationRefreshPending\(row\) && preliminaryAvailableToPay > 0/);
+  assert.match(
+    payoutTable,
+    /const canRefreshCandidate = audience === "workforce"[\s\S]*?publicationRefreshPending\(row\)[\s\S]*?preliminaryAvailableToPay > 0/
+  );
   assert.match(payoutTable, /row\.dropxStatus\.trim\(\)\.toLowerCase\(\) === "active"/);
-  assert.match(payoutTable, /row\.panAadhaarStatus !== "NOT LINKED"/);
-  assert.match(payoutTable, /BANK_PAYMENT_BLOCKED_STATUSES\.has\(visibleStatus\)/);
+  assert.match(payoutTable, /audience === "helpers" \|\| hasActiveWorkforceProfileStatus\(row\)/);
+  assert.match(payoutTable, /audience === "helpers" \|\| row\.panAadhaarStatus !== "NOT LINKED"/);
+  assert.match(payoutTable, /visibleStatus === "payment processing"/);
+  assert.match(payoutTable, /visibleStatus === "payment on hold"/);
+  assert.match(payoutTable, /audience === "workforce" && visibleStatus === "pan not linked"/);
   assert.match(payoutTable, /bankActionableIds\.has\(row\.id\)/);
   assert.match(payoutTable, /Refresh before bank file · eligibility rechecked/);
   assert.match(payoutTable, /No stale publication will be paid/);
