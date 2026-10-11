@@ -41,7 +41,8 @@ test("bank APIs opt into Helper ledgers without changing the Workforce default",
   );
   assert.match(bankFile, /rpc\("helper_create_payout_payment_row_batch"/);
   assert.match(bankFile, /rpc\("workforce_create_payout_payment_row_batch"/);
-  assert.match(bankFile, /referencePrefix: audience === "helpers" \? "HP" : "WP"/);
+  assert.match(bankFile, /referencePrefix: audience === "helpers" \? "HP" : "WF"/);
+  assert.match(redownload, /referencePrefix: audience === "helpers" \? "HP" : "WF"/);
   assert.match(redownload, /rpc\("helper_get_payout_payment_redownload"/);
   assert.match(redownload, /buildBatchWorkbook\(batchItems, audience\)/);
   assert.match(response, /form\.get\("audience"\)/);
@@ -57,8 +58,10 @@ test("bank APIs opt into Helper ledgers without changing the Workforce default",
   assert.match(history, /from\("helper_payout_payment_items"\)/);
   assert.match(history, /from\("helper_payout_payment_hold_events"\)/);
   assert.match(history, /from\("helper_payout_payment_batches"\)/);
-  assert.match(fedOne, /referencePrefix\?: "WP" \| "HP"/);
+  assert.match(fedOne, /referencePrefix\?: "WF" \| "WP" \| "HP"/);
   assert.match(fedOne, /referencePrefix === "HP"[\s\S]*?\^HP/);
+  assert.match(fedOne, /\^\(\?:WF\|WP\)/);
+  assert.match(fedOne, /startsWith\("WF"\)[\s\S]*?startsWith\("WP"\)/);
 });
 
 test("base Helper bank ledger establishes isolated location-scoped history", () => {

@@ -28,7 +28,7 @@ function instruction(overrides = {}) {
     beneficiaryIfsc: "FDRL0000123",
     beneficiaryName: "A Worker",
     locationCode: "nlrf",
-    referenceNo: "wpd111092026v1",
+    referenceNo: "wfd111092026v1",
     ...overrides
   };
 }
@@ -55,7 +55,7 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
         beneficiaryIfsc: "hdfc0000123",
         beneficiaryName: "Another Worker",
         locationCode: "KOZA",
-        referenceNo: "WPD222092026V2"
+        referenceNo: "WFD222092026V2"
       })
     ]
   });
@@ -77,7 +77,7 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
     "",
     "NLRF",
     "NET PAY",
-    "WPD111092026V1"
+    "WFD111092026V1"
   ]);
   assert.deepEqual(rows[2], [
     "NEFT",
@@ -91,7 +91,7 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
     "",
     "KOZA",
     "NET PAY",
-    "WPD222092026V2"
+    "WFD222092026V2"
   ]);
   assert.equal(sheet.C2.t, "n", "bank amounts must be numeric cells");
   assert.equal(sheet.B2.t, "s", "bank account numbers must remain text cells");
@@ -107,13 +107,13 @@ test("keeps separate location instructions for the same beneficiary as distinct 
         amountPaise: 47_401,
         beneficiaryName: "SIDDIQUE M",
         locationCode: "KBWE",
-        referenceNo: "WPT1013092026V2"
+        referenceNo: "WFT1013092026V2"
       }),
       instruction({
         amountPaise: 7_112_556,
         beneficiaryName: "SIDDIQUE M",
         locationCode: "KLZA",
-        referenceNo: "WPT1013092026V3"
+        referenceNo: "WFT1013092026V3"
       })
     ]
   });
@@ -125,9 +125,22 @@ test("keeps separate location instructions for the same beneficiary as distinct 
     creditRemarks: row["Credit Remarks"],
     reference: row["Unique Customer Reference Number"]
   })), [
-    { account: "001234567890", amount: 474.01, creditRemarks: "KBWE", reference: "WPT1013092026V2" },
-    { account: "001234567890", amount: 71125.56, creditRemarks: "KLZA", reference: "WPT1013092026V3" }
+    { account: "001234567890", amount: 474.01, creditRemarks: "KBWE", reference: "WFT1013092026V2" },
+    { account: "001234567890", amount: 71125.56, creditRemarks: "KLZA", reference: "WFT1013092026V3" }
   ]);
+});
+
+test("preserves historical WP references when a Workforce bank file is re-downloaded", () => {
+  const [legacyRow] = buildWorkforceFedOneRows({
+    debitAccountNumber: "100000000001",
+    referencePrefix: "WF",
+    valueDate: "2026-10-10",
+    instructions: [instruction({ referenceNo: "WPD111092026V1" })]
+  });
+
+  assert.equal(legacyRow["Unique Customer Reference Number"], "WPD111092026V1");
+  assert.equal(isValidWorkforceBankReference("WPD111092026V1", "WF"), true);
+  assert.equal(isValidWorkforceBankReference("WFD2222092026V1", "WF"), true);
 });
 
 test("reuses the FedOne format for Helper references without weakening the Workforce default", () => {
@@ -135,16 +148,16 @@ test("reuses the FedOne format for Helper references without weakening the Workf
     debitAccountNumber: "100000000001",
     referencePrefix: "HP",
     valueDate: "2026-10-10",
-    instructions: [instruction({ referenceNo: "HPD1001102026V1" })]
+    instructions: [instruction({ referenceNo: "HPD0826092026V1" })]
   });
-  assert.equal(helperRow["Unique Customer Reference Number"], "HPD1001102026V1");
-  assert.equal(isValidWorkforceBankReference("HPD1001102026V1", "HP"), true);
-  assert.equal(isValidWorkforceBankReference("HPD1001102026V1"), false);
+  assert.equal(helperRow["Unique Customer Reference Number"], "HPD0826092026V1");
+  assert.equal(isValidWorkforceBankReference("HPD0826092026V1", "HP"), true);
+  assert.equal(isValidWorkforceBankReference("HPD0826092026V1"), false);
 
   const response = responseWorkbook([
-    ["HPD1001102026V1", "001234567890", "FDRL0000123", 12345.67, "PAID", "HELPERUTR1", "Success"]
+    ["HPD0826092026V1", "001234567890", "FDRL0000123", 12345.67, "PAID", "HELPERUTR1", "Success"]
   ]);
-  assert.equal(parseWorkforceFedOneResponse(response, { referencePrefix: "HP" })[0].referenceNo, "HPD1001102026V1");
+  assert.equal(parseWorkforceFedOneResponse(response, { referencePrefix: "HP" })[0].referenceNo, "HPD0826092026V1");
   assert.throws(
     () => parseWorkforceFedOneResponse(response),
     /not a valid Workforce payment reference/i
@@ -153,33 +166,45 @@ test("reuses the FedOne format for Helper references without weakening the Workf
 
 test("parses mixed Workforce and Helper responses while skipping unrelated bank references", () => {
   const response = responseWorkbook([
-    ["WPF999092026V9", "bad", "bad", "not-an-amount", "", "", ""],
+    ["WFF999092026V9", "bad", "bad", "not-an-amount", "", "", ""],
     ["BANK-OTHER-001", "", "", "not-an-amount", "", "", ""],
-    ["WPD111092026V1", "001234567890", "FDRL0000123", 100, "PAID", "WORKUTR1", "Success"],
+    ["WFD2222092026V1", "001234567890", "FDRL0000123", 100, "PAID", "WORKUTR1", "Success"],
+    ["WPD111092026V1", "001234567891", "FDRL0000123", 75, "PAID", "LEGACYUTR1", "Success"],
     ["HPD1001102026V1", "9988776655", "HDFC0000456", 50, "CANCELLED", "", "Returned"]
   ]);
 
   assert.deepEqual(extractDropxFedOneReferenceCandidates(response), [
-    "WPF999092026V9",
+    "WFF999092026V9",
+    "WFD2222092026V1",
     "WPD111092026V1",
     "HPD1001102026V1"
   ]);
   assert.deepEqual(parseDropxFedOneResponse(response, new Set([
+    "WFD2222092026V1",
     "WPD111092026V1",
     "HPD1001102026V1"
   ])), {
     workforceRows: [{
       rowNumber: 4,
-      referenceNo: "WPD111092026V1",
+      referenceNo: "WFD2222092026V1",
       creditAccount: "001234567890",
       ifsc: "FDRL0000123",
       debitAmountPaise: 10000,
       status: "PAID",
       utrCin: "WORKUTR1",
       remarks: "Success"
+    }, {
+      rowNumber: 5,
+      referenceNo: "WPD111092026V1",
+      creditAccount: "001234567891",
+      ifsc: "FDRL0000123",
+      debitAmountPaise: 7500,
+      status: "PAID",
+      utrCin: "LEGACYUTR1",
+      remarks: "Success"
     }],
     helperRows: [{
-      rowNumber: 5,
+      rowNumber: 6,
       referenceNo: "HPD1001102026V1",
       creditAccount: "9988776655",
       ifsc: "HDFC0000456",
@@ -189,7 +214,7 @@ test("parses mixed Workforce and Helper responses while skipping unrelated bank 
       remarks: "Returned"
     }],
     skippedRows: [
-      { rowNumber: 2, referenceNo: "WPF999092026V9" },
+      { rowNumber: 2, referenceNo: "WFF999092026V9" },
       { rowNumber: 3, referenceNo: "BANK-OTHER-001" }
     ]
   });
@@ -275,8 +300,9 @@ test("rejects malformed Federal Bank account, IFSC and Workforce reference ident
   assert.equal(isValidWorkforceBankAccount("0012-3456"), false);
   assert.equal(isValidWorkforceBankIfsc(" fdrl\u200b 0000123 "), true);
   assert.equal(isValidWorkforceBankIfsc("FDRL1000123"), false, "the fifth IFSC character must be zero");
+  assert.equal(isValidWorkforceBankReference(" wf d2222092026v1 "), true);
   assert.equal(isValidWorkforceBankReference(" wp d111092026v1 "), true);
-  assert.equal(isValidWorkforceBankReference("WPD111132026V1"), false, "the embedded payment month must be real");
+  assert.equal(isValidWorkforceBankReference("WFD111132026V1"), false, "the embedded payment month must be real");
 
   assert.throws(() => buildWorkforceFedOneRows({
     debitAccountNumber: "0012-3456",
@@ -296,7 +322,7 @@ test("rejects malformed Federal Bank account, IFSC and Workforce reference ident
   assert.throws(() => buildWorkforceFedOneRows({
     debitAccountNumber: "00123456",
     valueDate: "2026-10-09",
-    instructions: [instruction({ referenceNo: "WPD111132026V1" })]
+    instructions: [instruction({ referenceNo: "WFD111132026V1" })]
   }), /Unique Customer Reference Number is invalid/i);
 });
 

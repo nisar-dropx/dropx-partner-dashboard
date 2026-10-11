@@ -142,7 +142,7 @@ function buildBatchWorkbook(items: RedownloadItem[], audience: PayoutAudience) {
   }
   return buildWorkforceFedOneWorkbook({
     debitAccountNumber,
-    referencePrefix: audience === "helpers" ? "HP" : "WP",
+    referencePrefix: audience === "helpers" ? "HP" : "WF",
     valueDate,
     instructions: items.map((item) => ({
       amountPaise: paise(item.instruction_amount),

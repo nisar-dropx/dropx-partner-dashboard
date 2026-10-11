@@ -38,12 +38,12 @@ export type WorkforceFedOnePaymentInstruction = {
 export type WorkforceFedOneWorkbookOptions = {
   debitAccountNumber: string;
   instructions: readonly WorkforceFedOnePaymentInstruction[];
-  referencePrefix?: "WP" | "HP";
+  referencePrefix?: "WF" | "WP" | "HP";
   valueDate: string;
 };
 
 export type WorkforceFedOneResponseOptions = {
-  referencePrefix?: "WP" | "HP";
+  referencePrefix?: "WF" | "WP" | "HP";
 };
 
 export type DropxFedOneResponse = {
@@ -123,11 +123,11 @@ export function isValidWorkforceBankIfsc(value: unknown) {
   return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizeWorkforceBankIfsc(value));
 }
 
-export function isValidWorkforceBankReference(value: unknown, referencePrefix: "WP" | "HP" = "WP") {
+export function isValidWorkforceBankReference(value: unknown, referencePrefix: "WF" | "WP" | "HP" = "WF") {
   const reference = normalizeWorkforceBankReference(value);
   const pattern = referencePrefix === "HP"
     ? /^HP[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/
-    : /^WP[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/;
+    : /^(?:WF|WP)[A-Z0-9]+(?:0[1-9]|1[0-2])[0-9]{4}V[1-9][0-9]*$/;
   return reference.length <= 64 && pattern.test(reference);
 }
 
@@ -319,7 +319,7 @@ function inspectFedOneResponseSheet(responseSheet: FedOneResponseSheet) {
     );
     const referencePrefix = referenceNo.slice(0, 2);
     if (
-      (referencePrefix !== "WP" && referencePrefix !== "HP")
+      (referencePrefix !== "WF" && referencePrefix !== "WP" && referencePrefix !== "HP")
       || !isValidWorkforceBankReference(referenceNo, referencePrefix)
       || seen.has(referenceNo)
     ) continue;
@@ -365,7 +365,7 @@ function parseFedOneResponseSheet(
     const rawReference = values["Customer Ref. No."];
     const referenceNo = normalizeWorkforceBankReference(rawReference);
     const referencePrefix = referenceNo.slice(0, 2);
-    const isDropxReference = referencePrefix === "WP" || referencePrefix === "HP";
+    const isDropxReference = referencePrefix === "WF" || referencePrefix === "WP" || referencePrefix === "HP";
     if (options.ownedReferences && !options.ownedReferences.has(referenceNo)) {
       skippedRows.push({ rowNumber, referenceNo });
       continue;
@@ -387,7 +387,7 @@ function parseFedOneResponseSheet(
     if (!referenceNo) errors.push(`Row ${rowNumber}: Customer Ref. No. is required.`);
     else {
       const expectedPrefix = options.ownedReferences
-        ? referencePrefix as "WP" | "HP"
+        ? referencePrefix as "WF" | "WP" | "HP"
         : options.referencePrefix;
       if (!isDropxReference || !isValidWorkforceBankReference(referenceNo, expectedPrefix)) {
         const subject = expectedPrefix === "HP" ? "Helper" : "Workforce";
@@ -468,6 +468,6 @@ export function parsePreparedDropxFedOneResponse(
   return {
     helperRows: rows.filter((row) => row.referenceNo.startsWith("HP")),
     skippedRows,
-    workforceRows: rows.filter((row) => row.referenceNo.startsWith("WP"))
+    workforceRows: rows.filter((row) => row.referenceNo.startsWith("WF") || row.referenceNo.startsWith("WP"))
   };
 }

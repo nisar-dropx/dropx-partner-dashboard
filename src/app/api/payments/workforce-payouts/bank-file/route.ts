@@ -164,7 +164,7 @@ function workbookResponse(result: Record<string, unknown>, audience: PayoutAudie
   })).digest("hex");
   const workbook = buildWorkforceFedOneWorkbook({
     debitAccountNumber,
-    referencePrefix: audience === "helpers" ? "HP" : "WP",
+    referencePrefix: audience === "helpers" ? "HP" : "WF",
     valueDate,
     instructions: items.map((item) => ({
       amountPaise: paise(item.instruction_amount),
