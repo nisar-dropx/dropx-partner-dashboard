@@ -9,6 +9,16 @@ import {
   ScoreReview,
 } from "./audit-score";
 import { AuditDownloads } from "./audit-downloads";
+import {
+  ShipmentResponses,
+  clearShipmentResponseDraft,
+} from "./shipment-responses";
+import {
+  applyAuditDraft,
+  clearAuditDraft,
+  loadAuditDraft,
+  saveAuditDraft,
+} from "./audit-draft";
 import { AuditEmailDelivery } from "./audit-email-delivery";
 import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -18,11 +28,10 @@ import {
 } from "@/lib/ops-pulse/station-audit-planning";
 import {
   ShipmentInspection,
-  ShipmentResponses,
   EmployeePicker,
 } from "./shipment-inspection";
 import type { AuditEmployee } from "@/lib/ops-pulse/station-audit-reconciliation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   loadAuditInspectionContext,
   addAuditManagerComment,
@@ -185,6 +194,82 @@ export function AuditDetail({
   );
   const submit = useAction();
   const lifecycle = useAction();
+  // Entries are kept on this device while the audit is in progress.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shipmentsRef = useRef(shipments);
+  shipmentsRef.current = shipments;
+  const draftReady = useRef(false);
+  const draftTimer = useRef<number | null>(null);
+  const [draftNotice, setDraftNotice] = useState("");
+  const [restoredNotes, setRestoredNotes] = useState<Record<
+    string,
+    string
+  > | null>(null);
+  const draftTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  const saveDraft = (announce: boolean) => {
+    if (!formRef.current || !draftReady.current) return;
+    const remarks = formRef.current.elements.namedItem("tid_remarks");
+    const savedAt = saveAuditDraft(audit.id, formRef.current, {
+      shipments: shipmentsRef.current,
+      tidRemarks: remarks instanceof HTMLInputElement ? remarks.value : "",
+    });
+    if (savedAt)
+      setDraftNotice(
+        `Draft saved on this device at ${draftTime(savedAt)}. Attached files are not kept.`,
+      );
+    else if (announce)
+      setDraftNotice("The draft could not be saved on this device.");
+  };
+  const formReady = editable && !!inspection;
+  useEffect(() => {
+    if (!formReady || draftReady.current) return;
+    if (audit.status_code !== "in_progress") {
+      // A submitted audit reopened for correction starts from the saved record.
+      clearAuditDraft(audit.id);
+      draftReady.current = true;
+      return;
+    }
+    const draft = loadAuditDraft<{
+      shipments?: ShipmentDraft[];
+      tidRemarks?: string;
+    }>(audit.id);
+    if (!draft) {
+      draftReady.current = true;
+      return;
+    }
+    if (Array.isArray(draft.extra?.shipments))
+      setShipments(draft.extra.shipments);
+    try {
+      const notes = JSON.parse(draft.extra?.tidRemarks || "{}");
+      if (notes && typeof notes === "object") setRestoredNotes(notes);
+    } catch {
+      // An unreadable observation list is ignored; the rest of the draft still applies.
+    }
+    // Fields that depend on other entries (a variance reason, an exception row)
+    // only exist after the first pass, so apply the draft again shortly after.
+    const timers = [0, 250, 800].map((delay, pass) =>
+      window.setTimeout(() => {
+        if (formRef.current) applyAuditDraft(formRef.current, draft);
+        if (pass === 2) {
+          draftReady.current = true;
+          setDraftNotice(
+            `Your draft from ${draftTime(draft.savedAt)} was restored. Attach files again before submitting.`,
+          );
+        }
+      }, delay),
+    );
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [formReady, audit.id, audit.status_code]);
+  useEffect(
+    () => () => {
+      if (draftTimer.current) window.clearTimeout(draftTimer.current);
+    },
+    [],
+  );
   const denominations = workspace.options.filter(
     (option) => option.option_group === "cash_denomination",
   );
@@ -363,7 +448,10 @@ export function AuditDetail({
       >
         {canPerform && (audit.status_code === "in_progress" || editing) ? (
           <form
+            ref={formRef}
             onChange={(event) => {
+              if (draftTimer.current) window.clearTimeout(draftTimer.current);
+              draftTimer.current = window.setTimeout(() => saveDraft(false), 1500);
               const target = event.target as HTMLInputElement;
               if (!target.name?.startsWith("check_")) return;
               const data = new FormData(event.currentTarget);
@@ -389,7 +477,14 @@ export function AuditDetail({
                   ),
                 );
                 setUploadProgress("Saving audit…");
-                return submitStationAudit(data);
+                const result = await submitStationAudit(data);
+                if (result.ok) {
+                  if (draftTimer.current) window.clearTimeout(draftTimer.current);
+                  draftReady.current = false;
+                  clearAuditDraft(audit.id);
+                  setDraftNotice("");
+                }
+                return result;
               });
             }}
           >
@@ -560,6 +655,7 @@ export function AuditDetail({
               inspection ? (
                 <ShipmentInspection
                   onDifferences={setDifferenceKeys}
+                  restoredNotes={restoredNotes}
                   lists={inspection.lists}
                   exceptions={existingShipments}
                 />
@@ -808,10 +904,23 @@ export function AuditDetail({
                       ? uploadProgress || "Submitting…"
                       : "Submit audit for review"}
                   </button>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    disabled={submit.pending || !inspection}
+                    onClick={() => saveDraft(true)}
+                  >
+                    Save draft
+                  </button>
                   {submit.notice ? (
                     <span className={styles.notice}>{submit.notice}</span>
                   ) : null}
                 </div>
+                {draftNotice ? (
+                  <p className={styles.checkHelp} role="status">
+                    {draftNotice}
+                  </p>
+                ) : null}
               </div>
             </details>
           </form>
@@ -1107,6 +1216,16 @@ function StationResponse({
   pending: boolean;
   notice: string;
 }) {
+  // The overall response text is kept on this device alongside the shipment answers.
+  const responseTextKey = `station-audit-response-text:${audit.id}`;
+  const [responseText, setResponseText] = useState("");
+  useEffect(() => {
+    try {
+      setResponseText(window.localStorage.getItem(responseTextKey) || "");
+    } catch {
+      // Storage is unavailable; start with an empty response.
+    }
+  }, [responseTextKey]);
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -1117,28 +1236,64 @@ function StationResponse({
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
+            // The shipment list is paged, so its answers arrive as one field.
+            let answers: Array<{
+              id: string;
+              tracking_id: string;
+              status: string;
+              remarks: string;
+              employee_ref: string;
+              complete: boolean;
+            }> = [];
+            try {
+              answers = JSON.parse(
+                String(data.get("shipment_responses_state") || "[]"),
+              );
+            } catch {
+              answers = [];
+            }
+            data.delete("shipment_responses_state");
+            data.delete("bulk_shipment_employee");
+            for (const key of Array.from(data.keys()))
+              if (key.startsWith("shipment_employee_view_")) data.delete(key);
+            const pending = answers.filter((answer) => !answer.complete);
+            if (pending.length) {
+              run(async () => ({
+                ok: false,
+                message: `${pending.length} of ${answers.length} shipments still need a status and remarks${pending.length <= 3 ? ` (${pending.map((p) => p.tracking_id).join(", ")})` : ""}. Choose "Not answered" in the list to see them. Your answers so far are saved on this device.`,
+              }));
+              return;
+            }
             data.set(
               "shipment_responses",
               JSON.stringify(
-                workspace.shipments
-                  .filter((s) => s.audit_id === audit.id && !s.is_resolved)
-                  .map((s) => ({
-                    id: s.id,
-                    status: data.get(`shipment_status_${s.id}`),
-                    remarks: data.get(`shipment_note_${s.id}`),
-                    employee_ref: data.get(`shipment_employee_${s.id}`),
-                  })),
+                answers.map(({ id, status, remarks, employee_ref }) => ({
+                  id,
+                  status,
+                  remarks,
+                  employee_ref,
+                })),
               ),
             );
             run(async () => {
               await uploadAuditFiles(data);
-              return respondToStationAudit(data);
+              const result = await respondToStationAudit(data);
+              if (result.ok) {
+                clearShipmentResponseDraft(audit.id);
+                try {
+                  window.localStorage.removeItem(responseTextKey);
+                } catch {
+                  // Storage is unavailable; nothing to clear.
+                }
+              }
+              return result;
             });
           }}
         >
           <input type="hidden" name="audit_id" value={audit.id} />
           <input type="hidden" name="updated_at" value={audit.updated_at} />
           <ShipmentResponses
+            auditId={audit.id}
             shipments={workspace.shipments.filter(
               (s) => s.audit_id === audit.id,
             )}
@@ -1165,6 +1320,18 @@ function StationResponse({
             <textarea
               name="response"
               required
+              value={responseText}
+              onChange={(event) => {
+                setResponseText(event.target.value);
+                try {
+                  window.localStorage.setItem(
+                    responseTextKey,
+                    event.target.value,
+                  );
+                } catch {
+                  // Storage is unavailable; the text stays on screen.
+                }
+              }}
               placeholder="What was corrected? Include the operational status and evidence reference."
             />
           </label>

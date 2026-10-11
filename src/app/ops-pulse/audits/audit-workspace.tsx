@@ -179,22 +179,9 @@ function Modal({
       ref={ref}
       className={styles.dialog}
       aria-labelledby={id}
-      onCancel={(event) => {
-        event.preventDefault();
-        close();
-      }}
-      onClick={(event) => {
-        if (event.target === ref.current) {
-          const box = ref.current!.getBoundingClientRect();
-          if (
-            event.clientX < box.left ||
-            event.clientX > box.right ||
-            event.clientY < box.top ||
-            event.clientY > box.bottom
-          )
-            close();
-        }
-      }}
+      // The window closes only from its close button, so a stray click outside
+      // or the Escape key cannot discard an audit that is being filled in.
+      onCancel={(event) => event.preventDefault()}
     >
       <header className={styles.modalHead}>
         <h2 id={id}>{title}</h2>

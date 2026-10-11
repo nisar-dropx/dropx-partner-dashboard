@@ -1462,3 +1462,47 @@
   .reportDates button { width: 100%; }
   .reportTable { min-width: 960px; }
 }
+
+.bulkBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed #c9cfdb;
+  border-radius: 10px;
+  background: #f7f8fb;
+}
+.bulkBar strong {
+  flex-basis: 100%;
+  font-size: 13px;
+}
+.bulkBar input,
+.bulkBar select {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.bulkBar > div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.responseSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.responseFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.shipmentAnswered {
+  border-color: #9bd0ad;
+  background: #f4fbf6;
+}

@@ -17,14 +17,21 @@ export function EmployeePicker({
   multiple = false,
   required = false,
   initial = [],
+  onChange,
 }: {
   name: string;
   people: AuditEmployee[];
   multiple?: boolean;
   required?: boolean;
   initial?: AuditEmployee[];
+  onChange?: (refs: string[]) => void;
 }) {
-  const [selected, setSelected] = useState(initial.map((p) => p.ref));
+  const [selected, setSelectedState] = useState(initial.map((p) => p.ref));
+  const setSelected = (change: (old: string[]) => string[]) => {
+    const next = change(selected);
+    setSelectedState(next);
+    onChange?.(next);
+  };
   const options = people
     .filter((p) => !multiple || !selected.includes(p.ref))
     .map((p) => ({
@@ -83,8 +90,11 @@ export function ShipmentInspection({
   lists,
   exceptions,
   onDifferences,
+  restoredNotes,
 }: {
   onDifferences?: (keys: string[]) => void;
+  /** Observations recovered from a saved draft; merged over what is on screen. */
+  restoredNotes?: Record<string, string> | null;
   lists: { expected: string[]; scanned: string[] } | null;
   exceptions: StationAuditWorkspace["shipments"];
 }) {
@@ -96,6 +106,11 @@ export function ShipmentInspection({
   const [notes, setNotes] = useState<Record<string, string>>(
     Object.fromEntries(exceptions.map((e) => [e.tracking_id, e.remarks || ""])),
   );
+  const [bulkNote, setBulkNote] = useState("");
+  const [bulkTarget, setBulkTarget] = useState("empty");
+  useEffect(() => {
+    if (restoredNotes) setNotes((old) => ({ ...old, ...restoredNotes }));
+  }, [restoredNotes]);
   const result = useMemo(() => {
     try {
       const a = parseAuditTids(expected),
@@ -207,6 +222,49 @@ export function ShipmentInspection({
               {result.matched} matched · {result.missing.length} missing ·{" "}
               {result.excess.length} excess
             </p>
+            {rows.length > 1 && (
+              <div className={styles.bulkBar}>
+                <strong>Fill many at once</strong>
+                <input
+                  value={bulkNote}
+                  onChange={(e) => setBulkNote(e.target.value)}
+                  placeholder="Observation to apply"
+                  aria-label="Observation to apply to several shipments"
+                />
+                <select
+                  value={bulkTarget}
+                  onChange={(e) => setBulkTarget(e.target.value)}
+                  aria-label="Which shipments to fill"
+                >
+                  <option value="empty">Those without an observation</option>
+                  <option value="Missing">All missing</option>
+                  <option value="Excess">All excess</option>
+                  <option value="all">All {rows.length}</option>
+                </select>
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  disabled={!bulkNote.trim()}
+                  onClick={() => {
+                    const text = bulkNote.trim();
+                    setNotes((old) => {
+                      const next = { ...old };
+                      for (const row of rows) {
+                        const wanted =
+                          bulkTarget === "all" ||
+                          (bulkTarget === "empty"
+                            ? !old[row.tid]?.trim()
+                            : row.kind === bulkTarget);
+                        if (wanted) next[row.tid] = text;
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+            )}
             <div className={styles.tidDifferences}>
               {rows.slice(page * 50, page * 50 + 50).map((row) => (
                 <label key={row.tid} className={styles.tidRow}>
@@ -274,93 +332,5 @@ export function ShipmentInspection({
         </label>
       </div>
     </section>
-  );
-}
-export function ShipmentResponses({
-  shipments,
-  options,
-  people,
-}: {
-  shipments: StationAuditWorkspace["shipments"];
-  options: AuditOption[];
-  people: AuditEmployee[];
-}) {
-  const [states, setStates] = useState<
-    Record<string, { status: string; remarks: string }>
-  >(
-    Object.fromEntries(
-      shipments.map((s) => [
-        s.id,
-        {
-          status: s.station_response?.status || "",
-          remarks: s.station_response?.remarks || "",
-        },
-      ]),
-    ),
-  );
-  return (
-    <div>
-      {shipments
-        .filter((s) => !s.is_resolved)
-        .map((s) => {
-          const state = states[s.id] || { status: "", remarks: "" };
-          const option = options.find((o) => o.code === state.status);
-          return (
-            <fieldset key={s.id} className={styles.shipmentResponse}>
-              <legend>
-                {s.tracking_id} · {s.discrepancy_code}
-              </legend>
-              <p className={styles.checkHelp}>{s.remarks}</p>
-              <label className={styles.inputLabel}>
-                Station status
-                <select
-                  name={`shipment_status_${s.id}`}
-                  required
-                  value={state.status}
-                  onChange={(e) =>
-                    setStates((old) => ({
-                      ...old,
-                      [s.id]: { ...state, status: e.target.value },
-                    }))
-                  }
-                >
-                  <option value="">Select status</option>
-                  {options.map((o) => (
-                    <option key={o.id} value={o.code}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className={styles.inputLabel}>
-                Remarks
-                <textarea
-                  name={`shipment_note_${s.id}`}
-                  required
-                  defaultValue={state.remarks}
-                  placeholder="Explain current status and follow-up"
-                />
-              </label>
-              <div className={styles.inputLabel}>
-                Employee ID{" "}
-                {option?.metadata.requires_employee === true
-                  ? "(required)"
-                  : "(optional)"}
-                <EmployeePicker
-                  key={`${s.id}:${state.status}`}
-                  name={`shipment_employee_${s.id}`}
-                  people={people}
-                  required={option?.metadata.requires_employee === true}
-                  initial={
-                    s.station_response?.employee
-                      ? [s.station_response.employee]
-                      : []
-                  }
-                />
-              </div>
-            </fieldset>
-          );
-        })}
-    </div>
   );
 }
