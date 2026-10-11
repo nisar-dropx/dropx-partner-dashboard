@@ -46,6 +46,12 @@ export type WorkforceFedOneResponseOptions = {
   referencePrefix?: "WP" | "HP";
 };
 
+export type DropxFedOneResponse = {
+  helperRows: WorkforceFedOneResponseRow[];
+  skippedRows: Array<{ rowNumber: number; referenceNo: string }>;
+  workforceRows: WorkforceFedOneResponseRow[];
+};
+
 export type WorkforceFedOneRow = {
   "Transaction Type": "IFT" | "NEFT";
   "Debit Account Number": string;
@@ -73,6 +79,12 @@ export type WorkforceFedOneResponseRow = {
 };
 
 type SheetCell = XLSX.CellObject & { f?: string };
+type FedOneResponseSheet = {
+  columnFor: (header: typeof WORKFORCE_FEDONE_RESPONSE_HEADERS[number]) => number;
+  headerIndex: number;
+  rows: unknown[][];
+  sheet: XLSX.WorkSheet;
+};
 
 function cleanCell(value: unknown) {
   return String(value ?? "")
@@ -253,10 +265,7 @@ function parseErrorList(errors: string[]) {
   return `The bank response file cannot be processed:\n${shown.map((error) => `- ${error}`).join("\n")}`;
 }
 
-export function parseWorkforceFedOneResponse(
-  bytes: ArrayBuffer | Uint8Array,
-  options: WorkforceFedOneResponseOptions = {}
-): WorkforceFedOneResponseRow[] {
+function readFedOneResponseSheet(bytes: ArrayBuffer | Uint8Array): FedOneResponseSheet {
   let workbook: XLSX.WorkBook;
   try {
     workbook = XLSX.read(workbookInput(bytes), { type: "array", raw: true });
@@ -294,9 +303,57 @@ export function parseWorkforceFedOneResponse(
     throw new Error(`The bank response header row contains duplicate required column(s): ${duplicatedHeaders.join(", ")}.`);
   }
   const columnFor = (header: typeof WORKFORCE_FEDONE_RESPONSE_HEADERS[number]) => headerPositions.get(normalizedHeader(header))?.[0] as number;
+  return { columnFor, headerIndex, rows, sheet };
+}
+
+function inspectFedOneResponseSheet(responseSheet: FedOneResponseSheet) {
+  const { columnFor, headerIndex, rows } = responseSheet;
+  const references: string[] = [];
+  const seen = new Set<string>();
+  let dataRowCount = 0;
+  for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex] ?? [];
+    if (row.some((value) => cleanCell(value))) dataRowCount += 1;
+    const referenceNo = normalizeWorkforceBankReference(
+      row[columnFor("Customer Ref. No.")] ?? ""
+    );
+    const referencePrefix = referenceNo.slice(0, 2);
+    if (
+      (referencePrefix !== "WP" && referencePrefix !== "HP")
+      || !isValidWorkforceBankReference(referenceNo, referencePrefix)
+      || seen.has(referenceNo)
+    ) continue;
+    seen.add(referenceNo);
+    references.push(referenceNo);
+  }
+  return { dataRowCount, referenceCandidates: references };
+}
+
+export function prepareDropxFedOneResponse(bytes: ArrayBuffer | Uint8Array) {
+  const responseSheet = readFedOneResponseSheet(bytes);
+  return {
+    ...inspectFedOneResponseSheet(responseSheet),
+    responseSheet
+  };
+}
+
+export function extractDropxFedOneReferenceCandidates(bytes: ArrayBuffer | Uint8Array) {
+  return prepareDropxFedOneResponse(bytes).referenceCandidates;
+}
+
+export function countFedOneResponseDataRows(bytes: ArrayBuffer | Uint8Array) {
+  return prepareDropxFedOneResponse(bytes).dataRowCount;
+}
+
+function parseFedOneResponseSheet(
+  responseSheet: FedOneResponseSheet,
+  options: WorkforceFedOneResponseOptions & { ownedReferences?: ReadonlySet<string> } = {}
+): { rows: WorkforceFedOneResponseRow[]; skippedRows: Array<{ rowNumber: number; referenceNo: string }> } {
+  const { columnFor, headerIndex, rows, sheet } = responseSheet;
 
   const errors: string[] = [];
   const parsed: WorkforceFedOneResponseRow[] = [];
+  const skippedRows: Array<{ rowNumber: number; referenceNo: string }> = [];
   const referenceRows = new Map<string, number>();
 
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
@@ -305,25 +362,37 @@ export function parseWorkforceFedOneResponse(
     const values = Object.fromEntries(WORKFORCE_FEDONE_RESPONSE_HEADERS.map((header) => [header, row[columnFor(header)] ?? ""])) as Record<typeof WORKFORCE_FEDONE_RESPONSE_HEADERS[number], unknown>;
     if (WORKFORCE_FEDONE_RESPONSE_HEADERS.every((header) => !cleanCell(values[header]))) continue;
 
+    const rawReference = values["Customer Ref. No."];
+    const referenceNo = normalizeWorkforceBankReference(rawReference);
+    const referencePrefix = referenceNo.slice(0, 2);
+    const isDropxReference = referencePrefix === "WP" || referencePrefix === "HP";
+    if (options.ownedReferences && !options.ownedReferences.has(referenceNo)) {
+      skippedRows.push({ rowNumber, referenceNo });
+      continue;
+    }
+
     for (const header of WORKFORCE_FEDONE_RESPONSE_HEADERS) {
       const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnFor(header) });
       const cell = sheet[address] as SheetCell | undefined;
       if (cell?.f) errors.push(`Row ${rowNumber}: formulas are not accepted in ${header}.`);
     }
 
-    const rawReference = values["Customer Ref. No."];
     const rawAccount = values["Credit Account"];
     if (unsafeNumericIdentifier(rawReference)) errors.push(`Row ${rowNumber}: Customer Ref. No. was stored as an unsafe Excel number.`);
     if (unsafeNumericIdentifier(rawAccount)) errors.push(`Row ${rowNumber}: Credit Account was stored as an unsafe Excel number.`);
 
-    const referenceNo = normalizeWorkforceBankReference(rawReference);
     const creditAccount = normalizeWorkforceBankAccount(rawAccount);
     const ifsc = normalizeWorkforceBankIfsc(values["IFSC Code"]);
     const status = cleanCell(values.Status).toUpperCase();
     if (!referenceNo) errors.push(`Row ${rowNumber}: Customer Ref. No. is required.`);
-    else if (!isValidWorkforceBankReference(referenceNo, options.referencePrefix)) {
-      const subject = options.referencePrefix === "HP" ? "Helper" : "Workforce";
-      errors.push(`Row ${rowNumber}: Customer Ref. No. is not a valid ${subject} payment reference.`);
+    else {
+      const expectedPrefix = options.ownedReferences
+        ? referencePrefix as "WP" | "HP"
+        : options.referencePrefix;
+      if (!isDropxReference || !isValidWorkforceBankReference(referenceNo, expectedPrefix)) {
+        const subject = expectedPrefix === "HP" ? "Helper" : "Workforce";
+        errors.push(`Row ${rowNumber}: Customer Ref. No. is not a valid ${subject} payment reference.`);
+      }
     }
     if (!creditAccount) errors.push(`Row ${rowNumber}: Credit Account is required.`);
     else if (!isValidWorkforceBankAccount(creditAccount)) errors.push(`Row ${rowNumber}: Credit Account must contain 4 to 30 letters or digits.`);
@@ -359,7 +428,46 @@ export function parseWorkforceFedOneResponse(
     });
   }
 
-  if (!parsed.length) throw new Error("No payment response rows were found below the bank response headers.");
+  if (!parsed.length) {
+    if (options.ownedReferences) {
+      throw new Error("No matching Workforce or Helper payment references were found for this company.");
+    }
+    throw new Error("No payment response rows were found below the bank response headers.");
+  }
   if (errors.length) throw new Error(parseErrorList(errors));
-  return parsed;
+  return { rows: parsed, skippedRows };
+}
+
+function parseFedOneResponse(
+  bytes: ArrayBuffer | Uint8Array,
+  options: WorkforceFedOneResponseOptions & { ownedReferences?: ReadonlySet<string> } = {}
+) {
+  return parseFedOneResponseSheet(readFedOneResponseSheet(bytes), options);
+}
+
+export function parseWorkforceFedOneResponse(
+  bytes: ArrayBuffer | Uint8Array,
+  options: WorkforceFedOneResponseOptions = {}
+): WorkforceFedOneResponseRow[] {
+  return parseFedOneResponse(bytes, options).rows;
+}
+
+export function parseDropxFedOneResponse(
+  bytes: ArrayBuffer | Uint8Array,
+  ownedReferences: ReadonlySet<string>
+): DropxFedOneResponse {
+  return parsePreparedDropxFedOneResponse(prepareDropxFedOneResponse(bytes), ownedReferences);
+}
+
+export function parsePreparedDropxFedOneResponse(
+  prepared: ReturnType<typeof prepareDropxFedOneResponse>,
+  ownedReferences: ReadonlySet<string>
+): DropxFedOneResponse {
+  const normalizedOwnedReferences = new Set([...ownedReferences].map(normalizeWorkforceBankReference));
+  const { rows, skippedRows } = parseFedOneResponseSheet(prepared.responseSheet, { ownedReferences: normalizedOwnedReferences });
+  return {
+    helperRows: rows.filter((row) => row.referenceNo.startsWith("HP")),
+    skippedRows,
+    workforceRows: rows.filter((row) => row.referenceNo.startsWith("WP"))
+  };
 }

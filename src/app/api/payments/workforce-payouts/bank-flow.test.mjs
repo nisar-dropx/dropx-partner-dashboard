@@ -72,11 +72,23 @@ test("bank response import is privileged, bounded and file-hash idempotent", () 
   assert.match(bankResponseRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
   assert.match(bankResponseRoute, /authorization\.hasAllLocationAccess/);
   assert.match(bankResponseRoute, /MAX_FILE_BYTES = 10 \* 1024 \* 1024/);
+  assert.match(bankResponseRoute, /MAX_RESPONSE_ROWS = 5000/);
+  assert.match(bankResponseRoute, /REFERENCE_LOOKUP_CHUNK_SIZE = 50/);
+  assert.match(bankResponseRoute, /REFERENCE_LOOKUP_CONCURRENCY = 4/);
   assert.match(bankResponseRoute, /\.xlsx\?/);
   assert.match(bankResponseRoute, /createHash\("sha256"\)/);
   assert.match(bankResponseRoute, /p_operation_id: operationId/);
   assert.match(bankResponseRoute, /p_file_sha256: fileSha256/);
-  assert.match(bankResponseRoute, /rpc\("workforce_finalize_payout_payment_response"/);
+  assert.match(bankResponseRoute, /prepareDropxFedOneResponse\(bytes\)/);
+  assert.match(bankResponseRoute, /from\(lookup\.table\)[\s\S]*?\.eq\("company_id", companyId\)[\s\S]*?\.in\("reference_no", lookup\.references\)/);
+  assert.match(bankResponseRoute, /parsePreparedDropxFedOneResponse\(prepared, ownedReferences\)/);
+  assert.match(bankResponseRoute, /rpc\("finalize_owned_payout_payment_response"/);
+  assert.match(bankResponseRoute, /p_workforce_rows: normalizedRows\(parsed\.workforceRows\)/);
+  assert.match(bankResponseRoute, /p_helper_rows: normalizedRows\(parsed\.helperRows\)/);
+  assert.match(bankResponseRoute, /skipped: parsed\.skippedRows\.length/);
+  assert.match(bankResponseRoute, /skipped: responseRowCount/);
+  assert.match(bankDialog, /Matching Workforce and Helper references are finalized together from either tab/);
+  assert.match(bankDialog, /Skipped \$\{skippedCount\} unrelated bank reference/);
 });
 
 test("payment history is finance-restricted, company-scoped and masks account numbers", () => {
@@ -208,10 +220,15 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
 });
 
 test("the UI exposes refresh-pending positive balances without treating them as authoritative", () => {
-  assert.match(table, /publicationRefreshPending\(row\) && preliminaryAvailableToPay > 0/);
+  assert.match(
+    table,
+    /const canRefreshCandidate = audience === "workforce"[\s\S]*?publicationRefreshPending\(row\)[\s\S]*?preliminaryAvailableToPay > 0/
+  );
   assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
-  assert.match(table, /BANK_PAYMENT_BLOCKED_STATUSES/);
-  assert.match(table, /row\.panAadhaarStatus !== "NOT LINKED"/);
+  assert.match(table, /visibleStatus === "payment processing"/);
+  assert.match(table, /visibleStatus === "payment on hold"/);
+  assert.match(table, /audience === "workforce" && visibleStatus === "pan not linked"/);
+  assert.match(table, /audience === "helpers" \|\| row\.panAadhaarStatus !== "NOT LINKED"/);
   assert.match(table, /publicationRefreshCount=\{selectedBankRefreshPendingCount\}/);
   assert.match(table, /row balance and every payment eligibility rule are checked again/);
   assert.match(bankDialog, /Refresh before file generation/);
