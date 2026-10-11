@@ -76,9 +76,11 @@ const checks = [
     "Biometric ID generation must preserve long decimal IDs as canonical strings without precision loss."
   ],
   [
-    biometricEnrolments.indexOf("const existingResult") < biometricEnrolments.indexOf("const deactivation")
+    biometricEnrolments.includes('.rpc("replace_biometric_enrolment_assignment"')
+      && biometricEnrolments.includes("p_account_id: personId")
+      && !biometricEnrolments.includes("p_close_ids")
       && !biometricEnrolments.includes(".limit(50)"),
-    "Biometric reassignment must validate conflicts before deactivating the current enrolment and without an arbitrary 50-row cap."
+    "Biometric reassignment must use the identity-scoped transactional RPC without a caller-controlled close set or arbitrary 50-row cap."
   ]
 ];
 

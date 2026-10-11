@@ -1,4 +1,23 @@
 import { supabaseAdmin } from "../supabase-admin";
+import {
+  buildHistoricalBiometricOwnershipWindows,
+  type HistoricalBiometricMapping
+} from "./attendance-reconciliation-policy";
+import {
+  biometricEnrolmentIdCandidates,
+  biometricCandidateOwnerKey,
+  isSameBiometricOwner,
+  normalizeBiometricEnrolmentId,
+  resolveBiometricCandidate,
+  type BiometricEnrolmentCandidate
+} from "./enrolment-resolution";
+import {
+  buildAttendancePunchMergePlan,
+  isPendingAttendanceReviewPunch,
+  RECONCILIATION_PROMOTABLE_PUNCH_FILTER,
+  selectAttendancePunchSummaryRows,
+  shouldClearStalePresentDaily
+} from "./attendance-rebuild-policy";
 import { wfhCreditState, wfhCreditLabel, type WfhCreditState } from "../wfh-attendance-credit";
 import { formatShiftClock, preferActiveRosterRow, preferActiveRosterRowsByKey, type RosterPlanPreference } from "../roster-plan-preference";
 import {
@@ -173,16 +192,11 @@ function isManualRegularizationDay(row: DailyRow) {
 }
 
 function normalizeBiometricId(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim().replace(/^0+(?=\d)/, "");
-  return normalized || "0";
+  return normalizeBiometricEnrolmentId(value) || "0";
 }
 
 function biometricIdVariants(values: string[]) {
-  return Array.from(new Set(values.flatMap((value) => {
-    const raw = String(value ?? "").trim();
-    const normalized = normalizeBiometricId(raw);
-    return [raw, normalized, normalized.padStart(6, "0"), normalized.padStart(8, "0")].filter(Boolean);
-  })));
+  return Array.from(new Set(values.flatMap((value) => biometricEnrolmentIdCandidates(value))));
 }
 
 /** Prefer the enrolment spelling that already holds the richest day summary. */
@@ -849,7 +863,7 @@ export async function loadDailyWorkerSnapshot({
     if (!employee.error && employee.data) {
       workerCode = employee.data.employee_code ?? null;
       workerName = employee.data.full_name ?? null;
-      locationId = employee.data.location_id ?? locationId;
+      locationId ??= employee.data.location_id ?? null;
     }
   } else if (accountId && ["workforce", "field_executive", "contractor", "vendor", "worker"].includes(profileType ?? "")) {
     const table = profileType === "contractor"
@@ -860,7 +874,7 @@ export async function loadDailyWorkerSnapshot({
           ? "workers"
           : "workforce";
     const candidateTables = profileType === "worker"
-      ? [table, "workforce_helpers", "workforce_pickers"] as const
+      ? ["helpers", table, "workforce_helpers", "workforce_pickers"] as const
       : [table] as const;
     for (const candidateTable of candidateTables) {
       const profile = await supabaseAdmin
@@ -872,7 +886,7 @@ export async function loadDailyWorkerSnapshot({
       if (!profile.error && profile.data) {
         workerCode = profile.data.dropx_id ?? null;
         workerName = profile.data.full_name ?? null;
-        locationId = profile.data.location_id ?? locationId;
+        locationId ??= profile.data.location_id ?? null;
         break;
       }
     }
@@ -886,7 +900,7 @@ export async function loadDailyWorkerSnapshot({
     if (!contractor.error && contractor.data) {
       workerCode = contractor.data.dropx_id ?? null;
       workerName = contractor.data.full_name ?? null;
-      locationId = contractor.data.location_id ?? locationId;
+      locationId ??= contractor.data.location_id ?? null;
     } else {
       const executive = await supabaseAdmin
         .from("workforce")
@@ -897,7 +911,7 @@ export async function loadDailyWorkerSnapshot({
       if (!executive.error && executive.data) {
         workerCode = executive.data.dropx_id ?? null;
         workerName = executive.data.full_name ?? null;
-        locationId = executive.data.location_id ?? locationId;
+        locationId ??= executive.data.location_id ?? null;
       }
     }
   }
@@ -923,38 +937,135 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
 
   const enrolmentVariants = biometricIdVariants([enrolmentId]);
   const canonicalEnrolmentId = normalizeBiometricId(enrolmentId);
-  const { data, error } = await supabaseAdmin
-    .from("attendance_punches")
-    .select("id, punch_time, enrolment_id")
-    .eq("company_id", companyId)
-    .in("enrolment_id", enrolmentVariants)
-    .eq("punch_date", punchDate)
-    .eq("calculated", true)
-    .order("punch_time", { ascending: true });
+  const [{ data, error }, existingDailyResult, ownershipResult] = await Promise.all([
+    supabaseAdmin
+      .from("attendance_punches")
+      .select("id,raw_event_id,device_serial,punch_time,enrolment_id,worker_type,profile_type,account_id,employee_id,field_executive_id,location_id,calculated,is_flagged,source")
+      .eq("company_id", companyId)
+      .in("enrolment_id", enrolmentVariants)
+      .eq("punch_date", punchDate)
+      .order("punch_time", { ascending: true }),
+    supabaseAdmin
+      .from("attendance_daily")
+      .select("enrolment_id,punch_date,punch_count,status,work_mode,remark,in_source,out_source,manual_in_request_id,manual_out_request_id")
+      .eq("company_id", companyId)
+      .in("enrolment_id", enrolmentVariants)
+      .eq("punch_date", punchDate),
+    supabaseAdmin
+      .from("biometric_enrolments")
+      .select("id,enrolment_id,worker_type,profile_type,account_id,employee_id,field_executive_id,location_id,status,effective_from,effective_to")
+      .eq("company_id", companyId)
+      .in("enrolment_id", enrolmentVariants)
+      .lte("effective_from", punchDate)
+      .or(`effective_to.is.null,effective_to.gte.${punchDate}`)
+  ]);
   if (error) throw new Error(error.message);
+  if (existingDailyResult.error && !isMissingColumnError(existingDailyResult.error)) {
+    throw new Error(existingDailyResult.error.message);
+  }
+  if (ownershipResult.error) throw new Error(ownershipResult.error.message);
 
-  const seenTimes = new Set<string>();
-  const punches = (data ?? []).filter((punch) => {
-    const stamp = String(punch.punch_time ?? "");
-    if (!stamp || seenTimes.has(stamp)) return false;
-    seenTimes.add(stamp);
-    return true;
-  });
-  // Freeze punch times before order updates so rebuild never picks up approval/server "now".
+  // A reviewed manual regularization is the authoritative daily summary. Raw
+  // punches remain auditable, but a later live/catch-up rebuild must not
+  // silently replace the approved manual in/out values.
+  if ((existingDailyResult.data ?? []).some((row) => isManualRegularizationDay(row as DailyRow))) {
+    return;
+  }
+
+  const ownershipRows = (ownershipResult.data ?? []) as HistoricalBiometricMapping[];
+  const distinctMappedOwnerCount = new Set(
+    ownershipRows.map((row) => biometricCandidateOwnerKey(row))
+  ).size;
+  const ownership = resolveBiometricCandidate(ownershipRows);
+  // A same-category collision has no safe owner. Keep the existing daily row
+  // untouched until the duplicate mapping is corrected; never let whichever
+  // mapping happened to rebuild last claim it.
+  if (ownership.kind === "ambiguous") return;
+  const resolvedOwner = ownership.kind === "resolved" ? ownership.owner : null;
+
+  const mergeGroups = buildAttendancePunchMergePlan(
+    (data ?? []).map((punch) => ({
+      ...punch,
+      owner_key: biometricCandidateOwnerKey(punch),
+      preferred_owner: Boolean(resolvedOwner && isSameBiometricOwner(punch, resolvedOwner))
+    })),
+    canonicalEnrolmentId
+  );
+  const keptPunches = mergeGroups.map((group) => group.keeper);
+  // Ownership is resolved before logical timestamp collapse. Otherwise a held
+  // or canonical row belonging to a lower-priority shared-ID owner could hide
+  // the authoritative owner's valid padded punch from the daily summary.
+  const ownerPunches = keptPunches.filter((punch) =>
+    !resolvedOwner || isSameBiometricOwner(punch, resolvedOwner)
+  );
+  const summaryPunches = selectAttendancePunchSummaryRows(ownerPunches, canonicalEnrolmentId);
+  const punches = summaryPunches.filter((punch) =>
+    punch.calculated === true
+    && (!resolvedOwner || isSameBiometricOwner(punch, resolvedOwner))
+  );
+  const heldOwnerPunches = summaryPunches.filter((punch) =>
+    (!resolvedOwner || isSameBiometricOwner(punch, resolvedOwner))
+    && isPendingAttendanceReviewPunch({ calculated: punch.calculated, isFlagged: punch.is_flagged })
+  );
+  // Freeze punch times before order updates so rebuild never picks up
+  // approval/server "now". The merge is deliberately logical: no physical
+  // punch or review evidence is deleted or reassigned.
   const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
-  for (let index = 0; index < punches.length; index += 1) {
-    const order = index + 1;
-    const preservedTime = punches[index].punch_time;
-    await supabaseAdmin
+  const calculatedOrderById = new Map(punches.map((punch, index) => [punch.id, index + 1]));
+  // Canonicalize only when no retained canonical row already occupies the
+  // physical unique key, while still refreshing calculated punch order.
+  for (const group of mergeGroups) {
+    const order = calculatedOrderById.get(group.keeper.id);
+    const shouldCanonicalize = group.canonicalize
+      && group.keeper.enrolment_id !== canonicalEnrolmentId;
+    if (!shouldCanonicalize && !order) continue;
+    const canonicalUpdate = await supabaseAdmin
       .from("attendance_punches")
       .update({
-        enrolment_id: canonicalEnrolmentId,
-        punch_order: order,
-        punch_label: punchLabel(order),
-        ...(preservedTime ? { punch_time: preservedTime } : {})
+        ...(shouldCanonicalize ? { enrolment_id: canonicalEnrolmentId } : {}),
+        ...(order ? { punch_order: order, punch_label: punchLabel(order) } : {})
       })
-      .eq("id", punches[index].id);
+      .eq("company_id", companyId)
+      .eq("id", group.keeper.id)
+      .eq("punch_date", punchDate)
+      .eq("punch_time", group.keeper.punch_time)
+      .eq("enrolment_id", group.keeper.enrolment_id)
+      .select("id");
+    if (canonicalUpdate.error) throw new Error(canonicalUpdate.error.message);
+    if ((canonicalUpdate.data ?? []).length !== 1) {
+      throw new Error("Attendance punch changed during canonical update; retry the rebuild.");
+    }
   }
+
+  // A held punch is intentionally absent from the calculated set until a
+  // manager approves it. If that was the owner's last calculated punch, remove
+  // only the stale biometric Present summary. Manual regularizations and WFH /
+  // business-trip credits were already identified above and remain untouched.
+  if (resolvedOwner && distinctMappedOwnerCount === 1 && !punches.length && heldOwnerPunches.length) {
+    const stalePresentEnrolments = (existingDailyResult.data ?? [])
+      .filter((row) => shouldClearStalePresentDaily({
+        hasHeldOwnerPunch: true,
+        inSource: row.in_source,
+        outSource: row.out_source,
+        status: row.status,
+        workMode: row.work_mode
+      }))
+      .map((row) => String(row.enrolment_id));
+    if (stalePresentEnrolments.length) {
+      const stalePresentDelete = await supabaseAdmin
+        .from("attendance_daily")
+        .delete()
+        .eq("company_id", companyId)
+        .eq("punch_date", punchDate)
+        .in("enrolment_id", stalePresentEnrolments);
+      if (stalePresentDelete.error) throw new Error(stalePresentDelete.error.message);
+    }
+    return;
+  }
+  // Calculated punches belonging only to a lower-priority mapping are not an
+  // absence for the preferred owner and must not blank or reassign its daily
+  // record. The preferred owner's replay will rebuild after its punch is stored.
+  if (resolvedOwner && !punches.length) return;
 
   const first = punchTimes[0] ? new Date(punchTimes[0]) : null;
   const summary = summarizeFirstInLastOut(punchTimes);
@@ -964,34 +1075,24 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
       ? "Single punch"
       : null;
 
-  const latestPunch = await supabaseAdmin
-    .from("attendance_punches")
-    .select("worker_type, employee_id, field_executive_id, profile_type, account_id, location_id")
-    .eq("company_id", companyId)
-    .in("enrolment_id", enrolmentVariants)
-    .eq("punch_date", punchDate)
-    .eq("calculated", true)
-    .order("punch_time", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (latestPunch.error) throw new Error(latestPunch.error.message);
+  const latestPunch = punches[punches.length - 1] ?? null;
 
   const workerSnapshot = await loadDailyWorkerSnapshot({
     companyId,
-    employeeId: latestPunch.data?.employee_id ?? null,
-    fallbackLocationId: latestPunch.data?.location_id ?? null,
-    fieldExecutiveId: latestPunch.data?.field_executive_id ?? null,
-    profileType: latestPunch.data?.profile_type ?? null,
-    accountId: latestPunch.data?.account_id ?? null
+    employeeId: latestPunch?.employee_id ?? null,
+    fallbackLocationId: latestPunch?.location_id ?? null,
+    fieldExecutiveId: latestPunch?.field_executive_id ?? null,
+    profileType: latestPunch?.profile_type ?? null,
+    accountId: latestPunch?.account_id ?? null
   });
 
   const basePayload = {
     company_id: companyId,
     enrolment_id: canonicalEnrolmentId,
-    worker_type: latestPunch.data?.worker_type ?? null,
-    employee_id: latestPunch.data?.employee_id ?? null,
-    field_executive_id: latestPunch.data?.field_executive_id ?? null,
-    location_id: latestPunch.data?.location_id ?? null,
+    worker_type: latestPunch?.worker_type ?? null,
+    employee_id: latestPunch?.employee_id ?? null,
+    field_executive_id: latestPunch?.field_executive_id ?? null,
+    location_id: latestPunch?.location_id ?? null,
     punch_date: punchDate,
     in_time: first?.toISOString() ?? null,
     out_time: summary.lastOutTime,
@@ -1022,16 +1123,9 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
     throw new Error(firstUpsert.error.message);
   }
 
-  // Drop padded/legacy duplicate daily rows for the same workday.
-  const staleVariants = enrolmentVariants.filter((value) => value !== canonicalEnrolmentId);
-  if (staleVariants.length) {
-    await supabaseAdmin
-      .from("attendance_daily")
-      .delete()
-      .eq("company_id", companyId)
-      .eq("punch_date", punchDate)
-      .in("enrolment_id", staleVariants);
-  }
+  // Padded attendance_daily rows are retained. A variant can belong to an
+  // independent shared-ID profile or contain explicit app-GPS/manual evidence;
+  // read paths already collapse variants without destructively erasing them.
 }
 
 type HistoricalRawPunchRow = {
@@ -1042,7 +1136,207 @@ type HistoricalRawPunchRow = {
   punch_time: string;
 };
 
-export async function backfillHistoricalPunches({
+type HistoricalEnrolmentWindowRow = {
+  effective_from: string | null;
+  effective_to: string | null;
+};
+
+function normalizedIsoDate(value: string | null | undefined) {
+  const date = String(value ?? "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+}
+
+/**
+ * Converts the mapping's inclusive local-date validity into the half-open UTC
+ * timestamp range used for querying raw device events. Using an exclusive next
+ * day boundary keeps every punch on `effective_to` while avoiding fractional
+ * second edge cases.
+ */
+export function historicalPunchTimeWindow({
+  effectiveFrom,
+  effectiveTo
+}: {
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+}) {
+  const fromDate = normalizedIsoDate(effectiveFrom);
+  const toDate = normalizedIsoDate(effectiveTo);
+  return {
+    fromDate,
+    toDate,
+    startAt: fromDate ? istDateTime(fromDate, "00:00").toISOString() : null,
+    endBefore: toDate ? istDateTime(addIsoDateDays(toDate, 1), "00:00").toISOString() : null
+  };
+}
+
+async function historicalEnrolmentWindow({
+  accountId,
+  companyId,
+  employeeId,
+  effectiveFrom,
+  effectiveTo,
+  enrolmentIds,
+  fieldExecutiveId,
+  profileType
+}: {
+  accountId: string;
+  companyId: string;
+  employeeId: string | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  enrolmentIds: string[];
+  fieldExecutiveId: string | null;
+  profileType: string;
+}) {
+  // Explicit arguments win, including an explicit null upper bound for a
+  // current/open mapping. Older callers can omit both arguments; their mapping
+  // row supplies the safe historical ownership boundary.
+  if (effectiveFrom !== undefined && effectiveTo !== undefined) {
+    return historicalPunchTimeWindow({ effectiveFrom, effectiveTo });
+  }
+
+  let mappingQuery = supabaseAdmin!
+    .from("biometric_enrolments")
+    .select("effective_from, effective_to")
+    .eq("company_id", companyId)
+    .eq("profile_type", profileType)
+    .in("enrolment_id", enrolmentIds);
+  if (profileType === "employee" && employeeId) {
+    mappingQuery = mappingQuery.eq("employee_id", employeeId);
+  } else if (profileType === "field_executive" && fieldExecutiveId) {
+    mappingQuery = mappingQuery.eq("field_executive_id", fieldExecutiveId);
+  } else {
+    mappingQuery = mappingQuery.eq("account_id", accountId);
+  }
+
+  const mapping = await mappingQuery
+    .order("effective_to", { ascending: false, nullsFirst: true })
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (mapping.error) throw new Error(mapping.error.message);
+  const stored = mapping.data as HistoricalEnrolmentWindowRow | null;
+  if (!stored && effectiveFrom === undefined) {
+    throw new Error("Historical attendance cannot be backfilled without a matching biometric enrolment window.");
+  }
+  return historicalPunchTimeWindow({
+    effectiveFrom: effectiveFrom !== undefined ? effectiveFrom : stored?.effective_from,
+    effectiveTo: effectiveTo !== undefined ? effectiveTo : stored?.effective_to
+  });
+}
+
+type HistoricalBackfillArgs = {
+  accountId: string;
+  companyId: string;
+  employeeId: string | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  enrolmentId: string;
+  fieldExecutiveId: string | null;
+  isActive: boolean;
+  locationId: string;
+  ownershipVerified?: boolean;
+  profileType: string;
+  workerStatus: string;
+  workerType: string;
+};
+
+function historicalMappingPersonId(mapping: HistoricalBiometricMapping) {
+  if (mapping.profile_type === "employee") return mapping.employee_id ?? mapping.account_id;
+  if (mapping.profile_type === "field_executive") return mapping.field_executive_id ?? mapping.account_id;
+  return mapping.account_id ?? mapping.employee_id ?? mapping.field_executive_id;
+}
+
+export async function backfillHistoricalPunches(args: HistoricalBackfillArgs) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const enrolmentIds = biometricIdVariants([args.enrolmentId]);
+  const requestedWindow = await historicalEnrolmentWindow({
+    accountId: args.accountId,
+    companyId: args.companyId,
+    employeeId: args.employeeId,
+    effectiveFrom: args.effectiveFrom,
+    effectiveTo: args.effectiveTo,
+    enrolmentIds,
+    fieldExecutiveId: args.fieldExecutiveId,
+    profileType: args.profileType
+  });
+
+  if (args.ownershipVerified) {
+    return backfillResolvedHistoricalPunches(args, requestedWindow);
+  }
+
+  const fromDate = requestedWindow.fromDate;
+  const toDate = requestedWindow.toDate ?? istDate(new Date());
+  if (!fromDate) {
+    throw new Error("Historical attendance requires an effective start date before ownership can be resolved.");
+  }
+
+  const mappings: HistoricalBiometricMapping[] = [];
+  const pageSize = 500;
+  for (let from = 0; ; from += pageSize) {
+    const result = await supabaseAdmin
+      .from("biometric_enrolments")
+      .select("id,company_id,enrolment_id,worker_type,profile_type,account_id,employee_id,field_executive_id,location_id,status,effective_from,effective_to")
+      .eq("company_id", args.companyId)
+      .in("enrolment_id", enrolmentIds)
+      .lte("effective_from", toDate)
+      .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (result.error) throw new Error(result.error.message);
+    const page = (result.data ?? []) as HistoricalBiometricMapping[];
+    mappings.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  const caller: BiometricEnrolmentCandidate = {
+    account_id: args.accountId,
+    employee_id: args.employeeId,
+    field_executive_id: args.fieldExecutiveId,
+    profile_type: args.profileType,
+    status: args.workerStatus,
+    worker_type: args.workerType
+  };
+  const ownershipWindows = buildHistoricalBiometricOwnershipWindows({
+    fromDate,
+    mappings,
+    toDate
+  });
+  let processed = 0;
+  for (const ownership of ownershipWindows) {
+    if (ownership.kind !== "resolved" || !ownership.owner || !isSameBiometricOwner(caller, ownership.owner)) {
+      continue;
+    }
+    const owner = ownership.owner;
+    const ownerAccountId = historicalMappingPersonId(owner);
+    if (!ownerAccountId) continue;
+    const resolvedArgs: HistoricalBackfillArgs = {
+      ...args,
+      accountId: ownerAccountId,
+      effectiveFrom: ownership.fromDate,
+      effectiveTo: ownership.toDate,
+      employeeId: owner.profile_type === "employee" ? ownerAccountId : null,
+      enrolmentId: ownership.enrolmentId,
+      fieldExecutiveId: owner.profile_type === "field_executive" ? ownerAccountId : null,
+      isActive: owner.status === "Active",
+      locationId: owner.location_id ?? args.locationId,
+      ownershipVerified: true,
+      profileType: owner.profile_type ?? args.profileType,
+      workerStatus: owner.status ?? args.workerStatus,
+      workerType: owner.worker_type ?? args.workerType
+    };
+    processed += await backfillResolvedHistoricalPunches(
+      resolvedArgs,
+      historicalPunchTimeWindow({
+        effectiveFrom: ownership.fromDate,
+        effectiveTo: ownership.toDate
+      })
+    );
+  }
+  return processed;
+}
+
+async function backfillResolvedHistoricalPunches({
   accountId,
   companyId,
   employeeId,
@@ -1053,74 +1347,70 @@ export async function backfillHistoricalPunches({
   profileType,
   workerStatus,
   workerType
-}: {
-  accountId: string;
-  companyId: string;
-  employeeId: string | null;
-  enrolmentId: string;
-  fieldExecutiveId: string | null;
-  isActive: boolean;
-  locationId: string;
-  profileType: string;
-  workerStatus: string;
-  workerType: string;
-}) {
+}: HistoricalBackfillArgs, window: ReturnType<typeof historicalPunchTimeWindow>) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
   const enrolmentIds = biometricIdVariants([enrolmentId]);
-  const rawEventIds: string[] = [];
   const rawPunches: HistoricalRawPunchRow[] = [];
   const pageSize = 500;
 
   for (let from = 0; ; from += pageSize) {
-    const alerts = await supabaseAdmin
-      .from("biometric_alerts")
-      .select("raw_event_id")
-      .eq("company_id", companyId)
-      .eq("alert_type", "unknown_enrolment")
-      .in("enrolment_id", enrolmentIds)
-      .not("raw_event_id", "is", null)
-      .is("resolved_at", null)
-      .range(from, from + pageSize - 1);
-    if (alerts.error) throw new Error(alerts.error.message);
-
-    const page = (alerts.data ?? [])
-      .map((alert) => alert.raw_event_id)
-      .filter((id): id is string => Boolean(id));
-    rawEventIds.push(...page);
-    if (page.length < pageSize) break;
-  }
-
-  const uniqueRawEventIds = Array.from(new Set(rawEventIds));
-  for (let offset = 0; offset < uniqueRawEventIds.length; offset += 100) {
-    const ids = uniqueRawEventIds.slice(offset, offset + 100);
-    const result = await supabaseAdmin
+    let rawQuery = supabaseAdmin
       .from("biometric_raw_events")
       .select("id, device_id, device_serial, enrolment_id, punch_time")
       .eq("company_id", companyId)
-      .in("id", ids)
+      .in("enrolment_id", enrolmentIds)
       .ilike("event_type", "timelog")
-      .not("punch_time", "is", null);
+      .range(from, from + pageSize - 1);
+    rawQuery = rawQuery
+      .not("punch_time", "is", null)
+      .order("punch_time", { ascending: true })
+      .order("id", { ascending: true });
+    if (window.startAt) rawQuery = rawQuery.gte("punch_time", window.startAt);
+    if (window.endBefore) rawQuery = rawQuery.lt("punch_time", window.endBefore);
+    const result = await rawQuery;
     if (result.error) throw new Error(result.error.message);
-    rawPunches.push(...((result.data ?? []) as HistoricalRawPunchRow[]));
+    const page = (result.data ?? []) as HistoricalRawPunchRow[];
+    rawPunches.push(...page);
+    if (page.length < pageSize) break;
   }
-  rawPunches.sort((left, right) =>
-    new Date(left.punch_time).getTime() - new Date(right.punch_time).getTime()
-  );
 
   if (!rawPunches.length) return 0;
 
   const affectedDates = new Set<string>();
-  for (let offset = 0; offset < rawPunches.length; offset += pageSize) {
-    const page = rawPunches.slice(offset, offset + pageSize);
-    const rows = page.map((rawPunch) => {
-      const punchDate = istDate(new Date(rawPunch.punch_time));
+  const rawPunchesByCalendarDate = new Map<string, HistoricalRawPunchRow[]>();
+  for (const rawPunch of rawPunches) {
+    const calendarDate = istDate(new Date(rawPunch.punch_time));
+    const day = rawPunchesByCalendarDate.get(calendarDate) ?? [];
+    day.push(rawPunch);
+    rawPunchesByCalendarDate.set(calendarDate, day);
+  }
+
+  // Process one calendar day at a time, oldest first. This lets overnight
+  // resolution see the prior day's already-calculated punches without doing a
+  // database write for every individual event.
+  for (const calendarDate of Array.from(rawPunchesByCalendarDate.keys()).sort()) {
+    const rows = [];
+    const rawEventIdsByPunchDate = new Map<string, string[]>();
+    for (const rawPunch of rawPunchesByCalendarDate.get(calendarDate) ?? []) {
+      const punchDate = await resolveAttendanceWorkDate({
+        accountId,
+        companyId,
+        employeeId,
+        enrolmentId,
+        fieldExecutiveId,
+        profileType,
+        punchTime: new Date(rawPunch.punch_time)
+      });
       affectedDates.add(punchDate);
-      return {
+      const rawEventIds = rawEventIdsByPunchDate.get(punchDate) ?? [];
+      rawEventIds.push(rawPunch.id);
+      rawEventIdsByPunchDate.set(punchDate, rawEventIds);
+      rows.push({
         company_id: companyId,
         raw_event_id: rawPunch.id,
         device_id: rawPunch.device_id,
-        enrolment_id: enrolmentId,
+        enrolment_id: normalizeBiometricId(enrolmentId),
         worker_type: workerType,
         profile_type: profileType,
         account_id: accountId,
@@ -1133,25 +1423,67 @@ export async function backfillHistoricalPunches({
         punch_order: 1,
         punch_label: punchLabel(1),
         worker_status: workerStatus,
-        calculated: isActive
-      };
-    });
+        // Lifecycle status is descriptive. A mapped device event remains valid
+        // attendance for Active, Pending, Under Review, Inactive, or any other
+        // profile status while its mapping is effective.
+        calculated: true
+      });
+    }
 
     const insert = await supabaseAdmin
       .from("attendance_punches")
       .upsert(rows, {
-        // A previously unknown enrolment already has a non-calculated Review
-        // punch under this logical key. Update that retained punch with the
-        // resolved profile and calculation state when the mapping is created.
-        ignoreDuplicates: false,
+        // Never mutate an existing punch in this insert. In particular, a
+        // biometric punch deliberately held by attendance-gps must keep its
+        // calculated=false / is_flagged=true manager-review state.
+        ignoreDuplicates: true,
         onConflict: "company_id,device_serial,enrolment_id,punch_time"
       });
     if (insert.error) throw new Error(insert.error.message);
+
+    // Resolve retained unknown-enrolment punches after the insert, but only
+    // while they remain unresolved and are not in the deliberate
+    // held-for-review state. Never rewrite an already-calculated punch: its
+    // owner/location fields are a historical snapshot and a later transfer
+    // must not relabel prior attendance. These database predicates also close
+    // the race where attendance-gps places a punch on hold while reconciliation
+    // is running.
+    for (const [punchDate, rawEventIds] of rawEventIdsByPunchDate) {
+      const promote = await supabaseAdmin
+        .from("attendance_punches")
+        .update({
+          // Preserve the retained row's enrolment spelling. Renaming a padded
+          // row here can collide with an already-present canonical physical
+          // key before the safe rebuild planner gets a chance to inspect it.
+          worker_type: workerType,
+          profile_type: profileType,
+          account_id: accountId,
+          employee_id: employeeId,
+          field_executive_id: fieldExecutiveId,
+          location_id: locationId,
+          punch_date: punchDate,
+          worker_status: workerStatus,
+          calculated: true
+        })
+        .eq("company_id", companyId)
+        .in("raw_event_id", rawEventIds)
+        .eq("calculated", false)
+        .or(RECONCILIATION_PROMOTABLE_PUNCH_FILTER);
+      if (promote.error) throw new Error(promote.error.message);
+    }
   }
 
-  if (isActive) {
-    for (const punchDate of Array.from(affectedDates).sort()) {
+  // Retained for call compatibility. Status no longer controls attendance.
+  void isActive;
+  const rebuildFailures: Array<{ date: string; message: string }> = [];
+  for (const punchDate of Array.from(affectedDates).sort()) {
+    try {
       await rebuildAttendanceDay(companyId, enrolmentId, punchDate);
+    } catch (error) {
+      rebuildFailures.push({
+        date: punchDate,
+        message: error instanceof Error ? error.message : "Attendance daily rebuild failed."
+      });
     }
   }
 
@@ -1165,6 +1497,16 @@ export async function backfillHistoricalPunches({
       .in("raw_event_id", processedRawEventIds.slice(offset, offset + 100))
       .is("resolved_at", null);
     if (resolve.error) throw new Error(resolve.error.message);
+  }
+
+  if (rebuildFailures.length) {
+    const details = rebuildFailures
+      .slice(0, 5)
+      .map((failure) => `${failure.date}: ${failure.message}`)
+      .join("; ");
+    throw new Error(
+      `Stored ${rawPunches.length} historical punch(es), but ${rebuildFailures.length} attendance day(s) could not be rebuilt. Retry after any Payment Processing lock is released. ${details}`
+    );
   }
 
   return rawPunches.length;

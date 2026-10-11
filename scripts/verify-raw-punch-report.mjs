@@ -24,6 +24,7 @@ const checks = [
   [exportRoute.includes("chunks(remainingOffsets, 8)") && exportRoute.includes("exportCutoff"), "Full exports must load stable raw-event pages concurrently."],
   [exportButton.includes("Preparing Excel") && exportButton.includes('role="alert"'), "The export must show progress and a usable error."],
   [mapping.includes("existingByProfile") && mapping.includes("config.tables"), "Mapping filters must validate the real People or Workforce profile rather than trusting a stale enrolment link."],
+  [resolver.includes('worker: { tables: ["helpers", "workforce_helpers", "workforce_pickers"]'), "Raw Punches must resolve canonical Helpers before the legacy Helper tables."],
   [resolver.includes('match: "serial"') && resolver.includes('match: "terminal"') && resolver.includes('match: "network"'), "Location resolution must support serial, terminal, and network fallbacks."]
 ];
 

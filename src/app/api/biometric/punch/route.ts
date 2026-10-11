@@ -2,6 +2,11 @@ import { NextRequest } from "next/server";
 import { createAttendancePunchNotification } from "@/lib/app-notifications";
 import { istDate, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
 import { checkBiometricPhoneMismatch } from "@/lib/biometric/attendance-gps";
+import {
+  biometricEnrolmentIdCandidates,
+  hasSameCategoryBiometricDuplicate as hasSameCategoryDuplicate,
+  pickPreferredBiometricCandidate
+} from "@/lib/biometric/enrolment-resolution";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +39,8 @@ type EnrolmentRow = {
   enrolment_id: string;
   worker_type: string;
   employee_id: string | null;
+  effective_from: string | null;
+  effective_to: string | null;
   field_executive_id: string | null;
   profile_type: "employee" | "field_executive" | "contractor" | "vendor" | "worker" | null;
   account_id: string | null;
@@ -87,8 +94,8 @@ function bearerToken(request: NextRequest) {
  * exit case whose confirmed LWD (end of day, IST) hasn't passed yet — if so, the
  * punch counts as active regardless of what biometric_enrolments.status says.
  * Scoped to employee/contractor only, since hr_exit_cases only models those two
- * worker types (field_executive/vendor/worker profile types are unaffected and
- * keep relying solely on biometric_enrolments.status, unchanged).
+ * worker types. This result now controls the status-mismatch alert and live app
+ * notification only; every resolved current mapping is still calculated.
  */
 async function isWithinConfirmedLastWorkingDay(companyId: string, profileType: string | null, employeeId: string | null, contractorId: string | null) {
   if (!supabaseAdmin) return false;
@@ -133,61 +140,19 @@ function clean(value: unknown) {
 }
 
 function enrolmentIdCandidates(value: unknown) {
-  const digits = clean(value).replace(/\D/g, "");
-  if (!digits) return [];
-  const normalized = digits.replace(/^0+/, "") || "0";
-  return Array.from(new Set([
-    normalized,
-    digits,
-    normalized.padStart(6, "0"),
-    normalized.padStart(8, "0")
-  ]));
+  return biometricEnrolmentIdCandidates(value);
 }
 
 function cleanEnrolmentId(value: unknown) {
   return enrolmentIdCandidates(value)[0] ?? "";
 }
 
-function enrolmentPriority(
-  row: Pick<EnrolmentRow, "status" | "worker_type" | "profile_type"> |
-    Pick<WorkerMatch, "isActive" | "workerType" | "profileType">
-) {
-  const workerType = "worker_type" in row ? row.worker_type : row.workerType;
-  const profileType = "profile_type" in row ? row.profile_type : row.profileType;
-  const active = "status" in row ? row.status === "Active" : row.isActive;
-  const profileOrder = ["employee", "contractor", "vendor", "worker", "field_executive"];
-  return [
-    Math.max(profileOrder.indexOf(profileType ?? (workerType === "employee" ? "employee" : "contractor")), 0),
-    active ? 0 : 1
-  ];
-}
-
-function hasSameCategoryDuplicate<T extends {
-  profile_type?: string | null;
-  profileType?: string | null;
-  worker_type?: string;
-  workerType?: string;
-}>(rows: T[]) {
-  const categories = rows.map((row) =>
-    row.profile_type ?? row.profileType ?? row.worker_type ?? row.workerType ?? ""
-  );
-  return new Set(categories).size !== categories.length;
-}
-
 function pickPreferredEnrolment(rows: EnrolmentRow[]) {
-  return rows.slice().sort((a, b) => {
-    const [aType, aActive] = enrolmentPriority(a);
-    const [bType, bActive] = enrolmentPriority(b);
-    return aType - bType || aActive - bActive;
-  })[0] ?? null;
+  return pickPreferredBiometricCandidate(rows);
 }
 
 function pickPreferredWorker(rows: WorkerMatch[]) {
-  return rows.slice().sort((a, b) => {
-    const [aType, aActive] = enrolmentPriority(a);
-    const [bType, bActive] = enrolmentPriority(b);
-    return aType - bType || aActive - bActive;
-  })[0] ?? null;
+  return pickPreferredBiometricCandidate(rows);
 }
 
 function jsonError(message: string, status = 400) {
@@ -297,17 +262,18 @@ async function createAlert({
   });
 }
 
-async function findCurrentEnrolments(companyId: string, enrolmentId: string) {
+async function findEffectiveEnrolments(companyId: string, enrolmentId: string, effectiveDate: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const candidates = enrolmentIdCandidates(enrolmentId);
   if (!candidates.length) return [];
 
   const result = await supabaseAdmin
     .from("biometric_enrolments")
-    .select("id, enrolment_id, worker_type, employee_id, field_executive_id, profile_type, account_id, location_id, status")
+    .select("id, enrolment_id, worker_type, employee_id, field_executive_id, profile_type, account_id, location_id, status, effective_from, effective_to")
     .eq("company_id", companyId)
     .in("enrolment_id", candidates)
-    .is("effective_to", null)
+    .lte("effective_from", effectiveDate)
+    .or(`effective_to.is.null,effective_to.gte.${effectiveDate}`)
     .limit(20);
   if (result.error) throw new Error(result.error.message);
   return (result.data ?? []) as EnrolmentRow[];
@@ -324,6 +290,7 @@ async function findWorkerMatches(companyId: string, enrolmentId: string) {
     ["field_executive", "workforce"],
     ["contractor", "contractors"],
     ["vendor", "vendors"],
+    ["worker", "helpers"],
     ["worker", "workforce_helpers"],
     ["worker", "workforce_pickers"]
   ] as const;
@@ -522,35 +489,42 @@ async function createEnrolmentFromWorker({
   worker: WorkerMatch;
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const now = new Date().toISOString();
-  const today = now.slice(0, 10);
-  const payload = {
-    company_id: companyId,
-    enrolment_id: cleanEnrolmentId(enrolmentId),
-    worker_type: worker.workerType,
-    profile_type: worker.profileType,
+  const today = istDate(new Date());
+  const desiredOwner = {
     account_id: worker.accountId,
     employee_id: worker.employeeId,
     field_executive_id: worker.fieldExecutiveId,
-    location_id: worker.locationId ?? device.location_id,
-    status: worker.isActive ? "Active" : "Inactive",
-    effective_from: worker.dateOfJoin || today,
-    effective_to: null,
-    notes: "Auto-linked from workforce master when biometric punch was received.",
-    updated_at: now
+    profile_type: worker.profileType,
+    worker_type: worker.workerType
   };
 
-  const insertResult = await supabaseAdmin
-    .from("biometric_enrolments")
-    .insert(payload)
-    .select("id, enrolment_id, worker_type, employee_id, field_executive_id, profile_type, account_id, location_id, status")
-    .single();
+  const replacement = await supabaseAdmin.rpc("replace_biometric_enrolment_assignment", {
+    p_account_id: worker.accountId,
+    p_actor_id: null,
+    p_company_id: companyId,
+    p_fallback_location_id: worker.locationId ?? device.location_id,
+    p_profile_type: worker.profileType
+  });
+  const replacementRows = Array.isArray(replacement.data)
+    ? replacement.data
+    : replacement.data ? [replacement.data] : [];
+  if (!replacement.error && replacementRows[0]) {
+    return replacementRows[0] as EnrolmentRow;
+  }
 
-  if (!insertResult.error) return insertResult.data as EnrolmentRow;
-
-  const retryRows = await findCurrentEnrolments(companyId, enrolmentId);
-  if (retryRows.length === 1) return retryRows[0];
-  throw new Error(insertResult.error.message);
+  // A concurrent identical webhook may have committed while this request was
+  // waiting for the transaction lock. Reuse only that exact owner/location;
+  // never accept another worker merely because it now owns the same number.
+  const retryRows = await findEffectiveEnrolments(companyId, enrolmentId, today);
+  const retry = retryRows.find((row) =>
+    row.profile_type === desiredOwner.profile_type
+    && row.account_id === desiredOwner.account_id
+    && row.employee_id === desiredOwner.employee_id
+    && row.field_executive_id === desiredOwner.field_executive_id
+    && row.location_id === (worker.locationId ?? device.location_id)
+  );
+  if (retry) return retry;
+  throw new Error(replacement.error?.message ?? "Unable to create biometric enrolment.");
 }
 
 async function reconcileLegacyEnrolment(
@@ -558,6 +532,9 @@ async function reconcileLegacyEnrolment(
   enrolment: EnrolmentRow
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  // Historical ownership is immutable. Legacy repair is only safe for the
+  // current open mapping, never for a closed row selected for a delayed punch.
+  if (enrolment.effective_to !== null) return enrolment;
   if (enrolment.profile_type && enrolment.profile_type !== "field_executive") return enrolment;
 
   const matches = await findWorkerMatches(companyId, enrolment.enrolment_id);
@@ -588,7 +565,7 @@ async function reconcileLegacyEnrolment(
     .update(repaired)
     .eq("id", enrolment.id)
     .eq("company_id", companyId)
-    .select("id, enrolment_id, worker_type, employee_id, field_executive_id, profile_type, account_id, location_id, status")
+    .select("id, enrolment_id, worker_type, employee_id, field_executive_id, profile_type, account_id, location_id, status, effective_from, effective_to")
     .single();
   if (result.error) throw new Error(result.error.message);
   return result.data as EnrolmentRow;
@@ -652,7 +629,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, stored: "raw_event", alert: "bad_timelog" });
     }
 
-    const enrolmentRows = await findCurrentEnrolments(device.company_id, enrolmentId);
+    // Device payloads can arrive late. Resolve the owner that was effective on
+    // the punch's IST calendar date rather than today's open mapping.
+    const punchCalendarDate = istDate(punchTime);
+    const enrolmentRows = await findEffectiveEnrolments(
+      device.company_id,
+      enrolmentId,
+      punchCalendarDate
+    );
     if (enrolmentRows.length > 1 && hasSameCategoryDuplicate(enrolmentRows)) {
       await storeReviewPunch({
         device,
@@ -681,7 +665,11 @@ export async function POST(request: NextRequest) {
 
     if (!enrolment) {
       const workers = await findWorkerMatches(device.company_id, enrolmentId);
-      if (workers.length && !hasSameCategoryDuplicate(workers)) {
+      // Master-data auto-link is only safe for a current-day live event. A
+      // delayed historical event without an effective mapping stays in review
+      // instead of backdating today's owner into the historical period.
+      const canAutoLinkCurrentAssignment = punchCalendarDate === istDate(new Date());
+      if (canAutoLinkCurrentAssignment && workers.length && !hasSameCategoryDuplicate(workers)) {
         const worker = pickPreferredWorker(workers);
         if (!worker) return jsonError("Unable to resolve worker for biometric punch.", 500);
         enrolment = await createEnrolmentFromWorker({
@@ -774,7 +762,10 @@ export async function POST(request: NextRequest) {
       punch_order: nextOrder,
       punch_label: punchLabel(nextOrder),
       worker_status: enrolment.status,
-      calculated: active,
+      // A current, resolved biometric mapping is sufficient attendance evidence.
+      // Profile lifecycle status remains on worker_status for review, but must
+      // not silently discard a real punch from attendance calculation.
+      calculated: true,
       source: "biometric",
       server_received_at: new Date().toISOString()
     };
@@ -806,7 +797,6 @@ export async function POST(request: NextRequest) {
         rawEventId,
         severity: "high"
       });
-      return Response.json({ ok: true, stored: "inactive_punch", alert: "inactive_worker_punched" });
     }
 
     await rebuildAttendanceDay(device.company_id, canonicalEnrolmentId, punchDate);
@@ -833,7 +823,7 @@ export async function POST(request: NextRequest) {
       (profileType === "employee" ? enrolment.employee_id : enrolment.field_executive_id);
     const punchAgeMs = Date.now() - punchTime.getTime();
     const isRecentLivePunch = punchAgeMs >= -5 * 60_000 && punchAgeMs <= 20 * 60_000;
-    if (!alreadyStored && recipientAccountId && isRecentLivePunch) {
+    if (active && !alreadyStored && recipientAccountId && isRecentLivePunch) {
       await createAttendancePunchNotification({
         accountId: recipientAccountId,
         companyId: device.company_id,

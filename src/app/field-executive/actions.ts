@@ -9,7 +9,6 @@ import * as XLSX from "xlsx";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { currentAccessSurface } from "@/lib/access-surface";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
-import { backfillHistoricalPunches } from "@/lib/biometric/attendance";
 import { generateBiometricEnrolmentId } from "@/lib/biometric/ids";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
@@ -536,19 +535,20 @@ export async function createFieldExecutive(formData: FormData) {
       }
     }
 
-    if (config.profileType !== "field_executive") {
-      await syncBiometricEnrolment({
-        companyId,
-        createdBy: authorization.userId,
-        effectiveFrom: dateOfJoin,
-        enrolmentId: biometricId,
-        accountId: executive.id,
-        isActive: true,
-        locationId,
-        profileType: config.profileType,
-        workerType: "individual_contract"
-      });
-    }
+    // Create the biometric ownership window immediately, including for
+    // Pending / Under Review Workforce profiles. Lifecycle status is retained
+    // on the mapping but no longer decides whether a real punch is attendance.
+    await syncBiometricEnrolment({
+      companyId,
+      createdBy: authorization.userId,
+      effectiveFrom: dateOfJoin,
+      enrolmentId: biometricId,
+      accountId: executive.id,
+      isActive: config.profileType !== "field_executive",
+      locationId,
+      profileType: config.profileType,
+      workerType: "individual_contract"
+    });
 
     if (config.profileType === "field_executive") {
       await supabaseAdmin.from("workforce_onboarding_events").insert({
@@ -1211,6 +1211,20 @@ export async function bulkImportFieldExecutives(formData: FormData) {
     }
 
     for (const row of inserted) {
+      // Bulk-created pending Workforce profiles need a mapping just as active
+      // profiles do; otherwise historical device uploads and reconciliation
+      // have no safe owner to resolve.
+      await syncBiometricEnrolment({
+        companyId,
+        createdBy: authorization.userId,
+        effectiveFrom: row.dateOfJoin,
+        enrolmentId: row.biometricId,
+        accountId: row.id,
+        isActive: lifecycle.isActive,
+        locationId: row.locationId,
+        profileType: config.profileType,
+        workerType: "individual_contract"
+      });
       if (config.profileType === "field_executive") {
         await supabaseAdmin.from("workforce_onboarding_events").insert({
           company_id: companyId,
@@ -1223,62 +1237,6 @@ export async function bulkImportFieldExecutives(formData: FormData) {
           metadata: { bulk_import: true, location_id: row.locationId }
         });
         continue;
-      }
-      await syncBiometricEnrolment({
-        backfillHistorical: table !== "helpers",
-        companyId,
-        createdBy: authorization.userId,
-        effectiveFrom: row.dateOfJoin,
-        enrolmentId: row.biometricId,
-        accountId: row.id,
-        isActive: true,
-        locationId: row.locationId,
-        profileType: config.profileType,
-        workerType: "individual_contract"
-      });
-    }
-
-    if (table === "helpers") {
-      const backgroundRows = inserted.filter((row): row is typeof row & { biometricId: string } => Boolean(row.biometricId));
-      if (backgroundRows.length) {
-        waitUntil((async () => {
-          for (const row of backgroundRows) {
-            let backfillError: unknown = null;
-            for (let attempt = 1; attempt <= 3; attempt += 1) {
-              try {
-                await backfillHistoricalPunches({
-                  accountId: row.id,
-                  companyId,
-                  employeeId: null,
-                  enrolmentId: row.biometricId,
-                  fieldExecutiveId: null,
-                  isActive: true,
-                  locationId: row.locationId,
-                  profileType: config.profileType,
-                  workerStatus: "Active",
-                  workerType: "individual_contract"
-                });
-                backfillError = null;
-                break;
-              } catch (error) {
-                backfillError = error;
-                if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
-              }
-            }
-            if (backfillError) {
-              console.error("[helper-bulk] Historical attendance backfill failed after retries.", backfillError);
-              await supabaseAdmin.from("audit_logs").insert({
-                actor_id: authorization.userId,
-                action: "helper_bulk_attendance_backfill_failed",
-                entity_table: "helpers",
-                entity_id: row.id,
-                old_values: null,
-                new_values: { biometric_id: row.biometricId, location_id: row.locationId },
-                reason: backfillError instanceof Error ? backfillError.message.slice(0, 500) : "Historical attendance backfill failed after three attempts."
-              });
-            }
-          }
-        })());
       }
     }
 

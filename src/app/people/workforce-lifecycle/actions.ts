@@ -394,7 +394,10 @@ export async function completeWorkforceSettlement(formData: FormData) {
       updated_at: now
     }).eq("company_id", companyId).eq("id", current.data.field_executive_id);
     if (closeProfile.error) throw new Error(closeProfile.error.message);
-    await supabaseAdmin.from("biometric_enrolments").update({ status: "Inactive", effective_to: effectiveDate, updated_at: now })
+    // Lifecycle status must not unassign the biometric ID. Keep the current
+    // mapping open so genuine punches continue to be captured for every
+    // profile status; effective_to is reserved for ID removal/reassignment.
+    await supabaseAdmin.from("biometric_enrolments").update({ status: "Inactive", updated_at: now })
       .eq("company_id", companyId).eq("profile_type", "field_executive")
       .eq("account_id", current.data.field_executive_id).is("effective_to", null);
     revalidatePath("/people/workforce-lifecycle");

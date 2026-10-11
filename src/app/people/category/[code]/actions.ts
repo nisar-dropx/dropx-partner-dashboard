@@ -9,6 +9,7 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
 import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, normalizeWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib/dropx-id-generation";
+import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
 import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
@@ -201,6 +202,19 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
       if (message.includes("duplicate") || message.includes("unique")) throw new Error("DropX ID, biometric ID, mobile, or email is already registered in this category.");
       throw new Error(insertResult.error.message);
     }
+    if (code === "helpers") {
+      await syncBiometricEnrolment({
+        accountId: insertResult.data.id,
+        companyId,
+        createdBy: authorization.userId,
+        effectiveFrom: dateOfJoin,
+        enrolmentId: biometricId,
+        isActive: true,
+        locationId,
+        profileType: "worker",
+        workerType: "individual_contract"
+      });
+    }
     if (directActivate && insertResult.data) {
       const documentPayload: Record<string, string> = {};
       const enabled = new Set(dashboardRules.enabled);
@@ -360,6 +374,19 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
 
     const updateResult = await supabaseAdmin.from(table).update(payload).eq("id", id).eq("company_id", companyId);
     if (updateResult.error) throw new Error(updateResult.error.message);
+    if (code === "helpers") {
+      await syncBiometricEnrolment({
+        accountId: id,
+        companyId,
+        createdBy: authorization.userId,
+        effectiveFrom: String(payload.date_of_join ?? existing.date_of_join ?? ""),
+        enrolmentId: String(existing.biometric_id ?? "") || null,
+        isActive: Boolean(payload.is_active),
+        locationId,
+        profileType: "worker",
+        workerType: "individual_contract"
+      });
+    }
     revalidatePath(`/people/category/${code}`);
     revalidatePath("/people/all");
   } catch (error) {

@@ -72,7 +72,7 @@ export const RAW_PUNCH_PROFILE_TABLES: Record<string, { code: string; tables: st
   field_executive: { tables: ["workforce"], code: "dropx_id" },
   contractor: { tables: ["contractors"], code: "dropx_id" },
   vendor: { tables: ["vendors"], code: "dropx_id" },
-  worker: { tables: ["workforce_helpers", "workforce_pickers"], code: "dropx_id" }
+  worker: { tables: ["helpers", "workforce_helpers", "workforce_pickers"], code: "dropx_id" }
 };
 
 type DeviceMatch = "device_id" | "network" | "serial" | "terminal";
