@@ -85,7 +85,8 @@ function fixture() {
       if (id in mocks) return mocks[id];
       if (id === '../supabase-admin') return { supabaseAdmin: db };
       assert.ok(id.startsWith('.'), `Unexpected dependency: ${id}`);
-      return load(path.resolve(path.dirname(file), `${id}.ts`));
+      const specifier = /\.(ts|tsx|js|mjs)$/.test(id) ? id : `${id}.ts`;
+      return load(path.resolve(path.dirname(file), specifier));
     }, mod, mod.exports, FixedDate);
     return mod.exports;
   }
