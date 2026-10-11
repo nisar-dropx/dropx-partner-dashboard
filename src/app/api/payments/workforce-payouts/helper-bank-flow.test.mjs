@@ -43,8 +43,12 @@ test("bank APIs opt into Helper ledgers without changing the Workforce default",
   assert.match(redownload, /rpc\("helper_get_payout_payment_redownload"/);
   assert.match(redownload, /buildBatchWorkbook\(batchItems, audience\)/);
   assert.match(response, /form\.get\("audience"\)/);
-  assert.match(response, /referencePrefix: audience === "helpers" \? "HP" : "WP"/);
-  assert.match(response, /rpc\("helper_finalize_payout_payment_response"/);
+  assert.match(response, /prepareDropxFedOneResponse\(bytes\)/);
+  assert.match(response, /from\(lookup\.table\)/);
+  assert.match(response, /"workforce_payout_payment_items"/);
+  assert.match(response, /"helper_payout_payment_items"/);
+  assert.match(response, /parsePreparedDropxFedOneResponse\(prepared, ownedReferences\)/);
+  assert.match(response, /rpc\("finalize_owned_payout_payment_response"/);
   assert.match(status, /rpc\("helper_cancel_payout_payment_items"/);
   assert.match(status, /rpc\("helper_transition_payout_payment_item"/);
   assert.match(status, /rpc\("helper_set_payout_payment_hold"/);

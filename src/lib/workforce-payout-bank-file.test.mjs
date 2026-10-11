@@ -7,6 +7,8 @@ import {
   WORKFORCE_FEDONE_RESPONSE_HEADERS,
   buildWorkforceFedOneRows,
   buildWorkforceFedOneWorkbook,
+  countFedOneResponseDataRows,
+  extractDropxFedOneReferenceCandidates,
   formatWorkforceFedOneValueDate,
   isValidWorkforceBankAccount,
   isValidWorkforceBankIfsc,
@@ -14,6 +16,7 @@ import {
   normalizeWorkforceBankAccount,
   normalizeWorkforceBankIfsc,
   normalizeWorkforceBankReference,
+  parseDropxFedOneResponse,
   parseWorkforceFedOneResponse
 } from "./workforce-payout-bank-file.ts";
 
@@ -145,6 +148,94 @@ test("reuses the FedOne format for Helper references without weakening the Workf
   assert.throws(
     () => parseWorkforceFedOneResponse(response),
     /not a valid Workforce payment reference/i
+  );
+});
+
+test("parses mixed Workforce and Helper responses while skipping unrelated bank references", () => {
+  const response = responseWorkbook([
+    ["WPF999092026V9", "bad", "bad", "not-an-amount", "", "", ""],
+    ["BANK-OTHER-001", "", "", "not-an-amount", "", "", ""],
+    ["WPD111092026V1", "001234567890", "FDRL0000123", 100, "PAID", "WORKUTR1", "Success"],
+    ["HPD1001102026V1", "9988776655", "HDFC0000456", 50, "CANCELLED", "", "Returned"]
+  ]);
+
+  assert.deepEqual(extractDropxFedOneReferenceCandidates(response), [
+    "WPF999092026V9",
+    "WPD111092026V1",
+    "HPD1001102026V1"
+  ]);
+  assert.deepEqual(parseDropxFedOneResponse(response, new Set([
+    "WPD111092026V1",
+    "HPD1001102026V1"
+  ])), {
+    workforceRows: [{
+      rowNumber: 4,
+      referenceNo: "WPD111092026V1",
+      creditAccount: "001234567890",
+      ifsc: "FDRL0000123",
+      debitAmountPaise: 10000,
+      status: "PAID",
+      utrCin: "WORKUTR1",
+      remarks: "Success"
+    }],
+    helperRows: [{
+      rowNumber: 5,
+      referenceNo: "HPD1001102026V1",
+      creditAccount: "9988776655",
+      ifsc: "HDFC0000456",
+      debitAmountPaise: 5000,
+      status: "CANCELLED",
+      utrCin: "",
+      remarks: "Returned"
+    }],
+    skippedRows: [
+      { rowNumber: 2, referenceNo: "WPF999092026V9" },
+      { rowNumber: 3, referenceNo: "BANK-OTHER-001" }
+    ]
+  });
+});
+
+test("counts legacy response rows without treating raw payment references as DropX payout candidates", () => {
+  const response = responseWorkbook([
+    ["G290219", "10030100584148", "FDRL0001003", 15840, "PAID", "S65099609", ""],
+    ["D0826", "99887766", "FDRL0000123", 3600, "PAID", "S65099610", ""]
+  ]);
+
+  assert.equal(countFedOneResponseDataRows(response), 2);
+  assert.deepEqual(extractDropxFedOneReferenceCandidates(response), []);
+});
+
+test("mixed response parsing validates only company-owned references and skips foreign DropX-looking rows", () => {
+  const malformed = responseWorkbook([
+    ["WPF999092026V9", "bad", "bad", "bad", "", "", ""],
+    ["HPD1001102026V1", "0012-3456", "FDRL1000123", "1.001", "", "", ""]
+  ]);
+  assert.throws(() => parseDropxFedOneResponse(malformed, new Set(["HPD1001102026V1"])), (error) => {
+    assert.match(error.message, /Row 3: Credit Account must contain 4 to 30 letters or digits/i);
+    assert.match(error.message, /Row 3: IFSC Code must use the standard 11-character format/i);
+    assert.match(error.message, /Row 3: Debit Amount must .*at most two decimal places/i);
+    assert.match(error.message, /Row 3: Status is required/i);
+    assert.doesNotMatch(error.message, /Row 2:/i);
+    return true;
+  });
+
+  assert.throws(
+    () => parseDropxFedOneResponse(responseWorkbook([
+      ["WPF999092026V9", "bad", "bad", "bad", "", "", ""]
+    ]), new Set()),
+    /No matching Workforce or Helper payment references/i
+  );
+});
+
+test("mixed response parsing rejects duplicate DropX references after normalization", () => {
+  const response = responseWorkbook([
+    ["BANK-OTHER-001", "", "", "", "", "", ""],
+    ["HPD1001102026V1", "9988776655", "HDFC0000456", 50, "PAID", "HELPERUTR1", ""],
+    [" hp d1001102026v1 ", "9988776655", "HDFC0000456", 50, "PAID", "HELPERUTR1", ""]
+  ]);
+  assert.throws(
+    () => parseDropxFedOneResponse(response, new Set(["HPD1001102026V1"])),
+    /Rows 3 and 4: duplicate Customer Ref\. No\. “HPD1001102026V1”/i
   );
 });
 

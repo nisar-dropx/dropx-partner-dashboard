@@ -169,6 +169,7 @@ export function WorkforcePayoutBankDialog({
       setResponseFile(null);
       const finalizedCount = Number(payload.paid ?? 0) + Number(payload.cancelled ?? 0);
       const unresolvedCount = Number(payload.rejected ?? 0) + Number(payload.unknown ?? 0);
+      const skippedCount = Number(payload.skipped ?? 0);
       const issueSummary = Array.isArray(payload.rows)
         ? payload.rows
           .filter((row: Record<string, unknown>) => ["rejected", "unknown"].includes(String(row?.outcome ?? "")))
@@ -177,7 +178,7 @@ export function WorkforcePayoutBankDialog({
           .join("; ")
         : "";
       setNotice(
-        `Finalized ${Number(payload.paid ?? 0)} paid and ${Number(payload.cancelled ?? 0)} cancelled payment${finalizedCount === 1 ? "" : "s"}.${unresolvedCount ? ` ${unresolvedCount} response row${unresolvedCount === 1 ? " was" : "s were"} not finalized; correct those rows and upload a new response file.${issueSummary ? ` ${issueSummary}` : ""}` : ""}`
+        `Finalized ${Number(payload.paid ?? 0)} paid and ${Number(payload.cancelled ?? 0)} cancelled payment${finalizedCount === 1 ? "" : "s"}.${skippedCount ? ` Skipped ${skippedCount} unrelated bank reference${skippedCount === 1 ? "" : "s"}.` : ""}${unresolvedCount ? ` ${unresolvedCount} DropX response row${unresolvedCount === 1 ? " was" : "s were"} not finalized; correct those rows and upload a new response file.${issueSummary ? ` ${issueSummary}` : ""}` : ""}`
       );
       router.refresh();
     } catch (caught) {
@@ -222,7 +223,7 @@ export function WorkforcePayoutBankDialog({
               <label>{publicationRefreshCount ? "Preliminary selected balance" : "Balance in this file"}<input className="field" readOnly value={`Rs ${Number(totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} /></label>
             </div>
           </> : <>
-            <p className="subtle">Upload the bank Transaction Enquiry Excel file. Paid rows require a UTR/CIN; cancelled rows release the processing lock for a new payment version.</p>
+            <p className="subtle">Upload the bank Transaction Enquiry Excel file. Matching Workforce and Helper references are finalized together from either tab; unrelated bank references are skipped. Paid rows require a UTR/CIN; cancelled rows release the processing lock for a new payment version.</p>
             <label>Bank response file
               <input accept=".xlsx,.xls" className="field" disabled={busy} onChange={(event) => { setResponseFile(event.target.files?.[0] ?? null); responseOperationIdRef.current = ""; }} required type="file" />
             </label>
