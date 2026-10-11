@@ -538,6 +538,28 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
   }
 }
 
+/**
+ * Read-only view of an upcoming week: the approved roster for it (dated day, else
+ * the repeating weekday). Writes nothing and starts no draft, so a viewer can move
+ * past a one-week dated roster without recalling or creating anything.
+ */
+export async function loadOpsRosterWeekReadOnly(locationId: string, weekStart: string): Promise<ActionResult> {
+  try {
+    const authorization = await requirePagePermission("ops_rostering", "access");
+    const companyId = requireCompanyId(authorization);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart ?? ""))) throw new Error("Choose a valid week.");
+    const currentWeek = rosterMonday(indiaToday());
+    const requested = rosterMonday(weekStart);
+    const start = requested < currentWeek ? currentWeek : requested;
+    const end = addRosterDays(start, 6);
+    // collectApprovedWeekEntries checks the station is inside this user's location access.
+    const entries = await collectApprovedWeekEntries(companyId, authorization, locationId, start, end);
+    return { ok: true, message: "", periodStart: start, periodEnd: end, rosterKind: "dated", entries: mapPreparedEntries(entries), persisted: false };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "That week could not be loaded." };
+  }
+}
+
 export async function saveOpsRosterAssignments(input: { planId: string; changes: RosterChange[]; viewWeekStart?: string }): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("ops_rostering", "edit");

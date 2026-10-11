@@ -14,7 +14,7 @@ import {
 } from "react";
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { cancelOpsRosterDraft, importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
+import { cancelOpsRosterDraft, importOpsRosterWorkbook, loadOpsRosterWeekReadOnly, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import { OpsRosterDecisionHistory } from "@/components/ops-roster-decision-history";
 import type { OpsRosterDecision, OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
 import { formatShiftClock } from "@/lib/roster-plan-preference";
@@ -169,6 +169,9 @@ export function OpsRosterPlanner({
   const [draggingLabel, setDraggingLabel] = useState<string | null>(null);
   const [draggingAssignment, setDraggingAssignment] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
+  // Viewing an upcoming week loaded read-only, outside the plan the page opened with.
+  const [isPeekedWeek, setIsPeekedWeek] = useState(false);
+  const [isLoadingWeek, setIsLoadingWeek] = useState(false);
   const [isSaving, startSaving] = useTransition();
   const [isImporting, startImporting] = useTransition();
   const [excelFileName, setExcelFileName] = useState<string | null>(null);
@@ -310,6 +313,7 @@ export function OpsRosterPlanner({
     preparedPlanIdRef.current = null;
     preparingRef.current = false;
     setIsPreparing(false);
+    setIsPeekedWeek(false);
     assignmentsRef.current = initial;
     setAssignments(initial);
     setDirtyKeys(new Set());
@@ -388,6 +392,7 @@ export function OpsRosterPlanner({
     // itself — a single Sunday rather than the new window's Monday — collapsing the
     // visible range to one day ("13 Sep to 13 Sep").
     setWeekStart(preparedPeriodStart);
+    setIsPeekedWeek(false);
     assignmentsRef.current = preparedAssignments;
     setAssignments(preparedAssignments);
     editingEnabledRef.current = true;
@@ -742,6 +747,54 @@ export function OpsRosterPlanner({
   // window being left. Unsaved changes must be saved first — silently discarding a
   // planner's in-progress work when they click Next/Back would be worse than blocking
   // the click with a clear message.
+  // A dated roster covers one week, so the weeks after it are not in the plan the page
+  // loaded. Moving there shows that week's approved roster read-only - nothing is
+  // recalled or drafted until the planner actually edits.
+  async function peekWeek(targetWeekStart: string) {
+    if (isLoadingWeek) return;
+    setIsLoadingWeek(true);
+    setMessage(null);
+    let result: Awaited<ReturnType<typeof loadOpsRosterWeekReadOnly>>;
+    try {
+      result = await loadOpsRosterWeekReadOnly(stationId, targetWeekStart);
+    } catch {
+      setIsLoadingWeek(false);
+      setMessage({ tone: "error", text: "That week could not be loaded. Please retry." });
+      return;
+    }
+    setIsLoadingWeek(false);
+    if (!result.ok || !result.periodStart) {
+      setMessage({ tone: "error", text: result.message || "That week could not be loaded. Please retry." });
+      return;
+    }
+    const peekedAssignments = initialAssignments(result.entries ?? []);
+    templateStartRef.current = result.periodStart;
+    setTemplateStart(result.periodStart);
+    setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
+    setLiveRecurring(false);
+    setWeekStart(result.periodStart);
+    setIsPeekedWeek(true);
+    assignmentsRef.current = peekedAssignments;
+    setAssignments(peekedAssignments);
+    setDirtyKeys(new Set());
+  }
+
+  // Back from a peeked week into the plan the page opened with: show that plan again
+  // (it may be a draft or pending change, which the approved view above would not show).
+  function restorePlanView(targetWeekStart: string) {
+    const planStart = plan?.periodStart ?? blankPeriodStart;
+    const planRecurring = plan?.status === "approved" && plan?.rosterKind === "recurring_weekly";
+    templateStartRef.current = planStart;
+    setTemplateStart(planStart);
+    setLivePeriodEnd(plan?.periodEnd ?? moveIsoDate(planStart, 6));
+    setLiveRecurring(planRecurring);
+    setWeekStart(!planRecurring && targetWeekStart < planStart ? planStart : targetWeekStart);
+    setIsPeekedWeek(false);
+    assignmentsRef.current = initial;
+    setAssignments(initial);
+    setDirtyKeys(new Set());
+  }
+
   async function moveWeekForward() {
     if (editingEnabled && !isRecurring) {
       if (dirtyKeys.size) {
@@ -760,8 +813,9 @@ export function OpsRosterPlanner({
       if (next > maxWeekStart) return;
       setWeekStart(next);
     } else {
-      if (next > livePeriodEnd) return;
-      setWeekStart(next);
+      if (next > maxWeekStart) return;
+      if (next > livePeriodEnd) await peekWeek(next);
+      else setWeekStart(next);
     }
     setSelectedDates(new Set());
   }
@@ -781,7 +835,18 @@ export function OpsRosterPlanner({
       return;
     }
     const next = moveIsoDate(weekStart, -7);
-    setWeekStart(next < initialWeekStart ? initialWeekStart : next);
+    const target = next < initialWeekStart ? initialWeekStart : next;
+    if (isPeekedWeek) {
+      if (target === weekStart) return;
+      const planStart = plan?.periodStart ?? blankPeriodStart;
+      const planEnd = plan?.periodEnd ?? moveIsoDate(planStart, 6);
+      const planRecurring = plan?.status === "approved" && plan?.rosterKind === "recurring_weekly";
+      if (planRecurring || (target >= planStart && target <= planEnd)) restorePlanView(target);
+      else await peekWeek(target);
+      setSelectedDates(new Set());
+      return;
+    }
+    setWeekStart(target);
     setSelectedDates(new Set());
   }
 
@@ -918,9 +983,9 @@ export function OpsRosterPlanner({
 
     <div className={styles.toolbar}>
       <div className={styles.weekNavigation}>
-        {weekStart > initialWeekStart ? <button type="button" aria-label="Back to current week" onClick={() => void moveWeekBack()} disabled={isPreparing}><ChevronLeft size={16} /></button> : null}
+        {weekStart > initialWeekStart ? <button type="button" aria-label="Back to current week" onClick={() => void moveWeekBack()} disabled={isPreparing || isLoadingWeek}><ChevronLeft size={16} /></button> : null}
         <span><CalendarDays size={15} /><strong>{dateLabel(dates[0] ?? weekStart)}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0] ?? weekStart)}</strong></span>
-        <button type="button" aria-label="Next week" onClick={() => void moveWeekForward()} disabled={isPreparing || (isRecurring || editingEnabled ? weekStart >= maxWeekStart : moveIsoDate(weekStart, 7) > livePeriodEnd)}><ChevronRight size={16} /></button>
+        <button type="button" aria-label="Next week" onClick={() => void moveWeekForward()} disabled={isPreparing || isLoadingWeek || (isRecurring || editingEnabled ? weekStart >= maxWeekStart : moveIsoDate(weekStart, 7) > maxWeekStart)}><ChevronRight size={16} /></button>
       </div>
       <label className={styles.search}><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, ID or designation" /></label>
       <select aria-label="People type" value={workerType} onChange={(event) => setWorkerType(event.target.value)}><option value="all">Employees & contractors</option><option value="employee">Employees</option><option value="contractor">Independent contractors</option></select>
