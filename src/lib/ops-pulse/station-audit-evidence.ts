@@ -33,3 +33,18 @@ export function auditEvidenceError(
     return "Confirm the recording and photos are uploaded, and the folder is shared as Anyone with the link — Viewer.";
   return "";
 }
+/**
+ * A blank folder does not block submission once proof files and written
+ * feedback are both present. A folder that was entered still has to be valid.
+ */
+export function auditEvidenceSubmitError(
+  required: boolean,
+  link: string,
+  confirmed: string,
+  hasFileEvidence: boolean,
+  hasFeedback: boolean,
+) {
+  const error = auditEvidenceError(required, link, confirmed);
+  if (error && !link && hasFileEvidence && hasFeedback) return "";
+  return error;
+}

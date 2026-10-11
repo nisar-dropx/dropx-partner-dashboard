@@ -1,5 +1,5 @@
 "use server";
-import { auditEvidenceError } from "@/lib/ops-pulse/station-audit-evidence";
+import { auditEvidenceSubmitError } from "@/lib/ops-pulse/station-audit-evidence";
 import {
   calculateAuditScore,
   type AuditAssessment,
@@ -638,10 +638,19 @@ export async function submitStationAudit(
     if (cashVariance && !varianceReason)
       throw new Error("Add a reason or finding for the cash difference.");
     const videoUrl = clean(formData.get("video_call_url"));
-    const videoError = auditEvidenceError(
+    const hasFeedback =
+      Boolean(
+        clean(formData.get("overall_summary")) ||
+          clean(formData.get("manager_summary")),
+      ) || responses.some((row) => Boolean(row.remarks));
+    const hasFileEvidence =
+      files.length > 0 || Boolean(existingProofs.data?.length);
+    const videoError = auditEvidenceSubmitError(
       type.requires_video_link,
       videoUrl,
       clean(formData.get("video_access_confirmed")),
+      hasFileEvidence,
+      hasFeedback,
     );
     if (videoError) throw new Error(videoError);
     let shipments = parseShipments(clean(formData.get("shipments_json")));

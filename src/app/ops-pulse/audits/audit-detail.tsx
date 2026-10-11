@@ -1,5 +1,6 @@
 "use client";
 import {
+  auditEvidenceSubmitError,
   isAuditEvidenceFolder,
   isAuditDriveLink,
 } from "@/lib/ops-pulse/station-audit-evidence";
@@ -78,6 +79,19 @@ const responseValue = (raw: unknown) =>
   raw && typeof raw === "object" && "value" in raw
     ? value((raw as { value?: unknown }).value)
     : value(raw);
+const formHasFileEvidence = (data: FormData, savedCount: number) => {
+  if (savedCount > 0) return true;
+  for (const entry of data.values())
+    if (entry instanceof File && entry.size > 0) return true;
+  return false;
+};
+const formHasFeedback = (data: FormData) => {
+  if (value(data.get("overall_summary")).trim()) return true;
+  if (value(data.get("manager_summary")).trim()) return true;
+  for (const [key, entry] of data.entries())
+    if (key.startsWith("check_note_") && value(entry).trim()) return true;
+  return false;
+};
 function useAction() {
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
@@ -204,6 +218,7 @@ export function AuditDetail({
   const shipmentsRef = useRef(shipments);
   shipmentsRef.current = shipments;
   const draftReady = useRef(false);
+  const submitting = useRef(false);
   const draftTimer = useRef<number | null>(null);
   const [draftNotice, setDraftNotice] = useState("");
   const [restoredNotes, setRestoredNotes] = useState<Record<
@@ -229,7 +244,7 @@ export function AuditDetail({
     serverDirty.current = false;
     try {
       const result = await saveStationAuditDraft(audit.id, text);
-      if (!draftReady.current) return;
+      if (!draftReady.current || submitting.current) return;
       if (result.ok)
         setDraftNotice(
           `Draft saved to your account at ${draftTime(new Date().toISOString())}. You can continue on another device. Attached files are not kept.`,
@@ -250,7 +265,7 @@ export function AuditDetail({
     }
   };
   const saveDraft = (announce: boolean) => {
-    if (!formRef.current || !draftReady.current) return;
+    if (submitting.current || !formRef.current || !draftReady.current) return;
     const remarks = formRef.current.elements.namedItem("tid_remarks");
     const savedAt = saveAuditDraft(audit.id, formRef.current, {
       shipments: shipmentsRef.current,
@@ -401,6 +416,9 @@ export function AuditDetail({
       ),
     );
   if (!type || !station) return null;
+  const recordingRequired = Boolean(
+    type.requires_video_link || audit.ops_audit_types?.requires_video_link,
+  );
   return (
     <section className={styles.detail} id={`audit-${audit.id}`}>
       <div className={styles.detailHead}>
@@ -526,7 +544,16 @@ export function AuditDetail({
             ref={formRef}
             // Buttons inside the form (bulk fill, scan, add a row) change entries
             // without a field event, so a click schedules the draft save as well.
-            onClickCapture={() => {
+            onClickCapture={(event) => {
+              const button = (event.target as HTMLElement | null)?.closest(
+                "button",
+              );
+              // Submit must not be recorded as another draft save.
+              if (
+                button instanceof HTMLButtonElement &&
+                button.type === "submit"
+              )
+                return;
               if (draftTimer.current) window.clearTimeout(draftTimer.current);
               draftTimer.current = window.setTimeout(() => saveDraft(false), 1500);
             }}
@@ -549,27 +576,64 @@ export function AuditDetail({
             }}
             onSubmit={(event) => {
               event.preventDefault();
-              const data = new FormData(event.currentTarget);
+              if (draftTimer.current) window.clearTimeout(draftTimer.current);
+              draftTimer.current = null;
+              setDraftNotice("");
+              const form = event.currentTarget;
+              const data = new FormData(form);
               data.set("shipments_json", JSON.stringify(shipments));
-              submit.run(async () => {
-                await uploadAuditFiles(data, (done, total) =>
-                  setUploadProgress(
-                    total ? `Uploading proof ${done} / ${total}…` : "",
-                  ),
+              const link = value(data.get("video_call_url")).trim();
+              const block = auditEvidenceSubmitError(
+                recordingRequired,
+                link,
+                value(data.get("video_access_confirmed")),
+                formHasFileEvidence(data, evidence.length),
+                formHasFeedback(data),
+              );
+              if (block) {
+                submitting.current = false;
+                const field = form.elements.namedItem(
+                  link && isAuditEvidenceFolder(link)
+                    ? "video_access_confirmed"
+                    : "video_call_url",
                 );
-                setUploadProgress("Saving audit…");
-                const result = await submitStationAudit(data);
-                if (result.ok) {
-                  if (draftTimer.current) window.clearTimeout(draftTimer.current);
-                  if (serverTimer.current) window.clearTimeout(serverTimer.current);
-                  serverTimer.current = null;
-                  serverDirty.current = false;
-                  draftReady.current = false;
-                  clearAuditDraft(audit.id);
-                  void clearStationAuditDraft(audit.id).catch(() => undefined);
-                  setDraftNotice("");
+                if (field instanceof HTMLElement) {
+                  const details = field.closest("details");
+                  if (details) details.open = true;
+                  field.scrollIntoView({ block: "center" });
+                  field.focus();
                 }
-                return result;
+                submit.run(async () => ({ ok: false, message: block }));
+                return;
+              }
+              submit.run(async () => {
+                submitting.current = true;
+                try {
+                  await uploadAuditFiles(data, (done, total) =>
+                    setUploadProgress(
+                      total ? `Uploading proof ${done} / ${total}…` : "",
+                    ),
+                  );
+                  setUploadProgress("Saving audit…");
+                  const result = await submitStationAudit(data);
+                  if (result.ok) {
+                    if (draftTimer.current)
+                      window.clearTimeout(draftTimer.current);
+                    if (serverTimer.current)
+                      window.clearTimeout(serverTimer.current);
+                    serverTimer.current = null;
+                    serverDirty.current = false;
+                    draftReady.current = false;
+                    clearAuditDraft(audit.id);
+                    void clearStationAuditDraft(audit.id).catch(
+                      () => undefined,
+                    );
+                    setDraftNotice("");
+                  }
+                  return result;
+                } finally {
+                  submitting.current = false;
+                }
               });
             }}
           >
@@ -701,39 +765,6 @@ export function AuditDetail({
                     </label>
                   </div>
                 )}
-                {type.requires_video_link ? (
-                  <div className={styles.twoCol} style={{ marginTop: 12 }}>
-                    <label className={styles.inputLabel}>
-                      Google Drive evidence folder *
-                      <small>
-                        {type.video_link_help ||
-                          "Upload the video-call screen recording and audit photos to one Google Drive folder. Set General access to Anyone with the link and role to Viewer, then paste the folder link here."}
-                      </small>
-                      <input
-                        name="video_call_url"
-                        type="url"
-                        defaultValue={audit.video_call_url ?? ""}
-                        placeholder="https://drive.google.com/drive/folders/..."
-                        required
-                      />
-                    </label>
-                    <label className={styles.inputLabel}>
-                      Recording, photos & viewing access *
-                      <select
-                        name="video_access_confirmed"
-                        defaultValue=""
-                        required
-                      >
-                        <option value="" disabled>
-                          Confirm access
-                        </option>
-                        <option value="yes">
-                          Confirmed — uploaded and shared for viewing
-                        </option>
-                      </select>
-                    </label>
-                  </div>
-                ) : null}
               </div>
             </details>
             {type?.shipment_reconciliation_enabled ? (
@@ -980,10 +1011,48 @@ export function AuditDetail({
                     placeholder="Private note for audit managers"
                   />
                 </label>
+                {recordingRequired ? (
+                  <div className={styles.twoCol} style={{ marginTop: 12 }}>
+                    <label className={styles.inputLabel}>
+                      Google Drive evidence folder
+                      <small>
+                        {type.video_link_help ||
+                          audit.ops_audit_types?.video_link_help ||
+                          "Upload the video-call screen recording and audit photos to one Google Drive folder. Set General access to Anyone with the link and role to Viewer, then paste the folder link here."}{" "}
+                        Attached evidence files plus written feedback can be
+                        submitted without this folder.
+                      </small>
+                      <input
+                        name="video_call_url"
+                        type="url"
+                        defaultValue={audit.video_call_url ?? ""}
+                        placeholder="https://drive.google.com/drive/folders/..."
+                      />
+                    </label>
+                    <label className={styles.inputLabel}>
+                      Recording, photos & viewing access
+                      <select name="video_access_confirmed" defaultValue="">
+                        <option value="">Not using a Drive folder</option>
+                        <option value="yes">
+                          Confirmed — uploaded and shared for viewing
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
                 <div className={styles.actions} style={{ marginTop: 12 }}>
                   <button
+                    type="submit"
                     className="button"
                     disabled={submit.pending || !inspection}
+                    onClick={(event) => {
+                      const form = event.currentTarget.form;
+                      const invalid = form?.querySelector(":invalid");
+                      if (!(invalid instanceof HTMLElement)) return;
+                      const details = invalid.closest("details");
+                      if (details) details.open = true;
+                      invalid.scrollIntoView({ block: "center" });
+                    }}
                   >
                     {submit.pending
                       ? uploadProgress || "Submitting…"
