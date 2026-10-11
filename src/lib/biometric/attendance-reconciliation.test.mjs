@@ -26,6 +26,10 @@ const routeSource = readFileSync(
 );
 const workerSource = readFileSync(new URL("./attendance-reconciliation.ts", import.meta.url), "utf8");
 const vercel = readFileSync(new URL("../../../vercel.json", import.meta.url), "utf8");
+const runLockMigration = readFileSync(
+  new URL("../../../supabase/migrations/20261011193000_attendance_reconciliation_run_lock.sql", import.meta.url),
+  "utf8"
+);
 
 test("scheduled reconciliation uses a bounded rolling window", () => {
   const window = resolveAttendanceReconciliationWindow({
@@ -73,6 +77,12 @@ test("authenticated catch-up mode can replay September without allowing an unbou
     now: new Date("2026-10-11T05:00:00.000Z"),
     toDate: null
   }), /mode=catchup/);
+  assert.throws(() => resolveAttendanceReconciliationWindow({
+    catchup: true,
+    fromDate: "2026-09-31",
+    now: new Date("2026-10-11T05:00:00.000Z"),
+    toDate: "2026-10-01"
+  }), /YYYY-MM-DD/);
   assert.match(routeSource, /: catchup \? 0 : null/);
 });
 
@@ -325,7 +335,7 @@ test("same-category historical owners remain ambiguous and are never replayed", 
   assert.equal(windows[0].kind, "ambiguous");
   assert.equal(windows[0].owner, null);
   assert.match(workerSource, /ownership\.kind === "ambiguous"/);
-  assert.match(workerSource, /ownershipVerified: true/);
+  assert.doesNotMatch(workerSource, /ownershipVerified: true/);
 });
 
 test("historical ownership is split only at effective-date boundaries", () => {
@@ -375,4 +385,81 @@ test("cron is strictly authenticated, deadline-bounded, idempotent through backf
   assert.doesNotMatch(workerSource, /result\.nextCursor = Math\.min\(\.\.\.result\.failures/);
   assert.match(workerSource, /Failure cursors are returned separately/);
   assert.match(vercel, /\/api\/cron\/attendance-reconciliation/);
+});
+
+test("company reconciliation lease claim shares the assignment lock and reports whether its insert won", () => {
+  const claimFunction = runLockMigration.split(
+    /create or replace function public\.attendance_release_reconciliation_run/i,
+    1
+  )[0];
+  assert.match(
+    claimFunction,
+    /pg_advisory_xact_lock\s*\(\s*pg_catalog\.hashtextextended\s*\(\s*'biometric-enrolment-assignment:'\s*\|\|\s*p_company_id::text\s*,\s*0\s*\)\s*\)/i
+  );
+  assert.match(claimFunction, /get diagnostics v_claimed = row_count;\s*return v_claimed = 1;/i);
+  assert.match(
+    claimFunction,
+    /pg_advisory_xact_lock[\s\S]*?v_now\s*:=\s*pg_catalog\.clock_timestamp\(\);[\s\S]*?v_now\s*\+\s*make_interval/i
+  );
+  assert.doesNotMatch(claimFunction, /v_now\s+timestamptz\s*:=/i);
+  assert.doesNotMatch(claimFunction, /return\s+exists\s*\(/i);
+});
+
+test("company-scoped repair validates the complete snapshot under a final lease", () => {
+  assert.match(workerSource, /const validationToken = randomUUID\(\)/);
+  assert.match(workerSource, /attendance_try_acquire_reconciliation_run[\s\S]*?const currentMappings = await loadMappings\(\{ companyId, fromDate, toDate \}\)/);
+  assert.match(workerSource, /mappingSnapshotToken\(currentMappings\) !== snapshotToken/);
+  assert.match(workerSource, /attendance_reconciliation_validation_lease_release_failed/);
+  assert.match(workerSource, /Attendance mapping changed while this repair was running\. This mapping will be retried\./);
+});
+
+test("biometric mapping writes take the same company lock and wait for an active repair lease", () => {
+  const guardFunction = runLockMigration.match(
+    /create or replace function public\.guard_biometric_enrolment_during_reconciliation\(\)[\s\S]*?\$function\$;/i
+  )?.[0] ?? "";
+  assert.match(
+    guardFunction,
+    /pg_advisory_xact_lock\s*\(\s*pg_catalog\.hashtextextended\s*\(\s*'biometric-enrolment-assignment:'\s*\|\|\s*v_company::text\s*,\s*0\s*\)\s*\)/i
+  );
+  assert.match(guardFunction, /run_lock\.company_id\s*=\s*v_company/i);
+  assert.match(guardFunction, /run_lock\.lease_until\s*>\s*pg_catalog\.clock_timestamp\(\)/i);
+  assert.match(guardFunction, /while exists\s*\([\s\S]*?\) loop[\s\S]*?pg_catalog\.pg_sleep\(0\.1\);[\s\S]*?end loop;/i);
+  assert.doesNotMatch(guardFunction, /raise exception/i);
+  assert.match(
+    runLockMigration,
+    /create trigger biometric_enrolments_reconciliation_guard\s+before insert or update or delete on public\.biometric_enrolments\s+for each row execute function public\.guard_biometric_enrolment_during_reconciliation\(\);/i
+  );
+});
+
+test("master profile writes atomically call the assignment RPC from AFTER row triggers", () => {
+  const syncFunction = runLockMigration.match(
+    /create or replace function public\.sync_biometric_enrolment_from_master\(\)[\s\S]*?\$function\$;/i
+  )?.[0] ?? "";
+  assert.match(syncFunction, /v_row jsonb := to_jsonb\(new\)/i);
+  assert.match(
+    syncFunction,
+    /perform \*\s+from public\.replace_biometric_enrolment_assignment\s*\(\s*\(v_row ->> 'company_id'\)::uuid,\s*auth\.uid\(\),\s*tg_argv\[0\],\s*\(v_row ->> 'id'\)::uuid,\s*nullif\(v_row ->> 'location_id', ''\)::uuid\s*\)/i
+  );
+  assert.doesNotMatch(syncFunction, /exception\s+when/i);
+
+  for (const [table, profileType] of [
+    ["employees", "employee"],
+    ["workforce", "field_executive"],
+    ["contractors", "contractor"],
+    ["vendors", "vendor"],
+    ["helpers", "worker"],
+    ["workforce_helpers", "worker"],
+    ["workforce_pickers", "worker"]
+  ]) {
+    assert.match(
+      runLockMigration,
+      new RegExp(
+        `create trigger ${table}_biometric_enrolment_sync\\s+` +
+        `after insert or update of biometric_id, location_id, is_active, date_of_join on public\\.${table}\\s+` +
+        `for each row execute function public\\.sync_biometric_enrolment_from_master\\('${profileType}'\\);`,
+        "i"
+      ),
+      `${table} must synchronize its biometric assignment in the profile write transaction`
+    );
+  }
 });

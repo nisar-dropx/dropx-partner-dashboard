@@ -46,6 +46,7 @@ export async function GET(request: Request) {
       cursor,
       deadlineAtMs: startedAtMs + (maxDuration - 45) * 1000,
       fromDate: window.fromDate,
+      serializeByCompany: true,
       toDate: window.toDate
     });
     const log = {

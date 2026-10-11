@@ -2,10 +2,11 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import { AttendanceRepairControl } from "./attendance-repair-control";
 
 export const dynamic = "force-dynamic";
 
@@ -235,6 +236,7 @@ export default async function BiometricMonitorPage() {
   const data = await loadBiometricMonitor(companyId);
   const reportingCount = data.devices.filter((device) => deviceReportingStatus(device) === "Reporting").length;
   const calculatedPunches = data.punches.filter((punch) => punch.calculated !== false).length;
+  const canRepairAttendance = authorization.isMasterOwner && authorization.hasAllLocationAccess && !authorization.readOnly && hasPermission(authorization, "app_settings", "edit");
 
   return (
     <AppShell active="Biometric Monitor" pageCode="app_settings">
@@ -253,6 +255,8 @@ export default async function BiometricMonitorPage() {
           </div>
         </section>
       ) : null}
+
+      {canRepairAttendance ? <AttendanceRepairControl /> : null}
 
       <section className="panel">
         <div className="panel-head toolbar">

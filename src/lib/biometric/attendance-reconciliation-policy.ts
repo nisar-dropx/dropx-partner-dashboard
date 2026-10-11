@@ -34,7 +34,12 @@ export function addIsoDateDays(value: string, days: number) {
 }
 
 function assertIsoDate(value: string, label: string) {
-  if (!ISO_DATE.test(value) || Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())) {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (
+    !ISO_DATE.test(value) ||
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== value
+  ) {
     throw new Error(`${label} must use YYYY-MM-DD.`);
   }
 }
