@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "test:provider-mapping": "node --experimental-strip-types --test src/lib/provider-first-mapping-view.test.mjs src/lib/provider-mapping-host.test.mjs src/lib/provider-mapping-outbound-months.test.mjs",
+    "test:business-document-email": "node --experimental-strip-types --test src/app/api/cron/business-document-expiry/route.test.mjs",
     "test:helper-payout-inputs": "node --experimental-strip-types --test src/lib/helper-payout-input-overlays.test.mjs src/lib/helper-payout-input-integration.test.mjs",
     "test:helper-payout-publication": "node --experimental-strip-types --test src/lib/helper-payout-publication.test.mjs",
     "verify:adhoc-da": "node --experimental-strip-types --test src/lib/ops-pulse/adhoc-da-report.test.mjs && node scripts/verify-adhoc-da-payments.mjs",
