@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isBusinessDocumentCronOwner, loadComplianceManagerEmail } from "@/lib/business-document-expiry-email";
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -159,16 +160,10 @@ function selectedRecipients(map: RecipientMap, selected: string[] | null | undef
 
 async function processCompany(company: CompanyRow, today: string) {
   if (!supabaseAdmin) return { failed: 0, sent: 0, skipped: 0 };
-  const [templateResult, settingsResult, documentsResult] = await Promise.all([
+  const [templateResult, documentsResult] = await Promise.all([
     supabaseAdmin
       .from("business_document_notification_templates")
       .select("is_enabled, to_recipients, cc_recipients, custom_to_emails, custom_cc_emails, subject_template, body_template")
-      .eq("company_id", company.id)
-      .eq("id", true)
-      .maybeSingle(),
-    supabaseAdmin
-      .from("business_document_settings")
-      .select("compliance_manager_user_id, profiles (email)")
       .eq("company_id", company.id)
       .eq("id", true)
       .maybeSingle(),
@@ -181,15 +176,21 @@ async function processCompany(company: CompanyRow, today: string) {
       .not("expiry_date", "is", null)
   ]);
 
-  if (templateResult.error || settingsResult.error || documentsResult.error) {
+  const preloadError = templateResult.error?.message ?? documentsResult.error?.message ?? null;
+  if (preloadError) {
+    console.error(JSON.stringify({ companyId: company.id, error: preloadError, event: "business_document_expiry_preload_failed" }));
     return { failed: 1, sent: 0, skipped: 0 };
   }
 
   const template = templateResult.data as TemplateRow | null;
   if (!template?.is_enabled) return { failed: 0, sent: 0, skipped: 0 };
 
-  const settings = settingsResult.data as { profiles?: { email: string | null } | { email: string | null }[] | null } | null;
-  const complianceManagerEmail = firstRelation(settings?.profiles)?.email ?? null;
+  const manager = await loadComplianceManagerEmail(company.id);
+  if (manager.error) {
+    console.error(JSON.stringify({ companyId: company.id, error: manager.error, event: "business_document_expiry_manager_lookup_failed" }));
+    return { failed: 1, sent: 0, skipped: 0 };
+  }
+  const complianceManagerEmail = manager.email;
 
   let sent = 0;
   let failed = 0;
@@ -279,7 +280,8 @@ async function processCompany(company: CompanyRow, today: string) {
       });
       sent += 1;
     } catch (error) {
-      await supabaseAdmin.from("business_document_notification_logs").insert({
+      const message = error instanceof Error ? error.message : "Unable to send email.";
+      const failedLog = await supabaseAdmin.from("business_document_notification_logs").insert({
         company_id: company.id,
         business_document_record_id: document.id,
         reminder_key: reminder.key,
@@ -288,8 +290,14 @@ async function processCompany(company: CompanyRow, today: string) {
         cc_recipients: finalCcRecipients,
         subject,
         status: "failed",
-        error_message: error instanceof Error ? error.message : "Unable to send email."
+        error_message: message
       });
+      console.error(JSON.stringify({
+        companyId: company.id,
+        documentId: document.id,
+        error: failedLog.error ? `${message}; log insert failed: ${failedLog.error.message}` : message,
+        event: "business_document_expiry_send_failed"
+      }));
       failed += 1;
     }
   }
@@ -302,6 +310,9 @@ export async function GET(request: Request) {
   if (secret) {
     const auth = request.headers.get("authorization") ?? "";
     if (auth !== `Bearer ${secret}`) return unauthorized();
+  }
+  if (!isBusinessDocumentCronOwner(request)) {
+    return NextResponse.json({ reason: "non-owner deployment", skipped: true });
   }
   if (!supabaseAdmin) return NextResponse.json({ error: "Supabase service role key is not configured." }, { status: 500 });
 
@@ -317,5 +328,9 @@ export async function GET(request: Request) {
     totals.skipped += result.skipped;
   }
 
-  return NextResponse.json({ date: today, ...totals });
+  const result = { date: today, ...totals };
+  const log = JSON.stringify({ event: "business_document_expiry_completed", ...result });
+  if (totals.failed) console.error(log);
+  else console.info(log);
+  return NextResponse.json(result, { status: totals.failed ? 500 : 200 });
 }
