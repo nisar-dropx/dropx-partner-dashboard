@@ -133,5 +133,32 @@
     "height": 300,
     "redactedRegions": 0,
     "flattened": true
+  },
+  {
+    "id": "training-confirmed",
+    "source": "amazon",
+    "page": 38,
+    "width": 721,
+    "height": 1585,
+    "redactedRegions": 0,
+    "flattened": true
+  },
+  {
+    "id": "ready-to-deliver",
+    "source": "amazon",
+    "page": 38,
+    "width": 721,
+    "height": 1455,
+    "redactedRegions": 0,
+    "flattened": true
+  },
+  {
+    "id": "eshram-registration",
+    "source": "official-eshram",
+    "url": "https://register.eshram.gov.in/#/user/platform-worker-registration",
+    "width": 1201,
+    "height": 445,
+    "redactedRegions": 0,
+    "flattened": true
   }
 ]

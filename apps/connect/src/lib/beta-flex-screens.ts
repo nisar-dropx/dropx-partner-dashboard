@@ -1,3 +1,4 @@
+import { personalGuideCopy } from "./beta-personal-guide.ts";
 import type { GuidanceLanguage } from "./beta-guidance";
 import type { FlexGuideStep } from "./beta-flex-guide";
 
@@ -5,8 +6,8 @@ import type { FlexGuideStep } from "./beta-flex-guide";
 export const flexScreenExamples = {
   signin: ["flex-signin"], privacy: ["privacy"], about: ["about-name", "about-contact"],
   licence: ["licence-front", "licence-back", "licence-review"], photo: ["profile-photo"],
-  bgc: ["bgc-consent", "bgc-details", "bgc-address"], uan: ["eshram-uan"],
-  account: ["account-review", "account-resolve"], learning: ["training-task"],
+  bgc: ["bgc-consent", "bgc-details", "bgc-address"], uan: ["eshram-registration", "eshram-uan"],
+  account: ["account-review", "account-resolve"], learning: ["training-task", "training-confirmed", "ready-to-deliver"],
 } as const satisfies Record<FlexGuideStep, readonly string[]>;
 export type FlexScreenId = typeof flexScreenExamples[FlexGuideStep][number];
 type ScreenCopy = {
@@ -18,7 +19,10 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     title: "See what to fill", note: "Example screens · Personal details removed. Enter your own details. Your Amazon screen may look different.",
     enlarge: "View full screen", close: "Close example", previous: "Previous screen", next: "Next screen", screen: "Example screen",
     examples: {
-      "flex-signin": ["Enter the invited email shown in DropX One.", "Use the Amazon password you created when accepting the invitation.", "Tap Sign in."],
+      "eshram-registration": [personalGuideCopy.en.uanSteps[0], personalGuideCopy.en.uanSteps[1]],
+      "training-confirmed": [personalGuideCopy.en.learningSteps[1], personalGuideCopy.en.learningSteps[2]],
+      "ready-to-deliver": [personalGuideCopy.en.learningSteps[3]],
+      "flex-signin": ["Sign in with this Amazon Flex email: {email}", "Use the Amazon password you created when accepting the invitation.", "Tap Sign in."],
       privacy: ["Open and read the Privacy Notice.", "Continue after reviewing it. Read any agreement before accepting."],
       "about-name": ["Enter your full legal name exactly as on your driving licence.", "Fill your current address and city."],
       "about-contact": ["Use your own mobile number, state and PIN code. Answer the personal questions accurately.", "Review your details, then Continue."],
@@ -28,7 +32,7 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
       "profile-photo": ["Use a clear photo of yourself, with your whole face visible.", "Review it, then Submit. Retake if unclear."],
       "bgc-consent": ["Read the background-check consent and the checks listed.", "Continue only if you agree."],
       "bgc-details": ["Enter your name as on PAN.", "Enter your PAN and father's name as on PAN. Answer history questions truthfully."],
-      "bgc-address": ["Enter your permanent address, city, state and PIN code.", "Review the address, then Continue."],
+      "bgc-address": ["Enter where you currently live: house, road, locality, landmark, city, state, PIN and reachable mobile. If this differs from your ID proof, do not use the ID-proof address as your current address. Fill a separately labelled permanent-address field truthfully.", "Review the address, then Continue."],
       "eshram-uan": ["Enter your name as on your UAN ID.", "If you have an e-Shram UAN, choose Yes and enter it. Otherwise choose No; follow Amazon's instructions or ask your TL. Do not enter PF UAN here.", "Check the details before Submit."],
       "account-review": ["Resolve Other Accounts appears only if Amazon finds an earlier delivery account. Ask your TL to review it."],
       "account-resolve": ["Agree and Remove removes/offboards the listed earlier accounts. Confirm with your TL which account to keep before using it."],
@@ -39,6 +43,9 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     title: "എന്ത് പൂരിപ്പിക്കണമെന്ന് കാണാം", note: "മാതൃകാ സ്ക്രീനുകൾ · വ്യക്തിവിവരങ്ങൾ നീക്കിയിട്ടുണ്ട്. നിങ്ങളുടെ സ്വന്തം വിവരങ്ങൾ നൽകുക. Amazon സ്ക്രീനിൽ ചെറിയ വ്യത്യാസങ്ങൾ ഉണ്ടാകാം.",
     enlarge: "സ്ക്രീൻ വലുതായി കാണുക", close: "മാതൃക അടയ്ക്കുക", previous: "മുൻ സ്ക്രീൻ", next: "അടുത്ത സ്ക്രീൻ", screen: "മാതൃകാ സ്ക്രീൻ",
     examples: {
+      "eshram-registration": [personalGuideCopy.ml.uanSteps[0], personalGuideCopy.ml.uanSteps[1]],
+      "training-confirmed": [personalGuideCopy.ml.learningSteps[1], personalGuideCopy.ml.learningSteps[2]],
+      "ready-to-deliver": [personalGuideCopy.ml.learningSteps[3]],
       "flex-signin": ["DropX One-ൽ കാണുന്ന ക്ഷണം ലഭിച്ച ഇമെയിൽ നൽകുക.", "ക്ഷണം സ്വീകരിക്കുമ്പോൾ നിങ്ങൾ സൃഷ്ടിച്ച Amazon പാസ്‌വേഡ് നൽകുക.", "Sign in അമർത്തുക."],
       privacy: ["Privacy Notice തുറന്ന് വായിക്കുക.", "വായിച്ചശേഷം Continue ചെയ്യുക. കരാർ അംഗീകരിക്കുന്നതിന് മുമ്പ് വായിക്കുക."],
       "about-name": ["ഡ്രൈവിങ് ലൈസൻസിലുള്ളതുപോലെ പൂർണ പേര് നൽകുക.", "നിലവിലെ വിലാസവും നഗരവും പൂരിപ്പിക്കുക."],
@@ -49,7 +56,7 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
       "profile-photo": ["മുഖം മുഴുവൻ വ്യക്തമായി കാണുന്ന സ്വന്തം ഫോട്ടോ നൽകുക.", "പരിശോധിച്ച് Submit ചെയ്യുക. വ്യക്തമല്ലെങ്കിൽ വീണ്ടും എടുക്കുക."],
       "bgc-consent": ["പശ്ചാത്തല പരിശോധനയ്ക്കുള്ള സമ്മതപത്രവും പരിശോധനകളുടെ പട്ടികയും വായിക്കുക.", "സമ്മതമാണെങ്കിൽ മാത്രം Continue ചെയ്യുക."],
       "bgc-details": ["PAN-ലുള്ളതുപോലെ പേര് നൽകുക.", "PAN നമ്പറും PAN-ലുള്ള അച്ഛന്റെ പേരും നൽകുക. മുൻകാല വിവരങ്ങൾക്ക് സത്യസന്ധമായി മറുപടി നൽകുക."],
-      "bgc-address": ["സ്ഥിരവിലാസം, നഗരം, സംസ്ഥാനം, പിൻ കോഡ് നൽകുക.", "വിലാസം പരിശോധിച്ച് Continue ചെയ്യുക."],
+      "bgc-address": ["ഇപ്പോൾ താമസിക്കുന്ന വിലാസം, റോഡ്, സമീപത്തെ അടയാളം, നഗരം, സംസ്ഥാനം, പിൻ കോഡ്, ബന്ധപ്പെടാനുള്ള നമ്പർ നൽകുക. ലൈസൻസിലെ വിലാസം വ്യത്യസ്തമാണെങ്കിൽ അതിനെ നിലവിലെ വിലാസമായി നൽകരുത്.", "വിലാസം പരിശോധിച്ച് Continue ചെയ്യുക."],
       "eshram-uan": ["UAN ID-ലുള്ളതുപോലെ പേര് നൽകുക.", "e-Shram UAN ഉണ്ടെങ്കിൽ Yes തിരഞ്ഞെടുത്ത് നൽകുക. ഇല്ലെങ്കിൽ No തിരഞ്ഞെടുക്കുക; Amazon നിർദേശം പിന്തുടരുക അല്ലെങ്കിൽ TL-നോട് ചോദിക്കുക. ഇവിടെ PF UAN നൽകരുത്.", "വിവരങ്ങൾ പരിശോധിച്ചശേഷം Submit ചെയ്യുക."],
       "account-review": ["മുൻ Amazon ഡെലിവറി അക്കൗണ്ട് കണ്ടെത്തിയാൽ മാത്രം Resolve Other Accounts കാണും. TL-നോട് പരിശോധിക്കാൻ പറയുക."],
       "account-resolve": ["Agree and Remove അമർത്തിയാൽ കാണിച്ച പഴയ അക്കൗണ്ടുകൾ നീക്കം/offboard ചെയ്യും. ഏത് അക്കൗണ്ട് നിലനിർത്തണമെന്ന് TL-നോട് ഉറപ്പാക്കിയശേഷം മാത്രം ഉപയോഗിക്കുക."],
@@ -60,6 +67,9 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     title: "ఏం నింపాలో చూడండి", note: "నమూనా స్క్రీన్‌లు · వ్యక్తిగత వివరాలు తొలగించబడ్డాయి. మీ సొంత వివరాలు ఇవ్వండి. మీ Amazon స్క్రీన్ కొంత భిన్నంగా ఉండవచ్చు.",
     enlarge: "పూర్తి స్క్రీన్ చూడండి", close: "నమూనా మూసివేయండి", previous: "ముందు స్క్రీన్", next: "తర్వాతి స్క్రీన్", screen: "నమూనా స్క్రీన్",
     examples: {
+      "eshram-registration": [personalGuideCopy.te.uanSteps[0], personalGuideCopy.te.uanSteps[1]],
+      "training-confirmed": [personalGuideCopy.te.learningSteps[1], personalGuideCopy.te.learningSteps[2]],
+      "ready-to-deliver": [personalGuideCopy.te.learningSteps[3]],
       "flex-signin": ["DropX Oneలో చూపిన ఆహ్వాన ఇమెయిల్ ఇవ్వండి.", "ఆహ్వానం అంగీకరించేటప్పుడు మీరు సృష్టించిన Amazon పాస్‌వర్డ్ వాడండి.", "Sign in నొక్కండి."],
       privacy: ["Privacy Notice తెరిచి చదవండి.", "చదివిన తర్వాత Continue చేయండి. ఏ ఒప్పందమైనా అంగీకరించే ముందు చదవండి."],
       "about-name": ["డ్రైవింగ్ లైసెన్స్‌లో ఉన్నట్లే పూర్తి పేరు ఇవ్వండి.", "ప్రస్తుత చిరునామా, నగరం నింపండి."],
@@ -70,7 +80,7 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
       "profile-photo": ["ముఖం పూర్తిగా స్పష్టంగా కనిపించే మీ ఫోటో ఇవ్వండి.", "పరిశీలించి Submit చేయండి. స్పష్టంగా లేకపోతే మళ్లీ తీయండి."],
       "bgc-consent": ["నేపథ్య తనిఖీ సమ్మతి, తనిఖీల జాబితా చదవండి.", "అంగీకరిస్తేనే Continue చేయండి."],
       "bgc-details": ["PANలో ఉన్నట్లే పేరు ఇవ్వండి.", "PAN నంబర్, PANలోని తండ్రి పేరు ఇవ్వండి. గత చరిత్ర ప్రశ్నలకు నిజాయితీగా జవాబివ్వండి."],
-      "bgc-address": ["శాశ్వత చిరునామా, నగరం, రాష్ట్రం, PIN కోడ్ ఇవ్వండి.", "చిరునామా చూసి Continue చేయండి."],
+      "bgc-address": ["ప్రస్తుతం నివసించే ఇంటి చిరునామా, రోడ్డు, ప్రాంతం, ల్యాండ్‌మార్క్, నగరం, రాష్ట్రం, PIN, మొబైల్ ఇవ్వండి. లైసెన్స్ చిరునామా వేరైతే దానిని ప్రస్తుత చిరునామాగా ఇవ్వవద్దు.", "చిరునామా చూసి Continue చేయండి."],
       "eshram-uan": ["UAN IDలో ఉన్నట్లే పేరు ఇవ్వండి.", "e-Shram UAN ఉంటే Yes ఎంచుకుని ఇవ్వండి. లేకపోతే No ఎంచుకుని Amazon సూచనలు పాటించండి లేదా TLను అడగండి. ఇక్కడ PF UAN ఇవ్వవద్దు.", "వివరాలు చూసిన తర్వాత Submit చేయండి."],
       "account-review": ["పాత Amazon డెలివరీ ఖాతా ఉంటేనే Resolve Other Accounts కనిపిస్తుంది. TLతో పరిశీలించండి."],
       "account-resolve": ["Agree and Remove నొక్కితే చూపిన పాత ఖాతాలు తొలగించబడతాయి/offboard అవుతాయి. ఏ ఖాతా ఉంచాలో TLతో నిర్ధారించుకున్న తర్వాతే వాడండి."],
@@ -81,6 +91,9 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     title: "எதை நிரப்ப வேண்டும் என்று பாருங்கள்", note: "மாதிரித் திரைகள் · தனிப்பட்ட விவரங்கள் நீக்கப்பட்டுள்ளன. உங்கள் சொந்த விவரங்களை உள்ளிடுங்கள். Amazon திரை சற்று மாறுபடலாம்.",
     enlarge: "முழுத் திரையைப் பார்க்க", close: "மாதிரியை மூடு", previous: "முந்தைய திரை", next: "அடுத்த திரை", screen: "மாதிரித் திரை",
     examples: {
+      "eshram-registration": [personalGuideCopy.ta.uanSteps[0], personalGuideCopy.ta.uanSteps[1]],
+      "training-confirmed": [personalGuideCopy.ta.learningSteps[1], personalGuideCopy.ta.learningSteps[2]],
+      "ready-to-deliver": [personalGuideCopy.ta.learningSteps[3]],
       "flex-signin": ["DropX One-ல் காட்டும் அழைப்பு மின்னஞ்சலை உள்ளிடுங்கள்.", "அழைப்பை ஏற்கும்போது உருவாக்கிய Amazon கடவுச்சொல்லைப் பயன்படுத்துங்கள்.", "Sign in அழுத்துங்கள்."],
       privacy: ["Privacy Notice திறந்து படியுங்கள்.", "படித்த பிறகு Continue செய்யுங்கள். ஒப்பந்தத்தை ஏற்கும் முன் படியுங்கள்."],
       "about-name": ["ஓட்டுநர் உரிமத்தில் உள்ளபடியே முழுப் பெயரை உள்ளிடுங்கள்.", "தற்போதைய முகவரி, நகரத்தை நிரப்புங்கள்."],
@@ -91,7 +104,7 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
       "profile-photo": ["முகம் முழுவதும் தெளிவாகத் தெரியும் உங்கள் புகைப்படத்தைப் பயன்படுத்துங்கள்.", "சரிபார்த்து Submit செய்யுங்கள். தெளிவில்லையெனில் மீண்டும் எடுங்கள்."],
       "bgc-consent": ["பின்னணிச் சோதனைக்கான சம்மதத்தையும் சோதனைப் பட்டியலையும் படியுங்கள்.", "ஒப்புக்கொண்டால் மட்டுமே Continue செய்யுங்கள்."],
       "bgc-details": ["PAN-ல் உள்ளபடியே பெயரை உள்ளிடுங்கள்.", "PAN எண், PAN-ல் உள்ள தந்தையின் பெயரை உள்ளிடுங்கள். கடந்தகாலக் கேள்விகளுக்கு உண்மையாகப் பதிலளியுங்கள்."],
-      "bgc-address": ["நிரந்தர முகவரி, நகரம், மாநிலம், அஞ்சல் குறியீடு உள்ளிடுங்கள்.", "முகவரியைச் சரிபார்த்து Continue செய்யுங்கள்."],
+      "bgc-address": ["இப்போது வசிக்கும் வீடு, சாலை, பகுதி, அருகிலுள்ள அடையாளம், நகரம், மாநிலம், அஞ்சல் குறியீடு, தொடர்பு எண்ணை உள்ளிடுங்கள். உரிமத்தின் முகவரி வேறாக இருந்தால் அதை தற்போதைய முகவரியாகக் கொடுக்க வேண்டாம்.", "முகவரியைச் சரிபார்த்து Continue செய்யுங்கள்."],
       "eshram-uan": ["UAN ID-ல் உள்ளபடியே பெயரை உள்ளிடுங்கள்.", "e-Shram UAN இருந்தால் Yes தேர்ந்தெடுத்து உள்ளிடுங்கள். இல்லையெனில் No தேர்ந்தெடுத்து Amazon வழிமுறைகளைப் பின்பற்றுங்கள் அல்லது TL-ஐக் கேளுங்கள். இங்கு PF UAN உள்ளிட வேண்டாம்.", "விவரங்களைச் சரிபார்த்த பிறகு Submit செய்யுங்கள்."],
       "account-review": ["முந்தைய Amazon டெலிவரி கணக்கு இருந்தால் மட்டுமே Resolve Other Accounts வரும். TL-யிடம் சரிபார்க்கச் சொல்லுங்கள்."],
       "account-resolve": ["Agree and Remove காட்டப்பட்ட பழைய கணக்குகளை நீக்கும்/offboard செய்யும். எந்தக் கணக்கை வைத்திருக்க வேண்டும் என TL-யிடம் உறுதிசெய்த பிறகே பயன்படுத்துங்கள்."],
@@ -102,6 +115,9 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     title: "ಏನು ತುಂಬಬೇಕೆಂದು ನೋಡಿ", note: "ಮಾದರಿ ಪರದೆಗಳು · ವೈಯಕ್ತಿಕ ವಿವರಗಳನ್ನು ತೆಗೆದುಹಾಕಲಾಗಿದೆ. ನಿಮ್ಮ ಸ್ವಂತ ವಿವರ ನೀಡಿ. Amazon ಪರದೆ ಸ್ವಲ್ಪ ಬೇರೆಯಾಗಿರಬಹುದು.",
     enlarge: "ಪೂರ್ಣ ಪರದೆ ನೋಡಿ", close: "ಮಾದರಿ ಮುಚ್ಚಿ", previous: "ಹಿಂದಿನ ಪರದೆ", next: "ಮುಂದಿನ ಪರದೆ", screen: "ಮಾದರಿ ಪರದೆ",
     examples: {
+      "eshram-registration": [personalGuideCopy.kn.uanSteps[0], personalGuideCopy.kn.uanSteps[1]],
+      "training-confirmed": [personalGuideCopy.kn.learningSteps[1], personalGuideCopy.kn.learningSteps[2]],
+      "ready-to-deliver": [personalGuideCopy.kn.learningSteps[3]],
       "flex-signin": ["DropX Oneನಲ್ಲಿ ತೋರಿಸಿದ ಆಹ್ವಾನದ ಇಮೇಲ್ ನೀಡಿ.", "ಆಹ್ವಾನ ಒಪ್ಪುವಾಗ ನೀವು ರಚಿಸಿದ Amazon ಪಾಸ್‌ವರ್ಡ್ ಬಳಸಿ.", "Sign in ಒತ್ತಿ."],
       privacy: ["Privacy Notice ತೆರೆದು ಓದಿ.", "ಓದಿದ ಬಳಿಕ Continue ಮಾಡಿ. ಯಾವುದೇ ಒಪ್ಪಂದ ಒಪ್ಪುವ ಮೊದಲು ಓದಿ."],
       "about-name": ["ಚಾಲನಾ ಪರವಾನಗಿಯಲ್ಲಿರುವಂತೆ ಪೂರ್ಣ ಹೆಸರು ನೀಡಿ.", "ಪ್ರಸ್ತುತ ವಿಳಾಸ ಮತ್ತು ನಗರ ತುಂಬಿ."],
@@ -123,6 +139,9 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     title: "देखें क्या भरना है", note: "उदाहरण स्क्रीन · निजी विवरण हटा दिए गए हैं। अपनी जानकारी भरें। आपकी Amazon स्क्रीन थोड़ी अलग दिख सकती है।",
     enlarge: "पूरी स्क्रीन देखें", close: "उदाहरण बंद करें", previous: "पिछली स्क्रीन", next: "अगली स्क्रीन", screen: "उदाहरण स्क्रीन",
     examples: {
+      "eshram-registration": [personalGuideCopy.hi.uanSteps[0], personalGuideCopy.hi.uanSteps[1]],
+      "training-confirmed": [personalGuideCopy.hi.learningSteps[1], personalGuideCopy.hi.learningSteps[2]],
+      "ready-to-deliver": [personalGuideCopy.hi.learningSteps[3]],
       "flex-signin": ["DropX One में दिखाया गया निमंत्रण वाला ईमेल भरें।", "निमंत्रण स्वीकार करते समय बनाया गया अपना Amazon पासवर्ड डालें।", "Sign in दबाएँ।"],
       privacy: ["Privacy Notice खोलकर पढ़ें।", "पढ़ने के बाद Continue करें। कोई भी समझौता स्वीकार करने से पहले पढ़ें।"],
       "about-name": ["ड्राइविंग लाइसेंस के अनुसार अपना पूरा कानूनी नाम भरें।", "मौजूदा पता और शहर भरें।"],
@@ -144,6 +163,9 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     title: "କ’ଣ ପୂରଣ କରିବେ ଦେଖନ୍ତୁ", note: "ନମୁନା ସ୍କ୍ରିନ୍ · ବ୍ୟକ୍ତିଗତ ତଥ୍ୟ ହଟାଯାଇଛି। ନିଜ ତଥ୍ୟ ଦିଅନ୍ତୁ। ଆପଣଙ୍କ Amazon ସ୍କ୍ରିନ୍ କିଛି ଅଲଗା ହୋଇପାରେ।",
     enlarge: "ପୂରା ସ୍କ୍ରିନ୍ ଦେଖନ୍ତୁ", close: "ନମୁନା ବନ୍ଦ କରନ୍ତୁ", previous: "ପୂର୍ବ ସ୍କ୍ରିନ୍", next: "ପରବର୍ତ୍ତୀ ସ୍କ୍ରିନ୍", screen: "ନମୁନା ସ୍କ୍ରିନ୍",
     examples: {
+      "eshram-registration": [personalGuideCopy.or.uanSteps[0], personalGuideCopy.or.uanSteps[1]],
+      "training-confirmed": [personalGuideCopy.or.learningSteps[1], personalGuideCopy.or.learningSteps[2]],
+      "ready-to-deliver": [personalGuideCopy.or.learningSteps[3]],
       "flex-signin": ["DropX Oneରେ ଦେଖାଯାଇଥିବା ନିମନ୍ତ୍ରଣ ଇମେଲ୍ ଦିଅନ୍ତୁ।", "ନିମନ୍ତ୍ରଣ ଗ୍ରହଣ ବେଳେ ତିଆରି କରିଥିବା ନିଜ Amazon ପାସୱାର୍ଡ ଦିଅନ୍ତୁ।", "Sign in ଦବାନ୍ତୁ।"],
       privacy: ["Privacy Notice ଖୋଲି ପଢ଼ନ୍ତୁ।", "ପଢ଼ିବା ପରେ Continue କରନ୍ତୁ। କୌଣସି ଚୁକ୍ତି ମାନିବା ପୂର୍ବରୁ ପଢ଼ନ୍ତୁ।"],
       "about-name": ["ଡ୍ରାଇଭିଂ ଲାଇସେନ୍ସ ଅନୁସାରେ ପୂରା ନାମ ଦିଅନ୍ତୁ।", "ବର୍ତ୍ତମାନର ଠିକଣା ଓ ସହର ପୂରଣ କରନ୍ତୁ।"],
@@ -162,3 +184,8 @@ export const flexScreenCopy: Record<GuidanceLanguage, ScreenCopy> = {
     },
   },
 };
+
+for (const language of Object.keys(personalGuideCopy) as Array<keyof typeof personalGuideCopy>) {
+ flexScreenCopy[language].examples["bgc-address"] = [personalGuideCopy[language].address, ...flexScreenCopy[language].examples["bgc-address"].slice(1)];
+ flexScreenCopy[language].examples["training-task"] = [personalGuideCopy[language].learningSteps[0]];
+}

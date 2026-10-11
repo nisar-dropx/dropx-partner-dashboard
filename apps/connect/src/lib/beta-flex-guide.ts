@@ -1,3 +1,4 @@
+import { personalGuideCopy } from "./beta-personal-guide.ts";
 import type { GuidanceLanguage } from "./beta-guidance";
 
 // Screen labels stay verbatim so candidates can find them in Amazon's app.
@@ -156,3 +157,9 @@ export const betaFlexGuide: Record<GuidanceLanguage, GuideCopy> = {
     },
   },
 };
+
+// Keep current-residence and LM instructions consistent in every guidance language.
+for (const language of Object.keys(personalGuideCopy) as Array<keyof typeof personalGuideCopy>) {
+ betaFlexGuide[language].steps.bgc.actions[1] = personalGuideCopy[language].address;
+ betaFlexGuide[language].steps.learning.actions = [betaFlexGuide[language].steps.learning.actions[0].split(". ")[0] + ". " + personalGuideCopy[language].learningSteps[0], personalGuideCopy[language].learningSteps[1]];
+}
