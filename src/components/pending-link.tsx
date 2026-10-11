@@ -55,6 +55,13 @@ export function PendingLink({
     setLoading(false);
   }, [currentUrl]);
 
+  // A placeholder dialog covers the page, so never leave it up if the page fails to arrive.
+  useEffect(() => {
+    if (!loading || !pendingOverlay) return;
+    const timer = window.setTimeout(() => setLoading(false), 20000);
+    return () => window.clearTimeout(timer);
+  }, [loading, pendingOverlay]);
+
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
       return;
@@ -98,7 +105,17 @@ export function PendingLink({
       {loading && iconOnly ? null : children}
       {loading && pendingOverlay
         ? createPortal(
-            <div className="modal-backdrop" role="status" aria-live="polite">
+            <div
+              className="modal-backdrop"
+              role="status"
+              aria-live="polite"
+              onClick={(event) => {
+                // Portal clicks bubble to this link; keep them from navigating again.
+                event.preventDefault();
+                event.stopPropagation();
+                setLoading(false);
+              }}
+            >
               <section className="modal-panel pending-overlay-panel">
                 <span className="inline-spinner" aria-hidden="true" />
                 <strong>{pendingOverlay}</strong>
