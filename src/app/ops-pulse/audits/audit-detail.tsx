@@ -79,15 +79,20 @@ const responseValue = (raw: unknown) =>
   raw && typeof raw === "object" && "value" in raw
     ? value((raw as { value?: unknown }).value)
     : value(raw);
-const formHasFileEvidence = (data: FormData, savedCount: number) => {
-  if (savedCount > 0) return true;
-  for (const entry of data.values())
-    if (entry instanceof File && entry.size > 0) return true;
-  return false;
+const selectedProofCount = (form: HTMLFormElement) => {
+  let count = 0;
+  for (const element of Array.from(form.elements)) {
+    if (!(element instanceof HTMLInputElement) || element.type !== "file")
+      continue;
+    count += Array.from(element.files || []).filter((file) => file.size > 0)
+      .length;
+  }
+  return count;
 };
 const formHasFeedback = (data: FormData) => {
   if (value(data.get("overall_summary")).trim()) return true;
   if (value(data.get("manager_summary")).trim()) return true;
+  if (value(data.get("evidence_caption")).trim()) return true;
   for (const [key, entry] of data.entries())
     if (key.startsWith("check_note_") && value(entry).trim()) return true;
   return false;
@@ -219,6 +224,7 @@ export function AuditDetail({
   shipmentsRef.current = shipments;
   const draftReady = useRef(false);
   const submitting = useRef(false);
+  const draftEpoch = useRef(0);
   const draftTimer = useRef<number | null>(null);
   const [draftNotice, setDraftNotice] = useState("");
   const [restoredNotes, setRestoredNotes] = useState<Record<
@@ -239,13 +245,19 @@ export function AuditDetail({
       window.clearTimeout(serverTimer.current);
       serverTimer.current = null;
     }
+    const epoch = draftEpoch.current;
     const text = readAuditDraftText(audit.id);
-    if (!text || !serverDirty.current) return;
+    if (!text || !serverDirty.current || submitting.current) return;
     serverDirty.current = false;
     try {
       const result = await saveStationAuditDraft(audit.id, text);
-      if (!draftReady.current || submitting.current) return;
-      if (result.ok)
+      if (
+        !draftReady.current ||
+        submitting.current ||
+        epoch !== draftEpoch.current
+      )
+        return;
+      if (result.ok && announce)
         setDraftNotice(
           `Draft saved to your account at ${draftTime(new Date().toISOString())}. You can continue on another device. Attached files are not kept.`,
         );
@@ -542,6 +554,7 @@ export function AuditDetail({
         {canPerform && (audit.status_code === "in_progress" || editing) ? (
           <form
             ref={formRef}
+            noValidate
             // Buttons inside the form (bulk fill, scan, add a row) change entries
             // without a field event, so a click schedules the draft save as well.
             onClickCapture={(event) => {
@@ -576,18 +589,31 @@ export function AuditDetail({
             }}
             onSubmit={(event) => {
               event.preventDefault();
+              draftEpoch.current += 1;
+              submitting.current = true;
               if (draftTimer.current) window.clearTimeout(draftTimer.current);
               draftTimer.current = null;
+              if (serverTimer.current) window.clearTimeout(serverTimer.current);
+              serverTimer.current = null;
               setDraftNotice("");
               const form = event.currentTarget;
               const data = new FormData(form);
+              const due = form.elements.namedItem("action_due_at");
+              if (
+                due instanceof HTMLInputElement &&
+                due.value &&
+                !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(due.value)
+              )
+                data.delete("action_due_at");
+              const proofs = selectedProofCount(form);
+              data.set("attached_evidence_count", String(proofs));
               data.set("shipments_json", JSON.stringify(shipments));
               const link = value(data.get("video_call_url")).trim();
               const block = auditEvidenceSubmitError(
                 recordingRequired,
                 link,
                 value(data.get("video_access_confirmed")),
-                formHasFileEvidence(data, evidence.length),
+                proofs > 0 || evidence.length > 0,
                 formHasFeedback(data),
               );
               if (block) {
@@ -607,7 +633,6 @@ export function AuditDetail({
                 return;
               }
               submit.run(async () => {
-                submitting.current = true;
                 try {
                   await uploadAuditFiles(data, (done, total) =>
                     setUploadProgress(
@@ -1043,16 +1068,9 @@ export function AuditDetail({
                 <div className={styles.actions} style={{ marginTop: 12 }}>
                   <button
                     type="submit"
+                    formNoValidate
                     className="button"
                     disabled={submit.pending || !inspection}
-                    onClick={(event) => {
-                      const form = event.currentTarget.form;
-                      const invalid = form?.querySelector(":invalid");
-                      if (!(invalid instanceof HTMLElement)) return;
-                      const details = invalid.closest("details");
-                      if (details) details.open = true;
-                      invalid.scrollIntoView({ block: "center" });
-                    }}
                   >
                     {submit.pending
                       ? uploadProgress || "Submitting…"

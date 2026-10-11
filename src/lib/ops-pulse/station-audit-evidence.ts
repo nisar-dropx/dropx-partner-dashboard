@@ -34,8 +34,8 @@ export function auditEvidenceError(
   return "";
 }
 /**
- * A blank folder does not block submission once proof files and written
- * feedback are both present. A folder that was entered still has to be valid.
+ * Proof files plus written feedback are enough to submit. A valid Drive folder
+ * still has to be confirmed. Any other link is ignored instead of blocking.
  */
 export function auditEvidenceSubmitError(
   required: boolean,
@@ -44,7 +44,7 @@ export function auditEvidenceSubmitError(
   hasFileEvidence: boolean,
   hasFeedback: boolean,
 ) {
-  const error = auditEvidenceError(required, link, confirmed);
-  if (error && !link && hasFileEvidence && hasFeedback) return "";
-  return error;
+  if (!required) return "";
+  if (hasFileEvidence && hasFeedback && !isAuditEvidenceFolder(link)) return "";
+  return auditEvidenceError(required, link, confirmed);
 }

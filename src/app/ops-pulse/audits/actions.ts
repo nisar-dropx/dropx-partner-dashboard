@@ -1,5 +1,8 @@
 "use server";
-import { auditEvidenceSubmitError } from "@/lib/ops-pulse/station-audit-evidence";
+import {
+  auditEvidenceSubmitError,
+  isAuditEvidenceFolder,
+} from "@/lib/ops-pulse/station-audit-evidence";
 import {
   calculateAuditScore,
   type AuditAssessment,
@@ -638,21 +641,34 @@ export async function submitStationAudit(
     if (cashVariance && !varianceReason)
       throw new Error("Add a reason or finding for the cash difference.");
     const videoUrl = clean(formData.get("video_call_url"));
+    const videoConfirmed = clean(formData.get("video_access_confirmed"));
     const hasFeedback =
       Boolean(
         clean(formData.get("overall_summary")) ||
-          clean(formData.get("manager_summary")),
-      ) || responses.some((row) => Boolean(row.remarks));
+          clean(formData.get("manager_summary")) ||
+          clean(formData.get("evidence_caption")),
+      ) ||
+      responses.some((row) => Boolean(row.remarks)) ||
+      Array.from(formData.keys()).some(
+        (key) => key.startsWith("check_note_") && Boolean(clean(formData.get(key))),
+      );
+    const attachedCount = number(formData.get("attached_evidence_count")) ?? 0;
     const hasFileEvidence =
-      files.length > 0 || Boolean(existingProofs.data?.length);
+      files.length > 0 ||
+      attachedCount > 0 ||
+      Boolean(existingProofs.data?.length);
     const videoError = auditEvidenceSubmitError(
       type.requires_video_link,
       videoUrl,
-      clean(formData.get("video_access_confirmed")),
+      videoConfirmed,
       hasFileEvidence,
       hasFeedback,
     );
     if (videoError) throw new Error(videoError);
+    const storedVideoUrl =
+      type.requires_video_link && !isAuditEvidenceFolder(videoUrl)
+        ? null
+        : videoUrl || null;
     let shipments = parseShipments(clean(formData.get("shipments_json")));
     let reconciliation: { expected: string[]; scanned: string[] } | null = null;
     if (type.shipment_reconciliation_enabled) {
@@ -853,8 +869,8 @@ export async function submitStationAudit(
             "excess",
       ).length,
       shipment_unresolved_count: unresolvedShipments.length,
-      video_call_url: videoUrl || null,
-      video_call_verified_at: videoUrl ? new Date().toISOString() : null,
+      video_call_url: storedVideoUrl,
+      video_call_verified_at: storedVideoUrl ? new Date().toISOString() : null,
       overall_summary:
         clean(formData.get("overall_summary")) ||
         (cashVariance
