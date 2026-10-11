@@ -1,5 +1,7 @@
 import { DynamicWorkforceCategoryPageContent } from "@/app/people/category/[code]/page";
 
+export const maxDuration = 300;
+
 type HelpersSearchParams = {
   edit?: string; error?: string; notice?: string; view?: string;
   full_name?: string; mobile_country_code?: string; mobile?: string; email?: string;

@@ -29,3 +29,20 @@ test("uses exact parser-compatible compensation headers", () => {
   assert.deepEqual(contractorRows[0], ["DropX ID", "Remuneration"]);
 });
 
+test("creates a Helper template with optional payment details and no PAN requirement", () => {
+  const template = buildImportTemplate("helper");
+  assert.equal(template.fileName, "DropX_Helper_Bulk_Upload_Template.xlsx");
+
+  const workbook = XLSX.read(template.bytes, { type: "buffer" });
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets.Upload, { header: 1, defval: "" });
+  assert.deepEqual(rows[0], [
+    "DropX ID", "Biometric ID", "Full name", "Mob country code", "Mob no", "Email",
+    "Date of join (DD/MM/YYYY)", "Location", "Designation code", "Bank account number", "IFSC"
+  ]);
+
+  const instructions = XLSX.utils.sheet_to_json(workbook.Sheets.Instructions, { header: 1, defval: "" }).flat().join(" ");
+  assert.match(instructions, /activated immediately/i);
+  assert.match(instructions, /PAN is not required/i);
+  assert.match(instructions, /enter both together/i);
+});
+

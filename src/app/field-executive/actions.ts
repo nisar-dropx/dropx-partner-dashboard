@@ -9,10 +9,11 @@ import * as XLSX from "xlsx";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { currentAccessSurface } from "@/lib/access-surface";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
+import { backfillHistoricalPunches } from "@/lib/biometric/attendance";
 import { generateBiometricEnrolmentId } from "@/lib/biometric/ids";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
-import { assertWorkerDesignationMappedToIdSeries, generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib/dropx-id-generation";
+import { generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib/dropx-id-generation";
 import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
 import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
 import { assertDesignationRegister, targetRegisterForWorkforceRoute } from "@/lib/designation-register-routing";
@@ -25,6 +26,16 @@ import { dashboardDateInputValue } from "@/lib/date-format";
 import { loadClientIdMappings, needsClientId, providerMappingFor, type ClientIdWorker } from "@/lib/workforce-client-id-queue";
 import { loadClientIdPartnerStates } from "@/lib/workforce-client-id-partner";
 import { callWorkforceAmazonWorker } from "@/lib/workforce-amazon-worker";
+import {
+  assertUniquePeopleBulkIdentities,
+  HELPER_BULK_IMPORT_MAX_ROWS,
+  PEOPLE_BULK_IMPORT_MAX_FILE_BYTES,
+  PEOPLE_BULK_IMPORT_MAX_ROWS,
+  normalizePeopleBulkBiometricId,
+  normalizePeopleBulkDropxId,
+  parsePeopleBulkBankDetails,
+  peopleBulkImportLifecycle
+} from "@/lib/people-bulk-import";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { loadOpsWorkforceLocations } from "@/lib/ops-workforce-locations";
 import { STATION_EMAIL_EXCEPTION_NOTE_FIELD, workforceStationPolicy, workforceStationEmailError, workforceStationEmailExceptionNote, workforceStationEmailNeedsException } from "@/lib/workforce-register-policy";
@@ -152,15 +163,17 @@ function isNextRedirectError(error: unknown) {
     String((error as { digest: string }).digest).startsWith("NEXT_REDIRECT");
 }
 
-function generatedDropxId(category: "field_executive" | "contractor" | "vendor" | "worker") {
+function generatedDropxId(category: string) {
   const prefix = category === "field_executive"
     ? "FE"
     : category === "contractor"
       ? "IC"
       : category === "vendor"
         ? "VEN"
-        : "WRK";
-  return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+        : category === "helpers"
+          ? "HEL"
+          : "WRK";
+  return `${prefix}-${Date.now().toString(36).toUpperCase()}${randomBytes(2).toString("hex").toUpperCase()}`;
 }
 
 /** Canonical Workforce rows must self-identify; DB rejects null source_profile_type. */
@@ -953,6 +966,7 @@ export async function reviewFieldExecutiveProfile(formData: FormData) {
 }
 
 type BulkImportRow = {
+  bankAccountNo: string | null;
   dropxId: string | null;
   biometricId: string | null;
   fullName: string;
@@ -962,6 +976,7 @@ type BulkImportRow = {
   dateOfJoin: string;
   locationCode: string;
   designationCode: string;
+  ifscCode: string | null;
 };
 
 function normalizeHeader(value: unknown) {
@@ -1000,14 +1015,16 @@ function parseExcelDate(value: unknown, rowNumber: number) {
   return date.toISOString().slice(0, 10);
 }
 
-async function parseBulkWorkbook(fileValue: FormDataEntryValue | null) {
+async function parseBulkWorkbook(fileValue: FormDataEntryValue | null, maxRows = PEOPLE_BULK_IMPORT_MAX_ROWS) {
   if (!(fileValue instanceof File) || fileValue.size === 0) throw new Error("Choose an Excel file to upload.");
+  if (fileValue.size > PEOPLE_BULK_IMPORT_MAX_FILE_BYTES) throw new Error("The upload file must be 10 MB or smaller.");
   const bytes = Buffer.from(await fileValue.arrayBuffer());
   const workbook = XLSX.read(bytes, { type: "buffer", cellDates: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) throw new Error("The Excel file does not contain a worksheet.");
   const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
   if (!rawRows.length) throw new Error("The Excel file does not contain any rows.");
+  if (rawRows.length > maxRows) throw new Error(`The Excel file can contain no more than ${maxRows} rows.`);
 
   return rawRows.map((row, index) => {
     const rowNumber = index + 2;
@@ -1020,16 +1037,26 @@ async function parseBulkWorkbook(fileValue: FormDataEntryValue | null) {
     if (!locationCode) throw new Error(`Row ${rowNumber}: Location is required.`);
     if (!designationCode) throw new Error(`Row ${rowNumber}: Designation code is required.`);
 
-    const biometricId = cellText(row, ["Biometric ID", "Biometric enrolment ID", "Bio ID"]).replace(/\D/g, "") || null;
-    if (biometricId && !/^\d{1,20}$/.test(biometricId)) throw new Error(`Row ${rowNumber}: Biometric ID must be numeric.`);
+    const biometricValue = cellText(row, ["Biometric ID", "Biometric enrolment ID", "Bio ID"]);
+    if (biometricValue && !/^\d{1,20}$/.test(biometricValue)) throw new Error(`Row ${rowNumber}: Biometric ID must contain 1 to 20 digits.`);
+    const biometricId = normalizePeopleBulkBiometricId(biometricValue) || null;
+    const email = required(cellText(row, ["Email", "Email ID"]), `Row ${rowNumber}: Email`).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`Row ${rowNumber}: Enter a valid email address.`);
+    const { bankAccountNo, ifscCode } = parsePeopleBulkBankDetails(
+      cellValue(row, ["Bank account number", "Bank account no", "Bank A/C No", "Account number"]),
+      cellValue(row, ["IFSC", "IFSC code"]),
+      rowNumber
+    );
 
     return {
-      dropxId: cellText(row, ["Dropx ID", "DropX ID", "Field executive ID", "ID"]).toUpperCase() || null,
+      bankAccountNo,
+      dropxId: normalizePeopleBulkDropxId(cellText(row, ["Dropx ID", "DropX ID", "Field executive ID", "ID"])) || null,
       biometricId,
       fullName,
       mobileCountryCode: cleanCountryCode(cellText(row, ["Mob country code", "Mobile country code", "Country code"]) || "91"),
       mobile,
-      email: required(cellText(row, ["Email", "Email ID"]), `Row ${rowNumber}: Email`).toLowerCase(),
+      email,
+      ifscCode,
       dateOfJoin: parseExcelDate(cellValue(row, ["Date of join", "Date of join (DD/MM/YYYY)", "Date of join (DD/MM/YYY)", "DOJ"]), rowNumber),
       locationCode,
       designationCode
@@ -1055,7 +1082,26 @@ export async function bulkImportFieldExecutives(formData: FormData) {
     if (currentAccessSurface() === "ops") {
       throw new Error("Bulk workforce onboarding is not available in OpsPulse. Submit one onboarding request at a time.");
     }
-    const rows = await parseBulkWorkbook(formData.get("bulk_file"));
+    if (table === "helpers") {
+      const categoryResult = await supabaseAdmin
+        .from("workforce_categories")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("code", "helpers")
+        .eq("is_active", true)
+        .maybeSingle();
+      if (categoryResult.error) throw new Error(categoryResult.error.message);
+      if (!categoryResult.data) throw new Error("The Helpers category is not active.");
+    }
+    const rows = await parseBulkWorkbook(
+      formData.get("bulk_file"),
+      table === "helpers" ? HELPER_BULK_IMPORT_MAX_ROWS : PEOPLE_BULK_IMPORT_MAX_ROWS
+    );
+    assertUniquePeopleBulkIdentities(rows.map((row, index) => ({
+      biometricId: row.biometricId,
+      dropxId: row.dropxId,
+      rowNumber: index + 2
+    })));
     const explicitDropxIds = new Map<string, number>();
     for (const [index, row] of rows.entries()) {
       if (!row.dropxId) continue;
@@ -1081,20 +1127,24 @@ export async function bulkImportFieldExecutives(formData: FormData) {
     const locationCodes = Array.from(new Set(rows.map((row) => row.locationCode)));
     const designationCodes = Array.from(new Set(rows.map((row) => row.designationCode)));
     const [locationsResult, designationsResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId).in("station_code", locationCodes),
+      supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId).eq("is_active", true).in("station_code", locationCodes),
       supabaseAdmin.from("designations").select("id, code, name, onboarding_categories, onboarding_role_ids, portal_permissions").eq("company_id", companyId).eq("is_active", true).in("code", designationCodes)
     ]);
     if (locationsResult.error) throw new Error(locationsResult.error.message);
     if (designationsResult.error) throw new Error(designationsResult.error.message);
 
     const locations = new Map((locationsResult.data ?? []).map((location) => [String(location.station_code).toUpperCase(), String(location.id)]));
-    const designations = new Map((designationsResult.data ?? []).map((designation) => [String(designation.code).toUpperCase(), {
+    const designations = new Map((designationsResult.data ?? [])
+      .filter((designation) => table !== "helpers" || ((designation.onboarding_categories ?? []) as string[]).includes("helpers"))
+      .map((designation) => [String(designation.code).toUpperCase(), {
       id: String(designation.id),
       name: String(designation.name),
       onboarding_role_ids: designation.onboarding_role_ids,
       portal_permissions: designation.portal_permissions,
-      workerCategory: config.category
+      workerCategory: table === "helpers" ? "helpers" : config.category
     }]));
+
+    const lifecycle = peopleBulkImportLifecycle(config.profileType);
 
     for (const [index, row] of rows.entries()) {
       const rowNumber = index + 2;
@@ -1110,7 +1160,6 @@ export async function bulkImportFieldExecutives(formData: FormData) {
       requireDesignationOnboardingAccess(designation, authorization);
       const accessSurface = currentAccessSurface();
       requireDesignationPortalAccess(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
-      await assertWorkerDesignationMappedToIdSeries({ companyId, designationId: designation.id });
       if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
         throw new Error(`Row ${rowNumber}: You do not have access to location ${row.locationCode}.`);
       }
@@ -1119,13 +1168,15 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         category: designation.workerCategory,
         companyId,
         designationId: designation.id,
-        fallback: () => generatedDropxId(config.category),
+        designationName: designation.name,
+        fallback: () => generatedDropxId(designation.workerCategory),
         locationId
       });
       const biometricId = row.biometricId || await generateConfiguredBiometricId({
         category: designation.workerCategory,
         companyId,
         designationId: designation.id,
+        designationName: designation.name,
         fallback: () => generateBiometricEnrolmentId(companyId),
         locationId
       });
@@ -1140,16 +1191,20 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         date_of_join: row.dateOfJoin,
         location_id: locationId,
         designation: designation.name,
+        ...(table === "helpers" ? {
+          bank_account_no: row.bankAccountNo,
+          ifsc_code: row.ifscCode
+        } : {}),
         ...(table === "workforce" ? { designation_id: designation.id, ...workforceIdentityFields() } : {}),
         created_by: authorization.userId,
-        onboarding_status: "pending",
+        onboarding_status: lifecycle.onboardingStatus,
         ...(config.profileType === "field_executive" ? {
           approval_required: true,
           onboarding_application_source: applicationSource,
           provider_id_status: "pending",
           lifecycle_status: "onboarding"
         } : {}),
-        is_active: config.profileType === "field_executive" ? false : true
+        is_active: lifecycle.isActive
       }, companyId)).select("id").single();
       if (insertResult.error) throw new Error(`Row ${rowNumber}: ${friendlyFieldExecutiveError(insertResult.error.message)}`);
       inserted.push({ id: insertResult.data.id, locationId, biometricId, dateOfJoin: row.dateOfJoin });
@@ -1170,6 +1225,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         continue;
       }
       await syncBiometricEnrolment({
+        backfillHistorical: table !== "helpers",
         companyId,
         createdBy: authorization.userId,
         effectiveFrom: row.dateOfJoin,
@@ -1182,7 +1238,53 @@ export async function bulkImportFieldExecutives(formData: FormData) {
       });
     }
 
+    if (table === "helpers") {
+      const backgroundRows = inserted.filter((row): row is typeof row & { biometricId: string } => Boolean(row.biometricId));
+      if (backgroundRows.length) {
+        waitUntil((async () => {
+          for (const row of backgroundRows) {
+            let backfillError: unknown = null;
+            for (let attempt = 1; attempt <= 3; attempt += 1) {
+              try {
+                await backfillHistoricalPunches({
+                  accountId: row.id,
+                  companyId,
+                  employeeId: null,
+                  enrolmentId: row.biometricId,
+                  fieldExecutiveId: null,
+                  isActive: true,
+                  locationId: row.locationId,
+                  profileType: config.profileType,
+                  workerStatus: "Active",
+                  workerType: "individual_contract"
+                });
+                backfillError = null;
+                break;
+              } catch (error) {
+                backfillError = error;
+                if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+              }
+            }
+            if (backfillError) {
+              console.error("[helper-bulk] Historical attendance backfill failed after retries.", backfillError);
+              await supabaseAdmin.from("audit_logs").insert({
+                actor_id: authorization.userId,
+                action: "helper_bulk_attendance_backfill_failed",
+                entity_table: "helpers",
+                entity_id: row.id,
+                old_values: null,
+                new_values: { biometric_id: row.biometricId, location_id: row.locationId },
+                reason: backfillError instanceof Error ? backfillError.message.slice(0, 500) : "Historical attendance backfill failed after three attempts."
+              });
+            }
+          }
+        })());
+      }
+    }
+
     revalidatePath(returnPath);
+    revalidatePath("/people/all");
+    if (table === "helpers") revalidatePath("/payments/workforce-payouts");
     fieldExecutiveRedirect({
       notice: config.profileType === "field_executive"
         ? `${inserted.length} workforce onboarding requests imported. Activation remains pending candidate submission and HO approval.`
@@ -1192,10 +1294,14 @@ export async function bulkImportFieldExecutives(formData: FormData) {
     if (isNextRedirectError(error)) throw error;
     if (inserted.length) {
       const insertedIds = inserted.map((row) => row.id);
-      await supabaseAdmin.from("biometric_enrolments").delete().in("field_executive_id", insertedIds);
+      if (config.profileType === "field_executive") {
+        await supabaseAdmin.from("biometric_enrolments").delete().eq("company_id", companyId).in("field_executive_id", insertedIds);
+      } else {
+        await supabaseAdmin.from("biometric_enrolments").delete().eq("company_id", companyId).eq("profile_type", config.profileType).in("account_id", insertedIds);
+      }
       await supabaseAdmin.from(table).delete().eq("company_id", companyId).in("id", insertedIds);
     }
-    fieldExecutiveRedirect({ error: error instanceof Error ? friendlyFieldExecutiveError(error.message) : "Unable to import field executives." }, returnPath);
+    fieldExecutiveRedirect({ error: error instanceof Error ? friendlyFieldExecutiveError(error.message) : `Unable to import ${entityLabel.toLowerCase()} records.` }, returnPath);
   }
 }
 

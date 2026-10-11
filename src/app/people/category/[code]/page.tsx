@@ -9,6 +9,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { PendingLink } from "@/components/pending-link";
 import { DynamicWorkforceRegistrationFields } from "@/components/dynamic-workforce-registration-fields";
+import { HelperBulkUpload } from "@/components/helper-bulk-upload";
 import { intersectProfileFieldChannelRules, normalizeCategoryProfileFieldRules, profileFieldRulesForCategory } from "@/lib/profile-field-rules";
 import { workforceProfileFields } from "@/lib/profile-field-rules";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
@@ -323,6 +324,10 @@ export async function DynamicWorkforceCategoryPageContent({
             </div>
           </form>
         </section>
+      ) : null}
+
+      {code === "helpers" && accessSurface !== "ops" && !authorization.readOnly && hasPermission(authorization, pageCode, "add") ? (
+        <HelperBulkUpload />
       ) : null}
 
       <FieldExecutiveList basePath={returnPath} canEdit={canEdit} emptyLabel={`No ${category.name.toLowerCase()} added yet.`} rows={rows} title={`${category.name} register`} />

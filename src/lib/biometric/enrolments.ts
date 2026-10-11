@@ -21,6 +21,7 @@ function cleanEnrolmentId(value: string | null | undefined) {
 }
 
 export async function syncBiometricEnrolment({
+  backfillHistorical = true,
   companyId,
   createdBy,
   effectiveFrom,
@@ -33,6 +34,7 @@ export async function syncBiometricEnrolment({
   accountId,
   workerType
 }: {
+  backfillHistorical?: boolean;
   companyId: string;
   createdBy: string;
   effectiveFrom: string;
@@ -136,6 +138,8 @@ export async function syncBiometricEnrolment({
       .insert(payload);
     if (error) throw new Error(error.message);
   }
+
+  if (!backfillHistorical) return;
 
   await backfillHistoricalPunches({
     accountId: personId,

@@ -4,6 +4,7 @@ export const importTemplateKinds = [
   "employee",
   "contractor",
   "field_executive",
+  "helper",
   "employee_salary",
   "contractor_remuneration"
 ] as const;
@@ -59,6 +60,21 @@ const definitions: Record<ImportTemplateKind, TemplateDefinition> = {
       "Use one row per person.",
       "Date of join must use DD/MM/YYYY.",
       "Location and designation must use their existing Dashboard codes."
+    ]
+  },
+  helper: {
+    fileName: "DropX_Helper_Bulk_Upload_Template.xlsx",
+    title: "Helper bulk upload",
+    headers: [...peopleHeaders, "Bank account number", "IFSC"],
+    notes: [
+      "Use one row per Helper who is not already registered in Dashboard.",
+      "Date of join must use DD/MM/YYYY.",
+      "Location and designation must use their existing Dashboard codes.",
+      "DropX ID and Biometric ID may be left blank only when the selected Helper designation has an ID generation series configured.",
+      "Imported Helpers are activated immediately without a review step.",
+      "Bank account number and IFSC are optional, but enter both together when supplied. Format Bank account number cells as Text so Excel preserves every digit. Both fields are needed before the Helper can be included in a bank payment file.",
+      "PAN is not required for Helper import or Helper payout.",
+      "Existing Helper records are rejected; this upload never overwrites a saved profile."
     ]
   },
   employee_salary: {
