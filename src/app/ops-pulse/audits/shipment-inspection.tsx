@@ -107,7 +107,12 @@ export function ShipmentInspection({
     Object.fromEntries(exceptions.map((e) => [e.tracking_id, e.remarks || ""])),
   );
   const [bulkNote, setBulkNote] = useState("");
-  const [bulkTarget, setBulkTarget] = useState("empty");
+  // Which differences are listed: any mix of kinds, optionally only those still
+  // waiting for an observation, optionally matching a typed tracking ID.
+  const [kinds, setKinds] = useState<string[]>(["Missing", "Excess"]);
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [search, setSearch] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
   useEffect(() => {
     if (restoredNotes) setNotes((old) => ({ ...old, ...restoredNotes }));
   }, [restoredNotes]);
@@ -134,6 +139,29 @@ export function ShipmentInspection({
     ...result.missing.map((tid) => ({ tid, kind: "Missing" })),
     ...result.excess.map((tid) => ({ tid, kind: "Excess" })),
   ];
+  const PAGE = 25;
+  const term = search.trim().toUpperCase();
+  const view = rows.filter(
+    (row) =>
+      kinds.includes(row.kind) &&
+      (!pendingOnly || !notes[row.tid]?.trim()) &&
+      (!term || row.tid.toUpperCase().includes(term)),
+  );
+  const pages = Math.max(1, Math.ceil(view.length / PAGE));
+  const current = Math.min(page, pages - 1);
+  const shown = view.slice(current * PAGE, current * PAGE + PAGE);
+  const viewIds = new Set(view.map((row) => row.tid));
+  // A selection only counts while its shipments are still listed.
+  const selected = picked.filter((tid) => viewIds.has(tid));
+  const targets = selected.length ? selected : view.map((row) => row.tid);
+  const pageSelected =
+    shown.length > 0 && shown.every((row) => selected.includes(row.tid));
+  const toggleKind = (kind: string) => {
+    setKinds((old) =>
+      old.includes(kind) ? old.filter((k) => k !== kind) : [...old, kind],
+    );
+    setPage(0);
+  };
   const addScan = () => {
     try {
       const next = parseAuditTids(scan).ids;
@@ -222,53 +250,129 @@ export function ShipmentInspection({
               {result.matched} matched · {result.missing.length} missing ·{" "}
               {result.excess.length} excess
             </p>
+            {rows.length > 0 && (
+              <div className={styles.responseFilters}>
+                <span>Show</span>
+                {["Missing", "Excess"].map((kind) => (
+                  <label key={kind}>
+                    <input
+                      type="checkbox"
+                      checked={kinds.includes(kind)}
+                      onChange={() => toggleKind(kind)}
+                    />{" "}
+                    {kind} (
+                    {kind === "Missing"
+                      ? result.missing.length
+                      : result.excess.length}
+                    )
+                  </label>
+                ))}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={pendingOnly}
+                    onChange={(e) => {
+                      setPendingOnly(e.target.checked);
+                      setPage(0);
+                    }}
+                  />{" "}
+                  Only without an observation
+                </label>
+                <input
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(0);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.preventDefault();
+                  }}
+                  placeholder="Find a tracking ID"
+                  aria-label="Find a tracking ID in the differences"
+                />
+              </div>
+            )}
             {rows.length > 1 && (
               <div className={styles.bulkBar}>
-                <strong>Fill many at once</strong>
+                <strong>
+                  Fill many at once ·{" "}
+                  {selected.length
+                    ? `${selected.length} selected`
+                    : `all ${view.length} listed`}
+                </strong>
                 <input
                   value={bulkNote}
                   onChange={(e) => setBulkNote(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.preventDefault();
+                  }}
                   placeholder="Observation to apply"
                   aria-label="Observation to apply to several shipments"
                 />
-                <select
-                  value={bulkTarget}
-                  onChange={(e) => setBulkTarget(e.target.value)}
-                  aria-label="Which shipments to fill"
-                >
-                  <option value="empty">Those without an observation</option>
-                  <option value="Missing">All missing</option>
-                  <option value="Excess">All excess</option>
-                  <option value="all">All {rows.length}</option>
-                </select>
                 <button
                   type="button"
                   className="button secondary compact"
-                  disabled={!bulkNote.trim()}
+                  disabled={!bulkNote.trim() || !targets.length}
                   onClick={() => {
                     const text = bulkNote.trim();
                     setNotes((old) => {
                       const next = { ...old };
-                      for (const row of rows) {
-                        const wanted =
-                          bulkTarget === "all" ||
-                          (bulkTarget === "empty"
-                            ? !old[row.tid]?.trim()
-                            : row.kind === bulkTarget);
-                        if (wanted) next[row.tid] = text;
-                      }
+                      for (const tid of targets) next[tid] = text;
                       return next;
                     });
+                    setPicked([]);
                   }}
                 >
-                  Apply
+                  Apply to {targets.length}
                 </button>
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  disabled={!shown.length}
+                  onClick={() =>
+                    setPicked(
+                      pageSelected
+                        ? selected.filter(
+                            (tid) => !shown.some((row) => row.tid === tid),
+                          )
+                        : [
+                            ...new Set([
+                              ...selected,
+                              ...shown.map((row) => row.tid),
+                            ]),
+                          ],
+                    )
+                  }
+                >
+                  {pageSelected ? "Unselect this page" : "Select this page"}
+                </button>
+                {selected.length > 0 && (
+                  <button
+                    type="button"
+                    className="button secondary compact"
+                    onClick={() => setPicked([])}
+                  >
+                    Clear selection
+                  </button>
+                )}
               </div>
             )}
             <div className={styles.tidDifferences}>
-              {rows.slice(page * 50, page * 50 + 50).map((row) => (
-                <label key={row.tid} className={styles.tidRow}>
+              {shown.map((row) => (
+                <div key={row.tid} className={styles.tidRow}>
                   <strong>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(row.tid)}
+                      onChange={(e) =>
+                        setPicked((old) =>
+                          e.target.checked
+                            ? [...old.filter((tid) => tid !== row.tid), row.tid]
+                            : old.filter((tid) => tid !== row.tid),
+                        )
+                      }
+                      aria-label={`Select ${row.tid}`}
+                    />{" "}
                     {row.tid}{" "}
                     <span className={styles.photoBadge}>{row.kind}</span>
                   </strong>
@@ -280,28 +384,31 @@ export function ShipmentInspection({
                     placeholder="Auditor observation (required)"
                     aria-label={`Observation for ${row.tid}`}
                   />
-                </label>
+                </div>
               ))}
               {!rows.length && !result.error && (
                 <p>No missing or excess TIDs in these lists.</p>
               )}
+              {rows.length > 0 && !view.length && (
+                <p>No differences match this view.</p>
+              )}
             </div>
-            {rows.length > 50 && (
+            {pages > 1 && (
               <div className={styles.actions}>
                 <button
                   type="button"
-                  disabled={!page}
-                  onClick={() => setPage((p) => p - 1)}
+                  disabled={!current}
+                  onClick={() => setPage(current - 1)}
                 >
                   Previous
                 </button>
                 <span>
-                  {page + 1} / {Math.ceil(rows.length / 50)}
+                  {current + 1} / {pages}
                 </span>
                 <button
                   type="button"
-                  disabled={(page + 1) * 50 >= rows.length}
-                  onClick={() => setPage((p) => p + 1)}
+                  disabled={current + 1 >= pages}
+                  onClick={() => setPage(current + 1)}
                 >
                   Next
                 </button>

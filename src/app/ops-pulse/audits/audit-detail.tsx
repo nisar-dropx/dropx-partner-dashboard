@@ -17,6 +17,8 @@ import {
   applyAuditDraft,
   clearAuditDraft,
   loadAuditDraft,
+  parseAuditDraft,
+  readAuditDraftText,
   saveAuditDraft,
 } from "./audit-draft";
 import { AuditEmailDelivery } from "./audit-email-delivery";
@@ -39,6 +41,9 @@ import {
   closeStationAudit,
   respondToStationAudit,
   submitStationAudit,
+  saveStationAuditDraft,
+  loadStationAuditDraft,
+  clearStationAuditDraft,
   rescheduleStationAudit,
   manageAuditAssignment,
 } from "./actions";
@@ -210,6 +215,40 @@ export function AuditDetail({
       hour: "2-digit",
       minute: "2-digit",
     });
+  // The server copy lets the auditor continue on another device. It is sent at
+  // most once every 20 seconds, and straight away from the Save draft button.
+  const serverTimer = useRef<number | null>(null);
+  const serverDirty = useRef(false);
+  const pushDraftToServer = async (announce: boolean) => {
+    if (serverTimer.current) {
+      window.clearTimeout(serverTimer.current);
+      serverTimer.current = null;
+    }
+    const text = readAuditDraftText(audit.id);
+    if (!text || !serverDirty.current) return;
+    serverDirty.current = false;
+    try {
+      const result = await saveStationAuditDraft(audit.id, text);
+      if (!draftReady.current) return;
+      if (result.ok)
+        setDraftNotice(
+          `Draft saved to your account at ${draftTime(new Date().toISOString())}. You can continue on another device. Attached files are not kept.`,
+        );
+      else {
+        serverDirty.current = true;
+        if (announce)
+          setDraftNotice(
+            `Draft saved on this device only. ${result.message}`,
+          );
+      }
+    } catch {
+      serverDirty.current = true;
+      if (announce && draftReady.current)
+        setDraftNotice(
+          "Draft saved on this device only. The server could not be reached; it will retry.",
+        );
+    }
+  };
   const saveDraft = (announce: boolean) => {
     if (!formRef.current || !draftReady.current) return;
     const remarks = formRef.current.elements.namedItem("tid_remarks");
@@ -217,12 +256,25 @@ export function AuditDetail({
       shipments: shipmentsRef.current,
       tidRemarks: remarks instanceof HTMLInputElement ? remarks.value : "",
     });
-    if (savedAt)
-      setDraftNotice(
-        `Draft saved on this device at ${draftTime(savedAt)}. Attached files are not kept.`,
+    if (!savedAt) {
+      if (announce)
+        setDraftNotice("The draft could not be saved on this device.");
+      return;
+    }
+    serverDirty.current = true;
+    if (announce) {
+      setDraftNotice("Saving draft…");
+      void pushDraftToServer(true);
+      return;
+    }
+    setDraftNotice(
+      `Draft saved on this device at ${draftTime(savedAt)}. Attached files are not kept.`,
+    );
+    if (!serverTimer.current)
+      serverTimer.current = window.setTimeout(
+        () => void pushDraftToServer(false),
+        20000,
       );
-    else if (announce)
-      setDraftNotice("The draft could not be saved on this device.");
   };
   const formReady = editable && !!inspection;
   useEffect(() => {
@@ -233,42 +285,65 @@ export function AuditDetail({
       draftReady.current = true;
       return;
     }
-    const draft = loadAuditDraft<{
-      shipments?: ShipmentDraft[];
-      tidRemarks?: string;
-    }>(audit.id);
-    if (!draft) {
-      draftReady.current = true;
-      return;
-    }
-    if (Array.isArray(draft.extra?.shipments))
-      setShipments(draft.extra.shipments);
-    try {
-      const notes = JSON.parse(draft.extra?.tidRemarks || "{}");
-      if (notes && typeof notes === "object") setRestoredNotes(notes);
-    } catch {
-      // An unreadable observation list is ignored; the rest of the draft still applies.
-    }
-    // Fields that depend on other entries (a variance reason, an exception row)
-    // only exist after the first pass, so apply the draft again shortly after.
-    const timers = [0, 250, 800].map((delay, pass) =>
-      window.setTimeout(() => {
-        if (formRef.current) applyAuditDraft(formRef.current, draft);
-        if (pass === 2) {
-          draftReady.current = true;
-          setDraftNotice(
-            `Your draft from ${draftTime(draft.savedAt)} was restored. Attach files again before submitting.`,
-          );
-        }
-      }, delay),
-    );
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    type Extra = { shipments?: ShipmentDraft[]; tidRemarks?: string };
+    let cancelled = false;
+    let timers: number[] = [];
+    void (async () => {
+      const local = loadAuditDraft<Extra>(audit.id);
+      // Whichever copy is newer wins: this device's, or the one saved to the account.
+      let remote: ReturnType<typeof parseAuditDraft<Extra>> = null;
+      try {
+        remote = parseAuditDraft<Extra>(
+          (await loadStationAuditDraft(audit.id)).draft,
+        );
+      } catch {
+        remote = null;
+      }
+      if (cancelled) return;
+      const fromServer =
+        !!remote && (!local || remote.savedAt > local.savedAt);
+      const draft = fromServer ? remote : local;
+      if (!draft) {
+        draftReady.current = true;
+        return;
+      }
+      if (Array.isArray(draft.extra?.shipments))
+        setShipments(draft.extra.shipments);
+      try {
+        const notes = JSON.parse(draft.extra?.tidRemarks || "{}");
+        if (notes && typeof notes === "object") setRestoredNotes(notes);
+      } catch {
+        // An unreadable observation list is ignored; the rest of the draft still applies.
+      }
+      // Fields that depend on other entries (a variance reason, an exception row)
+      // only exist after the first pass, so apply the draft again shortly after.
+      timers = [0, 250, 800].map((delay, pass) =>
+        window.setTimeout(() => {
+          if (cancelled) return;
+          if (formRef.current) applyAuditDraft(formRef.current, draft);
+          if (pass === 2) {
+            draftReady.current = true;
+            setDraftNotice(
+              `Your draft from ${new Date(draft.savedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} was restored${fromServer ? " from your account" : ""}. Attach files again before submitting.`,
+            );
+          }
+        }, delay),
+      );
+    })();
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
   }, [formReady, audit.id, audit.status_code]);
   useEffect(
     () => () => {
       if (draftTimer.current) window.clearTimeout(draftTimer.current);
+      if (serverTimer.current) window.clearTimeout(serverTimer.current);
+      // Closing the audit sends any unsent draft so it is not left on this device only.
+      const text = serverDirty.current ? readAuditDraftText(audit.id) : null;
+      if (text) void saveStationAuditDraft(audit.id, text).catch(() => undefined);
     },
-    [],
+    [audit.id],
   );
   const denominations = workspace.options.filter(
     (option) => option.option_group === "cash_denomination",
@@ -486,8 +561,12 @@ export function AuditDetail({
                 const result = await submitStationAudit(data);
                 if (result.ok) {
                   if (draftTimer.current) window.clearTimeout(draftTimer.current);
+                  if (serverTimer.current) window.clearTimeout(serverTimer.current);
+                  serverTimer.current = null;
+                  serverDirty.current = false;
                   draftReady.current = false;
                   clearAuditDraft(audit.id);
+                  void clearStationAuditDraft(audit.id).catch(() => undefined);
                   setDraftNotice("");
                 }
                 return result;

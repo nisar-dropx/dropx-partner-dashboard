@@ -196,6 +196,9 @@ export function ShipmentResponses({
           <input
             value={bulk.remarks}
             onChange={(e) => setBulk({ ...bulk, remarks: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.preventDefault();
+            }}
             placeholder="Remarks to apply"
             aria-label="Remarks to apply"
           />

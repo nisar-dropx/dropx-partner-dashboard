@@ -168,6 +168,70 @@ async function auditEmployees(
   if (result.error) throw new Error(result.error.message);
   return result.data || [];
 }
+// An in-progress audit's draft is one small private file per auditor, so it can be
+// picked up on another device. It never touches the audit tables until submission.
+const draftBucket = "ops-pulse-documents";
+const draftLimit = 1_500_000;
+async function draftTarget(auditId: string) {
+  const { authorization, companyId } = await assertManager("edit");
+  const audit = await readAudit(companyId, auditId, authorization);
+  if (!isMyAudit(audit, authorization.userId))
+    throw new Error("Only the assigned auditor keeps a draft for this audit.");
+  return {
+    audit,
+    path: `${companyId}/station-audits/${audit.id}/draft/${authorization.userId}.json`,
+  };
+}
+export async function saveStationAuditDraft(
+  auditId: string,
+  payload: string,
+): Promise<ActionResult> {
+  try {
+    const { audit, path } = await draftTarget(auditId);
+    if (audit.status_code !== "in_progress" || audit.completed_at)
+      throw new Error("Only an audit in progress keeps a draft.");
+    if (typeof payload !== "string" || !payload || payload.length > draftLimit)
+      throw new Error("This draft is too large to keep on the server.");
+    JSON.parse(payload);
+    const saved = await db()
+      .storage.from(draftBucket)
+      .upload(path, new Blob([payload], { type: "application/json" }), {
+        contentType: "application/json",
+        upsert: true,
+      });
+    if (saved.error) throw new Error(saved.error.message);
+    return { ok: true, message: "Draft saved." };
+  } catch (error) {
+    return message(error);
+  }
+}
+export async function loadStationAuditDraft(
+  auditId: string,
+): Promise<{ ok: boolean; draft: string | null }> {
+  try {
+    const { audit, path } = await draftTarget(auditId);
+    if (audit.status_code !== "in_progress" || audit.completed_at)
+      return { ok: true, draft: null };
+    const file = await db().storage.from(draftBucket).download(path);
+    if (file.error || !file.data) return { ok: true, draft: null };
+    const text = await file.data.text();
+    return { ok: true, draft: text.length <= draftLimit ? text : null };
+  } catch {
+    return { ok: false, draft: null };
+  }
+}
+export async function clearStationAuditDraft(
+  auditId: string,
+): Promise<ActionResult> {
+  try {
+    const { path } = await draftTarget(auditId);
+    const removed = await db().storage.from(draftBucket).remove([path]);
+    if (removed.error) throw new Error(removed.error.message);
+    return { ok: true, message: "Draft cleared." };
+  } catch (error) {
+    return message(error);
+  }
+}
 export async function loadAuditInspectionContext(auditId: string) {
   const auth = await requirePagePermission("station_audits", "access");
   const company = requireCompanyId(auth);

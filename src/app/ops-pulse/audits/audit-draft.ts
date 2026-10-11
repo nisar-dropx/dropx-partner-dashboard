@@ -50,6 +50,26 @@ export function loadAuditDraft<Extra>(auditId: string): AuditFormDraft<Extra> | 
   }
 }
 
+/** The stored draft exactly as saved, for sending to the server. */
+export function readAuditDraftText(auditId: string) {
+  try {
+    return window.localStorage.getItem(key(auditId));
+  } catch {
+    return null;
+  }
+}
+
+/** Parses a draft fetched from the server; null when it is not a usable draft. */
+export function parseAuditDraft<Extra>(text: string | null): AuditFormDraft<Extra> | null {
+  if (!text) return null;
+  try {
+    const draft = JSON.parse(text) as AuditFormDraft<Extra>;
+    return draft && Array.isArray(draft.fields) && typeof draft.savedAt === "string" ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
 export function clearAuditDraft(auditId: string) {
   try {
     window.localStorage.removeItem(key(auditId));
