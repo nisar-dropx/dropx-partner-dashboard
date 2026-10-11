@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       if(candidate.error&&!['42P01','42703','PGRST205'].includes(candidate.error.code))throw new Error("Email-pilot status is unavailable.");
       if(!candidate.data)return NextResponse.json({available:false},{headers});
       const [messages,invitation,attendance,registration,exitReasons,exitRequest,snapshot,cases,betaSettings]=await Promise.all([
-        db.from("workforce_amazon_email_pilot_messages").select("id,sender,subject,preview,action_url,action_urls,received_at").eq("company_id",company).eq("candidate_id",candidate.data.id).order("received_at",{ascending:false}).limit(20),
+        db.from("workforce_amazon_email_pilot_messages").select("*").eq("company_id",company).eq("candidate_id",candidate.data.id).order("received_at",{ascending:false}).limit(100),
         db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_code,error_message,updated_at").eq("company_id",company).eq("email_pilot_candidate_id",candidate.data.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
         candidate.data.biometric_id?db.from("attendance_daily").select("punch_date,in_time,out_time,status,updated_at").eq("company_id",company).eq("enrolment_id",candidate.data.biometric_id).order("punch_date",{ascending:false}).limit(1).maybeSingle():Promise.resolve({data:null,error:null}),
         db.from("workforce_amazon_email_pilot_registrations").select("status,submitted_at,confirmed_at,returned_at,return_note,updated_at").eq("company_id",company).eq("candidate_id",candidate.data.id).maybeSingle(),
@@ -69,18 +69,16 @@ export async function GET(request: NextRequest) {
       const live=verifiedBetaSnapshot(snapshot.error?null:snapshot.data,candidate.data.alias_email,providerId);
       const bgcChecks=betaChecks(live);
       if(verificationState(live?.uan_status)==="complete")inboxActions=inboxActions.filter(action=>action.kind!=="uan");
-      const verificationLinks=inboxActions.filter(action=>action.kind==="verification");
-      if(!bgcChecks.length)verificationLinks.forEach((item,index)=>bgcChecks.push({code:`idfy_link_${index}`,label:"IDfy verification request",status:"action",detail:"IDfy has requested verification. Opening the link does not confirm completion.",owner:"Associate",source:"DropX monitored inbox",updatedAt:item.receivedAt,actionUrl:item.url}));
       const learning=betaLearning(live);
       const verificationCases=cases.error?[]:(cases.data??[]).filter(item=>item.status!=="resolved");
       const journey=betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus,invitationAvailable:Boolean(rawInvitationUrl),bgcAction:bgcChecks.some(item=>item.status==="action")});
       const invitationUrl=journey.invitationUnlocked?rawInvitationUrl:null;
       return NextResponse.json({
-        available:true,pilot:true,isolatedBeta:true,
+        available:true,pilot:true,isolatedBeta:true,registeredMobile:candidate.data.mobile,
         stationState:(Array.isArray(candidate.data.stations)?candidate.data.stations[0]:candidate.data.stations)?.state??null,
         stage:journey.stage,stageLabel:journey.label,instruction:journey.instruction,
         registrationReady:journey.ready,
-        reportUpdatedAt:live?.idfy_observed_at??null,reportDate:null,stale:Boolean(live?.idfy_observed_at&&Date.now()-Date.parse(live.idfy_observed_at)>24*3600000),syncDelayed:Boolean(snapshot.error||live?.sync_error),
+        reportUpdatedAt:live?.idfy_observed_at??null,reportDate:null,stale:Boolean(live?.idfy_observed_at&&Date.now()-Date.parse(live.idfy_observed_at)>24*3600000),syncDelayed:Boolean(snapshot.error||live?.sync_error||!live?.idfy_observed_at),
         inboxActions,verificationCases,learning,learningPassword:betaSettings.data?.learning_initial_password??null,uanStatus:live?.uan_status??null,amazonRegistrationConfirmed:betaTaskComplete(live,"Accept Invitation"),accountSetupConfirmed:betaTaskComplete(live,"Account Setup"),verificationClosed:live?.operational_status==="OFFBOARDED"||verificationCases.some(item=>item.status==="offboarded"),amazonTasks:live?.amazon_tasks??[],bgcStatus:live?.bgc_status??null,idfyProfileId:live?.idfy_profile_id??null,operationalStatus:live?.operational_status??null,
         driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
         invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,

@@ -1,22 +1,26 @@
 "use client";
+import type { GuidanceLanguage } from '../lib/beta-guidance';
+import type { BetaInboxAction } from '../lib/beta-verification';
+import { ConnectBetaVideoVerification } from './connect-beta-video-verification';
 import { useEffect,useState } from 'react';
 import { ShieldCheck,Clock3,Check,CircleAlert,ExternalLink,Send } from 'lucide-react';
 import type { AppAccount } from './connect-profile-app';
 import styles from './connect-beta-verification.module.css';
 type Case={id:string;check_code:string;kind:string;label:string;reason:string;status:string;notified_at:string|null;failure_notified_at:string|null;response_at:string|null;mail_status:string;mail_sent_at:string|null};
-type Data={bgcStatus?:string|null;idfyProfileId?:string|null;stale?:boolean;syncDelayed?:boolean;reportUpdatedAt?:string|null;bgcChecks?:Array<{code:string;label:string;status:string;detail:string;source:string;updatedAt:string|null;actionUrl?:string|null}>;verificationCases?:Case[]};
+type Data={inboxActions?:BetaInboxAction[];registeredMobile?:string|null;verificationClosed?:boolean;bgcStatus?:string|null;idfyProfileId?:string|null;stale?:boolean;syncDelayed?:boolean;reportUpdatedAt?:string|null;bgcChecks?:Array<{code:string;label:string;status:string;detail:string;source:string;updatedAt:string|null;actionUrl?:string|null}>;verificationCases?:Case[]};
 const date=(v?:string|null)=>v?new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}):'Not received yet';
 const label:Record<string,string>={complete:'Clear',action:'Needs attention',in_progress:'In progress',pending:'Not confirmed'};
-export function ConnectBetaVerification({account,data,onRefresh}:{account:AppAccount;data:Data;onRefresh:()=>void}){
+export function ConnectBetaVerification({account,data,onRefresh,language="en"}:{account:AppAccount;data:Data;onRefresh:()=>void;language?:GuidanceLanguage}){
  const [open,setOpen]=useState<string|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const checks=data.bgcChecks??[],cases=data.verificationCases??[];
  const send=async(id:string,action:string,details:Record<string,unknown>={})=>{const r=await fetch('/api/connect/beta-verification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountId:account.id,profileType:account.profileType,caseId:id,action,details})});if(!r.ok)throw new Error((await r.json()).error||'Please retry.');};
  useEffect(()=>{const unseen=cases.filter(c=>c.status==='awaiting_candidate'&&(!c.notified_at||(!c.failure_notified_at&&/^(red|failed|fail|rejected|verified_red)$/i.test(data.bgcStatus??'')&&checks.some(check=>check.code===c.check_code&&check.status==='action'))));if(!unseen.length)return;let done=false;Promise.all(unseen.map(c=>send(c.id,'seen'))).then(()=>{if(!done)onRefresh();}).catch(()=>{});return()=>{done=true;};},[account.id,cases.map(c=>`${c.id}:${c.notified_at}:${c.failure_notified_at}:${data.bgcStatus}`).join('|')]);
  const attention=checks.filter(c=>c.status==='action').length;
  return <section className={styles.wrap}>
+  {!data.verificationClosed?<ConnectBetaVideoVerification action={data.inboxActions?.find(action=>action.kind==="verification")} language={language} mobile={data.registeredMobile}/>:null}
   <header className={styles.summary}><ShieldCheck/><div><small>IDfy background checks</small><h2>{attention?`${attention} check${attention===1?' needs':'s need'} attention`:checks.length?'Your verification is being tracked':'Waiting for an IDfy update'}</h2><p>{checks.filter(c=>c.status==='complete').length} clear · {checks.filter(c=>c.status==='in_progress'||c.status==='pending').length} pending</p></div></header>
   <p className={styles.freshness}>IDfy reference: <b>{data.idfyProfileId||'Not matched yet'}</b> · Last confirmed sync: {date(data.reportUpdatedAt)}</p>
-  {data.stale||data.syncDelayed?<p role="status" className={styles.notice}>Sync is delayed. These are the last received results. A missing update does not mean a check is clear.</p>:null}
+  {data.stale||data.syncDelayed?<p role="status" className={styles.notice}>{checks.length?'Sync is delayed. These are the last received results. A missing update does not mean a check is clear.':'Your IDfy check results have not synced yet. They will appear here after the first confirmed update.'}</p>:null}
   {attention?<p className={styles.notice}>Your application cannot complete while a required check needs attention. Your TL can help you resolve it. A response or a green result stops the no-response process.</p>:null}
   {!checks.length?<p className={styles.empty}>No check results have been confirmed here yet. UAN requests are shown separately under Account setup.</p>:checks.map(c=><article className={styles.check} key={c.code}><div className={styles.checkHead}><i data-state={c.status}>{c.status==='complete'?<Check/>:c.status==='action'?<CircleAlert/>:<Clock3/>}</i><h3>{c.label}</h3><b data-state={c.status}>{label[c.status]||'Not confirmed'}</b></div><p>{c.detail}</p><small>{c.source} · {date(c.updatedAt)}</small>{c.actionUrl?<a href={c.actionUrl} target="_blank" rel="noopener noreferrer">Open IDfy request <ExternalLink size={14}/></a>:null}</article>)}
   {cases.map(c=><article key={c.id} className={styles.case}><small>{c.status==='offboarded'?'APPLICATION CLOSED':c.status==='offboarding'?'STATUS UPDATE IN PROGRESS':'FOLLOW-UP'}</small><h3>{c.label}</h3><p>{c.reason}</p>

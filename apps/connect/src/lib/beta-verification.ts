@@ -12,14 +12,23 @@ export function verificationState(value:unknown):VerificationState {
  if(/^(green|clear|verified green|verified|complete(?:d)?|approved|pass(?:ed)?|success(?:ful)?)$/.test(valueText))return 'complete';
  return 'pending';
 }
-export function betaInboxActions(messages:Array<{subject?:string;preview?:string;action_url?:string|null;action_urls?:unknown;received_at?:string|null}>):BetaInboxAction[]{
+export function betaInboxActions(messages:Array<{sender?:string;subject?:string;preview?:string;action_url?:string|null;action_urls?:unknown;received_at?:string|null}>):BetaInboxAction[]{
  const result=new Map<string,BetaInboxAction>();
- for(const m of messages){
+ for(const m of [...messages].sort((a,b)=>String(b.received_at??'').localeCompare(String(a.received_at??'')))){
+  const senderDomain=String(m.sender??'').trim().match(/@([a-z0-9.-]+)>?$/i)?.[1]?.toLowerCase();
+  if(!senderDomain||!/(^|\.)idfy\.(com|in)$/.test(senderDomain))continue;
   const uan=/uan|e.?shram|ई.?श्रम/i.test(`${m.subject} ${m.preview}`);
+  const verification=/\b(video|address|background|bgv|kyc)\b/i.test(`${m.subject} ${m.preview}`);
   const links=[m.action_url,...(Array.isArray(m.action_urls)?m.action_urls.filter((x):x is string=>typeof x==='string'):[]),...String(m.preview??'').match(/https:\/\/[^\s<>"\]]+/g)??[]];
   for(const raw of links){const url=idfyActionUrl(raw?.replace(/[).,;]+$/,''));if(!url)continue;
-   const host=new URL(url).hostname;const kind=host==='capture.kyc.idfy.com'?'assisted':uan?'uan':'verification';
-   if(!result.has(url))result.set(url,{kind,url,receivedAt:m.received_at??null,label:kind==='uan'?'Submit UAN number & card':kind==='assisted'?'Get help from an IDfy agent':'Open IDfy verification'});
+   const parsed=new URL(url);const host=parsed.hostname;
+   if(parsed.username||parsed.password||parsed.port)continue;
+   const capture=host==='capture.kyc.idfy.com'&&/^\/v2\/captures\/?$/.test(parsed.pathname)&&Boolean(parsed.searchParams.get('t'));
+   const portal=host==='portal.idfy.com'&&/^\/tokens\/?$/.test(parsed.pathname)&&Boolean(parsed.searchParams.get('p'));
+   const uanForm=host==='360.idfy.com'&&/^\/noauth\/[^/]+\/?$/.test(parsed.pathname);
+   const kind:BetaInboxAction['kind']|null=uan?(capture?'assisted':uanForm?'uan':null):verification&&(capture||portal)?'verification':null;
+   if(!kind)continue;
+   if(!result.has(url))result.set(url,{kind,url,receivedAt:m.received_at??null,label:kind==='uan'?'Submit UAN number & card':kind==='assisted'?'Get help with UAN from IDfy':'Open video verification link'});
   }
  }
  return [...result.values()];
