@@ -57,6 +57,8 @@ type CellPickerState = {
   left: number;
 };
 
+type PeekedWeek = Extract<Awaited<ReturnType<typeof loadOpsRosterWeekReadOnly>>, { ok: true }>;
+
 type PreparedEntry = {
   workerType: "employee" | "contractor";
   workerId: string;
@@ -205,6 +207,11 @@ export function OpsRosterPlanner({
   // (right-click opening the picker, then picking an option) so they don't
   // double-prepare and race two router.refresh() calls against each other.
   const ensureEditingPromiseRef = useRef<Promise<boolean> | null>(null);
+  // Weeks already loaded read-only, and the requests still in flight, so the next
+  // week can be fetched ahead of the click and shown without a wait.
+  const weekCacheRef = useRef(new Map<string, PeekedWeek>());
+  const weekRequestsRef = useRef(new Map<string, Promise<PeekedWeek | null>>());
+  const peekTokenRef = useRef(0);
   const pointerDragRef = useRef<PointerDragState | null>(null);
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef(false);
@@ -272,6 +279,8 @@ export function OpsRosterPlanner({
     // guaranteed to map to exactly one pass). Every pass whose incoming plan matches the
     // expected shape is skipped, however many of them show up; it naturally stops
     // mattering once a genuinely different plan state arrives.
+    // The roster changed (or may have): weeks fetched earlier are no longer trustworthy.
+    weekCacheRef.current.clear();
     if (expectedPlanShapeRef.current !== null && expectedPlanShapeRef.current === planShape(plan)) {
       const nextPlanId = plan?.id ?? null;
       if (activePlanIdRef.current !== nextPlanId && nextPlanId) {
@@ -313,6 +322,8 @@ export function OpsRosterPlanner({
     preparedPlanIdRef.current = null;
     preparingRef.current = false;
     setIsPreparing(false);
+    peekTokenRef.current += 1;
+    setIsLoadingWeek(false);
     setIsPeekedWeek(false);
     assignmentsRef.current = initial;
     setAssignments(initial);
@@ -348,6 +359,9 @@ export function OpsRosterPlanner({
   // week during the same session means re-anchoring that window, not just changing the
   // client-side view.
   const applyPreparedWeek = useCallback(async (targetWeekStart: string) => {
+    // A read-only week still loading must not land on top of the editable one.
+    peekTokenRef.current += 1;
+    setIsLoadingWeek(false);
     preparingRef.current = true;
     setIsPreparing(true);
     setMessage({
@@ -393,6 +407,7 @@ export function OpsRosterPlanner({
     // visible range to one day ("13 Sep to 13 Sep").
     setWeekStart(preparedPeriodStart);
     setIsPeekedWeek(false);
+    weekCacheRef.current.clear();
     assignmentsRef.current = preparedAssignments;
     setAssignments(preparedAssignments);
     editingEnabledRef.current = true;
@@ -415,6 +430,33 @@ export function OpsRosterPlanner({
     }
     return true;
   }, [plan?.status, router, stationId]);
+
+  const fetchWeek = useCallback((targetWeekStart: string): Promise<PeekedWeek | null> => {
+    const ready = weekCacheRef.current.get(targetWeekStart);
+    if (ready) return Promise.resolve(ready);
+    const inFlight = weekRequestsRef.current.get(targetWeekStart);
+    if (inFlight) return inFlight;
+    const request = loadOpsRosterWeekReadOnly(stationId, targetWeekStart)
+      .then((result) => {
+        if (!result.ok || !result.periodStart) return null;
+        weekCacheRef.current.set(targetWeekStart, result);
+        return result;
+      })
+      .catch(() => null)
+      .finally(() => { weekRequestsRef.current.delete(targetWeekStart); });
+    weekRequestsRef.current.set(targetWeekStart, request);
+    return request;
+  }, [stationId]);
+
+  // Fetch the following week in the background while this one is being read, so
+  // pressing Next usually has nothing left to wait for.
+  useEffect(() => {
+    if (editingEnabled || isRecurring) return;
+    const next = moveIsoDate(weekStart, 7);
+    if (next > maxWeekStart || next <= livePeriodEnd) return;
+    const timer = window.setTimeout(() => { void fetchWeek(next); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [editingEnabled, fetchWeek, isRecurring, livePeriodEnd, maxWeekStart, weekStart]);
 
   const ensureEditing = useCallback(async () => {
     if (editingEnabledRef.current) return true;
@@ -750,33 +792,49 @@ export function OpsRosterPlanner({
   // A dated roster covers one week, so the weeks after it are not in the plan the page
   // loaded. Moving there shows that week's approved roster read-only - nothing is
   // recalled or drafted until the planner actually edits.
-  async function peekWeek(targetWeekStart: string) {
-    if (isLoadingWeek) return;
-    setIsLoadingWeek(true);
-    setMessage(null);
-    let result: Awaited<ReturnType<typeof loadOpsRosterWeekReadOnly>>;
-    try {
-      result = await loadOpsRosterWeekReadOnly(stationId, targetWeekStart);
-    } catch {
-      setIsLoadingWeek(false);
-      setMessage({ tone: "error", text: "That week could not be loaded. Please retry." });
-      return;
-    }
-    setIsLoadingWeek(false);
-    if (!result.ok || !result.periodStart) {
-      setMessage({ tone: "error", text: result.message || "That week could not be loaded. Please retry." });
-      return;
-    }
+  function showPeekedWeek(result: PeekedWeek, targetWeekStart: string) {
+    const periodStart = result.periodStart ?? targetWeekStart;
     const peekedAssignments = initialAssignments(result.entries ?? []);
-    templateStartRef.current = result.periodStart;
-    setTemplateStart(result.periodStart);
-    setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
+    templateStartRef.current = periodStart;
+    setTemplateStart(periodStart);
+    setLivePeriodEnd(result.periodEnd ?? moveIsoDate(periodStart, 6));
     setLiveRecurring(false);
-    setWeekStart(result.periodStart);
+    setWeekStart(periodStart);
     setIsPeekedWeek(true);
     assignmentsRef.current = peekedAssignments;
     setAssignments(peekedAssignments);
     setDirtyKeys(new Set());
+  }
+
+  async function peekWeek(targetWeekStart: string) {
+    setMessage(null);
+    const ready = weekCacheRef.current.get(targetWeekStart);
+    if (ready) { showPeekedWeek(ready, targetWeekStart); return; }
+    // Not fetched yet: move to the week straight away and show its cells as loading,
+    // so the click answers at once instead of the old week sitting there.
+    const token = ++peekTokenRef.current;
+    const previous = { templateStart, livePeriodEnd, liveRecurring, weekStart, isPeekedWeek };
+    templateStartRef.current = targetWeekStart;
+    setTemplateStart(targetWeekStart);
+    setLivePeriodEnd(moveIsoDate(targetWeekStart, 6));
+    setLiveRecurring(false);
+    setWeekStart(targetWeekStart);
+    setIsPeekedWeek(true);
+    setIsLoadingWeek(true);
+    const result = await fetchWeek(targetWeekStart);
+    if (token !== peekTokenRef.current) return;
+    setIsLoadingWeek(false);
+    if (!result) {
+      templateStartRef.current = previous.templateStart;
+      setTemplateStart(previous.templateStart);
+      setLivePeriodEnd(previous.livePeriodEnd);
+      setLiveRecurring(previous.liveRecurring);
+      setWeekStart(previous.weekStart);
+      setIsPeekedWeek(previous.isPeekedWeek);
+      setMessage({ tone: "error", text: "That week could not be loaded. Please retry." });
+      return;
+    }
+    showPeekedWeek(result, targetWeekStart);
   }
 
   // Back from a peeked week into the plan the page opened with: show that plan again
@@ -1007,7 +1065,7 @@ export function OpsRosterPlanner({
     {editingEnabled ? <div className={styles.bulkBar}><span><UsersRound size={15} /><strong>{selectedPeople.size}</strong> people · <strong>{selectedDates.size}</strong> days</span><span className={styles.activeTool}>Applying: <strong>{activeShift?.code ?? (activeTool?.kind === "weekly_off" ? "Week Off" : activeTool?.kind === "clear" ? "Remove" : "Select a shift")}</strong></span><button type="button" className="button secondary small" onClick={() => void fillDefaultShifts()}>Fill default shifts</button><button type="button" className="button secondary small" onClick={() => void applyBulk()}>Apply to selected</button><button type="button" className="button primary small" onClick={save} disabled={!dirtyKeys.size || isSaving}>{isSaving ? "Saving…" : `Save ${dirtyKeys.size || ""} changes`}</button></div> : null}
     {message ? <div className={`message-panel ${message.tone === "error" ? "error" : "success"}`} role="status">{message.text}</div> : null}
 
-    <div className={styles.calendarWrap}>
+    <div className={`${styles.calendarWrap}${isLoadingWeek ? ` ${styles.calendarLoading}` : ""}`} aria-busy={isLoadingWeek || undefined}>
       <table className={styles.calendar}>
         <thead><tr><th className={styles.personColumn}><label><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedPeople(allVisibleSelected ? new Set() : new Set(visiblePeople.map(personKey)))} /> Person</label></th>{dates.map((date) => {
           const dayCoverage = coverage.get(date);

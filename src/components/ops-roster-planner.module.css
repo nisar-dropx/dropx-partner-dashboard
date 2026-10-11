@@ -288,6 +288,16 @@
 .workspace > :global(.message-panel) { margin: 8px 12px 0; }
 
 .calendarWrap { max-width: 100%; max-height: min(68vh, 720px); overflow: auto; background: #fff; }
+/* A week still being fetched: names stay, each day cell is a quiet placeholder. */
+.calendarLoading { position: relative; }
+.calendarLoading::before { content: ""; position: sticky; z-index: 9; top: 0; left: 0; display: block; height: 2px; margin-bottom: -2px; background: linear-gradient(90deg, transparent, #de7a51, transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: rosterWeekLoading 1s linear infinite; }
+.calendarLoading .coverage { visibility: hidden; }
+.calendarLoading tbody td { pointer-events: none; }
+.calendarLoading tbody td .cell { border: 1px solid #edf0f4; background: linear-gradient(100deg, #f3f5f8 30%, #fafbfc 50%, #f3f5f8 70%); background-size: 200% 100%; box-shadow: none; color: transparent; animation: rosterCellLoading 1.2s ease-in-out infinite; }
+.calendarLoading tbody td .cell > * { visibility: hidden; }
+@keyframes rosterWeekLoading { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@keyframes rosterCellLoading { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .calendarLoading::before, .calendarLoading tbody td .cell { animation: none; } }
 .calendar { min-width: 1120px; width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
 .calendar th, .calendar td { padding: 0; }
 .calendar thead th { position: sticky; z-index: 4; top: 0; width: 124px; height: 75px; border-right: 1px solid #e5e9ef; background: #f7f9fb; text-transform: none; }
