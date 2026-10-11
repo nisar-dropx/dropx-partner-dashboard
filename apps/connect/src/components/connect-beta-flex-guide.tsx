@@ -6,10 +6,12 @@ import { betaFlexGuide, flexGuideSteps, flexInvitationWaiting, type FlexGuideSte
 import type { GuidanceLanguage } from "../lib/beta-guidance";
 import { ConnectBetaAmazonOtp } from "./connect-beta-amazon-otp";
 import { ConnectBetaFlexScreens } from "./connect-beta-flex-screens";
+import { BetaPersonalGuide } from "./connect-beta-personal-guide";
+import type { PersonalGuideContext } from "../lib/beta-personal-guide";
 import styles from "./connect-beta-flex-guide.module.css";
 
-export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvitation }: {
-  language: GuidanceLanguage; initialStep?: FlexGuideStep; onInvitation?: () => void;
+export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvitation, context = {} }: {
+  language: GuidanceLanguage; initialStep?: FlexGuideStep; onInvitation?: () => void; context?: PersonalGuideContext;
 }) {
   const [step, setStep] = useState<FlexGuideStep>(initialStep);
   const copy = betaFlexGuide[language], item = copy.steps[step];
@@ -28,7 +30,8 @@ export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvit
       <article className={styles.panel} ref={panel} tabIndex={-1} aria-labelledby={titleId}>
         <div className={styles.stepTitle}><span className={styles.stepNumber}>{index + 1}</span><div><small>{copy.step} {index + 1}</small><h2 id={titleId}>{item.title}</h2></div></div>
         <div className={styles.screen}><Smartphone size={18}/><span><small>{copy.screen}</small><strong lang="en">{meta.screen}</strong></span></div>
-        <ConnectBetaFlexScreens key={`screens-${step}`} step={step} language={language} title={item.title}/>
+        <ConnectBetaFlexScreens key={`screens-${step}`} step={step} language={language} title={item.title} context={context}/>
+        <BetaPersonalGuide step={step} language={language} context={context}/>
         {step === "signin" || step === "learning" ? <a className={styles.download} href={step === "signin" ? "https://play.google.com/store/apps/details?id=com.amazon.flex.rabbit" : "https://play.google.com/store/apps/details?id=com.disprz.amazon"} target="_blank" rel="noopener noreferrer"><Smartphone size={17}/>{step === "signin" ? copy.flexDownload : copy.learningDownload}<ExternalLink size={15}/></a> : null}
         <div className={styles.expect}><Info size={18}/><div><strong>{copy.expect}</strong><p>{item.expect}</p></div></div>
         <details className={styles.help} key={step}><summary>{copy.help}<ChevronDown size={16}/></summary><ol className={styles.instructions}>{item.actions.map((line, i) => <li key={i}>{line}</li>)}</ol><p>{item.help}</p></details>
@@ -40,8 +43,8 @@ export function ConnectBetaFlexGuide({ language, initialStep = "signin", onInvit
   </section>;
 }
 
-export function ConnectBetaFlexJourney({ accountId, companyId, language, email, invitationUrl }: {
-  accountId: string; companyId: string; language: GuidanceLanguage; email: string; invitationUrl: string | null;
+export function ConnectBetaFlexJourney({ accountId, companyId, language, email, invitationUrl, driverId, learningPassword }: {
+  accountId: string; companyId: string; language: GuidanceLanguage; email: string; invitationUrl: string | null; driverId?:string|null; learningPassword?:string|null;
 }) {
   const [view, setView] = useState<"invitation" | "guide">("invitation");
   const [copied, setCopied] = useState<"email" | "link" | null>(null);
@@ -62,7 +65,7 @@ export function ConnectBetaFlexJourney({ accountId, companyId, language, email, 
       <section className={styles.invitation}><h3>{invitationUrl ? copy.ready : copy.invitation}</h3><p>{invitationUrl ? copy.invitationBody : flexInvitationWaiting[language]}</p><aside><ShieldCheck size={18}/><div><strong>{copy.browserTitle}</strong><p>{copy.browserBody}</p></div></aside>{invitationUrl ? <div className={styles.actions}><button type="button" onClick={() => void copyValue("link", invitationUrl)}><Copy size={17}/>{copied === "link" ? copy.linkCopied : copy.copyLink}</button><a href={invitationUrl} target="_blank" rel="noopener noreferrer">{copy.openInvitation}<ExternalLink size={16}/></a></div> : null}</section>
       <ConnectBetaAmazonOtp accountId={accountId} companyId={companyId} language={language}/>
       <p className={styles.password}><ShieldCheck size={17}/><span><strong>{copy.password}</strong> {copy.passwordBody}</span></p>
-    </> : <ConnectBetaFlexGuide language={language} onInvitation={() => changeView("invitation")}/>}
+    </> : <ConnectBetaFlexGuide language={language} context={{email,driverId,learningPassword}} onInvitation={() => changeView("invitation")}/>}
     <aside className={styles.liveStatus}><Info size={18}/><div><strong>{copy.status}</strong><p>{copy.statusBody}</p></div></aside>
   </div>;
 }
