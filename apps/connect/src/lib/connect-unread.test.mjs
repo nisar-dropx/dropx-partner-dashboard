@@ -37,6 +37,8 @@ test('read receipts are preview-safe, account/case scoped and only clear display
 test('Connect menu badges exist in desktop and mobile, and conversation deep links are passed',()=>{
   const ui=readFileSync(new URL('../components/connect-login-flow.tsx',import.meta.url),'utf8');
   assert.equal((ui.match(/className="dx-connect-unread"/g)||[]).length,4);
+  const css=readFileSync(new URL('../../app/globals.css',import.meta.url),'utf8');
+  assert.match(css,/\.dx-desktop-nav nav button:has\(> \.dx-connect-unread\)\s*\{\s*grid-template-columns: 20px minmax\(0, 1fr\) auto;/);
   assert.match(ui,/initialCaseId=\{connectTarget.caseId\}/);
   assert.match(ui,/readOnly=\{userPreview\}/);
   const bridge=readFileSync(new URL('../components/connect-native-bridge.tsx',import.meta.url),'utf8');

@@ -13633,6 +13633,9 @@ html.native-app .dx-app-install {
   min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px;
   background: #d5235f; color: #fff; font-size: 11px; line-height: 1; margin-left: auto;
 }
+.dx-desktop-nav nav button:has(> .dx-connect-unread) {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
 .dx-mobile-nav button { position: relative; }
 .dx-mobile-nav .dx-connect-unread { position: absolute; top: 0; right: 12%; }
 .dx-case-new { display: inline-block; width: fit-content; color: #a41449; background: #fff0f5; padding: 4px 8px; border-radius: 99px; font-size: 12px; }
