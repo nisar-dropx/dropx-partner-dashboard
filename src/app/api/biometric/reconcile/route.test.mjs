@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 import * as reconciliationPolicy from "../../../../lib/biometric/attendance-reconciliation-policy.ts";
+import * as enrolmentResolution from "../../../../lib/biometric/enrolment-resolution.ts";
 
 const snapshotToken = "a".repeat(64);
 
@@ -16,6 +17,7 @@ function compile(sourceUrl, mocks) {
   new Function("require", "exports", "module", output)(
     (name) => {
       if (name in mocks) return mocks[name];
+      if (name === "@/lib/biometric/enrolment-resolution") return enrolmentResolution;
       throw new Error(`Missing test mock: ${name}`);
     },
     module.exports,
@@ -256,7 +258,7 @@ test("browser reconciliation releases its company lease when the worker fails", 
   ]);
 });
 
-test("reconciliation worker applies an optional company filter before paging", async () => {
+test("reconciliation worker scopes by company and snapshots semantic ownership instead of status", async () => {
   const mappings = ["a", "b"].map((suffix) => ({
     account_id: `person-${suffix}`,
     company_id: `company-${suffix}`,
@@ -330,6 +332,9 @@ test("reconciliation worker applies an optional company filter before paging", a
   assert.match(result.snapshotToken, /^[0-9a-f]{64}$/);
   assert.deepEqual(backfills.map((item) => item.companyId), ["company-a"]);
 
+  // Lifecycle status is descriptive attendance metadata. It must not restart
+  // a catch-up while the resolved person/location/type ownership is unchanged.
+  mappings[0].status = "Inactive";
   const repeated = await worker.reconcileBiometricAttendance({
     batchSize: 50,
     companyId: "company-a",
@@ -340,6 +345,92 @@ test("reconciliation worker applies an optional company filter before paging", a
     toDate: "2020-09-30"
   });
   assert.equal(repeated.snapshotToken, result.snapshotToken);
+
+  // A real semantic ownership change still invalidates the cursor snapshot.
+  mappings[0].location_id = "station-a-moved";
+  await assert.rejects(
+    worker.reconcileBiometricAttendance({
+      batchSize: 50,
+      companyId: "company-a",
+      cursor: 0,
+      deadlineAtMs: Date.now() + 60_000,
+      expectedSnapshotToken: result.snapshotToken,
+      fromDate: "2020-09-01",
+      toDate: "2020-09-30"
+    }),
+    /mappings changed/i
+  );
+
+  // Legacy Workforce aliases must hash the same canonical owner identity used
+  // by the resolver; a stale account_id must not hide a real owner change.
+  mappings[0] = {
+    ...mappings[0],
+    account_id: "stale-legacy-account",
+    field_executive_id: "legacy-workforce-a",
+    location_id: "station-a",
+    profile_type: "workforce",
+    worker_type: "contractor"
+  };
+  const legacy = await worker.reconcileBiometricAttendance({
+    batchSize: 50,
+    companyId: "company-a",
+    cursor: 0,
+    deadlineAtMs: Date.now() + 60_000,
+    fromDate: "2020-09-01",
+    toDate: "2020-09-30"
+  });
+  assert.equal(backfills.at(-1).accountId, "legacy-workforce-a");
+  assert.equal(backfills.at(-1).profileType, "field_executive");
+  mappings[0].field_executive_id = "legacy-workforce-b";
+  await assert.rejects(
+    worker.reconcileBiometricAttendance({
+      batchSize: 50,
+      companyId: "company-a",
+      cursor: 0,
+      deadlineAtMs: Date.now() + 60_000,
+      expectedSnapshotToken: legacy.snapshotToken,
+      fromDate: "2020-09-01",
+      toDate: "2020-09-30"
+    }),
+    /mappings changed/i
+  );
+
+  // Canonical/legacy alias rows for the same owner may exchange the Active
+  // tie-breaker without changing semantic ownership or normalized output.
+  const sharedAlias = {
+    ...mappings[0],
+    account_id: "stale-legacy-account",
+    field_executive_id: "legacy-workforce-b",
+    location_id: "station-a",
+    worker_type: "contractor"
+  };
+  mappings.splice(
+    0,
+    1,
+    { ...sharedAlias, id: "mapping-workforce", profile_type: "workforce", status: "Active" },
+    { ...sharedAlias, id: "mapping-field-executive", profile_type: "field_executive", status: "Inactive" }
+  );
+  const aliases = await worker.reconcileBiometricAttendance({
+    batchSize: 50,
+    companyId: "company-a",
+    cursor: 0,
+    deadlineAtMs: Date.now() + 60_000,
+    fromDate: "2020-09-01",
+    toDate: "2020-09-30"
+  });
+  mappings[0].status = "Inactive";
+  mappings[1].status = "Active";
+  const aliasesFlipped = await worker.reconcileBiometricAttendance({
+    batchSize: 50,
+    companyId: "company-a",
+    cursor: 0,
+    deadlineAtMs: Date.now() + 60_000,
+    expectedSnapshotToken: aliases.snapshotToken,
+    fromDate: "2020-09-01",
+    toDate: "2020-09-30"
+  });
+  assert.equal(aliasesFlipped.snapshotToken, aliases.snapshotToken);
+
   await assert.rejects(
     worker.reconcileBiometricAttendance({
       batchSize: 50,
@@ -352,6 +443,117 @@ test("reconciliation worker applies an optional company filter before paging", a
     }),
     /mappings changed/i
   );
+});
+
+test("raw-activity reconciliation hashes candidate membership and uses the already-verified owner", async () => {
+  const mappings = ["a", "b"].map((suffix) => ({
+    account_id: `person-${suffix}`,
+    company_id: "company-a",
+    effective_from: "2020-09-01",
+    effective_to: null,
+    employee_id: `person-${suffix}`,
+    enrolment_id: suffix === "a" ? "101" : "202",
+    field_executive_id: null,
+    id: `mapping-${suffix}`,
+    location_id: `station-${suffix}`,
+    profile_type: "employee",
+    status: "Active",
+    worker_type: "employee"
+  }));
+  let rawPunchDays = [
+    { company_id: "company-a", enrolment_id: "000101", punch_date: "2020-09-10" }
+  ];
+  const backfills = [];
+  const db = {
+    from(table) {
+      assert.equal(table, "biometric_enrolments");
+      const query = {
+        eq() { return query; },
+        lte() { return query; },
+        or() { return query; },
+        order() { return query; },
+        range() { return Promise.resolve({ data: mappings, error: null }); },
+        select() { return query; }
+      };
+      return query;
+    },
+    rpc(name) {
+      assert.equal(name, "attendance_reconciliation_raw_punch_days");
+      const query = {
+        order() { return query; },
+        range() { return Promise.resolve({ data: rawPunchDays, error: null }); }
+      };
+      return query;
+    }
+  };
+  const worker = compile(
+    new URL("../../../../lib/biometric/attendance-reconciliation.ts", import.meta.url),
+    {
+      "@/lib/biometric/attendance": {
+        backfillHistoricalPunches: async (options) => {
+          backfills.push(options);
+          return 1;
+        },
+        historicalPunchTimeWindow: () => ({
+          endBefore: "2020-09-30T18:30:00.000Z",
+          fromDate: "2020-09-01",
+          startAt: "2020-08-31T18:30:00.000Z",
+          toDate: "2020-09-30"
+        })
+      },
+      "@/lib/biometric/attendance-reconciliation-policy": reconciliationPolicy,
+      "@/lib/supabase-admin": { supabaseAdmin: db },
+      "node:crypto": {
+        createHash,
+        randomUUID: () => "33333333-3333-4333-8333-333333333333"
+      }
+    }
+  );
+
+  const first = await worker.reconcileBiometricAttendance({
+    batchSize: 50,
+    companyId: "company-a",
+    cursor: 0,
+    deadlineAtMs: Date.now() + 60_000,
+    fromDate: "2020-09-01",
+    rawActivityOnly: true,
+    toDate: "2020-09-30"
+  });
+  assert.equal(first.totalMappings, 1);
+  assert.equal(backfills[0].enrolmentId, "101");
+  assert.equal(backfills[0].ownershipVerified, true);
+
+  // A first TimeLog for a previously quiet mapped enrolment changes cursor
+  // membership even though the mapping snapshot itself is unchanged.
+  rawPunchDays = [
+    ...rawPunchDays,
+    { company_id: "company-a", enrolment_id: "202", punch_date: "2020-09-11" }
+  ];
+  await assert.rejects(
+    worker.reconcileBiometricAttendance({
+      batchSize: 50,
+      companyId: "company-a",
+      cursor: 0,
+      deadlineAtMs: Date.now() + 60_000,
+      expectedSnapshotToken: first.snapshotToken,
+      fromDate: "2020-09-01",
+      rawActivityOnly: true,
+      toDate: "2020-09-30"
+    }),
+    /candidate set or mappings changed/i
+  );
+
+  const restarted = await worker.reconcileBiometricAttendance({
+    batchSize: 50,
+    companyId: "company-a",
+    cursor: 0,
+    deadlineAtMs: Date.now() + 60_000,
+    fromDate: "2020-09-01",
+    rawActivityOnly: true,
+    toDate: "2020-09-30"
+  });
+  assert.equal(restarted.totalMappings, 2);
+  assert.notEqual(restarted.snapshotToken, first.snapshotToken);
 });
 
 test("serialized worker leases each company independently and skips only a contended company", async () => {
@@ -392,7 +594,9 @@ test("serialized worker leases each company independently and skips only a conte
           return Promise.resolve({
             data: companyId === undefined
               ? mappings
-              : mappings.filter((mapping) => mapping.company_id === companyId),
+              : mappings
+                .filter((mapping) => mapping.company_id === companyId)
+                .map((mapping) => ({ ...mapping, status: "Under Review" })),
             error: null
           });
         },
@@ -445,6 +649,8 @@ test("serialized worker leases each company independently and skips only a conte
     ]
   );
   assert.deepEqual(backfills.map((item) => item.companyId), ["company-b"]);
+  assert.equal(backfills[0].workerStatus, "Under Review");
+  assert.equal(backfills[0].ownershipVerified, true);
   assert.equal(result.attempted, 2);
   assert.equal(result.completed, 1);
   assert.equal(result.skipped, 1);

@@ -394,9 +394,34 @@ test("daily rebuild resolves historical ownership before choosing punch snapshot
   assert.doesNotMatch(rebuild, /from\("attendance_integrity_flags"\)/);
   assert.doesNotMatch(rebuild, /from\("attendance_location_reviews"\)/);
   assert.doesNotMatch(rebuild, /from\("attendance_punches"\)[\s\S]{0,300}?\.delete\(\)/);
-  assert.match(rebuild, /if \(canonicalUpdate\.error\) throw/);
+  assert.match(rebuild, /if \(canonicalUpdateError\) throw/);
   assert.doesNotMatch(rebuild, /const staleVariants =/);
   assert.match(rebuild, /Padded attendance_daily rows are retained/);
+});
+
+test("daily rebuild keeps padded evidence when canonical spelling hits a physical-key twin", () => {
+  const start = attendanceSource.indexOf("export async function rebuildAttendanceDay");
+  const end = attendanceSource.indexOf("type HistoricalRawPunchRow", start);
+  const rebuild = attendanceSource.slice(start, end);
+  const conflictFallback = rebuild.slice(
+    rebuild.indexOf("canonicalUpdateError as { code?: string }"),
+    rebuild.indexOf("if (canonicalUpdateError) throw")
+  );
+
+  assert.match(conflictFallback, /code === "23505"/);
+  const retainedMutation = conflictFallback.slice(
+    conflictFallback.indexOf('.update({ punch_order: order, punch_label: punchLabel(order) })'),
+    conflictFallback.indexOf('.eq("company_id", companyId)')
+  );
+  assert.match(retainedMutation, /punch_order: order, punch_label: punchLabel\(order\)/);
+  assert.doesNotMatch(retainedMutation, /enrolment_id\s*:/);
+  assert.match(conflictFallback, /\.eq\("company_id", companyId\)/);
+  assert.match(conflictFallback, /\.eq\("id", group\.keeper\.id\)/);
+  assert.match(conflictFallback, /\.eq\("punch_date", punchDate\)/);
+  assert.match(conflictFallback, /\.eq\("punch_time", group\.keeper\.punch_time\)/);
+  assert.match(conflictFallback, /\.eq\("enrolment_id", group\.keeper\.enrolment_id\)/);
+  assert.match(conflictFallback, /\.from\("attendance_punches"\)[\s\S]*?\.select\("id"\)[\s\S]*?\.eq\("company_id", companyId\)/);
+  assert.doesNotMatch(conflictFallback, /\.delete\(/);
 });
 
 test("daily station keeps the punch-time location after a later profile transfer", () => {

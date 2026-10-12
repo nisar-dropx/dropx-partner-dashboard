@@ -1034,8 +1034,43 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
       .eq("punch_time", group.keeper.punch_time)
       .eq("enrolment_id", group.keeper.enrolment_id)
       .select("id");
-    if (canonicalUpdate.error) throw new Error(canonicalUpdate.error.message);
-    if ((canonicalUpdate.data ?? []).length !== 1) {
+    let canonicalUpdateData = canonicalUpdate.data;
+    let canonicalUpdateError = canonicalUpdate.error;
+    // The rebuild query is intentionally scoped to one work date, but the
+    // physical punch identity is not. A retained canonical twin can therefore
+    // live on an adjacent night-shift date (or, on a legacy database, in
+    // another tenant under the obsolete global key). Canonical spelling is a
+    // cleanup only: never fail the attendance day or touch the blocking row.
+    // Re-run the same compare-and-set update without changing enrolment_id;
+    // this still refreshes order labels and detects a concurrent keeper edit.
+    if (
+      canonicalUpdateError
+      && shouldCanonicalize
+      && (canonicalUpdateError as { code?: string }).code === "23505"
+    ) {
+      const retainedKeeper = order
+        ? await supabaseAdmin
+          .from("attendance_punches")
+          .update({ punch_order: order, punch_label: punchLabel(order) })
+          .eq("company_id", companyId)
+          .eq("id", group.keeper.id)
+          .eq("punch_date", punchDate)
+          .eq("punch_time", group.keeper.punch_time)
+          .eq("enrolment_id", group.keeper.enrolment_id)
+          .select("id")
+        : await supabaseAdmin
+          .from("attendance_punches")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("id", group.keeper.id)
+          .eq("punch_date", punchDate)
+          .eq("punch_time", group.keeper.punch_time)
+          .eq("enrolment_id", group.keeper.enrolment_id);
+      canonicalUpdateData = retainedKeeper.data;
+      canonicalUpdateError = retainedKeeper.error;
+    }
+    if (canonicalUpdateError) throw new Error(canonicalUpdateError.message);
+    if ((canonicalUpdateData ?? []).length !== 1) {
       throw new Error("Attendance punch changed during canonical update; retry the rebuild.");
     }
   }

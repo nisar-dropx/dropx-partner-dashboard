@@ -5,6 +5,7 @@ import {
   ATTENDANCE_RECONCILIATION_DEFAULT_LOOKBACK_DAYS,
   addIsoDateDays,
   buildHistoricalBiometricOwnershipWindows,
+  filterHistoricalBiometricOwnershipWindowsForRawPunchActivity,
   intersectAttendanceReconciliationWindow,
   resolveAttendanceReconciliationWindow,
   rotatingAttendanceReconciliationOffset
@@ -28,6 +29,10 @@ const workerSource = readFileSync(new URL("./attendance-reconciliation.ts", impo
 const vercel = readFileSync(new URL("../../../vercel.json", import.meta.url), "utf8");
 const runLockMigration = readFileSync(
   new URL("../../../supabase/migrations/20261011193000_attendance_reconciliation_run_lock.sql", import.meta.url),
+  "utf8"
+);
+const rawActivityCandidateMigration = readFileSync(
+  new URL("../../../supabase/migrations/20261011203000_attendance_reconciliation_raw_activity_candidates.sql", import.meta.url),
   "utf8"
 );
 
@@ -100,7 +105,7 @@ test("mapping validity intersects the requested replay window for every status",
     toDate: "2026-09-30"
   }), null);
   assert.doesNotMatch(workerSource, /\.eq\(\s*["']status["']\s*,\s*["']Active["']/);
-  assert.match(workerSource, /isActive:\s*row\.status === ["']Active["']/);
+  assert.match(workerSource, /isActive:\s*repairOwner\.status === ["']Active["']/);
   assert.match(workerSource, /Lifecycle status is intentionally not an eligibility condition/);
 });
 
@@ -335,7 +340,11 @@ test("same-category historical owners remain ambiguous and are never replayed", 
   assert.equal(windows[0].kind, "ambiguous");
   assert.equal(windows[0].owner, null);
   assert.match(workerSource, /ownership\.kind === "ambiguous"/);
-  assert.doesNotMatch(workerSource, /ownershipVerified: true/);
+  assert.match(workerSource, /ownershipVerified: true/);
+  assert.ok(
+    workerSource.indexOf('ownership.kind === "ambiguous"') < workerSource.indexOf("ownershipVerified: true"),
+    "ambiguous ownership must be skipped before the verified backfill path"
+  );
 });
 
 test("historical ownership is split only at effective-date boundaries", () => {
@@ -360,6 +369,72 @@ test("historical ownership is split only at effective-date boundaries", () => {
     ["2026-09-01", "2026-09-14", "old"],
     ["2026-09-15", "2026-09-30", "new"]
   ]);
+});
+
+test("raw-punch candidate days narrow ownership windows without weakening ambiguity safety", () => {
+  const shared = {
+    candidates: [],
+    companyId: "company",
+    enrolmentId: "123"
+  };
+  const windows = [
+    {
+      ...shared,
+      fromDate: "2026-09-01",
+      kind: "resolved",
+      owner: { id: "old-owner" },
+      toDate: "2026-09-14"
+    },
+    {
+      ...shared,
+      enrolmentId: "000123",
+      fromDate: "2026-09-15",
+      kind: "ambiguous",
+      owner: null,
+      toDate: "2026-09-30"
+    },
+    {
+      ...shared,
+      enrolmentId: "456",
+      fromDate: "2026-09-01",
+      kind: "resolved",
+      owner: { id: "unaffected" },
+      toDate: "2026-09-30"
+    }
+  ];
+
+  assert.deepEqual(
+    filterHistoricalBiometricOwnershipWindowsForRawPunchActivity({
+      rawPunchDays: [
+        { company_id: "company", enrolment_id: "00000123", punch_date: "2026-09-20" },
+        { company_id: "other-company", enrolment_id: "456", punch_date: "2026-09-20" },
+        { company_id: "company", enrolment_id: "not-biometric", punch_date: "2026-09-20" }
+      ],
+      windows
+    }),
+    [windows[1]]
+  );
+  assert.equal(windows[1].kind, "ambiguous", "the existing worker must remain responsible for skipping conflicts");
+});
+
+test("one-time raw-activity mode hashes the server-side candidate set and safely falls back", () => {
+  assert.match(routeSource, /raw_activity_only/);
+  assert.match(routeSource, /rawActivityOnly/);
+  assert.match(workerSource, /attendance_reconciliation_raw_punch_days/);
+  assert.match(workerSource, /attendance_reconciliation_raw_activity_filter_unavailable/);
+  assert.match(workerSource, /ownershipWindows = completeOwnershipWindows/);
+  assert.match(workerSource, /ownershipSnapshotToken\(completeOwnershipWindows\)/);
+  assert.doesNotMatch(workerSource, /status:\s*mapping\.status/);
+  assert.match(workerSource, /rawActivitySnapshotToken/);
+  assert.match(workerSource, /mode: "raw-activity"/);
+  assert.match(routeSource, /expected_snapshot/);
+
+  assert.match(rawActivityCandidateMigration, /raw\.event_type ilike 'timelog'/i);
+  assert.match(rawActivityCandidateMigration, /raw\.punch_time >= p_start_at/i);
+  assert.match(rawActivityCandidateMigration, /raw\.punch_time < p_end_before/i);
+  assert.doesNotMatch(rawActivityCandidateMigration, /attendance_punches/i);
+  assert.match(rawActivityCandidateMigration, /grant execute[\s\S]*?to service_role/i);
+  assert.match(rawActivityCandidateMigration, /revoke all[\s\S]*?from authenticated/i);
 });
 
 test("recurring pages rotate deterministically across the mapped population", () => {
@@ -408,7 +483,7 @@ test("company reconciliation lease claim shares the assignment lock and reports 
 test("company-scoped repair validates the complete snapshot under a final lease", () => {
   assert.match(workerSource, /const validationToken = randomUUID\(\)/);
   assert.match(workerSource, /attendance_try_acquire_reconciliation_run[\s\S]*?const currentMappings = await loadMappings\(\{ companyId, fromDate, toDate \}\)/);
-  assert.match(workerSource, /mappingSnapshotToken\(currentMappings\) !== snapshotToken/);
+  assert.match(workerSource, /ownershipSnapshotToken\(currentOwnershipWindows\) !== ownershipToken/);
   assert.match(workerSource, /attendance_reconciliation_validation_lease_release_failed/);
   assert.match(workerSource, /Attendance mapping changed while this repair was running\. This mapping will be retried\./);
 });

@@ -1,11 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { backfillHistoricalPunches } from "@/lib/biometric/attendance";
+import { backfillHistoricalPunches, historicalPunchTimeWindow } from "@/lib/biometric/attendance";
 import {
   ATTENDANCE_RECONCILIATION_DEFAULT_BATCH_SIZE,
   buildHistoricalBiometricOwnershipWindows,
+  filterHistoricalBiometricOwnershipWindowsForRawPunchActivity,
   rotatingAttendanceReconciliationOffset,
-  type HistoricalBiometricMapping
+  type HistoricalBiometricMapping,
+  type HistoricalBiometricOwnershipWindow,
+  type HistoricalBiometricRawPunchDay
 } from "@/lib/biometric/attendance-reconciliation-policy";
+import { biometricCandidateCategory } from "@/lib/biometric/enrolment-resolution";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type ReconciliationEnrolment = {
@@ -47,8 +51,9 @@ export type AttendanceReconciliationResult = {
 };
 
 function personId(row: HistoricalBiometricMapping) {
-  if (row.profile_type === "employee") return row.employee_id || row.account_id;
-  if (row.profile_type === "field_executive") return row.field_executive_id || row.account_id;
+  const category = biometricCandidateCategory(row);
+  if (category === "employee") return row.employee_id || row.account_id;
+  if (category === "field_executive") return row.field_executive_id || row.account_id;
   return row.account_id || row.employee_id || row.field_executive_id;
 }
 
@@ -82,22 +87,93 @@ async function loadMappings({
   return mappings;
 }
 
-function mappingSnapshotToken(mappings: Array<ReconciliationEnrolment | HistoricalBiometricMapping>) {
+async function loadHistoricalRawPunchDays({
+  companyId,
+  fromDate,
+  toDate
+}: {
+  companyId?: string;
+  fromDate: string;
+  toDate: string;
+}): Promise<HistoricalBiometricRawPunchDay[] | null> {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const window = historicalPunchTimeWindow({ effectiveFrom: fromDate, effectiveTo: toDate });
+  if (!window.startAt || !window.endBefore) return null;
+
+  const rows: HistoricalBiometricRawPunchDay[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const result = await supabaseAdmin
+      .rpc("attendance_reconciliation_raw_punch_days", {
+        p_company_id: companyId ?? null,
+        p_end_before: window.endBefore,
+        p_start_at: window.startAt
+      })
+      .order("company_id", { ascending: true })
+      .order("enrolment_id", { ascending: true })
+      .order("punch_date", { ascending: true })
+      .range(from, from + pageSize - 1);
+    // A schema rollout must not turn an optimization into an attendance gap.
+    // Until the candidate RPC is available on every replica, fall back to the
+    // complete ownership snapshot and let the established health proof run.
+    if (result.error) {
+      console.warn(JSON.stringify({
+        event: "attendance_reconciliation_raw_activity_filter_unavailable",
+        message: result.error.message
+      }));
+      return null;
+    }
+    const page = (result.data ?? []) as HistoricalBiometricRawPunchDay[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
+function ownershipSnapshotToken(ownershipWindows: HistoricalBiometricOwnershipWindow[]) {
   return createHash("sha256")
-    .update(JSON.stringify(mappings.map((mapping) => ({
-      accountId: mapping.account_id,
-      companyId: mapping.company_id,
-      effectiveFrom: mapping.effective_from,
-      effectiveTo: mapping.effective_to,
-      employeeId: mapping.employee_id,
-      enrolmentId: mapping.enrolment_id,
-      fieldExecutiveId: mapping.field_executive_id,
-      id: mapping.id,
-      locationId: mapping.location_id,
-      profileType: mapping.profile_type,
-      status: mapping.status,
-      workerType: mapping.worker_type
+    .update(JSON.stringify(ownershipWindows.map((window) => ({
+      companyId: window.companyId,
+      enrolmentId: window.enrolmentId,
+      fromDate: window.fromDate,
+      kind: window.kind,
+      // Hash only fields that change reconciliation ownership/output. Mapping
+      // status is descriptive; row IDs, padded spelling, and redundant raw ID
+      // columns must not restart a catch-up when resolved ownership is stable.
+      owner: window.owner ? {
+        locationId: window.owner.location_id,
+        personId: personId(window.owner),
+        profileType: biometricCandidateCategory(window.owner),
+        workerType: window.owner.worker_type
+      } : null,
+      toDate: window.toDate
     }))))
+    .digest("hex");
+}
+
+function rawActivitySnapshotToken({
+  ownershipToken,
+  ownershipWindows
+}: {
+  ownershipToken: string;
+  ownershipWindows: HistoricalBiometricOwnershipWindow[];
+}) {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      mode: "raw-activity",
+      ownershipToken,
+      // These windows are already in deterministic company/enrolment/date
+      // order. Repair writes cannot remove raw TimeLog activity, so this set
+      // does not compact while cursors advance. Hash selected membership plus
+      // current semantic ownership defensively. A first raw event for a newly
+      // active enrolment changes membership and safely forces a fresh pass.
+      windows: ownershipWindows.map((window) => ({
+        companyId: window.companyId,
+        enrolmentId: window.enrolmentId,
+        fromDate: window.fromDate,
+        toDate: window.toDate
+      }))
+    }))
     .digest("hex");
 }
 
@@ -110,6 +186,7 @@ export async function reconcileBiometricAttendance({
   fromDate,
   leaseContention = "skip",
   leaseOwnerId = SCHEDULED_RECONCILIATION_OWNER_ID,
+  rawActivityOnly = false,
   now = new Date(),
   serializeByCompany = false,
   toDate
@@ -122,6 +199,7 @@ export async function reconcileBiometricAttendance({
   fromDate: string;
   leaseContention?: "fail" | "skip";
   leaseOwnerId?: string;
+  rawActivityOnly?: boolean;
   now?: Date;
   serializeByCompany?: boolean;
   toDate: string;
@@ -137,14 +215,29 @@ export async function reconcileBiometricAttendance({
   // browser runs always pass a company scope and must never load another
   // tenant's enrolments, including when the scope is unexpectedly blank.
   const mappings = await loadMappings({ companyId, fromDate, toDate });
-  const ownershipWindows = buildHistoricalBiometricOwnershipWindows({
+  const completeOwnershipWindows = buildHistoricalBiometricOwnershipWindows({
     fromDate,
     mappings,
     toDate
   });
-  const snapshotToken = mappingSnapshotToken(mappings);
+  const ownershipToken = ownershipSnapshotToken(completeOwnershipWindows);
+  let ownershipWindows = completeOwnershipWindows;
+  if (rawActivityOnly) {
+    const rawPunchDays = await loadHistoricalRawPunchDays({ companyId, fromDate, toDate });
+    if (rawPunchDays) {
+      ownershipWindows = filterHistoricalBiometricOwnershipWindowsForRawPunchActivity({
+        rawPunchDays,
+        windows: completeOwnershipWindows
+      });
+    }
+  }
+  const snapshotToken = rawActivityOnly
+    ? rawActivitySnapshotToken({ ownershipToken, ownershipWindows })
+    : ownershipToken;
   if (expectedSnapshotToken && expectedSnapshotToken !== snapshotToken) {
-    throw new Error("Attendance mappings changed during repair. Run the repair again.");
+    throw new Error(rawActivityOnly
+      ? "Attendance reconciliation candidate set or mappings changed during repair. Run the repair again."
+      : "Attendance mappings changed during repair. Run the repair again.");
   }
   const validateCompanySnapshot = async () => {
     if (!serializeByCompany || !companyId) return;
@@ -168,7 +261,12 @@ export async function reconcileBiometricAttendance({
         throw new Error("Attendance repair is busy for this company. Run the repair again.");
       }
       const currentMappings = await loadMappings({ companyId, fromDate, toDate });
-      if (mappingSnapshotToken(currentMappings) !== snapshotToken) {
+      const currentOwnershipWindows = buildHistoricalBiometricOwnershipWindows({
+        fromDate,
+        mappings: currentMappings,
+        toDate
+      });
+      if (ownershipSnapshotToken(currentOwnershipWindows) !== ownershipToken) {
         throw new Error("Attendance mappings changed during repair. Run the repair again.");
       }
     } finally {
@@ -244,12 +342,14 @@ export async function reconcileBiometricAttendance({
       continue;
     }
     const accountId = personId(row);
-    if (!accountId || !row.company_id || !ownership.enrolmentId || !row.location_id || !row.profile_type || !row.worker_type) {
+    const profileType = biometricCandidateCategory(row);
+    if (!accountId || !row.company_id || !ownership.enrolmentId || !row.location_id || !profileType || !row.worker_type) {
       result.skipped += 1;
       continue;
     }
 
     let leaseToken: string | null = null;
+    let repairOwner = row;
     try {
       if (serializeByCompany) {
         leaseToken = randomUUID();
@@ -298,7 +398,7 @@ export async function reconcileBiometricAttendance({
           !currentOwnership ||
           currentOwnership.kind !== "resolved" ||
           !currentOwnership.owner ||
-          mappingSnapshotToken([currentOwnership.owner]) !== mappingSnapshotToken([row])
+          ownershipSnapshotToken([currentOwnership]) !== ownershipSnapshotToken([ownership])
         ) {
           console.warn(JSON.stringify({
             companyId: row.company_id,
@@ -317,22 +417,38 @@ export async function reconcileBiometricAttendance({
           }
           continue;
         }
+        // Status is deliberately excluded from the ownership token, but it is
+        // still descriptive punch output. Use the row reloaded under the lease
+        // so a concurrent lifecycle change is captured without restarting the
+        // catch-up or writing the stale status from the global snapshot.
+        repairOwner = currentOwnership.owner;
       }
 
+      const repairAccountId = personId(repairOwner);
+      const repairProfileType = biometricCandidateCategory(repairOwner);
+      if (!repairAccountId || !repairOwner.location_id || !repairProfileType || !repairOwner.worker_type) {
+        throw new Error("Attendance mapping became incomplete while this repair was running.");
+      }
       result.punchesReconciled += await backfillHistoricalPunches({
-        accountId,
-        companyId: row.company_id,
+        accountId: repairAccountId,
+        companyId: repairOwner.company_id,
         effectiveFrom: ownership.fromDate,
         effectiveTo: ownership.toDate,
-        employeeId: row.profile_type === "employee" ? accountId : null,
+        employeeId: repairProfileType === "employee" ? repairAccountId : null,
         enrolmentId: ownership.enrolmentId,
-        fieldExecutiveId: row.profile_type === "field_executive" ? accountId : null,
+        fieldExecutiveId: repairProfileType === "field_executive" ? repairAccountId : null,
         // Lifecycle status is intentionally not an eligibility condition.
-        isActive: row.status === "Active",
-        locationId: row.location_id,
-        profileType: row.profile_type,
-        workerStatus: row.status || "Unknown",
-        workerType: row.worker_type
+        isActive: repairOwner.status === "Active",
+        locationId: repairOwner.location_id,
+        profileType: repairProfileType,
+        workerStatus: repairOwner.status || "Unknown",
+        workerType: repairOwner.worker_type,
+        // The worker resolved this window from the complete normalized mapping
+        // snapshot. Scheduled runs revalidate the exact owner while holding
+        // the company lease above; browser runs hold that same lease around
+        // the entire worker call. Re-resolving inside backfill would repeat a
+        // full mapping scan for every already-proven window.
+        ownershipVerified: true
       });
       result.completed += 1;
     } catch (error) {

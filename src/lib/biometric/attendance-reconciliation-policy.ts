@@ -143,6 +143,50 @@ export type HistoricalBiometricOwnershipWindow = {
   toDate: string;
 };
 
+export type HistoricalBiometricRawPunchDay = {
+  company_id: string;
+  enrolment_id: string;
+  punch_date: string;
+};
+
+/**
+ * Narrows an already-resolved ownership snapshot to windows with raw TimeLog
+ * activity selected by the database's fail-open repair predicate. Ownership
+ * remains a pure in-memory decision over the complete mapping snapshot. In
+ * particular, ambiguous windows are retained here so the worker still counts
+ * and skips them through its existing safety path. Candidate SQL reads a
+ * raw TimeLog evidence, so repair writes do not compact an advancing cursor.
+ * The worker still hashes selected membership and current mappings. A first
+ * raw event for another mapped enrolment changes that membership and safely
+ * forces the catch-up to restart from its new snapshot.
+ */
+export function filterHistoricalBiometricOwnershipWindowsForRawPunchActivity({
+  rawPunchDays,
+  windows
+}: {
+  rawPunchDays: HistoricalBiometricRawPunchDay[];
+  windows: HistoricalBiometricOwnershipWindow[];
+}) {
+  const datesByEnrolment = new Map<string, Set<string>>();
+  for (const row of rawPunchDays) {
+    const companyId = String(row.company_id ?? "").trim();
+    const enrolmentId = normalizeBiometricEnrolmentId(row.enrolment_id);
+    const punchDate = String(row.punch_date ?? "").trim();
+    if (!companyId || !enrolmentId || !ISO_DATE.test(punchDate)) continue;
+    const key = `${companyId}\u0000${enrolmentId}`;
+    const dates = datesByEnrolment.get(key) ?? new Set<string>();
+    dates.add(punchDate);
+    datesByEnrolment.set(key, dates);
+  }
+
+  return windows.filter((window) => {
+    const key = `${window.companyId}\u0000${normalizeBiometricEnrolmentId(window.enrolmentId)}`;
+    const dates = datesByEnrolment.get(key);
+    if (!dates) return false;
+    return Array.from(dates).some((date) => date >= window.fromDate && date <= window.toDate);
+  });
+}
+
 function historicalMappingSortKey(row: HistoricalBiometricMapping) {
   return `${row.company_id}\u0000${normalizeBiometricEnrolmentId(row.enrolment_id)}\u0000${row.id}`;
 }
