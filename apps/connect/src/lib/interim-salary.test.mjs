@@ -189,6 +189,7 @@ test('notification inbox and dashboard CTA are independently scoped; preview mak
     '../../../../src/lib/connect-approver-identity': { resolveConnectActorUserId: async () => 'actor' },
     '../../../../src/lib/supabase-admin': { supabaseAdmin: db }, '@/lib/dashboard-notices': { visibleDashboardNotices },
     '@/lib/announcement-personalization-data': { personalizeNotices: async (_db, _account, rows) => rows },
+    '@/lib/connect-unread': { loadConnectUnread: async () => ({ total: 2, updates: 1, cases: {} }) },
     '@/lib/announcement-notifications': { hydrateAnnouncementNotices: async (_db, _account, rows) => rows, announcementId: () => null }
   });
   const req = new Request('https://one.example/api/connect/notifications?profileType=employee&accountId=worker');

@@ -124,7 +124,7 @@ function shouldRunBackgroundTracking(payload: {
 }
 
 async function registerPushToken(account: AppAccount, token: string) {
-  const deviceId = `android-${account.id.slice(0, 8)}-${navigator.userAgent.length}`;
+  const deviceId = `${capacitor()?.getPlatform?.() ?? "android"}-${account.id.slice(0, 8)}-${navigator.userAgent.length}`;
   await fetch("/api/connect/notifications", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -184,7 +184,11 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
     if (!isNativeApp() || !account) return;
 
     let cancelled = false;
-    let pushListener: { remove: () => void } | undefined;
+    const pushListeners: Array<{ remove: () => void }> = [];
+    const listen = async (push: PushNotificationsPlugin, event: Parameters<PushNotificationsPlugin["addListener"]>[0], handler: Parameters<PushNotificationsPlugin["addListener"]>[1]) => {
+      const listener = await push.addListener(event, handler);
+      if (cancelled) listener.remove(); else pushListeners.push(listener);
+    };
 
     const sync = async () => {
       const state = await readAttendanceTrackingState(account);
@@ -199,19 +203,26 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
     // Fixed with the documented proguard-rules.pro keep rules for PluginHandle's annotation
     // fields, not app code, so no JS-side workaround is needed any more.
     const boot = async () => {
-      await sync();
       const push = pushPlugin();
       if (!push) return;
+      // Install listeners before register(): native registration can return immediately.
+      await listen(push, "registration", (event) => {
+        if (!event.value || cancelled) return;
+        void registerPushToken(account, event.value).catch(() => undefined);
+      });
+      await listen(push, "pushNotificationReceived", () => {
+        if (!cancelled) window.dispatchEvent(new Event("dropx-push-received"));
+      });
+      await listen(push, "pushNotificationActionPerformed", () => {
+        if (!cancelled) window.dispatchEvent(new Event("dropx-push-received"));
+      });
       const permission = await push.requestPermissions();
       if (permission.receive !== "granted" || cancelled) return;
       await push.register();
-      pushListener = await push.addListener("registration", async (event) => {
-        if (!event.value || cancelled) return;
-        await registerPushToken(account, event.value);
-      });
     };
 
     boot().catch(() => undefined);
+    sync().catch(() => undefined);
     const interval = window.setInterval(() => {
       sync().catch(() => undefined);
     }, POLL_MS);
@@ -219,7 +230,7 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
     return () => {
       cancelled = true;
       window.clearInterval(interval);
-      pushListener?.remove();
+      pushListeners.forEach(listener => listener.remove());
       dropxOnePlugin()?.stopBackgroundLocation?.().catch(() => undefined);
     };
   }, [account?.id, account?.profileType]);

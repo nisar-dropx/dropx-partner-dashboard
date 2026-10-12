@@ -183,6 +183,8 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const [openedNotice, setOpenedNotice] = useState<ConnectNotification | null>(null);
   const notificationAccount = useRef("");
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [connectUnreadCount, setConnectUnreadCount] = useState(0);
+  const [connectTarget, setConnectTarget] = useState({ caseId: "", announcementId: "" });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -271,12 +273,15 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     setUnreadNotifications(0);
     notificationAccount.current = account ? accountKey(account) : "";
     setNotifications([]); setDashboardNotices([]); setOpenedNotice(null); setUnreadNotifications(0);
+    setConnectUnreadCount(0); setConnectTarget({ caseId: "", announcementId: "" });
     if (account) void loadNotifications(false);
     if (!account) return;
     const refresh = () => { if (document.visibilityState === "visible") void loadNotifications(false); };
     const timer = window.setInterval(refresh, 60_000);
     window.addEventListener("focus", refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+    window.addEventListener("dropx-connect-read", refresh);
+    window.addEventListener("dropx-push-received", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener("dropx-connect-read", refresh); window.removeEventListener("dropx-push-received", refresh); };
   }, [account?.id, account?.profileType, account?.companyId]);
   useEffect(() => {
     if (!account || isWorkforceWorkspace(account) || isManagerAccount(account) || account.pageAccess?.includes("approvals")) return;
@@ -418,6 +423,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       setNotifications(payload.notifications ?? []);
       setDashboardNotices(payload.dashboardNotices ?? []);
       setUnreadNotifications(Number(payload.unreadCount ?? 0));
+      setConnectUnreadCount(Number(payload.connectUnreadCount ?? 0));
     } catch (reason) {
       setError(userFacingError(reason, "Unable to load notifications. Please try again."));
     } finally {
@@ -448,6 +454,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       } catch { /* A read-receipt failure must not prevent opening the notice. */ }
     }
     if (notificationAccount.current !== requestedAccount) return;
+    void loadNotifications(false);
     if (notification.data?.openNotice === true) {
       setNotificationMenu(false);
       setOpenedNotice(notification);
@@ -460,6 +467,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     if (destination && ["dashboard", "profile", "documents", "salary", "connect", "approvals", "requests", "advances", "earnings", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "performance", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
+      if (destination === "connect") setConnectTarget({ caseId: String(notification.data?.caseId ?? ""), announcementId: String(notification.data?.announcementId ?? "") });
     } else if (destination) {
       try {
         const url = new URL(destination);
@@ -490,6 +498,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       const readAt = new Date().toISOString();
       setNotifications((rows) => rows.map((row) => row.read_at ? row : { ...row, read_at: readAt }));
       setUnreadNotifications(0);
+      void loadNotifications(false);
     } catch (reason) {
       setError(userFacingError(reason, "Unable to clear notifications. Please try again."));
     } finally {
@@ -623,6 +632,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   }
   function open(next: Step, nextAttendanceFilter: AttendanceFilter = "all") {
     setDrawer(false); setProfileMenu(false);
+    if (next === "connect") setConnectTarget({ caseId: "", announcementId: "" });
     if (next === "attendance") setAttendanceFilter(nextAttendanceFilter);
     if (next === "lop") next = "leave";
     if (next === "wfh") {
@@ -772,14 +782,14 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
           {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><CreditCard />Payments</button> : null}
           {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays />Work schedule</button> : null}
           {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target />Performance</button> : null}
-          {allowed(account, "connect") ? <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore />Connect</button> : null}
+          {allowed(account, "connect") ? <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore />Connect{connectUnreadCount > 0 ? <b className="dx-connect-unread" aria-label={`${connectUnreadCount} unread Connect updates`}>{connectUnreadCount > 99 ? "99+" : connectUnreadCount}</b> : null}</button> : null}
           {allowed(account, "documents") ? <button aria-current={step === "documents" ? "page" : undefined} className={step === "documents" ? "active" : ""} onClick={() => open("documents")}><Files />Documents</button> : null}
           {allowed(account, "refer_earn") ? <button aria-current={step === "refer" ? "page" : undefined} className={step === "refer" ? "active" : ""} onClick={() => open("refer")}><UsersRound />Refer &amp; Earn</button> : null}
           {!isManagerAccount(account) && allowed(account, "profile") ? <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button> : null}
         </> : <>
           {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
           {!isManagerAccount(account) && allowed(account, "profile") ? <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button> : null}
-          <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore />Connect</button>
+          <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore />Connect{connectUnreadCount > 0 ? <b className="dx-connect-unread" aria-label={`${connectUnreadCount} unread Connect updates`}>{connectUnreadCount > 99 ? "99+" : connectUnreadCount}</b> : null}</button>
           {peopleSelfService(account) ? <button aria-current={step === "requests" ? "page" : undefined} className={step === "requests" ? "active" : ""} onClick={() => open("requests")}><ClipboardList />My Requests</button> : null}
           {(approvalAccess === "allowed") ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
           {sharedSelfService(account) && (canViewInterimSalary(account) || allowed(account, "advances") || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "salary" || step === "advances" || step === "reimbursements" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button> : null}
@@ -897,8 +907,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       {step === "profile" && account && !isolatedBetaJourney && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && sharedSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "salary" && account && canViewInterimSalary(account) ? <ConnectInterimSalary key={accountKey(account)} account={account} onDocuments={() => open("documents")} onAttendance={allowed(account, "attendance") ? () => open("attendance") : undefined} /> : null}
-      {step === "connect" && account && isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
-      {step === "connect" && account && !isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
+      {step === "connect" && account ? <ConnectCommunicationCenter key={accountKey(account)} account={account} readOnly={userPreview} initialCaseId={connectTarget.caseId} initialAnnouncementId={connectTarget.announcementId} /> : null}
       {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}
       {step === "approvals" && account && approvalAccess === "allowed" ? <ConnectApprovalInbox account={account} initialSection={requestedApprovalSection} /> : null}
       {step === "approvals" && account && approvalAccess === "loading" ? <div role="status"><Loader text="Checking approval access..." /></div> : null}
@@ -932,14 +941,14 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         {account.onboardingBeta ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Amazon</span></button> : null}
         {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><IndianRupee /><span>Payments</span></button> : null}
         {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays /><span>Work</span></button> : null}
-        {allowed(account, "connect") ? <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore /><span>Connect</span></button> : null}
+        {allowed(account, "connect") ? <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore /><span>Connect</span>{connectUnreadCount > 0 ? <b className="dx-connect-unread" aria-label={`${connectUnreadCount} unread Connect updates`}>{connectUnreadCount > 99 ? "99+" : connectUnreadCount}</b> : null}</button> : null}
         {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target /><span>Performance</span></button> : null}
         {allowed(account, "refer_earn") ? <button aria-current={step === "refer" ? "page" : undefined} className={step === "refer" ? "active" : ""} onClick={() => open("refer")}><UsersRound /><span>Refer</span></button> : null}
       </> : <>
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Home /><span>Home</span></button> : null}
         {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint /><span>Attendance</span></button> : null}
         {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight /><span>Roster</span></button> : null}
-        <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore /><span>Connect</span></button>
+        <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore /><span>Connect</span>{connectUnreadCount > 0 ? <b className="dx-connect-unread" aria-label={`${connectUnreadCount} unread Connect updates`}>{connectUnreadCount > 99 ? "99+" : connectUnreadCount}</b> : null}</button>
         {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target /><span>Performance</span></button> : null}
       </>}
     </nav> : null}

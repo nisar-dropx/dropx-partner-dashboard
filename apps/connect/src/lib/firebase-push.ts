@@ -113,7 +113,10 @@ export async function deliverNotificationPush(notification: PushNotification) {
     .eq("platform", "android")
     .eq("is_active", true)
     .not("push_token", "is", null);
-  if (tokenResult.error) return;
+  if (tokenResult.error) {
+    await supabaseAdmin.from("mob_app_notifications").update({ push_status: "failed", push_error: "Device registration lookup failed." }).eq("id", notification.id);
+    return;
+  }
   // The same phone can be registered under several device rows with one FCM token (see the
   // notifications route), so send once per token, not once per row.
   const seenTokens = new Set<string>();

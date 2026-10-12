@@ -7,6 +7,7 @@ import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { visibleDashboardNotices } from "@/lib/dashboard-notices";
 import { personalizeNotices } from "@/lib/announcement-personalization-data";
 import { hydrateAnnouncementNotices, announcementId } from "@/lib/announcement-notifications";
+import { loadConnectUnread } from "@/lib/connect-unread";
 
 function setupMessage(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? "");
@@ -112,8 +113,10 @@ export async function GET(request: Request) {
     const personal = await personalizeNotices(supabaseAdmin, account, hydrated);
     const byId = new Map(personal.map(row => [row.id, row]));
     const notifications = rows.flatMap(row => byId.has(row.id) && !staleIds.has(row.id) ? [byId.get(row.id)!] : []);
+    const connectUnread = await loadConnectUnread(supabaseAdmin, account);
     return NextResponse.json({
       notifications,
+      connectUnreadCount: connectUnread.total,
       dashboardNotices: visibleDashboardNotices((noticesResult.data ?? []).flatMap(row => byId.has(row.id) ? [byId.get(row.id)!] : [])),
       unreadCount: notifications.filter((row) => !row.read_at).length
     }, { headers: { "Cache-Control": "private, no-store" } });
