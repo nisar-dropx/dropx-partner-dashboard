@@ -131,3 +131,33 @@ const peopleOutage=await scoped.loadMapping(manager,'2026-10-07','*');
 assert.equal(peopleOutage.stations[0].clusters,null);assert.ok(peopleOutage.clusterWarning);assert.equal(peopleOutage.vehicles.length,2);
 assert.equal((await scoped.loadMapping(manager,'2026-10-07','*',false,false)).clusterWarning,undefined,'Write validation does not load optional People metadata');
 console.log('People clusters: current managers, multiple assignments, no-manager stations, legacy removal and independent writes passed.');
+
+// XPT IDs roll up through the configured parent, without expanding vehicle access.
+fixtureTables.stations.push(
+ {id:'xpt-a',station_code:'AXPT',parent_station_id:'s1',is_active:true,location_models:{code:'XPT'}},
+ {id:'xpt-b',station_code:'BXPT',parent_station_id:'s2',is_active:true,location_models:[{code:'XPT'}]},
+ {id:'other',station_code:'OTHER',parent_station_id:'s1',is_active:true,location_models:{code:'EDSP'}},
+ {id:'off',station_code:'OFF',parent_station_id:'s1',is_active:false,location_models:{code:'XPT'}}
+);
+fixtureTables.cps_shipment_daily.push(
+ {id:'xa',station_code:'AXPT',provider_employee_id:'XA',provider_employee_name:'XPT Alpha DA',work_date:'2026-10-06'},
+ {id:'xb',station_code:'BXPT',provider_employee_id:'XB',provider_employee_name:'XPT Beta DA',work_date:'2026-10-06'},
+ {id:'xa2',station_code:'AXPT',provider_employee_id:'A1',provider_employee_name:'Alpha DA',work_date:'2026-10-06'},
+ {id:'no',station_code:'OTHER',provider_employee_id:'NO',provider_employee_name:'Not XPT',work_date:'2026-10-06'},
+ {id:'off',station_code:'OFF',provider_employee_id:'OFF',provider_employee_name:'Inactive',work_date:'2026-10-06'}
+);
+const xpt=await scoped.loadMapping({...manager,locationScopeIds:['s1']},'2026-10-07','AAA');
+assert.deepEqual(xpt.options.map(o=>o.id).sort(),['A1','XA']);
+assert.equal(xpt.options.filter(o=>o.id==='A1').length,1,'Same ID in base and XPT is deduplicated');
+assert.deepEqual(xpt.options.find(o=>o.id==='XA').feedStationCodes,['AXPT']);
+assert.ok(model.riderAvailableAt(xpt.options.find(o=>o.id==='XA'),'AAA'));
+assert.equal(model.riderAvailableAt(xpt.options.find(o=>o.id==='XA'),'BBB'),false);
+assert.deepEqual(xpt.vehicles.map(v=>v.id),['va'],'Parent feed expansion grants no new vehicle access');
+const multiXpt=await scoped.loadMapping(manager,'2026-10-07','*');
+assert.ok(model.riderAvailableAt(multiXpt.options.find(o=>o.id==='XB'),'BBB'));
+assert.equal(model.riderAvailableAt(multiXpt.options.find(o=>o.id==='XB'),'AAA'),false);
+all.options=multiXpt.options;
+assert.equal((await bulk([{vehicleId:'va',ids:['XA'],expectedIds:[]}])).status,200,'Parent vehicle accepts linked XPT ID in write validation');
+assert.equal((await bulk([{vehicleId:'vb',ids:['XA'],expectedIds:[]}])).status,409,'Unrelated station rejects XPT ID');
+assert.equal(model.riderStationParents([{id:'base',code:'KGQA'}],[{station_code:'KGQC',parent_station_id:'base',is_active:true,location_models:{code:'XPT'}}]).get('KGQC'),'KGQA');
+console.log('XPT parent mapping: configured relation, active XPT only, deduplication, source labels, parent-only reader, all-station isolation and save validation passed.');
