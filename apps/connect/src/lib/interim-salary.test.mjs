@@ -188,7 +188,8 @@ test('notification inbox and dashboard CTA are independently scoped; preview mak
     '../../../../src/lib/connect-auth': { requireConnectAccount: async () => { if (!selected) throw Error('Login expired'); return selected; } },
     '../../../../src/lib/connect-approver-identity': { resolveConnectActorUserId: async () => 'actor' },
     '../../../../src/lib/supabase-admin': { supabaseAdmin: db }, '@/lib/dashboard-notices': { visibleDashboardNotices },
-    '@/lib/announcement-personalization-data': { personalizeNotices: async (_db, _account, rows) => rows }
+    '@/lib/announcement-personalization-data': { personalizeNotices: async (_db, _account, rows) => rows },
+    '@/lib/announcement-notifications': { hydrateAnnouncementNotices: async (_db, _account, rows) => rows, announcementId: () => null }
   });
   const req = new Request('https://one.example/api/connect/notifications?profileType=employee&accountId=worker');
   const response = await api.GET(req); assert.equal(response.status, 200);

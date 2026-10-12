@@ -272,6 +272,11 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     notificationAccount.current = account ? accountKey(account) : "";
     setNotifications([]); setDashboardNotices([]); setOpenedNotice(null); setUnreadNotifications(0);
     if (account) void loadNotifications(false);
+    if (!account) return;
+    const refresh = () => { if (document.visibilityState === "visible") void loadNotifications(false); };
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, [account?.id, account?.profileType, account?.companyId]);
   useEffect(() => {
     if (!account || isWorkforceWorkspace(account) || isManagerAccount(account) || account.pageAccess?.includes("approvals")) return;
@@ -883,7 +888,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       ) : null}
       {!userPreview && account ? <ConnectNativeBridge account={account} /> : null}
       <PullToRefresh />
-      {step === "dashboard" && account && peopleSelfService(account) ? <ConnectNoticeCards notices={visibleDashboardNotices(dashboardNotices)} onOpen={notice => void readNotification(notice)} /> : null}
+      {step === "dashboard" && account ? <ConnectNoticeCards notices={visibleDashboardNotices(dashboardNotices)} onOpen={notice => void readNotification(notice)} /> : null}
       {openedNotice ? <ConnectNoticeDialog notice={openedNotice} onClose={() => setOpenedNotice(null)} onContinue={() => { navigateNotification(openedNotice); setOpenedNotice(null); }} /> : null}
       {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} />}</ConnectBetaJourneyShell> : null}
       {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
