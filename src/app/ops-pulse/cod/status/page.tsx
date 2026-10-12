@@ -5,6 +5,7 @@ import { firstRelation, loadCodStationSettings } from '@/lib/ops-pulse/cod';
 import { loadCodStatusLocations } from '@/lib/ops-pulse/cod-status-server';
 import { requireCompanyId } from '@/lib/company-scope';
 import { pickupPolicy } from '@/lib/ops-pulse/cod-pickup';
+import { codStatusOwner } from '@/lib/ops-pulse/cod-status';
 import { CodStatusClient } from './status-client';
 export const dynamic = 'force-dynamic';
 export default async function CodStatusPage() {
@@ -14,7 +15,7 @@ export default async function CodStatusPage() {
     return <>
       <PageHead eyebrow="Operations · COD" title="COD status" subtitle="DA reconciliation, prepared deposits and remittances — together for each station." />
       <CodSectionTabs active="status" />
-      <CodStatusClient locations={locations.map(row => ({ id:row.id,code:row.station_code,name:row.station_name || '',model:firstRelation(row.location_models)?.code || '',region:row.region || row.state || '',manager:row.cluster_manager || '',pickup:pickupPolicy(settings.rows.find(s=>s.location_id===row.id)) }))} />
+      <CodStatusClient locations={locations.map(row => ({ id:row.id,code:row.station_code,name:row.station_name || '',model:firstRelation(row.location_models)?.code || '',region:row.region || row.state || '',...codStatusOwner(row),pickup:pickupPolicy(settings.rows.find(s=>s.location_id===row.id)) }))} />
     </>;
   } catch {
     return <><PageHead title="COD status" subtitle="Locations could not be loaded. Please reload to try again." /><CodSectionTabs active="status" /></>;
