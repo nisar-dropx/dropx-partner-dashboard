@@ -17,6 +17,8 @@ export async function codStatusPortalStation(auth: AuthorizationContext, locatio
   const settings = await loadCodStationSettings(requireCompanyId(auth), auth.locationScopeIds, auth.hasAllLocationAccess);
   if (settings.error) throw new Error('Unable to read COD Master settings. Please retry.');
   const config = settings.rows.find(row => row.location_id === location.id || (!row.location_id && row.station_code === location.station_code));
-  if (config && (config.is_active === false || config.portal_checks_enabled === false)) throw new Error('Portal checks are disabled in COD Master for this location.');
+  // portal_checks_enabled controls the older scheduled scraper, not an authorized
+  // user's on-demand read through the COD worker. Keep that scheduler setting intact.
+  if (config?.is_active === false) throw new Error('This location is inactive in COD Master.');
   return String(config?.portal_station_code || location.station_code).trim().toUpperCase();
 }
