@@ -178,7 +178,7 @@ test('notification inbox and dashboard CTA are independently scoped; preview mak
   const reads = []; let selected = account;
   const db = { from(table) {
     assert.equal(table, 'mob_app_notifications'); const filters = []; reads.push(filters);
-    const q = { select() { return q; }, eq(...args) { filters.push(args); return q; }, is(...args) { filters.push(args); return q; }, contains(...args) { filters.push(args); return q; }, gt(...args) { filters.push(args); return q; }, order() { return q; }, limit() { return q; }, then(resolve) { return Promise.resolve({ data: [{ id: 'notice', title: 'Test notice', body: 'Test', route: 'salary', created_at: '2026-10-09', data: { showOnDashboard: true, dashboardUntil: '2099-01-01T00:00:00.000Z' } }], error: null }).then(resolve); } };
+    const q = { select() { return q; }, eq(...args) { filters.push(args); return q; }, is(...args) { filters.push(args); return q; }, contains(...args) { filters.push(args); return q; }, or(...args) { filters.push(args); return q; }, order() { return q; }, limit() { return q; }, then(resolve) { return Promise.resolve({ data: [{ id: 'notice', title: 'Test notice', body: 'Test', route: 'salary', created_at: '2026-10-09', data: { showOnDashboard: true, dashboardUntil: '2099-01-01T00:00:00.000Z' } }], error: null }).then(resolve); } };
     return q;
   } };
   const api = load('../../app/api/connect/notifications/route.ts', {
@@ -196,6 +196,6 @@ test('notification inbox and dashboard CTA are independently scoped; preview mak
   const result = await response.json(); assert.equal(result.notifications.length, 1); assert.equal(result.dashboardNotices[0].route, 'salary');
   assert.equal(reads.length, 2);
   for (const filters of reads) for (const [key, value] of [['company_id', 'company'], ['recipient_profile_type', 'employee'], ['recipient_account_id', 'worker'], ['archived_at', null]]) assert.ok(filters.some(row => row[0] === key && row[1] === value));
-  assert.ok(reads[1].some(row => row[0] === 'data->>dashboardUntil'));
+  assert.ok(reads[1].some(row => String(row[0]).includes('data->>dashboardUntil.is.null')));
   selected = null; assert.equal((await api.GET(req)).status, 401); assert.equal(reads.length, 2);
 });

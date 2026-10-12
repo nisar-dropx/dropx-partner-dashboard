@@ -26,6 +26,17 @@ test('ordinary notifications are unchanged; invalid announcement IDs cannot be q
   assert.deepEqual(resolveAnnouncementNotices([other], []), [other]);
   assert.equal(announcementId({ ...notice, data: { announcementId: 'unsafe' } }), null);
 });
+test('removed banners disappear even if old notification metadata still says enabled', () => {
+  const rows = resolveAnnouncementNotices([notice], [{ ...a, show_on_dashboard: false }]);
+  assert.equal(visibleDashboardNotices(rows).length, 0);
+  assert.equal(rows.length, 1); // Notification content remains accessible.
+});
+test('a canonical no-expiry banner remains until removed; explicit deadlines still expire', () => {
+  const rows = resolveAnnouncementNotices([notice], [{ ...a, show_on_dashboard: true, dashboard_until: null, dashboard_summary: 'Please read' }]);
+  assert.equal(visibleDashboardNotices(rows, Date.parse('2030-01-01')).length, 1);
+  assert.equal(rows[0].data.summary, 'Please read');
+  assert.equal(visibleDashboardNotices([{ ...notice, data: { showOnDashboard: true } }]).length, 0);
+});
 test('database hydration scopes to company, account, profile type and selected receipts', async () => {
   const calls = []; const query = { select: (...args) => { calls.push(['select',...args]); return query; }, eq: (...args) => { calls.push(['eq',...args]); return query; }, in: (...args) => { calls.push(['in',...args]); return Promise.resolve({ data: [{ communication_announcements: a }], error: null }); } };
   const rows = await hydrateAnnouncementNotices({ from: () => query }, { companyId: 'company', id: 'contractor', profileType: 'contractor' }, [notice]);

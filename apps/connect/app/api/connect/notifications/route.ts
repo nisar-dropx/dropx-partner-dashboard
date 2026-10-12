@@ -50,8 +50,8 @@ export async function GET(request: Request) {
       .eq("company_id", account.companyId).eq("recipient_profile_type", account.profileType)
       .eq("recipient_account_id", account.id).is("archived_at", null)
       .contains("data", { showOnDashboard: true })
-      .gt("data->>dashboardUntil", new Date().toISOString())
-      .order("created_at", { ascending: false }).limit(5);
+      .or(`data->>dashboardUntil.is.null,data->>dashboardUntil.gt.${new Date().toISOString()}`)
+      .order("created_at", { ascending: false }).limit(50);
     if (noticesResult.error) throw noticesResult.error;
 
     const rows = result.data ?? [];

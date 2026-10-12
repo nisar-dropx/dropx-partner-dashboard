@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 type Notice = { event_code?: string; title: string; body: string; data?: Record<string, unknown> | null };
-type Announcement = { id: string; title: string; body: string; status: string; expires_at: string | null };
+type Announcement = { id: string; title: string; body: string; status: string; expires_at: string | null; show_on_dashboard?: boolean; dashboard_until?: string | null; dashboard_summary?: string | null };
 
 export function announcementId(notice: Notice): string | null {
   if (!["communication_announcement", "communication_announcement_reminder"].includes(notice.event_code ?? "")) return null;
@@ -17,7 +17,13 @@ export function resolveAnnouncementNotices<T extends Notice>(notices: T[], annou
     const announcement = allowed.get(id);
     // Only a recipient's published update may open from their bell/banner.
     if (!announcement) return [];
-    return [{ ...notice, title: announcement.title, body: announcement.body, data: { ...notice.data, openNotice: true } }];
+    return [{ ...notice, title: announcement.title, body: announcement.body, data: { ...notice.data, openNotice: true,
+      ...(typeof announcement.show_on_dashboard === "boolean" ? {
+        showOnDashboard: announcement.show_on_dashboard,
+        dashboardUntil: announcement.dashboard_until ?? null,
+        summary: announcement.dashboard_summary ?? null
+      } : {})
+    } }];
   });
 }
 
@@ -26,7 +32,7 @@ export async function hydrateAnnouncementNotices<T extends Notice>(db: SupabaseC
   const ids = [...new Set(notices.map(announcementId).filter((id): id is string => Boolean(id)))];
   if (!ids.length) return notices;
   const result = await db.from("communication_announcement_recipients")
-    .select("communication_announcements!inner(id,title,body,status,expires_at)")
+    .select("communication_announcements!inner(id,title,body,status,expires_at,show_on_dashboard,dashboard_until,dashboard_summary)")
     .eq("company_id", account.companyId).eq("recipient_account_id", account.id)
     .eq("recipient_profile_type", account.profileType).eq("communication_announcements.company_id", account.companyId)
     .in("announcement_id", ids);
