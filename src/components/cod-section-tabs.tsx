@@ -5,6 +5,7 @@ import { PendingLink } from "@/components/pending-link";
 import { useCodPendingAccess } from "@/components/cod-pending-access-provider";
 
 const codSections = [
+  { href: "/cod/status", key: "status", label: "COD Status", visible: true },
   { href: "/cod/executive-reconciliation", key: "executive-reconciliation", label: "Executive Reconciliation", visible: true },
   { href: "/cod/submission", key: "submission", label: "COD Submission", visible: true },
   { href: "/cod/reports", key: "reports", label: "COD Reports", visible: true },

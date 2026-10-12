@@ -146,6 +146,7 @@ function modelOperations(mode: OperatingMode): NavItem {
     label: "Operations",
     icon: "O",
     children: [
+      { code: "cod_reports", label: "COD Status", href: "/cod/status" },
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },

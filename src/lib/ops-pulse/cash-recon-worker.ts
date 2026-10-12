@@ -1364,3 +1364,10 @@ export async function continueCiaSnapshot(runId?: string): Promise<{
     throw error;
   }
 }
+
+/** Current portal status; scope and master station mapping are resolved by the API caller. */
+export async function fetchCodStatus(stationCode: string, fresh = false) {
+  return postWorker<import('./cod-status').CodStatusSnapshot>('/api/admin/executive/cod-status', {
+    stationCode, date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()), fresh,
+  });
+}
