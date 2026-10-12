@@ -1,158 +1,74 @@
 "use server";
-
-import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { requirePagePermission } from "@/lib/authorization";
-import { requireCompanyId, withCompany } from "@/lib/company-scope";
-import { supabaseAdmin } from "@/lib/supabase-admin";
-
-function clean(value: FormDataEntryValue | null) {
-  const text = String(value ?? "").trim();
-  return text.length ? text : null;
+import { cookies } from 'next/headers';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { requirePagePermission } from '@/lib/authorization';
+import { requireCompanyId } from '@/lib/company-scope';
+import { supabaseAdmin } from '@/lib/supabase-admin';
+import { assertPickupScope, parsePickupFields } from '@/lib/ops-pulse/cod-pickup';
+const path = '/master/cod-master';
+const text = (form: FormData, key: string) => String(form.get(key) ?? '').trim();
+function finish(result: { error?: string; notice?: string }): never {
+  cookies().set('dropx_cod_master_flash', JSON.stringify(result), { httpOnly: true, maxAge: 20, path, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+  redirect(path);
 }
-
-function required(value: FormDataEntryValue | null, field: string) {
-  const text = clean(value);
-  if (!text) throw new Error(`${field} is required.`);
-  return text;
+function failure(error: unknown): never {
+  if (String((error as {digest?: string})?.digest || '').startsWith('NEXT_REDIRECT')) throw error;
+  finish({error: error instanceof Error ? error.message : 'Unable to save pickup setup. Please retry.'});
 }
-
-function timeValue(value: FormDataEntryValue | null) {
-  const text = clean(value);
-  return text && /^\d{2}:\d{2}$/.test(text) ? text : null;
-}
-
-function intValue(value: FormDataEntryValue | null, fallback: number) {
-  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function redirectWithFlash(params: { error?: string; notice?: string }) {
-  cookies().set("dropx_cod_master_flash", JSON.stringify(params), {
-    httpOnly: true,
-    maxAge: 25,
-    path: "/master/cod-master",
-    sameSite: "lax"
-  });
-  redirect("/master/cod-master");
-}
-
-function isNextRedirectError(error: unknown) {
-  return typeof (error as { digest?: unknown })?.digest === "string" &&
-    String((error as { digest: string }).digest).startsWith("NEXT_REDIRECT");
-}
-
-async function stationDetails(companyId: string, locationId: string) {
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const { data, error } = await supabaseAdmin
-    .from("stations")
-    .select("id, station_code, state")
-    .eq("company_id", companyId)
-    .eq("id", locationId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Selected station is not available.");
-  return data;
-}
-
-async function buildPayload(companyId: string, formData: FormData) {
-  const locationId = required(formData.get("location_id"), "Station");
-  const station = await stationDetails(companyId, locationId);
-  const codDepositDay = required(formData.get("cod_deposit_day"), "COD deposit day");
-  if (!["Same Day", "Next Day"].includes(codDepositDay)) throw new Error("Select Same Day or Next Day.");
-
-  return {
-    location_id: locationId,
-    station_code: station.station_code,
-    state: station.state ?? null,
-    cms_agency: required(formData.get("cms_agency"), "CMS agency"),
-    agent_name: required(formData.get("agent_name"), "Agent name"),
-    agent_mobile: required(formData.get("agent_mobile"), "Mobile no."),
-    cod_deposit_day: codDepositDay,
-    pickup_time: required(formData.get("pickup_time"), "Pickup time"),
-    pickup_window_start: timeValue(formData.get("pickup_window_start")),
-    pickup_window_end: timeValue(formData.get("pickup_window_end")),
-    cod_submission_due_time: timeValue(formData.get("cod_submission_due_time")),
-    eod_submission_due_time: timeValue(formData.get("eod_submission_due_time")),
-    escalation_contact: clean(formData.get("escalation_contact")),
-    escalation_email: clean(formData.get("escalation_email")),
-    portal_station_code: clean(formData.get("portal_station_code")) ?? station.station_code,
-    driver_recon_due_time: timeValue(formData.get("driver_recon_due_time")),
-    prepared_deposit_due_time: timeValue(formData.get("prepared_deposit_due_time")),
-    portal_check_interval_minutes: intValue(formData.get("portal_check_interval_minutes"), 30),
-    portal_checks_enabled: clean(formData.get("portal_checks_enabled")) === "true",
-    is_active: clean(formData.get("is_active")) !== "false"
-  };
-}
-
-export async function createCodMaster(formData: FormData) {
-  const authorization = await requirePagePermission("cod_master", "add");
-  const companyId = requireCompanyId(authorization);
+function refreshed() { revalidatePath(path); revalidatePath('/ops-pulse/cod/status'); revalidatePath('/cod/status'); }
+export async function createCodMaster(form: FormData) {
+  const auth = await requirePagePermission('cod_master', 'add');
+  const companyId = requireCompanyId(auth);
   try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const payload = await buildPayload(companyId, formData);
-    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(payload.location_id)) {
-      throw new Error("You do not have access to the selected station.");
-    }
-    const { error } = await supabaseAdmin.from("cod_station_settings").insert(withCompany({
-      ...payload,
-      created_by: authorization.userId,
-      updated_by: authorization.userId
-    }, companyId));
-    if (error) throw new Error(error.message.includes("duplicate") ? "COD Master is already configured for this station. Edit that row instead." : error.message);
-    revalidatePath("/master/cod-master");
-    redirectWithFlash({ notice: "COD Master saved." });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: error instanceof Error ? error.message : "Unable to save COD Master." });
-  }
+    if (!supabaseAdmin) throw new Error('Database unavailable.');
+    const locationId = text(form, 'location_id'); assertPickupScope(auth, locationId);
+    const station = await supabaseAdmin.from('stations').select('id, station_code, state').eq('company_id', companyId).eq('id', locationId).eq('is_active', true).maybeSingle();
+    if (station.error || !station.data) throw new Error('Selected station is not available.');
+    const existing = await supabaseAdmin.from('cod_station_settings').select('id, pickup_configured, updated_at').eq('company_id', companyId).eq('location_id', locationId).maybeSingle();
+    if (existing.error) throw new Error('Could not check the existing pickup setup.');
+    if (existing.data?.pickup_configured) throw new Error('This station is already configured. Edit its row instead.');
+    const payload = { ...parsePickupFields(form), station_code: station.data.station_code, state: station.data.state,
+      updated_by: auth.userId, updated_at: new Date().toISOString() };
+    // Restoring a removed pickup never overwrites portal credentials or check settings.
+    const result = existing.data
+      ? await supabaseAdmin.from('cod_station_settings').update(payload).eq('company_id', companyId).eq('id', existing.data.id).eq('pickup_configured', false).eq('updated_at', existing.data.updated_at).select('id')
+      : await supabaseAdmin.from('cod_station_settings').insert({...payload, company_id: companyId, location_id: locationId, created_by: auth.userId, portal_station_code: station.data.station_code}).select('id');
+    if (result.error) throw new Error(result.error.code === '23505' ? 'This station was just configured. Reload to see it.' : 'Could not save the pickup setup. Please retry.');
+    if (!result.data?.length) throw new Error('This setup has changed. Reload and try again.');
+    refreshed(); finish({notice: 'COD pickup setup saved.'});
+  } catch (error) { failure(error); }
 }
-
-export async function updateCodMaster(formData: FormData) {
-  const authorization = await requirePagePermission("cod_master", "edit");
-  const companyId = requireCompanyId(authorization);
+export async function updateCodMaster(form: FormData) {
+  const auth = await requirePagePermission('cod_master', 'edit');
+  const companyId = requireCompanyId(auth);
   try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const id = required(formData.get("id"), "COD Master row");
-    const payload = await buildPayload(companyId, formData);
-    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(payload.location_id)) {
-      throw new Error("You do not have access to the selected station.");
-    }
-    const { error } = await supabaseAdmin
-      .from("cod_station_settings")
-      .update({
-        ...payload,
-        updated_by: authorization.userId,
-        updated_at: new Date().toISOString()
-      })
-      .eq("company_id", companyId)
-      .eq("id", id);
-    if (error) throw new Error(error.message);
-    revalidatePath("/master/cod-master");
-    redirectWithFlash({ notice: "COD Master updated." });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: error instanceof Error ? error.message : "Unable to update COD Master." });
-  }
+    if (!supabaseAdmin) throw new Error('Database unavailable.');
+    const id = text(form,'id');
+    const existing = await supabaseAdmin.from('cod_station_settings').select('location_id, updated_at').eq('company_id', companyId).eq('id', id).eq('pickup_configured', true).maybeSingle();
+    if (existing.error || !existing.data) throw new Error('Pickup setup is unavailable. Reload to see the latest register.');
+    assertPickupScope(auth, existing.data.location_id);
+    const result = await supabaseAdmin.from('cod_station_settings').update({...parsePickupFields(form), updated_by: auth.userId, updated_at: new Date().toISOString()})
+      .eq('company_id', companyId).eq('id', id).eq('location_id', existing.data.location_id).eq('pickup_configured', true).eq('updated_at', text(form,'updated_at')).select('id');
+    if (result.error) throw new Error('Unable to update pickup setup. Please retry.');
+    if (!result.data?.length) throw new Error('Someone changed this setup. Reload before saving again.');
+    refreshed(); finish({notice: 'COD pickup setup updated.'});
+  } catch (error) { failure(error); }
 }
-
-export async function deleteCodMaster(formData: FormData) {
-  const authorization = await requirePagePermission("cod_master", "edit");
-  const companyId = requireCompanyId(authorization);
+export async function deleteCodMaster(form: FormData) {
+  const auth = await requirePagePermission('cod_master', 'edit');
+  const companyId = requireCompanyId(auth);
   try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const id = required(formData.get("id"), "COD Master row");
-    const { error } = await supabaseAdmin
-      .from("cod_station_settings")
-      .delete()
-      .eq("company_id", companyId)
-      .eq("id", id);
-    if (error) throw new Error(error.message);
-    revalidatePath("/master/cod-master");
-    redirectWithFlash({ notice: "COD Master removed." });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: error instanceof Error ? error.message : "Unable to remove COD Master." });
-  }
+    if (!supabaseAdmin) throw new Error('Database unavailable.');
+    const id = text(form,'id');
+    const existing = await supabaseAdmin.from('cod_station_settings').select('location_id').eq('company_id', companyId).eq('id', id).eq('pickup_configured', true).maybeSingle();
+    if (existing.error || !existing.data) throw new Error('Pickup setup is unavailable.');
+    assertPickupScope(auth, existing.data.location_id);
+    // Recoverable removal: keep historical references and all portal integrations.
+    const result = await supabaseAdmin.from('cod_station_settings').update({pickup_configured: false, updated_by: auth.userId, updated_at: new Date().toISOString()})
+      .eq('company_id', companyId).eq('id', id).eq('location_id', existing.data.location_id).eq('pickup_configured', true).eq('updated_at', text(form,'updated_at')).select('id');
+    if (result.error) throw new Error('Unable to remove pickup setup.');
+    if (!result.data?.length) throw new Error('Someone changed this setup. Reload before deleting.');
+    refreshed(); finish({notice: 'Pickup setup deleted. You can add it again; past records and portal settings are retained.'});
+  } catch (error) { failure(error); }
 }

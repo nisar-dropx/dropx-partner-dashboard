@@ -1,4 +1,5 @@
-export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string };
+import type { PickupPolicy } from './cod-pickup';
+export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string; pickup?: PickupPolicy | null };
 export type StatusComponent<T> = { state: 'ok' | 'unavailable'; checkedAt: string; data: T | null };
 export type CodRemittance = { id: string; code: string | null; status: string; expectedAmount: number; actualAmount: number; variance: number; createdAt: number | null; updatedAt: number | null; submittedAt: number | null; createdBy: string; submittedBy: string | null };
 export type CodStatusSnapshot = {
