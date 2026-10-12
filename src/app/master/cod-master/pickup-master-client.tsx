@@ -6,7 +6,7 @@ import { pickupDescriptions, pickupRules, type PickupRule } from '@/lib/ops-puls
 import { createCodMaster, deleteCodMaster, updateCodMaster } from './actions';
 import styles from './pickup.module.css';
 type Location = {id:string; code:string; name:string; state:string};
-type Row = {id:string; location_id:string; station_code:string; state:string; cms_agency:string; agent_name:string; agent_mobile:string; pickup_rule:string; pickup_window_start:string; pickup_window_end:string; updated_at:string};
+type Row = {id:string; location_id:string; station_code:string; state:string; cms_agency:string; agent_name:string; agent_mobile:string; pickup_rule:string; pickup_window_start:string; pickup_window_end:string; updated_at:string; portal_station_code:string; portal_check_interval_minutes:number; portal_checks_enabled:boolean; cod_submission_due_time:string; eod_submission_due_time:string; driver_recon_due_time:string; prepared_deposit_due_time:string; escalation_contact:string; escalation_email:string};
 function Fields({row}: {row?:Row}) {
   const [rule,setRule] = useState(row?.pickup_rule || '');
   return <>
@@ -17,6 +17,14 @@ function Fields({row}: {row?:Row}) {
     <label>COD deposit rule<select name="pickup_rule" required value={rule} onChange={e=>setRule(e.target.value)}><option value="">Select deposit rule</option>{pickupRules.map(r=><option key={r}>{r}</option>)}</select></label>
     <label>Pickup from · IST<input name="pickup_window_start" type="time" required defaultValue={row?.pickup_window_start} /></label>
     <label>Pickup until · IST<input name="pickup_window_end" type="time" required defaultValue={row?.pickup_window_end} /></label>
+    {row && <details className={styles.full}><summary>Portal checks & escalation settings</summary><input type="hidden" name="advanced_settings" value="true"/><div className={styles.form}>
+      <label>Portal station code<input name="portal_station_code" defaultValue={row.portal_station_code}/></label>
+      <label>Portal check gap · minutes<input type="number" name="portal_check_interval_minutes" min={1} max={1440} defaultValue={row.portal_check_interval_minutes}/></label>
+      <label>Scheduled portal checks<select name="portal_checks_enabled" defaultValue={String(row.portal_checks_enabled)}><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
+      {(['cod_submission_due_time','eod_submission_due_time','driver_recon_due_time','prepared_deposit_due_time'] as const).map((key,i)=><label key={key}>{['COD submission due','EOD due','DA reconciliation due','Prepare deposit due'][i]} · IST<input name={key} type="time" defaultValue={row[key]}/></label>)}
+      <label>Escalation numbers<input name="escalation_contact" defaultValue={row.escalation_contact}/></label>
+      <label>Escalation emails<input name="escalation_email" defaultValue={row.escalation_email} placeholder="Comma-separated emails"/></label>
+    </div></details>}
     {rule && <p className={styles.formHint}>{pickupDescriptions[rule as PickupRule]}</p>}
   </>;
 }

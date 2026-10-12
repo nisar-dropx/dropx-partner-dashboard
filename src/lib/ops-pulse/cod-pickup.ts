@@ -22,6 +22,23 @@ export function parsePickupFields(form: FormData) {
     cod_deposit_day: rule === 'Next Day' ? 'Next Day' : 'Same Day', pickup_time: `${start}–${end}`,
     pickup_window_start: start, pickup_window_end: end, pickup_configured: true };
 }
+/** Optional existing integration controls remain separate from pickup policy. */
+export function parsePickupAdvanced(form: FormData) {
+  if (form.get('advanced_settings') !== 'true') return {};
+  const text = (key: string) => String(form.get(key) ?? '').trim();
+  const portalCode = text('portal_station_code').toUpperCase();
+  if (portalCode && !/^[A-Z0-9]{3,12}$/.test(portalCode)) throw new Error('Enter a valid portal station code.');
+  const gap = Number(text('portal_check_interval_minutes'));
+  if (!Number.isInteger(gap) || gap < 1 || gap > 1440) throw new Error('Portal check gap must be 1–1440 minutes.');
+  const optionalTime = (key: string) => { const value = text(key); if (value && !validTime(value)) throw new Error('Enter valid due times.'); return value || null; };
+  const emails = text('escalation_email');
+  if (emails && emails.split(/[,;]+/).some(email=>! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))) throw new Error('Enter valid escalation emails separated by commas.');
+  return { portal_station_code: portalCode || null, portal_check_interval_minutes: gap,
+    portal_checks_enabled: form.get('portal_checks_enabled') === 'true',
+    cod_submission_due_time: optionalTime('cod_submission_due_time'), eod_submission_due_time: optionalTime('eod_submission_due_time'),
+    driver_recon_due_time: optionalTime('driver_recon_due_time'), prepared_deposit_due_time: optionalTime('prepared_deposit_due_time'),
+    escalation_contact: text('escalation_contact') || null, escalation_email: emails || null };
+}
 export function pickupPolicy(row?: { pickup_configured?: boolean; pickup_rule?: string | null; pickup_window_start?: string | null; pickup_window_end?: string | null } | null): PickupPolicy | null {
   if (!row?.pickup_configured || !pickupRules.includes(row.pickup_rule as PickupRule)) return null;
   const start = row.pickup_window_start?.slice(0, 5) || '', end = row.pickup_window_end?.slice(0, 5) || '';

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePickupFields, pickupPolicy, pickupExpectation, assertPickupScope } from './cod-pickup.ts';
+import { parsePickupFields, parsePickupAdvanced, pickupPolicy, pickupExpectation, assertPickupScope } from './cod-pickup.ts';
 function form(extra={}) { const f=new FormData(); for (const [k,v] of Object.entries({cms_agency:'Radiant',agent_name:'',agent_mobile:'',pickup_rule:'Same Day-Partial',pickup_window_start:'18:30',pickup_window_end:'19:00',...extra})) f.set(k,v);return f; }
 test('explicit partial rule and blank contacts are preserved',()=>{const p=parsePickupFields(form());assert.equal(p.pickup_rule,'Same Day-Partial');assert.equal(p.cod_deposit_day,'Same Day');assert.equal(p.agent_mobile,'');});
 test('invalid rule, time, window and contact cannot be persisted',()=>{for(const extra of [{pickup_rule:'Same Day'},{pickup_window_start:'25:00'},{pickup_window_end:'18:00'},{pickup_window_end:'18:30'},{agent_mobile:'123'}]) assert.throws(()=>parsePickupFields(form(extra)));});
@@ -9,3 +9,5 @@ test('partial never requires all-day cash even after pickup; full/next-day do',(
 test('deleted, missing and legacy setups have no inferred rule',()=>{assert.equal(pickupPolicy({pickup_configured:false,pickup_rule:'Next Day',pickup_window_start:'08:00',pickup_window_end:'08:30'}),null);assert.equal(pickupExpectation(null,'2026-10-12').state,'unconfigured');assert.equal(pickupPolicy({pickup_configured:true,pickup_rule:'Same Day'}),null);});
 test('scope denies unrelated locations for both updates and deletes',()=>{assert.throws(()=>assertPickupScope({hasAllLocationAccess:false,locationScopeIds:['A']},'B'));assert.doesNotThrow(()=>assertPickupScope({hasAllLocationAccess:false,locationScopeIds:['A']},'A'));});
 test('invalid calendar date cannot produce misleading expectation',()=>assert.throws(()=>pickupExpectation({rule:'Next Day',start:'08:00',end:'08:30'},'2026-02-30')));
+
+test('pickup-only updates preserve portal settings; invalid advanced settings fail',()=>{assert.deepEqual(parsePickupAdvanced(form()),{});assert.throws(()=>parsePickupAdvanced(form({advanced_settings:'true',portal_station_code:'bad/code',portal_check_interval_minutes:'30'})));const a=parsePickupAdvanced(form({advanced_settings:'true',portal_station_code:'nlre',portal_check_interval_minutes:'30'}));assert.equal(a.portal_station_code,'NLRE');assert.equal(a.portal_checks_enabled,false);});

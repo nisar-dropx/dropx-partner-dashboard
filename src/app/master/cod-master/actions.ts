@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { requirePagePermission } from '@/lib/authorization';
 import { requireCompanyId } from '@/lib/company-scope';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { assertPickupScope, parsePickupFields } from '@/lib/ops-pulse/cod-pickup';
+import { assertPickupScope, parsePickupFields, parsePickupAdvanced } from '@/lib/ops-pulse/cod-pickup';
 const path = '/master/cod-master';
 const text = (form: FormData, key: string) => String(form.get(key) ?? '').trim();
 function finish(result: { error?: string; notice?: string }): never {
@@ -48,7 +48,7 @@ export async function updateCodMaster(form: FormData) {
     const existing = await supabaseAdmin.from('cod_station_settings').select('location_id, updated_at').eq('company_id', companyId).eq('id', id).eq('pickup_configured', true).maybeSingle();
     if (existing.error || !existing.data) throw new Error('Pickup setup is unavailable. Reload to see the latest register.');
     assertPickupScope(auth, existing.data.location_id);
-    const result = await supabaseAdmin.from('cod_station_settings').update({...parsePickupFields(form), updated_by: auth.userId, updated_at: new Date().toISOString()})
+    const result = await supabaseAdmin.from('cod_station_settings').update({...parsePickupFields(form), ...parsePickupAdvanced(form), updated_by: auth.userId, updated_at: new Date().toISOString()})
       .eq('company_id', companyId).eq('id', id).eq('location_id', existing.data.location_id).eq('pickup_configured', true).eq('updated_at', text(form,'updated_at')).select('id');
     if (result.error) throw new Error('Unable to update pickup setup. Please retry.');
     if (!result.data?.length) throw new Error('Someone changed this setup. Reload before saving again.');

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
-import { assertPickupScope, parsePickupFields } from '../../../lib/ops-pulse/cod-pickup.ts';
+import { assertPickupScope, parsePickupFields, parsePickupAdvanced } from '../../../lib/ops-pulse/cod-pickup.ts';
 
 function actions({record={location_id:'A',updated_at:'v1'},allowed=true,resultRows=[{id:'row'}]}={}) {
  const calls=[], flashes=[];
@@ -14,7 +14,7 @@ function actions({record={location_id:'A',updated_at:'v1'},allowed=true,resultRo
   '@/lib/authorization':{requirePagePermission:async()=>{if(!allowed)throw Error('denied');return {companyId:'tenant',userId:'user',hasAllLocationAccess:false,locationScopeIds:['A']};}},
   '@/lib/company-scope':{requireCompanyId:auth=>auth.companyId},
   '@/lib/supabase-admin':{supabaseAdmin:db},
-  '@/lib/ops-pulse/cod-pickup':{assertPickupScope,parsePickupFields}
+  '@/lib/ops-pulse/cod-pickup':{assertPickupScope,parsePickupFields,parsePickupAdvanced}
  };
  const out=ts.transpileModule(fs.readFileSync(new URL('./actions.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
  const module={exports:{}};new Function('require','exports','module',out)(n=>deps[n],module.exports,module);
