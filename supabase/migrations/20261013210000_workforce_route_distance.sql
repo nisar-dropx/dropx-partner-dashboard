@@ -49,11 +49,11 @@ grant select on public.workforce_route_distance_settings,public.workforce_route_
 
 -- Release is explicitly enabled after the Worker and both consumers are deployed.
 insert into public.workforce_route_distance_settings(company_id,effective_from)
-values ('b63603e9-36e2-4656-9b87-c421489a64a9','2026-10-01');
+values ('43866344-b550-4e8a-9a2d-9d23f3d8a997','2026-10-01');
 insert into public.workforce_route_distance_stations(company_id,station_id,latitude,longitude)
 select distinct s.company_id,s.id,s.latitude,s.longitude from public.stations s
 join public.field_executive_provider_mappings m on m.station_id=s.id and m.company_id=s.company_id
-where s.company_id='b63603e9-36e2-4656-9b87-c421489a64a9'
+where s.company_id='43866344-b550-4e8a-9a2d-9d23f3d8a997'
 and m.payment_values ? 'KM_RUN' and s.latitude is not null and s.longitude is not null
 and (s.latitude<>0 or s.longitude<>0);
 

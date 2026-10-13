@@ -14,9 +14,9 @@ create table workforce_payout_publications(company_id uuid,workforce_id uuid,per
 create table revisions(company_id uuid,work_date date);
 create function lock_workforce_payment_allocation_company(uuid) returns void language sql as 'select';
 create function workforce_bump_payout_period_dependency_revision(uuid,date) returns void language sql as 'insert into public.revisions values($1,$2)';
-insert into companies values('b63603e9-36e2-4656-9b87-c421489a64a9');`);
+insert into companies values('43866344-b550-4e8a-9a2d-9d23f3d8a997');`);
 await db.exec(fs.readFileSync('supabase/migrations/20261013210000_workforce_route_distance.sql','utf8'));
-const c='b63603e9-36e2-4656-9b87-c421489a64a9', w='11111111-1111-4111-8111-111111111111',s='22222222-2222-4222-8222-222222222222',m='33333333-3333-4333-8333-333333333333',f='44444444-4444-4444-8444-444444444444';
+const c='43866344-b550-4e8a-9a2d-9d23f3d8a997', w='11111111-1111-4111-8111-111111111111',s='22222222-2222-4222-8222-222222222222',m='33333333-3333-4333-8333-333333333333',f='44444444-4444-4444-8444-444444444444';
 await db.exec(`insert into stations values('${s}','${c}','TEST','area',12,77);insert into workforce values('${w}','${c}','2026-10-01',null);
 insert into field_executive_provider_mappings values('${m}','${c}','${w}','${s}','${f}','active','2026-10-01',null,'{"KM_RUN":3}');
 insert into payment_fields values('${f}','KM_RUN');insert into payment_method_components values('${f}','${f}',true,'KM_RUN');
