@@ -5,7 +5,7 @@ import { type DailyRouteFuel, routePendingLabel } from '../../../../src/lib/work
 import { ConnectRouteMap, type RouteGeometry } from './connect-route-map';
 import styles from './connect-route-fuel.module.css';
 const money=(n:number)=>`₹${n.toLocaleString('en-IN',{maximumFractionDigits:2})}`;
-const km=(n:number|null)=>n===null?'Pending':`${n.toLocaleString('en-IN',{maximumFractionDigits:2})} km`;
+const km=(n:number|null)=>n===null?'Pending':`${n.toLocaleString('en-IN',{maximumFractionDigits:4})} km`;
 export function ConnectRouteFuel({fuels,account}:{fuels:DailyRouteFuel[];account:{id:string;profileType:string}}){return <>{fuels.map(fuel=><FuelCard key={`${fuel.mappingId}:${fuel.date}:${fuel.routeId}:${fuel.updatedAt}`} fuel={fuel} account={account}/>)}</>;}
 function FuelCard({fuel,account}:{fuel:DailyRouteFuel;account:{id:string;profileType:string}}){
  const [open,setOpen]=useState(false),[geometry,setGeometry]=useState<RouteGeometry|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
