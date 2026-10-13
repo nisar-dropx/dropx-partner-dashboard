@@ -21,8 +21,11 @@ import {
 } from "@/lib/ops-pulse/station-audit-people";
 import {
   auditDay,
+  auditMonthRange,
   auditSlots,
   isMyAudit,
+  isUnscheduledAudit,
+  validAuditDate,
 } from "@/lib/ops-pulse/station-audit-planning";
 import { revalidatePath } from "next/cache";
 import {
@@ -34,9 +37,15 @@ import { resolveStationAuditRecipients } from "@/lib/ops-pulse/station-audit-rec
 import { sendStationAuditCompletedEmail } from "@/lib/ops-pulse/station-audit-email";
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
 import {
+  auditSchemaPendingMessage,
+  canAssignAnyStation,
   canManageStationAudits,
   canRespondToStationAudits,
+  canUseStationAudit,
   canUseStationAuditLocation,
+  isAuditSchemaPending,
+  loadAuditReportees,
+  stationAuditScope,
   createStationAudit,
   isStationAuditEligible,
   loadAuditStations,
@@ -139,7 +148,7 @@ async function readAudit(
   if (
     !result.data ||
     !station ||
-    !canUseStationAuditLocation(authorization, result.data.location_id) ||
+    !canUseStationAudit(authorization, result.data) ||
     !isStationAuditEligible(station, master.programmeSettings)
   )
     throw new Error("This audit is unavailable in your station scope.");
@@ -150,14 +159,21 @@ async function readAudit(
 }
 
 async function assertManager(action: "add" | "edit") {
-  const authorization = await requirePagePermission("station_audits", action);
-  const companyId = requireCompanyId(authorization);
+  const own = await requirePagePermission("station_audits", action);
+  const companyId = requireCompanyId(own);
   const master = await loadStationAuditMaster(companyId);
-  if (!canManageStationAudits(authorization, master.programmeSettings))
+  if (!canManageStationAudits(own, master.programmeSettings))
     throw new Error(
       "Only roles selected in Audit Master can schedule and manage audits.",
     );
-  return { authorization, companyId, master };
+  // `own` keeps the person's station scope; `authorization` adds any-station
+  // reach for the cross-audit roles chosen in Audit Master.
+  return {
+    authorization: stationAuditScope(own, master.programmeSettings),
+    own,
+    companyId,
+    master,
+  };
 }
 
 async function auditEmployees(
@@ -236,10 +252,11 @@ export async function clearStationAuditDraft(
   }
 }
 export async function loadAuditInspectionContext(auditId: string) {
-  const auth = await requirePagePermission("station_audits", "access");
-  const company = requireCompanyId(auth);
-  const audit = await readAudit(company, auditId, auth);
+  const viewer = await requirePagePermission("station_audits", "access");
+  const company = requireCompanyId(viewer);
   const master = await loadStationAuditMaster(company);
+  const auth = stationAuditScope(viewer, master.programmeSettings);
+  const audit = await readAudit(company, auditId, auth);
   if (
     !canManageStationAudits(auth, master.programmeSettings) &&
     !audit.completed_at
@@ -361,18 +378,22 @@ export async function rescheduleStationAudit(
     if (!reason || reason.length > 500)
       throw new Error("Enter a reason of up to 500 characters.");
     const originalDay = auditDay(audit.scheduled_for);
-    if (date.slice(0, 7) !== originalDay.slice(0, 7))
+    const unscheduled = isUnscheduledAudit(audit);
+    if (!unscheduled && date.slice(0, 7) !== originalDay.slice(0, 7))
       throw new Error("Reschedule within the same month.");
     const originalSlot = auditSlots(audit.ops_audit_types).find(
       (s) =>
         Number(originalDay.slice(-2)) >= s.startDay &&
         Number(originalDay.slice(-2)) <= s.endDay,
     );
-    const cycle = auditCycle(
-      audit.ops_audit_types,
-      date,
-      originalSlot?.code || audit.period_slot,
-    );
+    // An unscheduled audit keeps its own slot and may move to any later date.
+    const cycle = unscheduled
+      ? { cycleKey: date.slice(0, 7), periodSlot: audit.period_slot }
+      : auditCycle(
+          audit.ops_audit_types,
+          date,
+          originalSlot?.code || audit.period_slot,
+        );
     const result = await db().rpc("reschedule_station_audit", {
       p_company_id: companyId,
       p_audit_id: audit.id,
@@ -397,6 +418,488 @@ export async function rescheduleStationAudit(
       message:
         "Audit rescheduled. The original date and reason are saved in its history.",
     };
+  } catch (error) {
+    return message(error);
+  }
+}
+
+type StartResult = ActionResult & { auditId?: string };
+const allStations = { hasAllLocationAccess: true, locationScopeIds: [] };
+const requestColumns =
+  "id,location_id,audit_type_id,requested_by,requested_name,status,reason";
+type RequestRow = {
+  id: string;
+  location_id: string;
+  audit_type_id: string;
+  requested_by: string;
+  requested_name: string | null;
+  status: string;
+  reason: string;
+};
+function reasonText(formData: FormData) {
+  const reason = clean(formData.get("reason"));
+  if (!reason || reason.length > 500)
+    throw new Error("Enter a reason of up to 500 characters.");
+  return reason;
+}
+async function readRequest(companyId: string, requestId: string) {
+  const found = await db()
+    .from("ops_station_audit_requests")
+    .select(requestColumns)
+    .eq("company_id", companyId)
+    .eq("id", requestId)
+    .maybeSingle();
+  if (found.error)
+    throw new Error(
+      isAuditSchemaPending(found.error)
+        ? auditSchemaPendingMessage
+        : found.error.message,
+    );
+  if (!found.data) throw new Error("This request is no longer available.");
+  return found.data as RequestRow;
+}
+/** Cross-audit roles decide any request; a reporting manager decides their own team's. */
+async function canDecideRequest(
+  companyId: string,
+  own: AuthorizationContext,
+  anyStation: boolean,
+  request: RequestRow,
+) {
+  if (request.requested_by === own.userId) return false;
+  return (
+    anyStation ||
+    (await loadAuditReportees(companyId, own.userId)).includes(
+      request.requested_by,
+    )
+  );
+}
+
+/** Stations, and for cross-audit managers the auditors, beyond the person's own scope. */
+export async function loadAuditReach(): Promise<{
+  ok: boolean;
+  message: string;
+  stations: { id: string; label: string }[];
+  auditors: { id: string; name: string; role: string }[];
+}> {
+  try {
+    const { own, companyId, master } = await assertManager("add");
+    const settings = master.programmeSettings;
+    const stations = await loadAuditStations(companyId, allStations, settings);
+    const auditors = canAssignAnyStation(own, settings)
+      ? await loadAuditAssignees(
+          companyId,
+          settings.scheduler_role_ids,
+          stations.map((station) => station.id),
+        )
+      : [];
+    return {
+      ok: true,
+      message: "",
+      stations: stations.map((station) => ({
+        id: station.id,
+        label: `${station.station_code} · ${station.station_name || station.city || ""}`,
+      })),
+      auditors: auditors.map((p) => ({ id: p.id, name: p.name, role: p.role })),
+    };
+  } catch (error) {
+    return { ...message(error), stations: [], auditors: [] };
+  }
+}
+
+/**
+ * Creates an audit outside the monthly programme. In the person's own stations it
+ * needs no approval. At any other station it needs any-station reach, or a
+ * cross-station request that this person is entitled to approve.
+ */
+export async function startStationAudit(
+  formData: FormData,
+): Promise<StartResult> {
+  try {
+    const { authorization, own, companyId, master } = await assertManager("add");
+    const settings = master.programmeSettings;
+    const anyStation = canAssignAnyStation(own, settings);
+    const locationId = clean(formData.get("location_id"));
+    const auditTypeId = clean(formData.get("audit_type_id"));
+    const assignedUserId = clean(formData.get("assigned_to")) || own.userId;
+    const requestId = clean(formData.get("request_id"));
+    const reason = reasonText(formData);
+    const startNow = clean(formData.get("when")) !== "later";
+    const later = startNow
+      ? { date: "", time: "" }
+      : auditDateTime(
+          clean(formData.get("scheduled_date")),
+          clean(formData.get("scheduled_time")),
+        );
+    let request: RequestRow | null = null;
+    if (requestId) {
+      request = await readRequest(companyId, requestId);
+      if (request.status !== "pending")
+        throw new Error("This request has already been decided.");
+      if (!(await canDecideRequest(companyId, own, anyStation, request)))
+        throw new Error("You cannot approve this request.");
+      if (
+        request.location_id !== locationId ||
+        request.audit_type_id !== auditTypeId
+      )
+        throw new Error(
+          "Approve the station and audit type that were requested.",
+        );
+      if (!anyStation && assignedUserId !== request.requested_by)
+        throw new Error("Assign this audit to the person who requested it.");
+    } else if (!anyStation && !canUseStationAuditLocation(own, locationId))
+      throw new Error(
+        "This station is outside your stations. Send a cross-station request instead.",
+      );
+    if (request) {
+      // Claim the request first so two approvers cannot both create an audit.
+      const claimed = await db()
+        .from("ops_station_audit_requests")
+        .update({
+          status: "approved",
+          decided_by: own.userId,
+          decided_name: own.fullName || own.email,
+          decided_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("company_id", companyId)
+        .eq("id", request.id)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
+      if (claimed.error) throw new Error(claimed.error.message);
+      if (!claimed.data)
+        throw new Error("This request has already been decided.");
+    }
+    let audit: { id: string; audit_number: string };
+    try {
+      audit = await createStationAudit({
+        companyId,
+        authorization,
+        auditTypeId,
+        locationId,
+        scheduledDate: later.date,
+        scheduledTime: later.time,
+        assignedUserId,
+        reason,
+        unscheduled: true,
+        startNow,
+        anyStation: anyStation || Boolean(request),
+      });
+    } catch (error) {
+      if (request)
+        await db()
+          .from("ops_station_audit_requests")
+          .update({
+            status: "pending",
+            decided_by: null,
+            decided_name: null,
+            decided_at: null,
+          })
+          .eq("company_id", companyId)
+          .eq("id", request.id)
+          .eq("status", "approved")
+          .is("audit_id", null);
+      throw error;
+    }
+    if (request)
+      await db()
+        .from("ops_station_audit_requests")
+        .update({ audit_id: audit.id })
+        .eq("company_id", companyId)
+        .eq("id", request.id);
+    refreshAudits();
+    const mine = assignedUserId === own.userId;
+    return {
+      ok: true,
+      auditId: audit.id,
+      message: request
+        ? `Request approved. ${audit.audit_number} is assigned.`
+        : startNow && mine
+          ? `${audit.audit_number} started. Record evidence as you go.`
+          : `${audit.audit_number} created and assigned.`,
+    };
+  } catch (error) {
+    return message(error);
+  }
+}
+
+/** Asks a manager for one audit at a station outside the person's own stations. */
+export async function requestCrossAudit(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const { own, companyId, master } = await assertManager("add");
+    const settings = master.programmeSettings;
+    if (!settings.cross_audit_ready) throw new Error(auditSchemaPendingMessage);
+    const locationId = clean(formData.get("location_id"));
+    const auditTypeId = clean(formData.get("audit_type_id"));
+    const preferred = clean(formData.get("preferred_date"));
+    const reason = reasonText(formData);
+    if (canUseStationAuditLocation(own, locationId))
+      throw new Error(
+        "This station is already in your stations. Start the audit directly.",
+      );
+    if (preferred && (!validAuditDate(preferred) || preferred < auditDay()))
+      throw new Error("Choose today or a later date.");
+    const stations = await loadAuditStations(companyId, allStations, settings);
+    if (!stations.some((station) => station.id === locationId))
+      throw new Error("Choose a station that can be audited.");
+    if (!master.auditTypes.some((t) => t.id === auditTypeId && t.is_active))
+      throw new Error("Choose an active audit type from Audit Master.");
+    const saved = await db().from("ops_station_audit_requests").insert({
+      company_id: companyId,
+      location_id: locationId,
+      audit_type_id: auditTypeId,
+      requested_by: own.userId,
+      requested_name: own.fullName || own.email,
+      preferred_date: preferred || null,
+      reason,
+    });
+    if (saved.error?.code === "23505")
+      throw new Error(
+        "You already have an open request for this station and audit type.",
+      );
+    if (saved.error)
+      throw new Error(
+        isAuditSchemaPending(saved.error)
+          ? auditSchemaPendingMessage
+          : saved.error.message,
+      );
+    refreshAudits();
+    return {
+      ok: true,
+      message:
+        "Request sent. It appears under Requests until a manager approves or declines it.",
+    };
+  } catch (error) {
+    return message(error);
+  }
+}
+
+/** Declines a request (an approver) or withdraws it (the person who asked). */
+export async function decideAuditRequest(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const { own, companyId, master } = await assertManager("add");
+    const operation = clean(formData.get("operation"));
+    const request = await readRequest(
+      companyId,
+      clean(formData.get("request_id")),
+    );
+    const note = clean(formData.get("note"));
+    if (note.length > 500)
+      throw new Error("Keep the note within 500 characters.");
+    if (operation === "cancel") {
+      if (request.requested_by !== own.userId)
+        throw new Error("Only the person who asked can withdraw this request.");
+    } else if (operation === "decline") {
+      if (
+        !(await canDecideRequest(
+          companyId,
+          own,
+          canAssignAnyStation(own, master.programmeSettings),
+          request,
+        ))
+      )
+        throw new Error("You cannot decide this request.");
+      if (!note) throw new Error("Say why this request is declined.");
+    } else throw new Error("Invalid request action.");
+    const saved = await db()
+      .from("ops_station_audit_requests")
+      .update({
+        status: operation === "cancel" ? "cancelled" : "declined",
+        decided_by: own.userId,
+        decided_name: own.fullName || own.email,
+        decided_at: new Date().toISOString(),
+        decision_note: note || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("company_id", companyId)
+      .eq("id", request.id)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+    if (saved.error) throw new Error(saved.error.message);
+    if (!saved.data) throw new Error("This request has already been decided.");
+    refreshAudits();
+    return {
+      ok: true,
+      message:
+        operation === "cancel" ? "Request withdrawn." : "Request declined.",
+    };
+  } catch (error) {
+    return message(error);
+  }
+}
+
+/**
+ * Changes the audit type, the auditor, or both before the audit is submitted.
+ * A planned audit takes the new type's window for its date when that window is
+ * free; otherwise it is kept as an unscheduled audit so nothing is double-booked.
+ */
+export async function changeStationAudit(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const { authorization, own, companyId, master } =
+      await assertManager("edit");
+    const settings = master.programmeSettings;
+    const audit = await readAudit(
+      companyId,
+      clean(formData.get("audit_id")),
+      authorization,
+    );
+    const reason = reasonText(formData);
+    const typeId = clean(formData.get("audit_type_id")) || audit.audit_type_id;
+    const assignedTo = clean(formData.get("assigned_to")) || audit.assigned_to;
+    if (
+      audit.completed_at ||
+      !["scheduled", "in_progress"].includes(audit.status_code)
+    )
+      throw new Error(
+        "Only an audit that has not been submitted can be changed.",
+      );
+    const typeChanged = typeId !== audit.audit_type_id;
+    const auditorChanged =
+      assignedTo !== audit.assigned_to || audit.assignment_verified !== true;
+    if (!typeChanged && !auditorChanged)
+      throw new Error("Choose a different audit type or auditor.");
+    if (!assignedTo) throw new Error("Choose an auditor.");
+    // Once fieldwork has begun, only the person doing it may switch the checklist.
+    if (audit.status_code === "in_progress" && !isMyAudit(audit, own.userId))
+      throw new Error(
+        "This audit is in progress. Only the assigned auditor can change its type.",
+      );
+    let crossStation = audit.cross_station === true;
+    if (auditorChanged) {
+      if (audit.status_code !== "scheduled" || audit.started_at)
+        throw new Error("Only an unstarted audit can be reassigned.");
+      const anyStation = canAssignAnyStation(own, settings);
+      const reach = anyStation
+        ? (await loadAuditStations(companyId, allStations, settings)).map(
+            (station) => station.id,
+          )
+        : [audit.location_id];
+      const choice = (
+        await loadAuditAssignees(companyId, settings.scheduler_role_ids, reach)
+      ).find((p) => p.id === assignedTo);
+      if (!choice)
+        throw new Error(
+          anyStation
+            ? "Choose an active user who holds an audit manager role."
+            : "Choose an active auditor authorized for this station.",
+        );
+      crossStation = !choice.stationIds.includes(audit.location_id);
+    }
+    const day = auditDay(audit.scheduled_for);
+    const offProgramme = () => ({
+      cycleKey: day.slice(0, 7),
+      periodSlot: isUnscheduledAudit(audit)
+        ? audit.period_slot
+        : `unscheduled-${crypto.randomUUID().slice(0, 8)}`,
+    });
+    let cycle = { cycleKey: audit.cycle_key, periodSlot: audit.period_slot };
+    let source = isUnscheduledAudit(audit) ? "unscheduled" : "manual";
+    let typeName = "";
+    if (typeChanged) {
+      const type = master.auditTypes.find((t) => t.id === typeId && t.is_active);
+      if (!type)
+        throw new Error("Choose an active audit type from Audit Master.");
+      typeName = type.name;
+      let planned: { cycleKey: string; periodSlot: string } | null = null;
+      if (source === "manual") {
+        try {
+          planned = auditCycle(type, day);
+        } catch {
+          planned = null;
+        }
+        if (planned) {
+          const slot = auditSlots(type).find(
+            (s) => s.code === planned!.periodSlot,
+          );
+          const month = day.slice(0, 7);
+          const lastDay = Number(auditMonthRange(month).to.slice(-2));
+          const pad = (value: number) => String(value).padStart(2, "0");
+          const others = await db()
+            .from("ops_station_audits")
+            .select("id,cycle_key,period_slot,scheduled_for")
+            .eq("company_id", companyId)
+            .eq("audit_type_id", type.id)
+            .eq("location_id", audit.location_id)
+            .is("deleted_at", null)
+            .neq("schedule_source", "unscheduled")
+            .neq("id", audit.id)
+            .gte("scheduled_for", `${month}-01T00:00:00+05:30`)
+            .lte(
+              "scheduled_for",
+              `${month}-${pad(lastDay)}T23:59:59.999+05:30`,
+            );
+          if (others.error) throw new Error(others.error.message);
+          const taken = (others.data ?? []).some((row) => {
+            const date = Number(auditDay(row.scheduled_for).slice(-2));
+            return (
+              (row.cycle_key === planned!.cycleKey &&
+                row.period_slot === planned!.periodSlot) ||
+              (type.cadence_unit !== "weekly" &&
+                Boolean(slot) &&
+                date >= slot!.startDay &&
+                date <= slot!.endDay)
+            );
+          });
+          if (taken) planned = null;
+        }
+      }
+      if (planned) cycle = planned;
+      else {
+        cycle = offProgramme();
+        source = "unscheduled";
+      }
+    }
+    const changed = await db().rpc("change_station_audit", {
+      p_company_id: companyId,
+      p_audit_id: audit.id,
+      p_expected_updated_at: clean(formData.get("updated_at")),
+      p_audit_type_id: typeId,
+      p_cycle_key: cycle.cycleKey,
+      p_period_slot: cycle.periodSlot,
+      p_schedule_source: source,
+      p_assigned_to: assignedTo,
+      p_cross_station: crossStation,
+      p_reason: reason,
+      p_actor_id: own.userId,
+      p_actor_name: own.fullName,
+      p_actor_email: own.email,
+      p_actor_role: own.roleName || own.roleCode,
+    });
+    if (changed.error && isAuditSchemaPending(changed.error)) {
+      // Before the database update, an in-scope reassignment still works as it did.
+      if (typeChanged || crossStation) throw new Error(auditSchemaPendingMessage);
+      const legacy = await db().rpc("manage_station_audit", {
+        p_company_id: companyId,
+        p_audit_id: audit.id,
+        p_operation: "reassign",
+        p_expected_updated_at: clean(formData.get("updated_at")),
+        p_assigned_to: assignedTo,
+        p_reason: reason,
+        p_actor_id: own.userId,
+        p_actor_name: own.fullName,
+        p_actor_email: own.email,
+        p_actor_role: own.roleCode,
+      });
+      if (legacy.error) throw new Error(legacy.error.message);
+    } else if (changed.error) throw new Error(changed.error.message);
+    refreshAudits();
+    const parts = [
+      typeChanged ? `Audit type changed to ${typeName}.` : "",
+      typeChanged && source === "unscheduled" && !isUnscheduledAudit(audit)
+        ? `This station already has a planned ${typeName} for these dates, so this one is recorded as unscheduled.`
+        : "",
+      auditorChanged
+        ? "Auditor changed. It now appears in the selected auditor’s queue."
+        : "",
+    ];
+    return { ok: true, message: parts.filter(Boolean).join(" ") };
   } catch (error) {
     return message(error);
   }

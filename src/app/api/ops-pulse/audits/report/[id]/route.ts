@@ -2,7 +2,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
   canManageStationAudits,
-  canUseStationAuditLocation,
+  canOpenStationAudit,
   isStationAuditEligible,
   loadStationAuditMaster,
 } from "@/lib/ops-pulse/station-audits";
@@ -42,7 +42,12 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
     found.error ||
     !audit ||
     !audit.completed_at ||
-    !canUseStationAuditLocation(authorization, audit.location_id) ||
+    !(await canOpenStationAudit(
+      companyId,
+      authorization,
+      master.programmeSettings,
+      audit,
+    )) ||
     !isStationAuditEligible(
       {
         id: audit.location_id,

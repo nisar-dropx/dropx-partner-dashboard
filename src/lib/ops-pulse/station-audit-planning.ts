@@ -182,6 +182,20 @@ export function stationCanSeeAudit(
   );
 }
 
+/** Unscheduled audits sit outside the monthly programme and never use a planned slot. */
+export function isUnscheduledAudit(audit: { schedule_source?: string | null }) {
+  return audit.schedule_source === "unscheduled";
+}
+/** Report filter: "scheduled" keeps planned audits, "unscheduled" the rest. */
+export function matchesAuditPlan(
+  audit: { schedule_source?: string | null },
+  plan: string,
+) {
+  return (
+    (plan !== "scheduled" && plan !== "unscheduled") ||
+    isUnscheduledAudit(audit) === (plan === "unscheduled")
+  );
+}
 export function isMyAudit(
   audit: { assigned_to: string | null; assignment_verified?: boolean },
   userId: string,

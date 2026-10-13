@@ -12,6 +12,7 @@ import {
   auditStatusLabel,
   auditTone,
   isFastAudit,
+  isUnscheduledAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
 import { auditActor } from "./audit-detail";
 import styles from "./audit-workspace.module.css";
@@ -36,8 +37,9 @@ export function AuditMonthTracker({
         <div>
           <h2>Monthly team tracker</h2>
           <p>
-            Completed fieldwork / required visits · expand a station for owners,
-            responses, email status and reports.
+            Completed planned fieldwork / required visits · unscheduled audits
+            are listed but not counted · expand a station for owners, responses,
+            email status and reports.
           </p>
         </div>
       </div>
@@ -93,7 +95,10 @@ export function AuditMonthTracker({
                         <b>
                           {
                             rows.filter(
-                              (a) => a.audit_type_id === t.id && a.completed_at,
+                              (a) =>
+                                a.audit_type_id === t.id &&
+                                a.completed_at &&
+                                !isUnscheduledAudit(a),
                             ).length
                           }{" "}
                           / {t.required_count}
@@ -134,7 +139,10 @@ export function AuditMonthTracker({
                                 onClick={() => onOpen(a)}
                               >
                                 <span>
-                                  <b>{a.ops_audit_types?.name}</b>
+                                  <b>
+                                    {a.ops_audit_types?.name}
+                                    {isUnscheduledAudit(a) && " · Unscheduled"}
+                                  </b>
                                   <small>
                                     {auditDay(a.scheduled_for)} ·{" "}
                                     {auditLocalTime(a.scheduled_for)} IST

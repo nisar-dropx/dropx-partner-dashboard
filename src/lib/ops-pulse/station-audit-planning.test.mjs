@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { auditTimestamp, auditDay, auditMonthRange, auditPlanColumns, auditCycle, auditDuration, isFastAudit, stationCanSeeAudit, validAuditDate, auditTone, isMyAudit, auditQueueBucket, auditResponseLabel } from './station-audit-planning.ts';
+import { auditTimestamp, auditDay, auditMonthRange, auditPlanColumns, auditCycle, auditDuration, isFastAudit, stationCanSeeAudit, validAuditDate, auditTone, isMyAudit, auditQueueBucket, auditResponseLabel, isUnscheduledAudit, matchesAuditPlan } from './station-audit-planning.ts';
 const physical = { cadence_unit: 'monthly', required_count: 2, scheduling_config: { period_slots: [{ code: 'first_half', label: 'First half', start_day: 1 }, { code: 'second_half', label: 'Second half', start_day: 16 }] } };
 const cod = { cadence_unit: 'weekly', required_count: 1, scheduling_config: { period_slots: [{ code: 'weekly', label: 'Weekly coverage' }] } };
 test('India calendar groups midnight correctly and validates real dates', () => {
@@ -56,4 +56,10 @@ test('personal queue uses verified identity, India date windows, and explicit st
  assert.equal(auditQueueBucket({...a,scheduled_for:'2026-10-12T04:30Z'},'2026-10-05'),'week');
  assert.equal(auditQueueBucket({...a,scheduled_for:'2026-09-30T04:30Z'},'2026-10-05'),'overdue');
  assert.equal(auditResponseLabel({completed_at:'2026-10-05',station_response_status:'requested',response_due_at:'2026-10-06'},Date.parse('2026-10-07')),'Overdue response');
+});
+test('unscheduled audits are told apart from the planned programme', () => {
+  assert.equal(isUnscheduledAudit({ schedule_source: 'unscheduled' }), true);
+  for (const schedule_source of ['manual', 'programme', null, undefined]) assert.equal(isUnscheduledAudit({ schedule_source }), false);
+  const planned = { schedule_source: 'manual' }, surprise = { schedule_source: 'unscheduled' };
+  assert.deepEqual(['all', 'scheduled', 'unscheduled', 'anything'].map((plan) => [matchesAuditPlan(planned, plan), matchesAuditPlan(surprise, plan)]), [[true, true], [true, false], [false, true], [true, true]]);
 });

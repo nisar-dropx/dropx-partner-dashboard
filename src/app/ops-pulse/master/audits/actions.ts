@@ -146,6 +146,15 @@ export async function saveAuditProgrammeSettings(
       excluded_location_ids: selectedValues(formData, "excluded_location_ids"),
       exclude_head_office: clean(formData.get("exclude_head_office")) === "yes",
       updated_by: authorization.userId,
+      // Present only once the cross-station database update is applied.
+      ...(formData.has("cross_audit_roles")
+        ? {
+            cross_audit_role_ids: selectedValues(
+              formData,
+              "cross_audit_role_ids",
+            ),
+          }
+        : {}),
     };
     if (!payload.scheduler_role_ids.length)
       throw new Error(

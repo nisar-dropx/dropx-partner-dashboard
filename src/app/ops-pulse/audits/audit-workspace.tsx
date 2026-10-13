@@ -7,12 +7,14 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Play,
   Plus,
   Search,
   X,
 } from "lucide-react";
 import { SearchableSelect } from "@/components/searchable-select";
 import type {
+  AuditRequest,
   AuditStation,
   AuditType,
   StationAudit,
@@ -40,10 +42,13 @@ import {
   auditAssigneeKey,
   auditQueueBucket,
   isMyAudit,
+  isUnscheduledAudit,
+  matchesAuditPlan,
 } from "@/lib/ops-pulse/station-audit-planning";
 import type { AuditClusters } from "@/lib/ops-pulse/station-audit-clusters";
 import { rescheduleStationAudit, scheduleStationAudit } from "./actions";
 import { AuditDetail, auditActor } from "./audit-detail";
+import { AuditRequests, StartAudit } from "./audit-start";
 import styles from "./audit-workspace.module.css";
 
 const dateLabel = (date: string) =>
@@ -246,6 +251,7 @@ function Schedule({
       ? workspace.audits.find(
           (audit) =>
             !audit.deleted_at &&
+            !isUnscheduledAudit(audit) &&
             audit.location_id === stationId &&
             audit.audit_type_id === typeId &&
             auditDay(audit.scheduled_for).slice(0, 7) ===
@@ -490,7 +496,7 @@ export function AuditWorkspace({
   const [tab, setTab] = useState(
     searchParams.get("view") === "reports"
       ? "log"
-      : ["mine", "tracker", "queue", "plan", "calendar"].includes(searchParams.get("view") || "")
+      : ["mine", "tracker", "queue", "plan", "calendar", "requests"].includes(searchParams.get("view") || "")
         ? searchParams.get("view")!
         : stationOnly
         ? "queue"
@@ -509,6 +515,9 @@ export function AuditWorkspace({
   const [query, setQuery] = useState(searchParams.get("q") || "");
   const [status, setStatus] = useState(searchParams.get("status") || "all");
   const [fastOnly, setFastOnly] = useState(searchParams.get("fast") === "true");
+  const [plan, setPlan] = useState(searchParams.get("plan") || "all");
+  // The Start audit window; with a request it approves that cross-station request.
+  const [start, setStart] = useState<{ request?: AuditRequest } | null>(null);
   const [day, setDay] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState(focusAuditId || "");
   const [seed, setSeed] = useState<ScheduleSeed | null>(null);
@@ -585,7 +594,12 @@ export function AuditWorkspace({
   const stationIds = new Set(filteredStations.map((station) => station.id));
   const scopeAudits = workspace.audits.filter(
     (audit) =>
-      stationIds.has(audit.location_id) &&
+      // An audit assigned at another station has no station filter to sit under.
+      (stationIds.has(audit.location_id) ||
+        (audit.cross_station === true &&
+          isMyAudit(audit, viewerId) &&
+          !stations.length &&
+          !clusters.length)) &&
       (typeId === "all" || audit.audit_type_id === typeId) &&
       (!auditors.length || auditors.includes(auditAssigneeKey(audit))) &&
       (!query ||
@@ -614,14 +628,20 @@ export function AuditWorkspace({
   const history = (stationOnly ? visibleAudits : monthAudits).filter(
     (audit) => audit.completed_at,
   );
-  const reportAudits = visibleAudits.filter((audit) =>
+  const rangeAudits = visibleAudits.filter((audit) =>
     inAuditReportRange(audit, reportRange.from, reportRange.to),
+  );
+  const reportAudits = rangeAudits.filter((audit) =>
+    matchesAuditPlan(audit, plan),
   );
   const modalAudits = day
     ? visibleAudits.filter((audit) => auditDay(audit.scheduled_for) === day)
     : visibleAudits.filter((audit) => audit.id === selectedId);
+  // An audit opened by its ID stays open even when a filter would hide it.
   const selected =
-    modalAudits.find((audit) => audit.id === selectedId) || modalAudits[0];
+    modalAudits.find((audit) => audit.id === selectedId) ||
+    modalAudits[0] ||
+    (day ? undefined : workspace.audits.find((a) => a.id === selectedId));
   const showAudit = (audit: StationAudit) => {
     setDay(null);
     setSelectedId(audit.id);
@@ -630,6 +650,7 @@ export function AuditWorkspace({
     setDay(null);
     setSelectedId("");
     setSeed(null);
+    setStart(null);
   };
   const openReportPeriod = (params: URLSearchParams) => {
     for (const [key, value] of Object.entries({
@@ -640,6 +661,7 @@ export function AuditWorkspace({
       q: query,
       status,
       fast: String(fastOnly),
+      plan: plan === "all" ? "" : plan,
     })) {
       if (value) params.set(key, value);
       else params.delete(key);
@@ -674,6 +696,9 @@ export function AuditWorkspace({
     date.setUTCMonth(date.getUTCMonth() + amount);
     changeMonth(date.toISOString().slice(0, 7));
   };
+  const waitingRequests = workspace.requests.filter(
+    (request) => request.canDecide,
+  ).length;
   const viewing =
     tab === "mine"
       ? `${viewerName}’s audits`
@@ -692,6 +717,7 @@ export function AuditWorkspace({
     auditors: auditors.join(","),
     status,
     fast: String(fastOnly),
+    plan: tab === "log" ? plan : "all",
     q: query,
   });
   const renderCard = (audit: StationAudit) => (
@@ -705,7 +731,11 @@ export function AuditWorkspace({
           {audit.stations?.station_code} ·{" "}
           {workspace.auditTypes.find((t) => t.id === audit.audit_type_id)?.name}
         </h3>
-        <p>{audit.audit_number}</p>
+        <p>
+          {audit.audit_number}
+          {isUnscheduledAudit(audit) ? " · Unscheduled" : ""}
+          {audit.cross_station ? " · Cross-station" : ""}
+        </p>
       </div>
       <div className={styles.auditMeta}>
         <strong>
@@ -759,14 +789,19 @@ export function AuditWorkspace({
             </Link>
           )}
           {canSchedule && (
-            <button
-              className="button compact"
-              onClick={() =>
-                setSeed({ typeId: typeId === "all" ? undefined : typeId })
-              }
-            >
-              <Plus size={15} /> Schedule audit
-            </button>
+            <>
+              <button
+                className="button secondary compact"
+                onClick={() =>
+                  setSeed({ typeId: typeId === "all" ? undefined : typeId })
+                }
+              >
+                <Plus size={15} /> Schedule audit
+              </button>
+              <button className="button compact" onClick={() => setStart({})}>
+                <Play size={15} /> Start audit
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -839,6 +874,7 @@ export function AuditWorkspace({
               setQuery("");
               setStatus("all");
               setFastOnly(false);
+              setPlan("all");
             }}
           >
             Reset filters
@@ -892,7 +928,7 @@ export function AuditWorkspace({
           )}
         </div>
       </div>
-      {tab !== "log" && (
+      {tab !== "log" && tab !== "requests" && (
         <div className={styles.summary}>
           <div className={styles.metric}>
             <span>Scheduled</span>
@@ -943,6 +979,9 @@ export function AuditWorkspace({
                 ["queue", "Team queue"],
                 ["plan", "Monthly plan"],
                 ["calendar", "Calendar"],
+                ...(workspace.anyStation || workspace.requests.length
+                  ? [["requests", "Requests"]]
+                  : []),
                 ["log", "Reports & history"],
               ]
           ).map(([key, name]) => (
@@ -957,17 +996,33 @@ export function AuditWorkspace({
               }}
             >
               {name}
+              {key === "requests" && waitingRequests > 0 && (
+                <mark className={styles.fast}>{waitingRequests}</mark>
+              )}
             </button>
           ))}
         </div>
-        {canManage && (
+        {canManage && tab !== "requests" && (
           <AuditDownloads
             params={exportParams.toString()}
             disabled={navigationPending}
           />
         )}
       </div>
-      <div className={styles.legend}>
+      {tab === "requests" && (
+        <AuditRequests
+          workspace={workspace}
+          viewerId={viewerId}
+          canCreate={canSchedule}
+          onApprove={(request) => setStart({ request })}
+          onCreate={() => setStart({})}
+          onOpen={(auditId) => {
+            setDay(null);
+            setSelectedId(auditId);
+          }}
+        />
+      )}
+      <div className={styles.legend} hidden={tab === "requests"}>
         <span className={styles.complete}>● Completed</span>
         <span className={styles.pending}>● Pending / in progress</span>
         <span className={styles.scheduled}>● Scheduled</span>
@@ -1061,6 +1116,12 @@ export function AuditWorkspace({
       {tab === "log" && (
         <AuditRangeReport
           audits={reportAudits}
+          plan={plan}
+          planCounts={{
+            all: rangeAudits.length,
+            unscheduled: rangeAudits.filter(isUnscheduledAudit).length,
+          }}
+          onPlan={setPlan}
           workspace={workspace}
           range={reportRange}
           error={reportError}
@@ -1154,10 +1215,14 @@ export function AuditWorkspace({
               onSchedule={setSeed}
             />
           ))}
-      {(day || selectedId || seed) && (
+      {(day || selectedId || seed || start) && (
         <Modal
           title={
-            seed
+            start
+              ? start.request
+                ? "Approve cross-station audit"
+                : "Start audit"
+              : seed
               ? "Schedule station audit"
               : day
                 ? `Audits · ${dateLabel(day)}`
@@ -1165,7 +1230,23 @@ export function AuditWorkspace({
           }
           close={close}
         >
-          {seed ? (
+          {start ? (
+            <StartAudit
+              key={start.request?.id || "new"}
+              workspace={workspace}
+              viewerId={viewerId}
+              request={start.request}
+              defaultTypeId={typeId === "all" ? undefined : typeId}
+              onCreated={(auditId) => {
+                close();
+                if (auditId) setSelectedId(auditId);
+              }}
+              onRequested={() => {
+                close();
+                setTab("requests");
+              }}
+            />
+          ) : seed ? (
             <Schedule
               workspace={workspace}
               seed={seed}
@@ -1308,10 +1389,29 @@ function MonthlyPlan({
                       auditDay(a.scheduled_for) >= column.date &&
                       auditDay(a.scheduled_for) <= column.endDate,
                   );
+                  const planned = slotAudits.filter(
+                    (a) => !isUnscheduledAudit(a),
+                  );
                   return (
                     <td key={column.key}>
-                      {slotAudits.length ? (
-                        slotAudits.map((audit) =>
+                      {slotAudits
+                        .filter((a) => isUnscheduledAudit(a) && visible.has(a.id))
+                        .map((audit) => (
+                          <button
+                            key={audit.id}
+                            className={`${styles.slot} ${styles[`${auditTone(audit)}Border`]}`}
+                            onClick={() => onOpen(audit)}
+                          >
+                            <Badge audit={audit} />
+                            <strong>
+                              Unscheduled ·{" "}
+                              {dateLabel(auditDay(audit.scheduled_for))}
+                            </strong>
+                            <small>{auditorName(audit)}</small>
+                          </button>
+                        ))}
+                      {planned.length ? (
+                        planned.map((audit) =>
                           visible.has(audit.id) ? (
                             <button
                               key={audit.id}

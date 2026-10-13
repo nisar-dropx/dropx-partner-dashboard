@@ -313,6 +313,7 @@ const route = load("src/app/api/ops-pulse/audits/export/route.ts", {
   "@/lib/company-scope": { requireCompanyId: () => "tenant" },
   "@/lib/ops-pulse/station-audits": {
     canManageStationAudits: () => manager,
+    stationAuditScope: (authorization) => authorization,
     loadAuditStations: async () => [{ id: "A", station_code: "STA" }],
     loadStationAuditMaster: async () => ({
       programmeSettings: { scheduler_role_ids: [] },
