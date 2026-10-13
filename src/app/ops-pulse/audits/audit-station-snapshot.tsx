@@ -8,6 +8,18 @@ import styles from "./audit-workspace.module.css";
 const count = (value: number) => value.toLocaleString("en-IN");
 const money = (value: number) =>
   `₹${Math.round(value).toLocaleString("en-IN")}`;
+const readAt = (value: string) => {
+  const time = new Date(value);
+  return Number.isNaN(time.getTime())
+    ? value
+    : new Intl.DateTimeFormat("en-IN", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "Asia/Kolkata",
+      }).format(time);
+};
 const dayLabel = (date: string, index: number) =>
   index === 0 ? "Today" : index === 1 ? "Yesterday" : date;
 /** How one day's slip reads: its status once anything is recorded, otherwise whether it is late. */
@@ -131,6 +143,16 @@ export function StationSnapshot({ auditId }: { auditId: string }) {
         </small>
       </div>
     </div>
+      <p className={styles.muted}>
+        {[
+          ["Ageing", ageing?.asOf],
+          ["Not debriefed", held?.asOf],
+          ["CIA", cia?.asOf],
+        ]
+          .filter((part): part is [string, string] => Boolean(part[1]))
+          .map(([label, at]) => `${label} as of ${readAt(at)}`)
+          .join(" · ") || "No live figures are available for this station."}
+      </p>
     </details>
   );
 }

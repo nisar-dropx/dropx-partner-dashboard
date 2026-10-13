@@ -3,9 +3,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
   compareAuditTids,
+  auditDifferencesWorkbook,
+  auditHelpSheet,
+  auditTidTemplate,
   parseAuditTids,
   readAuditTidSheet,
   type AuditEmployee,
+  type AuditSheet,
 } from "@/lib/ops-pulse/station-audit-reconciliation";
 import type {
   AuditOption,
@@ -122,6 +126,17 @@ function SheetButton({
   );
 }
 type SheetTarget = "expected" | "scanned" | "reasons";
+/** Builds an Excel file from plain rows and hands it to the browser to save. */
+async function saveWorkbook(sheets: AuditSheet[], fileName: string) {
+  const XLSX = await import("xlsx");
+  const book = XLSX.utils.book_new();
+  for (const { name, rows, widths } of sheets) {
+    const sheet = XLSX.utils.aoa_to_sheet(rows);
+    sheet["!cols"] = widths.map((wch) => ({ wch }));
+    XLSX.utils.book_append_sheet(book, sheet, name);
+  }
+  XLSX.writeFile(book, fileName);
+}
 const plural = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? "" : "s"}`;
 export function ShipmentInspection({
@@ -215,17 +230,32 @@ export function ShipmentInspection({
         type: "array",
         raw: true,
       });
-      const sheet = book.SheetNames.map((name) => book.Sheets[name]).find(
-        (candidate) => candidate?.["!ref"],
+      // The first data sheet that holds tracking IDs is used; the template's
+      // guide and sample sheets are never read.
+      const sheets = book.SheetNames.filter(
+        (name) => !auditHelpSheet.test(name.trim()) && book.Sheets[name]?.["!ref"],
       );
-      if (!sheet) throw new Error("This file has no rows.");
-      const read = readAuditTidSheet(
-        XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-          header: 1,
-          raw: true,
-          defval: "",
-        }),
-      );
+      if (!sheets.length)
+        throw new Error(
+          "This file has no rows to read. Enter the tracking IDs in the first sheet.",
+        );
+      let read: ReturnType<typeof readAuditTidSheet> | null = null;
+      let problem: unknown = null;
+      for (const name of sheets) {
+        try {
+          read = readAuditTidSheet(
+            XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], {
+              header: 1,
+              raw: true,
+              defval: "",
+            }),
+          );
+          break;
+        } catch (e) {
+          problem ??= e;
+        }
+      }
+      if (!read) throw problem;
       const reasonCount = Object.keys(read.reasons).length;
       if (target === "reasons") {
         if (!read.hasReasons)
@@ -297,23 +327,7 @@ export function ShipmentInspection({
   // The same two columns work for the ERP ageing list, the physical scan and reasons.
   const downloadTemplate = async () => {
     try {
-      const XLSX = await import("xlsx");
-      const sheet = XLSX.utils.aoa_to_sheet([["Tracking ID", "Reason"]]);
-      sheet["!cols"] = [{ wch: 26 }, { wch: 60 }];
-      const guide = XLSX.utils.aoa_to_sheet([
-        ["How to use this template"],
-        ["1. Enter one tracking ID per row under Tracking ID, starting in row 2."],
-        ["2. Reason is optional. When filled, it becomes the auditor observation for that shipment."],
-        ["3. Keep the headings in row 1. Other columns are ignored."],
-        ["4. Upload the file under ERP ageing or under Physically scanned."],
-        ["5. Up to 10,000 tracking IDs per list. Repeated IDs count once."],
-        ["6. To fill reasons only, use Download as Excel in Differences, complete the Reason column and choose Upload reasons."],
-      ]);
-      guide["!cols"] = [{ wch: 110 }];
-      const book = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(book, sheet, "Tracking IDs");
-      XLSX.utils.book_append_sheet(book, guide, "How to use");
-      XLSX.writeFile(book, "audit-tracking-id-template.xlsx");
+      await saveWorkbook(auditTidTemplate(), "audit-tracking-id-template.xlsx");
     } catch {
       setSheetNotice((old) => ({
         ...old,
@@ -323,15 +337,16 @@ export function ShipmentInspection({
   };
   const downloadDifferences = async () => {
     try {
-      const XLSX = await import("xlsx");
-      const sheet = XLSX.utils.aoa_to_sheet([
-        ["Tracking ID", "Type", "Reason"],
-        ...rows.map((row) => [row.tid, row.kind, notes[row.tid] || ""]),
-      ]);
-      sheet["!cols"] = [{ wch: 26 }, { wch: 10 }, { wch: 60 }];
-      const book = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(book, sheet, "Differences");
-      XLSX.writeFile(book, "audit-differences.xlsx");
+      await saveWorkbook(
+        auditDifferencesWorkbook(
+          rows.map((row) => ({
+            tid: row.tid,
+            kind: row.kind,
+            reason: notes[row.tid] || "",
+          })),
+        ),
+        "audit-differences.xlsx",
+      );
     } catch {
       setSheetNotice((old) => ({
         ...old,
@@ -374,7 +389,8 @@ export function ShipmentInspection({
             onClick={() => void downloadTemplate()}
           >
             Download the Excel template
-          </button>
+          </button>{" "}
+          It includes a column guide and a filled sample.
         </p>
         <div className={styles.reconciliationGrid}>
           <div>
