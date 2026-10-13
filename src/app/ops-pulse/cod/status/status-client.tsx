@@ -71,7 +71,8 @@ export function CodStatusClient({ locations }: { locations: CodStatusLocation[] 
     if (part==='reconciliation') {
       const r=cashView(l);
       headline=r.pendingCount ? `${r.pendingCount} DA · ${amount(r.amount)}` : result.label;
-      detail=result.label;
+      const dated=r.dateTotals.map(([day])=>day);
+      detail=collectionDate && collectionDate!=='undated' ? `Collected ${dateLabel(collectionDate)} · ${result.label}` : dated.length ? `Collected ${dateLabel(dated[0])}${dated.length>1 ? ` – ${dateLabel(dated[dated.length-1])}` : ''} · ${result.label}` : result.label;
     } else if (part==='prepareDeposit') {
       const p=s!.prepareDeposit.data!;
       if ([p.expectedAmount,p.actualAmount,p.variance].some(v=>Math.abs(v)>=0.01)) {
