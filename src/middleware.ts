@@ -205,6 +205,7 @@ export async function middleware(request: NextRequest) {
     !isPublicAppPath(path) &&
     path !== "/" &&
     path !== "/fleet-control" &&
+    path !== "/fleet/mapping-mail" &&
     path !== "/users" &&
     path !== "/unauthorized"
   ) {
