@@ -18,13 +18,63 @@ const payoutInputs={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payout-input-calculation.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(payoutInputs.exports,payoutInputs);
 const details={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details);
+const routeDistance={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-route-distance.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(routeDistance.exports,routeDistance);
 const mod={exports:{}};
-new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-engine.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(mod.exports,mod,(id)=>{if(id==='../workforce-route-distance')return routeDistance.exports;if(id==='../workforce-payout-input-calculation')return payoutInputs.exports;if(id==='./cps-details')return details.exports;if(id==='../direct-workforce-pay')return direct.exports;if(id==='../workforce-payment-policy')return policy.exports;if(id==='../workforce-attendance-capture')return attendanceCapture.exports;if(id==='../workforce-production-threshold')return workforceProductionThreshold.exports;throw new Error(`Unexpected import ${id}`);});
 const {monthlyAccrual,allocateCost,rebuildCps,calculateRateCard}=mod.exports;
 const day=(station='A',date='2026-09-01',deliveries=100)=>({station_code:station,work_date:date,deliveries,activity:deliveries,associate_rows:1,unmapped:0,unpaid:0,da:99999,utr:0,van:0,other:0,rent:0,total:99999,shipment_present:true,utr_configured:false,target:null});
 const base=(days=[day()])=>({daily:days,breakup:days.map(d=>({station_code:d.station_code,work_date:d.work_date,head:'DA',sub_head:'Associate payout',source:'Shipment payment mapping',amount:99999})),generated_at:'now'});
 const facts=()=>({shipments:[{id:'s1',client:'Amazon',work_date:'2026-09-01',station_code:'A',provider_employee_id:'AM1',provider_employee_name:'Person',amazon_delivery:80,swa_delivery:20,total_delivery:100,total_activity:100,c_return:0,mfn:0,mfn_return:0}],volumes:[{station_code:'A',work_date:'2026-09-01',deliveries:100}],mappings:[{id:'m1',workforce_id:'w1',provider_id:'amazon',provider_member_id:'AM1',station_id:'station-a',effective_from:'2026-01-01',effective_to:null,status:'active',payment_method_id:'per-packet',payment_values:{DELIVERY:10},pay_type:'PER_PACKET'}],workforce:[{id:'w1',full_name:'Person',dropx_id:'D1',location_id:'station-a',date_of_join:'2026-01-01',is_active:true}],components:[{payment_method_id:'per-packet',component_code:'DELIVERY',component_type:'production',calculation_type:'count_x_rate'}],providers:[{id:'amazon',code:'AMAZON',name:'Amazon'}],stations:[{id:'station-a',station_code:'A',is_active:true,state:'KL'},{id:'station-b',station_code:'B',is_active:true,state:'KL'}],employees:[],salaries:[],people_rules:[],people_policies:[{designation_code:"SSA",mode:"home",head:"UTR",label:"Station staff CTC",allocation:"equal",effective_from:"2026-01-01"},{designation_code:"CLM",mode:"managed",head:"UTR",label:"Manager share",allocation:"equal",effective_from:"2026-01-01"},{designation_code:"DA",mode:"home",head:"DA",label:"Salary / minimum guarantee",allocation:"equal",effective_from:"2026-01-01"}]});
 const near=(a,b)=>assert.ok(Math.abs(a-b)<.000001,`${a} != ${b}`);
+function routeFacts() {
+ const f=facts(); f.shipments[0].work_date='2026-10-01';f.volumes[0].work_date='2026-10-01';
+ f.mappings[0].payment_values.KM_RUN=3;
+ f.components.push({payment_method_id:'per-packet',component_code:'KM_RUN',label:'Kilometres',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
+ f.route_distance={enabledFrom:'2026-10-01',manual:[],rateOverrides:[],rows:[{id:'r1',mapping_id:'m1',workforce_id:'w1',station_id:'station-a',work_date:'2026-10-01',status:'ready',distance_km:41.7039,departure_km:19.7952,delivery_km:1.9004,return_km:20.0083,calculated_at:'now'}]};
+ return f;
+}
+test('October CPS uses the same rounded mapped route fuel once across duplicate provider rows',()=>{
+ const f=routeFacts();f.shipments.push({...f.shipments[0],id:'s2'});
+ const r=rebuildCps(base([day('A','2026-10-01',200)]),f);
+ near(r.daily[0].da,2125.11);assert.equal(r.daily[0].deliveries,200);
+ assert.equal(r.people[0].fuel,125.11);assert.equal(r.gaps.length,0);
+ assert.deepEqual(r.associates.map(r=>r.fuel_pay),[125.11,0]);
+});
+test('CPS fuel kilometres never consume the parcel minimum',()=>{
+ const f=routeFacts();
+ f.mappings[0].production_threshold_config={period:'day',component_codes:['DELIVERY','KM_RUN'],minimum_units:110};
+ f.mappings[0].method_production_threshold_config={period:'day',component_codes:['DELIVERY','KM_RUN']};
+ const r=rebuildCps(base([day('A','2026-10-01')]),f);
+ assert.equal(r.daily[0].da,125.11);assert.equal(r.people[0].fuel,125.11);
+});
+test('CPS manual kilometres including zero and dated rate overrides match payout precedence',()=>{
+ const f=routeFacts();
+ f.route_distance.manual=[{workforce_id:'w1',station_id:'station-a',work_date:'2026-10-01',field_code_snapshot:'KM_RUN',units:12}];
+ f.route_distance.rateOverrides=[{workforce_id:'w1',station_id:'station-a',field_code_snapshot:'KM_RUN',effective_from:'2026-10-01',effective_to:'2026-10-01',input_value:4}];
+ assert.equal(rebuildCps(base([day('A','2026-10-01')]),f).people[0].fuel,48);
+ f.route_distance.manual[0].units=0;
+ assert.equal(rebuildCps(base([day('A','2026-10-01')]),f).people[0].fuel,0);
+});
+test('CPS missing or stale mapping routes stay visibly pending with known parcel pay retained',()=>{
+ for(const rows of [[],[{...routeFacts().route_distance.rows[0],mapping_id:'old'}]]) {
+ const f=routeFacts();f.route_distance.rows=rows;
+ const r=rebuildCps(base([day('A','2026-10-01')]),f);
+ assert.equal(r.daily[0].da,1000);assert.equal(r.associates[0].mapping_status,'Route distance pending');
+ assert.ok(r.gaps.some(g=>g.kind.startsWith('Fuel distance pending')));
+ }
+});
+test('CPS completed route accrues fuel while a parcel import is absent without inventing deliveries',()=>{
+ const f=routeFacts();f.shipments=[];
+ const r=rebuildCps(base([day('A','2026-10-01',0)]),f);
+ assert.equal(r.daily[0].da,125.11);assert.equal(r.daily[0].deliveries,0);
+});
+test('route fuel does not alter September or another station CPS',()=>{
+ const f=routeFacts();f.route_distance.rows[0].station_id='station-b';
+ let r=rebuildCps(base([day('A','2026-10-01')]),f);assert.equal(r.people[0].fuel,0);
+ f.shipments[0].work_date='2026-09-30';f.route_distance.rows[0].work_date='2026-09-30';
+ r=rebuildCps(base([day('A','2026-09-30')]),f);assert.equal(r.people[0].fuel,0);assert.ok(!r.gaps.some(g=>g.kind.startsWith('Fuel distance pending')));
+});
 test('monthly calendar accrual exactly conserves full CTC for February and 31-day months',()=>{
  for(const [month,count] of [['2024-02',29],['2026-08',31],['2026-09',30]])near(Array.from({length:count},(_,i)=>monthlyAccrual(23456.78,`${month}-${String(i+1).padStart(2,'0')}`)).reduce((a,b)=>a+b,0),23456.78);
 });
