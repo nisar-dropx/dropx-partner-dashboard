@@ -20,6 +20,7 @@ import {
   loadAuditAssignees,
 } from "@/lib/ops-pulse/station-audit-people";
 import {
+  addAuditDays,
   auditDay,
   auditMonthRange,
   auditSlots,
@@ -278,6 +279,41 @@ export async function loadAuditInspectionContext(auditId: string) {
   };
 }
 
+/** Station figures shown at the top of an audit, for the people who run audits. */
+export async function loadAuditSnapshot(auditId: string): Promise<{
+  ok: boolean;
+  message: string;
+  snapshot:
+    | import("@/lib/ops-pulse/station-audit-snapshot").AuditStationSnapshot
+    | null;
+}> {
+  try {
+    const viewer = await requirePagePermission("station_audits", "access");
+    const company = requireCompanyId(viewer);
+    const master = await loadStationAuditMaster(company);
+    if (!canManageStationAudits(viewer, master.programmeSettings))
+      throw new Error("Station figures are shown to audit managers only.");
+    const audit = await readAudit(
+      company,
+      auditId,
+      stationAuditScope(viewer, master.programmeSettings),
+    );
+    const { loadAuditStationSnapshot } = await import(
+      "@/lib/ops-pulse/station-audit-snapshot"
+    );
+    return {
+      ok: true,
+      message: "",
+      snapshot: await loadAuditStationSnapshot(company, {
+        id: audit.location_id,
+        station_code: audit.stations.station_code,
+      }),
+    };
+  } catch (error) {
+    return { ...message(error), snapshot: null };
+  }
+}
+
 export async function scheduleStationAudit(
   formData: FormData,
 ): Promise<ActionResult> {
@@ -370,35 +406,45 @@ export async function rescheduleStationAudit(
       audit.completed_at
     )
       throw new Error("Only an audit that has not started can be rescheduled.");
-    const { date, time } = auditDateTime(
-      clean(formData.get("scheduled_date")),
-      clean(formData.get("scheduled_time")),
-    );
+    const date = clean(formData.get("scheduled_date"));
+    const time = clean(formData.get("scheduled_time"));
+    const scheduledFor = auditTimestamp(date, time);
+    // A surprise visit already made may be dated back, but not without limit.
+    if (date < addAuditDays(auditDay(), -31))
+      throw new Error("Choose a date no more than 31 days back.");
+    if (scheduledFor === audit.scheduled_for)
+      throw new Error("Choose a different date or time.");
     const reason = clean(formData.get("reason"));
     if (!reason || reason.length > 500)
       throw new Error("Enter a reason of up to 500 characters.");
     const originalDay = auditDay(audit.scheduled_for);
     const unscheduled = isUnscheduledAudit(audit);
-    if (!unscheduled && date.slice(0, 7) !== originalDay.slice(0, 7))
-      throw new Error("Reschedule within the same month.");
+    const earlier = date < originalDay;
+    if (!unscheduled && !earlier && date.slice(0, 7) !== originalDay.slice(0, 7))
+      throw new Error(
+        "A planned audit can be postponed only within its month. Earlier dates are allowed.",
+      );
     const originalSlot = auditSlots(audit.ops_audit_types).find(
       (s) =>
         Number(originalDay.slice(-2)) >= s.startDay &&
         Number(originalDay.slice(-2)) <= s.endDay,
     );
-    // An unscheduled audit keeps its own slot and may move to any later date.
+    // An unscheduled audit keeps its own slot. A planned audit pulled forward
+    // takes the window its new date falls in; postponed, it stays in its own.
     const cycle = unscheduled
       ? { cycleKey: date.slice(0, 7), periodSlot: audit.period_slot }
-      : auditCycle(
-          audit.ops_audit_types,
-          date,
-          originalSlot?.code || audit.period_slot,
-        );
+      : earlier
+        ? auditCycle(audit.ops_audit_types, date)
+        : auditCycle(
+            audit.ops_audit_types,
+            date,
+            originalSlot?.code || audit.period_slot,
+          );
     const result = await db().rpc("reschedule_station_audit", {
       p_company_id: companyId,
       p_audit_id: audit.id,
       p_expected_date: clean(formData.get("original_scheduled_for")),
-      p_scheduled_for: auditTimestamp(date, time),
+      p_scheduled_for: scheduledFor,
       p_cycle_key: cycle.cycleKey,
       p_period_slot: cycle.periodSlot,
       p_reason: reason,
@@ -411,12 +457,19 @@ export async function rescheduleStationAudit(
       throw new Error(
         "That station already has an audit in this programme slot. Choose another slot or date.",
       );
+    // Earlier and past dates need the newer database rules.
+    if (
+      result.error &&
+      (Date.parse(scheduledFor) <= Date.now() || (earlier && !unscheduled)) &&
+      /future date|original date window|same month/i.test(result.error.message)
+    )
+      throw new Error(auditSchemaPendingMessage);
     if (result.error) throw new Error(result.error.message);
     refreshAudits();
     return {
       ok: true,
       message:
-        "Audit rescheduled. The original date and reason are saved in its history.",
+        "Audit date changed. The original date and reason are saved in its history.",
     };
   } catch (error) {
     return message(error);

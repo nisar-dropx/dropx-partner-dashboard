@@ -46,12 +46,12 @@ assert.deepEqual(
 );
 
 let next = 100;
-const insert = (date, slot, { type = physical, source = "manual" } = {}) => {
+const insert = (date, slot, { type = physical, source = "manual", cycle = "2099-10" } = {}) => {
   const id = uid(next++);
   return db
     .query(
-      `insert into ops_station_audits(id,company_id,audit_number,audit_type_id,location_id,scheduled_for,cycle_key,period_slot,schedule_source,assigned_to,assigned_name,assignment_verified) values($1::uuid,$2,$1::text,$3,$4,$5,'2099-10',$6,$7,$8,'Auditor',true)`,
-      [id, company, type, station, date, slot, source, auditor],
+      `insert into ops_station_audits(id,company_id,audit_number,audit_type_id,location_id,scheduled_for,cycle_key,period_slot,schedule_source,assigned_to,assigned_name,assignment_verified) values($1::uuid,$2,$1::text,$3,$4,$5,$9,$6,$7,$8,'Auditor',true)`,
+      [id, company, type, station, date, slot, source, auditor, cycle],
     )
     .then(() => id);
 };
@@ -184,12 +184,36 @@ await assert.rejects(
   /check constraint/,
 );
 
+// Early dates: a planned audit may be pulled forward into a free earlier window or
+// month, never into a booked one, and may not be postponed out of its own window.
+await db.exec(fs.readFileSync("supabase/migrations/20261013100000_station_audit_early_dates.sql", "utf8"));
+const move = (id, date, slot, cycle = "2099-12") =>
+  db.query("update ops_station_audits set scheduled_for=$2,period_slot=$3,cycle_key=$4 where id=$1", [id, date, slot, cycle]);
+const late = await insert("2099-12-20T04:00Z", "second_half", { cycle: "2099-12" });
+await move(late, "2099-12-05T04:00Z", "first_half");
+assert.equal((await row(late)).period_slot, "first_half");
+await assert.rejects(move(late, "2099-12-20T04:00Z", "second_half"), /original date window/);
+await assert.rejects(move(late, "2099-12-04T04:00Z", "second_half"), /within its configured window/);
+const later = await insert("2099-12-22T04:00Z", "second_half", { cycle: "2099-12" });
+await assert.rejects(move(later, "2099-12-06T04:00Z", "first_half"), /already has an audit/);
+await move(later, "2099-11-28T04:00Z", "second_half", "2099-11");
+await assert.rejects(move(later, "2099-12-28T04:00Z", "second_half"), /same month/);
+// A visit already made can be dated back up to 31 days, with the history kept.
+const soon = await insert(new Date(Date.now() + 86400000).toISOString(), "unscheduled-eeee5555", { source: "unscheduled", cycle: "soon" });
+const reschedule = async (id, to) =>
+  db.query("select public.reschedule_station_audit($1,$2,$3,$4,'back','unscheduled-eeee5555','Visited earlier',$5,'Leader','lead@example.test','Business Head')", [company, id, (await row(id)).scheduled_for, to, manager]);
+await assert.rejects(reschedule(soon, new Date(Date.now() - 40 * 86400000).toISOString()), /31 days back/);
+const yesterday = new Date(Date.now() - 86400000).toISOString();
+await reschedule(soon, yesterday);
+assert.equal(new Date((await row(soon)).scheduled_for).toISOString(), yesterday);
+assert.equal((await db.query("select count(*)::int as n from ops_station_audit_events where audit_id=$1 and event_type='rescheduled'", [soon])).rows[0].n, 1);
+
 // Browser roles reach neither the table nor the function.
 await db.exec("set role authenticated");
 await assert.rejects(db.query("select * from ops_station_audit_requests"), /permission denied/);
 await assert.rejects(change(refill, { type: physical, slot: "first_half" }), /permission denied/);
 await db.exec("reset role");
 console.log(
-  "Unscheduled audit database tests passed: window rules kept for planned audits, unscheduled audits outside the programme, type change with history and proof, booked-window refusal, cross-station marking, lifecycle guards, request uniqueness and browser-role denial.",
+  "Unscheduled audit database tests passed: window rules kept for planned audits, unscheduled audits outside the programme, type change with history and proof, booked-window refusal, cross-station marking, lifecycle guards, request uniqueness, early and back-dated moves, and browser-role denial.",
 );
 await db.close();

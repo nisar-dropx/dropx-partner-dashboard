@@ -61,8 +61,10 @@ import {
   isFastAudit,
   isUnscheduledAudit,
   auditStatusLabel,
+  addAuditDays,
   auditSlots,
 } from "@/lib/ops-pulse/station-audit-planning";
+import { StationSnapshot } from "./audit-station-snapshot";
 import styles from "./audit-workspace.module.css";
 type Result = { ok: boolean; message: string };
 const value = (input: unknown) => String(input ?? "");
@@ -514,6 +516,9 @@ export function AuditDetail({
         </p>
       )}
       <AuditIdentity audit={audit} workspace={workspace} />
+      {canManage && audit.status_code !== "closed" && (
+        <StationSnapshot auditId={audit.id} />
+      )}
       {canManage && (
         <AuditControls
           audit={audit}
@@ -1689,27 +1694,26 @@ function Reschedule({
   );
   const unscheduled = isUnscheduledAudit(audit);
   const end = auditMonthRange(original.slice(0, 7)).to;
-  const min = unscheduled
-    ? auditDay()
-    : `${original.slice(0, 7)}-${String(slot?.startDay || 1).padStart(2, "0")}`;
+  // Earlier dates are open, up to 31 days back for a visit already made.
+  const min = addAuditDays(auditDay(), -31);
   const max = unscheduled
     ? undefined
     : `${original.slice(0, 7)}-${String(Math.min(slot?.endDay || 31, Number(end.slice(-2)))).padStart(2, "0")}`;
   // A date input whose minimum is after its maximum can never be submitted.
-  if (max && (min > auditDay() ? min : auditDay()) > max)
+  if (max && min > max)
     return (
       <details className={styles.reschedule}>
-        <summary>Postpone / reschedule audit</summary>
+        <summary>Change audit date</summary>
         <p className={styles.muted}>
-          {slot?.label || "This slot"} ended on {max}, so this audit can no
-          longer be postponed. Start it now or schedule the station’s next
-          audit.
+          {slot?.label || "This slot"} ended on {max}, more than 31 days ago,
+          so this audit’s date can no longer be changed. Start it now or
+          schedule the station’s next audit.
         </p>
       </details>
     );
   return (
     <details className={styles.reschedule}>
-      <summary>Postpone / reschedule audit</summary>
+      <summary>Change audit date · earlier, later or a past visit</summary>
       <form
         className={styles.compactForm}
         onSubmit={(event) => {
@@ -1729,13 +1733,9 @@ function Reschedule({
           <input
             name="scheduled_date"
             type="date"
-            min={min > auditDay() ? min : auditDay()}
+            min={min}
             max={max}
-            defaultValue={
-              auditDay(audit.scheduled_for) < auditDay()
-                ? auditDay()
-                : auditDay(audit.scheduled_for)
-            }
+            defaultValue={original < min ? min : original}
             required
           />
         </label>
@@ -1750,8 +1750,8 @@ function Reschedule({
         </label>
         <p className={styles.muted}>
           {unscheduled
-            ? "Unscheduled audit: choose any date from today."
-            : `${slot?.label || "Current slot"}: ${min} – ${max}. Stay in this month and date window.`}
+            ? "Any date, up to 31 days back for a visit already made."
+            : `Bring it forward to any earlier date, up to 31 days back for a visit already made. It can be postponed only until ${max} (${slot?.label || "its window"}). To begin today without changing the date, use Start audit.`}
         </p>
         <label className={styles.inputLabel}>
           Reason

@@ -177,4 +177,15 @@ assert.equal((await change(asha,{audit_type_id:'physical'})).ok,true);
 Object.assign(plannedAudit,{status_code:'under_review',completed_at:new Date().toISOString()});
 before=rpcCalls.length;
 assert.equal((await change(asha,{audit_type_id:'physical'})).ok,false);assert.equal(rpcCalls.length,before,'a submitted audit cannot change type');
-console.log('Cross-station audit tests passed: own-station surprise start, out-of-scope refusal, request rules, reporting-manager and cross-role approval, single-audit reach, any-station creation, type and auditor change, and safe behaviour before the database update.');
+// 9. Changing the date: a visit already made may be dated back, within 31 days.
+const occupier=audits().find(a=>a.id==='occupier');
+const redate=(who,date)=>as(who,()=>actions.rescheduleStationAudit(form({audit_id:'occupier',original_scheduled_for:occupier.scheduled_for,scheduled_date:date,scheduled_time:'11:00',reason:'Visited earlier'})));
+before=rpcCalls.length;
+assert.equal((await redate(asha,planning.addAuditDays(today,-40))).ok,false);
+assert.equal((await redate(bala,planning.addAuditDays(today,-1))).ok,false,'another station’s auditor cannot move it');
+assert.equal(rpcCalls.length,before);
+const yesterday=planning.addAuditDays(today,-1);
+result=await redate(asha,yesterday);
+assert.equal(result.ok,true,result.message);
+call=rpcCalls.at(-1);assert.equal(call.name,'reschedule_station_audit');assert.equal(call.args.p_cycle_key,yesterday.slice(0,7));assert.equal(call.args.p_period_slot,'standard');assert.equal(call.args.p_scheduled_for,planning.auditTimestamp(yesterday,'11:00'));
+console.log('Cross-station audit tests passed: own-station surprise start, out-of-scope refusal, request rules, reporting-manager and cross-role approval, single-audit reach, any-station creation, type and auditor change, back-dated visits, and safe behaviour before the database update.');
