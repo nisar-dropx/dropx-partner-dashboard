@@ -760,7 +760,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   </section></div>;
 
   const isolatedBetaJourney = Boolean(account?.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
-  return <div className={`dx-app ${loggedIn ? "logged-in" : ""}${isolatedBetaJourney && (step === "activation" || step === "profile") ? " dx-private-beta" : ""}`}>
+  return <div className={`dx-app ${loggedIn ? "logged-in" : ""}${loggedIn && isWorkforceWorkspace(account) ? " dx-workforce-ui" : ""}${isolatedBetaJourney && (step === "activation" || step === "profile") ? " dx-private-beta" : ""}`}>
     {loggedIn && account ? <aside className="dx-desktop-nav" aria-label="DropX One navigation">
       <div className="dx-desktop-brand">
         <Image alt="DropX" height={44} priority src="/dropx-logo.png" width={126} />

@@ -17,6 +17,6 @@ export async function GET(request:Request){
     // Only the signed-in workforce member's route geometry; never raw Amazon
     // tasks, package identifiers, recipients, contact numbers or addresses.
     const geometry=result.data.route_geometry;
-    return NextResponse.json({...result.data,route_geometry:{station:geometry.station,path:geometry.path,stops:(geometry.stops??[]).map((stop:any)=>({point:stop.point,firstScanAt:stop.firstScanAt,scanCount:stop.scanCount}))}},{headers});
+    return NextResponse.json({...result.data,route_geometry:{method:['amazon_gps','amazon_gps_roads'].includes(geometry.method)?geometry.method:'scan_roads',station:geometry.station,path:geometry.path,stops:(geometry.stops??[]).map((stop:any)=>({point:stop.point,firstScanAt:stop.firstScanAt,scanCount:stop.scanCount}))}},{headers});
   }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Unable to load route'},{status:400,headers});}
 }
