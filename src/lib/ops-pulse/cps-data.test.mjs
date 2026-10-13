@@ -54,6 +54,8 @@ function dataModule(db, locations = all, rebuildCps = (base) => base) {
     "server-only": {},
     react: { cache: (fn) => fn },
     "./cps-engine": { rebuildCps },
+    "../workforce-route-distance": compile("../workforce-route-distance.ts"),
+    "../workforce-route-distance-data": {loadRouteDistanceContext: async () => ({enabledFrom:null,rows:[],manual:[],rateOverrides:[]})},
     "./cps-targets": compile("./cps-targets.ts"),
     "./advertising": { excludeAdvertisingSettlements: base => base },
     "./advertising-data": { loadAdvertising: async () => ({breakup:[],gaps:[],rows:[],settlements:[]}) },

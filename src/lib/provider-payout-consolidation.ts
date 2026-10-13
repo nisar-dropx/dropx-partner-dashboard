@@ -47,7 +47,7 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
           dailyByDate.set(day.date, { day, paymentSetupKey: segment.paymentSetupKey ?? "" });
           continue;
         }
-        if (!segment.paymentSetupKey || current.paymentSetupKey !== segment.paymentSetupKey) {
+        if ((current.day.routeFuel && day.routeFuel) || !segment.paymentSetupKey || current.paymentSetupKey !== segment.paymentSetupKey) {
           overlap = true;
           break;
         }
@@ -55,6 +55,7 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
           date: day.date,
           workDayUnits: Math.max(current.day.workDayUnits, day.workDayUnits),
           deliveryReview: current.day.deliveryReview ?? day.deliveryReview,
+          routeFuel: current.day.routeFuel ?? day.routeFuel,
           attendanceSource: current.day.attendanceSource === day.attendanceSource ? day.attendanceSource : "Mixed",
           attendanceRange: current.day.attendanceRange ?? day.attendanceRange,
           methodAmounts: summarizePaymentMethodAmounts([
@@ -86,7 +87,7 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
     const paymentMethodBreakdown = summarizePaymentMethodAmounts(workerSegments.flatMap((segment) =>
       segment.row.paymentMethodBreakdown.map((method) => ({ methodId: method.id, label: method.label, amount: method.amount }))
     ));
-    const status = workerSegments.some((segment) => segment.row.status === "Configuration incomplete")
+    const status = workerSegments.some(segment=>segment.row.status==="Route distance pending") ? "Route distance pending" : workerSegments.some((segment) => segment.row.status === "Configuration incomplete")
       ? "Configuration incomplete"
       : grossPayment > 0
         ? "Ready for review"

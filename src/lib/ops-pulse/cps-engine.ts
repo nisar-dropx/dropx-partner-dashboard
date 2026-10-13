@@ -1,4 +1,5 @@
 import { summarizeDaDetails, type CpsDaDay, type CpsRate } from "./cps-details";
+import { isKilometreField, kilometreRate, routeFuelForDay, routePendingLabel, type RouteDistanceContext } from '../workforce-route-distance';
 import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput, CpsStaffCost, CpsPeoplePolicy } from './cps';
 import {
   allocationActiveOn,
@@ -34,6 +35,7 @@ import { buildWorkforcePayoutInputMaps, overlayWorkforcePayoutAttendance,
 // Cost accrual is separate from payroll settlement. Source records are never rewritten.
 type RecordRow = Record<string, any>;
 export type CpsFacts = {
+  route_distance?: RouteDistanceContext;
   payout_inputs?: Parameters<typeof buildWorkforcePayoutInputMaps>[0];
   shipments: RecordRow[]; volumes: RecordRow[]; mappings: RecordRow[];
   workforce: RecordRow[]; components: RecordRow[]; providers: RecordRow[];
@@ -140,7 +142,7 @@ export function calculateRateCard(
   attendanceInput?: {basis:'days'|'hours';quantity:number}
 ) {
   const cost={salary:0,variable:0,fuel:0,van:0,missing:false,production_details:[] as import("./cps-details").CpsProductionDetail[]};
-  if (r.payment_method_id && !components.length) cost.missing=true;
+  if (r.payment_method_id && !components.length && !r.route_km_only) cost.missing=true;
   const values = Object.fromEntries(Object.entries(r.payment_values ?? {}).map(([k,v])=>[key(k),v]));
   for(const c of components) {
     const code=key(c.component_code), label=key(`${code} ${c.label}`);
@@ -223,6 +225,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const sellerExcludedOn=(date:string)=>['SELLER_PICKUP','SLLLER_RETURN','SELLER_RETURN','MFN','MFN_RETURN'].some(code=>
     (facts.component_policies??[]).filter(p=>key(p.component_code)===code&&p.effective_from<=date).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode==='pnl_only');
   const inputMaps=buildWorkforcePayoutInputMaps(facts.payout_inputs??{});
+  const routeEnabledOn=(date:string)=>Boolean(facts.route_distance?.enabledFrom && date>=facts.route_distance.enabledFrom);
   const stationById=new Map(facts.stations.map(s=>[s.id,s]));
   const selected=new Set(base.daily.map(d=>d.station_code));
   const dates=[...new Set(base.daily.map(d=>d.work_date))].sort();
@@ -363,6 +366,18 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const k=`${worker.id}|${row.work_date}`, g=groups.get(k)??{worker,date:row.work_date,rows:[] as LiveAssociate[],maps:[] as RecordRow[]};
     g.rows.push(row);g.maps.push(...matches);groups.set(k,g);
   }
+  // A completed route is work evidence even if the parcel import has not arrived.
+  // It contributes fuel cost, never invented deliveries or a changed denominator.
+  for(const route of facts.route_distance?.rows??[]) {
+    if(route.status!=='ready'||!routeEnabledOn(route.work_date)||!dates.includes(route.work_date)) continue;
+    const station=stationById.get(route.station_id)?.station_code;
+    const m=mappings.find(m=>m.id===route.mapping_id&&m.worker?.id===route.workforce_id&&m.station_id===route.station_id&&activeOn(m,route.work_date)&&kilometreRate(m)!==null);
+    if(!m?.worker||!selected.has(station)) continue;
+    const k=`${m.worker.id}|${route.work_date}`,g=groups.get(k)??{worker:m.worker,date:route.work_date,rows:[] as LiveAssociate[],maps:[] as RecordRow[]};
+    if(g.rows.some(row=>row.station_code===station)) continue;
+    const row={id:`route:${route.id}`,client:'Amazon',work_date:route.work_date,station_code:station,provider_employee_id:m.provider_member_id,provider_employee_name:m.worker.full_name,dropx_name:m.worker.full_name,dropx_emp_code:m.worker.dropx_id,pay_type:m.pay_type,total_delivery:0,total_activity:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:0,fuel_pay:0,van_pay:0,da_total_pay:0,mapping_status:'Mapped'};
+    associates.push(row);g.rows.push(row);g.maps.push(m);groups.set(k,g);
+  }
   // Calendar-monthly commitments and attendance-earned fixed pay accrue even when
   // the provider upload has no row for a worker.
   for(const m of mappings) {
@@ -431,6 +446,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     for(const [rowIndex,row] of orderedRows.entries()) for(const [componentIndex,c] of cs.entries()) {
       const code=key(c.component_code),isProduction=c.component_type==='production'||c.calculation_type==='count_x_rate';
       if(!isProduction) continue;
+      if(routeEnabledOn(g.date)&&isKilometreField(code)) continue;
       const source=c.provider_calculation_sources?.[String(row.client??'Amazon').toLowerCase()]||c.calculation_source||code;
       const stationId=thresholdStationById.size ? [...thresholdStationById.values()].find(s=>s.station_code===row.station_code)?.id : card.station_id;
       const uploaded=findWorkforceProductionInput(inputMaps,{workforceId:g.worker.id,stationId,paymentFieldId:c.payment_field_id,fieldCode:code,date:g.date});
@@ -495,8 +511,9 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const current=latest ? candidates.filter(m=>m.effective_from===latest.effective_from) : [];
     const conflict=new Set(current.map(rateSignature)).size>1;
     let card=latest;
-    const cs=sourceComponents(card ? components.get(card.payment_method_id)??[] : [],g.date);
-    if(card)card=paymentCard(card,cs,g.worker.id,g.date);
+    const cs=sourceComponents(card ? components.get(card.payment_method_id)??[] : [],g.date)
+      .filter(c=>!routeEnabledOn(g.date)||!isKilometreField(c.component_code));
+    if(card)card=paymentCard({...card,route_km_only:routeEnabledOn(g.date)&&(components.get(card.payment_method_id)??[]).length>0&&(components.get(card.payment_method_id)??[]).every(c=>isKilometreField(c.component_code))},cs,g.worker.id,g.date);
     const aggregate:RecordRow={client:g.rows[0].client};
     for(const field of ['amazon_delivery','swa_delivery','total_delivery','total_activity','c_return','mfn','mfn_return']) aggregate[field]=g.rows.reduce((n,r)=>n+num(r[field]),0);
     const workerDateKey=`${g.worker.id}|${g.date}`;
@@ -547,10 +564,21 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         thresholdAllocationsByRow.get(`${card!.id}|${g.date}|${String(row.id)}`)
       );
       const first=!seenStations.has(row.station_code);seenStations.add(row.station_code);
+      let routeFuel:ReturnType<typeof routeFuelForDay>=null;
+      if(first&&routeEnabledOn(g.date)&&facts.route_distance&&rowStationId) {
+        const kmMappings=mappings.filter(m=>m.worker?.id===g.worker.id&&m.station_id===rowStationId&&activeOn(m,g.date)&&kilometreRate(m)!==null);
+        const kmMapping=kmMappings.length===1?kmMappings[0]:null;
+        const kmComponent=kmMapping?sourceComponents(components.get(kmMapping.payment_method_id)??[],g.date).find(c=>isKilometreField(c.component_code)):null;
+        if(kmMapping&&kmComponent&&kmComponent.cps_cost_source!=='pnl_only') {
+          routeFuel=routeFuelForDay(facts.route_distance,{workforceId:g.worker.id,stationId:rowStationId,mappingId:kmMapping.id,date:g.date,rate:kilometreRate(kmMapping)!,hasActivity:g.rows.filter(r=>r.station_code===row.station_code).some(r=>[r.total_activity,r.total_delivery,r.c_return,r.mfn,r.mfn_return].some(v=>num(v)>0))});
+          if(routeFuel?.status==='ready') variable.production_details.push({label:kmComponent.label||'Fuel kilometres',basis:'per km',rate:routeFuel.rate,reported_units:routeFuel.km!,payable_units:routeFuel.km!,threshold_units:0,amount:routeFuel.amount!,bucket:'fuel'});
+          if(routeFuel?.status==='pending') gap(`Fuel distance pending · ${routePendingLabel(routeFuel.reason)}`,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Workforce team');
+        } else if(kmMappings.length>1) gap('Fuel distance pending · conflicting kilometre mappings',row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery));
+      }
       row.variable_pay=variable.variable;row.mg_pay=first?salaryByStation.get(row.station_code)??0:0;
-      row.fuel_pay=variable.fuel+(first?fuelByStation.get(row.station_code)??0:0);
+      row.fuel_pay=variable.fuel+(first?fuelByStation.get(row.station_code)??0:0)+(routeFuel?.amount??0);
       row.van_pay=first?vanByStation.get(row.station_code)??0:0;
-      row.da_total_pay=row.variable_pay+row.mg_pay+row.fuel_pay;row.pay_type=card!.pay_type;row.mapping_status=issue||'Mapped';
+      row.da_total_pay=row.variable_pay+row.mg_pay+row.fuel_pay;row.pay_type=card!.pay_type;row.mapping_status=issue||(routeFuel?.status==='pending'?'Route distance pending':'Mapped');
       const attendance=attendanceByWorkerDate.get(workerDateKey) as DirectPayAttendance|undefined;
       const attendanceWorked=directPayAttendanceUnit(attendance)>0;
       const worked=attendanceWorked || [row.total_activity,row.total_delivery,row.c_return,row.mfn,row.mfn_return].some(v=>num(v)>0);
@@ -569,8 +597,8 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         worked,work_basis:attendanceWorked?'attendance':worked?'shipment activity':'no work evidence',
         deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:0,seller_returns:0,
         salary:row.mg_pay,variable:row.variable_pay,fuel:row.fuel_pay,van:row.van_pay,
-        production_details:variable.production_details,pending_fixed_pay:pendingFixed || Boolean(range&&!range.complete) || Boolean(issue) || missingInputs.length>0,
-        source:'Workforce rate card',card_from:card!.effective_from,rates:detailRates(rowCard,cs,String(row.client??'Amazon'))});
+        production_details:variable.production_details,pending_fixed_pay:pendingFixed || Boolean(range&&!range.complete) || Boolean(issue) || missingInputs.length>0 || routeFuel?.status==='pending',
+        source:'Workforce rate card',card_from:card!.effective_from,rates:[...detailRates(rowCard,cs,String(row.client??'Amazon')),...(routeFuel?[{label:'Fuel kilometres',rate:routeFuel.rate,basis:'per km'}]:[])]});
       add(row.station_code,g.date,'DA','Salary / minimum guarantee',row.mg_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','Variable delivery pay',row.variable_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','DA fuel',row.fuel_pay,'Workforce rate card');

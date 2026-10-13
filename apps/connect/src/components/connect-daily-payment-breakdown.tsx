@@ -20,7 +20,7 @@ export function ConnectDailyPaymentBreakdown({ associateName, providers }: { ass
           {provider.providerMemberName ? <span><small>Partner name</small><strong>{provider.providerMemberName}</strong></span> : null}
         </header>
         <div className={styles.lines}>
-          {activityOrder.map((code) => {
+          {[...new Set([...activityOrder.filter(code=>byCode.has(code)),...byCode.keys()])].filter(code=>code!=="KM_RUN").map((code) => {
             const line = byCode.get(code) ?? { code, label: code === "c_return" ? "C-return" : code === "mfn_return" ? "MFN return" : code === "mfn" ? "MFN" : "Delivery", count: 0, rate: 0, amount: 0 };
             return <div className={styles.line} key={code}>
               <strong>{line.label}</strong>

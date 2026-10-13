@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
+import {kilometreRate,isKilometreField} from '../../../../src/lib/workforce-route-distance.ts';
+import {ownRouteFuel} from './own-route-fuel.ts';
 import {createRequire} from 'node:module';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
@@ -128,11 +130,14 @@ test('unbounded or unexpectedly scoped results are rejected',async()=>{
  await assert.rejects(loadOwnAdjustmentLedger(other,account,from,to),/scope/);
 });
 
-function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null){
+function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null,routeContext={enabledFrom:null,rows:[],manual:[],rateOverrides:[]}){
  const source=readFileSync(new URL('../../app/api/connect/earnings/route.ts',import.meta.url),'utf8');
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
  const imports={
+  '../../../../../../src/lib/workforce-route-distance-data':{loadRouteDistanceContext:async()=>routeContext},
+  '../../../../../../src/lib/workforce-route-distance':{kilometreRate,isKilometreField},
+  '@/lib/own-route-fuel':{ownRouteFuel},
   '@/lib/workforce-payment-mapping':{paymentMappingForDay:resolveMapping},
   '@/lib/workforce-payment-period':{workforcePaymentMonth:()=>({from})},
   'next/server':{NextResponse:{json:(body,init)=>new Response(JSON.stringify(body),{...init,headers:{'Content-Type':'application/json',...init?.headers}})}},
@@ -311,4 +316,25 @@ test('component distinguishes unlinked identity, genuine empty result and pendin
 test('component limits initial rows to one page with accessible controls',()=>{
  const html=renderLedger(ledger(Array.from({length:26},(_,id)=>row({id:String(id)}))));
  assert.equal((html.match(/<li>/g)||[]).length,25);assert.match(html,/Adjustment pages/);assert.match(html,/1 \/ 2/);
+});
+
+
+test('earnings combines road kilometres with delivery pay exactly once on the same day',async()=>{
+ const components=[
+  {component_code:'DELIVERY',component_type:'production',is_active:true,payment_fields:{code:'DELIVERY',label:'Delivery',field_type:'production',calculation_type:'count_x_rate',calculation_source:'total_delivery'}},
+  {component_code:'KM_RUN',component_type:'production',is_active:true,payment_fields:{code:'KM_RUN',label:'Fuel',field_type:'production',calculation_type:'count_x_rate',calculation_source:'total_delivery'}}
+ ];
+ const mapping={id:'A',provider_member_id:'A',provider_id:'provider',station_id:'station',workforce_id:'person',payment_method_id:'method',payment_values:{DELIVERY:10,KM_RUN:3},effective_from:from,effective_to:to,status:'active',providers:{name:'Provider'},payment_methods:{id:'method',name:'Delivery and fuel',payment_method_components:components}};
+ const shipment={id:'source',provider_employee_id:'A',work_date:from,station_code:'TEST',client:'Provider',total_delivery:8,total_activity:8};
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?[mapping]:q.table==='cps_shipment_daily'?[shipment]:q.table==='stations'?[{id:'station',station_code:'TEST'}]:[],error:null}));
+ const routeContext={enabledFrom:from,manual:[],rateOverrides:[],rows:[{id:'route',workforce_id:'person',station_id:'station',mapping_id:'A',work_date:from,status:'ready',reason:null,distance_km:41.7039,departure_km:19.7952,delivery_km:1.9004,return_km:20.0083,calculated_at:'2026-09-02T00:00:00Z'}]};
+ const response=await earningsRoute(db,async()=>account,all=>all[0],routeContext)(request()),body=await response.json();
+ assert.equal(response.status,200,JSON.stringify(body));
+ assert.equal(body.earnings[0].daily.length,1);
+ assert.equal(body.earnings[0].daily[0].baseAmount,205.11);
+ assert.equal(body.summary.baseAmount,205.11);
+ assert.equal(body.routeFuel[0].km,41.7039);
+ assert.equal(body.routeFuel[0].amount,125.11);
+ assert.equal(body.earnings[0].daily[0].production.length,2);
+ assert.doesNotThrow(()=>reconcileOwnProduction(body.earnings,body.summary));
 });

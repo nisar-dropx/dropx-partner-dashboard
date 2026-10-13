@@ -1,4 +1,6 @@
 import "server-only";
+import { loadRouteDistanceContext } from "@/lib/workforce-route-distance-data";
+import { isKilometreField, kilometreRate, routeFuelForDay, type RouteDistanceContext } from "@/lib/workforce-route-distance";
 
 
 
@@ -177,7 +179,7 @@ export async function loadWorkforcePayoutRows(
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult, panAadhaarResult, methodComponentsResult] = await Promise.all([
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, source_profile_type, dropx_id, full_name, designation, date_of_join, last_working_date, pan_number, onboarding_status, lifecycle_status, is_active, deleted_at, designations(code,name)").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, station_code, client, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
+    authorizedStationCodes.length ? readAllRows(supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("station_code", authorizedStationCodes).gte("work_date", workforcePaymentMonthStart(fromDate)).lte("work_date", toDate).order("work_date").order("station_code").order("provider_employee_id")) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
@@ -262,11 +264,19 @@ export async function loadWorkforcePayoutRows(
     || paymentFieldOverridesResult.error?.message
     || uploadedProductionInputsResult.error?.message;
   if (payoutInputError) return { rows: [] as WorkforcePayoutRow[], error: payoutInputError };
+  let routeContext: RouteDistanceContext = {enabledFrom:null,rows:[],manual:[],rateOverrides:[]};
+  if (mappings.some((mapping:any)=>kilometreRate(mapping)!==null)) {
+    try { routeContext = await loadRouteDistanceContext(admin,companyId,payoutInputWorkforceIds,thresholdHistoryStart,toDate); }
+    catch(error) { return {rows:[] as WorkforcePayoutRow[],error:error instanceof Error?error.message:"Route distance is unavailable."}; }
+  }
+  const manualKmKeys = new Set(payoutInputResults.production.map((row:any)=>`${row.workforce_id}|${row.station_id}|${row.work_date}|${String(row.field_code_snapshot).toUpperCase()}`));
+  const kmField = (methodComponentsResult.data??[]).map((c:any)=>Array.isArray(c.payment_fields)?c.payment_fields[0]:c.payment_fields).find((field:any)=>isKilometreField(field?.code));
+  const automaticKmInputs = kmField ? routeContext.rows.filter(row=>row.status==='ready' && !manualKmKeys.has(`${row.workforce_id}|${row.station_id}|${row.work_date}|KM_RUN`)).map(row=>({id:row.id,workforce_id:row.workforce_id,station_id:row.station_id,payment_field_id:kmField.id,field_code_snapshot:'KM_RUN',work_date:row.work_date,units:Number(row.distance_km)})) : [];
   const payoutInputMaps = buildWorkforcePayoutInputMaps({
     attendanceOverrides: attendanceOverridesResult.data ?? [],
     attendancePeriods: payoutInputResults.attendancePeriods,
     paymentFieldOverrides: paymentFieldOverridesResult.data ?? [],
-    productionInputs: uploadedProductionInputsResult.data ?? []
+    productionInputs: [...(uploadedProductionInputsResult.data ?? []),...automaticKmInputs]
   });
   const thresholdMappings = mappingsForAuthorizedWorkforce(allMappings, canonicalWorkers)
     .filter((mapping: any) => mapping.payment_method_id
@@ -279,7 +289,7 @@ export async function loadWorkforcePayoutRows(
     .filter(Boolean))];
   const hiddenThresholdMetricsResult = hiddenThresholdStationCodes.length
     ? await readAllRows(supabaseAdmin.from("cps_shipment_daily")
-      .select("provider_employee_id, provider_employee_name, work_date, station_code, client, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return")
+      .select("provider_employee_id, provider_employee_name, work_date, station_code, client, total_activity, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return")
       .eq("company_id", companyId)
       .in("station_code", hiddenThresholdStationCodes)
       .gte("work_date", thresholdHistoryStart)
@@ -892,7 +902,7 @@ export async function loadWorkforcePayoutRows(
       const paymentMethod: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
       return dateRange(activeFrom, activeTo).flatMap((date) => {
         const rows = providerDailyRowsByDate.get(date) ?? [];
-        return productionRules.map((rule) => {
+        return productionRules.filter(rule=>!(isKilometreField(rule.code)&&routeContext.enabledFrom&&date>=routeContext.enabledFrom)).map((rule) => {
           const providerUnits = rule.customProduction
             ? 0
             : rows.reduce((sum: number, daily: any) => sum + metricValue(daily, String(rule.source ?? "")), 0);
@@ -982,9 +992,14 @@ export async function loadWorkforcePayoutRows(
     const dates = [...new Set([...activeDates, ...eligibleDailyByDate.keys()])];
     let missingAttendanceConfiguration = false;
     let missingThresholdConfiguration = false;
+    let missingRouteDistance = false;
     const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = dates.sort().reverse().map((date) => {
       const rows = eligibleDailyByDate.get(date) ?? [];
+      const kmRate = kilometreRate(mapping);
+      const routeFuel = kmRate===null?null:routeFuelForDay(routeContext,{workforceId:String(worker.id),stationId:String(mapping.station_id),mappingId:String(mapping.id),date,rate:kmRate,hasActivity:rows.some(daily=>Number(daily.total_activity??daily.total_delivery??0)>0)||attendanceUnitForDate(String(worker.id),String(mapping.station_id),date,attendanceSourceKey)>0});
+      missingRouteDistance ||= routeFuel?.status==='pending';
       const productionLines = productionRules.map((rule) => {
+        if(isKilometreField(rule.code)&&routeFuel) return {code:rule.code,label:'Fuel allowance · calculated route km',componentType:rule.componentType,count:routeFuel.km??0,rate:routeFuel.rate,amount:routeFuel.amount??0,sortOrder:rule.sortOrder};
         const providerUnits = rule.customProduction
           ? 0
           : rows.reduce((sum, daily) => sum + metricValue(daily, String(rule.source ?? "")), 0);
@@ -1080,6 +1095,7 @@ export async function loadWorkforcePayoutRows(
         workDayUnits,
         deliveryReview: workDayUnits > 0 || (authorizedShipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0) > 0
           ? shipmentAttendanceReview(authorizedShipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0, captureSetting) ?? undefined : undefined,
+        routeFuel: routeFuel??undefined,
         attendanceSource: aggregateAttendance?.period.attendance_basis === "days"
           && !aggregateAttendance.issue
           ? "Bulk upload range"
@@ -1123,7 +1139,7 @@ export async function loadWorkforcePayoutRows(
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
     const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
     const additions = 0; const grossPayment = baseAmount + additions;
-    const status = missingAttendanceConfiguration || missingThresholdConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
+    const status = missingRouteDistance ? "Route distance pending" : missingAttendanceConfiguration || missingThresholdConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
     return [{
       workforceId: String(worker.id),
       categoryCode,

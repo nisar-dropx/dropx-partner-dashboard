@@ -1,3 +1,6 @@
+import { loadRouteDistanceContext } from '../../../../../../src/lib/workforce-route-distance-data';
+import { kilometreRate, isKilometreField } from '../../../../../../src/lib/workforce-route-distance';
+import { ownRouteFuel } from '@/lib/own-route-fuel';
 import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
 import {personalPaymentCard} from '@/lib/personal-payment-card';
 import {workforcePaymentMonth} from "@/lib/workforce-payment-period";
@@ -44,7 +47,7 @@ function productionRulesFor(mapping: any, station: any, allocations: any[]) {
   return productionComponents(mapping).flatMap((component: any, index: number) => {
     const field: any = componentField(component);
     const code = String(component.component_code || field?.code || "").trim();
-    if (!code) return [];
+    if (!code || isKilometreField(code)) return [];
     const matching = allocations.filter((allocation: any) => {
       const allocatedField: any = first(allocation.payment_fields);
       return allocation.provider_id === mapping.provider_id
@@ -188,6 +191,20 @@ export async function GET(request: Request) {
       const baseAmount = Math.round(dailyEarnings.reduce((sum: number, line) => sum + line.baseAmount, 0)*100)/100; const additions = Math.round(dailyEarnings.reduce((sum,line)=>sum+line.incentiveAmount,0)*100)/100;
       return { id: mapping.id, location: station?.station_code ?? "-", provider: first(mapping.providers)?.name ?? "-", model: station?.location_model_id ? "Mapped model" : "All models", paymentMethod: first(mapping.payment_methods)?.name ?? "-", workDays: new Set(dailyEarnings.map((row) => row.date)).size, production:[...productionByKey.values(),...attendanceProduction.values()], daily: dailyEarnings, baseAmount, additions, grossAmount: baseAmount + additions };
     });
+    const routeContext = workforce?.id && mappings.some(m=>kilometreRate(m)!==null)
+      ? await loadRouteDistanceContext(db(),account.companyId,[workforce.id],from,to)
+      : {enabledFrom:null,rows:[],manual:[],rateOverrides:[]};
+    const routeFuel = ownRouteFuel(routeContext,String(workforce?.id??''),mappings,[...(metricsResult.data??[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row);return m&&Number(row.total_activity??row.total_delivery??0)>0?[{mappingId:m.id,date:String(row.work_date)}]:[];}),...providerAttendanceDays.filter(day=>day.amount>0).map(day=>({mappingId:day.mappingId,date:day.date}))]);
+    for(const fuel of routeFuel){
+      const earning=providerEarnings.find(e=>e.id===fuel.mappingId);if(!earning)continue;
+      const amount=fuel.amount??0;
+      const line={label:fuel.source==='manual'?'Fuel allowance · uploaded km':'Fuel allowance · calculated route km',count:fuel.km??0,rate:fuel.rate,amount};
+      const day=earning.daily.find(d=>d.date===fuel.date);
+      if(day){day.production.push(line);day.baseAmount=Math.round((day.baseAmount+amount)*100)/100;day.amount=Math.round((day.amount+amount)*100)/100;}
+      else earning.daily.push({id:`route-km:${fuel.mappingId}:${fuel.date}`,date:fuel.date,production:[line],baseAmount:amount,incentiveAmount:0,amount,deliveries:0,calculationSource:'provider_mapping',payType:'provider_mapping'});
+      earning.production.push(line);earning.workDays=new Set(earning.daily.map(d=>d.date)).size;
+      earning.baseAmount=Math.round((earning.baseAmount+amount)*100)/100;earning.grossAmount=Math.round((earning.grossAmount+amount)*100)/100;
+    }
     const directMethods=paymentMethodById(direct.methods);
     const directEarnings=direct.allocations.flatMap(allocation=>{
       const days=direct.days.filter(day=>day.allocationId===allocation.id);
@@ -208,6 +225,6 @@ export async function GET(request: Request) {
     summary.additions=adjustments.summary.additions;
     summary.grossAmount=Math.round((summary.baseAmount+incentives.summary.amount+summary.additions)*100)/100;
     const deductionAmount=adjustments.summary.deductions,netAmount=Math.round((summary.grossAmount-deductionAmount)*100)/100;
-    return NextResponse.json({ month, earnings, adjustments, incentives:incentives.summary,summary:{...summary,incentiveAmount:incentives.summary.amount,deductionAmount,netAmount} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
+    return NextResponse.json({ month, earnings, routeFuel, adjustments, incentives:incentives.summary,summary:{...summary,incentiveAmount:incentives.summary.amount,deductionAmount,netAmount} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load earnings." }, { status: 400,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"} }); }
 }

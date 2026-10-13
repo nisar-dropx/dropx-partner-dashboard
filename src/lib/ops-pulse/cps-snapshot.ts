@@ -2,6 +2,8 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "../supabase-admin";
 import { readAllRows } from "../supabase-pagination";
+import { loadRouteDistanceContext } from "../workforce-route-distance-data";
+import { kilometreRate } from "../workforce-route-distance";
 import { workforcePaymentMonthStart } from "../workforce-payment-policy";
 import type { WorkforceAttendanceCaptureSetting } from "../workforce-attendance-capture";
 import { excludeAdvertisingSettlements } from "./advertising";
@@ -249,6 +251,11 @@ const snapshot = cache(
     };
     sourceFacts.mappings = (sourceFacts.mappings ?? []).map(enrichThresholdMapping);
     sourceFacts.components = (sourceFacts.components ?? []).map(enrichThresholdComponent);
+    sourceFacts.route_distance = await loadRouteDistanceContext(
+      supabaseAdmin, company,
+      [...new Set(sourceFacts.mappings.filter(m => kilometreRate(m) !== null).map(m => String(m.workforce_id)).filter(id => id && id !== 'null' && id !== 'undefined'))],
+      from, to,
+    );
     productionThresholdFacts.mappings = productionThresholdMappings.map(enrichThresholdMapping);
     productionThresholdFacts.components = (productionThresholdFacts.components ?? []).map(enrichThresholdComponent);
     // Company-private facts stay on the server. Merge current People assignments

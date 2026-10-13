@@ -8,13 +8,15 @@ import {workforcePaymentMonth} from '@/lib/workforce-payment-period';
 import {ConnectPayIncentives} from './connect-pay-incentives';
 import type {OwnIncentiveSummary} from '@/lib/workforce-own-incentives';
 import {reconcileOwnProduction,type OwnProductionDay} from '@/lib/own-production-breakdown';
+import {ConnectRouteFuel} from './connect-route-fuel';
+import type {DailyRouteFuel} from '../../../../src/lib/workforce-route-distance';
 import {ConnectProductionBreakdown} from './connect-production-breakdown';
 
 type Account = { id: string; profileType: string };
 type ProductionLine = { label: string; count: number; rate: number; amount: number };
 type DailyEarning = OwnProductionDay & {production: ProductionLine[]};
 type Earning = { id: string; location: string; provider: string; model: string; paymentMethod: string; workDays: number; production: ProductionLine[]; daily: DailyEarning[]; baseAmount: number; additions: number; grossAmount: number };
-type Payload = { month: string; earnings: Earning[];adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary; summary: { workDays: number; baseAmount: number;incentiveAmount:number; additions: number; grossAmount: number;deductionAmount:number;netAmount:number } };
+type Payload = { routeFuel?:DailyRouteFuel[]; month: string; earnings: Earning[];adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary; summary: { workDays: number; baseAmount: number;incentiveAmount:number; additions: number; grossAmount: number;deductionAmount:number;netAmount:number } };
 
 function money(value: number) { return `₹${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function monthLabel(value: string) { return new Date(`${value}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }); }
@@ -69,7 +71,7 @@ function MyEarnings({ account }: { account: Account }) {
         <article><small>Production incentives</small><strong>{money(summary.incentiveAmount)}</strong></article>
         <article><small>Additional pay</small><strong>{money(summary.additions)}</strong></article>
         <article><small>Approved deductions</small><strong>{money(summary.deductionAmount)}</strong></article>
-        <article className="total"><small>Estimated earnings</small><strong>{money(summary.netAmount)}</strong></article>
+        <article className="total"><small>{data.routeFuel?.some(f=>f.status==='pending')?'Known earnings · fuel pending':'Estimated earnings'}</small><strong>{money(summary.netAmount)}</strong></article>
       </div>
       <p className="dx-workforce-payment-note">Production + eligible incentives + approved additions − approved deductions. This is not your unpaid balance. Training pay and other payroll-only entitlements are confirmed in statements.</p>
       <ConnectPayAdjustments key={month} ledger={data.adjustments}/>
@@ -80,11 +82,17 @@ function MyEarnings({ account }: { account: Account }) {
         <ConnectProductionBreakdown days={earning.daily}/>
         <footer><span>Production pay <b>{money(earning.baseAmount)}</b></span><span>Production incentives <b>{money(earning.additions)}</b></span></footer>
       </article>)}</div> : null}
-      {rows.length && view === "daily" ? <div className="dx-earnings-list">{rows.flatMap((earning) => earning.daily.map((day) => ({ ...day, location: earning.location }))).sort((left, right) => right.date.localeCompare(left.date)).map((day) => <article key={day.id}>
-        <header><span><strong>{new Date(`${day.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong><small>{day.location}</small></span><b>{money(day.amount)}</b></header>
-        <ConnectProductionBreakdown days={[day]}/>
-        <footer><span>Production {money(day.baseAmount)}</span><span>Production incentives {money(day.incentiveAmount)}</span></footer>
-      </article>)}</div> : null}
+      {rows.length && view === "daily" ? <div className="dx-earnings-list">{[...new Set(rows.flatMap(e=>e.daily.map(d=>d.date)))].sort().reverse().map(date=>{
+        const days=rows.flatMap(e=>e.daily.filter(d=>d.date===date));
+        const locations=[...new Set(rows.filter(e=>e.daily.some(d=>d.date===date)).map(e=>e.location))];
+        const total=days.reduce((sum,d)=>sum+d.amount,0);
+        return <article key={date}>
+          <header><span><strong>{new Date(`${date}T00:00:00`).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}</strong><small>{locations.join(' · ')}</small></span><b>{money(total)}</b></header>
+          <ConnectProductionBreakdown days={days}/>
+          <ConnectRouteFuel account={account} fuels={(data.routeFuel??[]).filter(f=>f.date===date)}/>
+          <footer><span>Daily total <b>{money(total)}</b>{data.routeFuel?.some(f=>f.date===date&&f.status==='pending')?' · fuel pending':''}</span></footer>
+        </article>;
+      })}</div> : null}
       {!rows.length ? <div className="dx-advance-empty"><IndianRupee /><strong>No production activity for this month</strong></div> : null}
     </>:null}
   </section>;
