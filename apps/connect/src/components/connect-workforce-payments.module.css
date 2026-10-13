@@ -3,6 +3,28 @@
   align-items: start;
   min-width: 0;
 }
+.tabs{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px!important}
+.tabs button{justify-content:center;padding:12px 8px!important;min-height:46px;white-space:nowrap}
+.note{font-size:13px;line-height:1.6;color:#667085;margin:0}
+.dayDetail{padding:0 18px 18px}
+.dayLines{padding:16px 0;border-top:1px solid #edf0f4}
+.dayLines header{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px;font-size:14px}
+.dayLines header small{color:#667085}
+.dayLines>div{display:flex;justify-content:space-between;gap:16px;padding:6px 0;font-size:14px}
+.dayTotal{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:16px 0 0;border-top:1px solid #e5e9ef;font-size:14px}
+.dayTotal strong{font-size:20px}
+.rateSection{background:white;border:1px solid #e4e7ec;border-radius:22px;padding:24px}
+.rateSection>header,.rateAllocation>header{display:flex;justify-content:space-between;gap:18px;align-items:start}
+.rateSection>header small{font-size:11px;letter-spacing:1.2px;color:#ba315e;font-weight:700}
+.rateSection h2{font-size:27px;margin:8px 0}.rateSection h3{margin:0 0 7px;font-size:18px}
+.rateSection p{color:#667085;line-height:1.6}.rateSection button{min-width:44px;min-height:44px;border:1px solid #e4e7ec;border-radius:10px;background:#fff;cursor:pointer}
+.rateSection button svg{width:18px}
+.rateAllocation{margin-top:22px;padding-top:22px;border-top:1px solid #edf0f4}
+.rateAllocation header span,.rateAllocation header small{font-size:12px;color:#667085;line-height:1.6}
+.rateGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:18px}
+.rateTile{display:flex;flex-direction:column;gap:7px;min-width:0;border:1px solid #ece5e9;border-radius:16px;padding:20px;background:linear-gradient(145deg,#fff,#fcf5f8)}
+.rateTile small{font-size:13px;font-weight:650;color:#485467}.rateTile strong{font-size:27px;letter-spacing:-.6px;color:#293247}.rateTile span{font-size:13px;color:#8b3753}.rateTile em{font-size:11px;font-style:normal;line-height:1.5;color:#667085}
+@media(max-width:600px){.tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.tabs button{font-size:13px!important}.dayDetail{padding:0 14px 14px}.rateSection{padding:18px;border-radius:16px}.rateGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.rateTile{padding:14px}.rateTile strong{font-size:22px}.rateAllocation>header{flex-direction:column;gap:5px}}
 
 /* Shared dashboard cards carry desktop column spans. Payments is a vertical
    flow: contain every section in its single explicit track, including cards
@@ -63,3 +85,5 @@
     flex-direction: column;
   }
 }
+
+.lineBasis{display:block;margin-top:5px;font-size:12px;color:#667085;line-height:1.5}

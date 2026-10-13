@@ -16,6 +16,7 @@ import type {
   PublishedPayoutEarning,
 } from "@/lib/published-payout-breakdown";
 import styles from "./associate-payouts.module.css";
+import {payoutEarningGroups,payoutUnit} from "@/lib/payout-display";
 
 type Row = Record<string, any>;
 type Payout = Row & {
@@ -48,34 +49,6 @@ function periodLabel(from: string, to: string) {
   return isCompleteCalendarMonth(from, to)
     ? new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "UTC" }).format(start)
     : `${localDate(from)} – ${localDate(to)}`;
-}
-
-function earningBasis(line: PublishedPayoutEarning) {
-  if (line.basis === "per_month") return "Monthly amount prorated for eligible attendance";
-  if (line.basis === "per_day") return "Work days × daily rate";
-  if (line.basis === "per_hour") return "Work hours × hourly rate";
-  if (line.basis === "per_unit") return line.reportedUnits === undefined
-    ? "Production units × rate"
-    : `${quantity(line.reportedUnits)} reported · ${quantity(line.excludedUnits ?? 0)} excluded`;
-  if (line.basis === "additional") return "Additional payment";
-  return "Configured payment";
-}
-
-function earningUnit(line: PublishedPayoutEarning, payoutDays: number) {
-  if (line.basis === "per_month") return { value: quantity(payoutDays), label: "Eligible days" };
-  if (line.units === null) return { value: "—", label: "" };
-  if (line.basis === "per_day") return { value: quantity(line.units), label: "Work days" };
-  if (line.basis === "per_hour") return { value: quantity(line.units), label: "Work hours" };
-  return { value: quantity(line.units), label: "Units" };
-}
-
-function earningRate(line: PublishedPayoutEarning) {
-  if (line.rate === null) return { value: "—", label: "" };
-  if (line.basis === "per_month") return { value: money(line.rate), label: "Per month" };
-  if (line.basis === "per_day") return { value: money(line.rate), label: "Per day" };
-  if (line.basis === "per_hour") return { value: money(line.rate), label: "Per hour" };
-  if (line.basis === "per_unit") return { value: money(line.rate), label: "Per unit" };
-  return { value: money(line.rate), label: "Configured rate" };
 }
 
 export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange }: { accountId: string; profileType: string; month: string; onMonthLockChange?: (locked: boolean) => void }) {
@@ -201,7 +174,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
 
   return <section className={styles.card} aria-busy={loading}>
     <header className={styles.heading}>
-      <div><small>Published by Workforce</small><h2>Monthly payout</h2><p>Your published attendance, payment heads and deductions in one view.</p></div>
+      <div><small>Published by Workforce</small><h2>Monthly payout</h2><p>Your confirmed pay, allowances and deductions for the selected period.</p></div>
       <button type="button" onClick={() => void load()} disabled={loading}>{loadError ? "Retry" : "Refresh"}</button>
     </header>
     {loadError ? <p className={styles.error} role="alert">{loadError}</p> : null}
@@ -224,7 +197,6 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
       <div className={styles.summaryTotals} aria-label="Payout totals">
         <div><small>Gross earnings</small><strong>{money(payout.gross)}</strong></div>
         <div><small>Gross deductions</small><strong className={payout.deductions ? styles.negative : ""}>{payout.deductions ? `− ${money(payout.deductions)}` : money(0)}</strong></div>
-        <div><small>Net payable</small><strong>{money(payout.net)}</strong></div>
       </div>
 
       {(payout.days > 0 || payout.attendanceSource || payout.attendanceRanges.length > 0) ? <section className={styles.section}>
@@ -237,31 +209,16 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
         </div>
       </section> : null}
 
-      <section className={styles.section}>
-        <div className={styles.sectionHeading}><div><small>Earnings</small><h3>Payment heads</h3></div><strong>{money(payout.gross)}</strong></div>
-        {visibleEarnings.length ? <div
-          className={styles.tableWrap}
-          role="region"
-          aria-label="Payment details table. Scroll horizontally to view all columns."
-          tabIndex={0}
-        >
-          <table className={styles.breakdownTable} aria-label="Payment heads breakdown">
-            <thead><tr><th scope="col">Payment head</th><th scope="col">Units</th><th scope="col">Rate</th><th scope="col">Amount</th></tr></thead>
-            <tbody>
-              {visibleEarnings.map((line, index) => {
-                const unit = earningUnit(line, payout.days);
-                const rate = earningRate(line);
-                return <tr key={`${line.code}|${line.basis}|${line.rate ?? "none"}|${index}`}>
-                  <th scope="row"><strong>{line.label}</strong><small className={styles.basisNote}>{earningBasis(line)}</small></th>
-                  <td><strong>{unit.value}</strong>{unit.label ? <small>{unit.label}</small> : null}</td>
-                  <td><strong>{rate.value}</strong>{rate.label ? <small>{rate.label}</small> : null}</td>
-                  <td className={styles.earningAmount}>{money(line.amount)}</td>
-                </tr>;
-              })}
-            </tbody>
-            <tfoot><tr><th scope="row" colSpan={3}>Gross earnings</th><td>{money(payout.gross)}</td></tr></tfoot>
-          </table>
-        </div> : <p className={styles.emptyLine}>No payment heads were included in this payout.</p>}
+      <section className={styles.section} aria-label="Published earnings breakdown">
+        {payoutEarningGroups(visibleEarnings).map(group=><section className={styles.payGroup} key={group.title}>
+          <header><h3>{group.title}</h3><strong>{money(group.lines.reduce((n,l)=>n+l.amount,0))}</strong></header>
+          {group.lines.map((line,index)=><article className={styles.payLine} key={`${line.code}:${index}`}>
+            <div><strong>{line.label}</strong><p>{line.basis==='per_month'?'Monthly salary':line.basis==='per_day'?'Daily pay':line.basis==='per_hour'?'Hourly pay':line.units!==null?`${quantity(line.units)} ${payoutUnit(line)}${payoutUnit(line)==='km'?'':'s'}`:'Additional pay'}{line.rate!==null?` · ${money(line.rate)} / ${payoutUnit(line)}`:''}</p>{line.excludedUnits? <small>{quantity(line.excludedUnits)} units excluded under your rate agreement</small>:null}</div>
+            <strong>{money(line.amount)}</strong>
+          </article>)}
+        </section>)}
+        {!visibleEarnings.some(l=>l.amount!==0)?<p className={styles.emptyLine}>No earnings were included in this payout.</p>:null}
+        {visibleEarnings.some(l=>l.amount===0)?<details className={styles.zeroActivity}><summary>Activity with no separate payment</summary><p>These counts are recorded in the statement but do not add to this payout.</p>{visibleEarnings.filter(l=>l.amount===0).map((line,index)=><div key={`${line.code}:${index}`}><span>{line.label}{line.units!==null?` · ${quantity(line.units)} ${payoutUnit(line)}${payoutUnit(line)==='km'?'':'s'}`:''}</span><strong>{money(0)}</strong></div>)}</details>:null}
       </section>
 
       {visibleDeductions.length ? <section className={styles.section}>

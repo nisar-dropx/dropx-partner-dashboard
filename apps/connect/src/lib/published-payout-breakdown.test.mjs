@@ -59,12 +59,10 @@ test("monthly payout UI is one consolidated view and does not duplicate live dai
   const source = readFileSync(new URL("../components/associate-payouts.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../components/associate-payouts.module.css", import.meta.url), "utf8");
   assert.match(source, /Attendance used for this payout/);
-  assert.match(source, /Payment heads/);
+  assert.match(source, /payoutEarningGroups/);
   assert.match(source, /Deduction heads/);
-  assert.match(source, /Monthly amount/);
-  assert.match(source, /role="region"[\s\S]*aria-label="Payment details table\. Scroll horizontally to view all columns\."[\s\S]*tabIndex=\{0\}[\s\S]*aria-label="Payment heads breakdown"/);
-  assert.match(source, /aria-label="Payment heads breakdown"[\s\S]*<thead><tr><th scope="col">Payment head<\/th><th scope="col">Units<\/th><th scope="col">Rate<\/th><th scope="col">Amount<\/th><\/tr><\/thead>/);
-  assert.match(source, /aria-label="Payment heads breakdown"[\s\S]*<tfoot><tr><th scope="row" colSpan=\{3\}>Gross earnings<\/th><td>\{money\(payout\.gross\)\}<\/td><\/tr><\/tfoot>/);
+  assert.match(source, /Monthly salary/);
+  assert.match(source, /aria-label="Published earnings breakdown"/);
   assert.match(source, /aria-label="Deduction heads breakdown"[\s\S]*<th scope="col">Deduction<\/th><th scope="col">Amount<\/th>[\s\S]*Gross deductions/);
   assert.match(source, /aria-label="Payout totals"[\s\S]*Gross earnings[\s\S]*Gross deductions[\s\S]*Net payable/);
   assert.match(source, /aria-label="Final net payable"[\s\S]*Gross earnings minus gross deductions[\s\S]*Net payable/);
@@ -72,7 +70,6 @@ test("monthly payout UI is one consolidated view and does not duplicate live dai
   assert.match(styles, /\.tableWrap:focus-visible[\s\S]*outline:/);
   assert.match(styles, /@media \(max-width: 420px\)[\s\S]*\.breakdownTable/);
   assert.doesNotMatch(styles, /@media \(max-width: 420px\)[\s\S]*\.basisNote\s*\{[\s\S]*display:\s*none/);
-  assert.match(source, /line\.basis === "per_unit"[\s\S]*label: "Per unit"[\s\S]*label: "Configured rate"/);
   assert.doesNotMatch(source, /tab === ["']daily["']|Finalized payout details|<th>Date \/ ID<\/th>|className=\{styles\.paymentLine\}/);
 });
 

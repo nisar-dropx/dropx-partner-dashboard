@@ -141,12 +141,12 @@ export async function GET(request: Request) {
         };
       });
     });
-    const allocatedProductionBySource=new Map<string,Array<{label:string;count:number;reportedCount:number;rate:number;amount:number;thresholdApplied:boolean;thresholdDeducted:number;thresholdPeriod:"day"|"month"|null;thresholdMinimum:number|null;thresholdConfigurationMissing:boolean}>>();
+    const allocatedProductionBySource=new Map<string,Array<{label:string;unit?:string;count:number;reportedCount:number;rate:number;amount:number;thresholdApplied:boolean;thresholdDeducted:number;thresholdPeriod:"day"|"month"|null;thresholdMinimum:number|null;thresholdConfigurationMissing:boolean}>>();
     for(const allocated of allocateCombinedProductionThresholds(productionInputs)){
       const meta=productionMetaById.get(allocated.id);
       if(!meta)throw new Error("Your provider production could not be reconciled. Contact Workforce.");
       const key=`${meta.mappingId}:${meta.sourceId}`;
-      const line={label:meta.label,count:allocated.payableUnits,reportedCount:allocated.reportedUnits,rate:allocated.rate,amount:allocated.amount,thresholdApplied:allocated.thresholdApplied,thresholdDeducted:allocated.thresholdDeducted,thresholdPeriod:allocated.thresholdPeriod,thresholdMinimum:allocated.thresholdMinimum,thresholdConfigurationMissing:allocated.thresholdConfigurationMissing};
+      const line={label:meta.label,unit:"packages",count:allocated.payableUnits,reportedCount:allocated.reportedUnits,rate:allocated.rate,amount:allocated.amount,thresholdApplied:allocated.thresholdApplied,thresholdDeducted:allocated.thresholdDeducted,thresholdPeriod:allocated.thresholdPeriod,thresholdMinimum:allocated.thresholdMinimum,thresholdConfigurationMissing:allocated.thresholdConfigurationMissing};
       allocatedProductionBySource.set(key,[...(allocatedProductionBySource.get(key)??[]),line]);
     }
     const shipmentAttendanceByDay=aggregateShipmentDeliveriesByWorkforceDay((metricsResult.data??[]).flatMap(row=>{
@@ -175,14 +175,14 @@ export async function GET(request: Request) {
       const dailyEarnings = daily.map((row) => {
         const date=String(row.work_date),attendanceDay=remainingAttendance.get(date);remainingAttendance.delete(date);
         const production=allocatedProductionBySource.get(`${mapping.id}:${String(row.id)}`)??[];
-        const attendanceLines=(attendanceDay?.lines??[]).map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount}));
+        const attendanceLines=(attendanceDay?.lines??[]).map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount,unit:line.schedule==='per_month'?'monthly':line.schedule==='per_hour'?'hours':'days'}));
         const card = cardFor(mapping,date);
         const productionAmount=Math.round(production.reduce((sum:number,line:any)=>sum+line.amount,0)*100)/100;
         const baseAmount=attendanceConfigured?Math.round((productionAmount+(attendanceDay?.amount??0))*100)/100:productionConfigured?productionAmount:card?dailyCardAmounts.get(String(row.id))!:productionAmount;
         const incentiveAmount=incentives.bySource.get(String(row.id))??0;
         return { id:String(row.id),date,production:[...production,...attendanceLines],baseAmount,incentiveAmount,amount:Math.round((baseAmount+incentiveAmount)*100)/100,deliveries:metricValue(row,'total_delivery'),calculationSource:attendanceConfigured?'provider_attendance':productionConfigured?'provider_mapping':card?'workforce_rate_card':'provider_mapping',payType:attendanceConfigured?'attendance_eligibility':productionConfigured?'provider_mapping':card?.pay_type??'provider_mapping' };
       });
-      for(const attendanceDay of remainingAttendance.values())dailyEarnings.push({id:attendanceDay.id,date:attendanceDay.date,production:attendanceDay.lines.map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount})),baseAmount:attendanceDay.amount,incentiveAmount:0,amount:attendanceDay.amount,deliveries:0,calculationSource:'provider_attendance',payType:'attendance_eligibility'});
+      for(const attendanceDay of remainingAttendance.values())dailyEarnings.push({id:attendanceDay.id,date:attendanceDay.date,production:attendanceDay.lines.map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount,unit:line.schedule==='per_month'?'monthly':line.schedule==='per_hour'?'hours':'days'})),baseAmount:attendanceDay.amount,incentiveAmount:0,amount:attendanceDay.amount,deliveries:0,calculationSource:'provider_attendance',payType:'attendance_eligibility'});
       dailyEarnings.sort((left,right)=>right.date.localeCompare(left.date)||left.id.localeCompare(right.id));
       const attendanceProduction=new Map<string,{label:string;count:number;rate:number;amount:number}>();
       for(const day of attendanceDays)for(const line of day.lines){const key=`${line.code}:${line.rate}`,current=attendanceProduction.get(key)??{label:line.label,count:0,rate:line.rate,amount:0};current.count+=line.count;current.amount=Math.round((current.amount+line.amount)*100)/100;attendanceProduction.set(key,current);}
@@ -198,7 +198,7 @@ export async function GET(request: Request) {
     for(const fuel of routeFuel){
       const earning=providerEarnings.find(e=>e.id===fuel.mappingId);if(!earning)continue;
       const amount=fuel.amount??0;
-      const line={label:fuel.source==='manual'?'Fuel allowance · uploaded km':'Fuel allowance · calculated route km',count:fuel.km??0,rate:fuel.rate,amount};
+      const line={unit:'km',label:fuel.source==='manual'?'Fuel allowance · uploaded km':'Fuel allowance · calculated route km',count:fuel.km??0,rate:fuel.rate,amount};
       const day=earning.daily.find(d=>d.date===fuel.date);
       if(day){day.production.push(line);day.baseAmount=Math.round((day.baseAmount+amount)*100)/100;day.amount=Math.round((day.amount+amount)*100)/100;}
       else earning.daily.push({id:`route-km:${fuel.mappingId}:${fuel.date}`,date:fuel.date,production:[line],baseAmount:amount,incentiveAmount:0,amount,deliveries:0,calculationSource:'provider_mapping',payType:'provider_mapping'});
@@ -211,7 +211,7 @@ export async function GET(request: Request) {
       if(!days.length)return [];
       const productionByKey=new Map<string,{label:string;count:number;rate:number;amount:number}>();
       for(const day of days)for(const line of day.lines){const key=`${line.code}:${line.rate}`;const current=productionByKey.get(key)??{label:line.label,count:0,rate:line.rate,amount:0};current.count+=line.count;current.amount=Math.round((current.amount+line.amount)*100)/100;productionByKey.set(key,current);}
-      const daily=days.map(day=>({id:day.id,date:day.date,production:day.lines.map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount})),baseAmount:day.amount,incentiveAmount:0,amount:day.amount,deliveries:0,calculationSource:'direct_allocation' as const,payType:'direct_allocation'}));
+      const daily=days.map(day=>({id:day.id,date:day.date,production:day.lines.map(line=>({label:line.label,count:line.count,rate:line.rate,amount:line.amount,unit:line.schedule==='per_month'?'monthly':line.schedule==='per_hour'?'hours':'days'})),baseAmount:day.amount,incentiveAmount:0,amount:day.amount,deliveries:0,calculationSource:'direct_allocation' as const,payType:'direct_allocation'}));
       const baseAmount=Math.round(days.reduce((sum,day)=>sum+day.amount,0)*100)/100;
       return [{id:allocation.id,location:allocation.station_code_snapshot??'-',provider:'Direct workforce',model:allocation.designation_name_snapshot??allocation.designation_code_snapshot??'-',paymentMethod:directMethods.get(allocation.payment_method_id)?.name??'-',workDays:days.filter(day=>day.workDayUnits>0).reduce((sum,day)=>sum+day.workDayUnits,0),production:[...productionByKey.values()],daily,baseAmount,additions:0,grossAmount:baseAmount}];
     });
