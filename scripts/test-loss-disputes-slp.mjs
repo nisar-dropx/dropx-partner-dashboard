@@ -3,6 +3,9 @@ import fs from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import {
   casePhase,
+  cloakDisputeBody,
+  cloakFilingBlock,
+  cloakRemarks,
   disputeGate,
   filedInCloak,
   parseLiveWindow,
@@ -343,6 +346,22 @@ assert.equal(filedInCloak(sentDispute, live("eDSP2", "in_progress", { dispute_se
 assert.equal(filedInCloak({ decision: "dispute", status: "draft" }, live("NL1", "in_progress", { dispute_selected: "YES" })), false);
 assert.equal(filedInCloak({ decision: "dispute", status: "filed" }, live("eDSP1", "not_started")), true);
 assert.equal(filedInCloak(null, live("NL1", "in_progress")), false);
+// OpsPulse files only what Cloak's own form was seen to send: a first-round dispute.
+const toFile = { decision: "dispute", status: "submitted", source_stage: "eDSP1", reason: "Scan Update Issue", remarks: "Departed from our end." };
+assert.equal(cloakFilingBlock(toFile, "eDSP1"), "");
+assert.match(cloakFilingBlock({ ...toFile, decision: "accept" }, "eDSP1"), /by hand/);
+assert.match(cloakFilingBlock({ ...toFile, source_stage: "eDSP2" }, "eDSP2"), /by hand/);
+assert.match(cloakFilingBlock(toFile, "NL1"), /by hand/);
+assert.match(cloakFilingBlock({ ...toFile, status: "draft" }, "eDSP1"), /sent to the Cloak desk/);
+assert.match(cloakFilingBlock({ ...toFile, reason: "Made up" }, "eDSP1"), /not one Cloak offers/);
+assert.match(cloakFilingBlock(null, "eDSP1"), /sent to the Cloak desk/);
+assert.equal(cloakRemarks(" Departed. ", "https://drive.example/x"), "Departed.\n\nhttps://drive.example/x");
+assert.equal(cloakRemarks("Departed.", null), "Departed.");
+// Field for field what Cloak's dispute form posted (captured 11 Oct 2026).
+assert.deepEqual(
+  cloakDisputeBody({ tid: "630471464218", reason: "Scan Update Issue", remarks: "Departed.", proofKey: "DROP/cloak-630471464218-1.pdf", email: "desk@example.com", caseWith: "eDSP", value: "297.0", country: "IN", now: 1791726694776 }),
+  { action: "partnerDispute", tid: "630471464218", dispute_selected: "YES", dispute_proof: "DROP/cloak-630471464218-1.pdf", dispute_reason: "Scan Update Issue", partner_remarks: "Departed.", case_with: "eDSP", disputed_by: "desk@example.com", disputed_time: 1791726694776, revision: "1", value: "297.0", country: "IN" },
+);
 assert.equal(windowSummary(window, now).stage, "eDSP1");
 assert.equal(windowSummary(window, now).daysLeft, 3);
 assert.equal(windowSummary(window, new Date("2026-10-23T06:00:00Z")).stage, "eDSP2");

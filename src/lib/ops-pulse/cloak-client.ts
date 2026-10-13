@@ -10,7 +10,7 @@ const USER_AGENT =
 export class CloakError extends Error {
   constructor(
     message: string,
-    readonly code: "NO_SESSION" | "SESSION_EXPIRED" | "NETWORK" | "HTTP",
+    readonly code: "NO_SESSION" | "SESSION_EXPIRED" | "NETWORK" | "HTTP" | "STATE",
   ) {
     super(message);
   }
@@ -53,6 +53,40 @@ export async function cloakGet<T>(
   } catch {
     throw new CloakError("Cloak could not be reached.", "NETWORK");
   }
+  return cloakJson<T>(res);
+}
+
+/** POST a Cloak JSON API. Writes carry Cloak's fixed `x-csrf-token: required` header. */
+export async function cloakPost<T>(
+  path: `/api/v1/${string}`,
+  body: Record<string, unknown>,
+  cookie: string,
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${CLOAK_ORIGIN}${path}`, {
+      method: "POST",
+      redirect: "manual",
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "content-type": "application/json",
+        cookie,
+        origin: CLOAK_ORIGIN,
+        referer: `${CLOAK_ORIGIN}/`,
+        "x-csrf-token": "required",
+        "user-agent": USER_AGENT,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new CloakError("Cloak could not be reached.", "NETWORK");
+  }
+  return cloakJson<T>(res);
+}
+
+async function cloakJson<T>(res: Response): Promise<T> {
   const html = (res.headers.get("content-type") ?? "").includes("text/html");
   if (res.status === 401 || res.status === 403 || (res.status >= 300 && res.status < 400) || html)
     throw new CloakError(
