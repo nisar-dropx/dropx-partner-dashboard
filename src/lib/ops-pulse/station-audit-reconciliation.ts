@@ -107,6 +107,89 @@ export function readAuditTidSheet(rows: unknown[][]): AuditTidSheet {
   if (ids.size > 10000) throw new Error("Maximum 10,000 unique TIDs per list.");
   return { ids: [...ids], reasons, duplicates, skipped, hasReasons: reasonColumn >= 0 };
 }
+export type AuditSheet = { name: string; rows: string[][]; widths: number[] };
+/** Sheets that explain or illustrate; an upload never reads tracking IDs from them. */
+export const auditHelpSheet = /^(column guide|sample|how to use)$/i;
+const columnGuide: AuditSheet = {
+  name: "Column guide",
+  widths: [16, 78, 12, 34],
+  rows: [
+    ["Column", "What to enter", "Required", "Example"],
+    [
+      "Tracking ID",
+      "The shipment's tracking ID exactly as printed on the label or shown in the ERP ageing report. One shipment per row. Letters, digits, hyphen and underscore only, 4 to 80 characters, with at least one digit.",
+      "Yes",
+      "TBA123456789",
+    ],
+    [
+      "Reason",
+      "The auditor's observation for that shipment: what was found and why it is missing or extra. Up to 300 characters. It is used only when the shipment turns out to be missing or excess.",
+      "No",
+      "Not on shelf; last scanned 11 Oct",
+    ],
+    [
+      "Type",
+      "Appears only in the Differences download. Missing = in the ERP ageing list but not physically scanned. Excess = physically scanned but not in the ERP ageing list. Filled by the portal; do not change it.",
+      "Filled for you",
+      "Missing",
+    ],
+    [],
+    ["Where to upload", "What the file should hold"],
+    [
+      "ERP ageing",
+      "Every shipment the system says is at the station. Use the ERP ageing report or this template.",
+    ],
+    [
+      "Physically scanned",
+      "Every shipment actually found and scanned at the station.",
+    ],
+    [
+      "Upload reasons",
+      "The Differences download with its Reason column completed. Only reasons for listed differences are taken.",
+    ],
+    [],
+    ["Rules"],
+    ["Keep the headings in row 1 of the Tracking IDs sheet. Other columns are ignored."],
+    ["Up to 10,000 tracking IDs per list. A repeated tracking ID counts once."],
+    ["A row whose Tracking ID is not a tracking ID is skipped and reported after upload."],
+    ["Uploading adds to the list already on screen; it does not replace it."],
+    ["The Column guide and Sample sheets are never read. Enter your data in the first sheet."],
+  ],
+};
+/** The fill-in template: an empty sheet to complete, what each column means, and a filled example. */
+export function auditTidTemplate(): AuditSheet[] {
+  return [
+    { name: "Tracking IDs", widths: [26, 60], rows: [["Tracking ID", "Reason"]] },
+    columnGuide,
+    {
+      name: "Sample",
+      widths: [26, 60],
+      rows: [
+        ["Tracking ID", "Reason"],
+        ["TBA123456789", "Not on shelf; last scanned 11 Oct"],
+        ["363912345678", ""],
+        ["TBA987654321", "Damaged, kept aside for return"],
+        ["AWB-55001234", "Found at station, not in ageing report"],
+      ],
+    },
+  ];
+}
+/** Missing and excess shipments with their observations, ready to complete and upload back. */
+export function auditDifferencesWorkbook(
+  rows: { tid: string; kind: string; reason: string }[],
+): AuditSheet[] {
+  return [
+    {
+      name: "Differences",
+      widths: [26, 10, 60],
+      rows: [
+        ["Tracking ID", "Type", "Reason"],
+        ...rows.map((row) => [row.tid, row.kind, row.reason]),
+      ],
+    },
+    columnGuide,
+  ];
+}
 export function compareAuditTids(expected: string[], scanned: string[]) {
   const a = new Set(expected),
     b = new Set(scanned);

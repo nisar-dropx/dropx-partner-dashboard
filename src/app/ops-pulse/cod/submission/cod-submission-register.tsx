@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { updateCodSubmission, type CodSubmissionActionState } from "./actions";
 import { CodSubmitPendingOverlay } from "./cod-submit-overlay";
+import { DepositSlipInput } from "./deposit-slip-input";
 import { RemittanceVerifyButton } from "./remittance-verify-button";
 import { useCodFormState } from "./use-cod-form-state";
 
@@ -149,9 +150,9 @@ function EditSubmissionModal({
               </span>
             </label>
             <label className="span-2">Replace deposit slip photo
-              <input className="field" name="deposit_slip" required={editing.returned} type="file" accept="image/*" capture="environment" />
+              <DepositSlipInput required={editing.returned} />
               <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-                {editing.returned?'A replacement photo is required for this returned slip.':'Leave empty to keep the current slip. Upload JPG/PNG only if replacing.'}
+                {editing.returned?'A replacement photo or PDF is required for this returned slip.':'Leave empty to keep the current slip. Upload a JPG, PNG or PDF only if replacing.'}
               </span>
             </label>
             {editing.hasSlip && editing.slipUrl ? (

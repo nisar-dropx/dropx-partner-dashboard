@@ -11,7 +11,7 @@ test('scope denies unrelated locations for both updates and deletes',()=>{assert
 test('invalid calendar date cannot produce misleading expectation',()=>assert.throws(()=>pickupExpectation({rule:'Next Day',start:'08:00',end:'08:30'},'2026-02-30')));
 
 test('pickup-only updates preserve portal settings; invalid advanced settings fail',()=>{assert.deepEqual(parsePickupAdvanced(form()),{});assert.throws(()=>parsePickupAdvanced(form({advanced_settings:'true',portal_station_code:'bad/code',portal_check_interval_minutes:'30'})));const a=parsePickupAdvanced(form({advanced_settings:'true',portal_station_code:'nlre',portal_check_interval_minutes:'30'}));assert.equal(a.portal_station_code,'NLRE');assert.equal(a.portal_checks_enabled,false);});
-test('next-day preparation cutoff is required, editable and cannot precede pickup',()=>{assert.throws(()=>parsePickupFields(form({pickup_rule:'Next Day'})));assert.throws(()=>parsePickupFields(form({pickup_rule:'Next Day',next_day_preparation_from:'16:00'})));const f=form({pickup_rule:'Next Day',pickup_window_start:'10:00',pickup_window_end:'10:30',next_day_preparation_from:'16:00'});assert.equal(parsePickupFields(f).next_day_preparation_from,'16:00');const policy=pickupPolicy(parsePickupFields(f));assert.equal(policy.preparationFrom,'16:00');});
+test('next-day preparation cutoff is required and independent of evening pickup',()=>{assert.throws(()=>parsePickupFields(form({pickup_rule:'Next Day'})));assert.equal(pickupPolicy(parsePickupFields(form({pickup_rule:'Next Day',next_day_preparation_from:'16:00'}))).preparationFrom,'16:00');const f=form({pickup_rule:'Next Day',pickup_window_start:'10:00',pickup_window_end:'10:30',next_day_preparation_from:'16:00'});assert.equal(parsePickupFields(f).next_day_preparation_from,'16:00');const policy=pickupPolicy(parsePickupFields(f));assert.equal(policy.preparationFrom,'16:00');});
 
 test('DA closing deadline is configurable independently of pickup and can be left unset',()=>{
  const f=new FormData();for(const [k,v] of Object.entries({pickup_rule:'Same Day-Complete',pickup_window_start:'18:00',pickup_window_end:'18:30',cms_agency:'CMS',driver_recon_due_time:'22:00'}))f.set(k,v);
@@ -25,3 +25,10 @@ test('ageing and freshness settings are validated and updates preserve omitted v
  assert.equal(parsePickupFields(form({recon_age_flag_days:'2',cod_status_max_age_minutes:'10'})).recon_age_flag_days,2);
  for(const extra of [{recon_age_flag_days:'0'},{recon_age_flag_days:'1.5'},{cod_status_max_age_minutes:'0'},{cod_status_max_age_minutes:'61'}]) assert.throws(()=>parsePickupFields(form(extra)));
 });
+test('compact integration edits do not clear legacy deadlines hidden from the form',()=>{
+ const parsed=parsePickupAdvanced(form({advanced_settings:'true',portal_check_interval_minutes:'30'}));
+ for(const key of ['cod_submission_due_time','eod_submission_due_time','prepared_deposit_due_time']) assert.equal(Object.hasOwn(parsed,key),false);
+ assert.equal(parsePickupAdvanced(form({advanced_settings:'true',portal_check_interval_minutes:'30',prepared_deposit_due_time:'19:30'})).prepared_deposit_due_time,'19:30');
+});
+
+test('rule can be saved before CMS starts without fabricating pickup timing',()=>{const p=parsePickupFields(form({cms_agency:'',pickup_rule:'Next Day',pickup_window_start:'',pickup_window_end:'',next_day_preparation_from:'16:00'}));assert.equal(p.pickup_configured,true);assert.equal(p.pickup_rule,'Next Day');assert.equal(p.pickup_window_start,null);assert.equal(pickupPolicy(p),null);assert.throws(()=>parsePickupFields(form({pickup_window_start:''})));});

@@ -1899,7 +1899,7 @@ function SavedAudit({
         </div>
       </section>
       {!audit.completed_at && (
-        <details className={styles.section} open>
+        <details className={styles.section}>
           <summary>
             Read checklist & entry guide <span>Prepare before starting</span>
           </summary>

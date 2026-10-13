@@ -1,7 +1,7 @@
 import type { PickupPolicy } from './cod-pickup';
 import type { CodCmsContact } from './cod-cms-followup';
 import { reconciliationView } from './cod-reconciliation.ts';
-export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string; managers?: string[]; managerRole?: 'Cluster' | 'AOM' | 'Unmapped'; leads?: {name:string;role:string;phone:string|null}[]; teamUnavailable?:boolean; pickup?: PickupPolicy | null; cmsContact?: CodCmsContact; reconDueTime?: string | null; ageFlagDays?: number | null; maxAgeMinutes?: number | null };
+export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string; managers?: string[]; managerRole?: 'Cluster' | 'AOM' | 'Unmapped'; leads?: {name:string;role:string;phone:string|null}[]; teamUnavailable?:boolean; pickup?: PickupPolicy | null; cmsContact?: CodCmsContact; reconDueTime?: string | null; ageFlagDays?: number | null; maxAgeMinutes?: number | null; pickupBasis?: string | null };
 export type StatusComponent<T> = { state: 'ok' | 'unavailable'; checkedAt: string; data: T | null };
 export type CodRemittance = { id: string; code: string | null; status: string; expectedAmount: number; actualAmount: number; variance: number; createdAt: number | null; updatedAt: number | null; submittedAt: number | null; createdBy: string; submittedBy: string | null };
 export type CodStatusSnapshot = {
