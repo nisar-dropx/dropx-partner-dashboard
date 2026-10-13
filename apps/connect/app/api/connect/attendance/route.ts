@@ -400,12 +400,20 @@ export async function GET(request: NextRequest) {
     const customFrom = personRule?.custom_from ? String(personRule.custom_from).slice(0, 10) : null;
     const customTo = personRule?.custom_to ? String(personRule.custom_to).slice(0, 10) : null;
     const customClosesOn = personRule?.custom_closes_on ? String(personRule.custom_closes_on).slice(0, 10) : null;
+    // A rule set can close at a time of day (HRMS > Regularization rule sets). The
+    // database refuses a request from that instant, so the day must stop showing
+    // as open then too. Before that function exists the whole closing date counts.
+    const customClosesAt = customFrom && customTo && customClosesOn && personRule?.rule_set_id
+      ? await supabaseAdmin.rpc("hr_regularization_custom_closes_at", { p_rule_set_id: personRule.rule_set_id })
+      : null;
+    const customClosesAtMs = customClosesAt && !customClosesAt.error && customClosesAt.data ? Date.parse(String(customClosesAt.data)) : Number.NaN;
+    const customStillOpen = Number.isNaN(customClosesAtMs) ? Boolean(customClosesOn && todayIst <= customClosesOn) : Date.now() < customClosesAtMs;
     const withWindow = responseRows.map((row) => {
       const closeDate = closesOn(row.date);
       // With a close day set, the month rule alone decides; otherwise the backdate window.
       const baseOpen = closeDate ? todayIst <= closeDate : row.date >= earliestDate;
       const inCustom = Boolean(customFrom && customTo && customClosesOn && row.date >= customFrom && row.date <= customTo);
-      const open = row.date <= todayIst && (baseOpen || (inCustom && todayIst <= customClosesOn!));
+      const open = row.date <= todayIst && (baseOpen || (inCustom && customStillOpen));
       // The later of the two deadlines is the one the person sees.
       const closesOnDate = inCustom && (!closeDate || customClosesOn! > closeDate) ? customClosesOn : closeDate;
       return { ...row, regularizationOpen: open, regularizationClosesOn: closesOnDate };

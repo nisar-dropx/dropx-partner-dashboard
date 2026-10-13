@@ -60,6 +60,8 @@ export function resolveAttendancePayDayType(input: {
   if (workMode === "wfh" || /work from home|\bwfh\b/.test(label)) return "present_wfh";
   if (hasLeaveType && configuredUnpaid) return "unpaid_leave";
   if (hasLeaveType && configuredPaid) return "paid_leave";
+  // "Half Day (Weekly Off)": a week off worked for less than a full day is a half day.
+  if (/^half day\b/.test(label)) return "half_day";
   if (status === "WO" || /weekly off|week off|rest day/.test(label)) return "week_off";
   if (status === "H" || /\bholiday\b|\bpaid holiday\b/.test(label)) return "paid_holiday";
   if (status === "HD" || /half day/.test(label)) return "half_day";

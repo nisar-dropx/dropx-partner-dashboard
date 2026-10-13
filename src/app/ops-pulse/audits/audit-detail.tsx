@@ -46,6 +46,7 @@ import {
   loadStationAuditDraft,
   clearStationAuditDraft,
   rescheduleStationAudit,
+  changeStationAudit,
   manageAuditAssignment,
 } from "./actions";
 import type {
@@ -58,9 +59,12 @@ import {
   auditLocalTime,
   auditDuration,
   isFastAudit,
+  isUnscheduledAudit,
   auditStatusLabel,
+  addAuditDays,
   auditSlots,
 } from "@/lib/ops-pulse/station-audit-planning";
+import { StationSnapshot } from "./audit-station-snapshot";
 import styles from "./audit-workspace.module.css";
 type Result = { ok: boolean; message: string };
 const value = (input: unknown) => String(input ?? "");
@@ -181,9 +185,9 @@ export function AuditDetail({
   const type = workspace.auditTypes.find(
     (row) => row.id === audit.audit_type_id,
   );
-  const station = workspace.stations.find(
-    (row) => row.id === audit.location_id,
-  );
+  const station =
+    workspace.stations.find((row) => row.id === audit.location_id) ||
+    workspace.crossStations.find((row) => row.id === audit.location_id);
   const items = workspace.checklistItems.filter(
     (item) => item.audit_type_id === audit.audit_type_id,
   );
@@ -442,6 +446,8 @@ export function AuditDetail({
             {audit.audit_number} · Scheduled{" "}
             {formatDateTime(audit.scheduled_for)}{" "}
             {audit.assigned_name ? `· ${audit.assigned_name}` : ""}
+            {isUnscheduledAudit(audit) ? " · Unscheduled" : ""}
+            {audit.cross_station ? " · Cross-station auditor" : ""}
           </p>
         </div>
         <div className={styles.actions}>
@@ -510,7 +516,16 @@ export function AuditDetail({
         </p>
       )}
       <AuditIdentity audit={audit} workspace={workspace} />
-      {canManage && <AuditControls audit={audit} workspace={workspace} />}
+      {canManage && audit.status_code !== "closed" && (
+        <StationSnapshot auditId={audit.id} />
+      )}
+      {canManage && (
+        <AuditControls
+          audit={audit}
+          workspace={workspace}
+          canPerform={canPerform}
+        />
+      )}
       {audit.completed_at && (
         <div className={styles.identity}>
           <span>
@@ -1677,24 +1692,28 @@ function Reschedule({
       Number(original.slice(-2)) >= s.startDay &&
       Number(original.slice(-2)) <= s.endDay,
   );
+  const unscheduled = isUnscheduledAudit(audit);
   const end = auditMonthRange(original.slice(0, 7)).to;
-  const min = `${original.slice(0, 7)}-${String(slot?.startDay || 1).padStart(2, "0")}`;
-  const max = `${original.slice(0, 7)}-${String(Math.min(slot?.endDay || 31, Number(end.slice(-2)))).padStart(2, "0")}`;
+  // Earlier dates are open, up to 31 days back for a visit already made.
+  const min = addAuditDays(auditDay(), -31);
+  const max = unscheduled
+    ? undefined
+    : `${original.slice(0, 7)}-${String(Math.min(slot?.endDay || 31, Number(end.slice(-2)))).padStart(2, "0")}`;
   // A date input whose minimum is after its maximum can never be submitted.
-  if ((min > auditDay() ? min : auditDay()) > max)
+  if (max && min > max)
     return (
       <details className={styles.reschedule}>
-        <summary>Postpone / reschedule audit</summary>
+        <summary>Change audit date</summary>
         <p className={styles.muted}>
-          {slot?.label || "This slot"} ended on {max}, so this audit can no
-          longer be postponed. Start it now or schedule the station’s next
-          audit.
+          {slot?.label || "This slot"} ended on {max}, more than 31 days ago,
+          so this audit’s date can no longer be changed. Start it now or
+          schedule the station’s next audit.
         </p>
       </details>
     );
   return (
     <details className={styles.reschedule}>
-      <summary>Postpone / reschedule audit</summary>
+      <summary>Change audit date · earlier, later or a past visit</summary>
       <form
         className={styles.compactForm}
         onSubmit={(event) => {
@@ -1714,13 +1733,9 @@ function Reschedule({
           <input
             name="scheduled_date"
             type="date"
-            min={min > auditDay() ? min : auditDay()}
+            min={min}
             max={max}
-            defaultValue={
-              auditDay(audit.scheduled_for) < auditDay()
-                ? auditDay()
-                : auditDay(audit.scheduled_for)
-            }
+            defaultValue={original < min ? min : original}
             required
           />
         </label>
@@ -1734,8 +1749,9 @@ function Reschedule({
           />
         </label>
         <p className={styles.muted}>
-          {slot?.label || "Current slot"}: {min} – {max}. Stay in this month and
-          date window.
+          {unscheduled
+            ? "Any date, up to 31 days back for a visit already made."
+            : `Bring it forward to any earlier date, up to 31 days back for a visit already made. It can be postponed only until ${max} (${slot?.label || "its window"}). To begin today without changing the date, use Start audit.`}
         </p>
         <label className={styles.inputLabel}>
           Reason
@@ -2146,6 +2162,14 @@ function SavedAudit({
                     {String(row.after_data.reason || "")}
                   </p>
                 )}
+                {row.event_type === "type_changed" && (
+                  <p>
+                    {String(row.before_data.type_name || "Audit")} →{" "}
+                    {String(row.after_data.type_name || "Audit")}
+                    <br />
+                    {String(row.after_data.reason || "")}
+                  </p>
+                )}
                 {row.event_type === "reassigned" &&
                   Boolean(row.after_data.assigned_name) && (
                     <p>
@@ -2163,30 +2187,61 @@ function SavedAudit({
   );
 }
 
+/**
+ * Change the audit type, the auditor, or both in one save. The auditor can be
+ * changed until the audit starts; the type until it is submitted, and once
+ * fieldwork has begun only by the auditor doing it.
+ */
 function AuditControls({
   audit,
   workspace,
+  canPerform,
 }: {
   audit: StationAudit;
   workspace: StationAuditWorkspace;
+  canPerform: boolean;
 }) {
   const state = useAction();
+  const [typeId, setTypeId] = useState(audit.audit_type_id);
+  const unstarted = audit.status_code === "scheduled";
+  const editable =
+    !audit.completed_at &&
+    (unstarted || (audit.status_code === "in_progress" && canPerform));
+  if (!editable) return <div className={styles.controlRow} />;
+  const types = workspace.auditTypes.filter(
+    (type) => type.is_active || type.id === audit.audit_type_id,
+  );
   return (
     <div className={styles.controlRow}>
-      {audit.status_code === "scheduled" && (
-        <details className={styles.reschedule}>
-          <summary>Assign / reassign auditor</summary>
-          <form
-            className={styles.compactForm}
-            onSubmit={(e) => {
-              e.preventDefault();
-              const data = new FormData(e.currentTarget);
-              state.run(() => manageAuditAssignment(data));
-            }}
-          >
-            <input type="hidden" name="audit_id" value={audit.id} />
-            <input type="hidden" name="updated_at" value={audit.updated_at} />
-            <input type="hidden" name="operation" value="reassign" />
+      <details className={styles.reschedule}>
+        <summary>
+          {unstarted ? "Change audit · type or auditor" : "Change audit type"}
+        </summary>
+        <form
+          className={styles.compactForm}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const data = new FormData(e.currentTarget);
+            state.run(() => changeStationAudit(data));
+          }}
+        >
+          <input type="hidden" name="audit_id" value={audit.id} />
+          <input type="hidden" name="updated_at" value={audit.updated_at} />
+          <label className={styles.inputLabel}>
+            Audit type
+            <select
+              name="audit_type_id"
+              value={typeId}
+              onChange={(e) => setTypeId(e.target.value)}
+            >
+              {types.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {unstarted && (
             <div className={styles.inputLabel}>
               Auditor
               <SearchableSelect
@@ -2196,22 +2251,43 @@ function AuditControls({
                   audit.assignment_verified ? audit.assigned_to : ""
                 }
                 placeholder="Search authorized auditor"
+                maxOptions={200}
                 options={workspace.assignees
-                  .filter((p) => p.stationIds.includes(audit.location_id))
-                  .map((p) => ({ value: p.id, label: p.name, helper: p.role }))}
+                  .filter(
+                    (p) =>
+                      workspace.anyStation ||
+                      p.stationIds.includes(audit.location_id),
+                  )
+                  .map((p) => ({
+                    value: p.id,
+                    label: p.name,
+                    helper: p.stationIds.includes(audit.location_id)
+                      ? p.role
+                      : `${p.role} · another station’s team`,
+                  }))}
               />
             </div>
-            <label className={styles.inputLabel}>
-              Reason
-              <input name="reason" required maxLength={500} />
-            </label>
-            <button className="button compact" disabled={state.pending}>
-              Assign auditor
-            </button>
-            <p role="status">{state.notice}</p>
-          </form>
-        </details>
-      )}
+          )}
+          <label className={styles.inputLabel}>
+            Reason
+            <input
+              name="reason"
+              required
+              maxLength={500}
+              placeholder="Why is this changing?"
+            />
+          </label>
+          <button className="button compact" disabled={state.pending}>
+            {state.pending ? "Saving…" : "Save changes"}
+          </button>
+          <p role="status">
+            {state.notice ||
+              (typeId !== audit.audit_type_id
+                ? "The checklist switches to the new type. Station, auditor, time and shared entries are kept; answers that belong only to the old checklist are not carried over."
+                : "Both changes are saved together and recorded in the audit history.")}
+          </p>
+        </form>
+      </details>
     </div>
   );
 }

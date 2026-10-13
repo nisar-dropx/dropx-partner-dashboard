@@ -19,6 +19,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import {
   canManageStationAudits,
   loadAuditStations,
+  stationAuditScope,
   loadStationAuditMaster,
 } from "@/lib/ops-pulse/station-audits";
 import {
@@ -27,6 +28,8 @@ import {
   auditResponseLabel,
   auditStatusLabel,
   isFastAudit,
+  isUnscheduledAudit,
+  matchesAuditPlan,
 } from "@/lib/ops-pulse/station-audit-planning";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -80,7 +83,7 @@ async function exportAuditReport(request: Request) {
     );
   const stations = await loadAuditStations(
     companyId,
-    authorization,
+    stationAuditScope(authorization, master.programmeSettings),
     master.programmeSettings,
   );
   const requestedStations = url.searchParams.has("stations")
@@ -101,7 +104,7 @@ async function exportAuditReport(request: Request) {
     client
       .from("ops_station_audits")
       .select(
-        "id,audit_number,audit_type_id,location_id,scheduled_for,status_code,score,score_snapshot,assigned_to,assigned_name,assignment_verified,started_at,completed_at,completed_by,response_due_at,station_response_status,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
+        "id,audit_number,audit_type_id,location_id,scheduled_for,schedule_source,status_code,score,score_snapshot,assigned_to,assigned_name,assignment_verified,started_at,completed_at,completed_by,response_due_at,station_response_status,system_cash_amount,physical_cash_amount,cash_variance_amount,system_shipment_count,physical_shipment_count,shipment_missing_count,shipment_excess_count,shipment_unresolved_count,overall_summary,station_summary,manager_summary,email_status,ops_audit_types(name,code)",
       )
       .eq("company_id", companyId)
       .is("deleted_at", null)
@@ -145,6 +148,7 @@ async function exportAuditReport(request: Request) {
       (!selectedAuditors.length ||
         selectedAuditors.includes(auditAssigneeKey(audit))) &&
       (url.searchParams.get("fast") !== "true" || isFastAudit(audit)) &&
+      matchesAuditPlan(audit, url.searchParams.get("plan") || "all") &&
       (!term ||
         `${audit.audit_number} ${stationById.get(audit.location_id)?.station_code} ${auditorName(audit)} ${stationById.get(audit.location_id)?.station_name}`
           .toLowerCase()
@@ -261,6 +265,7 @@ async function exportAuditReport(request: Request) {
   const register = audits.map((audit: any) => ({
     "Audit number": audit.audit_number,
     "Audit type": typeName.get(audit.id),
+    Plan: isUnscheduledAudit(audit) ? "Unscheduled" : "Scheduled",
     Station: stationById.get(audit.location_id)?.station_code,
     "Station name":
       stationById.get(audit.location_id)?.station_name ??

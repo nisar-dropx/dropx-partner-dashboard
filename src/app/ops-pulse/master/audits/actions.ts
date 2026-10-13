@@ -146,6 +146,15 @@ export async function saveAuditProgrammeSettings(
       excluded_location_ids: selectedValues(formData, "excluded_location_ids"),
       exclude_head_office: clean(formData.get("exclude_head_office")) === "yes",
       updated_by: authorization.userId,
+      // Present only once the cross-station database update is applied.
+      ...(formData.has("cross_audit_roles")
+        ? {
+            cross_audit_role_ids: selectedValues(
+              formData,
+              "cross_audit_role_ids",
+            ),
+          }
+        : {}),
     };
     if (!payload.scheduler_role_ids.length)
       throw new Error(
@@ -520,69 +529,6 @@ export async function createAuditOption(formData: FormData): Promise<Result> {
     if (saved.error) throw new Error(saved.error.message);
     refresh();
     return { ok: true, message: "Reference value added." };
-  } catch (error) {
-    return result(error);
-  }
-}
-
-export async function saveAuditAirways(formData: FormData): Promise<Result> {
-  try {
-    const { authorization, companyId } = await access();
-    const label = clean(formData.get("label"));
-    const id = clean(formData.get("id"));
-    const stationIds = selectedValues(formData, "station_ids");
-    if (!label || label.length > 80)
-      throw new Error("Enter an Airways name of up to 80 characters.");
-    const { loadAuditStations, loadStationAuditMaster } = await import(
-      "@/lib/ops-pulse/station-audits"
-    );
-    const master = await loadStationAuditMaster(companyId);
-    const stations = await loadAuditStations(
-      companyId,
-      authorization,
-      master.programmeSettings,
-    );
-    const authorized = new Set(stations.map((station) => station.id));
-    if (stationIds.some((stationId) => !authorized.has(stationId)))
-      throw new Error("One or more stations are outside your audit scope.");
-    const existing = master.options.find(
-      (option) => option.id === id && option.option_group === "airways",
-    );
-    if (id && !existing)
-      throw new Error("Airways entry unavailable. Refresh and try again.");
-    // Preserve assignments outside a scoped editor's locations.
-    const preserved = Array.isArray(existing?.metadata.station_ids)
-      ? existing.metadata.station_ids.filter(
-          (stationId) =>
-            typeof stationId === "string" && !authorized.has(stationId),
-        )
-      : [];
-    const payload = {
-      label,
-      metadata: {
-        ...existing?.metadata,
-        station_ids: [...preserved, ...stationIds],
-      },
-    };
-    const saved = id
-      ? await db()
-          .from("ops_audit_reference_options")
-          .update(payload)
-          .eq("company_id", companyId)
-          .eq("option_group", "airways")
-          .eq("id", id)
-      : await db()
-          .from("ops_audit_reference_options")
-          .insert({
-            ...payload,
-            company_id: companyId,
-            option_group: "airways",
-            code: crypto.randomUUID(),
-            is_active: true,
-          });
-    if (saved.error) throw new Error(saved.error.message);
-    refresh();
-    return { ok: true, message: "Airways and station mappings saved." };
   } catch (error) {
     return result(error);
   }

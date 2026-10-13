@@ -56,6 +56,7 @@ type CommunicationCase = {
   last_activity_at: string;
   created_at: string;
   messages: CaseMessage[];
+  unreadNotificationIds?: string[];
   attachments: CaseAttachment[];
 };
 type AnnouncementAttachment = { id: string; original_name: string; mime_type: string; file_size: number };
@@ -105,7 +106,7 @@ function readableSize(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function ConnectCommunicationCenter({ account, active = true }: { account: AppAccount; active?: boolean }) {
+export function ConnectCommunicationCenter({ account, active = true, readOnly = false, initialCaseId = "", initialAnnouncementId = "" }: { account: AppAccount; active?: boolean; readOnly?: boolean; initialCaseId?: string; initialAnnouncementId?: string }) {
   // Keep the established People terminology intact; Workforce is presented as a
   // dedicated support channel while retaining the same secure case workflow.
   const workforce = account.workspace === "workforce";
@@ -165,6 +166,40 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
   setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!active) return;
+    const refresh = () => { if (document.visibilityState === "visible") void load(true); };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("dropx-push-received", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener("dropx-push-received", refresh); };
+  }, [active, load]);
+  useEffect(() => {
+    if (!initialCaseId || !cases.length) return;
+    const item = cases.find(row => row.id === initialCaseId);
+    if (item) { setSection(item.channel === "integrity" ? "speak-up" : "hr-help"); setSelectedCaseId(item.id); setSelectedAnnouncementId(""); }
+  }, [initialCaseId, cases.length]);
+  useEffect(() => {
+    if (initialAnnouncementId && announcements.some(row => row.id === initialAnnouncementId)) setSelectedAnnouncementId(initialAnnouncementId);
+  }, [initialAnnouncementId, announcements.length]);
+  const reading = useRef("");
+  const unreadCaseIds = selectedCase?.unreadNotificationIds ?? [];
+  const readKey = `${selectedCaseId}:${unreadCaseIds.join(",")}`;
+  useEffect(() => {
+    if (!active || readOnly || !selectedCase || !unreadCaseIds.length || document.visibilityState !== "visible" || reading.current === readKey) return;
+    reading.current = readKey;
+    const ids = [...unreadCaseIds];
+    const id = selectedCase.id;
+    void fetch("/api/connect/communication-center", { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: account.id, profileType: account.profileType, intent: "read_case", caseId: id, notificationIds: ids })
+    }).then(response => {
+      if (!response.ok) throw new Error("Unable to update read status. Reopen the conversation to retry.");
+      setCases(rows => rows.map(row => row.id === id ? { ...row, unreadNotificationIds: (row.unreadNotificationIds ?? []).filter(value => !ids.includes(value)) } : row));
+      window.dispatchEvent(new Event("dropx-connect-read"));
+    }).catch(reason => { reading.current = ""; setError(reason.message); });
+  // The key captures precisely the currently rendered notification IDs.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, readOnly, readKey, account.id, account.profileType]);
 
   function startCase(channel: Exclude<Channel, "general">) {
     const setting = settings.find((item) => item.channel === channel);
@@ -301,15 +336,16 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
 
   async function openAnnouncement(item: Announcement) {
     setSelectedAnnouncementId(item.id);
-    if (item.readAt) return;
-    setAnnouncements((current) => current.map((entry) => entry.id === item.id
-      ? { ...entry, readAt: new Date().toISOString() }
-      : entry));
-    await fetch("/api/connect/communication-center", {
+    if (item.readAt || readOnly) return;
+    const response = await fetch("/api/connect/communication-center", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ accountId: account.id, profileType: account.profileType, announcementId: item.id })
-    }).catch(() => undefined);
+    }).catch(() => null);
+    if (response?.ok) {
+      setAnnouncements(current => current.map(entry => entry.id === item.id ? { ...entry, readAt: new Date().toISOString() } : entry));
+      window.dispatchEvent(new Event("dropx-connect-read"));
+    }
   }
 
   if (loading) {
@@ -416,8 +452,8 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
     {error ? <div className="dx-communication-alert error"><AlertTriangle />{error}<button aria-label="Dismiss error" onClick={() => setError("")}><X /></button></div> : null}
     <nav aria-label="Connect sections" className="dx-connect-tabs">
       <button className={section === "updates" ? "active" : ""} onClick={() => setSection("updates")}><Megaphone /><span>Updates</span>{announcements.filter((item) => !item.readAt).length ? <b>{announcements.filter((item) => !item.readAt).length}</b> : null}</button>
-      <button className={section === "hr-help" ? "active" : ""} onClick={() => setSection("hr-help")}><Headphones /><span>{supportLabel}</span></button>
-      <button className={section === "speak-up" ? "active" : ""} onClick={() => setSection("speak-up")}><ShieldCheck /><span>Speak Up</span></button>
+      <button className={section === "hr-help" ? "active" : ""} onClick={() => setSection("hr-help")}><Headphones /><span>{supportLabel}</span>{cases.filter(item => item.channel === "connect").some(item => item.unreadNotificationIds?.length) ? <b>{cases.filter(item => item.channel === "connect").reduce((sum, item) => sum + (item.unreadNotificationIds?.length ?? 0), 0)}</b> : null}</button>
+      <button className={section === "speak-up" ? "active" : ""} onClick={() => setSection("speak-up")}><ShieldCheck /><span>Speak Up</span>{cases.filter(item => item.channel === "integrity").some(item => item.unreadNotificationIds?.length) ? <b>{cases.filter(item => item.channel === "integrity").reduce((sum, item) => sum + (item.unreadNotificationIds?.length ?? 0), 0)}</b> : null}</button>
     </nav>
 
     {section === "updates" ? <div className="dx-announcement-panel"><header><div><span><Megaphone />COMPANY COMMUNICATION</span><h2>Updates</h2><p>Announcements, policies, incentives and rollout plans from DropX.</p></div>{announcements.filter((item) => !item.readAt).length ? <b>{announcements.filter((item) => !item.readAt).length} new</b> : null}</header><div>{announcements.length ? announcements.slice(0, 30).map((item) => <button className={item.readAt ? "read" : "unread"} key={item.id} onClick={() => void openAnnouncement(item)}><i className={item.priority}><Megaphone /></i><span><small>{item.category} · {shortDate(item.published_at)}</small><strong>{item.title}</strong><em>{item.body.slice(0, 120)}{item.body.length > 120 ? "…" : ""}</em>{item.attachments?.length ? <small className="dx-announcement-clip"><Paperclip />{item.attachments.length} attachment{item.attachments.length === 1 ? "" : "s"}</small> : null}</span><ChevronRight /></button>) : <div className="dx-empty-cases"><Megaphone /><strong>You’re all caught up</strong><span>Official updates sent to your team will appear here.</span></div>}</div></div> : <>
@@ -428,7 +464,7 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
       </section>
       {confidential ? <div className="dx-anonymous-promise"><LockKeyhole /><div><strong>Your confidentiality promise</strong><p>Your report uses a case reference in the review workflow. Identity data is kept separately and access is restricted. Verified integrity reports may be considered for a reward under company policy.</p></div></div> : null}
       <div className="dx-my-cases-heading"><div><h2>{confidential ? "My Speak Up cases" : `My ${supportLabel} conversations`}</h2><p>Track progress and reply securely.</p></div><button aria-label="Refresh cases" onClick={() => void load(true)}><RefreshCw /></button></div>
-      <div className="dx-my-cases">{channelCases.length ? channelCases.map((item) => <button key={item.id} onClick={() => setSelectedCaseId(item.id)}><i className={confidential ? "coral" : "violet"}>{confidential ? <ShieldCheck /> : <Headphones />}</i><span><small>{item.case_number} · {item.category}</small><strong>{item.subject}</strong><em>{shortDate(item.last_activity_at)}</em></span><b className={`dx-case-status ${item.status}`}>{statusLabels[item.status] ?? item.status}</b><ChevronRight /></button>) : <div className="dx-empty-cases"><MessageCircleMore /><strong>No conversations yet</strong><span>{confidential ? "Your confidential reports will appear here." : `Start a private conversation whenever you need ${supportLabel} support.`}</span></div>}</div>
+      <div className="dx-my-cases">{channelCases.length ? channelCases.map((item) => <button key={item.id} onClick={() => setSelectedCaseId(item.id)}><i className={confidential ? "coral" : "violet"}>{confidential ? <ShieldCheck /> : <Headphones />}</i><span><small>{item.case_number} · {item.category}</small><strong>{item.subject}</strong><em>{shortDate(item.last_activity_at)}</em>{item.unreadNotificationIds?.length ? <b className="dx-case-new">{item.unreadNotificationIds.length} new update{item.unreadNotificationIds.length === 1 ? "" : "s"}</b> : null}</span><b className={`dx-case-status ${item.status}`}>{statusLabels[item.status] ?? item.status}</b><ChevronRight /></button>) : <div className="dx-empty-cases"><MessageCircleMore /><strong>No conversations yet</strong><span>{confidential ? "Your confidential reports will appear here." : `Start a private conversation whenever you need ${supportLabel} support.`}</span></div>}</div>
     </>}
   </section>;
 }

@@ -1,4 +1,7 @@
 import { randomUUID } from "crypto";
+import { cookies } from "next/headers";
+import { connectPreviewCookieName } from "@/lib/connect-preview-policy";
+import { loadConnectUnread } from "@/lib/connect-unread";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -256,8 +259,9 @@ export async function GET(request: Request) {
     if (reporterResult.error) throw reporterResult.error;
     const caseIds = (reporterResult.data ?? []).map((row) => row.case_id);
     const announcements = await announcementInbox(account);
+    const unread = await loadConnectUnread(supabaseAdmin, account);
     if (!caseIds.length) {
-      return NextResponse.json({ settings: await loadSettings(account.companyId), cases: [], announcements });
+      return NextResponse.json({ settings: await loadSettings(account.companyId), cases: [], announcements, unread });
     }
 
     const [caseResult, messageResult, attachmentResult] = await Promise.all([
@@ -286,8 +290,10 @@ export async function GET(request: Request) {
     return NextResponse.json({
       settings: await loadSettings(account.companyId),
       announcements,
+      unread,
       cases: (caseResult.data ?? []).map((item) => ({
         ...item,
+        unreadNotificationIds: unread.cases[item.id] ?? [],
         messages: messages.filter((message) => message.case_id === item.id),
         attachments: attachments.filter((attachment) => attachment.case_id === item.id)
       }))
@@ -415,6 +421,21 @@ export async function PATCH(request: Request) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const account = await accountFromRequest(request, body);
+    if (cookies().get(connectPreviewCookieName)?.value) return NextResponse.json({ error: "Preview is read-only." }, { status: 403 });
+    if (body.intent === "read_case") {
+      const caseId = String(body.caseId ?? "");
+      if (!await ownsCase(account.companyId, account.profileType, account.id, caseId)) return NextResponse.json({ error: "Case access denied." }, { status: 403 });
+      const ids = Array.isArray(body.notificationIds) ? body.notificationIds.filter((id: unknown) => typeof id === "string").slice(0, 1000) : [];
+      if (ids.length) {
+        // Only IDs rendered to the user: a concurrently arriving reply stays unread.
+        const result = await supabaseAdmin.from("mob_app_notifications").update({ read_at: new Date().toISOString() })
+          .eq("company_id", account.companyId).eq("recipient_profile_type", account.profileType)
+          .eq("recipient_account_id", account.id).eq("event_code", "communication_case_update")
+          .contains("data", { caseId }).in("id", ids).is("read_at", null);
+        if (result.error) throw result.error;
+      }
+      return NextResponse.json({ ok: true });
+    }
     const announcementId = String(body.announcementId ?? "");
     if (announcementId) {
       const result = await supabaseAdmin.from("communication_announcement_recipients")
@@ -436,6 +457,11 @@ export async function PATCH(request: Request) {
           .maybeSingle();
         if (!existing.data) return NextResponse.json({ error: "Announcement access denied." }, { status: 403 });
       }
+      const notices = await supabaseAdmin.from("mob_app_notifications").update({ read_at: new Date().toISOString() })
+        .eq("company_id", account.companyId).eq("recipient_profile_type", account.profileType)
+        .eq("recipient_account_id", account.id).eq("event_code", "communication_announcement")
+        .eq("source_key", announcementId).is("read_at", null);
+      if (notices.error) throw notices.error;
       return NextResponse.json({ ok: true });
     }
 

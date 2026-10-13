@@ -6,6 +6,8 @@ import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { visibleDashboardNotices } from "@/lib/dashboard-notices";
 import { personalizeNotices } from "@/lib/announcement-personalization-data";
+import { hydrateAnnouncementNotices, announcementId } from "@/lib/announcement-notifications";
+import { loadConnectUnread } from "@/lib/connect-unread";
 
 function setupMessage(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? "");
@@ -49,8 +51,8 @@ export async function GET(request: Request) {
       .eq("company_id", account.companyId).eq("recipient_profile_type", account.profileType)
       .eq("recipient_account_id", account.id).is("archived_at", null)
       .contains("data", { showOnDashboard: true })
-      .gt("data->>dashboardUntil", new Date().toISOString())
-      .order("created_at", { ascending: false }).limit(5);
+      .or(`data->>dashboardUntil.is.null,data->>dashboardUntil.gt.${new Date().toISOString()}`)
+      .order("created_at", { ascending: false }).limit(50);
     if (noticesResult.error) throw noticesResult.error;
 
     const rows = result.data ?? [];
@@ -107,11 +109,15 @@ export async function GET(request: Request) {
         .in("id", [...staleIds]);
     }
 
-    const personal = await personalizeNotices(supabaseAdmin, account, [...rows, ...(noticesResult.data ?? [])]);
-    const notifications = personal.slice(0, rows.length).filter((row) => !staleIds.has(row.id));
+    const hydrated = await hydrateAnnouncementNotices(supabaseAdmin, account, [...rows, ...(noticesResult.data ?? [])]);
+    const personal = await personalizeNotices(supabaseAdmin, account, hydrated);
+    const byId = new Map(personal.map(row => [row.id, row]));
+    const notifications = rows.flatMap(row => byId.has(row.id) && !staleIds.has(row.id) ? [byId.get(row.id)!] : []);
+    const connectUnread = await loadConnectUnread(supabaseAdmin, account);
     return NextResponse.json({
       notifications,
-      dashboardNotices: visibleDashboardNotices(personal.slice(rows.length)),
+      connectUnreadCount: connectUnread.total,
+      dashboardNotices: visibleDashboardNotices((noticesResult.data ?? []).flatMap(row => byId.has(row.id) ? [byId.get(row.id)!] : [])),
       unreadCount: notifications.filter((row) => !row.read_at).length
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
@@ -124,6 +130,7 @@ export async function PATCH(request: Request) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const account = await selectedAccount(request, body);
+    if (cookies().get(connectPreviewCookieName)?.value) return NextResponse.json({ error: "Preview is read-only." }, { status: 403 });
     const notificationId = String(body.notificationId ?? "").trim();
     const markAll = body.markAll === true;
     if (!notificationId && !markAll) {
@@ -138,8 +145,19 @@ export async function PATCH(request: Request) {
       .is("archived_at", null)
       .is("read_at", null);
     if (!markAll) query = query.eq("id", notificationId);
-    const result = await query;
+    const result = await query.select("event_code,title,body,data");
     if (result.error) throw result.error;
+    // Mark-all clears the bell, but must not falsely claim the full update was read.
+    if (!markAll) {
+      const ids = (result.data ?? []).map(announcementId).filter((id): id is string => Boolean(id));
+      if (ids.length) {
+        const receipt = await supabaseAdmin.from("communication_announcement_recipients")
+          .update({ read_at: new Date().toISOString() }).eq("company_id", account.companyId)
+          .eq("recipient_profile_type", account.profileType).eq("recipient_account_id", account.id)
+          .in("announcement_id", ids).is("read_at", null);
+        if (receipt.error) throw receipt.error;
+      }
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     return errorResponse(error);
