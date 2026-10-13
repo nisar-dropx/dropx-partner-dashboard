@@ -7,6 +7,7 @@ import {loadCodMailRecipients} from "./cod-pending-mail-scope";
 import {loadCodPendingReport} from "./ops-pulse/cod-pending-data";
 import {loadAdHocMailScope} from "./adhoc-digest-scope";
 import {digestMailAttachments,type DigestAttachment} from "./portal-digest-attachments";
+import {loadIdMappingRecipientScope} from "./id-mapping-digest";
 
 export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:string;state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
 export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>;attachments?:DigestAttachment[]};
@@ -83,11 +84,12 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
    try {
     const manualCod=delivery.event_key==='cod_pending_current';
     const controlEventKey=manualCod?'cod_pending_evening':delivery.event_key;
+    const threadEvents=delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:delivery.event_key.startsWith("id_mapping_")?["id_mapping_morning","id_mapping_afternoon"]:[delivery.event_key];
     const [controlResult,smtpResult,profileResult,threadResult]=await Promise.all([
      db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",controlEventKey).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
      db.from("profiles").select("id").eq("company_id",delivery.company_id).eq("is_active",true).ilike("email",delivery.recipient_email).limit(1),
-     db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:[delivery.event_key]).eq("recipient_email",delivery.recipient_email).eq("report_month",delivery.report_date.slice(0,7)).order("last_sent_at",{ascending:false}).limit(1).maybeSingle()
+     db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",threadEvents).eq("recipient_email",delivery.recipient_email).eq("report_month",delivery.report_date.slice(0,7)).order("last_sent_at",{ascending:false}).limit(1).maybeSingle()
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
@@ -124,6 +126,16 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      const ids=saved.data.scope_summary?.stationIds;
      if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!allowed.has(id)))throw new Error('Recipient performance scope changed; notification held.');
     }
+    if(delivery.event_key.startsWith('id_mapping_')) {
+     if(dueReportDate(controlResult.data as DigestControl)!==delivery.report_date)throw new Error('ID-mapping delivery window ended; held for verification.');
+     const control=controlResult.data as DigestControl;
+     const scope=await loadIdMappingRecipientScope(db,delivery.company_id,String(control.config.email_domain||""),Array.isArray(control.config.additional_recipient_emails)?control.config.additional_recipient_emails.map(String):[]);
+     const recipient=scope.recipients.find(row=>row.email===delivery.recipient_email);
+     const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
+     if(saved.error)throw new Error(saved.error.message);
+     const ids=saved.data.scope_summary?.stationIds;
+     if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!recipient.stationIds.includes(id)))throw new Error('Recipient ID-mapping scope changed; notification held.');
+    }
     if(!digestEnabled(controlResult.data as DigestControl)||!smtpResult.data.is_enabled||!profileResult.data?.length) {
      const skipped=await db.from("portal_digest_deliveries").update({status:"skipped",error:"Notification disabled or recipient no longer active.",completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
      if(skipped.error)throw new Error(skipped.error.message);summary.skipped++;return;
@@ -132,7 +144,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     if(!smtp.smtp_host||!smtp.smtp_from||!smtp.smtp_pass)throw new Error("Company SMTP is incomplete");
     const domain=String((controlResult.data as DigestControl).config.email_domain||"");
     if(!domain||!delivery.recipient_email.endsWith("@"+domain)||/[\r\n<>]/.test(delivery.recipient_email))throw new Error("Recipient is outside configured company email domain");
-    const threadEventKey=manualCod?'cod_pending_evening':delivery.event_key;
+    const threadEventKey=manualCod?'cod_pending_evening':delivery.event_key.startsWith('id_mapping_')?'id_mapping_morning':delivery.event_key;
     const key=digestThreadKey(delivery.company_id,portal,threadEventKey,delivery.recipient_email,month);
     const messageId="<portal-digest-"+key.slice(0,32)+"-"+delivery.report_date+(manualCod?"-manual-"+delivery.id.replace(/[^a-zA-Z0-9]/g,'').slice(0,12):"")+"@"+domain+">";
     const root=thread?.root_message_id||messageId,subject=thread?.subject||delivery.subject;
