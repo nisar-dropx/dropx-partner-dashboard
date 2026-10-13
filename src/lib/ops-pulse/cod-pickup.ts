@@ -15,9 +15,9 @@ export function parsePickupFields(form: FormData) {
   const rule = text('pickup_rule');
   if (!pickupRules.includes(rule as PickupRule)) throw new Error('Select a deposit rule.');
   const start = text('pickup_window_start'), end = text('pickup_window_end');
-  if (!validTime(start) || !validTime(end) || end <= start) throw new Error('Enter a valid pickup window with the end after the start (IST).');
+  if ((start || end) && (!validTime(start) || !validTime(end) || end <= start)) throw new Error('Enter both pickup times with the end after the start (IST), or leave both blank until confirmed.');
   const preparationFrom = text('next_day_preparation_from');
-  if (rule === 'Next Day' && (!validTime(preparationFrom) || preparationFrom < end)) throw new Error('Set the next-day preparation time at or after the pickup window (IST).');
+  if (rule === 'Next Day' && !validTime(preparationFrom)) throw new Error('Set a valid next-day preparation time (IST).');
   const reconDue = text('driver_recon_due_time');
   if (reconDue && !validTime(reconDue)) throw new Error('Enter a valid DA reconciliation closing time (IST).');
   const configurableInteger = (key:string, max:number) => {
@@ -28,13 +28,13 @@ export function parsePickupFields(form: FormData) {
   };
   const alertSettings={...configurableInteger('recon_age_flag_days',365),...configurableInteger('cod_status_max_age_minutes',60)};
   const agency = text('cms_agency');
-  if (!agency || agency.length > 120) throw new Error('Enter a CMS agency (up to 120 characters).');
+  if (agency.length > 120) throw new Error('CMS agency must be up to 120 characters.');
   const name = text('agent_name'), mobile = text('agent_mobile').replace(/[\s()-]/g, '');
   if (name.length > 160 || (mobile && !/^\+?[0-9]{10,15}$/.test(mobile))) throw new Error('Enter a valid agent name and mobile number, or leave the contact fields blank.');
   return { ...alertSettings, cms_agency: agency, agent_name: name, agent_mobile: mobile, pickup_rule: rule as PickupRule,
     ...(form.has('driver_recon_due_time') ? {driver_recon_due_time: reconDue || null} : {}),
-    cod_deposit_day: rule === 'Next Day' ? 'Next Day' : 'Same Day', pickup_time: `${start}–${end}`,
-    pickup_window_start: start, pickup_window_end: end, next_day_preparation_from: rule === 'Next Day' ? preparationFrom : null, pickup_configured: true };
+    cod_deposit_day: rule === 'Next Day' ? 'Next Day' : 'Same Day', pickup_time: start ? `${start}–${end}` : null,
+    pickup_window_start: start || null, pickup_window_end: end || null, next_day_preparation_from: rule === 'Next Day' ? preparationFrom : null, pickup_configured: true };
 }
 /** Optional existing integration controls remain separate from pickup policy. */
 export function parsePickupAdvanced(form: FormData) {
@@ -56,7 +56,7 @@ export function pickupPolicy(row?: { pickup_configured?: boolean; pickup_rule?: 
   if (!row?.pickup_configured || !pickupRules.includes(row.pickup_rule as PickupRule)) return null;
   const start = row.pickup_window_start?.slice(0, 5) || '', end = row.pickup_window_end?.slice(0, 5) || '';
   const from = row.next_day_preparation_from?.slice(0,5) || '';
-  return validTime(start) && validTime(end) && end > start ? { rule: row.pickup_rule as PickupRule, start, end, preparationFrom: validTime(from) && from >= end ? from : null } : null;
+  return validTime(start) && validTime(end) && end > start ? { rule: row.pickup_rule as PickupRule, start, end, preparationFrom: validTime(from) ? from : null } : null;
 }
 /** A schedule expectation, not proof of a shortage or bank settlement. Partial
  * pickup requires a cash-at-cutoff snapshot before an amount can be validated. */

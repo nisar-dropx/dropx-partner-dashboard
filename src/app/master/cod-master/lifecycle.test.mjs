@@ -63,3 +63,12 @@ test('stale edits/deletes and out-of-scope station writes do not change saved ru
  assert.match((await s.act('deleteCodMaster',{id:row.id,updated_at:row.updated_at})).error,/access/);
  assert.deepEqual(row,before);
 });
+
+test('contact edits preserve estimated provenance; changing a window makes it a manual schedule',async()=>{
+ const s=system();await s.act('createCodMaster',basic);const row=s.records.cod_station_settings[0];
+ row.pickup_window_basis='Estimated from remittance updates';
+ await s.act('updateCodMaster',{...basic,id:row.id,updated_at:row.updated_at,agent_name:'CMS agent'});
+ assert.equal(row.pickup_window_basis,'Estimated from remittance updates');
+ await s.act('updateCodMaster',{...basic,id:row.id,updated_at:row.updated_at,pickup_window_end:'19:00'});
+ assert.equal(row.pickup_window_basis,null);
+});

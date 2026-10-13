@@ -28,7 +28,7 @@ export async function createCodMaster(form: FormData) {
     const existing = await supabaseAdmin.from('cod_station_settings').select('id, pickup_configured, updated_at').eq('company_id', companyId).eq('location_id', locationId).maybeSingle();
     if (existing.error) throw new Error('Could not check the existing pickup setup.');
     if (existing.data?.pickup_configured) throw new Error('This station is already configured. Edit its row instead.');
-    const payload = { ...parsePickupFields(form), station_code: station.data.station_code, state: station.data.state,
+    const payload = { ...parsePickupFields(form), pickup_window_basis: null, station_code: station.data.station_code, state: station.data.state,
       updated_by: auth.userId, updated_at: new Date().toISOString() };
     // Restoring a removed pickup never overwrites portal credentials or check settings.
     const result = existing.data
@@ -45,10 +45,12 @@ export async function updateCodMaster(form: FormData) {
   try {
     if (!supabaseAdmin) throw new Error('Database unavailable.');
     const id = text(form,'id');
-    const existing = await supabaseAdmin.from('cod_station_settings').select('location_id, updated_at').eq('company_id', companyId).eq('id', id).eq('pickup_configured', true).maybeSingle();
+    const existing = await supabaseAdmin.from('cod_station_settings').select('location_id, updated_at, pickup_window_start, pickup_window_end').eq('company_id', companyId).eq('id', id).eq('pickup_configured', true).maybeSingle();
     if (existing.error || !existing.data) throw new Error('Pickup setup is unavailable. Reload to see the latest register.');
     assertPickupScope(auth, existing.data.location_id);
-    const result = await supabaseAdmin.from('cod_station_settings').update({...parsePickupFields(form), ...parsePickupAdvanced(form), updated_by: auth.userId, updated_at: new Date().toISOString()})
+    const fields = parsePickupFields(form);
+    const changedWindow = (existing.data.pickup_window_start?.slice(0,5) || null) !== fields.pickup_window_start || (existing.data.pickup_window_end?.slice(0,5) || null) !== fields.pickup_window_end;
+    const result = await supabaseAdmin.from('cod_station_settings').update({...fields, ...parsePickupAdvanced(form), ...(changedWindow ? {pickup_window_basis:null} : {}), updated_by: auth.userId, updated_at: new Date().toISOString()})
       .eq('company_id', companyId).eq('id', id).eq('location_id', existing.data.location_id).eq('pickup_configured', true).eq('updated_at', text(form,'updated_at')).select('id');
     if (result.error) throw new Error('Unable to update pickup setup. Please retry.');
     if (!result.data?.length) throw new Error('Someone changed this setup. Reload before saving again.');
