@@ -14,6 +14,7 @@ import {
 const payoutTable = readFileSync(new URL("../components/workforce-payout-table.tsx", import.meta.url), "utf8");
 const payoutPage = readFileSync(new URL("../app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
 const payoutLoader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
+const payoutPreviewBatching = readFileSync(new URL("./payout-payment-preview-batching.ts", import.meta.url), "utf8");
 
 test("advance selection detects a Workforce member repeated across payout locations", () => {
   const duplicates = duplicateAdvanceWorkforceIds([
@@ -306,7 +307,10 @@ test("published and mapping-unlocked payouts remain available for manual input e
 
 test("selected-month enrichment and high-cardinality loader reads use bounded parallel batches", () => {
   assert.match(payoutPage, /mapWithConcurrency\(chunkedValues\(ids, 100\), 4/);
-  assert.match(payoutPage, /mapWithConcurrency\(chunkedValues\(payoutRows, 250\), 3/);
+  assert.match(payoutPage, /loadPayoutPaymentPreviews<[^>]+>/);
+  assert.match(payoutPreviewBatching, /PAYOUT_PAYMENT_PREVIEW_BATCH_SIZE = 50/);
+  assert.match(payoutPreviewBatching, /PAYOUT_PAYMENT_PREVIEW_CONCURRENCY = 3/);
+  assert.match(payoutPreviewBatching, /loadPreviewBatchWithTimeoutSplit/);
   assert.match(payoutLoader, /mapWithConcurrency\(chunkedValues\(payoutInputWorkforceIds, 100\), 3/);
   assert.match(payoutLoader, /mapWithConcurrency\(jobs, 4/);
 });

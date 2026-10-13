@@ -23,6 +23,7 @@ import {
 } from "@/lib/stable-payout-worksheet";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
+import { loadPayoutPaymentPreviews } from "@/lib/payout-payment-preview-batching";
 import {
   mergeWorkforcePayoutPaymentState,
   workforcePayoutPublicationRefreshPending,
@@ -529,23 +530,24 @@ async function withPayoutPaymentSummaries(
     }
     return { data: pageRows, error: null };
   };
-  const [previewResults, processingResult] = await Promise.all([
-    mapWithConcurrency(chunkedValues(payoutRows, 250), 3, async (payoutChunk) => admin.rpc(audience === "helpers"
-      ? "helper_preview_payout_payment_rows"
-      : "workforce_preview_payout_payment_rows", {
-        p_company_id: companyId,
-        p_period_start: fromDate,
-        p_period_end: toDate,
-        p_rows: payoutChunk
-      })),
+  const [previewResult, processingResult] = await Promise.all([
+    loadPayoutPaymentPreviews<Record<string, unknown>, PaymentPreview, { code?: string; message: string; details?: string; hint?: string }>({
+      rows: payoutRows,
+      loadBatch: async (payoutChunk) => admin.rpc(audience === "helpers"
+        ? "helper_preview_payout_payment_rows"
+        : "workforce_preview_payout_payment_rows", {
+          p_company_id: companyId,
+          p_period_start: fromDate,
+          p_period_end: toDate,
+          p_rows: payoutChunk
+        })
+    }),
     includeProcessingActionDetails
       ? loadProcessingItems()
       : Promise.resolve({ data: [] as ProcessingPaymentItem[], error: null })
   ]);
-  for (const result of previewResults) {
-    if (result.error) return { rows, error: result.error.message };
-    previews.push(...((result.data ?? []) as PaymentPreview[]));
-  }
+  if (previewResult.error) return { rows, error: previewResult.error.message };
+  previews.push(...previewResult.data);
   if (processingResult.error) return { rows, error: processingResult.error.message };
   processingItems.push(...(processingResult.data ?? []));
   const allocationResults = audience === "workforce"
