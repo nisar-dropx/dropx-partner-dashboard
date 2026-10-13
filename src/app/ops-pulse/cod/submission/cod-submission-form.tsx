@@ -6,6 +6,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { createCodSubmission, type CodSubmissionActionState } from "./actions";
 import { CodSubmitPendingOverlay } from "./cod-submit-overlay";
+import { DepositSlipInput } from "./deposit-slip-input";
 import { RemittanceVerifyButton } from "./remittance-verify-button";
 import { useCodFormState } from "./use-cod-form-state";
 
@@ -119,10 +120,10 @@ export function CodSubmissionForm({
             Enter the person&apos;s actual name, not a portal username.
           </span>
         </label>
-        <label className="span-2">Photo of deposit slip
-          <input className="field" name="deposit_slip" type="file" accept="image/*" capture="environment" required />
+        <label className="span-2">Photo or PDF of deposit slip
+          <DepositSlipInput required />
           <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-            Upload a clear photo of the CMS / bank deposit slip (JPG or PNG only — not PDF).
+            Upload a clear photo (JPG or PNG) or the PDF of the CMS / bank deposit slip. A PDF is converted to an image.
           </span>
         </label>
         <label className="span-3">Remarks
