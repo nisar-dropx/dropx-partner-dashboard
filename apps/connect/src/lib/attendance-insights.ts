@@ -271,7 +271,10 @@ export function attendanceDayInsight(
   // A week off or holiday the person actually worked (a complete in/out pair) is
   // present, not a rest day - it is also what earns the comp-off. Previously it
   // kept the grey week-off colour, so a worked 13 Sep looked like a day off.
-  if ((isWeekOffDay || isHolidayDay) && workedFullPunchPair(row)) {
+  // Only a rest day worked for the full hours: short hours on a week off are a
+  // half day, and under half a day it stays the week off (both scored upstream).
+  const workedRestDayInFull = payDayType !== "half_day" && (row.status.toUpperCase() !== "P" || /present|full day/.test(state));
+  if ((isWeekOffDay || isHolidayDay) && workedFullPunchPair(row) && workedRestDayInFull) {
     const restDay = isWeekOffDay ? "week off" : "holiday";
     const workedLabel = `Worked on ${restDay}`;
     return {
@@ -286,10 +289,12 @@ export function attendanceDayInsight(
     };
   }
 
-  if (isWeekOffDay) {
+  if (isWeekOffDay && payDayType !== "half_day") {
     return {
       calendarClass: "week-off",
-      detail: "Weekly off is recorded for this day.",
+      detail: workedFullPunchPair(row)
+        ? "You punched in on your weekly off, but the hours were under half a day. It stays a paid weekly off and does not count as a worked day."
+        : "Weekly off is recorded for this day.",
       headline: /present/.test(state) ? label : "Weekly off",
       issues: [],
       label: /present/.test(state) ? label : "Weekly off",
@@ -388,7 +393,9 @@ export function attendanceDayInsight(
     issues.push({
       code: "half_day",
       label: "Half day",
-      message: "Half-day deduction applies under company HR policy and will be deducted from your upcoming payment.",
+      message: isWeekOffDay
+        ? "You worked on your weekly off for less than a full day, so it counts as a half day under company HR policy."
+        : "Half-day deduction applies under company HR policy and will be deducted from your upcoming payment.",
       tone: "amber"
     });
     return {
