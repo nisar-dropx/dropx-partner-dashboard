@@ -188,6 +188,32 @@ test("one checked T1013 row selects only that location balance", () => {
   });
 });
 
+test("multi-row bank selection keeps each eligible payout identity once", () => {
+  const index = buildWorkforcePayoutBankSelectionIndex(
+    [
+      { id: "worker-a-primary", reviewSubjectId: "worker-a", locationId: "station-a", availableToPay: 1_250 },
+      { id: "worker-a-secondary", reviewSubjectId: "worker-a", locationId: "station-a", availableToPay: 1_250 },
+      { id: "worker-b", reviewSubjectId: "worker-b", locationId: "station-b", availableToPay: 875 },
+      { id: "worker-c-ineligible", reviewSubjectId: "worker-c", locationId: "station-c", availableToPay: 600, eligible: false }
+    ],
+    (row) => row.eligible !== false,
+    (row) => row.availableToPay
+  );
+
+  const selection = resolveWorkforcePayoutBankSelection(
+    index,
+    new Set(["worker-a-primary", "worker-a-secondary", "worker-b", "worker-c-ineligible"])
+  );
+
+  assert.deepEqual(selection, {
+    payoutRows: [
+      { workforceId: "worker-a", stationId: "station-a" },
+      { workforceId: "worker-b", stationId: "station-b" }
+    ],
+    totalAmount: 2_125
+  });
+});
+
 test("pending-publication bank selection keeps preliminary balances per location row", () => {
   const balances = buildWorkforcePayoutPreliminaryBalanceIndex([
     {
@@ -247,6 +273,8 @@ test("payout UI separates one-row advance recovery from complete-location notifi
   assert.doesNotMatch(payoutTable, /bankWorkforceIds[\s\S]{0,400}\.slice\(0,\s*50\)/);
   assert.match(payoutTable, /buildWorkforcePayoutBankSelectionIndex\(\s*rows,\s*\(row\) => bankActionableIds\.has\(row\.id\)/);
   assert.match(payoutTable, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected\s*\)/);
+  assert.match(payoutTable, /const selectedBankUnavailableCount = selectedRows\.length - selectedBankEligibleRowCount/);
+  assert.match(payoutTable, /Eligible rows remain available and are not blocked by the excluded selection/);
   assert.doesNotMatch(payoutTable, /const bankWorkforceIds/);
 });
 

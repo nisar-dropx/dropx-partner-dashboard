@@ -52,6 +52,10 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const allMappingHistory = (mappingsResult.data ?? []) as Mapping[];
   const mappingHistory = allMappingHistory.filter((mapping) => allowed(mapping.station_id));
   const activeMappings = mappingHistory.filter((mapping) => mapping.status === "active" && !mapping.effective_to);
+  const profileStationByWorkforce = new Map((workersResult.data ?? []).map((worker) => [
+    String(worker.id),
+    String(worker.location_id ?? "")
+  ]));
   const mappedSourceMemberKeys = new Set(allMappingHistory.map((mapping) => {
     const stationCode = stationCodeById.get(String(mapping.station_id ?? ""));
     return providerSourceMemberKey(stationCode || "*", mapping.provider_member_id);
@@ -59,7 +63,15 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const mappingByWorkforce = new Map<string, Mapping>();
   const mappingByMember = new Map<string, Mapping>();
   for (const mapping of activeMappings) {
-    if (mapping.workforce_id && !mappingByWorkforce.has(mapping.workforce_id)) mappingByWorkforce.set(mapping.workforce_id, mapping);
+    if (mapping.workforce_id) {
+      const current = mappingByWorkforce.get(mapping.workforce_id);
+      const profileStationId = profileStationByWorkforce.get(mapping.workforce_id) ?? "";
+      if (!current
+        || (String(mapping.station_id ?? "") === profileStationId
+          && String(current.station_id ?? "") !== profileStationId)) {
+        mappingByWorkforce.set(mapping.workforce_id, mapping);
+      }
+    }
     const memberKey = providerMemberKey(String(mapping.station_id ?? ""), String(mapping.provider_member_id ?? ""));
     if (!mappingByMember.has(memberKey)) mappingByMember.set(memberKey, mapping);
   }

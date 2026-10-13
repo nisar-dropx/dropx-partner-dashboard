@@ -14,6 +14,31 @@ const positiveBalanceEligibilityMigration = readFileSync(new URL(
   import.meta.url
 ), "utf8")
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const bankDetailsPresenceOnlyMigration = readFileSync(new URL(
+  "../supabase/migrations/20261012210000_payout_bank_details_presence_only.sql",
+  import.meta.url
+), "utf8");
+const presenceOnlySection = (name) => {
+  const start = `-- verification-section: ${name}:start`;
+  const end = `-- verification-section: ${name}:end`;
+  const startIndex = bankDetailsPresenceOnlyMigration.indexOf(start);
+  const endIndex = bankDetailsPresenceOnlyMigration.indexOf(end);
+  assert.ok(startIndex >= 0 && endIndex > startIndex, `Missing ${name} migration verification section.`);
+  return bankDetailsPresenceOnlyMigration.slice(startIndex + start.length, endIndex);
+};
+const executableHelperBankDetailsPresenceOnlyMigration = [
+  presenceOnlySection("helper-candidate"),
+  presenceOnlySection("helper-snapshot-constraint"),
+  presenceOnlySection("helper-finalizer")
+].join("\n");
+
+assert.match(bankDetailsPresenceOnlyMigration, /beneficiary account and IFSC syntax is delegated to the bank/i);
+assert.match(bankDetailsPresenceOnlyMigration, /nullif\(btrim\(bank_account_no_snapshot\), ''\) is not null/i);
+assert.match(bankDetailsPresenceOnlyMigration, /nullif\(btrim\(ifsc_snapshot\), ''\) is not null/i);
+assert.doesNotMatch(
+  presenceOnlySection("helper-snapshot-constraint"),
+  /bank_account_no_snapshot ~|ifsc_snapshot ~/i
+);
 
 const db = new PGlite();
 await db.exec(`
@@ -718,10 +743,12 @@ await assert.rejects(
 );
 
 await db.exec(positiveBalanceEligibilityMigration);
+await db.exec(executableHelperBankDetailsPresenceOnlyMigration);
 
 // These Helpers deliberately have no review, publication, allocation, or PAN
 // verification. The first is also inactive/pending: a positive live balance
-// plus valid bank-routing details must still be payable.
+// plus nonblank bank-routing details must still be payable even when their
+// syntax does not match the application's former local regexes.
 await db.exec(`
   insert into public.helpers(
     id, company_id, dropx_id, full_name, email, bank_account_no, ifsc_code,
@@ -730,7 +757,7 @@ await db.exec(`
     (
       '10000000-0000-4000-8000-000000000020',
       '10000000-0000-4000-8000-000000000001',
-      'H2001', 'Special Helper', null, '99887766', 'FDRL0000123',
+      'H2001', 'Special Helper', null, '99-887766', 'XX-1',
       'pending', false
     ),
     (
@@ -853,15 +880,20 @@ assert.equal(unrestrictedBatch.rows[0]?.result?.items?.length, 1);
 assert.equal(Number(unrestrictedBatch.rows[0]?.result?.items?.[0]?.instruction_amount), 3600);
 
 const unrestrictedItem = await db.query(`
-  select helper_publication_id, target_snapshot_hash, instruction_amount
+  select id, reference_no, helper_publication_id, target_snapshot_hash,
+    bank_account_no_snapshot, ifsc_snapshot, instruction_amount
   from public.helper_payout_payment_items
   where company_id = '10000000-0000-4000-8000-000000000001'
     and helper_id = '10000000-0000-4000-8000-000000000020'
     and period_start = '2026-11-01'
 `);
 assert.deepEqual(unrestrictedItem.rows, [{
+  id: unrestrictedItem.rows[0].id,
+  reference_no: unrestrictedItem.rows[0].reference_no,
   helper_publication_id: null,
   target_snapshot_hash: "c".repeat(64),
+  bank_account_no_snapshot: "99-887766",
+  ifsc_snapshot: "XX-1",
   instruction_amount: "3600.00"
 }]);
 
@@ -884,6 +916,58 @@ assert.equal(processingPreview.rows[0]?.payment_status, "Payment Processing");
 assert.equal(Number(processingPreview.rows[0]?.processing_amount), 3600);
 assert.equal(Number(processingPreview.rows[0]?.balance_payable), 3600);
 assert.equal(Number(processingPreview.rows[0]?.available_to_pay), 0);
+
+const mismatchedBeneficiaryFinalization = await db.query(`
+  select public.helper_finalize_payout_payment_response(
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000025',
+    repeat('a', 64), 'helper-mismatched-bank-response.xlsx',
+    jsonb_build_array(jsonb_build_object(
+      'row_number', 2,
+      'reference_no', $1::text,
+      'credit_account', 'DIFFERENT-ACCOUNT',
+      'ifsc', 'XX-1',
+      'debit_amount_paise', '360000',
+      'status', 'PAID',
+      'utr_cin', 'HELPERUTR-MISMATCH',
+      'remarks', 'Wrong beneficiary'
+    ))
+  ) result
+`, [unrestrictedItem.rows[0].reference_no]);
+assert.equal(mismatchedBeneficiaryFinalization.rows[0]?.result?.rejected, 1,
+  "a nonblank response value must still exactly match the immutable Helper account snapshot");
+assert.equal(mismatchedBeneficiaryFinalization.rows[0]?.result?.paid, 0);
+
+const nonstandardBeneficiaryFinalization = await db.query(`
+  select public.helper_finalize_payout_payment_response(
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000026',
+    repeat('b', 64), 'helper-nonstandard-bank-response.xlsx',
+    jsonb_build_array(jsonb_build_object(
+      'row_number', 2,
+      'reference_no', $1::text,
+      'credit_account', '99-887766',
+      'ifsc', 'XX-1',
+      'debit_amount_paise', '360000',
+      'status', 'PAID',
+      'utr_cin', 'HELPERUTR1',
+      'remarks', 'Processed'
+    ))
+  ) result
+`, [unrestrictedItem.rows[0].reference_no]);
+assert.equal(nonstandardBeneficiaryFinalization.rows[0]?.result?.paid, 1,
+  "an exact nonblank account/IFSC response must finalize without local syntax validation");
+const finalizedNonstandardItem = await db.query(
+  "select status,bank_account_no_snapshot,ifsc_snapshot from public.helper_payout_payment_items where id=$1",
+  [unrestrictedItem.rows[0].id]
+);
+assert.deepEqual(finalizedNonstandardItem.rows, [{
+  status: "paid",
+  bank_account_no_snapshot: "99-887766",
+  ifsc_snapshot: "XX-1"
+}]);
 
 const publicationColumn = await db.query(`
   select is_nullable

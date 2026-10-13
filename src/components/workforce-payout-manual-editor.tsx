@@ -12,6 +12,7 @@ import {
   createWorkforcePayoutManualLines,
   normalizeWorkforcePayoutManualLineType,
   validateWorkforcePayoutManualLines,
+  workforcePayoutManualAttendancePeriod,
   workforcePayoutManualSelectionKey,
   type WorkforcePayoutManualAction,
   type WorkforcePayoutManualCatalog,
@@ -219,13 +220,18 @@ export function WorkforcePayoutManualEditor({
   function changeSelection(lineId: string, selectionKey: string) {
     const selection = selectionByKey.get(selectionKey);
     if (!selection) return;
-    replaceLine(lineId, (line) => ({
-      ...line,
-      selectionKey,
-      dropxId: selection.dropxId,
-      name: selection.name,
-      location: selection.location === "-" ? "" : selection.location
-    }));
+    replaceLine(lineId, (line) => {
+      const attendancePeriod = workforcePayoutManualAttendancePeriod(selection, fromDate, toDate);
+      return {
+        ...line,
+        selectionKey,
+        dropxId: selection.dropxId,
+        name: selection.name,
+        location: selection.location === "-" ? "" : selection.location,
+        effectiveDate: line.inputType === "ATTENDANCE" ? attendancePeriod.effectiveDate : line.effectiveDate,
+        effectiveTo: line.inputType === "ATTENDANCE" ? attendancePeriod.effectiveTo : line.effectiveTo
+      };
+    });
   }
 
   function changeAction(lineId: string, action: WorkforcePayoutManualAction) {
@@ -233,7 +239,13 @@ export function WorkforcePayoutManualEditor({
   }
 
   function changeType(lineId: string, inputType: WorkforcePayoutManualInputType | "") {
-    replaceLine(lineId, (line) => normalizeWorkforcePayoutManualLineType(line, inputType, fromDate, toDate));
+    replaceLine(lineId, (line) => normalizeWorkforcePayoutManualLineType(
+      line,
+      inputType,
+      fromDate,
+      toDate,
+      selectionByKey.get(line.selectionKey)
+    ));
   }
 
   function changeDate(lineId: string, key: "effectiveDate" | "effectiveTo", value: string) {
@@ -594,7 +606,12 @@ export function WorkforcePayoutManualEditor({
                   <ul>{(preview?.issues ?? []).filter((issue) => !issue.rowNumber).map((issue, index) => <li key={index}>{issue.message}</li>)}</ul>
                 </div>
               ) : null}
-              {preview?.message ? <div className="compensation-import-message success"><strong>Changes applied</strong><span>{preview.message}</span></div> : null}
+              {preview?.message ? (
+                <div className="compensation-import-message success">
+                  <strong>{preview.importId ? "Changes applied" : "Preview complete"}</strong>
+                  <span>{preview.message}</span>
+                </div>
+              ) : null}
               {(preview?.warnings ?? []).length ? (
                 <div className="workforce-payout-manual-warnings" role="status">
                   <strong>Applied with {preview?.warnings?.length} warning{preview?.warnings?.length === 1 ? "" : "s"}</strong>

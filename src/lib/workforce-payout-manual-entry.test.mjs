@@ -43,6 +43,43 @@ test("changing to a period-only type locks dates to the complete payout period",
   assert.equal(normalized.fieldCode, "");
 });
 
+test("attendance defaults to the selected payout allocation range instead of an uncovered full month", () => {
+  const selection = {
+    ...selections[0],
+    attendanceFrom: "2026-09-02",
+    attendanceTo: "2026-09-30"
+  };
+  const source = createWorkforcePayoutManualLines([selection], "2026-09-01", "2026-09-30")[0];
+  const normalized = normalizeWorkforcePayoutManualLineType(
+    source,
+    "ATTENDANCE",
+    "2026-09-01",
+    "2026-09-30",
+    selection
+  );
+
+  assert.equal(normalized.effectiveDate, "2026-09-02");
+  assert.equal(normalized.effectiveTo, "2026-09-30");
+});
+
+test("apply to all clamps attendance dates to each payout allocation", () => {
+  const boundedSelections = [
+    { ...selections[0], attendanceFrom: "2026-09-01", attendanceTo: "2026-09-30" },
+    { ...selections[1], attendanceFrom: "2026-09-10", attendanceTo: "2026-09-25" }
+  ];
+  const starters = createWorkforcePayoutManualLines(boundedSelections, "2026-09-01", "2026-09-30");
+  starters[0] = completedLine({
+    inputType: "ATTENDANCE",
+    fieldCode: "WORK_DAYS",
+    value: "20"
+  });
+  const filled = applyWorkforcePayoutManualLineToAll(starters, starters[0].id, boundedSelections);
+  const copied = filled.find((line) => line.dropxId === "DX-002");
+
+  assert.equal(copied.effectiveDate, "2026-09-10");
+  assert.equal(copied.effectiveTo, "2026-09-25");
+});
+
 test("apply to all fills each selected payout while retaining its identity and location", () => {
   const starters = createWorkforcePayoutManualLines(selections, "2026-09-01", "2026-09-30");
   starters[0] = completedLine();

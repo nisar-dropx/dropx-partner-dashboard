@@ -6,8 +6,11 @@ import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
+  isValidWorkforceBankReference,
+  normalizeWorkforceBankReference,
   parsePreparedDropxFedOneResponse,
   prepareDropxFedOneResponse,
+  type LegacyDropxFedOneReferenceCandidate,
   type WorkforceFedOneResponseRow
 } from "@/lib/workforce-payout-bank-file";
 
@@ -53,8 +56,10 @@ function normalizedRows(rows: WorkforceFedOneResponseRow[]) {
   return rows.map((row) => ({
     row_number: row.rowNumber,
     reference_no: row.referenceNo,
+    debit_account: row.debitAccount ?? "",
     credit_account: row.creditAccount,
     ifsc: row.ifsc,
+    value_date: row.valueDate ?? "",
     debit_amount_paise: row.debitAmountPaise,
     status: row.status === "CANCELED" ? "CANCELLED" : row.status,
     utr_cin: row.utrCin,
@@ -84,13 +89,89 @@ async function loadOwnedPaymentReferences(companyId: string, candidates: string[
   return new Set(results.flat());
 }
 
+type LegacyReferenceResolution = {
+  audience?: unknown;
+  message?: unknown;
+  reference_no?: unknown;
+  resolution_state?: unknown;
+  row_number?: unknown;
+};
+
+async function resolveLegacyPaymentReferences(
+  companyId: string,
+  candidates: LegacyDropxFedOneReferenceCandidate[]
+) {
+  const aliases = new Map<number, string>();
+  if (!candidates.length) return aliases;
+  const database = supabaseAdmin;
+  if (!database) throw new Error("Database configuration is unavailable.");
+
+  const resolved = await database.rpc("resolve_owned_payout_legacy_response_references", {
+    p_company_id: companyId,
+    p_rows: candidates.map((candidate) => ({
+      amount_error: candidate.amountError ?? "",
+      credit_account: candidate.creditAccount,
+      debit_amount_paise: candidate.debitAmountPaise,
+      dropx_id: candidate.dropxId,
+      ifsc: candidate.ifsc,
+      row_number: candidate.rowNumber,
+      status: candidate.status,
+      utr_cin: candidate.utrCin
+    }))
+  });
+  if (resolved.error) {
+    throw new Error(`Unable to safely resolve bare DropX payment references: ${resolved.error.message}`);
+  }
+
+  const byRow = new Map<number, LegacyReferenceResolution>();
+  for (const raw of Array.isArray(resolved.data) ? resolved.data as LegacyReferenceResolution[] : []) {
+    const rowNumber = Number(raw.row_number);
+    if (!Number.isSafeInteger(rowNumber) || rowNumber <= 0 || byRow.has(rowNumber)) {
+      throw new Error("The bare DropX payment reference resolver returned invalid or duplicate row evidence.");
+    }
+    byRow.set(rowNumber, raw);
+  }
+
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    const resolution = byRow.get(candidate.rowNumber);
+    if (!resolution) {
+      errors.push(`Row ${candidate.rowNumber}: no ownership resolution was returned for bare DropX ID “${candidate.dropxId}”.`);
+      continue;
+    }
+    const state = String(resolution.resolution_state ?? "").trim().toLowerCase();
+    if (state === "unrelated") continue;
+    if (state === "error") {
+      errors.push(String(resolution.message ?? `Row ${candidate.rowNumber}: the bare DropX payment reference is ambiguous.`));
+      continue;
+    }
+    const referenceNo = normalizeWorkforceBankReference(resolution.reference_no);
+    const audience = String(resolution.audience ?? "").trim().toLowerCase();
+    const expectedPrefix = audience === "helpers" ? "HP" : audience === "workforce" ? "WF" : null;
+    if (!expectedPrefix || !isValidWorkforceBankReference(referenceNo, expectedPrefix)) {
+      errors.push(`Row ${candidate.rowNumber}: the bare DropX resolver returned an invalid canonical payment reference.`);
+      continue;
+    }
+    aliases.set(candidate.rowNumber, referenceNo);
+  }
+
+  if (errors.length) {
+    const shown = errors.slice(0, 25);
+    if (errors.length > shown.length) shown.push(`${errors.length - shown.length} more issue(s) were found.`);
+    throw new Error(`The bank response file cannot be processed:\n${shown.map((error) => `- ${error}`).join("\n")}`);
+  }
+  return aliases;
+}
+
 export async function POST(request: Request) {
   try {
     if (!sameOrigin(request)) return errorResponse("Invalid request origin.", 403);
     const authorization = await getAuthorization();
     if (!authorization) return errorResponse("Sign in to finalize Workforce payments.", 401);
-    const payoutPageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
-    if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !hasPermission(authorization, "payment_process", "edit")) {
+    const accessSurface = currentAdminAccessSurface();
+    const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+    const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
+    if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
       return errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403);
     }
     if (!authorization.hasAllLocationAccess) return errorResponse("Workforce bank finalization requires all-location access.", 403);
@@ -118,10 +199,19 @@ export async function POST(request: Request) {
       return errorResponse(`The bank response can contain at most ${MAX_RESPONSE_ROWS} data rows.`, 400);
     }
     const candidates = prepared.referenceCandidates;
-    if (candidates.length > MAX_REFERENCE_CANDIDATES) {
+    const legacyCandidates = prepared.legacyReferenceCandidates;
+    if (candidates.length + legacyCandidates.length > MAX_REFERENCE_CANDIDATES) {
       return errorResponse(`The bank response can contain at most ${MAX_REFERENCE_CANDIDATES} distinct DropX-looking references.`, 400);
     }
-    const ownedReferences = await loadOwnedPaymentReferences(companyId, candidates);
+    const rowReferenceAliases = await resolveLegacyPaymentReferences(companyId, legacyCandidates);
+    const ownedReferences = await loadOwnedPaymentReferences(companyId, [
+      ...new Set([...candidates, ...rowReferenceAliases.values()])
+    ]);
+    for (const [rowNumber, referenceNo] of rowReferenceAliases) {
+      if (!ownedReferences.has(referenceNo)) {
+        throw new Error(`The bank response file cannot be processed:\n- Row ${rowNumber}: the resolved payment reference no longer belongs to this company.`);
+      }
+    }
     if (!ownedReferences.size) {
       return Response.json({
         paid: 0,
@@ -132,7 +222,7 @@ export async function POST(request: Request) {
         skipped: responseRowCount
       }, { headers: noStore });
     }
-    const parsed = parsePreparedDropxFedOneResponse(prepared, ownedReferences);
+    const parsed = parsePreparedDropxFedOneResponse(prepared, ownedReferences, rowReferenceAliases);
     if (parsed.workforceRows.length + parsed.helperRows.length > MAX_RESPONSE_ROWS) {
       return errorResponse(`The bank response can contain at most ${MAX_RESPONSE_ROWS} DropX payment rows.`, 400);
     }

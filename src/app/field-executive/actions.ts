@@ -1152,11 +1152,13 @@ export async function bulkImportFieldExecutives(formData: FormData) {
       const designation = designations.get(row.designationCode);
       if (!locationId) throw new Error(`Row ${rowNumber}: Location ${row.locationCode} not found.`);
       if (!designation) throw new Error(`Row ${rowNumber}: Designation code ${row.designationCode} not found.`);
-      await assertDesignationRegister({
-        companyId,
-        designationId: designation.id,
-        expectedTables: [targetRegisterForWorkforceRoute(returnPath)]
-      });
+      if (table !== "helpers") {
+        await assertDesignationRegister({
+          companyId,
+          designationId: designation.id,
+          expectedTables: [targetRegisterForWorkforceRoute(returnPath)]
+        });
+      }
       requireDesignationOnboardingAccess(designation, authorization);
       const accessSurface = currentAccessSurface();
       requireDesignationPortalAccess(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });

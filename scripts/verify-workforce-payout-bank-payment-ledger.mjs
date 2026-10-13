@@ -39,6 +39,18 @@ const partialPaymentStatusMigrationUrl = new URL(
   "../supabase/migrations/20261010180000_workforce_payout_partial_payment_status.sql",
   import.meta.url
 );
+const bulkPaymentHoldsMigrationUrl = new URL(
+  "../supabase/migrations/20261012120000_workforce_payout_bulk_payment_holds.sql",
+  import.meta.url
+);
+const sourcePaymentHoldsMigrationUrl = new URL(
+  "../supabase/migrations/20261012160000_workforce_payout_source_identity_holds.sql",
+  import.meta.url
+);
+const bankDetailsPresenceOnlyMigrationUrl = new URL(
+  "../supabase/migrations/20261012210000_payout_bank_details_presence_only.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
 const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
@@ -48,6 +60,24 @@ const rowSelectionMigration = readFileSync(rowSelectionMigrationUrl, "utf8");
 const bulkCancellationMigration = readFileSync(bulkCancellationMigrationUrl, "utf8");
 const processingRedownloadMigration = readFileSync(processingRedownloadMigrationUrl, "utf8");
 const partialPaymentStatusMigration = readFileSync(partialPaymentStatusMigrationUrl, "utf8");
+const bulkPaymentHoldsMigration = readFileSync(bulkPaymentHoldsMigrationUrl, "utf8");
+const sourcePaymentHoldsMigration = readFileSync(sourcePaymentHoldsMigrationUrl, "utf8");
+const bankDetailsPresenceOnlyMigration = readFileSync(bankDetailsPresenceOnlyMigrationUrl, "utf8");
+const presenceOnlySection = (name) => {
+  const start = `-- verification-section: ${name}:start`;
+  const end = `-- verification-section: ${name}:end`;
+  const startIndex = bankDetailsPresenceOnlyMigration.indexOf(start);
+  const endIndex = bankDetailsPresenceOnlyMigration.indexOf(end);
+  assert.ok(startIndex >= 0 && endIndex > startIndex, `Missing ${name} migration verification section.`);
+  return bankDetailsPresenceOnlyMigration.slice(startIndex + start.length, endIndex);
+};
+const executableWorkforceProfileBankDetailsPresenceOnlyMigration = [
+  presenceOnlySection("workforce-profile-candidate"),
+  presenceOnlySection("workforce-snapshot-constraint"),
+  presenceOnlySection("workforce-finalizer")
+].join("\n");
+const executableWorkforceRowBankDetailsPresenceOnlyMigration =
+  presenceOnlySection("workforce-row-candidate");
 const executablePublishedSnapshotFreshnessMigration = publishedSnapshotFreshnessMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableLifecycleMigration = lifecycleMigration
@@ -61,6 +91,10 @@ const executableBulkCancellationMigration = bulkCancellationMigration
 const executableProcessingRedownloadMigration = processingRedownloadMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executablePartialPaymentStatusMigration = partialPaymentStatusMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableBulkPaymentHoldsMigration = bulkPaymentHoldsMigration
+  .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
+const executableSourcePaymentHoldsMigration = sourcePaymentHoldsMigration
   .replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, "");
 const executableMigration = [migration, compatibilityMigration, publishedSnapshotFreshnessMigration]
   .map((sql) => sql.replace(/notify\s+pgrst\s*,\s*'reload schema'\s*;/gi, ""))
@@ -132,6 +166,25 @@ assert.match(processingRedownloadMigration, /allocation_check\.allocated_amount 
 assert.match(processingRedownloadMigration, /to service_role/i);
 assert.match(partialPaymentStatusMigration, /v_paid > 0 and balance_payable > 0 then ''Partially Paid''/i);
 assert.match(partialPaymentStatusMigration, /workforce_payout_payment_row_candidates/i);
+assert.match(bankDetailsPresenceOnlyMigration, /beneficiary account and IFSC syntax is delegated to the bank/i);
+assert.match(bankDetailsPresenceOnlyMigration, /nullif\(btrim\(bank_account_no_snapshot\), ''\) is not null/i);
+assert.match(bankDetailsPresenceOnlyMigration, /nullif\(btrim\(ifsc_snapshot\), ''\) is not null/i);
+assert.match(bankDetailsPresenceOnlyMigration, /v_account = ''[\s\S]*?v_ifsc = ''[\s\S]*?v_account <> public\.workforce_payout_bank_account_canonical/i);
+assert.doesNotMatch(
+  presenceOnlySection("workforce-snapshot-constraint"),
+  /bank_account_no_snapshot ~|ifsc_snapshot ~/i
+);
+assert.match(bulkPaymentHoldsMigration, /create table public\.workforce_payout_payment_hold_operations/i);
+assert.match(bulkPaymentHoldsMigration, /create or replace function public\.workforce_set_payout_payment_holds/i);
+assert.match(bulkPaymentHoldsMigration, /array_agg\(selected\.workforce_id order by selected\.workforce_id\)/i);
+assert.match(bulkPaymentHoldsMigration, /order by workforce\.id[\s\S]*?for update/i);
+assert.match(bulkPaymentHoldsMigration, /perform public\.lock_workforce_payment_allocation_company\(p_company_id\)/i);
+assert.match(bulkPaymentHoldsMigration, /item\.status = 'processing'[\s\S]*?No holds were changed/i);
+assert.match(bulkPaymentHoldsMigration, /selected_workforce_ids <> v_ids/i);
+assert.match(bulkPaymentHoldsMigration, /bulk_operation_id[\s\S]*?deferrable initially deferred/i);
+assert.match(bulkPaymentHoldsMigration, /eligibility_code := ''payment_on_hold''/i);
+assert.match(bulkPaymentHoldsMigration, /v_new text := '''On Hold'''/i);
+assert.doesNotMatch(bulkPaymentHoldsMigration, /cardinality\(p_workforce_ids\)\s*>/i);
 assert.doesNotMatch(
   processingRedownloadMigration,
   /\b(update|insert into|delete from)\s+public\.workforce_payout_payment_/i
@@ -292,6 +345,9 @@ const unmarkedPublication = id(13);
 const mappingRelock = id(14);
 const legacyPublication = id(35);
 const refreshJob = id(36);
+const sourceHoldProvider = id(37);
+const sourceHoldWorkforce = id(38);
+const sourceHoldBatch = id(39);
 const periodStart = "2026-09-01";
 const periodEnd = "2026-09-30";
 const dependencyHash = "dependency-september-2026";
@@ -317,6 +373,13 @@ await db.exec(`
     id uuid primary key,
     company_id uuid not null,
     station_code text not null,
+    unique(company_id,id)
+  );
+  create table public.providers(
+    id uuid primary key,
+    company_id uuid not null,
+    code text,
+    name text not null,
     unique(company_id,id)
   );
   create table public.workforce(
@@ -450,6 +513,9 @@ await db.exec(`
     field_executive_id uuid,
     employee_id uuid,
     contractor_id uuid,
+    provider_id uuid,
+    station_id uuid,
+    provider_member_id text,
     effective_from date not null,
     effective_to date,
     status text not null,
@@ -528,6 +594,7 @@ await db.exec(`
 await db.exec(executableMigration);
 await db.exec(executablePublishedSnapshotFreshnessMigration);
 await db.exec(executableLifecycleMigration);
+await db.exec(executableWorkforceProfileBankDetailsPresenceOnlyMigration);
 
 const installedCandidateDefinition = await db.query(`
   select pg_get_functiondef(
@@ -857,19 +924,25 @@ await assert.rejects(
 await assertNoIdentifierFailureLock(id(41));
 await db.query("update public.payment_banks set ifsc=' fdrl 0000001 ' where id=$1", [bank]);
 
-await db.query("update public.workforce set bank_account_no='1234-567890' where id=$1", [workforce]);
-await assert.rejects(
-  createBatch({ operation: id(42), fingerprint: "6".repeat(64) }),
-  /Bank account for Workforce ID D111 must contain 4 to 30 letters or digits/i
+await db.query(
+  "update public.workforce set bank_account_no=' ',ifsc_code='FDRL1000002' where id=$1",
+  [workforce]
 );
-await assertNoIdentifierFailureLock(id(42));
-await db.query("update public.workforce set bank_account_no=' 1234 567890 ',ifsc_code='FDRL1000002' where id=$1", [workforce]);
-await assert.rejects(
-  createBatch({ operation: id(43), fingerprint: "7".repeat(64) }),
-  /IFSC for Workforce ID D111 must use the standard 11-character format/i
+const missingBeneficiaryPreview = await preview();
+assert.equal(missingBeneficiaryPreview.eligible, false,
+  "blank beneficiary bank values must remain ineligible");
+assert.equal(missingBeneficiaryPreview.eligibility_code, "beneficiary_bank_details_missing");
+assert.equal(Number(missingBeneficiaryPreview.available_to_pay), 11836,
+  "the beneficiary presence gate must not alter the underlying payable balance");
+
+await db.query(
+  "update public.workforce set bank_account_no='1234-567890',ifsc_code='FDRL1000002' where id=$1",
+  [workforce]
 );
-await assertNoIdentifierFailureLock(id(43));
-await db.query("update public.workforce set ifsc_code=' fdrl 0000002 ' where id=$1", [workforce]);
+const nonstandardBeneficiaryPreview = await preview();
+assert.equal(nonstandardBeneficiaryPreview.eligible, true,
+  "nonblank beneficiary account and IFSC values must not be rejected by local syntax rules");
+assert.equal(nonstandardBeneficiaryPreview.eligibility_code, "eligible");
 await db.query("update public.workforce set dropx_id='---' where id=$1", [workforce]);
 await assert.rejects(
   createBatch({ operation: id(44), fingerprint: "8".repeat(64) }),
@@ -916,8 +989,8 @@ assert.equal(Number((await db.query(
 "a rejected processing edit leaves no partial source row");
 assert.equal(first.items[0].credit_remarks, "NLRF");
 assert.equal(first.items[0].debit_account_no, "0011223344");
-assert.equal(first.items[0].bank_account_no, "1234567890");
-assert.equal(first.items[0].ifsc, "FDRL0000002");
+assert.equal(first.items[0].bank_account_no, "1234-567890");
+assert.equal(first.items[0].ifsc, "FDRL1000002");
 const processingPreview = await preview();
 assert.equal(processingPreview.eligible, false);
 assert.equal(processingPreview.eligibility_code, "payment_processing");
@@ -978,12 +1051,22 @@ await assert.rejects(
   /Payment Processing is active/i
 );
 
-const finalize = async ({ operation, hash, referenceNo, amountPaise, status, utrCin = "", remarks = "" }) => {
+const finalize = async ({
+  operation,
+  hash,
+  referenceNo,
+  amountPaise,
+  status,
+  utrCin = "",
+  remarks = "",
+  creditAccount = "1234-567890",
+  ifsc = "FDRL1000002"
+}) => {
   const rows = [{
     row_number: 2,
     reference_no: referenceNo,
-    credit_account: "1234567890",
-    ifsc: "FDRL0000002",
+    credit_account: creditAccount,
+    ifsc,
     debit_amount_paise: amountPaise,
     status,
     utr_cin: utrCin,
@@ -1006,6 +1089,20 @@ const transitionPayment = async ({ operation, paymentItemId, outcome, remarks })
   );
   return result.rows[0].result;
 };
+const mismatchedBeneficiary = await finalize({
+  operation: id(45),
+  hash: "e".repeat(64),
+  referenceNo: "WPD111092026V1",
+  amountPaise: 1183600,
+  status: "PAID",
+  utrCin: "UTR-MISMATCH",
+  remarks: "WRONG BENEFICIARY",
+  creditAccount: "DIFFERENT-ACCOUNT"
+});
+assert.equal(mismatchedBeneficiary.rejected, 1,
+  "a nonblank response value must still exactly match the immutable account snapshot");
+assert.equal(mismatchedBeneficiary.paid, 0);
+
 const paid = await finalize({
   operation: id(21),
   hash: "b".repeat(64),
@@ -1427,6 +1524,270 @@ await db.exec(executableRowSelectionMigration);
 await db.exec(executableBulkCancellationMigration);
 await db.exec(executableProcessingRedownloadMigration);
 await db.exec(executablePartialPaymentStatusMigration);
+await db.exec(executableBulkPaymentHoldsMigration);
+await db.exec(executableSourcePaymentHoldsMigration);
+await db.exec(executableWorkforceRowBankDetailsPresenceOnlyMigration);
+
+const installedProfileHoldStatus = await db.query(`
+  select pg_get_functiondef(
+    'public.workforce_payout_payment_candidates(uuid,date,date,uuid[])'::regprocedure
+  ) definition
+`);
+const installedRowHoldStatus = await db.query(`
+  select pg_get_functiondef(
+    'public.workforce_payout_payment_row_candidates(uuid,date,date,jsonb)'::regprocedure
+  ) definition
+`);
+for (const definition of [
+  installedProfileHoldStatus.rows[0].definition,
+  installedRowHoldStatus.rows[0].definition
+]) {
+  assert.match(definition, /payment_status := 'On Hold'/i);
+  assert.match(definition, /eligibility_code := 'payment_on_hold'/i);
+  assert.doesNotMatch(definition, /Payment On Hold/i);
+}
+
+const sourceTarget = [{
+  station_id: station,
+  provider_identity: "EDSP",
+  provider_member_id: " RAW-42 "
+}];
+await db.query(
+  `insert into public.providers(id,company_id,code,name)
+   values ($1,$2,'EDSP','Amazon')`,
+  [sourceHoldProvider, company]
+);
+await db.query(
+  `insert into public.workforce(
+    id,company_id,dropx_id,full_name,email,location_id,bank_account_no,ifsc_code
+   ) values ($1,$2,'SRC1','Source Hold Worker','source-hold@example.com',$3,
+    '6677889900','FDRL0000004')`,
+  [sourceHoldWorkforce, company, station]
+);
+const sourceHoldBeforeMapping = await db.query(
+  `select public.workforce_set_payout_combined_payment_holds(
+    $1,$2,$3,array[$4::uuid],$5::jsonb,$6::date,$7::date,true,$8
+  ) result`,
+  [company, actor, id(905), sourceHoldWorkforce, JSON.stringify(sourceTarget),
+    periodStart, periodEnd,
+    "Hold report-only provider debit before mapping"]
+);
+assert.equal(sourceHoldBeforeMapping.rows[0].result.changed, 2);
+assert.equal(sourceHoldBeforeMapping.rows[0].result.processed, 2);
+assert.equal(sourceHoldBeforeMapping.rows[0].result.on_hold, true);
+
+const canonicalCombinedReplay = await db.query(
+  `select public.workforce_set_payout_combined_payment_holds(
+    $1,$2,$3,array[$4::uuid,$4::uuid],$5::jsonb,$6::date,$7::date,true,$8
+  ) result`,
+  [company, actor, id(905), sourceHoldWorkforce, JSON.stringify([
+    {
+      station_id: station,
+      provider_identity: "ed-sp",
+      provider_member_id: "raw 42"
+    },
+    {
+      station_id: station,
+      provider_identity: "EDSP",
+      provider_member_id: "RAW-42"
+    }
+  ]), periodStart, periodEnd, "Hold report-only provider debit before mapping"]
+);
+assert.equal(canonicalCombinedReplay.rows[0].result.replayed, true,
+  "selection order, formatting and duplicates must canonicalize to the exact original envelope");
+assert.equal(canonicalCombinedReplay.rows[0].result.changed, 2);
+assert.equal(canonicalCombinedReplay.rows[0].result.processed, 2);
+
+const changedCombinedEnvelopeCalls = [
+  {
+    name: "profile-only retry",
+    workforceIds: [sourceHoldWorkforce],
+    sources: [],
+    remarks: "Hold report-only provider debit before mapping"
+  },
+  {
+    name: "source-only retry",
+    workforceIds: [],
+    sources: sourceTarget,
+    remarks: "Hold report-only provider debit before mapping"
+  },
+  {
+    name: "changed profile retry",
+    workforceIds: [workforce],
+    sources: sourceTarget,
+    remarks: "Hold report-only provider debit before mapping"
+  },
+  {
+    name: "changed source retry",
+    workforceIds: [sourceHoldWorkforce],
+    sources: [{
+      station_id: station,
+      provider_identity: "EDSP",
+      provider_member_id: "RAW-43"
+    }],
+    remarks: "Hold report-only provider debit before mapping"
+  },
+  {
+    name: "changed remark retry",
+    workforceIds: [sourceHoldWorkforce],
+    sources: sourceTarget,
+    remarks: "Different combined hold request"
+  }
+];
+for (const retry of changedCombinedEnvelopeCalls) {
+  await assert.rejects(
+    db.query(
+      `select public.workforce_set_payout_combined_payment_holds(
+        $1,$2,$3,$4::uuid[],$5::jsonb,$6::date,$7::date,true,$8
+      )`,
+      [company, actor, id(905), retry.workforceIds, JSON.stringify(retry.sources),
+        periodStart, periodEnd, retry.remarks]
+    ),
+    /combined payment hold operation ID was already used for a different request/i,
+    retry.name
+  );
+}
+
+const combinedEnvelopeAudit = await db.query(
+  `select actor_user_id,period_start,period_end,action,remarks,
+      selected_workforce_ids,selected_source_identities,result,
+      (select count(*)::int
+       from public.workforce_payout_payment_hold_operations profile_operation
+       where profile_operation.company_id=combined_operation.company_id
+         and profile_operation.operation_id=combined_operation.operation_id) profile_operations,
+      (select count(*)::int
+       from public.workforce_payout_source_payment_hold_events source_event
+       where source_event.company_id=combined_operation.company_id
+         and source_event.operation_id=combined_operation.operation_id) source_events
+   from public.workforce_payout_combined_hold_operations combined_operation
+   where company_id=$1 and operation_id=$2`,
+  [company, id(905)]
+);
+assert.equal(combinedEnvelopeAudit.rows.length, 1);
+assert.deepEqual(combinedEnvelopeAudit.rows[0].selected_workforce_ids, [sourceHoldWorkforce]);
+assert.deepEqual(combinedEnvelopeAudit.rows[0].selected_source_identities, [{
+  station_id: station,
+  provider_identity_key: "EDSP",
+  provider_member_id_key: "RAW42"
+}]);
+assert.equal(combinedEnvelopeAudit.rows[0].profile_operations, 1);
+assert.equal(combinedEnvelopeAudit.rows[0].source_events, 1,
+  "altered combined retries must not add child operations or events");
+await assert.rejects(
+  db.query(
+    `update public.workforce_payout_combined_hold_operations
+     set remarks='Tampered combined envelope'
+     where company_id=$1 and operation_id=$2`,
+    [company, id(905)]
+  ),
+  /operation history is immutable/i,
+  "combined request envelopes must remain append-only"
+);
+const sourceHoldUnmapped = await db.query(
+  `select public.workforce_payout_source_payment_is_on_hold(
+    $1,$2,$3,$4::date,$5::date
+  ) held`,
+  [company, sourceHoldWorkforce, station, periodStart, periodEnd]
+);
+assert.equal(sourceHoldUnmapped.rows[0].held, false,
+  "a report-only source hold must not attach to an unrelated profile before mapping");
+
+await db.query(
+  `insert into public.field_executive_provider_mappings(
+    company_id,workforce_id,provider_id,station_id,provider_member_id,
+    effective_from,effective_to,status
+  ) values ($1,$2,$3,$4,'RAW-42',$5::date,null,'active')`,
+  [company, sourceHoldWorkforce, sourceHoldProvider, station, periodStart]
+);
+const sourceHoldAfterMapping = await db.query(
+  `select public.workforce_payout_source_payment_is_on_hold(
+    $1,$2,$3,$4::date,$5::date
+  ) held`,
+  [company, sourceHoldWorkforce, station, periodStart, periodEnd]
+);
+assert.equal(sourceHoldAfterMapping.rows[0].held, true,
+  "the same source hold must become authoritative when its provider identity is mapped later");
+
+await db.query(
+  "select set_config('app.workforce_payout_payment_mutation','allowed',false)"
+);
+await db.query(
+  `insert into public.workforce_payout_payment_batches(
+    id,company_id,operation_id,request_fingerprint,selected_workforce_ids,
+    bank_id,period_start,period_end,value_date,debit_account_no_snapshot,
+    bank_code_snapshot,file_type_snapshot,status,generated_by
+  ) values ($1,$2,$3,$4,array[$5::uuid],$6,$7::date,$8::date,date '2026-10-10',
+    '1234567890','FEDERAL_BANK','fedone','processing',$9)`,
+  [sourceHoldBatch, company, id(908), "8".repeat(64), sourceHoldWorkforce,
+    bank, periodStart, periodEnd, actor]
+);
+const sourcePaymentInsert = `insert into public.workforce_payout_payment_items(
+    company_id,batch_id,workforce_id,period_start,period_end,payment_version,
+    reference_no,dropx_id_snapshot,beneficiary_name_snapshot,beneficiary_email_snapshot,
+    bank_account_no_snapshot,ifsc_snapshot,location_id_snapshot,location_code_snapshot,
+    debit_remarks_snapshot,credit_remarks_snapshot,current_target_amount,
+    paid_before_amount,instruction_amount,status
+  ) values ($1,$2,$3,$4::date,$5::date,1,'WPSRC1092026V1','SRC1',
+    'Source Hold Worker','source-hold@example.com','6677889900','FDRL0000004',
+    $6,'NLRF','NET PAY','NLRF',100,0,100,'processing') returning id`;
+await assert.rejects(
+  db.query(sourcePaymentInsert, [
+    company, sourceHoldBatch, sourceHoldWorkforce, periodStart, periodEnd, station
+  ]),
+  /source is On Hold and cannot be included in a bank file/i,
+  "every payment-item insert path must fail closed after a report-only source is mapped"
+);
+
+const sourceAliasRelease = await db.query(
+  `select public.workforce_set_payout_combined_payment_holds(
+    $1,$2,$3,array[$4::uuid],$5::jsonb,$6::date,$7::date,false,$8
+  ) result`,
+  [company, actor, id(906), sourceHoldWorkforce, JSON.stringify([{
+    station_id: station,
+    provider_identity: "Amazon",
+    provider_member_id: "RAW-42"
+  }]), periodStart, periodEnd, "Release mapped provider source after verification"]
+);
+assert.equal(sourceAliasRelease.rows[0].result.changed, 2,
+  "a mapped provider-name release must change both the profile and pre-mapping source hold");
+const sourceHoldAfterAliasRelease = await db.query(
+  `select public.workforce_payout_source_payment_is_on_hold(
+    $1,$2,$3,$4::date,$5::date
+  ) held`,
+  [company, sourceHoldWorkforce, station, periodStart, periodEnd]
+);
+assert.equal(sourceHoldAfterAliasRelease.rows[0].held, false,
+  "provider code/name aliases must resolve to one effective source hold state");
+
+const insertedSourcePayment = await db.query(sourcePaymentInsert, [
+  company, sourceHoldBatch, sourceHoldWorkforce, periodStart, periodEnd, station
+]);
+assert.equal(insertedSourcePayment.rows.length, 1,
+  "the bank insert guard must allow the same mapped source after Unhold");
+await assert.rejects(
+  db.query(
+    `select public.workforce_set_payout_combined_payment_holds(
+      $1,$2,$3,array[$4::uuid],$5::jsonb,$6::date,$7::date,true,$8
+    )`,
+    [company, actor, id(907), sourceHoldWorkforce, JSON.stringify([{
+      station_id: station,
+      provider_identity: "Amazon",
+      provider_member_id: "RAW-42"
+    }]), periodStart, periodEnd, "Must reject mapped source while payment is processing"]
+  ),
+  /Payment Processing/i,
+  "a mapped source cannot be held while its bank instruction is processing"
+);
+
+const setBulkHolds = async ({ operation, workforceIds, hold, remarks }) => {
+  const response = await db.query(
+    `select public.workforce_set_payout_payment_holds(
+      $1,$2,$3,$4::uuid[],$5::date,$6::date,$7,$8
+    ) result`,
+    [company, actor, operation, workforceIds, periodStart, periodEnd, hold, remarks]
+  );
+  return response.rows[0].result;
+};
 
 const standardizedPartialPreview = await preview();
 assert.equal(standardizedPartialPreview.payment_status, "Partially Paid");
@@ -1434,6 +1795,26 @@ assert.equal(Number(standardizedPartialPreview.current_target_amount), 14000);
 assert.equal(Number(standardizedPartialPreview.paid_amount), 13000);
 assert.equal(Number(standardizedPartialPreview.balance_payable), 1000);
 assert.equal(Number(standardizedPartialPreview.available_to_pay), 1000);
+const paidThenIncreasedHold = await setBulkHolds({
+  operation: id(903),
+  workforceIds: [workforce],
+  hold: true,
+  remarks: "Hold corrected balance after prior payment"
+});
+assert.equal(paidThenIncreasedHold.changed_count, 1);
+const heldCorrectedBalance = await preview();
+assert.equal(Number(heldCorrectedBalance.paid_amount), 13000);
+assert.equal(Number(heldCorrectedBalance.balance_payable), 1000);
+assert.equal(Number(heldCorrectedBalance.available_to_pay), 0);
+assert.equal(heldCorrectedBalance.payment_status, "On Hold");
+assert.equal(heldCorrectedBalance.eligibility_code, "payment_on_hold",
+  "a hold placed after an earlier payment must also cover a later increased balance");
+await setBulkHolds({
+  operation: id(904),
+  workforceIds: [workforce],
+  hold: false,
+  remarks: "Release corrected balance after finance approval"
+});
 
 // A legacy profile-wide processing instruction spans two allocation rows. It
 // cannot be represented by one dashboard location row, so bulk row
@@ -1547,11 +1928,146 @@ for (const [index, profileId] of bulkCancelWorkforces.entries()) {
       periodStart, periodEnd]
   );
 }
+
+// A hold is independent of today's payable amount.  Start one selected payout
+// at zero, place the hold, then simulate a corrected publication that makes it
+// positive; the same durable event must continue to block bank generation.
+await db.query(
+  `update public.workforce_payout_publications
+   set snapshot=jsonb_set(snapshot,'{item,net_amount}',to_jsonb(0)),
+       snapshot_hash=$3
+   where company_id=$1 and workforce_id=$2
+     and period_start=$4::date and period_end=$5::date`,
+  [company, bulkCancelWorkforces[0], "0".repeat(64), periodStart, periodEnd]
+);
+
+const heldProfiles = [bulkCancelWorkforces[1], bulkCancelWorkforces[0]];
+const bulkHoldOperation = id(900);
+const bulkHeld = await setBulkHolds({
+  operation: bulkHoldOperation,
+  workforceIds: heldProfiles,
+  hold: true,
+  remarks: "Finance verification pending"
+});
+assert.equal(bulkHeld.replayed, false);
+assert.equal(bulkHeld.selected_count, 2);
+assert.equal(bulkHeld.changed_count, 2);
+assert.equal(bulkHeld.unchanged_count, 0);
+assert.equal(bulkHeld.on_hold, true);
+assert.deepEqual(
+  bulkHeld.items.map((item) => item.workforce_id),
+  [...heldProfiles].sort(),
+  "bulk hold events must use a stable profile lock and result order"
+);
+const bulkHeldPreview = await previewProfile(bulkCancelWorkforces[0]);
+assert.equal(bulkHeldPreview.payment_status, "On Hold");
+assert.equal(bulkHeldPreview.eligibility_code, "payment_on_hold");
+assert.equal(bulkHeldPreview.eligible, false);
+assert.equal(Number(bulkHeldPreview.current_target_amount), 0);
+assert.equal(Number(bulkHeldPreview.available_to_pay), 0,
+  "the authoritative bank candidate must expose a zero-balance hold");
+await db.query(
+  `update public.workforce_payout_publications
+   set snapshot=jsonb_set(snapshot,'{item,net_amount}',to_jsonb(700)),
+       snapshot_hash=$3
+   where company_id=$1 and workforce_id=$2
+     and period_start=$4::date and period_end=$5::date`,
+  [company, bulkCancelWorkforces[0], "7".repeat(64), periodStart, periodEnd]
+);
+const positiveAfterHoldPreview = await previewProfile(bulkCancelWorkforces[0]);
+assert.equal(Number(positiveAfterHoldPreview.current_target_amount), 700);
+assert.equal(Number(positiveAfterHoldPreview.balance_payable), 700);
+assert.equal(Number(positiveAfterHoldPreview.available_to_pay), 0);
+assert.equal(positiveAfterHoldPreview.payment_status, "On Hold");
+assert.equal(positiveAfterHoldPreview.eligibility_code, "payment_on_hold",
+  "a zero-balance hold must survive a later positive payout correction");
+
+const bulkHeldReplay = await setBulkHolds({
+  operation: bulkHoldOperation,
+  workforceIds: [...heldProfiles].reverse(),
+  hold: true,
+  remarks: "Finance verification pending"
+});
+assert.equal(bulkHeldReplay.replayed, true);
+assert.equal(bulkHeldReplay.hold_operation_id, bulkHeld.hold_operation_id);
+await assert.rejects(
+  setBulkHolds({
+    operation: bulkHoldOperation,
+    workforceIds: heldProfiles,
+    hold: true,
+    remarks: "Different retry payload"
+  }),
+  /operation ID was already used for a different request/i
+);
+const bulkHoldAudit = await db.query(
+  `select event.workforce_id,event.action,event.state_changed,event.bulk_item_index
+   from public.workforce_payout_payment_hold_events event
+   where event.bulk_operation_id=$1
+   order by event.bulk_item_index`,
+  [bulkHeld.hold_operation_id]
+);
+assert.deepEqual(
+  bulkHoldAudit.rows.map((row) => ({
+    workforce_id: row.workforce_id,
+    action: row.action,
+    state_changed: row.state_changed,
+    bulk_item_index: row.bulk_item_index
+  })),
+  [...heldProfiles].sort().map((workforceId, index) => ({
+    workforce_id: workforceId,
+    action: "hold",
+    state_changed: true,
+    bulk_item_index: index + 1
+  })),
+  "one immutable item event must durably audit every bulk selection"
+);
+await assert.rejects(
+  db.query(
+    `update public.workforce_payout_payment_hold_operations
+     set remarks='Tampered bulk request' where id=$1`,
+    [bulkHeld.hold_operation_id]
+  ),
+  /holds may be changed only by the payment lifecycle RPC|history is immutable/i,
+  "the exactly replayable bulk command envelope must remain append-only"
+);
+
+const bulkReleased = await setBulkHolds({
+  operation: id(901),
+  workforceIds: [...heldProfiles].reverse(),
+  hold: false,
+  remarks: "Finance verification complete"
+});
+assert.equal(bulkReleased.changed_count, 2);
+assert.equal(bulkReleased.on_hold, false);
+const releasedPreview = await previewProfile(bulkCancelWorkforces[0]);
+assert.equal(releasedPreview.eligibility_code, "eligible");
+assert.equal(releasedPreview.eligible, true);
+
 const bulkCancelBatch = await createProfileBatch({
   operation: id(380), fingerprint: "b".repeat(64), workforceIds: bulkCancelWorkforces
 });
 assert.equal(bulkCancelBatch.items.length, 12,
   "one large selection must create every exact station instruction in the same batch");
+const holdEventCountBeforeProcessingRejection = Number((await db.query(
+  "select count(*)::int count from public.workforce_payout_payment_hold_events"
+)).rows[0].count);
+await assert.rejects(
+  setBulkHolds({
+    operation: id(902),
+    workforceIds: [bulkCancelWorkforces[0], bulkCancelWorkforces[1]],
+    hold: true,
+    remarks: "Must reject the complete processing selection"
+  }),
+  /Payment Processing is active.*No holds were changed/i
+);
+const holdEventCountAfterProcessingRejection = Number((await db.query(
+  "select count(*)::int count from public.workforce_payout_payment_hold_events"
+)).rows[0].count);
+assert.equal(
+  holdEventCountAfterProcessingRejection,
+  holdEventCountBeforeProcessingRejection,
+  "a processing profile must reject the complete bulk operation before any hold event is written"
+);
 const firstBulkItemId = bulkCancelBatch.items[0].item_id;
 const secondBulkItemId = bulkCancelBatch.items[1].item_id;
 const pristineRedownload = await db.query(
@@ -2547,6 +3063,14 @@ const catalog = await db.query(`
       where oid='public.workforce_payout_payment_hold_events'::regclass) hold_rls,
     has_table_privilege('service_role','public.workforce_payout_payment_hold_events','SELECT') hold_select,
     has_table_privilege('service_role','public.workforce_payout_payment_hold_events','INSERT') hold_insert,
+    (select relrowsecurity and relforcerowsecurity from pg_class
+      where oid='public.workforce_payout_payment_hold_operations'::regclass) hold_operation_rls,
+    has_table_privilege('service_role','public.workforce_payout_payment_hold_operations','SELECT') hold_operation_select,
+    has_table_privilege('service_role','public.workforce_payout_payment_hold_operations','INSERT') hold_operation_insert,
+    (select relrowsecurity and relforcerowsecurity from pg_class
+      where oid='public.workforce_payout_combined_hold_operations'::regclass) combined_hold_operation_rls,
+    has_table_privilege('service_role','public.workforce_payout_combined_hold_operations','SELECT') combined_hold_operation_select,
+    has_table_privilege('service_role','public.workforce_payout_combined_hold_operations','INSERT') combined_hold_operation_insert,
     has_table_privilege('service_role','public.workforce_payout_review_submissions','INSERT') review_insert,
     has_function_privilege('service_role',
       'public.workforce_create_payout_payment_batch(uuid,uuid,uuid,text,uuid,date,date,date,uuid[])',
@@ -2594,6 +3118,18 @@ const catalog = await db.query(`
       'public.workforce_set_payout_payment_hold(uuid,uuid,uuid,uuid,date,date,boolean,text)',
       'EXECUTE') authenticated_hold_execute,
     has_function_privilege('service_role',
+      'public.workforce_set_payout_payment_holds(uuid,uuid,uuid,uuid[],date,date,boolean,text)',
+      'EXECUTE') bulk_hold_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_set_payout_payment_holds(uuid,uuid,uuid,uuid[],date,date,boolean,text)',
+      'EXECUTE') authenticated_bulk_hold_execute,
+    has_function_privilege('service_role',
+      'public.workforce_set_payout_combined_payment_holds(uuid,uuid,uuid,uuid[],jsonb,date,date,boolean,text)',
+      'EXECUTE') combined_hold_execute,
+    has_function_privilege('authenticated',
+      'public.workforce_set_payout_combined_payment_holds(uuid,uuid,uuid,uuid[],jsonb,date,date,boolean,text)',
+      'EXECUTE') authenticated_combined_hold_execute,
+    has_function_privilege('service_role',
       'public.workforce_transition_payout_payment_item(uuid,uuid,uuid,uuid,text,text)',
       'EXECUTE') transition_execute,
     has_function_privilege('authenticated',
@@ -2614,6 +3150,12 @@ assert.equal(catalog.rows[0].item_insert, false);
 assert.equal(catalog.rows[0].hold_rls, true);
 assert.equal(catalog.rows[0].hold_select, true);
 assert.equal(catalog.rows[0].hold_insert, false);
+assert.equal(catalog.rows[0].hold_operation_rls, true);
+assert.equal(catalog.rows[0].hold_operation_select, true);
+assert.equal(catalog.rows[0].hold_operation_insert, false);
+assert.equal(catalog.rows[0].combined_hold_operation_rls, true);
+assert.equal(catalog.rows[0].combined_hold_operation_select, true);
+assert.equal(catalog.rows[0].combined_hold_operation_insert, false);
 assert.equal(catalog.rows[0].review_insert, false);
 assert.equal(catalog.rows[0].create_execute, true,
   "the additive row-selection rollout must not revoke the legacy creator before every app instance is upgraded");
@@ -2631,6 +3173,10 @@ assert.equal(catalog.rows[0].authenticated_row_refresh_claim_execute, false);
 assert.equal(catalog.rows[0].internal_execute, false);
 assert.equal(catalog.rows[0].hold_execute, true);
 assert.equal(catalog.rows[0].authenticated_hold_execute, false);
+assert.equal(catalog.rows[0].bulk_hold_execute, true);
+assert.equal(catalog.rows[0].authenticated_bulk_hold_execute, false);
+assert.equal(catalog.rows[0].combined_hold_execute, true);
+assert.equal(catalog.rows[0].authenticated_combined_hold_execute, false);
 assert.equal(catalog.rows[0].transition_execute, true);
 assert.equal(catalog.rows[0].authenticated_transition_execute, false);
 assert.equal(catalog.rows[0].redownload_execute, true);

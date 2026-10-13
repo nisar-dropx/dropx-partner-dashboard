@@ -112,8 +112,10 @@ async function authorize(audience: PayoutAudience) {
   const label = audience === "helpers" ? "Helper" : "Workforce";
   const authorization = await getAuthorization();
   if (!authorization) return { error: errorResponse(`Sign in to re-download ${label} bank files.`, 401) } as const;
-  const payoutPageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
-  if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !hasPermission(authorization, "payment_process", "edit")) {
+  const accessSurface = currentAdminAccessSurface();
+  const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+  const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
+  if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
   }
   if (!authorization.hasAllLocationAccess) {

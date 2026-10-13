@@ -29,7 +29,8 @@ test("service-role Supabase requests always bypass the Next.js data cache", asyn
 
 test("publication refresh worker claims bounded durable jobs and recalculates a stable worksheet", () => {
   assert.match(source, /workforce_claim_payout_publication_refresh_jobs/);
-  assert.match(source, /Math\.max\(1, Math\.min\(100,/);
+  assert.match(source, /const maximumJobs = target \? MAX_TARGETED_WORKFORCE_IDS : 100/);
+  assert.match(source, /Math\.max\(1, Math\.min\(maximumJobs,/);
   assert.match(source, /loadStablePayoutWorksheet/);
   assert.match(source, /workforcePayoutDependencyHash/);
   assert.match(source, /loadWorkforcePayoutRows/);
@@ -43,6 +44,7 @@ test("publication refresh worker can claim an exact selected Workforce period wi
   assert.match(source, /p_period_end: target\.periodEnd/);
   assert.match(source, /requires a company, Workforce IDs, period start, and period end together/i);
   assert.match(source, /MAX_TARGETED_WORKFORCE_IDS\s*=\s*10_000/);
+  assert.match(source, /const maximumJobs = target \? MAX_TARGETED_WORKFORCE_IDS : 100/);
   assert.match(source, /requires valid company, Workforce, and station IDs/);
   assert.doesNotMatch(source, /\.in\("workforce_id", target\.workforceIds\)/);
   assert.match(source, /workforce_claim_payout_publication_refresh_jobs/);

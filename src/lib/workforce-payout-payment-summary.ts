@@ -25,6 +25,7 @@ export type WorkforcePayoutPaymentSummary = {
     | "Payment Processing"
     | "Payment Failed"
     | "Payment Cancelled"
+    | "On Hold"
     | "Payment On Hold"
     | "PAN Not Linked"
     | "Paid"
@@ -34,6 +35,134 @@ export type WorkforcePayoutPaymentSummary = {
   eligibilityCode: string | null;
   eligibilityMessage: string | null;
 };
+
+type WorkforcePayoutPaymentState = {
+  publicationPaymentReady?: boolean;
+  publicationLockState?: "locked" | "unlocked" | null;
+  publicationTargetAmount?: number | null;
+  netAmount: number;
+  status: string;
+  paymentSummary?: WorkforcePayoutPaymentSummary;
+};
+
+function paise(value: unknown) {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.round((amount + Number.EPSILON) * 100) : null;
+}
+
+export function workforcePayoutTargetAmountsMatch(liveNetAmount: unknown, publishedNetAmount: unknown) {
+  const live = paise(liveNetAmount);
+  const published = paise(publishedNetAmount);
+  return live !== null && published !== null && live === published;
+}
+
+export function workforcePayoutPublicationRefreshPending(
+  audience: "workforce" | "helpers",
+  publicationLockState: WorkforcePayoutPaymentState["publicationLockState"],
+  liveNetAmount: unknown,
+  publishedNetAmount: unknown
+) {
+  return audience === "workforce"
+    && publicationLockState === "locked"
+    && paise(publishedNetAmount) !== null
+    && !workforcePayoutTargetAmountsMatch(liveNetAmount, publishedNetAmount);
+}
+
+/**
+ * Review/publication freshness is the first payment gate. A bank preview based
+ * on an older immutable publication must never overwrite that blocker merely
+ * because the older snapshot was otherwise eligible.
+ */
+export function mergeWorkforcePayoutPaymentState<Row extends WorkforcePayoutPaymentState>(
+  reviewedRow: Row,
+  paymentRow: WorkforcePayoutPaymentState,
+  audience: "workforce" | "helpers"
+) {
+  const paymentSummary = paymentRow.paymentSummary;
+  if (!paymentSummary) return reviewedRow;
+
+  const publishedTargetAmount = audience === "workforce"
+    && Object.prototype.hasOwnProperty.call(reviewedRow, "publicationTargetAmount")
+      ? reviewedRow.publicationTargetAmount
+      : paymentSummary.currentNetAmount;
+  const publishedTargetChanged = workforcePayoutPublicationRefreshPending(
+    audience,
+    reviewedRow.publicationLockState,
+    reviewedRow.netAmount,
+    publishedTargetAmount
+  );
+  const refreshPending = publishedTargetChanged
+    || String(paymentSummary.eligibilityCode ?? "").trim().toLowerCase() === "publication_refresh_pending";
+  const paymentProcessing = paymentSummary.status === "Payment Processing"
+    || Number(paymentSummary.processingAmount) > 0;
+  // The payment candidate RPC is the authoritative, location-level bank
+  // preflight.  The review loader still carries a company/month dependency
+  // hash for notification replay, so an unrelated payout change can make its
+  // legacy `publicationPaymentReady` flag false even though the selected
+  // publication was validated by the candidate RPC.  Trust that authoritative
+  // candidate only when the review presentation independently confirms that a
+  // publication/review exists.  Explicit freshness/relock blockers continue
+  // to fail closed below and can never be bypassed by an older preview.
+  const authoritativePublishedStatuses = new Set([
+    "approved",
+    "delivery needs review",
+    "notification failed",
+    "notification queued",
+    "payment published",
+    "under review"
+  ]);
+  const reviewReady = reviewedRow.publicationPaymentReady === true
+    || (
+      paymentRow.publicationPaymentReady === true
+      && paymentSummary.eligible === true
+      && authoritativePublishedStatuses.has(String(reviewedRow.status ?? "").trim().toLowerCase())
+    );
+  const numericPublishedTarget = paise(publishedTargetAmount) === null
+    ? paymentSummary.currentNetAmount
+    : Number(publishedTargetAmount);
+  const effectiveBalance = money(Math.max(
+    0,
+    refreshPending
+      ? Number(reviewedRow.netAmount) - Number(paymentSummary.paidAmount)
+      : Number(paymentSummary.balancePayable)
+  ));
+  const financialLifecycleStatus = Number(paymentSummary.paidAmount) > 0
+    ? effectiveBalance === 0
+      ? "Paid" as const
+      : "Partially Paid" as const
+    : null;
+  const mergedSummary = refreshPending
+    ? {
+        ...paymentSummary,
+        currentNetAmount: numericPublishedTarget,
+        balancePayable: money(Math.max(0, numericPublishedTarget - Number(paymentSummary.paidAmount))),
+        availableToPay: 0,
+        overpaidAmount: money(Math.max(0, Number(paymentSummary.paidAmount) - numericPublishedTarget)),
+        status: paymentProcessing ? "Payment Processing" as const : paymentSummary.status,
+        eligible: false,
+        eligibilityCode: "publication_refresh_pending",
+        eligibilityMessage: "Payout inputs changed after publication. The current balance will be revalidated before the bank file is created."
+      } satisfies WorkforcePayoutPaymentSummary
+    : paymentSummary;
+
+  return {
+    ...reviewedRow,
+    publicationPaymentReady: !refreshPending
+      && reviewReady
+      && paymentRow.publicationPaymentReady === true,
+    paymentSummary: mergedSummary,
+    status: paymentProcessing
+      ? "Payment Processing"
+      : financialLifecycleStatus
+        ? financialLifecycleStatus
+      : refreshPending
+        ? "Publication refresh pending"
+      : reviewReady
+        ? paymentSummary.status ?? reviewedRow.status
+        : reviewedRow.status
+  };
+}
 
 const PAYMENT_BALANCE_AVAILABLE_CODES = new Set([
   "eligible",

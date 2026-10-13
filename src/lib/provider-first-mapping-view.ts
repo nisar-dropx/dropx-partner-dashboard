@@ -46,6 +46,7 @@ export type ProviderFirstMappingRowView = {
 export type ProviderFirstMappingReplacement = {
   kind: "owner" | "location";
   allowKeepAll?: boolean;
+  allowMove?: boolean;
   mappingId: string;
   providerMemberId: string;
   providerMemberName: string;
@@ -79,14 +80,16 @@ export function providerFirstLocationRemap(
     || !row.workforceId
     || row.workforceId !== worker.id
     || !worker.mappingId
-    || row.mappingId !== worker.mappingId
+    || (row.mappingId && row.mappingId !== worker.mappingId)
     || worker.stationId === row.stationId
     || worker.providerId !== row.providerId
-    || !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
+    || !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)
+    || !providerFirstLocationIsAllowed(row, worker)) {
     return null;
   }
   return {
     kind: "location",
+    ...(row.stationId === String(worker.profileStationId ?? "").trim() ? {} : { allowMove: false }),
     mappingId: worker.mappingId,
     providerMemberId: row.providerMemberId,
     providerMemberName: row.providerMemberName,
@@ -98,8 +101,38 @@ export function providerFirstLocationRemap(
   };
 }
 
+/**
+ * A Provider ID may be retained at a second location only when the selected
+ * DropX profile already has that exact provider/member identity mapped at its
+ * registered location. Moving an older mapping into the profile's registered
+ * location remains valid as the normal location-correction path.
+ *
+ * This client-side check is only for worksheet feedback. The action and the
+ * database repeat the same invariant against current stored mappings.
+ */
+export function providerFirstLocationIsAllowed(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+) {
+  if (!worker) return false;
+  if (worker.stationId === row.stationId) return true;
+  if (!row.workforceId
+    || row.workforceId !== worker.id
+    || !worker.mappingId
+    || worker.providerId !== row.providerId
+    || !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
+    return false;
+  }
+  const registeredStationId = String(worker.profileStationId ?? "").trim();
+  if (!registeredStationId) return false;
+  return row.stationId === registeredStationId || worker.stationId === registeredStationId;
+}
+
 export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
   if (replacement.kind === "location") {
+    if (replacement.allowMove === false) {
+      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at its registered location ${replacement.existingLocationLabel ?? "the current location"}.\nUse Keep all to add ${replacement.newLocationLabel ?? "the selected location"} for the same DropX ID while preserving the verified registered-location mapping.`;
+    }
     return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nMove it to ${replacement.newLocationLabel ?? "the selected location"}, or keep both location mappings for the same DropX ID?\nMoving ends the old location on the preceding day. Keep all preserves both locations.`;
   }
   return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}.\nDo you want to replace this mapping?`;
@@ -298,15 +331,59 @@ function providerSpellingVariantMatches(left: string, right: string) {
   return distance <= allowedDistance && 1 - (distance / longest) >= 0.78;
 }
 
+// A single occurrence of these high-collision name parts is not enough to
+// establish provider identity. Keep spelling variants explicit so that the
+// safety rule is deterministic and can be expanded from production evidence.
+const COMMON_PROVIDER_NAME_TOKENS = new Set([
+  "ABDUL", "AHAMAD", "AHAMED", "AHMAD", "AHMED", "ALI", "BABU", "BIBI",
+  "DAS", "DEVI", "KHAN", "KUMAR", "KUMARI", "MD", "MOHAMAD", "MOHAMED",
+  "MOHAMMAD", "MOHAMMED", "MOHD", "MUHAMAD", "MUHAMED", "MUHAMMAD",
+  "MUHAMMED", "RAJ", "RAM", "SHAIK", "SHAIKH", "SHEIKH", "SINGH", "SK",
+  "SRI"
+]);
+
+function meaningfulProviderNameTokens(tokens: string[]) {
+  return tokens.filter((token) => token.length > 1 && !COMMON_PROVIDER_NAME_TOKENS.has(token));
+}
+
+function hasMeaningfulProviderNameEvidence(providerTokens: string[], dropxTokens: string[]) {
+  const providerSubstantiveTokens = providerTokens.filter((token) => token.length > 1);
+  const dropxSubstantiveTokens = dropxTokens.filter((token) => token.length > 1);
+  if (!providerSubstantiveTokens.length || !dropxSubstantiveTokens.length) return false;
+
+  // The relaxed rule is only for a multi-part name. Two unrelated one-word
+  // names must not become a match merely because they are similar.
+  const hasMultipleNameParts = providerSubstantiveTokens.length > 1 || dropxSubstantiveTokens.length > 1;
+  if (!hasMultipleNameParts) return false;
+
+  const providerMeaningfulTokens = meaningfulProviderNameTokens(providerTokens);
+  const dropxMeaningfulTokens = meaningfulProviderNameTokens(dropxTokens);
+  for (const providerToken of providerMeaningfulTokens) {
+    for (const dropxToken of dropxMeaningfulTokens) {
+      if (providerToken === dropxToken) return true;
+      // Fuzzy matching remains limited to cases where both supplied names are
+      // multi-part, preventing a lone approximate token from authorizing a map.
+      if (
+        providerSubstantiveTokens.length > 1
+        && dropxSubstantiveTokens.length > 1
+        && providerSpellingVariantMatches(providerToken, dropxToken)
+      ) return true;
+    }
+  }
+  return false;
+}
+
 export function providerFirstNamesMatch(providerName: string, dropxName: string) {
   const providerHolder = providerHolderName(providerName);
   const dropxHolder = providerHolderName(dropxName);
-  if (matchNames(providerHolder, dropxHolder).status !== "none") return true;
-
   const providerTokens = providerNameTokens(providerHolder);
   const dropxTokens = providerNameTokens(dropxHolder);
-  if (providerTokens.length < 2 || providerTokens.length !== dropxTokens.length) return false;
-  return providerTokens.every((token, index) => providerSpellingVariantMatches(token, dropxTokens[index]));
+  const directMatch = matchNames(providerHolder, dropxHolder);
+  if (directMatch.status === "exact") return true;
+  // Initials and common names never count as the one matching identity token.
+  // Extra initials therefore neither authorize nor block a match supported by
+  // a meaningful full token such as THAHA.
+  return hasMeaningfulProviderNameEvidence(providerTokens, dropxTokens);
 }
 
 export function providerFirstRowIssue(
@@ -317,7 +394,7 @@ export function providerFirstRowIssue(
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
   if (!row.workforceId) return row.mappingId ? null : "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
-  if (worker.stationId !== row.stationId && !providerFirstLocationRemap(row, worker)) return "Location mismatch.";
+  if (!providerFirstLocationIsAllowed(row, worker)) return "Location mismatch.";
   if (worker.mappedProviderMemberId && !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
     return "This DropX ID is already mapped to another Provider Member ID.";
   }

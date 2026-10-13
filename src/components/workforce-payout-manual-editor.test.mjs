@@ -44,6 +44,7 @@ test("manual editor reuses bulk upload preview and commit with generated CSV", (
   assert.match(source, /role="alertdialog"/);
   assert.match(source, /announceWorkforcePayoutInputsChanged\(/);
   assert.match(source, /closeEditor\(\);[\s\S]*?router\.refresh\(\)/);
+  assert.match(source, /preview\.importId \? "Changes applied" : "Preview complete"/);
 });
 
 test("manual editor loads its scoped field catalog and warns about published selections", () => {
@@ -78,6 +79,7 @@ test("Workforce and Helper payout selection expose manual editing independently 
   assert.match(tableSource, /audience=\{audience\}/);
   assert.match(tableSource, /buttonLabel="Edit payout inputs"/);
   assert.match(tableSource, /manualSelectedRows\.map/);
+  assert.match(tableSource, /manualAttendancePeriod\(row, periodStart, periodEnd\)/);
   assert.match(tableSource, /if \(!reviewSelectedRows\.length \|\| reviewState\.busy\) return/);
   assert.match(tableSource, /Send Notification[\s\S]*?reviewSelectedRows\.length/);
 });

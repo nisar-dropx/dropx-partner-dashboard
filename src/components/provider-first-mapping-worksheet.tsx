@@ -12,6 +12,7 @@ import {
   providerMappingMonthOptions,
   isScientificProviderMemberId,
   providerFirstNamesMatch,
+  providerFirstLocationIsAllowed,
   providerFirstLocationRemap,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
@@ -41,6 +42,7 @@ function appendRow(
   row: ProviderFirstMappingRow,
   replacementMappingId = "",
   replacementAction: "move" | "keep" | "" = "",
+  paidHistoryDecision?: PaidHistoryDecision,
   clearWorkforceId = ""
 ) {
   const prefix = `rows[${position}]`;
@@ -62,6 +64,9 @@ function appendRow(
   formData.set(`${prefix}[replace_mapping_id]`, replacementMappingId);
   formData.set(`${prefix}[replacement_confirmed]`, replacementMappingId ? "yes" : "");
   formData.set(`${prefix}[replacement_action]`, replacementAction);
+  formData.set(`${prefix}[payment_transfer_action]`, paidHistoryDecision?.action ?? "");
+  formData.set(`${prefix}[payment_transfer_fingerprint]`, paidHistoryDecision?.paymentFingerprint ?? "");
+  formData.set(`${prefix}[payment_transfer_operation_id]`, paidHistoryDecision?.operationId ?? "");
   formData.set(`${prefix}[clear_mapping]`, !row.workforceId && row.mappingId ? "yes" : "");
   formData.set(`${prefix}[clear_workforce_id]`, clearWorkforceId);
 }
@@ -73,6 +78,48 @@ type ReplacementSaveConfirmation = {
   confirmedMappingIds: Record<number, string>;
   confirmedActions: Record<number, "move" | "keep">;
 };
+
+type PaidHistoryAction = "transfer" | "keep";
+
+type PaidHistoryDecision = {
+  action: PaidHistoryAction;
+  paymentFingerprint: string;
+  operationId: string;
+};
+
+type PaidHistoryTransferConfirmation = {
+  clientKey: string;
+  providerMemberId: string;
+  providerMemberName: string;
+  existingWorkforceId: string;
+  existingDropxId: string;
+  existingDropxName: string;
+  newWorkforceId: string;
+  newDropxId: string;
+  newDropxName: string;
+  paidAmount: number | string;
+  paymentCount?: number;
+  paymentFingerprint: string;
+  operationId: string;
+  transferAllowed: boolean;
+  transferBlockedReason?: string;
+};
+
+type PaidHistorySaveConfirmation = {
+  indexes: number[];
+  index: number;
+  confirmation: PaidHistoryTransferConfirmation;
+  confirmedMappingIds: Record<number, string>;
+  confirmedActions: Record<number, "move" | "keep">;
+  confirmedPaidHistoryDecisions: Record<number, PaidHistoryDecision>;
+};
+
+const rupees = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
 
 function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   busy: boolean;
@@ -111,6 +158,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [savingIndexes, setSavingIndexes] = useState<Set<number>>(() => new Set());
   const [saveNotice, setSaveNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [replacementConfirmation, setReplacementConfirmation] = useState<ReplacementSaveConfirmation | null>(null);
+  const [paidHistoryConfirmation, setPaidHistoryConfirmation] = useState<PaidHistorySaveConfirmation | null>(null);
 
   const paymentMethodById = useMemo(() => new Map(paymentMethods.map((method) => [method.id, method])), [paymentMethods]);
   const paymentOptions = useMemo(() => paymentMethods.filter((method) => method.isActive !== false).map((method) => ({ value: method.id, label: method.name, helper: method.code })), [paymentMethods]);
@@ -136,8 +184,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const hasDirtyLocationMismatch = dirtyIndexes.some((index) => {
     const selectedWorker = workerById.get(rows[index].workforceId);
     return Boolean(rows[index].workforceId)
-      && selectedWorker?.stationId !== rows[index].stationId
-      && !providerFirstLocationRemap(rows[index], selectedWorker);
+      && !providerFirstLocationIsAllowed(rows[index], selectedWorker);
   });
   const isSaving = savingIndexes.size > 0;
 
@@ -260,7 +307,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   async function saveIndexes(
     indexes: number[],
     confirmedMappingIds: Record<number, string> = {},
-    confirmedActions: Record<number, "move" | "keep"> = {}
+    confirmedActions: Record<number, "move" | "keep"> = {},
+    confirmedPaidHistoryDecisions: Record<number, PaidHistoryDecision> = {}
   ) {
     if (isSaving) return;
     const selected = Array.from(new Set(indexes)).filter((index) => dirtyRows[index]);
@@ -292,7 +340,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       row: { ...rows[index], paymentValues: { ...rows[index].paymentValues } },
       previousWorkforceId: baselineRows[index]?.workforceId ?? "",
       replacementMappingId: confirmedMappingIds[index] ?? "",
-      replacementAction: confirmedActions[index] ?? "" as const
+      replacementAction: confirmedActions[index] ?? "" as const,
+      paidHistoryDecision: confirmedPaidHistoryDecisions[index]
     }));
     const snapshotByKey = new Map(snapshots.map((snapshot) => [snapshot.key, snapshot]));
     const snapshotByIndex = new Map(snapshots.map((snapshot) => [snapshot.index, snapshot]));
@@ -304,13 +353,16 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       snapshot.row,
       snapshot.replacementMappingId,
       snapshot.replacementAction,
+      snapshot.paidHistoryDecision,
       snapshot.previousWorkforceId
     ));
     setSavingIndexes(new Set(selected));
     setSaveNotice(null);
 
     try {
-      const result = await saveProviderFirstMappingsInline(data);
+      const result = await saveProviderFirstMappingsInline(data) as Awaited<ReturnType<typeof saveProviderFirstMappingsInline>> & {
+        paidHistoryTransfer?: PaidHistoryTransferConfirmation;
+      };
       const canonicalByIndex = new Map<number, ProviderFirstMappingRow>();
       const clearedByIndex = new Map<number, { row: ProviderFirstMappingRow; expectedMappingId: string }>();
       for (const saved of result.savedRows) {
@@ -434,6 +486,21 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           });
         }
       }
+      if (result.paidHistoryTransfer) {
+        const failed = snapshotByKey.get(result.paidHistoryTransfer.clientKey);
+        if (failed) {
+          setPaidHistoryConfirmation({
+            indexes: selected,
+            index: failed.index,
+            confirmation: result.paidHistoryTransfer,
+            confirmedMappingIds,
+            confirmedActions,
+            confirmedPaidHistoryDecisions
+          });
+        }
+      } else if (result.ok) {
+        setPaidHistoryConfirmation(null);
+      }
       setSaveNotice({ kind: result.ok ? "success" : "error", message: result.message });
     } catch (error) {
       setSaveNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to save provider mappings." });
@@ -465,7 +532,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const selectedWorker = workerById.get(row.workforceId);
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
         const locationRemap = providerFirstLocationRemap(row, selectedWorker);
-        const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId && !locationRemap);
+        const locationMismatch = Boolean(selectedWorker && !providerFirstLocationIsAllowed(row, selectedWorker));
         const profileLocationDrift = Boolean(selectedWorker?.profileStationId && selectedWorker.profileStationId !== selectedWorker.stationId);
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
         const productionThresholdConfig = row.productionThresholdConfig ?? selectedPaymentMethod?.productionThresholdConfig ?? null;
@@ -529,7 +596,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               setReplacementConfirmation(null);
               void saveIndexes(indexes, confirmedMappingIds, confirmedActions);
             }} type="button">Keep all</button> : null}
-            <button className="button" disabled={isSaving} onClick={() => {
+            {active.replacement.allowMove !== false ? <button className="button" disabled={isSaving} onClick={() => {
               const confirmedMappingIds = { ...replacementConfirmation.confirmedMappingIds, [active.index]: active.replacement.mappingId };
               const confirmedActions = { ...replacementConfirmation.confirmedActions, [active.index]: "move" as const };
               const nextCursor = replacementConfirmation.cursor + 1;
@@ -540,7 +607,45 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               const indexes = replacementConfirmation.indexes;
               setReplacementConfirmation(null);
               void saveIndexes(indexes, confirmedMappingIds, confirmedActions);
-            }} type="button">{active.replacement.kind === "location" ? "Move mapping" : "Replace mapping"}</button>
+            }} type="button">{active.replacement.kind === "location" ? "Move mapping" : "Replace mapping"}</button> : null}
+          </div>
+        </section>
+      </div>;
+    })() : null}
+    {paidHistoryConfirmation ? (() => {
+      const payment = paidHistoryConfirmation.confirmation;
+      const paidAmount = Number(payment.paidAmount);
+      const paymentLabel = payment.paymentCount && payment.paymentCount > 1
+        ? `${payment.paymentCount} completed bank payments totalling ${rupees.format(Number.isFinite(paidAmount) ? paidAmount : 0)}`
+        : `${rupees.format(Number.isFinite(paidAmount) ? paidAmount : 0)} already paid`;
+      const choosePaidHistoryAction = (action: PaidHistoryAction) => {
+        const confirmedPaidHistoryDecisions = {
+          ...paidHistoryConfirmation.confirmedPaidHistoryDecisions,
+          [paidHistoryConfirmation.index]: {
+            action,
+            paymentFingerprint: payment.paymentFingerprint,
+            operationId: payment.operationId
+          }
+        };
+        const indexes = paidHistoryConfirmation.indexes;
+        const mappingIds = paidHistoryConfirmation.confirmedMappingIds;
+        const mappingActions = paidHistoryConfirmation.confirmedActions;
+        setPaidHistoryConfirmation({ ...paidHistoryConfirmation, confirmedPaidHistoryDecisions });
+        void saveIndexes(indexes, mappingIds, mappingActions, confirmedPaidHistoryDecisions);
+      };
+      return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setPaidHistoryConfirmation(null); }}>
+        <section aria-labelledby="paid-history-transfer-title" aria-modal="true" className="modal-panel confirmation-dialog" role="alertdialog">
+          <div className="modal-head"><div><h2 id="paid-history-transfer-title">What should happen to the paid amount?</h2></div></div>
+          <div className="confirmation-body">
+            <p><strong>{payment.providerMemberId}</strong>{payment.providerMemberName ? ` · ${payment.providerMemberName}` : ""} has {paymentLabel} under <strong>{payment.existingDropxId}</strong>{payment.existingDropxName ? ` · ${payment.existingDropxName}` : ""}.</p>
+            <p>You are mapping it to <strong>{payment.newDropxId}</strong>{payment.newDropxName ? ` · ${payment.newDropxName}` : ""}. Choose whether its paid credit should transfer to the new ID or remain with the existing ID.</p>
+            <p className="subtle">Transferring does not create, reverse or rewrite a bank payment. The original bank reference and UTR remain unchanged, and an audited paid credit is applied to the new ID so the amount is not paid twice.</p>
+            {!payment.transferAllowed && payment.transferBlockedReason ? <div className="mapping-row-error">{payment.transferBlockedReason}</div> : null}
+          </div>
+          <div className="form-actions modal-actions confirmation-actions">
+            <button className="button secondary" disabled={isSaving} onClick={() => setPaidHistoryConfirmation(null)} type="button">Cancel</button>
+            <button className="button secondary" disabled={isSaving} onClick={() => choosePaidHistoryAction("keep")} type="button">Keep paid credit with {payment.existingDropxId}</button>
+            <button className="button" disabled={isSaving || !payment.transferAllowed} onClick={() => choosePaidHistoryAction("transfer")} type="button">Transfer payment details to {payment.newDropxId}</button>
           </div>
         </section>
       </div>;

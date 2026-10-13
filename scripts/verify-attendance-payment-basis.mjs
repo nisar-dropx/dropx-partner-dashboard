@@ -34,7 +34,9 @@ assert.match(dashboardCalculator, /attendanceBased[\s\S]*attendanceUnit/);
 assert.match(dashboardPayout, /attendanceComponents[\s\S]*directPayForDay/);
 assert.match(dashboardPayout, /const allMappings = mappingsResult\.data \?\? \[\][\s\S]*const authorizedMappings = allMappings\.filter[\s\S]*const mappings = authorizedMappings\.filter/,
   "the payout worksheet must resolve report identities only through mappings in the viewer's allowed locations");
-assert.match(dashboardPayout, /const attendanceOwnerOn[\s\S]*const candidates = allMappings\.filter/,
+assert.match(dashboardPayout, /const allMappingsByWorkforceId = new Map[\s\S]*for \(const mapping of allMappings\)[\s\S]*const attendanceMappingsByWorkforceId = new Map/,
+  "provider attendance ownership must be indexed from all mappings, not the viewer's location-scoped mappings");
+assert.match(dashboardPayout, /const attendanceOwnerOn[\s\S]*const candidates = \(attendanceMappingsByWorkforceId\.get\(workforceId\) \?\? \[\]\)\.filter/,
   "provider attendance ownership must not change with the viewer's location scope");
 assert.match(connectCalculator, /attendanceBased[\s\S]*units/);
 assert.match(connectPaymentData, /and\(workforce_id\.is\.null,\$\{sourceColumn\}\.eq\.\$\{worker\.source_profile_id\}\)/);

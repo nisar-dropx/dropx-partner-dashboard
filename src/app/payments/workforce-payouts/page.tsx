@@ -23,7 +23,15 @@ import {
 } from "@/lib/stable-payout-worksheet";
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
-import type { WorkforcePayoutPaymentSummary } from "@/lib/workforce-payout-payment-summary";
+import {
+  mergeWorkforcePayoutPaymentState,
+  workforcePayoutPublicationRefreshPending,
+  type WorkforcePayoutPaymentSummary
+} from "@/lib/workforce-payout-payment-summary";
+import {
+  workforcePayoutRowSourceIdentities,
+  workforcePayoutSourceIdentityKey
+} from "@/lib/workforce-payout-source-hold";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { isWorkforcePayoutCalculationPublishable } from "@/lib/workforce-payout-publication-eligibility";
 import {
@@ -154,6 +162,7 @@ async function withPayoutReviewStatuses(
     version_hash: string | null;
     dependency_hash: string | null;
     source_change_id: string | null;
+    target_amount: number | null;
   }> = [];
   const reviewChunks = await mapWithConcurrency(chunkedValues(ids, 100), 4, async (idChunk) => {
     const [result, publicationResult] = await Promise.all([
@@ -170,7 +179,7 @@ async function withPayoutReviewStatuses(
       audience === "workforce"
         ? readAllRows(admin
           .from("workforce_payout_publications")
-          .select("workforce_id,station_id,notification_status,dependency_hash")
+          .select("workforce_id,station_id,notification_status,dependency_hash,target_amount:snapshot->item->>net_amount")
           .eq("company_id", companyId)
           .eq("publication_kind", "worksheet")
           .eq("period_start", fromDate)
@@ -214,6 +223,13 @@ async function withPayoutReviewStatuses(
           : null,
         source_change_id: audience === "helpers" && publication.payout_source_change_id != null
           ? String(publication.payout_source_change_id)
+          : null,
+        target_amount: audience === "workforce"
+          ? (() => {
+              if (publication.target_amount === null || publication.target_amount === undefined || publication.target_amount === "") return null;
+              const amount = Number(publication.target_amount);
+              return Number.isFinite(amount) ? amount : null;
+            })()
           : null
       };
     })));
@@ -261,6 +277,7 @@ async function withPayoutReviewStatuses(
     versionHash: string | null;
     dependencyHash: string | null;
     sourceChangeId: string | null;
+    targetAmount: number | null;
   }>();
   const publishedSubjectIds = new Set<string>();
   publications.forEach((entry) => {
@@ -271,7 +288,8 @@ async function withPayoutReviewStatuses(
         status: String(entry.notification_status),
         versionHash: entry.version_hash,
         dependencyHash: entry.dependency_hash,
-        sourceChangeId: entry.source_change_id
+        sourceChangeId: entry.source_change_id,
+        targetAmount: entry.target_amount
       });
     }
   });
@@ -352,17 +370,31 @@ async function withPayoutReviewStatuses(
       const presentation = payoutReviewPresentation(row.status, reviewStatus, subjectType);
       const workforceId = String(row.reviewSubjectId ?? "");
       const mappingUnlocked = audience === "workforce" && unlockedWorkforceIds.has(workforceId);
+      const publication = subjectKey ? publicationBySubject.get(subjectKey) : null;
+      const publicationLockState: WorkforcePayoutRow["publicationLockState"] = mappingUnlocked
+          ? "unlocked"
+          : publishedSubjectIds.has(workforceId)
+            ? "locked"
+            : null;
+      const workforcePublicationRefreshPending = workforcePayoutPublicationRefreshPending(
+        audience,
+        publicationLockState,
+        row.netAmount,
+        publication?.targetAmount
+      );
       const helperNeedsPublication = audience === "helpers"
         && helperSubjectsNeedingPublication.has(workforceId)
         && isWorkforcePayoutCalculationPublishable(row.status)
         && row.paymentDetailsAvailable;
       const status = mappingUnlocked
         ? "Mapping unlocked"
-        : helperNeedsPublication
-          ? "Republish required"
-        : presentation.status === "Under Review" && subjectKey
-          ? publishedStatus(publicationBySubject.get(subjectKey)?.status) ?? presentation.status
-          : presentation.status;
+        : workforcePublicationRefreshPending
+          ? "Publication refresh pending"
+          : helperNeedsPublication
+            ? "Republish required"
+            : presentation.status === "Under Review" && subjectKey
+              ? publishedStatus(publication?.status) ?? presentation.status
+              : presentation.status;
       const publicationSnapshotHash = audience === "workforce"
         ? workforcePayoutPublicationSnapshotHash(
           buildWorkforcePayoutPublicationSnapshot(row, fromDate, toDate, dependencyHash)
@@ -370,11 +402,6 @@ async function withPayoutReviewStatuses(
         : helperPayoutPublicationSnapshotHash(
           buildHelperPayoutPublicationSnapshot(row, fromDate, toDate)
         );
-      const publicationLockState: WorkforcePayoutRow["publicationLockState"] = mappingUnlocked
-          ? "unlocked"
-          : publishedSubjectIds.has(workforceId)
-            ? "locked"
-            : null;
       const tokenStatus = helperNeedsPublication ? "Ready for review" : presentation.tokenStatus;
       const reviewToken = row.reviewSubjectId && row.reviewSubjectType && row.locationId
         && tokenStatus
@@ -399,6 +426,7 @@ async function withPayoutReviewStatuses(
         status,
         publicationLockState,
         publicationPaymentReady: paymentReadySubjectIds.has(workforceId),
+        publicationTargetAmount: audience === "workforce" ? publication?.targetAmount ?? null : null,
         reviewToken,
         publicationDependencyHash: audience === "workforce" ? dependencyHash : null,
         publicationLocations: publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []
@@ -642,22 +670,92 @@ async function loadWorkforcePayoutBanks(companyId: string, enabled: boolean) {
   };
 }
 
+async function withPayoutSourcePaymentHolds(
+  companyId: string,
+  audience: "workforce" | "helpers",
+  fromDate: string,
+  toDate: string,
+  rows: WorkforcePayoutRow[]
+) {
+  if (audience !== "workforce" || !supabaseAdmin) {
+    return { rows, error: null as string | null };
+  }
+  const sourceKeys = new Set(rows.flatMap((row) =>
+    workforcePayoutRowSourceIdentities(row).map(workforcePayoutSourceIdentityKey)
+  ).filter(Boolean));
+  if (!sourceKeys.size) return { rows, error: null as string | null };
+
+  const result = await readAllRows(supabaseAdmin
+    .from("workforce_payout_source_payment_hold_events")
+    .select("id,station_id,provider_identity_key,provider_member_id_key,action,created_at")
+    .eq("company_id", companyId)
+    .eq("period_start", fromDate)
+    .eq("period_end", toDate)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false }));
+  if (result.error) return { rows, error: result.error.message };
+
+  const latestActionBySource = new Map<string, string>();
+  for (const event of result.data ?? []) {
+    const key = workforcePayoutSourceIdentityKey({
+      stationId: String(event.station_id ?? ""),
+      providerIdentity: String(event.provider_identity_key ?? ""),
+      providerMemberId: String(event.provider_member_id_key ?? "")
+    });
+    if (key && sourceKeys.has(key) && !latestActionBySource.has(key)) {
+      latestActionBySource.set(key, String(event.action ?? ""));
+    }
+  }
+
+  return {
+    rows: rows.map((row) => {
+      const sourceHeld = workforcePayoutRowSourceIdentities(row).some((source) =>
+        latestActionBySource.get(workforcePayoutSourceIdentityKey(source)) === "hold"
+      );
+      if (!sourceHeld) return row;
+      const paymentSummary = row.paymentSummary ? {
+        ...row.paymentSummary,
+        availableToPay: 0,
+        status: "On Hold" as const,
+        eligible: false,
+        eligibilityCode: "payment_on_hold",
+        eligibilityMessage: "This provider payout source is On Hold. Release the hold before creating a bank payment."
+      } : undefined;
+      return {
+        ...row,
+        publicationPaymentReady: false,
+        paymentSummary,
+        status: "On Hold"
+      };
+    }),
+    error: null as string | null
+  };
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function WorkforcePayoutsPage({ searchParams = {} }: { searchParams?: Record<string, string | string[] | undefined> }) {
   const period = resolvePeriod(searchParams);
   const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
-  const pageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+  const accessSurface = currentAdminAccessSurface();
+  const pageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
+  // Ops has its own Workforce Payouts page permission and does not expose the
+  // Finance-only Payment Process page. Keep that extra permission on the other
+  // surfaces, while allowing Ops editors to use the mirrored payment actions.
+  const canUsePaymentActions = accessSurface === "ops"
+    || hasPermission(authorization, "payment_process", "edit");
   const canProcessPayments = period.mode === "monthly"
     && canEdit
     && authorization.hasAllLocationAccess
-    && hasPermission(authorization, "payment_process", "edit")
+    && canUsePaymentActions
     && !authorization.readOnly;
-  const canLoadPaymentSummaries = period.mode === "monthly"
-    && canEdit;
+  // Payment lifecycle is read-only worksheet data. Every authorised viewer
+  // must see Paid / Partially Paid / Processing, while the sensitive action
+  // identifiers below remain restricted by includeProcessingActionDetails.
+  const canLoadPaymentSummaries = period.mode === "monthly";
   const canManageMappingLocks = audience === "workforce"
     && canEdit
     && authorization.hasAllLocationAccess
@@ -705,18 +803,20 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       })
   ]);
   const paymentByRowId = new Map(paymentEnriched.rows.map((row) => [row.id, row]));
-  const rows = reviewed.rows.map((row) => {
+  const reviewedPaymentRows = reviewed.rows.map((row) => {
     const paymentRow = paymentByRowId.get(row.id);
-    if (!paymentRow?.paymentSummary) return row;
-    return {
-      ...row,
-      publicationPaymentReady: paymentRow.publicationPaymentReady,
-      paymentSummary: paymentRow.paymentSummary,
-      status: paymentRow.paymentSummary.status ?? row.status
-    };
+    return paymentRow?.paymentSummary
+      ? mergeWorkforcePayoutPaymentState(row, paymentRow, audience)
+      : row;
   });
-  const error = reviewed.error || paymentEnriched.error || bankResult.error;
-  const advancePageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_advances" : "workforce_advances";
+  const sourceHeld = loadError || !canLoadPaymentSummaries
+    ? { rows: reviewedPaymentRows, error: loadError }
+    : await withPayoutSourcePaymentHolds(
+      companyId, audience, period.fromDate, period.toDate, reviewedPaymentRows
+    );
+  const rows = sourceHeld.rows;
+  const error = reviewed.error || paymentEnriched.error || sourceHeld.error || bankResult.error;
+  const advancePageCode = accessSurface === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const canDeductAdvances = audience === "workforce"
     && canEdit
     && hasPermission(authorization, advancePageCode, "edit");

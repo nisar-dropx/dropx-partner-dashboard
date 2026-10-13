@@ -55,7 +55,6 @@ import {
   aggregateResolvedShipmentDeliveriesByWorkforceDay,
   mappingsForAuthorizedWorkforce,
   normalizePayoutIdentity,
-  payoutMappingMatchesShipment,
   resolveShipmentPayoutMapping,
   shipmentIdentityKey,
   workforcePayoutDropxStatus,
@@ -331,8 +330,26 @@ export async function loadWorkforcePayoutRows(
       is_custom_production: field?.is_custom_production === true,
       sort_order: Number(row.sort_order)
     };
-    componentsByMethod.set(String(row.payment_method_id), [...(componentsByMethod.get(String(row.payment_method_id)) ?? []), component]);
+    const methodId = String(row.payment_method_id);
+    const existing = componentsByMethod.get(methodId);
+    if (existing) existing.push(component);
+    else componentsByMethod.set(methodId, [component]);
   }
+  const normalizedPaymentValuesBySource = new WeakMap<object, Map<string, unknown>>();
+  const normalizedPaymentValues = (configuredValues: Record<string, unknown> | null | undefined) => {
+    if (!configuredValues || typeof configuredValues !== "object") return new Map<string, unknown>();
+    const cached = normalizedPaymentValuesBySource.get(configuredValues);
+    if (cached) return cached;
+    const values = new Map<string, unknown>();
+    for (const [key, value] of Object.entries(configuredValues)) {
+      const code = normalizePaymentFieldCode(key);
+      // Object.entries(...).find(...) historically selected the first normalized
+      // key. Retain that precedence when legacy snapshots contain aliases.
+      if (code && !values.has(code)) values.set(code, value);
+    }
+    normalizedPaymentValuesBySource.set(configuredValues, values);
+    return values;
+  };
   const paymentValuesForDate = (
     configuredValues: Record<string, unknown> | null | undefined,
     components: DirectPayComponent[],
@@ -341,18 +358,17 @@ export async function loadWorkforcePayoutRows(
     date: string
   ) => {
     const values: Record<string, unknown> = { ...(configuredValues ?? {}) };
+    const configuredByCode = normalizedPaymentValues(configuredValues);
     for (const component of components) {
       const code = normalizePaymentFieldCode(component.component_code);
       if (!code) continue;
-      const configuredEntry = Object.entries(configuredValues ?? {})
-        .find(([key]) => normalizePaymentFieldCode(key) === code);
       values[code] = resolveWorkforcePaymentFieldRate(payoutInputMaps, {
         workforceId,
         stationId,
         paymentFieldId: component.payment_field_id,
         fieldCode: code,
         date,
-        fallbackRate: configuredEntry?.[1]
+        fallbackRate: configuredByCode.get(code)
       });
     }
     return values;
@@ -400,10 +416,58 @@ export async function loadWorkforcePayoutRows(
     };
   });
   const thresholdPayoutMappingIdentityById = new Map(thresholdPayoutMappingIdentities.map((mapping) => [mapping.id, mapping]));
+  const indexMappingsByProviderMember = (identities: WorkforcePayoutMappingIdentity[]) => {
+    const index = new Map<string, WorkforcePayoutMappingIdentity[]>();
+    for (const identity of identities) {
+      const memberId = normalizePayoutIdentity(identity.providerMemberId);
+      if (!memberId) continue;
+      const existing = index.get(memberId);
+      if (existing) existing.push(identity);
+      else index.set(memberId, [identity]);
+    }
+    return index;
+  };
+  const payoutMappingsByProviderMember = indexMappingsByProviderMember(payoutMappingIdentities);
+  const thresholdMappingsByProviderMember = indexMappingsByProviderMember(thresholdPayoutMappingIdentities);
+  const resolveIndexedShipment = (
+    row: any,
+    index: Map<string, WorkforcePayoutMappingIdentity[]>
+  ) => resolveShipmentPayoutMapping(
+    row,
+    index.get(normalizePayoutIdentity(row.provider_employee_id)) ?? []
+  );
   const shipmentResolutionByRow = new Map<any, ReturnType<typeof resolveShipmentPayoutMapping>>();
-  for (const row of metricsResult.data ?? []) shipmentResolutionByRow.set(row, resolveShipmentPayoutMapping(row, payoutMappingIdentities));
+  for (const row of metricsResult.data ?? []) shipmentResolutionByRow.set(row, resolveIndexedShipment(row, payoutMappingsByProviderMember));
   const thresholdShipmentResolutionByRow = new Map<any, ReturnType<typeof resolveShipmentPayoutMapping>>();
-  for (const row of thresholdMetricRows) thresholdShipmentResolutionByRow.set(row, resolveShipmentPayoutMapping(row, thresholdPayoutMappingIdentities));
+  for (const row of thresholdMetricRows) thresholdShipmentResolutionByRow.set(row, resolveIndexedShipment(row, thresholdMappingsByProviderMember));
+  const shipmentRowsByMappingId = new Map<string, any[]>();
+  const conflictingMappingIdsInPeriod = new Set<string>();
+  for (const row of metricsResult.data ?? []) {
+    const resolution = shipmentResolutionByRow.get(row);
+    if (resolution?.kind === "mapped") {
+      for (const match of resolution.matches) {
+        if (match.workforceId !== resolution.workforceId) continue;
+        const existing = shipmentRowsByMappingId.get(match.id);
+        if (existing) existing.push(row);
+        else shipmentRowsByMappingId.set(match.id, [row]);
+      }
+    } else if (resolution?.kind === "conflict") {
+      const date = String(row.work_date ?? "");
+      if (date < fromDate || date > toDate) continue;
+      for (const match of resolution.matches) conflictingMappingIdsInPeriod.add(match.id);
+    }
+  }
+  const thresholdShipmentRowsByMappingId = new Map<string, any[]>();
+  for (const row of thresholdMetricRows) {
+    const resolution = thresholdShipmentResolutionByRow.get(row);
+    if (resolution?.kind !== "mapped") continue;
+    for (const match of resolution.matches) {
+      if (match.workforceId !== resolution.workforceId) continue;
+      const existing = thresholdShipmentRowsByMappingId.get(match.id);
+      if (existing) existing.push(row);
+      else thresholdShipmentRowsByMappingId.set(match.id, [row]);
+    }
+  }
   const authorizedShipmentDeliveriesByWorkerDate = aggregateResolvedShipmentDeliveriesByWorkforceDay(
     metricsResult.data ?? [],
     (row) => shipmentResolutionByRow.get(row)
@@ -456,9 +520,14 @@ export async function loadWorkforcePayoutRows(
     Boolean(aggregateAttendanceForDate(workforceId, stationId, date, sourceKey))
     || hasWorkforcePayoutAttendanceOverride(payoutInputMaps, workforceId, date);
   const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
+  const dateRangeCache = new Map<string, string[]>();
   const dateRange = (from: string, to: string) => {
+    const key = `${from}|${to}`;
+    const cached = dateRangeCache.get(key);
+    if (cached) return cached;
     const dates: string[] = [];
     for (let cursor = new Date(`${from}T00:00:00Z`); cursor <= new Date(`${to}T00:00:00Z`); cursor.setUTCDate(cursor.getUTCDate() + 1)) dates.push(cursor.toISOString().slice(0, 10));
+    dateRangeCache.set(key, dates);
     return dates;
   };
   const panBySource = new Map([...contractorsResult.data ?? [], ...employeesResult.data ?? [], ...fieldExecutivesResult.data ?? []].map((row: any) => [row.id, row.pan_number]));
@@ -467,6 +536,12 @@ export async function loadWorkforcePayoutRows(
   const modelById = new Map((modelsResult.data ?? []).map((row: any) => [row.id, row]));
   const locationByCode = new Map(locations.map((row: any) => [normalizePayoutIdentity(row.station_code), row]));
   const allocations = allocationResult.data ?? [];
+  const productionAllocationsByProviderId = new Map<any, any[]>();
+  for (const allocation of allocations) {
+    const existing = productionAllocationsByProviderId.get(allocation.provider_id);
+    if (existing) existing.push(allocation);
+    else productionAllocationsByProviderId.set(allocation.provider_id, [allocation]);
+  }
   const deductionHeads = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
   const panAadhaarLinkedByWorkforceId = new Map((panAadhaarResult.data ?? []).map((row: any) => [row.account_id, row.verified === true]));
   const historyByWorkforceId = new Map<string, PaymentAllocationHistoryEntry[]>();
@@ -524,8 +599,51 @@ export async function loadWorkforcePayoutRows(
   }
   for (const [workforceId, history] of historyByWorkforceId) historyByWorkforceId.set(workforceId, sortPaymentAllocationHistory(history));
   for (const [memberKey, history] of historyByProviderMember) historyByProviderMember.set(memberKey, sortPaymentAllocationHistory(history));
-  const attendanceComponentsFor = (mapping: any) => (componentsByMethod.get(String(mapping.payment_method_id)) ?? [])
-    .filter((component) => component.component_type !== "production" && component.calculation_source === "attendance_eligibility");
+  const attendanceComponentsByMethod = new Map<string, DirectPayComponent[]>();
+  for (const [methodId, components] of componentsByMethod) {
+    attendanceComponentsByMethod.set(
+      methodId,
+      components.filter((component) => component.component_type !== "production" && component.calculation_source === "attendance_eligibility")
+    );
+  }
+  const attendanceComponentsFor = (mapping: any) => attendanceComponentsByMethod.get(String(mapping.payment_method_id)) ?? [];
+  const mappingWorkforceId = (mapping: any) => {
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
+    return String(workerBySource.get(sourceId)?.id ?? "");
+  };
+  const allMappingsByWorkforceId = new Map<string, any[]>();
+  for (const mapping of allMappings) {
+    const workforceId = mappingWorkforceId(mapping);
+    if (!workforceId) continue;
+    const existing = allMappingsByWorkforceId.get(workforceId);
+    if (existing) existing.push(mapping);
+    else allMappingsByWorkforceId.set(workforceId, [mapping]);
+  }
+  const attendanceMappingsByWorkforceId = new Map<string, any[]>();
+  for (const [workforceId, workerMappings] of allMappingsByWorkforceId) {
+    attendanceMappingsByWorkforceId.set(
+      workforceId,
+      workerMappings
+        .filter((mapping) => attendanceComponentsFor(mapping).length > 0)
+        .sort((left, right) => String(right.effective_from).localeCompare(String(left.effective_from)) || String(right.id).localeCompare(String(left.id)))
+    );
+  }
+  const directAllocationsByWorkforceId = new Map<string, any[]>();
+  for (const allocation of allDirectAllocations) {
+    const workforceId = String(allocation.workforce_id ?? "");
+    if (!workforceId) continue;
+    const existing = directAllocationsByWorkforceId.get(workforceId);
+    if (existing) existing.push(allocation);
+    else directAllocationsByWorkforceId.set(workforceId, [allocation]);
+  }
+  const activeDirectAllocationsByWorkforceId = new Map<string, any[]>();
+  for (const allocation of directAllocations) {
+    const workforceId = String(allocation.workforce_id ?? "");
+    if (!workforceId) continue;
+    const existing = activeDirectAllocationsByWorkforceId.get(workforceId);
+    if (existing) existing.push(allocation);
+    else activeDirectAllocationsByWorkforceId.set(workforceId, [allocation]);
+  }
   const attendanceSetupSignature = (mapping: any) => JSON.stringify(attendanceComponentsFor(mapping)
     .map((component) => {
       const code = String(component.component_code ?? "").trim().toUpperCase();
@@ -538,13 +656,10 @@ export async function loadWorkforcePayoutRows(
   const attendanceOwnerOn = (workforceId: string, date: string) => {
     const cacheKey = `${workforceId}|${date}`;
     if (attendanceOwnerByWorkerDate.has(cacheKey)) return attendanceOwnerByWorkerDate.get(cacheKey) ?? "";
-    const candidates = allMappings.filter((candidate: any) => {
-      const sourceId = candidate.workforce_id || candidate.contractor_id || candidate.employee_id || candidate.field_executive_id;
-      return workerBySource.get(sourceId)?.id === workforceId
-        && String(candidate.effective_from) <= date
+    const candidates = (attendanceMappingsByWorkforceId.get(workforceId) ?? []).filter((candidate: any) => {
+      return String(candidate.effective_from) <= date
         && (!candidate.effective_to || String(candidate.effective_to) >= date)
-        && attendanceComponentsFor(candidate).length > 0;
-    }).sort((left: any, right: any) => String(right.effective_from).localeCompare(String(left.effective_from)) || String(right.id).localeCompare(String(left.id)));
+    });
     if (!candidates.length) {
       attendanceOwnerByWorkerDate.set(cacheKey, "");
       return "";
@@ -561,10 +676,6 @@ export async function loadWorkforcePayoutRows(
     components: DirectPayComponent[];
   };
   const aggregateAttendancePeriods = [...payoutInputMaps.attendancePeriodsByWorkforceStation.values()].flat();
-  const mappingWorkforceId = (mapping: any) => {
-    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
-    return String(workerBySource.get(sourceId)?.id ?? "");
-  };
   const directAllocationComponents = (allocation: any) => {
     const snapshot = Array.isArray(allocation.payment_components)
       ? allocation.payment_components.filter((component: unknown): component is DirectPayComponent => Boolean(component && typeof component === "object"))
@@ -574,9 +685,8 @@ export async function loadWorkforcePayoutRows(
   const relevantAttendanceComponents = (components: DirectPayComponent[], basis: "hours" | "days") =>
     components.filter((component) => directPayAttendanceBasis(component) === basis);
   const aggregateAttendanceSourcesOn = (period: (typeof aggregateAttendancePeriods)[number], date: string): AggregateAttendanceSource[] => {
-    const providerSources = allMappings.flatMap((mapping: any) => {
-      if (mappingWorkforceId(mapping) !== period.workforce_id
-        || (mapping.station_id && String(mapping.station_id) !== period.station_id)
+    const providerSources = (allMappingsByWorkforceId.get(period.workforce_id) ?? []).flatMap((mapping: any) => {
+      if ((mapping.station_id && String(mapping.station_id) !== period.station_id)
         || !allocationActiveOn(mapping, date)) return [];
       const components = relevantAttendanceComponents(
         componentsByMethod.get(String(mapping.payment_method_id)) ?? [],
@@ -584,9 +694,8 @@ export async function loadWorkforcePayoutRows(
       );
       return components.length ? [{ key: `provider:${String(mapping.id)}`, values: mapping.payment_values, components }] : [];
     });
-    const directSources = allDirectAllocations.flatMap((allocation: any) => {
-      if (String(allocation.workforce_id) !== period.workforce_id
-        || (allocation.station_id && String(allocation.station_id) !== period.station_id)
+    const directSources = (directAllocationsByWorkforceId.get(period.workforce_id) ?? []).flatMap((allocation: any) => {
+      if ((allocation.station_id && String(allocation.station_id) !== period.station_id)
         || !allocationActiveOn(allocation, date)) return [];
       const components = relevantAttendanceComponents(directAllocationComponents(allocation), period.attendance_basis);
       return components.length ? [{ key: `direct:${String(allocation.id)}`, values: allocation.payment_values, components }] : [];
@@ -658,6 +767,13 @@ export async function loadWorkforcePayoutRows(
     const sourceKey = [...sourceKeys][0];
     if (sourceKeys.size === 1 && sourceKey) aggregateAttendanceSourceByPeriod.set(periodKey, sourceKey);
   }
+  const aggregateAttendancePeriodsByWorkforceStation = new Map<string, typeof aggregateAttendancePeriods>();
+  for (const period of aggregateAttendancePeriods) {
+    const key = `${period.workforce_id}|${period.station_id}`;
+    const existing = aggregateAttendancePeriodsByWorkforceStation.get(key);
+    if (existing) existing.push(period);
+    else aggregateAttendancePeriodsByWorkforceStation.set(key, [period]);
+  }
   const sourceHasInvalidAggregateAttendance = (
     workforceId: string,
     stationId: string,
@@ -666,7 +782,8 @@ export async function loadWorkforcePayoutRows(
     payoutTo: string,
     requiresMonthlyDayHistory: boolean
   ) =>
-    aggregateAttendancePeriods.some((period) => period.workforce_id === workforceId
+    (aggregateAttendancePeriodsByWorkforceStation.get(`${workforceId}|${stationId}`) ?? []).some((period) =>
+      period.workforce_id === workforceId
       && period.station_id === stationId
       && aggregateAttendanceIssueByPeriod.has(aggregateAttendancePeriodKey(period))
       && (!aggregateAttendanceSourceByPeriod.get(aggregateAttendancePeriodKey(period))
@@ -697,7 +814,7 @@ export async function loadWorkforcePayoutRows(
     const cached = productionRulesByMappingId.get(mappingId);
     if (cached) return cached;
     const configuredOrder = paymentComponentOrderMap(componentsByMethod.get(String(mapping.payment_method_id)) ?? []);
-    const matchingAllocations = allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).flatMap((item: any) => {
+    const matchingAllocations = (productionAllocationsByProviderId.get(mapping.provider_id) ?? []).filter((item: any) => !item.provider_model_id || item.provider_model_id === location?.location_model_id).flatMap((item: any) => {
       const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields;
       const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
       if (!field?.code || field.field_type !== "production" || !metric?.source_key) return [];
@@ -711,9 +828,9 @@ export async function loadWorkforcePayoutRows(
       // must never create a second copy of the same payable component.
       if (!current || (candidate.item.provider_model_id && !current.item.provider_model_id)) allocationByCode.set(code, candidate);
     }
+    const configuredValues = normalizedPaymentValues(mapping.payment_values);
     const rules: ProviderProductionRule[] = [...allocationByCode.values()].map(({ item, field, metric }) => {
       const code = String(field.code);
-      const rateEntry = Object.entries(mapping.payment_values ?? {}).find(([key]) => normalizePaymentFieldCode(key) === normalizePaymentFieldCode(code));
       return {
         allocationKey: `${String(item.payment_field_id ?? "")}|${String(item.provider_model_id ?? "all")}|${String(metric.source_key)}|${normalizePaymentFieldCode(code)}`,
         paymentFieldId: String(item.payment_field_id ?? ""),
@@ -722,7 +839,7 @@ export async function loadWorkforcePayoutRows(
         componentType: "production" as const,
         source: String(metric.source_key),
         customProduction: false,
-        rate: Number(rateEntry?.[1] ?? 0),
+        rate: Number(configuredValues.get(normalizePaymentFieldCode(code)) ?? 0),
         sortOrder: configuredOrder.get(normalizePaymentFieldCode(code)),
         componentOrder: 0
       };
@@ -732,7 +849,6 @@ export async function loadWorkforcePayoutRows(
       const code = normalizePaymentFieldCode(component.component_code);
       const paymentFieldId = String(component.payment_field_id ?? "");
       if (!code || !paymentFieldId || component.component_type !== "production" || component.is_custom_production !== true || existingCodes.has(code)) continue;
-      const rateEntry = Object.entries(mapping.payment_values ?? {}).find(([key]) => normalizePaymentFieldCode(key) === code);
       rules.push({
         allocationKey: `custom|${paymentFieldId}|${code}`,
         paymentFieldId,
@@ -741,7 +857,7 @@ export async function loadWorkforcePayoutRows(
         componentType: "production",
         source: null,
         customProduction: true,
-        rate: Number(rateEntry?.[1] ?? 0),
+        rate: Number(configuredValues.get(code) ?? 0),
         sortOrder: configuredOrder.get(code),
         componentOrder: 0
       });
@@ -751,32 +867,8 @@ export async function loadWorkforcePayoutRows(
     productionRulesByMappingId.set(mappingId, ordered);
     return ordered;
   };
-  const providerDailyRowsByMappingId = new Map<string, any[]>();
-  const providerDailyRowsFor = (mapping: any, mappingIdentity: WorkforcePayoutMappingIdentity, workforceId: string) => {
-    const mappingId = String(mapping.id);
-    const cached = providerDailyRowsByMappingId.get(mappingId);
-    if (cached) return cached;
-    const rows = (metricsResult.data ?? []).filter((daily: any) => {
-      if (!payoutMappingMatchesShipment(mappingIdentity, daily)) return false;
-      const resolution = shipmentResolutionByRow.get(daily);
-      return resolution?.kind === "mapped" && resolution.workforceId === workforceId;
-    });
-    providerDailyRowsByMappingId.set(mappingId, rows);
-    return rows;
-  };
-  const thresholdDailyRowsByMappingId = new Map<string, any[]>();
-  const thresholdDailyRowsFor = (mapping: any, mappingIdentity: WorkforcePayoutMappingIdentity, workforceId: string) => {
-    const mappingId = String(mapping.id);
-    const cached = thresholdDailyRowsByMappingId.get(mappingId);
-    if (cached) return cached;
-    const rows = thresholdMetricRows.filter((daily: any) => {
-      if (!payoutMappingMatchesShipment(mappingIdentity, daily)) return false;
-      const resolution = thresholdShipmentResolutionByRow.get(daily);
-      return resolution?.kind === "mapped" && resolution.workforceId === workforceId;
-    });
-    thresholdDailyRowsByMappingId.set(mappingId, rows);
-    return rows;
-  };
+  const providerDailyRowsFor = (mapping: any) => shipmentRowsByMappingId.get(String(mapping.id)) ?? [];
+  const thresholdDailyRowsFor = (mapping: any) => thresholdShipmentRowsByMappingId.get(String(mapping.id)) ?? [];
   const productionThresholdInputId = (mappingId: unknown, date: string, rule: ProviderProductionRule) =>
     `${String(mappingId)}|${date}|${rule.allocationKey}`;
   const thresholdInputs = thresholdMappings
@@ -791,7 +883,7 @@ export async function loadWorkforcePayoutRows(
       if (activeFrom > activeTo) return [];
       const productionRules = productionRulesFor(mapping, location);
       if (!productionRules.length) return [];
-      const providerDailyRows = thresholdDailyRowsFor(mapping, mappingIdentity, String(worker.id));
+      const providerDailyRows = thresholdDailyRowsFor(mapping);
       const providerDailyRowsByDate = new Map<string, any[]>();
       for (const row of providerDailyRows) {
         const date = String(row.work_date);
@@ -847,10 +939,10 @@ export async function loadWorkforcePayoutRows(
   });
   const providerSegments = mappings.flatMap((mapping: any): ProviderPayoutSegment[] => {
     const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const mappingIdentity = payoutMappingIdentityById.get(String(mapping.id));
+    const provider: any = Array.isArray(mapping.providers) ? mapping.providers[0] : mapping.providers;
     if (!worker || !mappingIdentity) return [];
-    const matchingShipmentRows = (metricsResult.data ?? []).filter((daily: any) => payoutMappingMatchesShipment(mappingIdentity, daily));
-    if (matchingShipmentRows.some((daily: any) => String(daily.work_date) >= fromDate && String(daily.work_date) <= toDate && shipmentResolutionByRow.get(daily)?.kind === "conflict")) return [];
-    const providerDailyRows = providerDailyRowsFor(mapping, mappingIdentity, String(worker.id));
+    if (conflictingMappingIdsInPeriod.has(String(mapping.id))) return [];
+    const providerDailyRows = providerDailyRowsFor(mapping);
     const providerMemberName = providerDailyRows.find((daily: any) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
     const paymentMethod: any = Array.isArray(mapping.payment_methods) ? mapping.payment_methods[0] : mapping.payment_methods;
     const paymentMethodId = String(mapping.payment_method_id);
@@ -859,7 +951,16 @@ export async function loadWorkforcePayoutRows(
     const activeFrom = [fromDate, String(mapping.effective_from), String(worker?.date_of_join ?? fromDate)].sort().at(-1)!;
     const activeTo = [toDate, today(), String(mapping.effective_to ?? toDate), String(worker?.last_working_date ?? toDate)].sort()[0];
     const activeDates = activeFrom <= activeTo ? dateRange(activeFrom, activeTo) : [];
-    const eligibleDaily = activeFrom <= activeTo ? providerDailyRows.filter((daily) => daily.work_date >= activeFrom && daily.work_date <= activeTo) : [];
+    const eligibleDailyByDate = new Map<string, any[]>();
+    if (activeFrom <= activeTo) {
+      for (const daily of providerDailyRows) {
+        if (daily.work_date < activeFrom || daily.work_date > activeTo) continue;
+        const date = String(daily.work_date);
+        const existing = eligibleDailyByDate.get(date);
+        if (existing) existing.push(daily);
+        else eligibleDailyByDate.set(date, [daily]);
+      }
+    }
     const productionRules = productionRulesFor(mapping, location);
     const attendanceComponents = attendanceComponentsFor(mapping);
     const attendanceSourceKey = `provider:${String(mapping.id)}`;
@@ -877,11 +978,12 @@ export async function loadWorkforcePayoutRows(
     const attendanceDates = attendanceComponents.length && worker?.id && activeFrom <= activeTo
       ? dateRange(activeFrom, activeTo).filter((date) => attendanceOwnerOn(worker.id, date) === String(mapping.id))
       : [];
-    const dates = [...new Set([...activeDates, ...eligibleDaily.map((daily) => String(daily.work_date))])];
+    const attendanceDateSet = new Set(attendanceDates);
+    const dates = [...new Set([...activeDates, ...eligibleDailyByDate.keys()])];
     let missingAttendanceConfiguration = false;
     let missingThresholdConfiguration = false;
     const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = dates.sort().reverse().map((date) => {
-      const rows = eligibleDaily.filter((daily) => String(daily.work_date) === date);
+      const rows = eligibleDailyByDate.get(date) ?? [];
       const productionLines = productionRules.map((rule) => {
         const providerUnits = rule.customProduction
           ? 0
@@ -933,7 +1035,7 @@ export async function loadWorkforcePayoutRows(
       const workerDateKey = `${worker?.id}|${date}`;
       const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
       const aggregateAttendance = aggregateAttendanceForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey);
-      const ownedAttendanceComponents = attendanceDates.includes(date) || aggregateAttendance ? attendanceComponents : [];
+      const ownedAttendanceComponents = attendanceDateSet.has(date) || aggregateAttendance ? attendanceComponents : [];
       const hasImportedAttendance = hasImportedAttendanceForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey);
       const attendancePay = directPayForDay(
         paymentValuesForDate(mapping.payment_values, ownedAttendanceComponents, String(worker.id), String(mapping.station_id), date),
@@ -1027,7 +1129,7 @@ export async function loadWorkforcePayoutRows(
       categoryCode,
       panNumber: worker?.pan_number ?? panBySource.get(sourceId) ?? null,
       paymentSetupKey: providerPaymentSetupKey(mapping),
-      row: { id: mapping.id, reviewSubjectType: "workforce", reviewSubjectId: String(worker.id), dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays, workDaysSource, history: [], paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions: 0, deductionBreakdown: [], panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment, status } satisfies WorkforcePayoutRow
+      row: { id: mapping.id, reviewSubjectType: "workforce", reviewSubjectId: String(worker.id), dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: provider?.name ?? "-", paymentSourceIdentity: { stationId: String(mapping.station_id), providerIdentity: String(provider?.name ?? provider?.code ?? ""), providerMemberId: String(mapping.provider_member_id ?? "") }, model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays, workDaysSource, history: [], paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions: 0, deductionBreakdown: [], panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment, status } satisfies WorkforcePayoutRow
     }];
   });
   if (providerAttendanceConflict) return { rows: [] as WorkforcePayoutRow[], error: "Conflicting provider attendance payment setups exist for the same workforce date. Resolve the duplicate rate cards before calculating payroll." };
@@ -1052,7 +1154,7 @@ export async function loadWorkforcePayoutRows(
     const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id;
     const canonicalWorkforceId = workerBySource.get(sourceId)?.id;
     if (!canonicalWorkforceId) return false;
-    return directAllocations.some((allocation: any) => allocation.workforce_id === canonicalWorkforceId
+    return (activeDirectAllocationsByWorkforceId.get(String(canonicalWorkforceId)) ?? []).some((allocation: any) => allocation.workforce_id === canonicalWorkforceId
       && String(mapping.effective_from) <= String(allocation.effective_to ?? toDate)
       && String(allocation.effective_from) <= String(mapping.effective_to ?? toDate));
   });
@@ -1062,7 +1164,7 @@ export async function loadWorkforcePayoutRows(
   for (const shipment of metricsResult.data ?? []) {
     const shipmentDate = String(shipment.work_date ?? "");
     if (shipmentDate < fromDate || shipmentDate > toDate || !normalizePayoutIdentity(shipment.provider_employee_id)) continue;
-    const resolution = shipmentResolutionByRow.get(shipment) ?? resolveShipmentPayoutMapping(shipment, payoutMappingIdentities);
+    const resolution = shipmentResolutionByRow.get(shipment) ?? resolveIndexedShipment(shipment, payoutMappingsByProviderMember);
     const kind = resolution.kind === "unmapped"
       ? "unmapped"
       : resolution.kind === "conflict"
@@ -1097,6 +1199,11 @@ export async function loadWorkforcePayoutRows(
       designation: worker ? workforceDesignation(worker) : "",
       providerMemberId,
       providerMemberName,
+      paymentSourceIdentity: location?.id ? {
+        stationId: String(location.id),
+        providerIdentity: String(source.client ?? ""),
+        providerMemberId
+      } : undefined,
       locationId: location?.id ?? null,
       location: stationCode || "-",
       provider: String(source.client ?? "").trim() || "Provider report",

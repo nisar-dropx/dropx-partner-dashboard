@@ -24,6 +24,8 @@ test("bulk re-download is authorized, exact-selection only, and read-only", () =
   assert.match(route, /sameOrigin\(request\)/);
   assert.match(route, /hasPermission\(authorization, payoutPageCode, "edit"\)/);
   assert.match(route, /hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(route, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(route, /!hasPermission\(authorization, payoutPageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(route, /authorization\.hasAllLocationAccess/);
   assert.match(route, /MAX_REQUEST_BYTES = 4 \* 1024 \* 1024/);
   assert.match(route, /uniquePaymentItemIds\(body\.paymentItemIds\)/);

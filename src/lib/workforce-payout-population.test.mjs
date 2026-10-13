@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   aggregateResolvedShipmentDeliveriesByWorkforceDay,
   mappingsForAuthorizedWorkforce,
+  normalizePayoutIdentity,
   payoutMappingMatchesShipment,
   resolveShipmentPayoutMapping,
   shipmentIdentityKey,
@@ -45,6 +47,42 @@ test("mapping resolution distinguishes unmapped, mapped and conflicting identiti
   });
   assert.equal(resolveShipmentPayoutMapping(shipment, [mapping, { ...mapping, id: "mapping-2", workforceId: "worker-2" }]).kind, "conflict");
   assert.equal(resolveShipmentPayoutMapping(shipment, [{ ...mapping, workforceId: "" }]).kind, "conflict");
+});
+
+test("provider-member indexing preserves complete shipment mapping resolution", () => {
+  const mappings = [
+    mapping,
+    { ...mapping, id: "mapping-other-member", providerMemberId: "AM202", workforceId: "worker-2" },
+    { ...mapping, id: "mapping-other-station", stationCode: "KLZH" },
+    { ...mapping, id: "mapping-conflict", workforceId: "worker-3" }
+  ];
+  const byProviderMember = new Map();
+  for (const candidate of mappings) {
+    const key = normalizePayoutIdentity(candidate.providerMemberId);
+    byProviderMember.set(key, [...(byProviderMember.get(key) ?? []), candidate]);
+  }
+  const shipments = [
+    shipment,
+    { ...shipment, provider_employee_id: "AM202" },
+    { ...shipment, provider_employee_id: "AM303" },
+    { ...shipment, station_code: "KLZH" }
+  ];
+
+  for (const candidate of shipments) {
+    assert.deepEqual(
+      resolveShipmentPayoutMapping(candidate, byProviderMember.get(normalizePayoutIdentity(candidate.provider_employee_id)) ?? []),
+      resolveShipmentPayoutMapping(candidate, mappings)
+    );
+  }
+});
+
+test("the payout loader indexes high-cardinality shipment and attendance lookups", () => {
+  const loader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
+  assert.match(loader, /const payoutMappingsByProviderMember = indexMappingsByProviderMember/);
+  assert.match(loader, /const shipmentRowsByMappingId = new Map/);
+  assert.match(loader, /const attendanceMappingsByWorkforceId = new Map/);
+  assert.match(loader, /const eligibleDailyByDate = new Map/);
+  assert.doesNotMatch(loader, /const providerDailyRowsFor[\s\S]{0,500}?metricsResult\.data[\s\S]{0,100}?\.filter/);
 });
 
 test("report identity grouping keeps the same provider ID separate by station and client", () => {

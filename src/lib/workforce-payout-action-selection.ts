@@ -105,19 +105,33 @@ export function resolveWorkforcePayoutBankSelection(
   index: ReadonlyMap<string, WorkforcePayoutBankSelectionIndexEntry>,
   selectedRowIds: ReadonlySet<string>
 ) {
-  const payoutRows: WorkforcePayoutBankRowSelection[] = [];
-  let totalAmount = 0;
+  const selectedByPayoutIdentity = new Map<string, WorkforcePayoutBankSelectionIndexEntry>();
 
   for (const rowId of selectedRowIds) {
     const entry = index.get(rowId);
     if (!entry) continue;
-    payoutRows.push({ workforceId: entry.workforceId, stationId: entry.stationId });
-    totalAmount += entry.availableToPay;
+
+    // A worksheet can surface more than one display/source row for the same
+    // Workforce and location. The bank API intentionally accepts that payout
+    // identity only once. Deduplicate here so selecting several table rows
+    // cannot disable the action with a duplicate-row request or double the
+    // preliminary amount shown in the dialog.
+    const payoutIdentity = `${entry.workforceId}|${entry.stationId}`;
+    const existing = selectedByPayoutIdentity.get(payoutIdentity);
+    if (!existing || entry.availableToPay > existing.availableToPay) {
+      selectedByPayoutIdentity.set(payoutIdentity, entry);
+    }
   }
 
+  const selectedEntries = [...selectedByPayoutIdentity.values()];
+  const payoutRows = selectedEntries.map((entry) => ({
+    workforceId: entry.workforceId,
+    stationId: entry.stationId
+  }));
   payoutRows.sort((left, right) =>
     left.workforceId.localeCompare(right.workforceId) || left.stationId.localeCompare(right.stationId)
   );
+  const totalAmount = selectedEntries.reduce((sum, entry) => sum + entry.availableToPay, 0);
   return { payoutRows, totalAmount: money(totalAmount) };
 }
 

@@ -99,6 +99,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
   const remap = providerFirstLocationRemap(destination, sourceWorker);
   assert.deepEqual(remap, {
     kind: "location",
+    allowMove: false,
     mappingId: "mapping-1",
     providerMemberId: "member-1",
     providerMemberName: "Asha Devi",
@@ -110,7 +111,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
   });
   assert.equal(
     providerFirstMappingReplacementMessage(remap),
-    "Provider ID member-1 - Asha Devi is currently mapped to DROPX1 - Asha Devi at JUGD - Jharsuguda.\nMove it to JUGF - Sundergarh, or keep both location mappings for the same DropX ID?\nMoving ends the old location on the preceding day. Keep all preserves both locations."
+    "Provider ID member-1 - Asha Devi is already mapped to DROPX1 - Asha Devi at its registered location JUGD - Jharsuguda.\nUse Keep all to add JUGF - Sundergarh for the same DropX ID while preserving the verified registered-location mapping."
   );
   assert.equal(providerFirstValidationStatus(destination, sourceWorker, method), "ready");
   assert.equal(providerFirstLocationRemap({ ...destination, providerId: "provider-2" }, sourceWorker), null);
@@ -156,8 +157,25 @@ test("matches controlled provider-report spelling variants without weakening glo
   ), true);
   assert.equal(providerFirstNamesMatch("Rithesh Kumar / SPVAN_DROP / 1001", "RITESH KUMAR"), true);
   assert.equal(providerFirstNamesMatch("Asha Devi / DROP / 1002", "ASHA DEVI"), true);
+  assert.equal(providerFirstNamesMatch("KUMAR RITHESH / DROP / 1004", "RITHESH KUMAR"), true);
+  assert.equal(providerFirstNamesMatch("R Kumar / DROP / 1005", "R KUMAR"), true);
+  assert.equal(providerFirstNamesMatch("Thaha mohammad B / SPVAN-DROP / 206139406", "MOHAMMED THAHA"), true);
+  assert.equal(providerFirstNamesMatch("Suresh Chandran / DROP / 1011", "CHANDRAN"), true);
   assert.equal(providerFirstNamesMatch("Rajesh Sharma / DROP / 1003", "Ramesh Varma"), false);
   assert.equal(providerFirstNamesMatch("Bhuwneshwar", "Bhuwaneswar"), false);
+});
+
+test("rejects provider mappings supported only by an initial or a common name token", () => {
+  assert.equal(providerFirstNamesMatch("Thaha mohammed B / SPVAN_DROP / 206139406", "ABDULKADER BASHEER"), false);
+  assert.equal(providerFirstNamesMatch("Arun Kumar / DROP / 1006", "RAJESH KUMAR"), false);
+  assert.equal(providerFirstNamesMatch("Arun Muhamed / DROP / 1012", "RAJESH MUHAMED"), false);
+  assert.equal(providerFirstNamesMatch("Arun Mohammed / DROP / 1013", "RAJESH MOHAMMED"), false);
+  assert.equal(providerFirstNamesMatch("Arun Abdul / DROP / 1014", "RAJESH ABDUL"), false);
+  assert.equal(providerFirstNamesMatch("Arun Singh / DROP / 1015", "RAJESH SINGH"), false);
+  assert.equal(providerFirstNamesMatch("B / DROP / 1007", "BASHEER"), false);
+  assert.equal(providerFirstNamesMatch("R Kumar / DROP / 1008", "RITESH KUMAR"), false);
+  assert.equal(providerFirstNamesMatch("Mohammed A / DROP / 1009", "MOHAMMED ABDUL"), false);
+  assert.equal(providerFirstNamesMatch("M Kumar / DROP / 1010", "MANOJ KUMAR"), false);
 });
 
 test("recognizes scientific provider IDs without fabricating missing digits", () => {
@@ -387,7 +405,8 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(inlineAction, /canEditProviderMappings\(authorization\)/);
   assert.match(inlineAction, /saveExecutiveMappingRow/);
   assert.match(inlineAction, /providerFirstReplacementState/);
-  assert.doesNotMatch(inlineAction, /redirect\(|revalidatePath\(/);
+  assert.doesNotMatch(inlineAction, /redirect\(/);
+  assert.match(inlineAction, /revalidatePath\("\/payments\/workforce-payouts"\)/);
   assert.match(actions, /isScientificProviderMemberId\(providerMemberId\)/);
   assert.match(actions, /XLSX\.read\(await file\.arrayBuffer\(\), \{ type: "array", raw: true \}\)/);
   assert.match(actions, /identifierRows = XLSX\.utils\.sheet_to_json[\s\S]*raw: true/);

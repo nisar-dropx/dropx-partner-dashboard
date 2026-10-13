@@ -84,6 +84,22 @@ test("simultaneous provider IDs with the same payment setup merge without double
   assert.equal(result.rows[0].row.providerMemberId, "P1 / P2");
 });
 
+test("a consolidated row preserves a held non-first provider source for later release", () => {
+  const first = segment({ id: "provider-a", methodId: "packets", method: "Per packet", from: 1, to: 1, rate: 10, units: 7, amount: 70, paymentSetupKey: "same-setup" });
+  const second = segment({ id: "provider-b", methodId: "packets", method: "Per packet", from: 1, to: 1, rate: 10, units: 5, amount: 50, paymentSetupKey: "same-setup" });
+  first.row.paymentSourceIdentity = { stationId: "station", providerIdentity: "Amazon", providerMemberId: "FIRST" };
+  second.row.paymentSourceIdentity = { stationId: "station", providerIdentity: "Amazon", providerMemberId: "HELD-NON-FIRST" };
+
+  const result = consolidateProviderPayoutSegments([first, second]);
+
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.rows[0].row.paymentSourceIdentities, [
+    first.row.paymentSourceIdentity,
+    second.row.paymentSourceIdentity
+  ]);
+  assert.deepEqual(result.rows[0].row.paymentSourceIdentity, first.row.paymentSourceIdentity);
+});
+
 test("the same workforce remains one payout row per location", () => {
   const first = segment({ id: "station-a", methodId: "fixed-a", method: "Fixed A", from: 1, to: 1, rate: 100, units: 1, amount: 100, locationId: "station-a" });
   const second = segment({ id: "station-b", methodId: "fixed-b", method: "Fixed B", from: 1, to: 1, rate: 200, units: 1, amount: 200, locationId: "station-b" });

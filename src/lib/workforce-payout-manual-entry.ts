@@ -16,6 +16,8 @@ export type WorkforcePayoutManualSelection = {
   location: string;
   locationId?: string | null;
   status?: string;
+  attendanceFrom?: string;
+  attendanceTo?: string;
 };
 
 export type WorkforcePayoutManualLine = {
@@ -120,14 +122,39 @@ export function chunkWorkforcePayoutManualLines(
   return chunks;
 }
 
+export function workforcePayoutManualAttendancePeriod(
+  selection: WorkforcePayoutManualSelection | undefined,
+  periodStart: string,
+  periodEnd: string
+) {
+  const effectiveDate = selection?.attendanceFrom
+    && selection.attendanceFrom >= periodStart
+    && selection.attendanceFrom <= periodEnd
+    ? selection.attendanceFrom
+    : periodStart;
+  const effectiveTo = selection?.attendanceTo
+    && selection.attendanceTo >= effectiveDate
+    && selection.attendanceTo <= periodEnd
+    ? selection.attendanceTo
+    : periodEnd;
+  return { effectiveDate, effectiveTo };
+}
+
 export function normalizeWorkforcePayoutManualLineType(
   line: WorkforcePayoutManualLine,
   inputType: WorkforcePayoutManualInputType | "",
   periodStart: string,
-  periodEnd: string
+  periodEnd: string,
+  selection?: WorkforcePayoutManualSelection
 ): WorkforcePayoutManualLine {
   const periodOnly = inputType === "ADDITIONAL_PAYMENT" || inputType === "DEDUCTION";
-  const effectiveDate = periodOnly ? periodStart : line.effectiveDate || periodStart;
+  const attendanceOnly = inputType === "ATTENDANCE";
+  const attendancePeriod = workforcePayoutManualAttendancePeriod(selection, periodStart, periodEnd);
+  const effectiveDate = periodOnly
+    ? periodStart
+    : attendanceOnly
+      ? attendancePeriod.effectiveDate
+      : line.effectiveDate || periodStart;
   return {
     ...line,
     inputType,
@@ -135,9 +162,11 @@ export function normalizeWorkforcePayoutManualLineType(
     effectiveDate,
     effectiveTo: periodOnly
       ? periodEnd
-      : inputType === "PRODUCTION_UNITS"
-        ? effectiveDate
-        : line.effectiveTo || periodEnd
+      : attendanceOnly
+        ? attendancePeriod.effectiveTo
+        : inputType === "PRODUCTION_UNITS"
+          ? effectiveDate
+          : line.effectiveTo || periodEnd
   };
 }
 
@@ -180,6 +209,18 @@ export function applyWorkforcePayoutManualLineToAll(
       name: selection.name,
       location: selection.location === "-" ? "" : selection.location
     };
+    if (copy.inputType === "ATTENDANCE") {
+      const attendanceFrom = selection.attendanceFrom && selection.attendanceFrom > copy.effectiveDate
+        ? selection.attendanceFrom
+        : copy.effectiveDate;
+      const attendanceTo = selection.attendanceTo && selection.attendanceTo < copy.effectiveTo
+        ? selection.attendanceTo
+        : copy.effectiveTo;
+      copy.effectiveDate = attendanceFrom;
+      copy.effectiveTo = attendanceTo >= attendanceFrom
+        ? attendanceTo
+        : selection.attendanceTo ?? selection.attendanceFrom ?? attendanceFrom;
+    }
     if (targetIndex >= 0) next[targetIndex] = copy;
     else next.push(copy);
   });

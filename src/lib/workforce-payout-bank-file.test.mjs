@@ -17,6 +17,8 @@ import {
   normalizeWorkforceBankIfsc,
   normalizeWorkforceBankReference,
   parseDropxFedOneResponse,
+  parsePreparedDropxFedOneResponse,
+  prepareDropxFedOneResponse,
   parseWorkforceFedOneResponse
 } from "./workforce-payout-bank-file.ts";
 
@@ -228,16 +230,86 @@ test("counts legacy response rows without treating raw payment references as Dro
 
   assert.equal(countFedOneResponseDataRows(response), 2);
   assert.deepEqual(extractDropxFedOneReferenceCandidates(response), []);
+  assert.deepEqual(
+    prepareDropxFedOneResponse(response).legacyReferenceCandidates.map((row) => ({
+      amount: row.debitAmountPaise,
+      dropxId: row.dropxId,
+      rowNumber: row.rowNumber,
+      status: row.status,
+      utrCin: row.utrCin
+    })),
+    [
+      { amount: 1_584_000, dropxId: "G290219", rowNumber: 2, status: "PAID", utrCin: "S65099609" },
+      { amount: 360_000, dropxId: "D0826", rowNumber: 3, status: "PAID", utrCin: "S65099610" }
+    ]
+  );
 });
 
-test("mixed response parsing validates only company-owned references and skips foreign DropX-looking rows", () => {
+test("rewrites resolved bare DropX IDs by row before the existing mixed parser", () => {
+  const response = responseWorkbook([
+    ["DF1141", "001234", "FDRL0001", 100, "PAID", "UTR-WF", "Success"],
+    ["D0826", "009999", "FDRL0002", 50, "PAID", "UTR-HP", "Success"],
+    ["BANK-OTHER-001", "007777", "FDRL0003", 25, "PAID", "UTR-OTHER", "Success"]
+  ]);
+  const prepared = prepareDropxFedOneResponse(response);
+  assert.deepEqual(
+    prepared.legacyReferenceCandidates.map((candidate) => [candidate.rowNumber, candidate.dropxId]),
+    [[2, "DF1141"], [3, "D0826"], [4, "BANKOTHER001"]]
+  );
+
+  assert.deepEqual(parsePreparedDropxFedOneResponse(
+    prepared,
+    new Set(["WFDF1141102026V1", "HPD0826102026V1"]),
+    new Map([[2, "WFDF1141102026V1"], [3, "HPD0826102026V1"]])
+  ), {
+    workforceRows: [{
+      rowNumber: 2,
+      referenceNo: "WFDF1141102026V1",
+      creditAccount: "001234",
+      ifsc: "FDRL0001",
+      debitAmountPaise: 10000,
+      status: "PAID",
+      utrCin: "UTR-WF",
+      remarks: "Success"
+    }],
+    helperRows: [{
+      rowNumber: 3,
+      referenceNo: "HPD0826102026V1",
+      creditAccount: "009999",
+      ifsc: "FDRL0002",
+      debitAmountPaise: 5000,
+      status: "PAID",
+      utrCin: "UTR-HP",
+      remarks: "Success"
+    }],
+    skippedRows: [{ rowNumber: 4, referenceNo: "BANK-OTHER-001" }]
+  });
+});
+
+test("row aliases keep two bare-ID rows separate instead of guessing one profile-wide reference", () => {
+  const prepared = prepareDropxFedOneResponse(responseWorkbook([
+    ["T1013", "001111", "FDRL0001", 474.01, "PAID", "UTR-1", "Success"],
+    ["T1013", "001111", "FDRL0001", 71125.56, "PAID", "UTR-2", "Success"]
+  ]));
+  const parsed = parsePreparedDropxFedOneResponse(
+    prepared,
+    new Set(["WFT1013092026V2", "WFT1013092026V3"]),
+    new Map([[2, "WFT1013092026V2"], [3, "WFT1013092026V3"]])
+  );
+  assert.deepEqual(
+    parsed.workforceRows.map((row) => [row.rowNumber, row.referenceNo, row.debitAmountPaise]),
+    [[2, "WFT1013092026V2", 47_401], [3, "WFT1013092026V3", 7_112_556]]
+  );
+});
+
+test("mixed response parsing accepts stored beneficiary identifiers and validates only company-owned payment fields", () => {
   const malformed = responseWorkbook([
     ["WPF999092026V9", "bad", "bad", "bad", "", "", ""],
     ["HPD1001102026V1", "0012-3456", "FDRL1000123", "1.001", "", "", ""]
   ]);
   assert.throws(() => parseDropxFedOneResponse(malformed, new Set(["HPD1001102026V1"])), (error) => {
-    assert.match(error.message, /Row 3: Credit Account must contain 4 to 30 letters or digits/i);
-    assert.match(error.message, /Row 3: IFSC Code must use the standard 11-character format/i);
+    assert.doesNotMatch(error.message, /Credit Account must contain/i);
+    assert.doesNotMatch(error.message, /IFSC Code must use/i);
     assert.match(error.message, /Row 3: Debit Amount must .*at most two decimal places/i);
     assert.match(error.message, /Row 3: Status is required/i);
     assert.doesNotMatch(error.message, /Row 2:/i);
@@ -295,7 +367,7 @@ test("maps every instruction deterministically and validates financial inputs", 
   }), /positive/i);
 });
 
-test("rejects malformed Federal Bank account, IFSC and Workforce reference identifiers", () => {
+test("keeps strict debit-bank helpers but passes through nonempty beneficiary identifiers", () => {
   assert.equal(isValidWorkforceBankAccount(" 0012\u00a03456 "), true);
   assert.equal(isValidWorkforceBankAccount("0012-3456"), false);
   assert.equal(isValidWorkforceBankIfsc(" fdrl\u200b 0000123 "), true);
@@ -309,16 +381,26 @@ test("rejects malformed Federal Bank account, IFSC and Workforce reference ident
     valueDate: "2026-10-09",
     instructions: [instruction()]
   }), /Debit Account Number must contain 4 to 30 letters or digits/i);
+  const [nonstandardBeneficiary] = buildWorkforceFedOneRows({
+    debitAccountNumber: "00123456",
+    valueDate: "2026-10-09",
+    instructions: [instruction({
+      beneficiaryAccountNumber: "123-456",
+      beneficiaryIfsc: "KLGBO040661"
+    })]
+  });
+  assert.equal(nonstandardBeneficiary["Beneficiary Account Number"], "123-456");
+  assert.equal(nonstandardBeneficiary["IFSC Code"], "KLGBO040661");
   assert.throws(() => buildWorkforceFedOneRows({
     debitAccountNumber: "00123456",
     valueDate: "2026-10-09",
-    instructions: [instruction({ beneficiaryAccountNumber: "123-456" })]
-  }), /Beneficiary Account Number must contain 4 to 30 letters or digits/i);
+    instructions: [instruction({ beneficiaryAccountNumber: " " })]
+  }), /Beneficiary Account Number is required/i);
   assert.throws(() => buildWorkforceFedOneRows({
     debitAccountNumber: "00123456",
     valueDate: "2026-10-09",
-    instructions: [instruction({ beneficiaryIfsc: "FDRL1000123" })]
-  }), /IFSC Code must use the standard 11-character format/i);
+    instructions: [instruction({ beneficiaryIfsc: " " })]
+  }), /IFSC Code is required/i);
   assert.throws(() => buildWorkforceFedOneRows({
     debitAccountNumber: "00123456",
     valueDate: "2026-10-09",
@@ -360,6 +442,85 @@ test("parses a Transaction Enquiry workbook with normalized identifiers and exac
   assert.equal(normalizeWorkforceBankIfsc(" fdrl 1 "), "FDRL1");
 });
 
+test("preserves Federal Transaction Enquiry settlement fields for payment history", () => {
+  const workbook = XLSX.utils.book_new();
+  const headers = [
+    "Select All",
+    "Payment Ref. No.",
+    "Customer Ref. No.",
+    "Debit Account",
+    "Value Date",
+    "Payee",
+    "Credit Account",
+    "IFSC Code",
+    "Transfer Type",
+    "Debit Amount",
+    "Status",
+    "UTR/CIN",
+    "System Processing Remarks",
+    "Payment Advice",
+    "Actions"
+  ];
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["PaymentInstrGrid"],
+    headers,
+    [
+      "",
+      "I121026128908163",
+      "WFDF1141102026V1",
+      "\u200c13650200019427",
+      "12/10/2026",
+      "DAKUMALA VIJAYA RAJU",
+      "\u200c918010081240680",
+      "UTIB0003826",
+      "NEFT",
+      9867,
+      "Paid",
+      "FBPT262858291677",
+      "Processed successfully",
+      "",
+      "RaiseGrievance"
+    ]
+  ]);
+  XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
+  const bytes = new Uint8Array(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+
+  assert.deepEqual(parseWorkforceFedOneResponse(bytes), [{
+    rowNumber: 3,
+    referenceNo: "WFDF1141102026V1",
+    debitAccount: "13650200019427",
+    creditAccount: "918010081240680",
+    ifsc: "UTIB0003826",
+    valueDate: "2026-10-12",
+    debitAmountPaise: 986700,
+    status: "PAID",
+    utrCin: "FBPT262858291677",
+    remarks: "Processed successfully"
+  }]);
+});
+
+test("validates settlement date and rejects formulas in preserved response fields", () => {
+  const headers = [
+    ...WORKFORCE_FEDONE_RESPONSE_HEADERS,
+    "Debit Account",
+    "Value Date"
+  ];
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    headers,
+    ["WFD111102026V1", "001234", "FDRL0001", 100, "PAID", "UTR1", "", "13650200019427", "31/11/2026"]
+  ]);
+  sheet.H2 = { t: "s", f: '"13650200019427"', v: "13650200019427" };
+  XLSX.utils.book_append_sheet(workbook, sheet, "Transaction Enquiry");
+  const bytes = new Uint8Array(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+
+  assert.throws(() => parseWorkforceFedOneResponse(bytes), (error) => {
+    assert.match(error.message, /Row 2: formulas are not accepted in Debit Account/i);
+    assert.match(error.message, /Row 2: Value Date must be a real Excel date/i);
+    return true;
+  });
+});
+
 test("detects duplicate normalized customer references before finalization", () => {
   const bytes = responseWorkbook([
     ["WPD111092026V1", "001234", "FDRL0001", 100, "PAID", "UTR1", ""],
@@ -393,16 +554,25 @@ test("returns clear errors for missing headers, invalid amounts and formulas", (
   });
 });
 
-test("rejects malformed identifiers in a bank response before finalization", () => {
+test("accepts nonstandard beneficiary identifiers in a bank response but still validates the payment reference", () => {
   const bytes = responseWorkbook([
     ["WPD111132026V1", "0012-3456", "FDRL1000123", 100, "PAID", "UTR1", ""]
   ]);
   assert.throws(() => parseWorkforceFedOneResponse(bytes), (error) => {
     assert.match(error.message, /Customer Ref\. No\. is not a valid Workforce payment reference/i);
-    assert.match(error.message, /Credit Account must contain 4 to 30 letters or digits/i);
-    assert.match(error.message, /IFSC Code must use the standard 11-character format/i);
+    assert.doesNotMatch(error.message, /Credit Account must contain/i);
+    assert.doesNotMatch(error.message, /IFSC Code must use/i);
     return true;
   });
+});
+
+test("round-trips nonstandard nonempty beneficiary identifiers in a bank response", () => {
+  const [row] = parseWorkforceFedOneResponse(responseWorkbook([
+    ["WPD111092026V1", "123-456", "KLGBO040661", 100, "PAID", "UTR1", ""]
+  ]));
+
+  assert.equal(row.creditAccount, "123-456");
+  assert.equal(row.ifsc, "KLGBO040661");
 });
 
 test("rejects an empty response and duplicate required response headers", () => {

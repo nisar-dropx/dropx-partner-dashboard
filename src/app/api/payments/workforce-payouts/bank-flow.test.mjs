@@ -11,6 +11,7 @@ const bankDialog = readFileSync(new URL("../../../../components/workforce-payout
 const actionSelection = readFileSync(new URL("../../../../lib/workforce-payout-action-selection.ts", import.meta.url), "utf8");
 const publicationRefresh = readFileSync(new URL("../../../../lib/workforce-payout-publication-refresh.ts", import.meta.url), "utf8");
 const historyButton = readFileSync(new URL("../../../../components/workforce-payout-payment-history-button.tsx", import.meta.url), "utf8");
+const bulkHold = readFileSync(new URL("../../../../components/workforce-payout-bulk-hold.tsx", import.meta.url), "utf8");
 const bulkCancellation = readFileSync(new URL("../../../../components/workforce-payout-bulk-cancellation.tsx", import.meta.url), "utf8");
 const page = readFileSync(new URL("../../../../app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
 const snapshot = readFileSync(new URL("../../../../lib/workforce-payout-publication-snapshot.ts", import.meta.url), "utf8");
@@ -22,6 +23,8 @@ test("bank-file creation is company-scoped, privileged, transport-bounded and id
   assert.match(bankFileRoute, /sameOrigin\(request\)/);
   assert.match(bankFileRoute, /hasPermission\(authorization, payoutPageCode, "edit"\)/);
   assert.match(bankFileRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(bankFileRoute, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(bankFileRoute, /!hasPermission\(authorization, payoutPageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(bankFileRoute, /authorization\.hasAllLocationAccess/);
   assert.match(bankFileRoute, /requireCompanyId\(authorization\)/);
   assert.doesNotMatch(bankFileRoute, /MAX_SELECTION/);
@@ -43,7 +46,7 @@ test("bank-file creation refreshes only the selected exact-period publications b
   assert.match(bankFileRoute, /companyId: access\.companyId/);
   assert.match(bankFileRoute, /payoutRows,[\s\S]*?periodStart,[\s\S]*?periodEnd,/);
   assert.match(bankFileRoute, /deadlineAtMs: Date\.now\(\) \+ 240_000/);
-  assert.match(bankFileRoute, /limit: 100/);
+  assert.match(bankFileRoute, /limit: 10_000/);
   assert.ok(
     bankFileRoute.indexOf("refreshWorkforcePayoutPublicationJobs({")
       < bankFileRoute.indexOf('rpc("workforce_create_payout_payment_row_batch"'),
@@ -70,6 +73,8 @@ test("bank response import is privileged, bounded and file-hash idempotent", () 
   assert.match(bankResponseRoute, /sameOrigin\(request\)/);
   assert.match(bankResponseRoute, /hasPermission\(authorization, payoutPageCode, "edit"\)/);
   assert.match(bankResponseRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(bankResponseRoute, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(bankResponseRoute, /!hasPermission\(authorization, payoutPageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(bankResponseRoute, /authorization\.hasAllLocationAccess/);
   assert.match(bankResponseRoute, /MAX_FILE_BYTES = 10 \* 1024 \* 1024/);
   assert.match(bankResponseRoute, /MAX_RESPONSE_ROWS = 5000/);
@@ -80,8 +85,15 @@ test("bank response import is privileged, bounded and file-hash idempotent", () 
   assert.match(bankResponseRoute, /p_operation_id: operationId/);
   assert.match(bankResponseRoute, /p_file_sha256: fileSha256/);
   assert.match(bankResponseRoute, /prepareDropxFedOneResponse\(bytes\)/);
+  assert.match(bankResponseRoute, /debit_account: row\.debitAccount \?\? ""/);
+  assert.match(bankResponseRoute, /credit_account: row\.creditAccount/);
+  assert.match(bankResponseRoute, /ifsc: row\.ifsc/);
+  assert.match(bankResponseRoute, /value_date: row\.valueDate \?\? ""/);
+  assert.match(bankResponseRoute, /debit_amount_paise: row\.debitAmountPaise/);
+  assert.match(bankResponseRoute, /utr_cin: row\.utrCin/);
+  assert.match(bankResponseRoute, /remarks: row\.remarks/);
   assert.match(bankResponseRoute, /from\(lookup\.table\)[\s\S]*?\.eq\("company_id", companyId\)[\s\S]*?\.in\("reference_no", lookup\.references\)/);
-  assert.match(bankResponseRoute, /parsePreparedDropxFedOneResponse\(prepared, ownedReferences\)/);
+  assert.match(bankResponseRoute, /parsePreparedDropxFedOneResponse\(prepared, ownedReferences, rowReferenceAliases\)/);
   assert.match(bankResponseRoute, /rpc\("finalize_owned_payout_payment_response"/);
   assert.match(bankResponseRoute, /p_workforce_rows: normalizedRows\(parsed\.workforceRows\)/);
   assert.match(bankResponseRoute, /p_helper_rows: normalizedRows\(parsed\.helperRows\)/);
@@ -91,42 +103,46 @@ test("bank response import is privileged, bounded and file-hash idempotent", () 
   assert.match(bankDialog, /Skipped \$\{skippedCount\} unrelated bank reference/);
 });
 
-test("payment history is finance-restricted, company-scoped and masks account numbers", () => {
-  assert.match(historyRoute, /hasPermission\(authorization, pageCode, "edit"\)/);
-  assert.match(historyRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
-  assert.match(historyRoute, /authorization\.hasAllLocationAccess/);
+test("payment history is page-viewable, location-scoped, company-scoped and masks account numbers", () => {
+  assert.match(historyRoute, /hasPermission\(authorization, pageCode, "access"\)/);
+  assert.doesNotMatch(historyRoute, /hasPermission\(authorization, pageCode, "edit"\)/);
+  assert.doesNotMatch(historyRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(historyRoute, /!authorization\.hasAllLocationAccess && !authorization\.locationScopeIds\.some/);
   assert.match(historyRoute, /\.eq\("company_id", companyId\)/);
   assert.match(historyRoute, /`••••\$\{account\.slice\(-4\)\}`/);
   assert.match(historyRoute, /redownloadable: String\(batch\?\.status \?\? ""\) === "processing"/);
   assert.match(historyRoute, /from\("workforce_payout_payment_hold_events"\)/);
-  assert.match(historyRoute, /onHold: String\(holdEvents\[0\]\?\.action/);
+  assert.match(historyRoute, /rpc\("workforce_payout_source_payment_is_on_hold"/);
+  assert.match(historyRoute, /onHold: profileOnHold \|\| sourceOnHold/);
+  assert.match(bulkHold, /audience === "workforce" && \(action === "release_hold" \|\| !item\.workforceId\) \? item\.sourceTargets : \[\]/);
 });
 
-test("payment history identifies split bank lines by their immutable location snapshot", () => {
+test("payment history identifies split bank lines by their immutable location code", () => {
   assert.match(historyRoute, /const stationId = String\(params\.get\("stationId"\)/);
   assert.match(historyRoute, /\.eq\("location_id_snapshot", stationId\)/);
   assert.match(historyRoute, /location_id_snapshot,location_code_snapshot/);
-  assert.match(historyRoute, /from\("stations"\)/);
-  assert.match(historyRoute, /\.select\("id,station_name"\)/);
-  assert.match(historyRoute, /locationCode: String\(item\.location_code_snapshot/);
-  assert.match(historyRoute, /locationName: locationNames\.get\(String\(item\.location_id_snapshot/);
+  assert.match(historyRoute, /locationCode: text\(item\.location_code_snapshot\)/);
   assert.match(historyButton, /locationCode: string/);
-  assert.match(historyButton, /locationName: string/);
   assert.match(historyButton, /new URLSearchParams\(\{ audience, workforceId, stationId, periodStart, periodEnd \}\)/);
   assert.match(historyButton, /<th>Location<\/th>/);
-  assert.match(historyButton, /<td>\{locationLabel\(entry\)\}<\/td>/);
+  assert.match(historyButton, /<td>\{entry\.locationCode \|\| "—"\}<\/td>/);
 });
 
-test("manual status changes and holds are privileged, reasoned and surfaced from payment history", () => {
+test("manual status changes and holds are privileged and reasoned, with hold actions beside row history", () => {
   assert.match(paymentStatusRoute, /sameOrigin\(request\)/);
   assert.match(paymentStatusRoute, /hasPermission\(authorization, pageCode, "edit"\)/);
   assert.match(paymentStatusRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(paymentStatusRoute, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(paymentStatusRoute, /!hasPermission\(authorization, pageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(paymentStatusRoute, /authorization\.hasAllLocationAccess/);
   assert.match(paymentStatusRoute, /remarks\.length < 3 \|\| remarks\.length > 1000/);
   assert.match(paymentStatusRoute, /rpc\("workforce_transition_payout_payment_item"/);
   assert.match(paymentStatusRoute, /rpc\("workforce_set_payout_payment_hold"/);
-  assert.match(historyButton, /Mark on hold/);
-  assert.match(historyButton, /Release hold/);
+  assert.doesNotMatch(historyButton, /Mark on hold|Release hold/);
+  assert.match(table, /canManageIndividualHold \? <WorkforcePayoutBulkHold/);
+  assert.match(table, /mode="single"/);
+  assert.match(bulkHold, /Hold remarks/);
+  assert.match(bulkHold, /Unhold remarks/);
   assert.match(historyButton, />Failed<\/button>/);
   assert.match(historyButton, />Cancelled<\/button>/);
   assert.match(historyButton, /canManageStatus && pendingAction/);
@@ -137,6 +153,49 @@ test("manual status changes and holds are privileged, reasoned and surfaced from
   assert.match(lifecycleMigration, /from public\.connect_profile_verifications/);
   assert.match(lifecycleMigration, /eligibility_code := 'pan_not_linked'/);
   assert.match(lifecycleMigration, /eligibility_code := 'payment_on_hold'/);
+});
+
+test("one processing instruction can be finalized manually with complete audited bank evidence", () => {
+  assert.match(paymentStatusRoute, /actions = new Set\(\[[^\]]*"finalize"/);
+  assert.match(paymentStatusRoute, /action === "finalize"/);
+  assert.match(paymentStatusRoute, /positiveMoney\(body\.amount\)/);
+  assert.match(paymentStatusRoute, /boundedText\(body\.debitAccount, 128\)/);
+  assert.match(paymentStatusRoute, /boundedText\(body\.creditAccount, 128\)/);
+  assert.match(paymentStatusRoute, /boundedText\(body\.creditIfsc, 64\)/);
+  assert.match(paymentStatusRoute, /validDate\(valueDate\)/);
+  assert.match(paymentStatusRoute, /meaningfulBankReference\(body\.utrCin\)/);
+  assert.match(paymentStatusRoute, /boundedText\(body\.bankRemarks, 1000\)/);
+  assert.match(paymentStatusRoute, /rpc\("workforce_finalize_payout_payment_item_manually"/);
+  assert.match(paymentStatusRoute, /rpc\("helper_finalize_payout_payment_item_manually"/);
+  assert.match(historyButton, /onClick=\{\(\) => chooseFinalize\(entry\)\}[^>]*>Finalize<\/button>/);
+  assert.match(historyButton, /Paid amount/);
+  assert.match(historyButton, /Debit account/);
+  assert.match(historyButton, /Credit account/);
+  assert.match(historyButton, /Credit IFSC/);
+  assert.match(historyButton, /UTR\/CIN/);
+  assert.match(historyButton, /Value date/);
+  assert.match(historyButton, /Bank remarks/);
+  assert.match(historyButton, /amount <= maximum/);
+  assert.match(historyButton, /entry\.maxAmount \?\? entry\.instructionAmount \?\? entry\.amount/);
+  assert.match(historyButton, /lower amount leaves the balance payable and marks the payout Partially Paid/);
+});
+
+test("payment history presents immutable bank evidence in the requested columns", () => {
+  assert.match(historyRoute, /status,bank_response_status,bank_account_no_snapshot/);
+  assert.match(historyRoute, /bank_response_status[\s\S]*?MANUAL_PAID[\s\S]*?bank_processing_remarks/);
+  assert.match(historyButton, /<th>Location<\/th>/);
+  assert.match(historyButton, /<td>\{entry\.locationCode \|\| "—"\}<\/td>/);
+  assert.doesNotMatch(historyButton, /locationLabel\(entry\)/);
+  assert.match(historyButton, /<th>Debit A\/c<\/th>/);
+  assert.match(historyButton, /debitAccountDisplay\(entry\)/);
+  assert.match(historyButton, /<th>Credit A\/c<\/th>/);
+  assert.match(historyButton, /entry\.creditAccount \|\| "—"/);
+  assert.match(historyButton, /<th>Credit IFSC<\/th>/);
+  assert.match(historyButton, /entry\.creditIfsc \|\| "—"/);
+  assert.match(historyButton, /<th>Value Date<\/th>/);
+  assert.match(historyButton, /dateOnly\(entry\.valueDate\)/);
+  assert.match(historyButton, /<th>Generated on<\/th>/);
+  assert.match(historyButton, /<th>Finalized on<\/th>/);
 });
 
 test("selected processing rows can be cancelled atomically with one mandatory remark", () => {
@@ -184,7 +243,8 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
   assert.match(page, /loadError \|\| !canLoadPaymentSummaries/);
   assert.match(page, /includeProcessingActionDetails: canProcessPayments/);
   assert.match(page, /const \[reviewed, paymentEnriched\] = await Promise\.all/);
-  assert.match(page, /canProcessPayments = period\.mode === "monthly"[\s\S]*?authorization\.hasAllLocationAccess[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(page, /const canUsePaymentActions = accessSurface === "ops"[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(page, /canProcessPayments = period\.mode === "monthly"[\s\S]*?authorization\.hasAllLocationAccess[\s\S]*?canUsePaymentActions/);
   assert.match(page, /"helper_payout_payment_items" : "workforce_payout_payment_items"[\s\S]{0,300}instruction_amount/);
   assert.match(table, /publicationPaymentReady === true/);
   assert.match(table, /row\.paymentSummary\?\.eligible === true/);
@@ -192,7 +252,8 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
   assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
   assert.match(table, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected\s*\)/);
   assert.match(actionSelection, /index\.set\(row\.id,/);
-  assert.match(actionSelection, /payoutRows\.push\(\{ workforceId: entry\.workforceId, stationId: entry\.stationId \}\)/);
+  assert.match(actionSelection, /selectedByPayoutIdentity/);
+  assert.match(actionSelection, /const payoutIdentity = `\$\{entry\.workforceId\}\|\$\{entry\.stationId\}`/);
   assert.doesNotMatch(table, /complete profile/i);
   assert.match(bankDialog, /Only current Active \{subjectLabel\} profiles are eligible/);
   assert.match(bankDialog, /Under Review and every other profile status are excluded/);

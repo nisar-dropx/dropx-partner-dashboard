@@ -49,14 +49,13 @@ assert.match(workforcePage, /production_threshold_config[\s\S]*payment_methods\(
 assert.match(workforceTable, /aria-expanded=\{expanded\}/, "The Workforce breakup must be keyboard-accessible");
 assert.match(workforceTable, /"Breakup"/, "Workforce must expose the period-total breakup action");
 assert.match(workforceTable, />Work Days</, "The Workforce payout table must display capture-aware Work Days");
-assert.match(workforceTable, />Gross Payment</, "The Workforce payout table must show gross payment");
-assert.match(workforceTable, />Gross Deductions</, "The Workforce payout table must show gross deductions");
+assert.match(workforceTable, />Gross \/ deductions</, "The Workforce payout table must keep gross payment and deductions visible in its compact summary");
+assert.match(workforceTable, /money\(row\.grossPayment\)[\s\S]*?money\(row\.deductions\)/, "The compact amount summary must show the stored gross payment and deduction values");
 assert.match(workforceTable, />Net Pay</, "The Workforce payout table must show net pay");
-assert.match(workforceTable, /<th className="payout-money" scope="col">Gross Payment<\/th>/, "The gross payment header must align with its numeric values");
-assert.match(workforceTable, /<th className="payout-money" scope="col">Gross Deductions<\/th>/, "The gross deductions header must align with its numeric values");
+assert.match(workforceTable, /<th className="payout-money" scope="col">Gross \/ deductions<\/th>/, "The combined gross and deduction header must align with its numeric values");
 assert.match(workforceTable, /<th className="payout-money" scope="col">Net Pay<\/th>/, "The net pay header must align with its numeric values");
 assert.match(workforceTable, /<th scope="col">Payment Method<\/th>/, "The main Workforce payout view must label the Payment Method column");
-assert.match(workforceTable, /<th scope="col">Designation<\/th>/, "The shared Workforce and Helper payout view must show designation");
+assert.match(workforceTable, /<th scope="col">Assignment<\/th>[\s\S]*?row\.designation/, "The shared Workforce and Helper payout view must keep designation visible in the Assignment column");
 assert.match(workforceTable, /row\.paymentDetailsAvailable \? <strong>\{row\.paymentMethod\}<\/strong>/, "Mapped payout rows must show their payment method");
 assert.doesNotMatch(workforceTable, /overview-method-|daily-method-/, "The visible worksheet must not render global payment-method columns");
 assert.match(workforceExport, /"Attendance Source"/, "The Workforce payout export must identify the attendance source");
@@ -72,7 +71,7 @@ assert.doesNotMatch(workforceExport, /paymentMethodBreakdown/, "Export must not 
 assert.match(workforceExport, /componentType === "production"[\s\S]*Count[\s\S]*Rate \(INR\)[\s\S]*Amount \(INR\)/, "Only production components must export Count, Rate, and Amount");
 assert.match(workforceExport, /Reported Units[\s\S]*Threshold \/ Excluded Units[\s\S]*Payable Units/, "Thresholded production must export reported, excluded and payable units separately");
 assert.match(workforceExport, /:\s*\[`\$\{item\.exportLabel\} Rate \(INR\)`, `\$\{item\.exportLabel\} Amount \(INR\)`\]/, "Attendance and fixed components must omit misleading Count columns");
-assert.match(workforceTable, /const tableColumnCount = showSelection \? 13 : 12/, "Workforce detail and empty rows must span the compact totals worksheet, including the action-gated selection column");
+assert.match(workforceTable, /const tableColumnCount = showSelection \? 11 : 10/, "Workforce detail and empty rows must span the compact totals worksheet, including the action-gated selection column");
 assert.match(workforceTable, /Payment totals[\s\S]*Deduction totals/, "Workforce breakup must show period payment and deduction totals");
 assert.match(workforceTable, /row\.productionBreakdown\.filter\(\(item\) => item\.amount !== 0 \|\| item\.reportedCount !== undefined\)/, "Workforce breakup must retain zero-pay threshold lines for auditability");
 assert.match(workforceTable, />Payment<\/th><th className="payout-money" scope="col">Units<\/th><th className="payout-money" scope="col">Rate<\/th><th className="payout-money" scope="col">Amount<\/th>/, "Workforce breakup must show right-aligned payment units, rate, and amount");
@@ -101,7 +100,7 @@ assert.doesNotMatch(workforceTable, /\["20","50"/, "The 20-row payout option mus
 assert.match(workforcePage, /\.in\("station_code", authorizedStationCodes\)/, "Provider report population must load every ID in the viewer's authorized stations");
 assert.doesNotMatch(workforcePage, /\.in\("provider_employee_id", providerMemberIds\)/, "Provider report population must not be restricted to mapped provider IDs");
 assert.match(workforcePage, /const authorizedMappings = allMappings\.filter\([\s\S]*?allowed\.has\(row\.station_id\)[\s\S]*?const payoutMappingIdentities[\s\S]*?authorizedMappings\.map/, "Provider mapping resolution must use only mappings from the viewer's authorized stations");
-assert.match(workforcePage, /matchingShipmentRows\.some\([\s\S]*?daily\.work_date[\s\S]*?>= fromDate[\s\S]*?daily\.work_date[\s\S]*?<= toDate[\s\S]*?kind === "conflict"/, "Mapping conflicts outside a selected day or custom range must not suppress its payable rows");
+assert.match(workforcePage, /const conflictingMappingIdsInPeriod[\s\S]*?date < fromDate \|\| date > toDate[\s\S]*?conflictingMappingIdsInPeriod\.add[\s\S]*?conflictingMappingIdsInPeriod\.has/, "Mapping conflicts outside a selected day or custom range must not suppress its payable rows");
 assert.match(workforcePage, /reportOnlyRows[\s\S]*"ID not mapped"[\s\S]*paymentDetailsAvailable:\s*false/, "Unmapped provider report IDs must remain visible without payable details");
 assert.match(workforcePage, /workforcePayoutDropxStatus\(worker\)/, "Mapped payout rows must expose the current DropX lifecycle status");
 assert.match(workforcePage, /designations\(code,name\)/, "Workforce payouts must resolve the canonical designation master label");
@@ -109,10 +108,10 @@ assert.match(workforcePopulation, /providerMemberId[\s\S]*stationCode[\s\S]*prov
 assert.match(workforcePopulation, /mappingsForAuthorizedWorkforce[\s\S]*authorizedIdentityIds/, "Scoped payouts must keep hidden carry-in limited to workers already authorized in the visible scope");
 assert.match(workforceTable, /label="Mapping status"/, "The payout worksheet must expose a searchable Mapping status filter");
 assert.match(workforceTable, /status === "ID not mapped"[\s\S]*return "bad"/, "Unmapped IDs must use the red status treatment");
-assert.match(workforceTable, /row\.paymentDetailsAvailable \? <strong>\{money\(row\.grossPayment\)\}<\/strong> : null/, "Unmapped rows must leave payment amount cells blank");
+assert.match(workforceTable, /row\.paymentDetailsAvailable \? <>\s*<strong>\{money\(row\.grossPayment\)\}<\/strong>[\s\S]*?\s*: null/, "Unmapped rows must leave the combined payment amount cell blank");
 assert.match(workforceExport, /blankPayments \? "" : row\.grossPayment/, "Unmapped provider IDs must export blank payment details instead of zero amounts");
 assert.match(globalStyles, /\.workforce-payout-page\s*\{[\s\S]*?margin-top:\s*-8px/, "Payout density changes must be scoped to the shared Dashboard and Ops page");
-assert.match(globalStyles, /\.workforce-payout-page \.workforce-payout-table td\s*\{\s*padding:\s*7px 9px/, "Payout rows must use compact, readable spacing");
+assert.match(globalStyles, /\.workforce-payout-page \.workforce-payout-table td\s*\{\s*padding:\s*9px 10px/, "Payout rows must use compact, readable spacing");
 
 assert.match(workforcePage, /<WorkforcePayoutPeriodFilter/, "Workforce must use the focused period selector");
 assert.match(workforcePeriodFilter, /mode === "monthly"[\s\S]*name="month"/, "Monthly mode must show only its month input");

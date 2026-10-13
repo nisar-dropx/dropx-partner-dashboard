@@ -548,7 +548,13 @@ export async function refreshWorkforcePayoutPublicationJobs(
     return result;
   }
 
-  const maxJobs = Math.max(1, Math.min(100, input.limit ?? 100));
+  // Recurring/background drains stay deliberately bounded at 100. An exact
+  // user-selected bank action can contain more than 100 payout rows, however,
+  // and must not silently leave the selected tail stale merely because the UI
+  // selection is large. It is still bounded by the 10,000-row target guard and
+  // the shared route deadline below.
+  const maximumJobs = target ? MAX_TARGETED_WORKFORCE_IDS : 100;
+  const maxJobs = Math.max(1, Math.min(maximumJobs, input.limit ?? 100));
   const deadlineAtMs = Number.isFinite(input.deadlineAtMs)
     ? Number(input.deadlineAtMs)
     : Date.now() + DEFAULT_RUNTIME_BUDGET_MS;

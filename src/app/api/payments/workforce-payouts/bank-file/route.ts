@@ -129,8 +129,10 @@ async function authorize(audience: PayoutAudience) {
   const label = audienceLabel(audience);
   const authorization = await getAuthorization();
   if (!authorization) return { error: errorResponse(`Sign in to process ${label} payments.`, 401) } as const;
-  const payoutPageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
-  if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !hasPermission(authorization, "payment_process", "edit")) {
+  const accessSurface = currentAdminAccessSurface();
+  const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+  const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
+  if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
   }
   if (!authorization.hasAllLocationAccess) {
@@ -415,8 +417,10 @@ export async function POST(request: Request) {
           periodStart,
           periodEnd,
           deadlineAtMs: Date.now() + 240_000,
-          // Refresh only the exact Workforce/location rows selected for payment.
-          limit: 100
+          // Drain every queued generation for the exact selected rows, not
+          // merely one job per row. The worker remains deadline-bounded and
+          // applies its existing 10,000-target transport guard.
+          limit: 10_000
         });
       } catch (error) {
         return errorResponse(

@@ -1,6 +1,7 @@
 import type { WorkforcePayoutRow } from "../components/workforce-payout-table.tsx";
 import { summarizePaymentMethodAmounts, summarizePayoutBreakdownLines } from "./workforce-payout-summary.ts";
 import { groupPayoutItemsBySubjectLocation } from "./workforce-payout-location-groups.ts";
+import { workforcePayoutRowSourceIdentities } from "./workforce-payout-source-hold.ts";
 
 export type ProviderPayoutSegment = {
   workforceId: string;
@@ -92,6 +93,9 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
         : workerSegments.some((segment) => ["No eligible attendance", "No eligible accrual"].includes(segment.row.status))
           ? "No eligible accrual"
           : "Awaiting production";
+    const paymentSourceIdentities = workforcePayoutRowSourceIdentities({
+      paymentSourceIdentities: workerSegments.flatMap((segment) => workforcePayoutRowSourceIdentities(segment.row))
+    });
 
     rows.push({
       workforceId,
@@ -99,6 +103,8 @@ export function consolidateProviderPayoutSegments(segments: ProviderPayoutSegmen
       panNumber: first.panNumber,
       row: {
         ...first.row,
+        paymentSourceIdentity: paymentSourceIdentities[0],
+        paymentSourceIdentities,
         id: `provider-${workforceId}-${locationId || "unassigned"}`,
         providerMemberId: joined(workerSegments.map((segment) => segment.row.providerMemberId), "-"),
         providerMemberName: joined(workerSegments.map((segment) => segment.row.providerMemberName), "-"),

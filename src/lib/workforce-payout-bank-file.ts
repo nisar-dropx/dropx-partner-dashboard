@@ -25,6 +25,14 @@ export const WORKFORCE_FEDONE_RESPONSE_HEADERS = [
   "System Processing Remarks"
 ] as const;
 
+// Federal Bank includes these settlement fields in the Transaction Enquiry
+// export, but older response exports did not always include them. Preserve
+// them whenever they are present without making legacy response files fail.
+const WORKFORCE_FEDONE_RESPONSE_SETTLEMENT_HEADERS = [
+  "Debit Account",
+  "Value Date"
+] as const;
+
 export type WorkforceFedOnePaymentInstruction = {
   amountPaise: number;
   beneficiaryAccountNumber: string;
@@ -52,6 +60,17 @@ export type DropxFedOneResponse = {
   workforceRows: WorkforceFedOneResponseRow[];
 };
 
+export type LegacyDropxFedOneReferenceCandidate = {
+  amountError?: string;
+  creditAccount: string;
+  debitAmountPaise: number | null;
+  dropxId: string;
+  ifsc: string;
+  rowNumber: number;
+  status: string;
+  utrCin: string;
+};
+
 export type WorkforceFedOneRow = {
   "Transaction Type": "IFT" | "NEFT";
   "Debit Account Number": string;
@@ -70,8 +89,10 @@ export type WorkforceFedOneRow = {
 export type WorkforceFedOneResponseRow = {
   rowNumber: number;
   referenceNo: string;
+  debitAccount?: string;
   creditAccount: string;
   ifsc: string;
+  valueDate?: string;
   debitAmountPaise: number;
   status: string;
   utrCin: string;
@@ -81,6 +102,8 @@ export type WorkforceFedOneResponseRow = {
 type SheetCell = XLSX.CellObject & { f?: string };
 type FedOneResponseSheet = {
   columnFor: (header: typeof WORKFORCE_FEDONE_RESPONSE_HEADERS[number]) => number;
+  optionalColumnFor: (header: typeof WORKFORCE_FEDONE_RESPONSE_SETTLEMENT_HEADERS[number]) => number | undefined;
+  date1904: boolean;
   headerIndex: number;
   rows: unknown[][];
   sheet: XLSX.WorkSheet;
@@ -113,6 +136,10 @@ export function normalizeWorkforceBankAccount(value: unknown) {
 
 export function normalizeWorkforceBankIfsc(value: unknown) {
   return normalizeWithoutWhitespace(value);
+}
+
+export function normalizeDropxBankIdentity(value: unknown) {
+  return cleanCell(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 export function isValidWorkforceBankAccount(value: unknown) {
@@ -184,11 +211,13 @@ export function buildWorkforceFedOneRows(options: WorkforceFedOneWorkbookOptions
     const beneficiaryAccountNumber = normalizeWorkforceBankAccount(instruction.beneficiaryAccountNumber);
     const beneficiaryIfsc = normalizeWorkforceBankIfsc(instruction.beneficiaryIfsc);
     const referenceNo = normalizeWorkforceBankReference(instruction.referenceNo);
-    if (!isValidWorkforceBankAccount(beneficiaryAccountNumber)) {
-      throw new Error(`${instructionLabel}: Beneficiary Account Number must contain 4 to 30 letters or digits.`);
+    // Beneficiary routing values are operator-owned master data. Preserve the
+    // normalized values for the bank and let the bank validate their syntax.
+    if (!beneficiaryAccountNumber) {
+      throw new Error(`${instructionLabel}: Beneficiary Account Number is required.`);
     }
-    if (!isValidWorkforceBankIfsc(beneficiaryIfsc)) {
-      throw new Error(`${instructionLabel}: IFSC Code must use the standard 11-character format (for example FDRL0000123).`);
+    if (!beneficiaryIfsc) {
+      throw new Error(`${instructionLabel}: IFSC Code is required.`);
     }
     if (!isValidWorkforceBankReference(referenceNo, options.referencePrefix)) {
       throw new Error(`${instructionLabel}: Unique Customer Reference Number is invalid.`);
@@ -251,6 +280,35 @@ function responseAmountPaise(value: unknown) {
   return paise;
 }
 
+function responseValueDate(value: unknown, date1904: boolean) {
+  if (typeof value === "number") {
+    const decoded = XLSX.SSF.parse_date_code(value, { date1904 });
+    if (decoded && validDateParts(decoded.d, decoded.m, decoded.y)) {
+      return `${String(decoded.y).padStart(4, "0")}-${String(decoded.m).padStart(2, "0")}-${String(decoded.d).padStart(2, "0")}`;
+    }
+    throw new Error("Value Date must be a real Excel date, YYYY-MM-DD or DD/MM/YYYY.");
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const raw = cleanCell(value);
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    const [, yearText, monthText, dayText] = iso;
+    if (validDateParts(Number(dayText), Number(monthText), Number(yearText))) return raw;
+  }
+  const display = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (display) {
+    const [, dayText, monthText, yearText] = display;
+    if (validDateParts(Number(dayText), Number(monthText), Number(yearText))) {
+      return `${yearText}-${monthText}-${dayText}`;
+    }
+  }
+  throw new Error("Value Date must be a real Excel date, YYYY-MM-DD or DD/MM/YYYY.");
+}
+
 function unsafeNumericIdentifier(value: unknown) {
   return typeof value === "number" && (!Number.isSafeInteger(value) || value < 0);
 }
@@ -299,34 +357,85 @@ function readFedOneResponseSheet(bytes: ArrayBuffer | Uint8Array): FedOneRespons
     headerPositions.set(key, [...(headerPositions.get(key) ?? []), index]);
   });
   const duplicatedHeaders = WORKFORCE_FEDONE_RESPONSE_HEADERS.filter((header) => (headerPositions.get(normalizedHeader(header))?.length ?? 0) > 1);
-  if (duplicatedHeaders.length) {
-    throw new Error(`The bank response header row contains duplicate required column(s): ${duplicatedHeaders.join(", ")}.`);
+  const duplicatedSettlementHeaders = WORKFORCE_FEDONE_RESPONSE_SETTLEMENT_HEADERS.filter(
+    (header) => (headerPositions.get(normalizedHeader(header))?.length ?? 0) > 1
+  );
+  if (duplicatedHeaders.length || duplicatedSettlementHeaders.length) {
+    throw new Error(`The bank response header row contains duplicate required column(s): ${[
+      ...duplicatedHeaders,
+      ...duplicatedSettlementHeaders
+    ].join(", ")}.`);
   }
   const columnFor = (header: typeof WORKFORCE_FEDONE_RESPONSE_HEADERS[number]) => headerPositions.get(normalizedHeader(header))?.[0] as number;
-  return { columnFor, headerIndex, rows, sheet };
+  const optionalColumnFor = (header: typeof WORKFORCE_FEDONE_RESPONSE_SETTLEMENT_HEADERS[number]) =>
+    headerPositions.get(normalizedHeader(header))?.[0];
+  return {
+    columnFor,
+    optionalColumnFor,
+    date1904: workbook.Workbook?.WBProps?.date1904 === true,
+    headerIndex,
+    rows,
+    sheet
+  };
 }
 
 function inspectFedOneResponseSheet(responseSheet: FedOneResponseSheet) {
   const { columnFor, headerIndex, rows } = responseSheet;
   const references: string[] = [];
+  const legacyReferenceCandidates: LegacyDropxFedOneReferenceCandidate[] = [];
   const seen = new Set<string>();
   let dataRowCount = 0;
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex] ?? [];
     if (row.some((value) => cleanCell(value))) dataRowCount += 1;
-    const referenceNo = normalizeWorkforceBankReference(
-      row[columnFor("Customer Ref. No.")] ?? ""
-    );
+    const rawReference = row[columnFor("Customer Ref. No.")] ?? "";
+    const referenceNo = normalizeWorkforceBankReference(rawReference);
     const referencePrefix = referenceNo.slice(0, 2);
+    const validGeneratedReference =
+      (referencePrefix === "WF" || referencePrefix === "WP" || referencePrefix === "HP")
+      && isValidWorkforceBankReference(referenceNo, referencePrefix);
     if (
-      (referencePrefix !== "WF" && referencePrefix !== "WP" && referencePrefix !== "HP")
-      || !isValidWorkforceBankReference(referenceNo, referencePrefix)
-      || seen.has(referenceNo)
-    ) continue;
-    seen.add(referenceNo);
-    references.push(referenceNo);
+      validGeneratedReference
+      && !seen.has(referenceNo)
+    ) {
+      seen.add(referenceNo);
+      references.push(referenceNo);
+      continue;
+    }
+
+    // Some Federal Bank Transaction Enquiry exports return the bare DropX ID
+    // instead of our generated WF/HP reference. Treat only compact identifiers
+    // containing both a letter and a digit as possible legacy DropX identities.
+    // Company ownership is deliberately decided later from immutable payment
+    // ledgers; unrelated bank references remain skippable.
+    const dropxId = normalizeDropxBankIdentity(rawReference);
+    if (
+      !validGeneratedReference
+      && dropxId.length >= 2
+      && dropxId.length <= 64
+      && /[A-Z]/.test(dropxId)
+      && /[0-9]/.test(dropxId)
+    ) {
+      let debitAmountPaise: number | null = null;
+      let amountError: string | undefined;
+      try {
+        debitAmountPaise = responseAmountPaise(row[columnFor("Debit Amount")] ?? "");
+      } catch (error) {
+        amountError = error instanceof Error ? error.message : "Debit Amount is invalid.";
+      }
+      legacyReferenceCandidates.push({
+        ...(amountError ? { amountError } : {}),
+        creditAccount: normalizeWorkforceBankAccount(row[columnFor("Credit Account")] ?? ""),
+        debitAmountPaise,
+        dropxId,
+        ifsc: normalizeWorkforceBankIfsc(row[columnFor("IFSC Code")] ?? ""),
+        rowNumber: rowIndex + 1,
+        status: cleanCell(row[columnFor("Status")] ?? "").toUpperCase(),
+        utrCin: cleanCell(row[columnFor("UTR/CIN")] ?? "")
+      });
+    }
   }
-  return { dataRowCount, referenceCandidates: references };
+  return { dataRowCount, legacyReferenceCandidates, referenceCandidates: references };
 }
 
 export function prepareDropxFedOneResponse(bytes: ArrayBuffer | Uint8Array) {
@@ -347,9 +456,14 @@ export function countFedOneResponseDataRows(bytes: ArrayBuffer | Uint8Array) {
 
 function parseFedOneResponseSheet(
   responseSheet: FedOneResponseSheet,
-  options: WorkforceFedOneResponseOptions & { ownedReferences?: ReadonlySet<string> } = {}
+  options: WorkforceFedOneResponseOptions & {
+    ownedReferences?: ReadonlySet<string>;
+    rowReferenceAliases?: ReadonlyMap<number, string>;
+  } = {}
 ): { rows: WorkforceFedOneResponseRow[]; skippedRows: Array<{ rowNumber: number; referenceNo: string }> } {
-  const { columnFor, headerIndex, rows, sheet } = responseSheet;
+  const { columnFor, date1904, headerIndex, optionalColumnFor, rows, sheet } = responseSheet;
+  const debitAccountColumn = optionalColumnFor("Debit Account");
+  const valueDateColumn = optionalColumnFor("Value Date");
 
   const errors: string[] = [];
   const parsed: WorkforceFedOneResponseRow[] = [];
@@ -363,7 +477,10 @@ function parseFedOneResponseSheet(
     if (WORKFORCE_FEDONE_RESPONSE_HEADERS.every((header) => !cleanCell(values[header]))) continue;
 
     const rawReference = values["Customer Ref. No."];
-    const referenceNo = normalizeWorkforceBankReference(rawReference);
+    const rawReferenceNo = normalizeWorkforceBankReference(rawReference);
+    const referenceNo = normalizeWorkforceBankReference(
+      options.rowReferenceAliases?.get(rowNumber) ?? rawReferenceNo
+    );
     const referencePrefix = referenceNo.slice(0, 2);
     const isDropxReference = referencePrefix === "WF" || referencePrefix === "WP" || referencePrefix === "HP";
     if (options.ownedReferences && !options.ownedReferences.has(referenceNo)) {
@@ -371,16 +488,24 @@ function parseFedOneResponseSheet(
       continue;
     }
 
-    for (const header of WORKFORCE_FEDONE_RESPONSE_HEADERS) {
-      const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnFor(header) });
+    const responseColumns = [
+      ...WORKFORCE_FEDONE_RESPONSE_HEADERS.map((header) => ({ header, column: columnFor(header) })),
+      ...(debitAccountColumn === undefined ? [] : [{ header: "Debit Account", column: debitAccountColumn }]),
+      ...(valueDateColumn === undefined ? [] : [{ header: "Value Date", column: valueDateColumn }])
+    ];
+    for (const { column, header } of responseColumns) {
+      const address = XLSX.utils.encode_cell({ r: rowIndex, c: column });
       const cell = sheet[address] as SheetCell | undefined;
       if (cell?.f) errors.push(`Row ${rowNumber}: formulas are not accepted in ${header}.`);
     }
 
     const rawAccount = values["Credit Account"];
+    const rawDebitAccount = debitAccountColumn === undefined ? undefined : row[debitAccountColumn];
     if (unsafeNumericIdentifier(rawReference)) errors.push(`Row ${rowNumber}: Customer Ref. No. was stored as an unsafe Excel number.`);
     if (unsafeNumericIdentifier(rawAccount)) errors.push(`Row ${rowNumber}: Credit Account was stored as an unsafe Excel number.`);
+    if (unsafeNumericIdentifier(rawDebitAccount)) errors.push(`Row ${rowNumber}: Debit Account was stored as an unsafe Excel number.`);
 
+    const debitAccount = debitAccountColumn === undefined ? undefined : normalizeWorkforceBankAccount(rawDebitAccount);
     const creditAccount = normalizeWorkforceBankAccount(rawAccount);
     const ifsc = normalizeWorkforceBankIfsc(values["IFSC Code"]);
     const status = cleanCell(values.Status).toUpperCase();
@@ -395,10 +520,18 @@ function parseFedOneResponseSheet(
       }
     }
     if (!creditAccount) errors.push(`Row ${rowNumber}: Credit Account is required.`);
-    else if (!isValidWorkforceBankAccount(creditAccount)) errors.push(`Row ${rowNumber}: Credit Account must contain 4 to 30 letters or digits.`);
     if (!ifsc) errors.push(`Row ${rowNumber}: IFSC Code is required.`);
-    else if (!isValidWorkforceBankIfsc(ifsc)) errors.push(`Row ${rowNumber}: IFSC Code must use the standard 11-character format.`);
     if (!status) errors.push(`Row ${rowNumber}: Status is required.`);
+    if (debitAccountColumn !== undefined && !debitAccount) errors.push(`Row ${rowNumber}: Debit Account is required.`);
+
+    let valueDate: string | undefined;
+    if (valueDateColumn !== undefined) {
+      try {
+        valueDate = responseValueDate(row[valueDateColumn], date1904);
+      } catch (error) {
+        errors.push(`Row ${rowNumber}: ${error instanceof Error ? error.message : "Value Date is invalid."}`);
+      }
+    }
 
     let debitAmountPaise = 0;
     try {
@@ -419,8 +552,10 @@ function parseFedOneResponseSheet(
     parsed.push({
       rowNumber,
       referenceNo,
+      ...(debitAccountColumn === undefined ? {} : { debitAccount }),
       creditAccount,
       ifsc,
+      ...(valueDateColumn === undefined ? {} : { valueDate }),
       debitAmountPaise,
       status,
       utrCin: cleanCell(values["UTR/CIN"]),
@@ -461,10 +596,17 @@ export function parseDropxFedOneResponse(
 
 export function parsePreparedDropxFedOneResponse(
   prepared: ReturnType<typeof prepareDropxFedOneResponse>,
-  ownedReferences: ReadonlySet<string>
+  ownedReferences: ReadonlySet<string>,
+  rowReferenceAliases: ReadonlyMap<number, string> = new Map()
 ): DropxFedOneResponse {
   const normalizedOwnedReferences = new Set([...ownedReferences].map(normalizeWorkforceBankReference));
-  const { rows, skippedRows } = parseFedOneResponseSheet(prepared.responseSheet, { ownedReferences: normalizedOwnedReferences });
+  const normalizedAliases = new Map(
+    [...rowReferenceAliases].map(([rowNumber, referenceNo]) => [rowNumber, normalizeWorkforceBankReference(referenceNo)])
+  );
+  const { rows, skippedRows } = parseFedOneResponseSheet(prepared.responseSheet, {
+    ownedReferences: normalizedOwnedReferences,
+    rowReferenceAliases: normalizedAliases
+  });
   return {
     helperRows: rows.filter((row) => row.referenceNo.startsWith("HP")),
     skippedRows,
