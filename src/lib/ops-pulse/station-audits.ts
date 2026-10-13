@@ -565,15 +565,6 @@ export async function loadStationAuditWorkspace(
           stationIds,
         )
       : [];
-  master.options = master.options.flatMap((option) => {
-    if (option.option_group !== "airways") return [option];
-    const ids = stringList(option.metadata.station_ids).filter((id) =>
-      stationIds.includes(id),
-    );
-    return ids.length
-      ? [{ ...option, metadata: { ...option.metadata, station_ids: ids } }]
-      : [];
-  });
   if (!stationIds.length)
     return {
       ...master,

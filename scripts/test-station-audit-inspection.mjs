@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import ts from 'typescript';
 import { PGlite } from '@electric-sql/pglite';
 function lib(path){const m={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(m,m.exports);return m.exports;}
-const {parseAuditTids,compareAuditTids,selectedAuditEmployees}=lib('src/lib/ops-pulse/station-audit-reconciliation.ts');
+const {parseAuditTids,compareAuditTids,selectedAuditEmployees,readAuditTidSheet}=lib('src/lib/ops-pulse/station-audit-reconciliation.ts');
+// Spreadsheet import: heading found below a title row, reasons read, bad cells counted, numbers kept exact.
+assert.deepEqual(readAuditTidSheet([['Ageing report'],['Sl','Tracking ID','Remarks'],[1,'tid123','Not on shelf'],[2,'TID123',''],[3,'not a tid',''],[4,'',''],[5,123456789012,' Damaged ']]),{ids:['TID123','123456789012'],reasons:{TID123:'Not on shelf','123456789012':'Damaged'},duplicates:1,skipped:1,hasReasons:true});
+assert.deepEqual(readAuditTidSheet([['x','TID100'],['y','TID200']]),{ids:['TID100','TID200'],reasons:{},duplicates:0,skipped:0,hasReasons:false},'a sheet without headings uses the column holding tracking IDs');
+assert.equal(readAuditTidSheet([['AWB'],[1.5e21],['TID9000']]).ids.join(),'TID9000','a number too large to be exact is never guessed');
+assert.throws(()=>readAuditTidSheet([['Name','City'],['Asha','Kochi']]),/No tracking IDs found/);assert.throws(()=>readAuditTidSheet([['Tracking ID'],['']]),/No tracking IDs found under/);
+assert.throws(()=>readAuditTidSheet([['TID'],...Array.from({length:10001},(_,i)=>[`TID${i}`])]),/10,000/);assert.equal(readAuditTidSheet([['TID','Reason'],['TID1234','x'.repeat(900)]]).reasons.TID1234.length,300);
 const {missingAuditPhotos}=lib('src/lib/ops-pulse/station-audit-photos.ts');
 assert.deepEqual(parseAuditTids(' tid123\nTID123\tTID456;\n'),{ids:['TID123','TID456'],duplicates:1});
 assert.deepEqual(compareAuditTids(['TID123','TID456'],['TID123','TID789']),{missing:['TID456'],excess:['TID789'],matched:1});

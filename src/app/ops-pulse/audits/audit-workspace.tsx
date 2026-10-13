@@ -503,9 +503,6 @@ export function AuditWorkspace({
   const [clusters, setClusters] = useState<string[]>(
     searchParams.get("clusters")?.split(",").filter(Boolean) || [],
   );
-  const [airways, setAirways] = useState<string[]>(
-    searchParams.get("airways")?.split(",").filter(Boolean) || [],
-  );
   const [auditors, setAuditors] = useState<string[]>(
     searchParams.get("auditors")?.split(",").filter(Boolean) || [],
   );
@@ -573,17 +570,6 @@ export function AuditWorkspace({
   const selectedAuditorNames = auditorOptions
     .filter((option) => auditors.includes(option.value))
     .map((option) => option.label);
-  const airwayOptions = workspace.options.filter(
-    (option) => option.option_group === "airways",
-  );
-  const stationAirways = (stationId: string) =>
-    airwayOptions
-      .filter(
-        (option) =>
-          Array.isArray(option.metadata.station_ids) &&
-          option.metadata.station_ids.includes(stationId),
-      )
-      .map((option) => option.id);
   const filteredStations = useMemo(
     () =>
       workspace.stations.filter(
@@ -592,20 +578,9 @@ export function AuditWorkspace({
           (!clusters.length ||
             (clusterMap.byStation[station.id] || ["unmapped"]).some((key) =>
               clusters.includes(key),
-            )) &&
-          (!airways.length ||
-            (stationAirways(station.id).length
-              ? stationAirways(station.id).some((id) => airways.includes(id))
-              : airways.includes("unassigned"))),
+            )),
       ),
-    [
-      workspace.stations,
-      workspace.options,
-      clusterMap,
-      stations,
-      clusters,
-      airways,
-    ],
+    [workspace.stations, clusterMap, stations, clusters],
   );
   const stationIds = new Set(filteredStations.map((station) => station.id));
   const scopeAudits = workspace.audits.filter(
@@ -661,7 +636,6 @@ export function AuditWorkspace({
       type: typeId,
       stations: stations.join(","),
       clusters: clusters.join(","),
-      airways: airways.join(","),
       auditors: auditors.join(","),
       q: query,
       status,
@@ -772,26 +746,12 @@ export function AuditWorkspace({
         </div>
         <div className={styles.actions}>
           {canManage && (
-            <>
-              <MultiFilter
-                label="Cluster"
-                options={clusterMap.options}
-                selected={clusters}
-                onChange={setClusters}
-              />
-              <MultiFilter
-                label="Airways"
-                options={[
-                  ...airwayOptions.map((option) => ({
-                    value: option.id,
-                    label: option.label,
-                  })),
-                  { value: "unassigned", label: "Unassigned" },
-                ]}
-                selected={airways}
-                onChange={setAirways}
-              />
-            </>
+            <MultiFilter
+              label="Cluster"
+              options={clusterMap.options}
+              selected={clusters}
+              onChange={setClusters}
+            />
           )}
           {canViewMaster && (
             <Link className="button secondary compact" href="/master/audits">
@@ -875,7 +835,6 @@ export function AuditWorkspace({
             onClick={() => {
               setStations([]);
               setClusters([]);
-              setAirways([]);
               setAuditors([]);
               setQuery("");
               setStatus("all");

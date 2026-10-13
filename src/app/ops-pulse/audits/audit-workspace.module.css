@@ -1171,19 +1171,6 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-.airwaysStations {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 10px;
-  max-height: 300px;
-  overflow: auto;
-  margin: 16px 0;
-}
-.airwaysStations label {
-  gap: 8px;
-  font-size: 12px;
-  align-items: center;
-}
 .detailGrid {
   align-items: start;
 }
@@ -1364,6 +1351,18 @@
 .scanInput {
   display: flex;
   gap: 6px;
+}
+.sheetTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0 0 8px;
+}
+.sheetTools small {
+  flex: 1 1 160px;
+  min-width: 0;
+  color: #64748b;
 }
 .scanInput input {
   min-width: 0;
