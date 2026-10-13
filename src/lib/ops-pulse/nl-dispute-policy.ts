@@ -240,6 +240,56 @@ export function requestSent(
     (request.source_stage ?? "") === (stage ?? "")
   );
 }
+/**
+ * Why OpsPulse cannot file this request in Cloak itself ("" = it can).
+ * Only the call we have seen Cloak accept is automated: a first-round dispute (eDSP1, revision 1).
+ * Accepting a loss and answering Amazon in eDSP2 are still filed by hand.
+ */
+export function cloakFilingBlock(
+  request: Pick<DisputeRequest, "decision" | "status" | "source_stage" | "reason" | "remarks"> | null,
+  stage: string | null | undefined,
+) {
+  if (!request || request.status !== "submitted")
+    return "Only a request sent to the Cloak desk can be filed.";
+  if (request.decision !== "dispute")
+    return "An accepted loss is filed in Cloak by hand.";
+  if (request.source_stage !== "eDSP1" || stage !== "eDSP1")
+    return "Only a first dispute (eDSP1) can be filed from OpsPulse. File this one in Cloak by hand.";
+  if (!DISPUTE_REASONS.includes(request.reason))
+    return "The dispute reason is not one Cloak offers. Return it to the station.";
+  if (!request.remarks.trim()) return "The dispute has no remarks for Amazon.";
+  return "";
+}
+/** The one remarks box Cloak has: the station's text with its CCTV link underneath. */
+export const cloakRemarks = (remarks: string, cctvUrl: string | null) =>
+  [remarks.trim(), (cctvUrl ?? "").trim()].filter(Boolean).join("\n\n");
+/** Body of Cloak's `partnerDispute` action, exactly as its own dispute form sends it. */
+export function cloakDisputeBody(input: {
+  tid: string;
+  reason: string;
+  remarks: string;
+  proofKey: string;
+  email: string;
+  caseWith: string;
+  value: string;
+  country: string;
+  now: number;
+}) {
+  return {
+    action: "partnerDispute",
+    tid: input.tid,
+    dispute_selected: "YES",
+    dispute_proof: input.proofKey,
+    dispute_reason: input.reason,
+    partner_remarks: input.remarks,
+    case_with: input.caseWith,
+    disputed_by: input.email,
+    disputed_time: input.now,
+    revision: "1",
+    value: input.value,
+    country: input.country,
+  };
+}
 export const REQUEST_STATUS: Record<
   DisputeRequest["status"],
   { label: string; tone: "warn" | "info" | "good" | "muted" }

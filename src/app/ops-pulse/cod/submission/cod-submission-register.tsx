@@ -1,6 +1,7 @@
 "use client";
 
 import {CodSlipCheckDetails} from '@/components/cod-slip-check-details';
+import {CodSlipView} from '@/components/cod-slip-view';
 import {compactCodReason} from '@/lib/ops-pulse/cod-return-policy';
 import {proofStatusLabel,proofTone} from '@/lib/ops-pulse/cod-proof-policy';
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -50,6 +51,7 @@ export type CodRegisterRow = {
   proofCheckedAt?:string|null;
   hasSlip: boolean;
   slipUrl: string | null;
+  slipIsPdf: boolean;
 };
 
 const initialEditState: CodSubmissionActionState = { ok: false };
@@ -157,10 +159,11 @@ function EditSubmissionModal({
             </label>
             {editing.hasSlip && editing.slipUrl ? (
               <div className="span-1" style={{ alignSelf: "end" }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <CodSlipView
                   alt="Current slip"
-                  src={editing.slipUrl}
+                  url={editing.slipUrl}
+                  pdf={editing.slipIsPdf}
+                  width={500}
                   style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border, #ddd)" }}
                 />
               </div>
@@ -249,10 +252,12 @@ export function CodSubmissionRegister({
                       onClick={() => setPreview(row)}
                     >
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <CodSlipView
                           alt="Deposit slip"
-                          src={row.slipUrl}
+                          url={row.slipUrl}
+                          pdf={row.slipIsPdf}
+                          width={160}
+                          lazy
                           style={{
                             width: 44,
                             height: 44,
@@ -306,10 +311,11 @@ export function CodSubmissionRegister({
             </div>
             <div className="panel-body" style={{ display: "grid", gap: 12 }}>
               {preview.slipUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <CodSlipView
                   alt="Deposit slip preview"
-                  src={preview.slipUrl}
+                  url={preview.slipUrl}
+                  pdf={preview.slipIsPdf}
+                  maxPages={10}
                   style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: 8, background: "#111" }}
                 />
               ) : null}

@@ -189,9 +189,10 @@ export function NlLiveReport({
                   {v.deskQueue === 1 ? "" : "s"} to file
                 </strong>
                 <span>
-                  Stations have sent these for filing. Download the queue, file
-                  them in Cloak, and they are marked filed automatically on the
-                  next hourly check.
+                  Stations have sent these for filing. Open a case to file its
+                  first dispute in Cloak from here. Accepted losses and
+                  responses to Amazon are filed in Cloak by hand — download the
+                  queue; they are marked filed on the next hourly check.
                 </span>
               </div>
               <a

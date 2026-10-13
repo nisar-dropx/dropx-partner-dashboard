@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import {
   casePhase,
   disputeGate,
+  cloakFilingBlock,
   filedInCloak,
   requestSent,
   DISPUTE_REASONS,
@@ -62,6 +63,7 @@ const actionLabel: Record<string, string> = {
   withdraw: "Withdrawn by station",
   return: "Returned by desk",
   file: "Marked filed in Cloak",
+  file_cloak: "Filed in Cloak",
 };
 
 export function NlLiveCases({
@@ -350,6 +352,7 @@ function LiveDetail({
         ? "filed"
         : status
       : null;
+  const cloakBlock = cloakFilingBlock(request, x.current_sla_stage);
   const reasons = reason && !DISPUTE_REASONS.includes(reason)
     ? [reason, ...DISPUTE_REASONS]
     : DISPUTE_REASONS;
@@ -386,7 +389,8 @@ function LiveDetail({
       setHistory((h) => [
         {
           id: String(Date.now()),
-          action,
+          // Filing from OpsPulse is recorded as "file", with how it was filed in the desk note.
+          action: action === "file_cloak" ? "file" : action,
           actor_name: j.request.updated_by_name,
           created_at: j.request.updated_at,
           snapshot: j.request,
@@ -707,10 +711,28 @@ function LiveDetail({
                 />
               </label>
               <div className={styles.toolbar}>
-                {shownStatus === "submitted" ? (
+                {shownStatus === "submitted" && !cloakBlock ? (
                   <button
                     type="button"
                     className={styles.primary}
+                    disabled={busy}
+                    onClick={() => {
+                      if (
+                        // `window` here is the dispute window prop.
+                        globalThis.confirm(
+                          `File this dispute in Cloak now?\n\nThe reason, remarks${request?.cctv_url ? ", CCTV link" : ""}${request?.attachments.length ? " and proof" : ""} are sent to Amazon as they are shown here. This cannot be undone from OpsPulse.`,
+                        )
+                      )
+                        void send("file_cloak", {});
+                    }}
+                  >
+                    {busy ? "Filing…" : "File in Cloak now"}
+                  </button>
+                ) : null}
+                {shownStatus === "submitted" ? (
+                  <button
+                    type="button"
+                    className={cloakBlock ? styles.primary : styles.button}
                     disabled={busy}
                     onClick={() => void send("file", { desk_note: deskNote })}
                   >
@@ -748,7 +770,7 @@ function LiveDetail({
                 </p>
               ) : null}
               {h.snapshot.remarks ? <p>{h.snapshot.remarks}</p> : null}
-              {h.action === "return" && h.snapshot.desk_note ? (
+              {(h.action === "return" || h.action === "file") && h.snapshot.desk_note ? (
                 <p>
                   <strong>Desk:</strong> {h.snapshot.desk_note}
                 </p>

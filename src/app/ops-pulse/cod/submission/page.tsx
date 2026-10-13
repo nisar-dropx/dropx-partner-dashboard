@@ -14,6 +14,7 @@ import {
   codSetupMessage,
   depositAttachmentsFor,
   depositSlipViewUrl,
+  isPdfAttachment,
   firstRelation,
   formatAmount,
   formatDate,
@@ -151,7 +152,8 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
       proofResult: row.ai_result,
       proofCheckedAt: row.proof_checked_at,
       hasSlip: slips.length > 0,
-      slipUrl: slips.length ? depositSlipViewUrl(row.id) : null
+      slipUrl: slips.length ? depositSlipViewUrl(row.id) : null,
+      slipIsPdf: slips.length > 0 && isPdfAttachment(slips[0])
     };
   });
 
