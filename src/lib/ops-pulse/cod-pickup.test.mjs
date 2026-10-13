@@ -25,3 +25,8 @@ test('ageing and freshness settings are validated and updates preserve omitted v
  assert.equal(parsePickupFields(form({recon_age_flag_days:'2',cod_status_max_age_minutes:'10'})).recon_age_flag_days,2);
  for(const extra of [{recon_age_flag_days:'0'},{recon_age_flag_days:'1.5'},{cod_status_max_age_minutes:'0'},{cod_status_max_age_minutes:'61'}]) assert.throws(()=>parsePickupFields(form(extra)));
 });
+test('compact integration edits do not clear legacy deadlines hidden from the form',()=>{
+ const parsed=parsePickupAdvanced(form({advanced_settings:'true',portal_check_interval_minutes:'30'}));
+ for(const key of ['cod_submission_due_time','eod_submission_due_time','prepared_deposit_due_time']) assert.equal(Object.hasOwn(parsed,key),false);
+ assert.equal(parsePickupAdvanced(form({advanced_settings:'true',portal_check_interval_minutes:'30',prepared_deposit_due_time:'19:30'})).prepared_deposit_due_time,'19:30');
+});

@@ -4,7 +4,7 @@ import { requirePagePermission } from '@/lib/authorization';
 import { firstRelation, loadCodStationSettings } from '@/lib/ops-pulse/cod';
 import { loadCodStatusLocations } from '@/lib/ops-pulse/cod-status-server';
 import { requireCompanyId } from '@/lib/company-scope';
-import { pickupPolicy } from '@/lib/ops-pulse/cod-pickup';
+import { pickupDefaults, pickupPolicy } from '@/lib/ops-pulse/cod-pickup';
 import { codStatusOwner } from '@/lib/ops-pulse/cod-status';
 import { codCmsContact } from '@/lib/ops-pulse/cod-cms-followup';
 import { loadCodTeamDirectory } from '@/lib/ops-pulse/cod-station-team';
@@ -25,8 +25,8 @@ export default async function CodStatusPage() {
         const setting = settings.rows.find(s=>s.location_id===row.id);
         return { id:row.id,code:row.station_code,name:row.station_name || '',model:firstRelation(row.location_models)?.code || '',region:row.region || row.state || '',...codStatusOwner(row),teamUnavailable,
           leads:team.filter(person=>person.locationId===row.id && isStationLead(person)).map(({name,role,phone})=>({name,role,phone})),
-          pickup:pickupPolicy(setting),cmsContact:codCmsContact(setting),ageFlagDays:setting?.recon_age_flag_days ?? null,
-          maxAgeMinutes:setting?.cod_status_max_age_minutes ?? null,reconDueTime:setting?.driver_recon_due_time?.slice(0,5) || null };
+          pickup:pickupPolicy(setting),cmsContact:codCmsContact(setting),ageFlagDays:setting?.recon_age_flag_days ?? pickupDefaults.recon_age_flag_days,
+          maxAgeMinutes:setting?.cod_status_max_age_minutes ?? pickupDefaults.cod_status_max_age_minutes,reconDueTime:setting ? setting.driver_recon_due_time?.slice(0,5) || null : pickupDefaults.driver_recon_due_time };
       })} />
     </>;
   } catch {

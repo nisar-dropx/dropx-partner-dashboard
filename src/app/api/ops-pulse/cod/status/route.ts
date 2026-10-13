@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getAuthorization, hasPermission } from '@/lib/authorization';
 import { fetchCodStatus } from '@/lib/ops-pulse/cash-recon-worker';
-import { codStatusPortalStation, loadCodStatusLocations } from '@/lib/ops-pulse/cod-status-server';
+import { codStatusPortalStation, loadCodStatusLocation } from '@/lib/ops-pulse/cod-status-server';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 export async function GET(request: Request) {
-  const auth = await getAuthorization();
-  if (!auth || !hasPermission(auth, 'cod_reports', 'access')) return NextResponse.json({ error: 'COD reports access required.' }, { status: 403 });
   try {
+    const auth = await getAuthorization();
+    if (!auth) return NextResponse.json({ error: 'Session could not be verified. Retry this station; reload if the issue continues.' }, { status: 401 });
+    if (!hasPermission(auth, 'cod_reports', 'access')) return NextResponse.json({ error: 'COD reports access required.' }, { status: 403 });
     const url = new URL(request.url);
-    const locations = await loadCodStatusLocations(auth);
-    const location = locations.find(row => row.id === url.searchParams.get('location'));
+    const location = await loadCodStatusLocation(auth,url.searchParams.get('location') || '');
     if (!location) return NextResponse.json({ error: 'Location unavailable or outside your access.' }, { status: 403 });
     const stationCode = await codStatusPortalStation(auth, location);
     const snapshot = await fetchCodStatus(stationCode, url.searchParams.get('refresh') === '1');

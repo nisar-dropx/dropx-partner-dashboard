@@ -7,9 +7,10 @@ import { CompactFilter } from './compact-filter';
 import { StationTeam } from './station-team';
 import { CmsFollowUp } from './cms-followup';
 import { overdueCodRemittances } from '@/lib/ops-pulse/cod-cms-followup';
+import { codRefreshDue } from '@/lib/ops-pulse/cod-refresh';
 import styles from './status.module.css';
 type Part = 'reconciliation' | 'prepareDeposit' | 'remittances';
-type Row = { snapshot?: CodStatusSnapshot; loading?: boolean; error?: string };
+type Row = { snapshot?: CodStatusSnapshot; loading?: boolean; error?: string; lastAttemptAt?: number };
 const amount = (n: number) => new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR', maximumFractionDigits:2 }).format(n);
 const dateLabel = (value:string) => new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',year:'numeric'}).format(new Date(value+'T00:00:00+05:30'));
 const time = (value: string | number | null | undefined) => value && Number.isFinite(new Date(value).getTime()) ? new Intl.DateTimeFormat('en-IN', { timeZone:'Asia/Kolkata', day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true }).format(new Date(value)) : 'Not available';
@@ -34,12 +35,13 @@ export function CodStatusClient({ locations }: { locations: CodStatusLocation[] 
   const refresh = useCallback(async (id: string, fresh = false) => {
     if (busy.current.has(id)) return;
     busy.current.add(id);
-    setRows(prev => ({...prev,[id]:{...prev[id],loading:true,error:undefined}}));
+    const lastAttemptAt = Date.now();
+    setRows(prev => ({...prev,[id]:{...prev[id],loading:true,error:undefined,lastAttemptAt}}));
     try {
       const response = await fetch(`/api/ops-pulse/cod/status?location=${encodeURIComponent(id)}${fresh?'&refresh=1':''}`, { cache:'no-store',signal:AbortSignal.timeout(115000) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Check unavailable. Please retry.');
-      if (alive.current) {setRows(prev => ({...prev,[id]:{snapshot:data,loading:false}}));setNow(new Date());}
+      if (alive.current) {setRows(prev => ({...prev,[id]:{snapshot:data,loading:false,lastAttemptAt}}));setNow(new Date());}
     } catch (error) {
       if (alive.current) setRows(prev => ({...prev,[id]:{...prev[id],loading:false,error:error instanceof Error && error.name !== 'TimeoutError' ? error.message : 'Check timed out. Please retry.'}}));
     } finally { busy.current.delete(id); }
@@ -56,11 +58,18 @@ export function CodStatusClient({ locations }: { locations: CodStatusLocation[] 
     alive.current = true;
     void refreshMany(locations.map(l=>l.id),false);
     const timer = setInterval(()=>setNow(new Date()),60000);
-    return () => { alive.current=false; clearInterval(timer); };
+    const onVisible = () => { if (document.visibilityState === 'visible') setNow(new Date()); };
+    document.addEventListener('visibilitychange',onVisible);
+    return () => { alive.current=false; clearInterval(timer); document.removeEventListener('visibilitychange',onVisible); };
   },[locations,refreshMany]);
   const checks = (l:CodStatusLocation) => codStatusChecks(rows[l.id]?.snapshot,l.pickup || null,now,!!rows[l.id]?.error,collectionDate,l.reconDueTime || null,l.maxAgeMinutes ?? null);
   const status = (l:CodStatusLocation) => codStatusCategory(rows[l.id]?.snapshot,now,l.pickup || null,!!rows[l.id]?.error,collectionDate,l.reconDueTime || null,l.maxAgeMinutes ?? null);
   const selected = locations.filter(l=>matchesCodFilters(l,checks(l),status(l),{search,model,manager,region,station:stations}));
+  useEffect(() => {
+    if (refreshing || document.visibilityState !== 'visible') return;
+    const due = selected.filter(l=>codRefreshDue(rows[l.id],l.maxAgeMinutes,now)).map(l=>l.id);
+    if (due.length) void refreshMany(due,true);
+  },[now,selected,rows,refreshing,refreshMany]);
   const snapshots = Object.fromEntries(Object.entries(rows).map(([id,row])=>[id,row.snapshot]));
   const statusBase=selected.filter(l=>matchesCodFilters(l,checks(l),status(l),parts) && matchesSelection(freshness,[codFreshness(rows[l.id]?.snapshot,l.maxAgeMinutes,now,!!rows[l.id]?.loading,!!rows[l.id]?.error)]));
   const visible = statusBase.filter(l=>matchesSelection(filter,[status(l)])).sort((a,b)=>compareCodRows(a,b,snapshots,sort,direction,now,collectionDate));
@@ -122,7 +131,7 @@ export function CodStatusClient({ locations }: { locations: CodStatusLocation[] 
     return <><h3>COD remittance details</h3><p>Portal window: {time(s.remittanceWindow.startTime)} – {time(s.remittanceWindow.endTime)} IST. Records outside this window are not checked here. “Submitted” is Amazon’s status; it does not confirm bank settlement.</p>{!m?.complete && <p className={styles.warning}>The source check is incomplete. Do not treat the absence of an open remittance as clearance.</p>}<div className={styles.scroll}><table><thead><tr><th>Remittance</th><th>Portal status</th><th>Pickup assessment</th><th>Expected</th><th>Actual</th><th>Variance</th><th>Created</th><th>Last updated · IST</th><th>Submitted by</th></tr></thead><tbody>{m?.rows.map(r=>{const assessment=['CREATED','PENDING_SUBMISSION'].includes(r.status.toUpperCase())?classifyRemittance(r,m.latestSubmitted,location.pickup || null,now):null;return <tr key={r.id}><td><strong>{r.code||'Code not issued'}</strong></td><td><span className={['CREATED','PENDING_SUBMISSION'].includes(r.status)?styles.warn:styles.neutral}>{r.status}</span></td><td>{assessment?<span className={`${styles.assessment} ${toneClass(assessment.tone)}`} title={assessment.reason}>{assessment.label}</span>:'—'}</td><td>{amount(r.expectedAmount)}</td><td>{amount(r.actualAmount)}</td><td>{amount(r.variance)}</td><td>{time(r.createdAt)}</td><td>{time(r.updatedAt)}</td><td>{r.submittedBy||'—'}</td></tr>;})}</tbody></table>{!m?.rows.length && <p>No remittances returned in this portal window.</p>}</div></>;
   }
   return <div className={styles.root}>
-    <div className={styles.toolbar}><div><strong>Today · {now.toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'long',year:'numeric'})}</strong><small>{locations.length} authorized locations · All times IST</small></div><button className={styles.refresh} disabled={refreshing} onClick={()=>refreshMany(visible.map(l=>l.id),true)}>{refreshing?'Checking stations…':'Refresh selected stations'}</button></div>
+    <div className={styles.toolbar}><div><strong>Today · {now.toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'long',year:'numeric'})}</strong><small>{locations.length} authorized locations · All times IST</small><small>Auto-refresh while open · station interval from COD Pickup Master. Refresh now checks Amazon immediately.</small></div><button className={styles.refresh} disabled={refreshing} onClick={()=>refreshMany(visible.map(l=>l.id),true)}>{refreshing?'Checking stations…':'Refresh selected stations'}</button></div>
     <section className={styles.dateBar} aria-label="COD collection date">
       <div><strong>COD collection date</strong><small>Filter cash by its collection / pending date in Amazon.</small></div>
       <label className={styles.dateSelect}>Show<select aria-label="COD collection date filter" value={dateMode} onChange={e=>setDateMode(e.target.value)}><option value="all">All outstanding dates</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="custom">Choose date</option><option value="undated">Date unverified</option></select></label>

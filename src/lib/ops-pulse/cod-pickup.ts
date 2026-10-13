@@ -2,6 +2,8 @@
 export const pickupRules = ['Same Day-Complete', 'Same Day-Partial', 'Next Day'] as const;
 export type PickupRule = typeof pickupRules[number];
 export type PickupPolicy = { rule: PickupRule; start: string; end: string; preparationFrom?: string | null };
+/** Defaults agreed for new stations; saved station overrides always take precedence. */
+export const pickupDefaults = { driver_recon_due_time: '21:00', next_day_preparation_from: '16:00', recon_age_flag_days: 1, cod_status_max_age_minutes: 15 } as const;
 export const pickupDescriptions: Record<PickupRule, string> = {
   'Same Day-Complete': 'Full cash for the collection day is expected in the same-day pickup.',
   'Same Day-Partial': 'Cash available at pickup is deposited; later collections carry forward to the next pickup.',
@@ -47,8 +49,7 @@ export function parsePickupAdvanced(form: FormData) {
   if (emails && emails.split(/[,;]+/).some(email=>! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))) throw new Error('Enter valid escalation emails separated by commas.');
   return { portal_station_code: portalCode || null, portal_check_interval_minutes: gap,
     portal_checks_enabled: form.get('portal_checks_enabled') === 'true',
-    cod_submission_due_time: optionalTime('cod_submission_due_time'), eod_submission_due_time: optionalTime('eod_submission_due_time'),
-    prepared_deposit_due_time: optionalTime('prepared_deposit_due_time'),
+    ...Object.fromEntries(['cod_submission_due_time','eod_submission_due_time','prepared_deposit_due_time'].filter(key=>form.has(key)).map(key=>[key,optionalTime(key)])),
     escalation_contact: text('escalation_contact') || null, escalation_email: emails || null };
 }
 export function pickupPolicy(row?: { pickup_configured?: boolean; pickup_rule?: string | null; pickup_window_start?: string | null; pickup_window_end?: string | null; next_day_preparation_from?: string | null } | null): PickupPolicy | null {
