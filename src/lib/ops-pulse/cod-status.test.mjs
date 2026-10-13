@@ -50,7 +50,7 @@ test('missing timestamps, settings, source records and stale checks do not becom
  const missing=base();missing.prepareDeposit.state='unavailable';assert.equal(codStatusCategory(missing,now,policy),'unavailable');
 });
 test('cash difference flags red; pending DA cash stays separate from remittance status',()=>{
- const s=base();s.reconciliation.data.pendingCount=2;assert.equal(codStatusChecks(s,policy,now).reconciliation.tone,'waiting');assert.equal(codStatusChecks(s,policy,now).remittances.tone,'clear');
+ const s=base();s.reconciliation.data.pendingCount=2;assert.equal(codStatusChecks(s,policy,now).reconciliation.tone,'unavailable');assert.equal(codStatusChecks(s,policy,now).remittances.tone,'clear');
  s.prepareDeposit.data.variance=-10;assert.equal(codStatusCategory(s,now,policy),'attention');
 });
 test('People cluster takes priority and AOM is used only when no cluster exists',()=>{

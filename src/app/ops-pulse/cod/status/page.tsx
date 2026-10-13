@@ -15,7 +15,7 @@ export default async function CodStatusPage() {
     return <>
       <PageHead eyebrow="Operations · COD" title="COD status" subtitle="DA reconciliation, prepared deposits and remittances — together for each station." />
       <CodSectionTabs active="status" />
-      <CodStatusClient locations={locations.map(row => ({ id:row.id,code:row.station_code,name:row.station_name || '',model:firstRelation(row.location_models)?.code || '',region:row.region || row.state || '',...codStatusOwner(row),pickup:pickupPolicy(settings.rows.find(s=>s.location_id===row.id)) }))} />
+      <CodStatusClient locations={locations.map(row => ({ id:row.id,code:row.station_code,name:row.station_name || '',model:firstRelation(row.location_models)?.code || '',region:row.region || row.state || '',...codStatusOwner(row),pickup:pickupPolicy(settings.rows.find(s=>s.location_id===row.id)),reconDueTime:settings.rows.find(s=>s.location_id===row.id)?.driver_recon_due_time?.slice(0,5) || null }))} />
     </>;
   } catch {
     return <><PageHead title="COD status" subtitle="Locations could not be loaded. Please reload to try again." /><CodSectionTabs active="status" /></>;

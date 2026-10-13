@@ -16,11 +16,14 @@ export function parsePickupFields(form: FormData) {
   if (!validTime(start) || !validTime(end) || end <= start) throw new Error('Enter a valid pickup window with the end after the start (IST).');
   const preparationFrom = text('next_day_preparation_from');
   if (rule === 'Next Day' && (!validTime(preparationFrom) || preparationFrom < end)) throw new Error('Set the next-day preparation time at or after the pickup window (IST).');
+  const reconDue = text('driver_recon_due_time');
+  if (reconDue && !validTime(reconDue)) throw new Error('Enter a valid DA reconciliation closing time (IST).');
   const agency = text('cms_agency');
   if (!agency || agency.length > 120) throw new Error('Enter a CMS agency (up to 120 characters).');
   const name = text('agent_name'), mobile = text('agent_mobile').replace(/[\s()-]/g, '');
   if (name.length > 160 || (mobile && !/^\+?[0-9]{10,15}$/.test(mobile))) throw new Error('Enter a valid agent name and mobile number, or leave the contact fields blank.');
   return { cms_agency: agency, agent_name: name, agent_mobile: mobile, pickup_rule: rule as PickupRule,
+    ...(form.has('driver_recon_due_time') ? {driver_recon_due_time: reconDue || null} : {}),
     cod_deposit_day: rule === 'Next Day' ? 'Next Day' : 'Same Day', pickup_time: `${start}–${end}`,
     pickup_window_start: start, pickup_window_end: end, next_day_preparation_from: rule === 'Next Day' ? preparationFrom : null, pickup_configured: true };
 }
@@ -38,7 +41,7 @@ export function parsePickupAdvanced(form: FormData) {
   return { portal_station_code: portalCode || null, portal_check_interval_minutes: gap,
     portal_checks_enabled: form.get('portal_checks_enabled') === 'true',
     cod_submission_due_time: optionalTime('cod_submission_due_time'), eod_submission_due_time: optionalTime('eod_submission_due_time'),
-    driver_recon_due_time: optionalTime('driver_recon_due_time'), prepared_deposit_due_time: optionalTime('prepared_deposit_due_time'),
+    prepared_deposit_due_time: optionalTime('prepared_deposit_due_time'),
     escalation_contact: text('escalation_contact') || null, escalation_email: emails || null };
 }
 export function pickupPolicy(row?: { pickup_configured?: boolean; pickup_rule?: string | null; pickup_window_start?: string | null; pickup_window_end?: string | null; next_day_preparation_from?: string | null } | null): PickupPolicy | null {
