@@ -145,8 +145,9 @@ function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches || busy} onClick={() => onSave(index)} type="button">{busy ? "Saving..." : dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialOutboundMonth, canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
   shipmentMonths: string[];
+  initialOutboundMonth: string;
   initialQuery?: string;
   initialStationId?: string;
   canEdit: boolean;
@@ -160,8 +161,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [query, setQuery] = useState(initialQuery);
   const deferredQuery = useDeferredValue(query);
   const [stationFilters, setStationFilters] = useState<string[]>(initialStationId ? [initialStationId] : []);
-  const [monthFilters, setMonthFilters] = useState<string[]>([]);
-  const monthOptions = useMemo(() => providerMappingMonthOptions(shipmentMonths), [shipmentMonths]);
+  const [monthFilters, setMonthFilters] = useState<string[]>([initialOutboundMonth]);
+  const monthOptions = useMemo(() => providerMappingMonthOptions([...shipmentMonths, initialOutboundMonth]), [shipmentMonths, initialOutboundMonth]);
   const [methodFilters, setMethodFilters] = useState<string[]>([]);
   const [mappingFilters, setMappingFilters] = useState<string[]>(["unmapped"]);
   const [validationFilters, setValidationFilters] = useState<string[]>([]);
@@ -201,8 +202,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   });
   const isSaving = savingIndexes.size > 0;
 
+  // Filter persisted values: selecting an associate or changing a rate card must
+  // not remove an unfinished row. A successful save updates baselineRows.
   const visibleIndexes = useMemo(() => filterProviderFirstRowIndexes({
-    rows,
+    rows: baselineRows,
     workerById,
     paymentMethodById,
     filters: {
@@ -213,7 +216,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       mappingStatuses: mappingFilters,
       validationStatuses: validationFilters
     }
-  }), [rows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
+  }), [baselineRows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
   const hasFilters = Boolean(query || monthFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);

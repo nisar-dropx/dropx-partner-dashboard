@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { dashboardDateInputValue } from "@/lib/date-format";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -187,6 +188,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet initialOutboundMonth={dashboardDateInputValue().slice(0, 7)} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }
