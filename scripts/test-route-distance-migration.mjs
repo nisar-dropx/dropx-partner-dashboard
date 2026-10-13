@@ -70,4 +70,32 @@ assert.equal((await targetV2()).identity_reason,'amazon_identity_conflict');
 await db.exec(`delete from field_executive_provider_mappings where id='${other}'`);
 assert.equal((await db.query('select * from workforce_route_distance_targets_v2($1,$2,$3)',[other,'2026-10-02',s])).rows.length,0);
 await db.exec('set role authenticated');await assert.rejects(snapshot([pair()]),/permission denied/);await assert.rejects(db.query('select * from workforce_route_scc_snapshots'),/permission denied/);await db.exec('reset role');
-console.log('PASS: route migration and SCC identity resolution; exact IDs; duplicate/conflict rejection; 7-day cache; verified and prior-route fallbacks; write validation; frozen payouts; private permissions');await db.close();
+await db.exec(fs.readFileSync('supabase/migrations/20261014034000_route_scc_company_fallback.sql','utf8'));
+const neighbour='66666666-6666-4666-8666-666666666666',foreign='77777777-7777-4777-8777-777777777777';
+await db.exec(`insert into stations values('${neighbour}','${c}','PARENT','area',12,77);
+insert into workforce_route_distance_stations(company_id,station_id,latitude,longitude) values('${c}','${neighbour}',12,77);
+delete from workforce_route_scc_snapshots;`);
+await snapshot([pair()],neighbour);
+assert.equal((await targetV2()).transporter_id,'A111111');
+assert.equal((await targetV2()).identity_source,'scc_company_exact_id');
+assert.equal(await save({...row,transporter_id:'A111111'}),'updated');
+await db.exec('delete from workforce_route_distances');
+// Contradictory IDs anywhere in this company require review, including a
+// second numeric employee ID for the same transporter in another roster.
+await snapshot([pair('200001','A222222')]);
+assert.equal((await targetV2()).identity_reason,'amazon_identity_conflict');
+await snapshot([pair('200002')]);
+assert.equal((await targetV2()).identity_reason,'amazon_identity_conflict');
+await snapshot([pair()]);assert.equal((await targetV2()).identity_source,'scc_exact_id');
+await db.exec(`delete from workforce_route_scc_snapshots where station_id='${s}';
+update workforce_route_scc_snapshots set observed_at=now()-interval '8 days';`);
+assert.equal((await targetV2()).identity_reason,'amazon_identity_missing');
+// Another tenant's matching employee ID must never resolve this candidate.
+await db.exec(`insert into companies values('${foreign}');
+insert into stations values('${foreign}','${foreign}','OTHER','area',12,77);
+insert into workforce_route_scc_snapshots values('${foreign}','${foreign}','[{"employeeId":"200001","tasId":"A111111","store":false}]',now());`);
+assert.equal((await targetV2()).identity_reason,'amazon_identity_missing');
+await snapshot([pair()],neighbour);
+await db.exec(`update field_executive_provider_mappings set effective_to='2026-10-01' where id='${m}'`);
+assert.equal(await targetV2(),undefined);
+console.log('PASS: route storage, exact SCC company fallback, cross-station and reverse conflicts, stale/foreign isolation, effective dates, frozen payouts and private permissions');await db.close();
