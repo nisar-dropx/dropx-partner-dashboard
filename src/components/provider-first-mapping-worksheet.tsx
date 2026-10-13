@@ -14,14 +14,17 @@ import {
   providerFirstNamesMatch,
   providerFirstLocationIsAllowed,
   providerFirstLocationRemap,
+  providerFirstMappingReferenceForRow,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstPageWindow,
+  providerFirstRowForMappingPeriod,
   providerFirstRowIssue,
   providerMemberKey,
   type ProviderFirstMappingReplacement,
   type ProviderFirstMappingRowView,
   type ProviderFirstPageSize,
+  type ProviderFirstRegisteredMappingView,
   type ProviderFirstWorkerView
 } from "@/lib/provider-first-mapping-view";
 
@@ -32,8 +35,18 @@ function signature(row: ProviderFirstMappingRow) {
   return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), JSON.stringify(row.productionThresholdConfig), row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo].join("|");
 }
 
+function previousIsoDate(value: string) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderFirstWorker | undefined) {
-  return Boolean(worker?.mappedProviderMemberId && providerMemberKey(row.stationId, worker.mappedProviderMemberId) !== providerMemberKey(row.stationId, row.providerMemberId));
+  const reference = providerFirstMappingReferenceForRow(row, worker);
+  return Boolean(reference && (
+    reference.providerId !== row.providerId
+      || providerMemberKey("", reference.mappedProviderMemberId) !== providerMemberKey("", row.providerMemberId)
+  ));
 }
 
 function appendRow(
@@ -223,6 +236,16 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   }
 
+  function updateEffectivePeriod(index: number, change: Pick<ProviderFirstMappingRow, "effectiveFrom"> | Pick<ProviderFirstMappingRow, "effectiveTo">) {
+    setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
+    setSaveNotice(null);
+    setRows((current) => current.map((row, rowIndex) => {
+      if (rowIndex !== index) return row;
+      const next = { ...row, ...change };
+      return providerFirstRowForMappingPeriod(next, workerById.get(next.workforceId));
+    }));
+  }
+
   function relocatedHistory(
     history: ProviderFirstMappingRow["history"],
     relocation: { previousMappingId: string; previousEffectiveTo: string; previousStatus: "closed" | "cancelled" }
@@ -247,6 +270,41 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       effectiveTo: "",
       history
     };
+  }
+
+  function registeredMappingFromRow(row: ProviderFirstMappingRow): ProviderFirstRegisteredMappingView {
+    return {
+      mappingId: row.mappingId,
+      stationId: row.stationId,
+      locationLabel: row.stationLabel,
+      providerId: row.providerId,
+      mappedProviderMemberId: row.providerMemberId,
+      paymentMethodId: row.paymentMethodId,
+      paymentValues: row.paymentValues,
+      productionThresholdConfig: row.productionThresholdConfig,
+      productionThresholdMinimumUnits: row.productionThresholdMinimumUnits,
+      effectiveFrom: row.effectiveFrom,
+      effectiveTo: row.effectiveTo,
+      status: row.effectiveTo ? "closed" : "active"
+    };
+  }
+
+  function registeredMappingsAfterSave(worker: ProviderFirstWorker, saved: ProviderFirstMappingRow) {
+    const stored = worker.registeredLocationMappings?.length
+      ? worker.registeredLocationMappings
+      : worker.registeredLocationMapping
+        ? [worker.registeredLocationMapping]
+        : [];
+    const next = registeredMappingFromRow(saved);
+    return [next, ...stored.filter((mapping) => mapping.mappingId !== next.mappingId)]
+      .sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom));
+  }
+
+  function currentMappingsAfterSave(worker: ProviderFirstWorker, saved: ProviderFirstMappingRow) {
+    const next = registeredMappingFromRow(saved);
+    return [next, ...(worker.currentMappings ?? []).filter((mapping) => mapping.mappingId !== next.mappingId)]
+      .filter((mapping) => mapping.status === "active" && !mapping.effectiveTo)
+      .sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom));
   }
 
   function reconciledHistory(
@@ -288,19 +346,23 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       return;
     }
     const row = rows[index];
-    const targetHasMapping = Boolean(worker.mappingId);
+    // Keep active mapping state independent from registered-location evidence.
+    // A third location must inherit the exact registered anchor, even when the
+    // worker also has an active mapping at a different additional location.
+    const mappingReference = providerFirstMappingReferenceForRow(row, worker);
+    const targetHasMappingReference = Boolean(mappingReference?.mappingId);
     update(index, {
       workforceId: worker.id,
       dropxId: worker.dropxId,
       dropxName: worker.fullName,
-      mappingId: worker.mappingId,
-      providerId: row.providerId || worker.providerId,
-      paymentMethodId: targetHasMapping ? worker.paymentMethodId : row.paymentMethodId,
-      paymentValues: targetHasMapping ? worker.paymentValues : row.paymentValues,
-      productionThresholdConfig: targetHasMapping ? worker.productionThresholdConfig : row.productionThresholdConfig,
-      productionThresholdMinimumUnits: targetHasMapping ? worker.productionThresholdMinimumUnits : row.productionThresholdMinimumUnits,
-      effectiveFrom: targetHasMapping ? worker.effectiveFrom : row.effectiveFrom || worker.dateOfJoin,
-      effectiveTo: targetHasMapping ? worker.effectiveTo : row.effectiveTo
+      mappingId: mappingReference?.mappingId ?? "",
+      providerId: row.providerId || mappingReference?.providerId || worker.providerId,
+      paymentMethodId: targetHasMappingReference ? mappingReference?.paymentMethodId ?? "" : row.paymentMethodId,
+      paymentValues: targetHasMappingReference ? mappingReference?.paymentValues ?? {} : row.paymentValues,
+      productionThresholdConfig: targetHasMappingReference ? mappingReference?.productionThresholdConfig ?? null : row.productionThresholdConfig,
+      productionThresholdMinimumUnits: targetHasMappingReference ? mappingReference?.productionThresholdMinimumUnits ?? "" : row.productionThresholdMinimumUnits,
+      effectiveFrom: targetHasMappingReference ? mappingReference?.effectiveFrom ?? "" : row.effectiveFrom || worker.dateOfJoin,
+      effectiveTo: targetHasMappingReference ? mappingReference?.effectiveTo ?? "" : row.effectiveTo
     });
   }
 
@@ -364,7 +426,16 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         paidHistoryTransfer?: PaidHistoryTransferConfirmation;
       };
       const canonicalByIndex = new Map<number, ProviderFirstMappingRow>();
+      const boundedHistoryByIndex = new Map<number, ProviderFirstMappingRow>();
       const clearedByIndex = new Map<number, { row: ProviderFirstMappingRow; expectedMappingId: string }>();
+      const mappingClosuresByWorker = new Map<string, Array<{ mappingId: string; effectiveTo: string; status: "closed" | "cancelled" }>>();
+      const rememberClosure = (workforceId: string, mappingId: string, effectiveTo: string, status: "closed" | "cancelled") => {
+        if (!workforceId || !mappingId) return;
+        mappingClosuresByWorker.set(workforceId, [
+          ...(mappingClosuresByWorker.get(workforceId) ?? []).filter((closure) => closure.mappingId !== mappingId),
+          { mappingId, effectiveTo, status }
+        ]);
+      };
       for (const saved of result.savedRows) {
         const snapshot = snapshotByKey.get(saved.clientKey);
         if (!snapshot) continue;
@@ -375,8 +446,11 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             previousStatus: saved.cleared.previousStatus
           });
           canonicalByIndex.set(snapshot.index, clearCurrentMapping(snapshot.row, clearedHistory));
+          const closedWorkerId = saved.cleared.previousWorkforceId || snapshot.previousWorkforceId;
+          rememberClosure(closedWorkerId, saved.cleared.previousMappingId, saved.cleared.previousEffectiveTo, saved.cleared.previousStatus);
           continue;
         }
+        const baseline = baselineRows[snapshot.index];
         let canonical = {
           ...snapshot.row,
           mappingId: saved.mappingId,
@@ -402,10 +476,49 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               expectedMappingId: saved.relocation.previousMappingId
             });
           }
+          rememberClosure(
+            origin?.workforceId || snapshot.previousWorkforceId || canonical.workforceId,
+            saved.relocation.previousMappingId,
+            saved.relocation.previousEffectiveTo,
+            saved.relocation.previousStatus
+          );
         } else {
-          canonical = { ...canonical, history: reconciledHistory(baselineRows[snapshot.index], canonical) };
+          canonical = { ...canonical, history: reconciledHistory(baseline, canonical) };
+          // Ordinary versioning can close an active row without returning a
+          // relocation payload. Mirror that closure immediately so a second
+          // edit cannot target the stale active mapping before a reload.
+          if (snapshot.replacementAction !== "keep" && baseline.mappingId && baseline.workforceId) {
+            if (baseline.mappingId === canonical.mappingId && canonical.effectiveTo) {
+              rememberClosure(baseline.workforceId, baseline.mappingId, canonical.effectiveTo, "closed");
+            } else if (baseline.mappingId !== canonical.mappingId
+              && baseline.effectiveFrom
+              && canonical.effectiveFrom > baseline.effectiveFrom) {
+              rememberClosure(baseline.workforceId, baseline.mappingId, previousIsoDate(canonical.effectiveFrom), "closed");
+            }
+          }
         }
-        canonicalByIndex.set(snapshot.index, canonical);
+        if (canonical.effectiveTo) {
+          // Closed mappings belong in history. Keeping one in the current row
+          // or worker state makes the no-refresh view disagree with a reload
+          // and can later target a historical ID as though it were active.
+          boundedHistoryByIndex.set(snapshot.index, canonical);
+          const preservesLaterCurrent = snapshot.replacementAction === "keep"
+            && Boolean(baseline.mappingId)
+            && baseline.mappingId !== canonical.mappingId
+            && baseline.workforceId === canonical.workforceId
+            && !baseline.effectiveTo
+            && baseline.stationId === canonical.stationId
+            && baseline.providerId === canonical.providerId
+            && providerMemberKey("", baseline.providerMemberId) === providerMemberKey("", canonical.providerMemberId);
+          canonicalByIndex.set(
+            snapshot.index,
+            preservesLaterCurrent
+              ? { ...baseline, history: canonical.history }
+              : clearCurrentMapping(canonical, canonical.history)
+          );
+        } else {
+          canonicalByIndex.set(snapshot.index, canonical);
+        }
       }
 
       if (canonicalByIndex.size) {
@@ -422,16 +535,41 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         }));
         const workerUpdates = new Map<string, Partial<ProviderFirstWorker>>();
         const workerClears = new Map<string, string>();
+        const rememberRegisteredMapping = (saved: ProviderFirstMappingRow, profileStationId: string) => {
+          if (!saved.workforceId || saved.stationId !== profileStationId) return;
+          const worker = workerById.get(saved.workforceId);
+          if (!worker) return;
+          const pending = workerUpdates.get(saved.workforceId) ?? {};
+          const workerWithPendingHistory = {
+            ...worker,
+            registeredLocationMappings: pending.registeredLocationMappings ?? worker.registeredLocationMappings,
+            registeredLocationMapping: pending.registeredLocationMapping ?? worker.registeredLocationMapping
+          };
+          const registeredLocationMappings = registeredMappingsAfterSave(workerWithPendingHistory, saved);
+          workerUpdates.set(saved.workforceId, {
+            ...pending,
+            registeredLocationMappings,
+            registeredLocationMapping: registeredLocationMappings[0]
+          });
+        };
         for (const snapshot of snapshots) {
           const canonical = canonicalByIndex.get(snapshot.index);
           if (!canonical) continue;
+          const boundedHistory = boundedHistoryByIndex.get(snapshot.index);
+          const saved = result.savedRows.find((candidate) => candidate.clientKey === snapshot.key);
+          if (boundedHistory) {
+            rememberRegisteredMapping(boundedHistory, saved?.profileStationId ?? "");
+            continue;
+          }
           if (snapshot.previousWorkforceId && snapshot.previousWorkforceId !== canonical.workforceId) {
             const remaining = baselineRows.find((candidate, candidateIndex) => candidateIndex !== snapshot.index
               && candidate.workforceId === snapshot.previousWorkforceId
-              && candidate.mappingId);
+              && candidate.mappingId
+              && !candidate.effectiveTo);
             if (remaining) {
               const existingWorker = workerById.get(snapshot.previousWorkforceId);
               workerUpdates.set(snapshot.previousWorkforceId, {
+                ...(workerUpdates.get(snapshot.previousWorkforceId) ?? {}),
                 stationId: remaining.stationId,
                 locationLabel: remaining.stationLabel,
                 profileStationId: existingWorker?.profileStationId,
@@ -447,20 +585,73 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
                 mappedProviderMemberId: remaining.providerMemberId
               });
             } else {
-              workerClears.set(snapshot.previousWorkforceId, snapshot.row.providerMemberId);
+              workerClears.set(snapshot.previousWorkforceId, saved?.cleared?.previousMappingId ?? snapshot.row.mappingId);
             }
           }
           if (!canonical.workforceId) continue;
-          const saved = result.savedRows.find((candidate) => candidate.clientKey === snapshot.key);
-          workerUpdates.set(canonical.workforceId, { stationId: canonical.stationId, locationLabel: canonical.stationLabel, profileStationId: saved?.profileStationId ?? canonical.stationId, profileLocationLabel: saved?.profileLocationLabel ?? canonical.stationLabel, providerId: canonical.providerId, mappingId: canonical.mappingId, paymentMethodId: canonical.paymentMethodId, paymentValues: canonical.paymentValues, productionThresholdConfig: canonical.productionThresholdConfig, productionThresholdMinimumUnits: canonical.productionThresholdMinimumUnits, effectiveFrom: canonical.effectiveFrom, effectiveTo: canonical.effectiveTo, mappedProviderMemberId: canonical.providerMemberId });
+          const existingWorker = workerById.get(canonical.workforceId);
+          const pending = workerUpdates.get(canonical.workforceId) ?? {};
+          const currentMappings = existingWorker
+            ? currentMappingsAfterSave({ ...existingWorker, currentMappings: pending.currentMappings ?? existingWorker.currentMappings }, canonical)
+            : [];
+          const profileStationId = saved?.profileStationId ?? canonical.stationId;
+          const preferredCurrent = currentMappings.find((mapping) => mapping.stationId === profileStationId)
+            ?? currentMappings[0]
+            ?? registeredMappingFromRow(canonical);
+          workerUpdates.set(canonical.workforceId, { ...pending, stationId: preferredCurrent.stationId, locationLabel: preferredCurrent.locationLabel, profileStationId, profileLocationLabel: saved?.profileLocationLabel ?? canonical.stationLabel, providerId: preferredCurrent.providerId, mappingId: preferredCurrent.mappingId, paymentMethodId: preferredCurrent.paymentMethodId, paymentValues: preferredCurrent.paymentValues, productionThresholdConfig: preferredCurrent.productionThresholdConfig, productionThresholdMinimumUnits: preferredCurrent.productionThresholdMinimumUnits, effectiveFrom: preferredCurrent.effectiveFrom, effectiveTo: preferredCurrent.effectiveTo, mappedProviderMemberId: preferredCurrent.mappedProviderMemberId, currentMappings });
+          rememberRegisteredMapping(canonical, profileStationId);
         }
         setWorkerRows((current) => current.map((worker) => {
           const update = workerUpdates.get(worker.id);
-          if (update) return { ...worker, ...update };
-          const expectedMember = workerClears.get(worker.id);
-          return expectedMember && providerMemberKey(worker.stationId, worker.mappedProviderMemberId) === providerMemberKey(worker.stationId, expectedMember)
-            ? { ...worker, mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "", mappedProviderMemberId: "" }
-            : worker;
+          let next = update ? { ...worker, ...update } : worker;
+          const clearedMappingId = workerClears.get(worker.id);
+          if (clearedMappingId && next.mappingId === clearedMappingId) {
+            next = { ...next, mappingId: "", paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "", mappedProviderMemberId: "" };
+          }
+          const closures = mappingClosuresByWorker.get(worker.id) ?? [];
+          if (!closures.length) return next;
+          const closureById = new Map(closures.map((closure) => [closure.mappingId, closure]));
+          const currentMappings = (next.currentMappings ?? []).filter((mapping) => !closureById.has(mapping.mappingId));
+          const registeredLocationMappings = (next.registeredLocationMappings ?? []).flatMap((mapping) => {
+            const closure = closureById.get(mapping.mappingId);
+            if (!closure) return [mapping];
+            if (closure.status === "cancelled") return [];
+            return [{ ...mapping, effectiveTo: closure.effectiveTo, status: "closed" as const }];
+          });
+          const preferredCurrent = currentMappings.find((mapping) => mapping.stationId === next.profileStationId)
+            ?? currentMappings[0];
+          const closedPrimary = closureById.has(next.mappingId);
+          return {
+            ...next,
+            ...(preferredCurrent ? {
+              stationId: preferredCurrent.stationId,
+              locationLabel: preferredCurrent.locationLabel,
+              providerId: preferredCurrent.providerId,
+              mappingId: preferredCurrent.mappingId,
+              paymentMethodId: preferredCurrent.paymentMethodId,
+              paymentValues: preferredCurrent.paymentValues,
+              productionThresholdConfig: preferredCurrent.productionThresholdConfig,
+              productionThresholdMinimumUnits: preferredCurrent.productionThresholdMinimumUnits,
+              effectiveFrom: preferredCurrent.effectiveFrom,
+              effectiveTo: preferredCurrent.effectiveTo,
+              mappedProviderMemberId: preferredCurrent.mappedProviderMemberId
+            } : closedPrimary ? {
+              stationId: next.profileStationId ?? next.stationId,
+              locationLabel: next.profileLocationLabel ?? next.locationLabel,
+              providerId: "",
+              mappingId: "",
+              paymentMethodId: "",
+              paymentValues: {},
+              productionThresholdConfig: null,
+              productionThresholdMinimumUnits: "",
+              effectiveFrom: "",
+              effectiveTo: "",
+              mappedProviderMemberId: ""
+            } : {}),
+            currentMappings,
+            registeredLocationMappings,
+            registeredLocationMapping: registeredLocationMappings[0]
+          };
         }));
         setErrors((current) => {
           const next = { ...current };
@@ -560,7 +751,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               <input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="1" onChange={(event) => update(index, { productionThresholdMinimumUnits: event.target.value })} placeholder="Enter minimum units" step="1" type="number" value={row.productionThresholdMinimumUnits} />
               <span className="provider-first-selected-detail">Combined across {productionThresholdConfig.component_codes.map((code) => components.find((component) => component.code === code)?.label ?? code).join(" + ")}</span>
             </label> : null}
-            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
+            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Confirmation is required when saving.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}

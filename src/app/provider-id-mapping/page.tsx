@@ -61,9 +61,14 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     return providerSourceMemberKey(stationCode || "*", mapping.provider_member_id);
   }));
   const mappingByWorkforce = new Map<string, Mapping>();
+  const currentMappingsByWorkforce = new Map<string, Mapping[]>();
   const mappingByMember = new Map<string, Mapping>();
   for (const mapping of activeMappings) {
     if (mapping.workforce_id) {
+      currentMappingsByWorkforce.set(mapping.workforce_id, [
+        ...(currentMappingsByWorkforce.get(mapping.workforce_id) ?? []),
+        mapping
+      ]);
       const current = mappingByWorkforce.get(mapping.workforce_id);
       const profileStationId = profileStationByWorkforce.get(mapping.workforce_id) ?? "";
       if (!current
@@ -74,6 +79,18 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     }
     const memberKey = providerMemberKey(String(mapping.station_id ?? ""), String(mapping.provider_member_id ?? ""));
     if (!mappingByMember.has(memberKey)) mappingByMember.set(memberKey, mapping);
+  }
+  const registeredMappingByWorkforce = new Map<string, Mapping[]>();
+  for (const mapping of mappingHistory) {
+    const canonicalPeriod = (mapping.status === "active" && !mapping.effective_to)
+      || (mapping.status === "closed" && Boolean(mapping.effective_to));
+    if (!mapping.workforce_id || !canonicalPeriod) continue;
+    const profileStationId = profileStationByWorkforce.get(mapping.workforce_id) ?? "";
+    if (!profileStationId || String(mapping.station_id ?? "") !== profileStationId) continue;
+    registeredMappingByWorkforce.set(mapping.workforce_id, [
+      ...(registeredMappingByWorkforce.get(mapping.workforce_id) ?? []),
+      mapping
+    ]);
   }
   const workforceById = new Map((workersResult.data ?? []).map((worker) => [worker.id, worker]));
   const designationById = new Map((designationsResult.data ?? []).map((designation) => [String(designation.id), designation]));
@@ -110,13 +127,24 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   }
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => {
     const designation = designationById.get(String(worker.designation_id ?? "")) ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
-    return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
+    return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || registeredMappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
   }).map((worker) => {
+    const registeredMappings = registeredMappingByWorkforce.get(worker.id) ?? [];
+    const activeWorkerMappings = currentMappingsByWorkforce.get(worker.id) ?? [];
+    // Current mapping fields describe only an active, open mapping. Historical
+    // registered-location rows are evidence for bounded Keep all operations,
+    // but must not make an otherwise unmapped worker look currently mapped.
     const mapping = mappingByWorkforce.get(worker.id);
     const thresholdSnapshot = parseProductionThresholdSnapshot(mapping?.production_threshold_config);
     const profileStationId = String(worker.location_id ?? "");
     const mappingStationId = String(mapping?.station_id ?? profileStationId);
-    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: mappingStationId, providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(mappingStationId) ?? "No location", profileStationId, profileLocationLabel: stationLabelById.get(profileStationId) ?? "No location", onboardingStatus: String(worker.onboarding_status ?? "") };
+    const mappingView = (stored: Mapping) => {
+      const storedThreshold = parseProductionThresholdSnapshot(stored.production_threshold_config);
+      return { mappingId: stored.id, stationId: String(stored.station_id ?? ""), locationLabel: stationLabelById.get(String(stored.station_id ?? "")) ?? "No location", providerId: String(stored.provider_id ?? ""), mappedProviderMemberId: stored.provider_member_id, paymentMethodId: String(stored.payment_method_id ?? ""), paymentValues: Object.fromEntries(Object.entries(stored.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: storedThreshold ? { period: storedThreshold.period, component_codes: storedThreshold.component_codes } : null, productionThresholdMinimumUnits: storedThreshold ? String(storedThreshold.minimum_units) : "", effectiveFrom: stored.effective_from, effectiveTo: stored.effective_to ?? "", status: stored.status as "active" | "closed" };
+    };
+    const currentMappings = activeWorkerMappings.map(mappingView);
+    const registeredLocationMappings = registeredMappings.map(mappingView);
+    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: mappingStationId, providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(mappingStationId) ?? "No location", profileStationId, profileLocationLabel: stationLabelById.get(profileStationId) ?? "No location", currentMappings, registeredLocationMappings, registeredLocationMapping: registeredLocationMappings[0], onboardingStatus: String(worker.onboarding_status ?? "") };
   });
   const providerMembers = canonicalizeProviderFirstMembers(((providerResult.data ?? []) as ProviderMemberSource[]).map((provider) => ({
     providerMemberId: String(provider.provider_employee_id ?? "").trim(),

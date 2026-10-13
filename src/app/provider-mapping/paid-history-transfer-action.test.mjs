@@ -7,6 +7,14 @@ const inlineSave = actions.slice(
   actions.indexOf("export async function saveProviderFirstMappingsInline"),
   actions.indexOf("export async function saveProviderFirstMapping(")
 );
+const saveRow = actions.slice(
+  actions.indexOf("async function saveExecutiveMappingRow"),
+  actions.indexOf("export async function saveProviderMappingWorksheet")
+);
+const replacementState = actions.slice(
+  actions.indexOf("async function providerFirstReplacementState"),
+  actions.indexOf("async function providerFirstPaymentTransferState")
+);
 
 test("owner remaps preflight paid history before the atomic replacement", () => {
   assert.match(actions, /rowValue\(formData, index, "payment_transfer_action"\)/);
@@ -57,4 +65,52 @@ test("inline mapping saves immediately invalidate the payout worksheet", () => {
     inlineSave,
     /if \(savedRows\.length\) \{\s*revalidateTag\("ops-cps"\);\s*revalidatePath\("\/provider-id-mapping"\);\s*revalidatePath\("\/payments\/workforce-payouts"\);\s*\}/
   );
+});
+
+test("bounded historical actions ignore only current mappings that start later", () => {
+  assert.match(actions, /function currentProviderMappingOverlapsRequestedPeriod\(/);
+  assert.match(actions, /!validProviderMappingDate\(requestedEffectiveFrom\)/);
+  assert.match(actions, /!validProviderMappingDate\(requestedEffectiveTo\)/);
+  assert.match(actions, /requestedEffectiveFrom > requestedEffectiveTo/);
+  assert.match(actions, /return currentEffectiveFrom <= requestedEffectiveTo/);
+
+  assert.match(replacementState, /select\("id, effective_from, effective_to, status"\)/);
+  assert.match(replacementState, /providerPeriodById/);
+  assert.match(replacementState, /period\.status !== "active" \|\| period\.effective_to !== null/);
+  assert.match(replacementState, /const relevantTargetMappings = targetMappings\.filter\(activeMappingOverlapsRequestedPeriod\)/);
+  assert.match(replacementState, /const relevantProviderMappings = providerMappings\.filter\(activeMappingOverlapsRequestedPeriod\)/);
+  assert.match(replacementState, /new Set\(relevantProviderMappings\.map\(canonicalOwner\)\)/);
+  assert.match(replacementState, /relevantProviderMappings\.find\(\(mapping\) => mapping\.station_id === stationId\)/);
+  assert.match(replacementState, /submittedMapping \?\? relevantTargetMappings\[0\] \?\? relevantProviderMappings\[0\]/);
+});
+
+test("the final save guard uses the same fail-closed period overlap rule", () => {
+  assert.match(saveRow, /select\("id, station_id, effective_from"\)/);
+  assert.match(saveRow, /\.eq\("status", "active"\)/);
+  assert.match(saveRow, /existingCurrentMappings \?\? \[\]\)\.find\(\(mapping\) =>[\s\S]*?currentProviderMappingOverlapsRequestedPeriod\(mapping\.effective_from, effectiveFrom, effectiveTo \?\? ""\)/);
+});
+
+test("the inline response reloads the exact period that was saved", () => {
+  assert.match(actions, /const savedProviderId = rowRequired\(formData, index, "provider_id", "Provider"\)/);
+  assert.match(actions, /const savedEffectiveFrom = rowRequired\(formData, index, "effective_from", "Effective from"\)/);
+  assert.match(actions, /const savedEffectiveTo = rowValue\(formData, index, "effective_to"\)/);
+  assert.match(actions, /\.eq\("provider_id", savedProviderId\)/);
+  assert.match(actions, /\.eq\("effective_from", savedEffectiveFrom\)/);
+  assert.match(actions, /savedEffectiveTo[\s\S]*?savedMappingQuery\.eq\("effective_to", savedEffectiveTo\)[\s\S]*?savedMappingQuery\.is\("effective_to", null\)/);
+});
+
+test("an inactive method is reusable only from an exact canonical Keep-all anchor", () => {
+  assert.match(saveRow, /select\("id, code, is_active, production_threshold_config/);
+  assert.match(saveRow, /if \(paymentMethod\.is_active !== true\)/);
+  assert.match(saveRow, /sourceType !== "workforce" \|\| !keepMappingId/);
+  assert.match(saveRow, /keepAnchor\.station_id === canonicalWorker\.location_id/);
+  assert.match(saveRow, /keepAnchor\.station_id !== stationId/);
+  assert.match(saveRow, /keepAnchor\.provider_id === submittedProviderId/);
+  assert.match(saveRow, /providerMemberIdentity\(keepAnchor\.provider_member_id\) === providerMemberIdentity\(providerMemberId\)/);
+  assert.match(saveRow, /keepAnchor\.payment_method_id === paymentMethodId/);
+  assert.match(saveRow, /keepAnchor\.status === "active" && !keepAnchor\.effective_to/);
+  assert.match(saveRow, /keepAnchor\.status === "closed" && Boolean\(keepAnchor\.effective_to\)/);
+  assert.match(saveRow, /canonicalKeepAnchor/);
+  assert.match(saveRow, /providerFirstMappingPeriodContains\([\s\S]*?effectiveFrom,[\s\S]*?effectiveTo \?\? ""/);
+  assert.match(saveRow, /historical Keep-all anchor is outside your allocated locations/);
 });

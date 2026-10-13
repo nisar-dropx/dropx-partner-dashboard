@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { getAuthorization } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
-import { isScientificProviderMemberId, providerFirstNamesMatch, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
+import { isScientificProviderMemberId, providerFirstMappingPeriodContains, providerFirstNamesMatch, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { parseProductionThresholdConfig, type ProductionThresholdConfig } from "@/lib/production-threshold-config";
@@ -26,6 +26,33 @@ function clean(value: FormDataEntryValue | null) {
 
 function providerMemberIdentity(value: unknown) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+function validProviderMappingDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Current mappings are open-ended, so a bounded historical request overlaps
+ * only when the current mapping started on or before the requested end date.
+ * Invalid or open request dates deliberately fail closed and keep the current
+ * mapping relevant until the normal row validation reports the bad input.
+ */
+function currentProviderMappingOverlapsRequestedPeriod(
+  mappingEffectiveFrom: unknown,
+  requestedEffectiveFrom: string,
+  requestedEffectiveTo: string
+) {
+  const currentEffectiveFrom = String(mappingEffectiveFrom ?? "");
+  if (!validProviderMappingDate(requestedEffectiveFrom)
+    || !validProviderMappingDate(requestedEffectiveTo)
+    || requestedEffectiveFrom > requestedEffectiveTo
+    || !validProviderMappingDate(currentEffectiveFrom)) {
+    return true;
+  }
+  return currentEffectiveFrom <= requestedEffectiveTo;
 }
 
 function mappingRedirect(params: { error?: string; notice?: string }) {
@@ -580,13 +607,75 @@ async function saveExecutiveMappingRow(
   const productionThresholdMinimumUnits = rowValue(formData, index, "production_threshold_minimum_units");
   const { data: paymentMethod, error: methodError } = await supabaseAdmin
     .from("payment_methods")
-    .select("id, code, production_threshold_config, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
+    .select("id, code, is_active, production_threshold_config, payment_method_components (component_code, label, payment_fields(calculation_source, calculation_type))")
     .eq("id", paymentMethodId)
     .eq("company_id", companyId)
-    .eq("is_active", true)
-    .single();
+    .maybeSingle();
 
   if (methodError) throw new Error(methodError.message);
+  if (!paymentMethod) throw new Error(`Row ${index + 1}: Payment method was not found for this company.`);
+  if (paymentMethod.is_active !== true) {
+    const keepMappingId = options.keepExistingLocationMappingId;
+    if (sourceType !== "workforce" || !keepMappingId) {
+      throw new Error(`Row ${index + 1}: The selected payment method is inactive.`);
+    }
+    const [{ data: keepAnchor, error: keepAnchorError }, { data: canonicalWorker, error: canonicalWorkerError }] = await Promise.all([
+      supabaseAdmin
+        .from("field_executive_provider_mappings")
+        .select("id, workforce_id, employee_id, contractor_id, field_executive_id, station_id, provider_id, provider_member_id, payment_method_id, effective_from, effective_to, status")
+        .eq("company_id", companyId)
+        .eq("id", keepMappingId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("workforce")
+        .select("id, location_id, source_profile_type, source_profile_id")
+        .eq("company_id", companyId)
+        .eq("id", id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    ]);
+    if (keepAnchorError) throw new Error(keepAnchorError.message);
+    if (canonicalWorkerError) throw new Error(canonicalWorkerError.message);
+    const anchorMatchesCanonicalOwner = Boolean(keepAnchor && canonicalWorker) && (
+      keepAnchor?.workforce_id === id
+      || (canonicalWorker?.source_profile_type === "employee"
+        && keepAnchor?.employee_id === canonicalWorker.source_profile_id)
+      || (canonicalWorker?.source_profile_type === "contractor"
+        && keepAnchor?.contractor_id === canonicalWorker.source_profile_id)
+      || (canonicalWorker?.source_profile_type === "field_executive"
+        && keepAnchor?.field_executive_id === canonicalWorker.source_profile_id)
+    );
+    const canonicalKeepAnchor = Boolean(
+      keepAnchor
+      && (
+        (keepAnchor.status === "active" && !keepAnchor.effective_to)
+        || (keepAnchor.status === "closed" && Boolean(keepAnchor.effective_to))
+      )
+    );
+    const exactKeepAnchor = Boolean(
+      keepAnchor
+      && canonicalWorker
+      && anchorMatchesCanonicalOwner
+      && keepAnchor.station_id === canonicalWorker.location_id
+      && keepAnchor.station_id !== stationId
+      && keepAnchor.provider_id === submittedProviderId
+      && providerMemberIdentity(keepAnchor.provider_member_id) === providerMemberIdentity(providerMemberId)
+      && keepAnchor.payment_method_id === paymentMethodId
+      && canonicalKeepAnchor
+      && providerFirstMappingPeriodContains(
+        String(keepAnchor.effective_from ?? ""),
+        String(keepAnchor.effective_to ?? ""),
+        effectiveFrom,
+        effectiveTo ?? ""
+      )
+    );
+    if (!exactKeepAnchor) {
+      throw new Error(`Row ${index + 1}: The selected payment method is inactive and is not the exact Keep-all anchor method.`);
+    }
+    if (allowedLocationIds && (!keepAnchor?.station_id || !allowedLocationIds.has(keepAnchor.station_id))) {
+      throw new Error(`Row ${index + 1}: The historical Keep-all anchor is outside your allocated locations.`);
+    }
+  }
   const methodComponents = (paymentMethod.payment_method_components ?? []) as ProviderPaymentComponent[];
   const { data: existingThresholdMapping, error: existingThresholdMappingError } = mappingId
     ? await supabaseAdmin
@@ -692,17 +781,18 @@ async function saveExecutiveMappingRow(
       : sourceType === "employee" ? "employee_id"
         : sourceType === "contractor" ? "contractor_id"
           : "field_executive_id";
-    const { data: existingCurrentMapping, error: existingCurrentMappingError } = await supabaseAdmin
+    const { data: existingCurrentMappings, error: existingCurrentMappingError } = await supabaseAdmin
       .from("field_executive_provider_mappings")
-      .select("id, station_id")
+      .select("id, station_id, effective_from")
       .eq("company_id", companyId)
       .eq(workerColumn, id)
       .is("effective_to", null)
-      .neq("status", "cancelled")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
     if (existingCurrentMappingError) throw new Error(existingCurrentMappingError.message);
+    const existingCurrentMapping = (existingCurrentMappings ?? []).find((mapping) =>
+      currentProviderMappingOverlapsRequestedPeriod(mapping.effective_from, effectiveFrom, effectiveTo ?? "")
+    );
     if (existingCurrentMapping) {
       if (allowedLocationIds && (!existingCurrentMapping.station_id || !allowedLocationIds.has(existingCurrentMapping.station_id))) {
         throw new Error(`Row ${index + 1}: The existing active mapping is outside your allocated locations.`);
@@ -794,7 +884,7 @@ async function saveExecutiveMappingRow(
   if (effectiveTo && effectiveTo < effectiveFrom) {
     throw new Error(`Row ${index + 1}: Effective to cannot be before effective from.`);
   }
-  if (replacementMappingId && effectiveTo) {
+  if (replacementMappingId && !options.keepExistingLocationMappingId && effectiveTo) {
     throw new Error(`Row ${index + 1}: A replacement mapping must remain open-ended. Leave Effective to blank.`);
   }
   if (monthlyThresholdChangeRequiresMonthStart(storedThresholdSnapshot, parseProductionThresholdSnapshot(productionThresholdConfig)) && !isFirstDayOfMonth(effectiveFrom)) {
@@ -1100,6 +1190,9 @@ type ProviderFirstActiveMapping = {
   station_id: string | null;
   provider_id: string | null;
   provider_member_id: string;
+  effective_from?: string;
+  effective_to?: string | null;
+  status?: string;
 };
 
 type ProviderFirstReplacementState = {
@@ -1164,11 +1257,26 @@ async function providerFirstReplacementState({
   const targetOwnerFilter = sourceColumn && sourceProfileId
     ? `workforce_id.eq.${workforceId},${sourceColumn}.eq.${sourceProfileId}`
     : `workforce_id.eq.${workforceId}`;
+  const registeredStationId = String(selectedWorker.location_id ?? "");
+  const needsRegisteredLocationException = Boolean(registeredStationId && registeredStationId !== stationId);
+  const requestedEffectiveFrom = rowValue(formData, index, "effective_from") ?? "";
+  const requestedEffectiveTo = rowValue(formData, index, "effective_to") ?? "";
+  const registeredMappingQuery = registeredStationId
+    ? supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("id, workforce_id, employee_id, contractor_id, field_executive_id, station_id, provider_id, provider_member_id, effective_from, effective_to, status")
+      .eq("company_id", companyId)
+      .or(targetOwnerFilter)
+      .eq("station_id", registeredStationId)
+      .neq("status", "cancelled")
+      .order("effective_from", { ascending: false })
+      .order("created_at", { ascending: false })
+    : Promise.resolve({ data: [], error: null });
 
-  const [targetResult, providerResult] = await Promise.all([
+  const [targetResult, providerResult, registeredMappingResult] = await Promise.all([
     supabaseAdmin
       .from("field_executive_provider_mappings")
-      .select("id, workforce_id, employee_id, contractor_id, field_executive_id, station_id, provider_id, provider_member_id")
+      .select("id, workforce_id, employee_id, contractor_id, field_executive_id, station_id, provider_id, provider_member_id, effective_from, effective_to, status")
       .eq("company_id", companyId)
       .or(targetOwnerFilter)
       .is("effective_to", null)
@@ -1178,35 +1286,81 @@ async function providerFirstReplacementState({
       p_company: companyId,
       p_provider: providerId,
       p_provider_member_id: providerMemberId
-    })
+    }),
+    registeredMappingQuery
   ]);
   if (targetResult.error) throw new Error(targetResult.error.message);
   if (providerResult.error) throw new Error(providerResult.error.message);
+  if (registeredMappingResult.error) throw new Error(registeredMappingResult.error.message);
   const rawTargetMappings = (targetResult.data ?? []) as ProviderFirstActiveMapping[];
-  const providerMappings = (providerResult.data ?? []) as ProviderFirstActiveMapping[];
+  const rawProviderMappings = (providerResult.data ?? []) as ProviderFirstActiveMapping[];
+  const providerMappingIds = [...new Set(rawProviderMappings.map((mapping) => String(mapping.id ?? "")).filter(Boolean))];
+  const { data: providerMappingPeriods, error: providerMappingPeriodsError } = providerMappingIds.length
+    ? await supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("id, effective_from, effective_to, status")
+      .eq("company_id", companyId)
+      .in("id", providerMappingIds)
+    : { data: [], error: null };
+  if (providerMappingPeriodsError) throw new Error(providerMappingPeriodsError.message);
+  const providerPeriodById = new Map((providerMappingPeriods ?? []).map((mapping) => [String(mapping.id), mapping]));
+  const providerMappings = rawProviderMappings.map((mapping) => {
+    const period = providerPeriodById.get(String(mapping.id));
+    if (!period || period.status !== "active" || period.effective_to !== null) {
+      throw new Error(`Row ${index + 1}: The active provider mapping changed. Reload the page and try again.`);
+    }
+    return {
+      ...mapping,
+      effective_from: String(period.effective_from ?? ""),
+      effective_to: period.effective_to,
+      status: period.status
+    };
+  });
+  const registeredMappings = ((registeredMappingResult.data ?? []) as ProviderFirstActiveMapping[]).filter((mapping) =>
+    (mapping.status === "active" && !mapping.effective_to)
+      || (mapping.status === "closed" && Boolean(mapping.effective_to))
+  );
   const normalizedMemberId = providerMemberIdentity(providerMemberId);
   const targetMappings = rawTargetMappings.filter((mapping) => mapping.workforce_id === workforceId
     || (sourceColumn && sourceProfileId && String(mapping[sourceColumn as keyof ProviderFirstActiveMapping] ?? "") === sourceProfileId));
-  const registeredStationId = String(selectedWorker.location_id ?? "");
-  const needsRegisteredLocationException = Boolean(registeredStationId && registeredStationId !== stationId);
+  const activeMappingOverlapsRequestedPeriod = (mapping: ProviderFirstActiveMapping) =>
+    currentProviderMappingOverlapsRequestedPeriod(
+      mapping.effective_from,
+      requestedEffectiveFrom,
+      requestedEffectiveTo
+    );
+  const relevantTargetMappings = targetMappings.filter(activeMappingOverlapsRequestedPeriod);
+  const relevantProviderMappings = providerMappings.filter(activeMappingOverlapsRequestedPeriod);
 
-  if (targetMappings.some((mapping) => allowedLocationIds && (!mapping.station_id || !allowedLocationIds.has(mapping.station_id)))) {
+  if (relevantTargetMappings.some((mapping) => allowedLocationIds && (!mapping.station_id || !allowedLocationIds.has(mapping.station_id)))) {
     throw new Error(`Row ${index + 1}: One of the destination's active mappings is outside your allocated locations.`);
   }
-  if (targetMappings.some((mapping) => String(mapping.provider_member_id).trim().toUpperCase() !== normalizedMemberId
-    || mapping.provider_id !== providerId)) {
+  if (relevantTargetMappings.some((mapping) =>
+    String(mapping.provider_member_id).trim().toUpperCase() !== normalizedMemberId
+      || mapping.provider_id !== providerId)) {
     throw new Error(`Row ${index + 1}: This DropX ID already has a different active provider mapping.`);
   }
-  const registeredLocationMapping = targetMappings.find((mapping) =>
+  const registeredLocationMapping = registeredMappings.find((mapping) =>
     String(mapping.station_id ?? "") === registeredStationId
       && mapping.provider_id === providerId
       && providerMemberIdentity(mapping.provider_member_id) === normalizedMemberId
+      && providerFirstMappingPeriodContains(
+        String(mapping.effective_from ?? ""),
+        String(mapping.effective_to ?? ""),
+        requestedEffectiveFrom,
+        requestedEffectiveTo
+      )
   ) ?? null;
   if (needsRegisteredLocationException && !registeredLocationMapping) {
-    throw new Error(`Row ${index + 1}: Location mismatch. Map this Provider ID to the DropX profile at its registered location first, then use Keep all for the additional location.`);
+    throw new Error(`Row ${index + 1}: Location mismatch. Map this Provider ID to the DropX profile at its registered location for the complete requested period, then use Keep all for the additional location.`);
   }
 
-  const legacyOwnerFilters = providerMappings.flatMap((mapping) => [
+  const ownerRelevantMappings = [
+    ...relevantTargetMappings,
+    ...relevantProviderMappings,
+    ...(registeredLocationMapping ? [registeredLocationMapping] : [])
+  ];
+  const legacyOwnerFilters = ownerRelevantMappings.flatMap((mapping) => [
     mapping.employee_id ? `source_profile_type.eq.employee,source_profile_id.eq.${mapping.employee_id}` : "",
     mapping.contractor_id ? `source_profile_type.eq.contractor,source_profile_id.eq.${mapping.contractor_id}` : "",
     mapping.field_executive_id ? `source_profile_type.eq.field_executive,source_profile_id.eq.${mapping.field_executive_id}` : ""
@@ -1231,7 +1385,7 @@ async function providerFirstReplacementState({
     if (mapping.field_executive_id) return legacyOwnerBySource.get(`field_executive:${mapping.field_executive_id}`) ?? null;
     return null;
   };
-  const providerOwners = new Set(providerMappings.map(canonicalOwner));
+  const providerOwners = new Set(relevantProviderMappings.map(canonicalOwner));
   if (providerOwners.has(null)) {
     throw new Error(`Row ${index + 1}: The Provider ID has an active legacy mapping without a canonical Workforce profile.`);
   }
@@ -1240,9 +1394,10 @@ async function providerFirstReplacementState({
   }
 
   const providerOwner = providerOwners.size ? [...providerOwners][0] : null;
-  const destinationMapping = providerMappings.find((mapping) => mapping.station_id === stationId) ?? null;
+  const destinationMapping = relevantProviderMappings.find((mapping) => mapping.station_id === stationId) ?? null;
   const submittedMapping = submittedMappingId
-    ? [...targetMappings, ...providerMappings].find((mapping) => mapping.id === submittedMappingId) ?? null
+    ? [...relevantTargetMappings, ...relevantProviderMappings, ...(registeredLocationMapping ? [registeredLocationMapping] : [])]
+      .find((mapping) => mapping.id === submittedMappingId) ?? null
     : null;
   if (submittedMappingId && !submittedMapping) {
     throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
@@ -1263,19 +1418,19 @@ async function providerFirstReplacementState({
     };
   }
 
-  if (!providerMappings.length && !targetMappings.length) {
+  if (!relevantProviderMappings.length && !relevantTargetMappings.length && !registeredLocationMapping) {
     if (expectedReplacementId) throw new Error(`Row ${index + 1}: The active mapping changed after confirmation. Review it and try again.`);
     return { confirmation: null, locationRemap: null, keepAll: null, ownerReplacement: null, currentMappingLocationDriftEdit: false };
   }
 
-  if (providerOwner && providerOwner !== workforceId && providerMappings.length > 1) {
+  if (providerOwner && providerOwner !== workforceId && relevantProviderMappings.length > 1) {
     throw new Error(`Row ${index + 1}: This Provider ID is retained at multiple locations for another DropX ID and cannot be replaced here.`);
   }
   const existingMapping = providerOwner && providerOwner !== workforceId
-    ? providerMappings[0]
+    ? relevantProviderMappings[0]
     : needsRegisteredLocationException
       ? registeredLocationMapping
-      : submittedMapping ?? targetMappings[0] ?? providerMappings[0];
+      : submittedMapping ?? relevantTargetMappings[0] ?? relevantProviderMappings[0];
   if (!existingMapping) throw new Error(`Row ${index + 1}: The existing mapping could not be identified.`);
   if (allowedLocationIds && (!existingMapping.station_id || !allowedLocationIds.has(existingMapping.station_id))) {
     throw new Error(`Row ${index + 1}: The existing provider mapping is outside your allocated locations.`);
@@ -1333,7 +1488,7 @@ async function providerFirstReplacementState({
       throw new Error(`Row ${index + 1}: Keep all is available only when the same DropX ID works at multiple locations.`);
     }
     if (changeKind === "location" && needsRegisteredLocationException && replacementAction === "move") {
-      throw new Error(`Row ${index + 1}: Keep all is required for an additional location so the verified registered-location mapping remains active.`);
+      throw new Error(`Row ${index + 1}: Keep all is required for an additional location so the verified registered-location mapping remains preserved for that period.`);
     }
     return {
       confirmation: null,
@@ -1723,14 +1878,22 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         paymentTransferDecision: paymentTransferState.decision
       });
 
-      const { data: savedMappings, error: savedMappingError } = await supabaseAdmin
+      const savedProviderId = rowRequired(formData, index, "provider_id", "Provider");
+      const savedEffectiveFrom = rowRequired(formData, index, "effective_from", "Effective from");
+      const savedEffectiveTo = rowValue(formData, index, "effective_to");
+      let savedMappingQuery = supabaseAdmin
         .from("field_executive_provider_mappings")
-        .select("id, workforce_id, provider_member_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to")
+        .select("id, workforce_id, provider_id, provider_member_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to")
         .eq("company_id", companyId)
         .eq("workforce_id", workforceId)
         .eq("station_id", stationId)
+        .eq("provider_id", savedProviderId)
         .neq("status", "cancelled")
-        .order("effective_from", { ascending: false })
+        .eq("effective_from", savedEffectiveFrom);
+      savedMappingQuery = savedEffectiveTo
+        ? savedMappingQuery.eq("effective_to", savedEffectiveTo)
+        : savedMappingQuery.is("effective_to", null);
+      const { data: savedMappings, error: savedMappingError } = await savedMappingQuery
         .order("created_at", { ascending: false });
       if (savedMappingError) throw new Error(savedMappingError.message);
       const savedMapping = (savedMappings ?? []).find((mapping) =>

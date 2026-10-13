@@ -2,6 +2,21 @@ import { matchNames } from "./name-match.ts";
 import type { PaymentAllocationHistoryEntry } from "./payment-allocation-history.ts";
 import type { ProductionThresholdConfig } from "./production-threshold-config.ts";
 
+export type ProviderFirstRegisteredMappingView = {
+  mappingId: string;
+  stationId: string;
+  locationLabel: string;
+  providerId: string;
+  mappedProviderMemberId: string;
+  paymentMethodId: string;
+  paymentValues: Record<string, string>;
+  productionThresholdConfig: ProductionThresholdConfig | null;
+  productionThresholdMinimumUnits: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+  status?: "active" | "closed";
+};
+
 export type ProviderFirstWorkerView = {
   id: string;
   dropxId: string;
@@ -20,6 +35,9 @@ export type ProviderFirstWorkerView = {
   locationLabel: string;
   profileStationId?: string;
   profileLocationLabel?: string;
+  currentMappings?: ProviderFirstRegisteredMappingView[];
+  registeredLocationMappings?: ProviderFirstRegisteredMappingView[];
+  registeredLocationMapping?: ProviderFirstRegisteredMappingView;
   onboardingStatus: string;
 };
 
@@ -76,28 +94,211 @@ export function providerFirstLocationRemap(
   row: ProviderFirstMappingRowView,
   worker: ProviderFirstWorkerView | undefined
 ): ProviderFirstMappingReplacement | null {
+  const reference = providerFirstMappingReferenceForRow(row, worker);
   if (!worker
+    || !reference
     || !row.workforceId
     || row.workforceId !== worker.id
-    || !worker.mappingId
-    || (row.mappingId && row.mappingId !== worker.mappingId)
-    || worker.stationId === row.stationId
-    || worker.providerId !== row.providerId
-    || !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)
+    || !reference.mappingId
+    || (row.mappingId && row.mappingId !== reference.mappingId)
+    || reference.stationId === row.stationId
+    || reference.providerId !== row.providerId
+    || !sameProviderMember(reference.mappedProviderMemberId, row.providerMemberId)
     || !providerFirstLocationIsAllowed(row, worker)) {
     return null;
   }
   return {
     kind: "location",
     ...(row.stationId === String(worker.profileStationId ?? "").trim() ? {} : { allowMove: false }),
-    mappingId: worker.mappingId,
+    mappingId: reference.mappingId,
     providerMemberId: row.providerMemberId,
     providerMemberName: row.providerMemberName,
     existingDropxId: worker.dropxId,
     existingDropxName: worker.fullName,
-    existingLocationLabel: worker.locationLabel,
+    existingLocationLabel: reference.locationLabel,
     newLocationLabel: row.stationLabel,
     effectiveFrom: row.effectiveFrom
+  };
+}
+
+function isIsoCalendarDate(value: string) {
+  const match = String(value ?? "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
+/**
+ * Returns true only when one stored mapping covers the complete requested
+ * mapping interval. Blank end dates represent an open-ended interval, so a
+ * historical (closed) registered-location mapping can never authorize an
+ * open-ended additional-location mapping.
+ */
+export function providerFirstMappingPeriodContains(
+  anchorEffectiveFrom: string,
+  anchorEffectiveTo: string,
+  requestedEffectiveFrom: string,
+  requestedEffectiveTo: string
+) {
+  const anchorFrom = String(anchorEffectiveFrom ?? "").trim();
+  const anchorTo = String(anchorEffectiveTo ?? "").trim();
+  const requestedFrom = String(requestedEffectiveFrom ?? "").trim();
+  const requestedTo = String(requestedEffectiveTo ?? "").trim();
+  if (!isIsoCalendarDate(anchorFrom) || !isIsoCalendarDate(requestedFrom)) return false;
+  if (anchorTo && !isIsoCalendarDate(anchorTo)) return false;
+  if (requestedTo && !isIsoCalendarDate(requestedTo)) return false;
+  if (anchorTo && anchorTo < anchorFrom) return false;
+  if (requestedTo && requestedTo < requestedFrom) return false;
+  if (anchorFrom > requestedFrom) return false;
+  if (!anchorTo) return true;
+  return Boolean(requestedTo) && requestedTo <= anchorTo;
+}
+
+function primaryWorkerMapping(worker: ProviderFirstWorkerView): ProviderFirstRegisteredMappingView | undefined {
+  if (!worker.mappingId || worker.effectiveTo) return undefined;
+  return {
+    mappingId: worker.mappingId,
+    stationId: worker.stationId,
+    locationLabel: worker.locationLabel,
+    providerId: worker.providerId,
+    mappedProviderMemberId: worker.mappedProviderMemberId,
+    paymentMethodId: worker.paymentMethodId,
+    paymentValues: worker.paymentValues,
+    productionThresholdConfig: worker.productionThresholdConfig,
+    productionThresholdMinimumUnits: worker.productionThresholdMinimumUnits,
+    effectiveFrom: worker.effectiveFrom,
+    effectiveTo: worker.effectiveTo,
+    status: "active"
+  };
+}
+
+function currentWorkerMappings(worker: ProviderFirstWorkerView) {
+  const mappings = (worker.currentMappings ?? []).filter((mapping) => mapping.status === "active" && !mapping.effectiveTo);
+  const primary = primaryWorkerMapping(worker);
+  if (primary && !mappings.some((mapping) => mapping.mappingId === primary.mappingId)) {
+    return [primary, ...mappings];
+  }
+  return mappings;
+}
+
+function registeredWorkerMappings(worker: ProviderFirstWorkerView) {
+  const registeredStationId = String(worker.profileStationId ?? "").trim();
+  const suppliedMappings = worker.registeredLocationMappings?.length
+    ? worker.registeredLocationMappings
+    : worker.registeredLocationMapping
+      ? [worker.registeredLocationMapping]
+      : [];
+  const mappings = suppliedMappings.filter((mapping) =>
+    (mapping.status === "active" && !mapping.effectiveTo)
+      || (mapping.status === "closed" && Boolean(mapping.effectiveTo))
+  );
+  const primary = primaryWorkerMapping(worker);
+  if (primary?.stationId === registeredStationId && !mappings.some((mapping) => mapping.mappingId === primary.mappingId)) {
+    return [...mappings, primary];
+  }
+  return mappings;
+}
+
+function mappingIdentityMatchesRow(
+  mapping: Pick<ProviderFirstRegisteredMappingView, "providerId" | "mappedProviderMemberId">,
+  row: Pick<ProviderFirstMappingRowView, "providerId" | "providerMemberId">
+) {
+  return mapping.providerId === row.providerId
+    && sameProviderMember(mapping.mappedProviderMemberId, row.providerMemberId);
+}
+
+function mappingPeriodContainsRow(
+  mapping: Pick<ProviderFirstRegisteredMappingView, "effectiveFrom" | "effectiveTo">,
+  row: Pick<ProviderFirstMappingRowView, "effectiveFrom" | "effectiveTo">
+) {
+  return providerFirstMappingPeriodContains(
+    mapping.effectiveFrom,
+    mapping.effectiveTo,
+    row.effectiveFrom,
+    row.effectiveTo
+  );
+}
+
+/** Selects the exact stored mapping that should supply dates/rates and anchor a save. */
+export function providerFirstMappingReferenceForRow(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+) {
+  if (!worker) return undefined;
+  const currentMappings = currentWorkerMappings(worker);
+  const registeredStationId = String(worker.profileStationId ?? "").trim();
+  const registered = registeredWorkerMappings(worker).filter((mapping) =>
+    mapping.mappingId
+      && mapping.stationId === registeredStationId
+      && mappingIdentityMatchesRow(mapping, row)
+  );
+  const registeredForPeriod = registered.find((mapping) => mappingPeriodContainsRow(mapping, row));
+  const currentAtDestination = currentMappings.filter((mapping) => mapping.stationId === row.stationId);
+  const currentForPeriod = currentAtDestination.find((mapping) =>
+    mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
+  );
+
+  // An existing current row remains the edit target only when its identity and
+  // period actually cover the row. A later current mapping must not hide the
+  // exact historical registered-location anchor for an earlier bounded row.
+  if (currentForPeriod) return currentForPeriod;
+  if (registeredForPeriod) return registeredForPeriod;
+
+  // Before dates have been chosen, use the newest exact registered anchor as
+  // the template. Once dates exist, never silently reuse a non-containing
+  // anchor; the row must fail validation until a covering interval is chosen.
+  if (!row.effectiveFrom && registered.length) return registered[0];
+
+  // Preserve a conflicting current destination mapping as evidence so the UI
+  // can report its provider/member conflict instead of treating the ID as free.
+  const conflictingCurrent = currentAtDestination.find((mapping) => !mappingIdentityMatchesRow(mapping, row));
+  if (conflictingCurrent) return conflictingCurrent;
+
+  // Moving a matching active mapping back to the profile's registered station
+  // remains the ordinary correction path.
+  if (row.stationId === registeredStationId) {
+    return currentMappings.find((mapping) => mappingIdentityMatchesRow(mapping, row));
+  }
+  return undefined;
+}
+
+/**
+ * When period edits select another historical anchor, switch all stored
+ * mapping-owned values together. User-entered dates remain unchanged so a
+ * narrower interval within the selected anchor is preserved.
+ */
+export function providerFirstRowForMappingPeriod(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+): ProviderFirstMappingRowView {
+  const reference = providerFirstMappingReferenceForRow(row, worker);
+  if (!reference) {
+    // A brand-new row has no stored mapping-owned state to invalidate. Preserve
+    // manual method/rate entry while its dates are being composed.
+    if (!row.mappingId) return row;
+    return {
+      ...row,
+      mappingId: "",
+      paymentMethodId: "",
+      paymentValues: {},
+      productionThresholdConfig: null,
+      productionThresholdMinimumUnits: ""
+    };
+  }
+  if (reference.mappingId === row.mappingId) return row;
+  return {
+    ...row,
+    mappingId: reference.mappingId,
+    paymentMethodId: reference.paymentMethodId,
+    paymentValues: reference.paymentValues,
+    productionThresholdConfig: reference.productionThresholdConfig,
+    productionThresholdMinimumUnits: reference.productionThresholdMinimumUnits
   };
 }
 
@@ -115,17 +316,28 @@ export function providerFirstLocationIsAllowed(
   worker: ProviderFirstWorkerView | undefined
 ) {
   if (!worker) return false;
-  if (worker.stationId === row.stationId) return true;
   if (!row.workforceId
-    || row.workforceId !== worker.id
-    || !worker.mappingId
-    || worker.providerId !== row.providerId
-    || !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
+    || row.workforceId !== worker.id) {
     return false;
   }
   const registeredStationId = String(worker.profileStationId ?? "").trim();
   if (!registeredStationId) return false;
-  return row.stationId === registeredStationId || worker.stationId === registeredStationId;
+  const currentMappings = currentWorkerMappings(worker);
+  if (row.stationId === registeredStationId) {
+    // An unmapped profile may be bootstrapped at its own location. If a current
+    // mapping exists, an exact historical interval wins over an unrelated
+    // later current mapping; otherwise this must remain the same identity.
+    const historicalMatch = registeredWorkerMappings(worker).some((mapping) =>
+      mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
+    );
+    return historicalMatch || !currentMappings.length || currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row));
+  }
+  return registeredWorkerMappings(worker).some((mapping) =>
+    Boolean(mapping.mappingId)
+      && mapping.stationId === registeredStationId
+      && mappingIdentityMatchesRow(mapping, row)
+      && mappingPeriodContainsRow(mapping, row)
+  );
 }
 
 export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
@@ -394,10 +606,11 @@ export function providerFirstRowIssue(
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
   if (!row.workforceId) return row.mappingId ? null : "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
-  if (!providerFirstLocationIsAllowed(row, worker)) return "Location mismatch.";
-  if (worker.mappedProviderMemberId && !sameProviderMember(worker.mappedProviderMemberId, row.providerMemberId)) {
-    return "This DropX ID is already mapped to another Provider Member ID.";
+  const mappingReference = providerFirstMappingReferenceForRow(row, worker);
+  if (mappingReference && !mappingIdentityMatchesRow(mappingReference, row)) {
+    return "This DropX ID is already mapped to another Provider or Provider Member ID.";
   }
+  if (!providerFirstLocationIsAllowed(row, worker)) return "Location mismatch.";
   if (!providerFirstNamesMatch(row.providerMemberName, row.dropxName)) return "Name mismatch.";
   if (!row.providerId) return "The selected location has no provider.";
   if (!row.paymentMethodId) return "Payment method is required.";

@@ -93,7 +93,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
     ...row,
     stationId: "station-2",
     stationLabel: "JUGF - Sundergarh",
-    effectiveFrom: "2026-06-28"
+    effectiveFrom: "2026-09-01"
   };
   const sourceWorker = { ...worker, locationLabel: "JUGD - Jharsuguda" };
   const remap = providerFirstLocationRemap(destination, sourceWorker);
@@ -107,7 +107,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
     existingDropxName: "Asha Devi",
     existingLocationLabel: "JUGD - Jharsuguda",
     newLocationLabel: "JUGF - Sundergarh",
-    effectiveFrom: "2026-06-28"
+    effectiveFrom: "2026-09-01"
   });
   assert.equal(
     providerFirstMappingReplacementMessage(remap),
@@ -117,6 +117,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
   assert.equal(providerFirstLocationRemap({ ...destination, providerId: "provider-2" }, sourceWorker), null);
   assert.equal(providerFirstLocationRemap({ ...destination, providerMemberId: "member-2" }, sourceWorker), null);
   assert.equal(providerFirstLocationRemap({ ...destination, mappingId: "stale-mapping" }, sourceWorker), null);
+  assert.equal(providerFirstLocationRemap({ ...destination, effectiveFrom: "2026-08-31" }, sourceWorker), null);
   assert.equal(providerFirstValidationStatus({ ...destination, providerId: "provider-2" }, sourceWorker, method), "needs_attention");
 });
 
@@ -384,7 +385,7 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /formData\.set\(`\$\{prefix\}\[provider_member_id\]`, row\.providerMemberId\)/);
   assert.match(component, /Combined minimum \/ \{productionThresholdConfig\.period\}/);
   assert.match(component, /production_threshold_minimum_units/);
-  assert.match(component, /mappingId: worker\.mappingId/);
+  assert.match(component, /mappingId: mappingReference\?\.mappingId \?\? ""/);
   assert.match(component, /Replace existing mapping\?/);
   assert.match(component, /Move mapping to new location\?/);
   assert.match(component, />Keep all<\/button>/);
