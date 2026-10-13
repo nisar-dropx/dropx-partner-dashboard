@@ -152,7 +152,7 @@ function buildBatchWorkbook(items: RedownloadItem[], audience: PayoutAudience) {
       beneficiaryEmail: String(item.beneficiary_email ?? "") || null,
       beneficiaryIfsc: String(item.ifsc ?? ""),
       beneficiaryName: String(item.beneficiary_name ?? ""),
-      locationCode: String(item.credit_remarks ?? item.location_code ?? ""),
+      creditRemarks: String(item.credit_remarks ?? item.location_code ?? ""),
       referenceNo: String(item.reference_no ?? "")
     }))
   });

@@ -29,7 +29,7 @@ function instruction(overrides = {}) {
     beneficiaryEmail: "worker@example.com",
     beneficiaryIfsc: "FDRL0000123",
     beneficiaryName: "A Worker",
-    locationCode: "nlrf",
+    creditRemarks: "d111",
     referenceNo: "wfd111092026v1",
     ...overrides
   };
@@ -56,7 +56,7 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
         beneficiaryEmail: null,
         beneficiaryIfsc: "hdfc0000123",
         beneficiaryName: "Another Worker",
-        locationCode: "KOZA",
+        creditRemarks: "D222",
         referenceNo: "WFD222092026V2"
       })
     ]
@@ -77,7 +77,7 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
     "FDRL0000123",
     "worker@example.com",
     "",
-    "NLRF",
+    "D111",
     "NET PAY",
     "WFD111092026V1"
   ]);
@@ -91,7 +91,7 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
     "HDFC0000123",
     "",
     "",
-    "KOZA",
+    "D222",
     "NET PAY",
     "WFD222092026V2"
   ]);
@@ -100,7 +100,7 @@ test("builds the exact FedOne upload columns and fixed Workforce payment remarks
   assert.equal(sheet.E2.t, "s", "beneficiary account numbers must remain text cells");
 });
 
-test("keeps separate location instructions for the same beneficiary as distinct bank lines", () => {
+test("keeps separate location instructions for the same DropX ID as distinct bank lines", () => {
   const rows = buildWorkforceFedOneRows({
     debitAccountNumber: "100000000001",
     valueDate: "2026-10-10",
@@ -108,13 +108,13 @@ test("keeps separate location instructions for the same beneficiary as distinct 
       instruction({
         amountPaise: 47_401,
         beneficiaryName: "SIDDIQUE M",
-        locationCode: "KBWE",
+        creditRemarks: "T1013",
         referenceNo: "WFT1013092026V2"
       }),
       instruction({
         amountPaise: 7_112_556,
         beneficiaryName: "SIDDIQUE M",
-        locationCode: "KLZA",
+        creditRemarks: "T1013",
         referenceNo: "WFT1013092026V3"
       })
     ]
@@ -127,9 +127,20 @@ test("keeps separate location instructions for the same beneficiary as distinct 
     creditRemarks: row["Credit Remarks"],
     reference: row["Unique Customer Reference Number"]
   })), [
-    { account: "001234567890", amount: 474.01, creditRemarks: "KBWE", reference: "WFT1013092026V2" },
-    { account: "001234567890", amount: 71125.56, creditRemarks: "KLZA", reference: "WFT1013092026V3" }
+    { account: "001234567890", amount: 474.01, creditRemarks: "T1013", reference: "WFT1013092026V2" },
+    { account: "001234567890", amount: 71125.56, creditRemarks: "T1013", reference: "WFT1013092026V3" }
   ]);
+});
+
+test("requires Credit Remarks for every bank instruction", () => {
+  assert.throws(
+    () => buildWorkforceFedOneRows({
+      debitAccountNumber: "100000000001",
+      valueDate: "2026-10-10",
+      instructions: [instruction({ creditRemarks: "" })]
+    }),
+    /Credit Remarks is required/i
+  );
 });
 
 test("preserves historical WP references when a Workforce bank file is re-downloaded", () => {
@@ -150,8 +161,9 @@ test("reuses the FedOne format for Helper references without weakening the Workf
     debitAccountNumber: "100000000001",
     referencePrefix: "HP",
     valueDate: "2026-10-10",
-    instructions: [instruction({ referenceNo: "HPD0826092026V1" })]
+    instructions: [instruction({ creditRemarks: "D0826", referenceNo: "HPD0826092026V1" })]
   });
+  assert.equal(helperRow["Credit Remarks"], "D0826");
   assert.equal(helperRow["Unique Customer Reference Number"], "HPD0826092026V1");
   assert.equal(isValidWorkforceBankReference("HPD0826092026V1", "HP"), true);
   assert.equal(isValidWorkforceBankReference("HPD0826092026V1"), false);

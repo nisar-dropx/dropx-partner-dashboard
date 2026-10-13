@@ -44,7 +44,7 @@ test("bulk re-download preserves immutable instructions and separates original b
   assert.match(route, /instruction_amount/);
   assert.match(route, /reference_no/);
   assert.match(route, /bank_account_no/);
-  assert.match(route, /credit_remarks/);
+  assert.match(route, /creditRemarks: String\(item\.credit_remarks \?\? item\.location_code \?\? ""\)/);
   assert.match(route, /debit_remarks/);
   assert.match(route, /new JSZip\(\)/);
   assert.match(route, /archive\.file\(batchFilename/);

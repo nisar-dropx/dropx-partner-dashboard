@@ -51,6 +51,10 @@ const bankDetailsPresenceOnlyMigrationUrl = new URL(
   "../supabase/migrations/20261012210000_payout_bank_details_presence_only.sql",
   import.meta.url
 );
+const creditRemarksDropxMigrationUrl = new URL(
+  "../supabase/migrations/20261013170000_payout_bank_credit_remarks_dropx_id.sql",
+  import.meta.url
+);
 const migration = readFileSync(migrationUrl, "utf8");
 const compatibilityMigration = readFileSync(compatibilityMigrationUrl, "utf8");
 const publishedSnapshotFreshnessMigration = readFileSync(publishedSnapshotFreshnessMigrationUrl, "utf8");
@@ -63,6 +67,22 @@ const partialPaymentStatusMigration = readFileSync(partialPaymentStatusMigration
 const bulkPaymentHoldsMigration = readFileSync(bulkPaymentHoldsMigrationUrl, "utf8");
 const sourcePaymentHoldsMigration = readFileSync(sourcePaymentHoldsMigrationUrl, "utf8");
 const bankDetailsPresenceOnlyMigration = readFileSync(bankDetailsPresenceOnlyMigrationUrl, "utf8");
+const creditRemarksDropxMigration = readFileSync(creditRemarksDropxMigrationUrl, "utf8");
+const creditRemarksSection = (name) => {
+  const start = `-- verification-section: ${name}:start`;
+  const end = `-- verification-section: ${name}:end`;
+  const startIndex = creditRemarksDropxMigration.indexOf(start);
+  const endIndex = creditRemarksDropxMigration.indexOf(end);
+  assert.ok(startIndex >= 0 && endIndex > startIndex, `Missing ${name} Credit Remarks migration verification section.`);
+  return creditRemarksDropxMigration.slice(startIndex + start.length, endIndex);
+};
+const executableWorkforceCreditRemarksMigration = [
+  creditRemarksDropxMigration.slice(
+    creditRemarksDropxMigration.indexOf("create or replace function public.set_payout_payment_credit_remarks_dropx"),
+    creditRemarksDropxMigration.indexOf("-- verification-section: workforce:start")
+  ),
+  creditRemarksSection("workforce")
+].join("\n");
 const presenceOnlySection = (name) => {
   const start = `-- verification-section: ${name}:start`;
   const end = `-- verification-section: ${name}:end`;
@@ -595,6 +615,7 @@ await db.exec(executableMigration);
 await db.exec(executablePublishedSnapshotFreshnessMigration);
 await db.exec(executableLifecycleMigration);
 await db.exec(executableWorkforceProfileBankDetailsPresenceOnlyMigration);
+await db.exec(executableWorkforceCreditRemarksMigration);
 
 const installedCandidateDefinition = await db.query(`
   select pg_get_functiondef(
@@ -987,7 +1008,7 @@ assert.equal(Number((await db.query(
   [workforce]
 )).rows[0].count), sourceRowsBeforeProcessingEdit,
 "a rejected processing edit leaves no partial source row");
-assert.equal(first.items[0].credit_remarks, "NLRF");
+assert.equal(first.items[0].credit_remarks, "D111");
 assert.equal(first.items[0].debit_account_no, "0011223344");
 assert.equal(first.items[0].bank_account_no, "1234-567890");
 assert.equal(first.items[0].ifsc, "FDRL1000002");
@@ -2318,8 +2339,8 @@ assert.deepEqual(
     amount: Number(item.instruction_amount)
   })),
   [
-    { reference: "WPT1013092026V1", credit: "KBWE", amount: 474 },
-    { reference: "WPT1013092026V2", credit: "KLZA", amount: 71125.57 }
+    { reference: "WPT1013092026V1", credit: "T1013", amount: 474 },
+    { reference: "WPT1013092026V2", credit: "T1013", amount: 71125.57 }
   ]
 );
 const splitLedger = await db.query(
@@ -2423,7 +2444,7 @@ assert.deepEqual(
     amount: Number(item.instruction_amount)
   })),
   [
-    { reference: "WPT1013092026V3", credit: "KLZA", target: 71226, paidBefore: 71125.57, amount: 100.43 }
+    { reference: "WPT1013092026V3", credit: "T1013", target: 71226, paidBefore: 71125.57, amount: 100.43 }
   ]
 );
 await db.query(
@@ -2851,7 +2872,7 @@ const rowBatchResult = await db.query(
 );
 const rowBatch = rowBatchResult.rows[0].result;
 assert.equal(rowBatch.items.length, 1);
-assert.equal(rowBatch.items[0].credit_remarks, "KBWE");
+assert.equal(rowBatch.items[0].credit_remarks, "ROW150");
 assert.equal(Number(rowBatch.items[0].instruction_amount), 474.01);
 const rowBatchEvidence = await db.query(
   `select item.location_code_snapshot,allocation.station_id,

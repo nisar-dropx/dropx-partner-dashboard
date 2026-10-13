@@ -39,7 +39,7 @@ export type WorkforceFedOnePaymentInstruction = {
   beneficiaryEmail?: string | null;
   beneficiaryIfsc: string;
   beneficiaryName: string;
-  locationCode: string;
+  creditRemarks: string;
   referenceNo: string;
 };
 
@@ -233,7 +233,7 @@ export function buildWorkforceFedOneRows(options: WorkforceFedOneWorkbookOptions
       "IFSC Code": beneficiaryIfsc,
       "Beneficiary Email ID": cleanCell(instruction.beneficiaryEmail),
       "Beneficiary ID": "",
-      "Credit Remarks": requiredText(instruction.locationCode, `${instructionLabel}: Credit Remarks location code`).toUpperCase(),
+      "Credit Remarks": requiredText(instruction.creditRemarks, `${instructionLabel}: Credit Remarks`).toUpperCase(),
       "Debit Remarks": "NET PAY",
       "Unique Customer Reference Number": referenceNo
     };

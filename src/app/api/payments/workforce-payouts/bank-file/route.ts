@@ -174,7 +174,7 @@ function workbookResponse(result: Record<string, unknown>, audience: PayoutAudie
       beneficiaryEmail: String(item.beneficiary_email ?? "") || null,
       beneficiaryIfsc: String(item.ifsc ?? ""),
       beneficiaryName: String(item.beneficiary_name ?? ""),
-      locationCode: String(item.credit_remarks ?? ""),
+      creditRemarks: String(item.credit_remarks ?? ""),
       referenceNo: String(item.reference_no ?? "")
     }))
   });

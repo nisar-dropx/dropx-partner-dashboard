@@ -18,6 +18,25 @@ const bankDetailsPresenceOnlyMigration = readFileSync(new URL(
   "../supabase/migrations/20261012210000_payout_bank_details_presence_only.sql",
   import.meta.url
 ), "utf8");
+const creditRemarksDropxMigration = readFileSync(new URL(
+  "../supabase/migrations/20261013170000_payout_bank_credit_remarks_dropx_id.sql",
+  import.meta.url
+), "utf8");
+const creditRemarksSection = (name) => {
+  const start = `-- verification-section: ${name}:start`;
+  const end = `-- verification-section: ${name}:end`;
+  const startIndex = creditRemarksDropxMigration.indexOf(start);
+  const endIndex = creditRemarksDropxMigration.indexOf(end);
+  assert.ok(startIndex >= 0 && endIndex > startIndex, `Missing ${name} Credit Remarks migration verification section.`);
+  return creditRemarksDropxMigration.slice(startIndex + start.length, endIndex);
+};
+const executableHelperCreditRemarksMigration = [
+  creditRemarksDropxMigration.slice(
+    creditRemarksDropxMigration.indexOf("create or replace function public.set_payout_payment_credit_remarks_dropx"),
+    creditRemarksDropxMigration.indexOf("-- verification-section: workforce:start")
+  ),
+  creditRemarksSection("helper")
+].join("\n");
 const presenceOnlySection = (name) => {
   const start = `-- verification-section: ${name}:start`;
   const end = `-- verification-section: ${name}:end`;
@@ -744,6 +763,7 @@ await assert.rejects(
 
 await db.exec(positiveBalanceEligibilityMigration);
 await db.exec(executableHelperBankDetailsPresenceOnlyMigration);
+await db.exec(executableHelperCreditRemarksMigration);
 
 // These Helpers deliberately have no review, publication, allocation, or PAN
 // verification. The first is also inactive/pending: a positive live balance
@@ -878,9 +898,11 @@ const unrestrictedBatch = await db.query(`
 `);
 assert.equal(unrestrictedBatch.rows[0]?.result?.items?.length, 1);
 assert.equal(Number(unrestrictedBatch.rows[0]?.result?.items?.[0]?.instruction_amount), 3600);
+assert.equal(unrestrictedBatch.rows[0]?.result?.items?.[0]?.credit_remarks, "H2001");
 
 const unrestrictedItem = await db.query(`
   select id, reference_no, helper_publication_id, target_snapshot_hash,
+    dropx_id_snapshot, location_code_snapshot, credit_remarks_snapshot,
     bank_account_no_snapshot, ifsc_snapshot, instruction_amount
   from public.helper_payout_payment_items
   where company_id = '10000000-0000-4000-8000-000000000001'
@@ -892,6 +914,9 @@ assert.deepEqual(unrestrictedItem.rows, [{
   reference_no: unrestrictedItem.rows[0].reference_no,
   helper_publication_id: null,
   target_snapshot_hash: "c".repeat(64),
+  dropx_id_snapshot: "H2001",
+  location_code_snapshot: "BBB",
+  credit_remarks_snapshot: "H2001",
   bank_account_no_snapshot: "99-887766",
   ifsc_snapshot: "XX-1",
   instruction_amount: "3600.00"

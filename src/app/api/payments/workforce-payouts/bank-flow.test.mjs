@@ -18,6 +18,7 @@ const snapshot = readFileSync(new URL("../../../../lib/workforce-payout-publicat
 const lifecycleMigration = readFileSync(new URL("../../../../../supabase/migrations/20261009172942_workforce_payout_manual_status_and_holds.sql", import.meta.url), "utf8");
 const rowSelectionMigration = readFileSync(new URL("../../../../../supabase/migrations/20261010130000_workforce_payout_location_row_bank_selection.sql", import.meta.url), "utf8");
 const bulkCancellationMigration = readFileSync(new URL("../../../../../supabase/migrations/20261010150000_workforce_payout_bulk_processing_cancellation.sql", import.meta.url), "utf8");
+const creditRemarksDropxMigration = readFileSync(new URL("../../../../../supabase/migrations/20261013170000_payout_bank_credit_remarks_dropx_id.sql", import.meta.url), "utf8");
 
 test("bank-file creation is company-scoped, privileged, transport-bounded and idempotent without a row cap", () => {
   assert.match(bankFileRoute, /sameOrigin\(request\)/);
@@ -67,6 +68,15 @@ test("bank-file re-download is permitted only for a wholly processing immutable 
   assert.match(bankFileRoute, /items\.some\(\(item\) => String\(item\.status\) !== "processing"\)/);
   assert.match(bankFileRoute, /Only an entirely unfinalized Payment Processing batch can be downloaded again/);
   assert.match(bankFileRoute, /X-Workforce-Payout-Batch-Id/);
+});
+
+test("new Workforce and Helper bank instructions snapshot DropX ID as Credit Remarks", () => {
+  assert.match(bankFileRoute, /creditRemarks: String\(item\.credit_remarks \?\? ""\)/);
+  assert.match(creditRemarksDropxMigration, /new\.credit_remarks_snapshot := upper\(btrim\(new\.dropx_id_snapshot\)\)/i);
+  assert.match(creditRemarksDropxMigration, /before insert on public\.workforce_payout_payment_items/i);
+  assert.match(creditRemarksDropxMigration, /before insert on public\.helper_payout_payment_items/i);
+  assert.match(creditRemarksDropxMigration, /credit_remarks_snapshot in \([\s\S]*?location_code_snapshot,[\s\S]*?upper\(btrim\(dropx_id_snapshot\)\)/i);
+  assert.doesNotMatch(creditRemarksDropxMigration, /update\s+public\.(?:workforce|helper)_payout_payment_items/i);
 });
 
 test("bank response import is privileged, bounded and file-hash idempotent", () => {
