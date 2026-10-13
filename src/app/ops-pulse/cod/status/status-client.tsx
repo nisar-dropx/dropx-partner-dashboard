@@ -5,6 +5,8 @@ import { reconciliationView, reconciliationAgeing, collectionDay, validCollectio
 import { pickupExpectation } from '@/lib/ops-pulse/cod-pickup';
 import { CompactFilter } from './compact-filter';
 import { StationTeam } from './station-team';
+import { CmsFollowUp } from './cms-followup';
+import { overdueCodRemittances } from '@/lib/ops-pulse/cod-cms-followup';
 import styles from './status.module.css';
 type Part = 'reconciliation' | 'prepareDeposit' | 'remittances';
 type Row = { snapshot?: CodStatusSnapshot; loading?: boolean; error?: string };
@@ -90,9 +92,9 @@ export function CodStatusClient({ locations }: { locations: CodStatusLocation[] 
       const m=s!.remittances.data!;
       detail=m.latestSubmitted ? `${m.latestSubmitted.code || 'No code'} · Updated ${time(m.latestSubmitted.updatedAt)}` : result.reason;
     }
-    return <button className={`${styles.cell} ${toneClass(result.tone)}`} onClick={()=>toggle(l.id,part)} aria-expanded={expanded?.id===l.id && expanded.part===part} aria-label={`${l.code} ${part==='reconciliation'?'DA reconciliation':part==='prepareDeposit'?'prepare deposit':'COD deposition'} details`}>
+    return <><button className={`${styles.cell} ${toneClass(result.tone)}`} onClick={()=>toggle(l.id,part)} aria-expanded={expanded?.id===l.id && expanded.part===part} aria-label={`${l.code} ${part==='reconciliation'?'DA reconciliation':part==='prepareDeposit'?'prepare deposit':'COD deposition'} details`}>
       <strong>{headline} <span aria-hidden>›</span></strong><small>{detail}</small>{part==='reconciliation' && <><small>{result.reason}</small>{collectionDate && cashView(l).priorAmount>0 && <small>All dates: {amount(cashView(l).priorAmount)} earlier-day cash still outstanding</small>}</>}{part==='remittances' && s?.remittances.data?.latestSubmitted && <small>{result.reason}</small>}{part!=='reconciliation' && result.tone==='unavailable' && <small>{result.reason}</small>}
-    </button>;
+    </button>{part==='remittances' && overdueCodRemittances(s,l.pickup || null,now,!!row?.error,l.maxAgeMinutes ?? null).length>0 && <CmsFollowUp station={l.code} contact={l.cmsContact}/>}</>;
   }
   function details(s: CodStatusSnapshot, part: Part, location:CodStatusLocation) {
     if(part==='reconciliation') {
