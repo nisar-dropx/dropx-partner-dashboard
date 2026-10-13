@@ -90,7 +90,7 @@ const administration: NavItem[] = [
       { code: "cps_inputs", label: "CPS Master", href: "/master/cps" },
       { code: "ops_workforce_mileage", label: "DA distance pilot", href: "/attendance/da-distance" },
       { code: "cps_inputs", label: "Advertising Master", href: "/master/advertising" },
-      { code: "cod_master", label: "COD Master", href: "/master/cod-master" },
+      { code: "cod_master", label: "COD Pickup Master", href: "/master/cod-master" },
       { code: "ops_loss_master", label: "Loss Recovery Master", href: "/master/loss-recovery" },
       { code: "station_audit_master", label: "Audit Master", href: "/master/audits" },
       { code: "master_locations", label: "Station Master", href: "/master/location" },
@@ -137,7 +137,7 @@ function modelOperations(mode: OperatingMode): NavItem {
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
         { code: "station_audits", label: "Station Audits", href: "/audits" },
         { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=flipkart" },
-        { code: "cod_reports", label: "Daily COD Review", href: "/cod/pending" }
+        { code: "cod_reports", label: "COD Slip Review", href: "/cod/pending" }
       ]
     };
   }
@@ -151,7 +151,8 @@ function modelOperations(mode: OperatingMode): NavItem {
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
       { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" },
       { code: "station_audits", label: "Station Audits", href: "/audits" },
-      { code: "cod_reports", label: "Daily COD Review", href: "/cod/pending" }
+      { code: "cod_reports", label: "COD Slip Review", href: "/cod/pending" },
+      { code: "cod_reports", label: "COD Status", href: "/cod/status" }
     ]
   };
 }

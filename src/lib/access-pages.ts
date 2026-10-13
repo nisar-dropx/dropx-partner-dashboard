@@ -112,7 +112,7 @@ export const accessPages = [
   { code: "workforce_whatsapp", name: "Workforce WhatsApp", sort_order: 127 },
   { code: "designations", name: "Designations", sort_order: 128 },
   { code: "biometric_devices", name: "Device Master", sort_order: 129 },
-  { code: "cod_master", name: "COD Master", sort_order: 130 },
+  { code: "cod_master", name: "COD Pickup Master", sort_order: 130 },
   { code: "performance_master", name: "Performance Master", sort_order: 130 },
   { code: "capacity_master", name: "Capacity Master", sort_order: 130 },
   { code: "master_documents", name: "Documents", sort_order: 131 },

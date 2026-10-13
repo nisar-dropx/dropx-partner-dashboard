@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 
 type CodTabKey =
+  | "status"
   | "executive-reconciliation"
   | "submission"
   | "reports"
@@ -12,6 +13,7 @@ type CodTabKey =
   | "portal-checks";
 
 function tabFromPath(pathname: string): CodTabKey {
+  if (pathname.includes("/cod/status")) return "status";
   if (pathname.includes("/cod/submission")) return "submission";
   if (pathname.includes("/cod/reports")) return "reports";
   if (pathname.includes("/cod/cash-in-associate")) return "cash-in-associate";

@@ -39,7 +39,7 @@ export default async function CodPendingPage({searchParams={}}:{searchParams?:Pa
  const validationTone=(row:CodPendingRow)=>row.slipUploaded?proofTone(row.validation):row.exception?'good':'warn';
  const validationReason=(row:CodPendingRow)=>row.slipUploaded&&row.validation==='Review pending'?'Upload recorded; manual review pending':compactCodReason(row.validationReason);
  return <>
- <PageHead eyebrow="Ops Pulse" title="Daily COD Review" subtitle="Daily slips, manual review and exception updates. Deadline: 8:30 PM IST. Open a station for proof and history."/>
+ <PageHead eyebrow="Ops Pulse" title="COD Slip Review" subtitle="Daily slips, manual review and exception updates. Deadline: 8:30 PM IST. Open a station for proof and history."/>
  <CodSectionTabs active="pending"/>
  <section className="panel"><div className="panel-body"><form action="/cod/pending" className="form-grid four">
  <label>Deposit date<input className="field" name="date" type="date" required defaultValue={date}/></label>

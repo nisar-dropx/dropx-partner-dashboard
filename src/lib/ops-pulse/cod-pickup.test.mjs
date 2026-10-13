@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parsePickupFields, parsePickupAdvanced, pickupPolicy, pickupExpectation, assertPickupScope } from './cod-pickup.ts';
+function form(extra={}) { const f=new FormData(); for (const [k,v] of Object.entries({cms_agency:'Radiant',agent_name:'',agent_mobile:'',pickup_rule:'Same Day-Partial',pickup_window_start:'18:30',pickup_window_end:'19:00',...extra})) f.set(k,v);return f; }
+test('explicit partial rule and blank contacts are preserved',()=>{const p=parsePickupFields(form());assert.equal(p.pickup_rule,'Same Day-Partial');assert.equal(p.cod_deposit_day,'Same Day');assert.equal(p.agent_mobile,'');});
+test('invalid rule, time, window and contact cannot be persisted',()=>{for(const extra of [{pickup_rule:'Same Day'},{pickup_window_start:'25:00'},{pickup_window_end:'18:00'},{pickup_window_end:'18:30'},{agent_mobile:'123'}]) assert.throws(()=>parsePickupFields(form(extra)));});
+test('next day pickup advances month and uses IST deadline',()=>{const e=pickupExpectation({rule:'Next Day',start:'08:00',end:'08:30'},'2026-10-31',new Date('2026-11-01T02:59:00Z'));assert.equal(e.depositDate,'2026-11-01');assert.equal(e.state,'upcoming');assert.equal(pickupExpectation({rule:'Next Day',start:'08:00',end:'08:30'},'2026-10-31',new Date('2026-11-01T03:01:00Z')).state,'window-ended');});
+test('partial never requires all-day cash even after pickup; full/next-day do',()=>{for(const rule of ['Same Day-Complete','Same Day-Partial','Next Day']) {const e=pickupExpectation({rule,start:'18:00',end:'18:30'},'2026-10-12',new Date('2026-10-15'));assert.equal(e.fullDayCashExpected,rule!=='Same Day-Partial');assert.equal(e.state,'window-ended');}});
+test('deleted, missing and legacy setups have no inferred rule',()=>{assert.equal(pickupPolicy({pickup_configured:false,pickup_rule:'Next Day',pickup_window_start:'08:00',pickup_window_end:'08:30'}),null);assert.equal(pickupExpectation(null,'2026-10-12').state,'unconfigured');assert.equal(pickupPolicy({pickup_configured:true,pickup_rule:'Same Day'}),null);});
+test('scope denies unrelated locations for both updates and deletes',()=>{assert.throws(()=>assertPickupScope({hasAllLocationAccess:false,locationScopeIds:['A']},'B'));assert.doesNotThrow(()=>assertPickupScope({hasAllLocationAccess:false,locationScopeIds:['A']},'A'));});
+test('invalid calendar date cannot produce misleading expectation',()=>assert.throws(()=>pickupExpectation({rule:'Next Day',start:'08:00',end:'08:30'},'2026-02-30')));
+
+test('pickup-only updates preserve portal settings; invalid advanced settings fail',()=>{assert.deepEqual(parsePickupAdvanced(form()),{});assert.throws(()=>parsePickupAdvanced(form({advanced_settings:'true',portal_station_code:'bad/code',portal_check_interval_minutes:'30'})));const a=parsePickupAdvanced(form({advanced_settings:'true',portal_station_code:'nlre',portal_check_interval_minutes:'30'}));assert.equal(a.portal_station_code,'NLRE');assert.equal(a.portal_checks_enabled,false);});
+test('next-day preparation cutoff is required, editable and cannot precede pickup',()=>{assert.throws(()=>parsePickupFields(form({pickup_rule:'Next Day'})));assert.throws(()=>parsePickupFields(form({pickup_rule:'Next Day',next_day_preparation_from:'16:00'})));const f=form({pickup_rule:'Next Day',pickup_window_start:'10:00',pickup_window_end:'10:30',next_day_preparation_from:'16:00'});assert.equal(parsePickupFields(f).next_day_preparation_from,'16:00');const policy=pickupPolicy(parsePickupFields(f));assert.equal(policy.preparationFrom,'16:00');});
+
+test('DA closing deadline is configurable independently of pickup and can be left unset',()=>{
+ const f=new FormData();for(const [k,v] of Object.entries({pickup_rule:'Same Day-Complete',pickup_window_start:'18:00',pickup_window_end:'18:30',cms_agency:'CMS',driver_recon_due_time:'22:00'}))f.set(k,v);
+ assert.equal(parsePickupFields(f).driver_recon_due_time,'22:00');
+ f.set('driver_recon_due_time','');assert.equal(parsePickupFields(f).driver_recon_due_time,null);
+ f.set('driver_recon_due_time','25:00');assert.throws(()=>parsePickupFields(f),/closing time/);
+});
+
+test('ageing and freshness settings are validated and updates preserve omitted values',()=>{
+ assert.equal(parsePickupFields(form()).recon_age_flag_days,undefined);
+ assert.equal(parsePickupFields(form({recon_age_flag_days:'2',cod_status_max_age_minutes:'10'})).recon_age_flag_days,2);
+ for(const extra of [{recon_age_flag_days:'0'},{recon_age_flag_days:'1.5'},{cod_status_max_age_minutes:'0'},{cod_status_max_age_minutes:'61'}]) assert.throws(()=>parsePickupFields(form(extra)));
+});

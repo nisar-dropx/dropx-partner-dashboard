@@ -104,6 +104,9 @@ export type CodStationSettingRow = {
   agent_name: string | null;
   agent_mobile: string | null;
   cod_deposit_day: "Same Day" | "Next Day";
+  pickup_configured?: boolean;
+  pickup_rule?: string | null;
+  next_day_preparation_from?: string | null;
   pickup_time: string | null;
   pickup_window_start: string | null;
   pickup_window_end: string | null;
@@ -119,6 +122,8 @@ export type CodStationSettingRow = {
   amazon_driver_recon_url?: string | null;
   amazon_bank_deposit_url?: string | null;
   driver_recon_due_time?: string | null;
+  recon_age_flag_days?: number | null;
+  cod_status_max_age_minutes?: number | null;
   prepared_deposit_due_time?: string | null;
   portal_check_interval_minutes?: number | string | null;
   portal_checks_enabled?: boolean | null;
@@ -584,7 +589,7 @@ export const loadCodLocations = cache(async (companyId: string, locationScopeIds
     .order("station_code");
   if (error) return { locations: [] as CodLocationRow[], error: error.message };
   const stationRows = (data ?? []) as CodLocationRow[];
-  const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationRows.map((row) => row.id));
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationRows.map((row) => row.id), { includeStationResponsibilities: true });
   if (hierarchy.error) {
     console.error("[people-operational-hierarchy] unable to resolve station hierarchy", { companyId, error: hierarchy.error });
   }
@@ -618,7 +623,7 @@ export async function loadCodStationSettings(companyId: string, locationScopeIds
   if (!supabaseAdmin) return { rows: [] as CodStationSettingRow[], error: "Supabase service role key is not configured." };
   let query = supabaseAdmin
     .from("cod_station_settings")
-    .select("id, company_id, location_id, station_code, state, cms_agency, agent_name, agent_mobile, cod_deposit_day, pickup_time, pickup_window_start, pickup_window_end, cod_submission_due_time, eod_submission_due_time, escalation_contact, escalation_email, cod_sheet_link, portal_station_code, portal_login_url, portal_username, portal_secret_name, amazon_driver_recon_url, amazon_bank_deposit_url, driver_recon_due_time, prepared_deposit_due_time, portal_check_interval_minutes, portal_checks_enabled, is_active, created_at, updated_at")
+    .select("id, company_id, location_id, station_code, state, cms_agency, agent_name, agent_mobile, cod_deposit_day, pickup_configured, pickup_rule, next_day_preparation_from, pickup_time, pickup_window_start, pickup_window_end, cod_submission_due_time, eod_submission_due_time, escalation_contact, escalation_email, cod_sheet_link, portal_station_code, portal_login_url, portal_username, portal_secret_name, amazon_driver_recon_url, amazon_bank_deposit_url, driver_recon_due_time, recon_age_flag_days, cod_status_max_age_minutes, prepared_deposit_due_time, portal_check_interval_minutes, portal_checks_enabled, is_active, created_at, updated_at")
     .eq("company_id", companyId)
     .order("station_code");
   if (!hasAllLocationAccess) query = query.in("location_id", locationScopeIds.length ? locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
