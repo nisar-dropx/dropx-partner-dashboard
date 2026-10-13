@@ -19,3 +19,9 @@ test('DA closing deadline is configurable independently of pickup and can be lef
  f.set('driver_recon_due_time','');assert.equal(parsePickupFields(f).driver_recon_due_time,null);
  f.set('driver_recon_due_time','25:00');assert.throws(()=>parsePickupFields(f),/closing time/);
 });
+
+test('ageing and freshness settings are validated and updates preserve omitted values',()=>{
+ assert.equal(parsePickupFields(form()).recon_age_flag_days,undefined);
+ assert.equal(parsePickupFields(form({recon_age_flag_days:'2',cod_status_max_age_minutes:'10'})).recon_age_flag_days,2);
+ for(const extra of [{recon_age_flag_days:'0'},{recon_age_flag_days:'1.5'},{cod_status_max_age_minutes:'0'},{cod_status_max_age_minutes:'61'}]) assert.throws(()=>parsePickupFields(form(extra)));
+});

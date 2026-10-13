@@ -18,11 +18,18 @@ export function parsePickupFields(form: FormData) {
   if (rule === 'Next Day' && (!validTime(preparationFrom) || preparationFrom < end)) throw new Error('Set the next-day preparation time at or after the pickup window (IST).');
   const reconDue = text('driver_recon_due_time');
   if (reconDue && !validTime(reconDue)) throw new Error('Enter a valid DA reconciliation closing time (IST).');
+  const configurableInteger = (key:string, max:number) => {
+    if (!form.has(key)) return {};
+    const n=Number(text(key));
+    if (!Number.isInteger(n) || n<1 || n>max) throw new Error(`Enter a valid ${key==='recon_age_flag_days'?'ageing flag threshold (1–365 days)':'status validity (1–60 minutes)'}.`);
+    return {[key]:n};
+  };
+  const alertSettings={...configurableInteger('recon_age_flag_days',365),...configurableInteger('cod_status_max_age_minutes',60)};
   const agency = text('cms_agency');
   if (!agency || agency.length > 120) throw new Error('Enter a CMS agency (up to 120 characters).');
   const name = text('agent_name'), mobile = text('agent_mobile').replace(/[\s()-]/g, '');
   if (name.length > 160 || (mobile && !/^\+?[0-9]{10,15}$/.test(mobile))) throw new Error('Enter a valid agent name and mobile number, or leave the contact fields blank.');
-  return { cms_agency: agency, agent_name: name, agent_mobile: mobile, pickup_rule: rule as PickupRule,
+  return { ...alertSettings, cms_agency: agency, agent_name: name, agent_mobile: mobile, pickup_rule: rule as PickupRule,
     ...(form.has('driver_recon_due_time') ? {driver_recon_due_time: reconDue || null} : {}),
     cod_deposit_day: rule === 'Next Day' ? 'Next Day' : 'Same Day', pickup_time: `${start}–${end}`,
     pickup_window_start: start, pickup_window_end: end, next_day_preparation_from: rule === 'Next Day' ? preparationFrom : null, pickup_configured: true };

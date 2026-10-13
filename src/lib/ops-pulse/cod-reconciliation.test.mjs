@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {reconciliationView,collectionDay,validCollectionDate} from './cod-reconciliation.ts';
+import {reconciliationView,reconciliationAgeing,collectionDay,validCollectionDate} from './cod-reconciliation.ts';
 import {codStatusChecks,compareCodRows} from './cod-status.ts';
 const at=s=>Date.parse(s+'+05:30'), now=new Date(at('2026-10-13T12:00:00'));
 const pkg=(day,amount=100)=>({trackingId:day,amount,paymentMethod:'CASH',collectedAt:at(day+'T11:00:00'),transactionAt:at('2026-10-13T11:30:00')});
@@ -45,10 +45,24 @@ test('today becomes earlier-day overdue at IST midnight across month/year; inval
  assert.equal(collectionDay(at('2026-10-14T10:00:00'),now),null);
 });
 test('a DA date filter never changes prepare-deposit and remittance assessment; numeric sort follows displayed cohort',()=>{
- const snapshot=r=>({date:'2026-10-13',fetchedAt:now.toISOString(),reconciliation:{state:'ok',data:r},prepareDeposit:{state:'ok',data:{expectedAmount:50,actualAmount:50,variance:0}},remittances:{state:'ok',data:{complete:true,openCount:0,rows:[],latestSubmitted:null}}});
+ const snapshot=r=>({date:'2026-10-13',fetchedAt:now.toISOString(),reconciliation:{state:'ok',checkedAt:now.toISOString(),data:r},prepareDeposit:{state:'ok',checkedAt:now.toISOString(),data:{sourceScope:'outstanding_history',sourceWindow:{startTime:0,endTime:now.getTime()},expectedAmount:50,actualAmount:50,variance:0}},remittances:{state:'ok',checkedAt:now.toISOString(),data:{complete:true,openCount:0,rows:[],latestSubmitted:null}}});
  const a={id:'a',code:'AAA'},b={id:'b',code:'BBB'};
  const sa=snapshot(data([pkg('2026-10-13',2),pkg('2026-10-12',200)])),sb=snapshot(data([pkg('2026-10-13',100)]));
  const old=codStatusChecks(sa,null,now,false,'2026-10-12','21:00'),today=codStatusChecks(sa,null,now,false,'2026-10-13','21:00');
  assert.deepEqual(old.prepareDeposit,today.prepareDeposit);assert.deepEqual(old.remittances,today.remittances);
  assert.deepEqual([b,a].sort((x,y)=>compareCodRows(x,y,{a:sa,b:sb},'reconciliation','asc',now,'2026-10-13')).map(x=>x.id),['a','b']);
+});
+
+test('age flag isolates older positive TIDs across dates and uses the editable threshold',()=>{
+ const source=data([pkg('2026-10-12',100),pkg('2026-10-01',250),pkg('2026-10-13',25)]);
+ assert.equal(reconciliationAgeing(source,1,now).count,2);
+ assert.equal(reconciliationAgeing(source,2,now).amount,250);
+ assert.equal(reconciliationAgeing(source,2,now).oldestDays,12);
+ assert.equal(reconciliationAgeing(source,null,now).configured,false);
+ assert.equal(reconciliationAgeing(source,null,now).count,0);
+});
+test('negative adjustments cannot hide a positive overdue TID',()=>{
+ const source=data([pkg('2026-10-12',100),pkg('2026-10-12',-100),pkg('2026-10-13',20)]);
+ assert.equal(reconciliationView(source,'','21:00',now).check.tone,'attention');
+ assert.equal(reconciliationAgeing(source,1,now).amount,100);
 });

@@ -6,7 +6,7 @@ import { pickupDescriptions, pickupRules, type PickupRule } from '@/lib/ops-puls
 import { createCodMaster, deleteCodMaster, updateCodMaster } from './actions';
 import styles from './pickup.module.css';
 type Location = {id:string; code:string; name:string; state:string};
-type Row = {id:string; location_id:string; station_code:string; state:string; cms_agency:string; agent_name:string; agent_mobile:string; pickup_rule:string; next_day_preparation_from:string; pickup_window_start:string; pickup_window_end:string; updated_at:string; portal_station_code:string; portal_check_interval_minutes:number; portal_checks_enabled:boolean; cod_submission_due_time:string; eod_submission_due_time:string; driver_recon_due_time:string; prepared_deposit_due_time:string; escalation_contact:string; escalation_email:string};
+type Row = {recon_age_flag_days:number;cod_status_max_age_minutes:number;id:string; location_id:string; station_code:string; state:string; cms_agency:string; agent_name:string; agent_mobile:string; pickup_rule:string; next_day_preparation_from:string; pickup_window_start:string; pickup_window_end:string; updated_at:string; portal_station_code:string; portal_check_interval_minutes:number; portal_checks_enabled:boolean; cod_submission_due_time:string; eod_submission_due_time:string; driver_recon_due_time:string; prepared_deposit_due_time:string; escalation_contact:string; escalation_email:string};
 function Fields({row}: {row?:Row}) {
   const [rule,setRule] = useState(row?.pickup_rule || '');
   return <>
@@ -19,13 +19,15 @@ function Fields({row}: {row?:Row}) {
     <label>Pickup until · IST<input name="pickup_window_end" type="time" required defaultValue={row?.pickup_window_end} /></label>
     {rule==='Next Day' && <label>Prepare tomorrow’s deposit from · IST<input type="time" name="next_day_preparation_from" required defaultValue={row?.next_day_preparation_from}/><small>Creation after today’s submission and before this time is flagged. Later preparation can wait until the next pickup.</small></label>}
     <label>DA reconciliation closing time · IST<input name="driver_recon_due_time" type="time" defaultValue={row?.driver_recon_due_time}/><small>Today’s cash is normal before this time; unreconciled cash is overdue afterwards. Earlier-day cash is already overdue.</small></label>
+    <label>Highlight pending TIDs from · days<input name="recon_age_flag_days" type="number" min={1} max={365} required defaultValue={row?.recon_age_flag_days}/><small>Calendar days in IST. Earlier-day cash remains overdue; this controls the prominent ageing flag.</small></label>
+    <label>Live status valid for · minutes<input name="cod_status_max_age_minutes" type="number" min={1} max={60} required defaultValue={row?.cod_status_max_age_minutes}/><small>Older checks require refresh and cannot show clearance.</small></label>
     {row && <details className={styles.full}><summary>Portal checks & escalation settings</summary><input type="hidden" name="advanced_settings" value="true"/><div className={styles.form}>
       <label>Portal station code<input name="portal_station_code" defaultValue={row.portal_station_code}/></label>
       <label>Portal check gap · minutes<input type="number" name="portal_check_interval_minutes" min={1} max={1440} defaultValue={row.portal_check_interval_minutes}/></label>
-      <label>Scheduled portal checks<select name="portal_checks_enabled" defaultValue={String(row.portal_checks_enabled)}><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
+      <label>Scheduled SCC validation<select name="portal_checks_enabled" defaultValue={String(row.portal_checks_enabled)}><option value="false">Disabled</option><option value="true">Enabled</option></select><small>Controls scheduled validation and retries after COD submission. It does not disable the on-demand COD Status refresh.</small></label>
       {(['cod_submission_due_time','eod_submission_due_time','prepared_deposit_due_time'] as const).map((key,i)=><label key={key}>{['COD submission due','EOD due','Prepare deposit due'][i]} · IST<input name={key} type="time" defaultValue={row[key]}/></label>)}
-      <label>Escalation numbers<input name="escalation_contact" defaultValue={row.escalation_contact}/></label>
-      <label>Escalation emails<input name="escalation_email" defaultValue={row.escalation_email} placeholder="Comma-separated emails"/></label>
+      <label>Escalation phone contacts<input name="escalation_contact" defaultValue={row.escalation_contact}/><small>Reference contacts only. Automated WhatsApp sending is not connected to these COD checks.</small></label>
+      <label>Escalation emails<input name="escalation_email" defaultValue={row.escalation_email} placeholder="Comma-separated emails"/><small>Used for COD escalations, including validation failures after three attempts. Sending requires company Email Config / SMTP; saving an address does not enable reminders.</small></label>
     </div></details>}
     {rule && <p className={styles.formHint}>{pickupDescriptions[rule as PickupRule]}</p>}
   </>;

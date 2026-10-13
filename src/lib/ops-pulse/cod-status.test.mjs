@@ -6,7 +6,7 @@ const now=new Date(at('2026-10-12T21:30:00'));
 const policy={rule:'Next Day',start:'10:00',end:'10:30',preparationFrom:'16:00'};
 const remit=(created,status='CREATED')=>({id:created,code:'AC1',status,expectedAmount:100,actualAmount:100,variance:0,createdAt:at(created),updatedAt:at(created),submittedAt:null});
 const latest={...remit('2026-10-12T12:00:00','SUBMITTED'),submittedAt:at('2026-10-12T12:00:00')};
-function base(open=[],date=now) {return {date:codStatusToday(date),fetchedAt:date.toISOString(),reconciliation:{state:'ok',data:{complete:true,pendingCount:0,pendingAmount:0}},prepareDeposit:{state:'ok',data:{expectedAmount:0,actualAmount:0,variance:0}},remittances:{state:'ok',data:{complete:true,openCount:open.length,submittedToday:true,latestSubmitted:latest,rows:[...open,latest]}}};}
+function base(open=[],date=now) {return {date:codStatusToday(date),fetchedAt:date.toISOString(),reconciliation:{state:'ok',checkedAt:now.toISOString(),data:{complete:true,pendingCount:0,pendingAmount:0}},prepareDeposit:{state:'ok',checkedAt:now.toISOString(),data:{sourceScope:'outstanding_history',sourceWindow:{startTime:0,endTime:now.getTime()},expectedAmount:0,actualAmount:0,variance:0}},remittances:{state:'ok',checkedAt:now.toISOString(),data:{complete:true,openCount:open.length,submittedToday:true,latestSubmitted:latest,rows:[...open,latest]}}};}
 test('three independent checks: zero prepare stays green while expected next-day pickup stays amber',()=>{
  const s=base([remit('2026-10-12T21:00:00')]);const c=codStatusChecks(s,policy,now);
  assert.equal(c.prepareDeposit.tone,'clear');assert.equal(c.remittances.tone,'waiting');assert.equal(codStatusCategory(s,now,policy),'waiting');
