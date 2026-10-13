@@ -589,7 +589,7 @@ export const loadCodLocations = cache(async (companyId: string, locationScopeIds
     .order("station_code");
   if (error) return { locations: [] as CodLocationRow[], error: error.message };
   const stationRows = (data ?? []) as CodLocationRow[];
-  const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationRows.map((row) => row.id));
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationRows.map((row) => row.id), { includeStationResponsibilities: true });
   if (hierarchy.error) {
     console.error("[people-operational-hierarchy] unable to resolve station hierarchy", { companyId, error: hierarchy.error });
   }

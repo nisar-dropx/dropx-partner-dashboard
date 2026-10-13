@@ -1,6 +1,6 @@
 import type { PickupPolicy } from './cod-pickup';
 import { reconciliationView } from './cod-reconciliation.ts';
-export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string; managers?: string[]; managerRole?: 'Cluster' | 'AOM' | 'Unmapped'; pickup?: PickupPolicy | null; reconDueTime?: string | null; ageFlagDays?: number | null; maxAgeMinutes?: number | null };
+export type CodStatusLocation = { id: string; code: string; name: string; model: string; region: string; manager: string; managers?: string[]; managerRole?: 'Cluster' | 'AOM' | 'Unmapped'; leads?: {name:string;role:string;phone:string|null}[]; teamUnavailable?:boolean; pickup?: PickupPolicy | null; reconDueTime?: string | null; ageFlagDays?: number | null; maxAgeMinutes?: number | null };
 export type StatusComponent<T> = { state: 'ok' | 'unavailable'; checkedAt: string; data: T | null };
 export type CodRemittance = { id: string; code: string | null; status: string; expectedAmount: number; actualAmount: number; variance: number; createdAt: number | null; updatedAt: number | null; submittedAt: number | null; createdBy: string; submittedBy: string | null };
 export type CodStatusSnapshot = {
@@ -88,14 +88,31 @@ export function codStatusCategory(snapshot: CodStatusSnapshot | undefined, now =
   const checks=Object.values(codStatusChecks(snapshot,policy,now,failed,collectionDate,reconDueTime,maxAgeMinutes));
   return (['attention','unavailable','unchecked','waiting','active','clear'] as CodTone[]).find(t=>checks.some(c=>c.tone===t))!;
 }
-export type CodFilters = {search?:string;model?:string;region?:string;manager?:string;overall?:string;reconciliation?:string;prepareDeposit?:string;remittances?:string};
+export type CodSelection = string | string[];
+export type CodFilters = {search?:string;station?:CodSelection;model?:CodSelection;region?:CodSelection;manager?:CodSelection;overall?:CodSelection;reconciliation?:CodSelection;prepareDeposit?:CodSelection;remittances?:CodSelection};
+export function matchesSelection(selection:CodSelection|undefined, values:string[]) {
+  const chosen=Array.isArray(selection)?selection:selection?[selection]:[];
+  return !chosen.length || chosen.some(value=>values.includes(value));
+}
+export function toggleCodSelection(selected:string[], value:string) {
+  return selected.includes(value)?selected.filter(item=>item!==value):[...selected,value];
+}
 export function matchesCodFilters(location:CodStatusLocation, checks:Record<CodPart,CodCheck>, overall:CodTone, filters:CodFilters) {
   return (!filters.search || `${location.code} ${location.name}`.toLowerCase().includes(filters.search.trim().toLowerCase()))
-    && (!filters.model || location.model===filters.model)
-    && (!filters.region || (location.region || '__unmapped')===filters.region)
-    && (!filters.manager || (filters.manager==='__unmapped' ? !location.manager : (location.managers || [location.manager]).includes(filters.manager)))
-    && (!filters.overall || overall===filters.overall)
-    && (['reconciliation','prepareDeposit','remittances'] as const).every(part=>!filters[part] || checks[part].tone===filters[part]);
+    && matchesSelection(filters.station,[location.id])
+    && matchesSelection(filters.model,[location.model])
+    && matchesSelection(filters.region,[location.region || '__unmapped'])
+    && matchesSelection(filters.manager,location.manager?(location.managers || [location.manager]):['__unmapped'])
+    && matchesSelection(filters.overall,[overall])
+    && (['reconciliation','prepareDeposit','remittances'] as const).every(part=>matchesSelection(filters[part],[checks[part].tone]));
+}
+export type CodFreshness='fresh'|'stale'|'failed'|'checking'|'unchecked';
+export function codFreshness(snapshot:CodStatusSnapshot|undefined, maxAgeMinutes:number|null|undefined, now:Date, loading=false, failed=false):CodFreshness {
+  if(loading) return 'checking';
+  if(failed) return 'failed';
+  if(!snapshot) return 'unchecked';
+  const times=[snapshot.fetchedAt,...(['reconciliation','prepareDeposit','remittances'] as const).map(part=>snapshot[part].checkedAt)].map(Date.parse);
+  return snapshot.date===codStatusToday(now) && !!maxAgeMinutes && times.every(t=>Number.isFinite(t) && t<=now.getTime()+60000 && now.getTime()-t<=maxAgeMinutes*60000)?'fresh':'stale';
 }
 export type CodSort = 'station'|'region'|'manager'|'reconciliation'|'prepareDeposit'|'remittances'|'checkedAt';
 export function compareCodRows(a:CodStatusLocation,b:CodStatusLocation,snapshots:Record<string,CodStatusSnapshot|undefined>, sort:CodSort, direction:'asc'|'desc', now:Date, collectionDate='') {
