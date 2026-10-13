@@ -84,6 +84,37 @@ test("bounded historical actions ignore only current mappings that start later",
   assert.match(replacementState, /submittedMapping \?\? relevantTargetMappings\[0\] \?\? relevantProviderMappings\[0\]/);
 });
 
+test("a submitted closed mapping is reused only for an exact same-owner identity and location edit", () => {
+  const submittedQuery = replacementState.slice(
+    replacementState.indexOf("const submittedMappingQuery"),
+    replacementState.indexOf("const [targetResult", replacementState.indexOf("const submittedMappingQuery"))
+  );
+  const closedMappingCheck = replacementState.slice(
+    replacementState.indexOf("const submittedClosedMapping"),
+    replacementState.indexOf("const targetMappings", replacementState.indexOf("const submittedClosedMapping"))
+  );
+  const closedMappingResult = replacementState.slice(
+    replacementState.indexOf("if (submittedClosedMapping)"),
+    replacementState.indexOf("if (destinationMapping", replacementState.indexOf("if (submittedClosedMapping)"))
+  );
+
+  assert.match(submittedQuery, /\.eq\("company_id", companyId\)/);
+  assert.match(submittedQuery, /\.eq\("id", submittedMappingId\)/);
+  assert.match(submittedQuery, /\.neq\("status", "cancelled"\)/);
+  assert.match(submittedQuery, /\.maybeSingle\(\)/);
+  assert.match(closedMappingCheck, /submittedStoredMapping\.status === "closed"/);
+  assert.match(closedMappingCheck, /Boolean\(submittedStoredMapping\.effective_to\)/);
+  assert.match(closedMappingCheck, /String\(submittedStoredMapping\.effective_from \?\? ""\) === requestedEffectiveFrom/);
+  assert.match(closedMappingCheck, /submittedStoredMapping\.station_id === stationId/);
+  assert.match(closedMappingCheck, /submittedStoredMapping\.provider_id === providerId/);
+  assert.match(closedMappingCheck, /providerMemberIdentity\(submittedStoredMapping\.provider_member_id\) === normalizedMemberId/);
+  assert.match(closedMappingCheck, /submittedStoredMapping\.workforce_id === workforceId/);
+  assert.match(closedMappingCheck, /sourceColumn && sourceProfileId/);
+  assert.match(closedMappingResult, /if \(expectedReplacementId\)/);
+  assert.match(closedMappingResult, /confirmation: null/);
+  assert.match(closedMappingResult, /currentMappingLocationDriftEdit: true/);
+});
+
 test("the final save guard uses the same fail-closed period overlap rule", () => {
   assert.match(saveRow, /select\("id, station_id, effective_from"\)/);
   assert.match(saveRow, /\.eq\("status", "active"\)/);

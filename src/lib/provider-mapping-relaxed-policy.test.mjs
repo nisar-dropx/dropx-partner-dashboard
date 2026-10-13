@@ -143,6 +143,60 @@ test("a closed registered-location mapping permits only fully contained bounded 
   }
 });
 
+test("the exact closed mapping remains the edit target when it is reopened at the same location", () => {
+  const closedMapping = {
+    mappingId: "mapping-history",
+    stationId: "station-a",
+    locationLabel: "KGQC",
+    providerId: "provider-1",
+    mappedProviderMemberId: "2000074247130",
+    paymentMethodId: "method-history",
+    paymentValues: { DELIVERY: "16" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-30",
+    status: "closed"
+  };
+  const historicalWorker = {
+    ...baseWorker,
+    mappingId: "",
+    paymentMethodId: "",
+    mappedProviderMemberId: "",
+    effectiveFrom: "",
+    effectiveTo: "",
+    mappingHistory: [closedMapping],
+    registeredLocationMappings: [closedMapping]
+  };
+  const reopenedRow = {
+    ...secondLocationRow,
+    stationId: "station-a",
+    stationLabel: "KGQC",
+    mappingId: closedMapping.mappingId,
+    paymentMethodId: closedMapping.paymentMethodId,
+    paymentValues: closedMapping.paymentValues,
+    effectiveFrom: "2026-09-01",
+    effectiveTo: ""
+  };
+
+  assert.equal(
+    providerFirstMappingReferenceForRow(reopenedRow, historicalWorker)?.mappingId,
+    closedMapping.mappingId
+  );
+  assert.deepEqual(providerFirstRowForMappingPeriod(reopenedRow, historicalWorker), reopenedRow);
+  assert.equal(providerFirstLocationIsAllowed(reopenedRow, historicalWorker), true);
+
+  const differentMember = { ...reopenedRow, providerMemberId: "different-member" };
+  assert.equal(providerFirstMappingReferenceForRow(differentMember, historicalWorker), undefined);
+  assert.equal(providerFirstRowForMappingPeriod(differentMember, historicalWorker).mappingId, "");
+
+  // Reopening a closed row is an in-place same-location edit. It must not let
+  // the historical row authorize an open-ended mapping at another location.
+  const additionalLocation = { ...reopenedRow, stationId: "station-b", stationLabel: "KGQE" };
+  assert.equal(providerFirstMappingReferenceForRow(additionalLocation, historicalWorker), undefined);
+  assert.equal(providerFirstLocationIsAllowed(additionalLocation, historicalWorker), false);
+});
+
 test("mapping period containment is inclusive and fails closed for ambiguous dates", () => {
   assert.equal(providerFirstMappingPeriodContains("2026-09-01", "2026-09-30", "2026-09-01", "2026-09-30"), true);
   assert.equal(providerFirstMappingPeriodContains("2026-09-01", "2026-09-30", "2026-09-30", "2026-09-30"), true);

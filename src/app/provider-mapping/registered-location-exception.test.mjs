@@ -91,6 +91,7 @@ test("the page exposes a historical registered-location mapping and selection in
     readFile(new URL("../../components/provider-first-mapping-worksheet.tsx", import.meta.url), "utf8")
   ]);
   assert.match(page, /const registeredMappingByWorkforce = new Map<string, Mapping\[\]>/);
+  assert.match(page, /const mappingHistoryByWorkforce = new Map<string, Mapping\[\]>/);
   assert.match(page, /const currentMappingsByWorkforce = new Map<string, Mapping\[\]>/);
   assert.match(page, /for \(const mapping of mappingHistory\)/);
   assert.match(page, /mapping\.status === "active" && !mapping\.effective_to/);
@@ -101,6 +102,7 @@ test("the page exposes a historical registered-location mapping and selection in
   assert.doesNotMatch(page, /mappingByWorkforce\.get\(worker\.id\) \?\? registered/);
   assert.match(page, /const registeredLocationMappings = registeredMappings\.map/);
   assert.match(page, /const currentMappings = activeWorkerMappings\.map\(mappingView\)/);
+  assert.match(page, /mappingHistory: completeMappingHistory/);
   assert.match(page, /registeredLocationMappings, registeredLocationMapping: registeredLocationMappings\[0\]/);
   assert.match(page, /effectiveFrom: stored\.effective_from/);
   assert.match(page, /effectiveTo: stored\.effective_to \?\? ""/);

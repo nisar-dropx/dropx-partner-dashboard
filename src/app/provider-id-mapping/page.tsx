@@ -81,10 +81,15 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     if (!mappingByMember.has(memberKey)) mappingByMember.set(memberKey, mapping);
   }
   const registeredMappingByWorkforce = new Map<string, Mapping[]>();
+  const mappingHistoryByWorkforce = new Map<string, Mapping[]>();
   for (const mapping of mappingHistory) {
     const canonicalPeriod = (mapping.status === "active" && !mapping.effective_to)
       || (mapping.status === "closed" && Boolean(mapping.effective_to));
     if (!mapping.workforce_id || !canonicalPeriod) continue;
+    mappingHistoryByWorkforce.set(mapping.workforce_id, [
+      ...(mappingHistoryByWorkforce.get(mapping.workforce_id) ?? []),
+      mapping
+    ]);
     const profileStationId = profileStationByWorkforce.get(mapping.workforce_id) ?? "";
     if (!profileStationId || String(mapping.station_id ?? "") !== profileStationId) continue;
     registeredMappingByWorkforce.set(mapping.workforce_id, [
@@ -143,8 +148,9 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
       return { mappingId: stored.id, stationId: String(stored.station_id ?? ""), locationLabel: stationLabelById.get(String(stored.station_id ?? "")) ?? "No location", providerId: String(stored.provider_id ?? ""), mappedProviderMemberId: stored.provider_member_id, paymentMethodId: String(stored.payment_method_id ?? ""), paymentValues: Object.fromEntries(Object.entries(stored.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: storedThreshold ? { period: storedThreshold.period, component_codes: storedThreshold.component_codes } : null, productionThresholdMinimumUnits: storedThreshold ? String(storedThreshold.minimum_units) : "", effectiveFrom: stored.effective_from, effectiveTo: stored.effective_to ?? "", status: stored.status as "active" | "closed" };
     };
     const currentMappings = activeWorkerMappings.map(mappingView);
+    const completeMappingHistory = (mappingHistoryByWorkforce.get(worker.id) ?? []).map(mappingView);
     const registeredLocationMappings = registeredMappings.map(mappingView);
-    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: mappingStationId, providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(mappingStationId) ?? "No location", profileStationId, profileLocationLabel: stationLabelById.get(profileStationId) ?? "No location", currentMappings, registeredLocationMappings, registeredLocationMapping: registeredLocationMappings[0], onboardingStatus: String(worker.onboarding_status ?? "") };
+    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: mappingStationId, providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(mappingStationId) ?? "No location", profileStationId, profileLocationLabel: stationLabelById.get(profileStationId) ?? "No location", currentMappings, mappingHistory: completeMappingHistory, registeredLocationMappings, registeredLocationMapping: registeredLocationMappings[0], onboardingStatus: String(worker.onboarding_status ?? "") };
   });
   const providerMembers = canonicalizeProviderFirstMembers(((providerResult.data ?? []) as ProviderMemberSource[]).map((provider) => ({
     providerMemberId: String(provider.provider_employee_id ?? "").trim(),
