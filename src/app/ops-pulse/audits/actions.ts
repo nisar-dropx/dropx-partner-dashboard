@@ -412,7 +412,7 @@ export async function rescheduleStationAudit(
     // A surprise visit already made may be dated back, but not without limit.
     if (date < addAuditDays(auditDay(), -31))
       throw new Error("Choose a date no more than 31 days back.");
-    if (scheduledFor === audit.scheduled_for)
+    if (Date.parse(scheduledFor) === Date.parse(audit.scheduled_for))
       throw new Error("Choose a different date or time.");
     const reason = clean(formData.get("reason"));
     if (!reason || reason.length > 500)

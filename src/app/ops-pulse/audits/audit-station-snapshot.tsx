@@ -10,7 +10,13 @@ const money = (value: number) =>
   `₹${Math.round(value).toLocaleString("en-IN")}`;
 const dayLabel = (date: string, index: number) =>
   index === 0 ? "Today" : index === 1 ? "Yesterday" : date;
-const slipDone = new Set(["Complete", "No Cash", "Banker Not Reported"]);
+/** How one day's slip reads: its status once anything is recorded, otherwise whether it is late. */
+const slipLabel = (slip: { status: string; uploaded: boolean; overdue: boolean }) =>
+  slip.status !== "Missing slip"
+    ? slip.status
+    : slip.overdue
+      ? "Not uploaded"
+      : "Not uploaded yet";
 
 /**
  * The station's standing before the visit: cash with executives, shipments ageing
@@ -44,7 +50,8 @@ export function StationSnapshot({ auditId }: { auditId: string }) {
       </p>
     );
   const { cia, ageing, held, slips } = snapshot;
-  const missing = (slips || []).filter((slip) => !slip.uploaded && !slipDone.has(slip.status));
+  // Before the day's deadline a missing slip is expected, not a finding.
+  const late = (slips || []).filter((slip) => slip.overdue);
   return (
     <div className={styles.snapshot} aria-label="Station figures before the audit">
       <div className={cia && cia.pendingLiability > 0 ? styles.snapshotAlert : ""}>
@@ -88,21 +95,16 @@ export function StationSnapshot({ auditId }: { auditId: string }) {
             : ""}
         </small>
       </div>
-      <div className={missing.length ? styles.snapshotAlert : ""}>
+      <div className={late.length ? styles.snapshotAlert : ""}>
         <span>COD slip</span>
         <strong>
           {slips
-            ? missing.length
-              ? "Not uploaded"
-              : slips[0].status
+            ? slipLabel(late[0] || slips[0])
             : "Not in COD programme"}
         </strong>
         <small>
           {(slips || [])
-            .map(
-              (slip, index) =>
-                `${dayLabel(slip.date, index)}: ${slip.uploaded ? slip.status : slipDone.has(slip.status) ? slip.status : "no slip"}`,
-            )
+            .map((slip, index) => `${dayLabel(slip.date, index)}: ${slipLabel(slip)}`)
             .join(" · ")}
         </small>
       </div>

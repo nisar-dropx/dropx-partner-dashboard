@@ -609,7 +609,21 @@ export function ShipmentInspection({
             {result.error}
           </p>
         )}
-        <input type="hidden" name="tid_remarks" value={JSON.stringify(notes)} />
+        {/* Only the observations for listed differences are sent, so reasons read
+            from a large file never push the report past the upload limit. */}
+        <input
+          type="hidden"
+          name="tid_remarks"
+          value={JSON.stringify(
+            result.error
+              ? notes
+              : Object.fromEntries(
+                  rows
+                    .filter((row) => notes[row.tid])
+                    .map((row) => [row.tid, notes[row.tid]]),
+                ),
+          )}
+        />
         <label className={styles.confirmLine}>
           <input
             type="checkbox"

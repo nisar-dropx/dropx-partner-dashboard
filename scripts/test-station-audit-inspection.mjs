@@ -8,7 +8,9 @@ const {parseAuditTids,compareAuditTids,selectedAuditEmployees,readAuditTidSheet}
 assert.deepEqual(readAuditTidSheet([['Ageing report'],['Sl','Tracking ID','Remarks'],[1,'tid123','Not on shelf'],[2,'TID123',''],[3,'not a tid',''],[4,'',''],[5,123456789012,' Damaged ']]),{ids:['TID123','123456789012'],reasons:{TID123:'Not on shelf','123456789012':'Damaged'},duplicates:1,skipped:1,hasReasons:true});
 assert.deepEqual(readAuditTidSheet([['x','TID100'],['y','TID200']]),{ids:['TID100','TID200'],reasons:{},duplicates:0,skipped:0,hasReasons:false},'a sheet without headings uses the column holding tracking IDs');
 assert.equal(readAuditTidSheet([['AWB'],[1.5e21],['TID9000']]).ids.join(),'TID9000','a number too large to be exact is never guessed');
-assert.throws(()=>readAuditTidSheet([['Name','City'],['Asha','Kochi']]),/No tracking IDs found/);assert.throws(()=>readAuditTidSheet([['Tracking ID'],['']]),/No tracking IDs found under/);
+assert.throws(()=>readAuditTidSheet([['Name','City'],['Asha','Kochi']]),/No tracking IDs found/);assert.throws(()=>readAuditTidSheet([['Tracking ID'],['']]),/No tracking IDs found/);
+assert.deepEqual(readAuditTidSheet([['Shipment ageing report'],[],['Sl','Shipment status','Tracking ID','Auditor notes'],[1,'At station','TID5000','Torn'],[2,'At station','TID6000','']]),{ids:['TID5000','TID6000'],reasons:{TID5000:'Torn'},duplicates:0,skipped:0,hasReasons:true},'a title row or a status column is never taken for the tracking-ID column');
+assert.equal(readAuditTidSheet([['AWB'],[1.5e21],['TID9000']]).skipped,1,'an inexact number is reported as skipped');
 assert.throws(()=>readAuditTidSheet([['TID'],...Array.from({length:10001},(_,i)=>[`TID${i}`])]),/10,000/);assert.equal(readAuditTidSheet([['TID','Reason'],['TID1234','x'.repeat(900)]]).reasons.TID1234.length,300);
 const {missingAuditPhotos}=lib('src/lib/ops-pulse/station-audit-photos.ts');
 assert.deepEqual(parseAuditTids(' tid123\nTID123\tTID456;\n'),{ids:['TID123','TID456'],duplicates:1});
