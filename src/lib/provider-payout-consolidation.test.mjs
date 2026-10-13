@@ -132,3 +132,10 @@ test("aggregate WORK_DAYS settlement is not clamped to one day", () => {
   assert.deepEqual(result.rows[0].row.dailyBreakdown[0].attendanceRange, aggregate.row.dailyBreakdown[0].attendanceRange);
   assert.equal(result.rows[0].row.grossPayment, 450);
 });
+
+test("overlapping fuel records cannot double-pay the same route",()=>{
+ const a=segment({id:'a',methodId:'fuel',method:'Fuel',from:1,to:1,rate:3,units:10,amount:30,paymentSetupKey:'same'});
+ const b=structuredClone(a);b.row.id='b';
+ a.row.dailyBreakdown[0].routeFuel={status:'ready',amount:30};b.row.dailyBreakdown[0].routeFuel={status:'ready',amount:30};
+ const result=consolidateProviderPayoutSegments([a,b]);assert.deepEqual(result.conflicts,['worker-1']);assert.equal(result.rows.length,0);
+});

@@ -1,3 +1,6 @@
+import { loadRouteDistanceContext } from '../../../../../../src/lib/workforce-route-distance-data';
+import { kilometreRate, rateCardUnit, isKilometreField } from '../../../../../../src/lib/workforce-route-distance';
+import { ownRouteFuel } from '@/lib/own-route-fuel';
 import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -18,6 +21,7 @@ import {allocateCombinedProductionThresholds} from '../../../../../../src/lib/wo
 export const dynamic='force-dynamic';
 
 type Mapping = {
+  station_id:string;
   id: string;
   payment_method_id?: string | null;
   pay_type?:string|null;
@@ -83,6 +87,7 @@ function mappedProductionRules(mapping: Mapping) {
     const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
     if (component.is_active === false || (component.component_type !== "production" && field?.field_type !== "production" && field?.calculation_type !== "count_x_rate")) return [];
     const code = String(component.component_code || field?.code || "").trim();
+    if(isKilometreField(code))return [];
     const rawRate = values[code] ?? Object.entries(values).find(([key]) => key.trim().toUpperCase() === code.toUpperCase())?.[1];
     const rate = Number(rawRate ?? 0);
     if (!Number.isFinite(rate) || rate < 0) throw new Error("Your provider production rate is invalid. Contact Workforce.");
@@ -121,7 +126,7 @@ export async function GET(request: NextRequest) {
     const period = workforcePaymentReadPeriod(month, today);
     const currentPeriod = workforcePaymentReadPeriod(currentMonth, today);
     const loadMappings = (target: { from: string; to: string }) => admin.from("field_executive_provider_mappings")
-      .select("id,provider_member_id,effective_from,effective_to,status,payment_method_id,payment_values,production_threshold_config,pay_type,providers(name,code),stations(station_code),payment_methods(id,name,production_threshold_config,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source))),workforce_id,field_executive_id,contractor_id,employee_id")
+      .select("id,station_id,provider_member_id,effective_from,effective_to,status,payment_method_id,payment_values,production_threshold_config,pay_type,providers(name,code),stations(station_code),payment_methods(id,name,production_threshold_config,payment_method_components(component_code,component_type,label,pay_schedule,sort_order,is_active,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source))),workforce_id,field_executive_id,contractor_id,employee_id")
       .eq("company_id", account.companyId)
       .neq("status", "cancelled").lt("effective_from",target.to).or(`effective_to.is.null,effective_to.gte.${target.from}`)
       .or(identityFilters.length ? identityFilters.join(","):"id.eq.00000000-0000-0000-0000-000000000000").order("effective_from",{ascending:false}).limit(1000);
@@ -286,6 +291,15 @@ export async function GET(request: NextRequest) {
       attendanceDay.lines.forEach(line=>mergeLine(current.rateLines,{code:line.code,label:line.label,count:line.count,rate:line.rate,amount:line.amount}));
       dailyByDate.set(attendanceDay.date,current);
     }
+    const routeContext=workforce?.id&&mappings.some(m=>kilometreRate(m)!==null)?await loadRouteDistanceContext(admin,account.companyId,[workforce.id],period.from,periodEnd):{enabledFrom:null,rows:[],manual:[],rateOverrides:[]};
+    const routeActivity=[...(dailyResult.data??[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row);return m&&Number(row.total_activity??row.total_delivery??0)>0?[{mappingId:m.id,date:String(row.work_date)}]:[];}),...providerAttendanceDays.filter(day=>day.amount>0).map(day=>({mappingId:day.mappingId,date:day.date}))];
+    const routeFuel=ownRouteFuel(routeContext,String(workforce?.id??''),mappings,routeActivity);
+    for(const fuel of routeFuel){
+      const current=dailyByDate.get(fuel.date)??{date:fuel.date,deliveries:0,amazonDeliveries:0,swaDeliveries:0,cReturns:0,mfn:0,mfnReturns:0,earnings:0,rateLines:new Map<string,RateLine>(),providers:new Map<string,ProviderDay>()};
+      const line={code:'KM_RUN',label:'Fuel allowance · calculated route km',count:fuel.km??0,rate:fuel.rate,amount:fuel.amount??0};
+      mergeLine(current.rateLines,line);current.earnings+=line.amount;
+      dailyByDate.set(fuel.date,current);
+    }
     for (const directDay of direct.days) {
       const current = dailyByDate.get(directDay.date) ?? { date: directDay.date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>(), providers: new Map<string, ProviderDay>() };
       current.earnings += directDay.amount;
@@ -335,9 +349,15 @@ export async function GET(request: NextRequest) {
         grossAmount: Number(item.gross_amount ?? 0), netAmount: Number(item.net_amount ?? 0)
       }];
     });
-    const providerRateCard = currentMappings.flatMap((mapping) => Object.entries(mapping.payment_values ?? {})
-      .filter(([key, value]) => !key.startsWith('DROPX_') && Number.isFinite(Number(value)))
-      .map(([code, value]) => ({ code, rate: Number(value), providerMemberId: mapping.provider_member_id, effectiveFrom: mapping.effective_from, effectiveTo: mapping.effective_to })));
+    const providerRateCard = currentMappings.flatMap((mapping) => {
+      const method:any=mappingMethod(mapping);
+      return (method?.payment_method_components??[]).filter((c:any)=>c.is_active!==false).flatMap((c:any)=>{
+        const field:any=componentField(c),code=String(c.component_code||field?.code||'');
+        const raw=Object.entries(mapping.payment_values??{}).find(([key])=>key.trim().toUpperCase()===code.trim().toUpperCase())?.[1];
+        if(raw===null||raw===undefined||!Number.isFinite(Number(raw)))return [];
+        return [{code,label:code==='KM_RUN'?'Fuel allowance':String(c.label||field?.label||code),rate:Number(raw),unit:rateCardUnit(field,code,c.pay_schedule),providerMemberId:mapping.provider_member_id,effectiveFrom:mapping.effective_from,effectiveTo:mapping.effective_to}];
+      });
+    });
     const currentDirectMethods=paymentMethodById(currentDirect.methods);
     const directRateCard=currentDirect.allocations.flatMap(allocation=>{
       const method=currentDirectMethods.get(allocation.payment_method_id);
@@ -349,7 +369,7 @@ export async function GET(request: NextRequest) {
         const field=componentField(component),code=String(component.component_code||field?.code||'').trim();
         const raw=allocation.payment_values?.[code]??allocation.payment_values?.[component.component_code];
         const rate=Number(raw);
-        return code&&Number.isFinite(rate)?[{code,label:String(field?.label||component.label||code),rate,providerMemberId:null,effectiveFrom:allocation.effective_from,effectiveTo:allocation.effective_to,source:'direct' as const}]:[];
+        return code&&Number.isFinite(rate)?[{code,label:String(field?.label||component.label||code),rate,unit:rateCardUnit(field,code,component.pay_schedule),providerMemberId:null,effectiveFrom:allocation.effective_from,effectiveTo:allocation.effective_to,source:'direct' as const}]:[];
       });
     });
     const directMapping=currentDirect.allocations.map(allocation=>({
@@ -375,6 +395,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       month,
+      routeFuel:account.pageAccess.includes("earnings")?routeFuel:[],
       period: period.label,
       hasPaymentMapping: mappings.length > 0 || direct.allocations.length > 0,
       mapping: currentMappingPayload,

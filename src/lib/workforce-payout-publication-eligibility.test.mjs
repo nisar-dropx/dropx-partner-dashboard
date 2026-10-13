@@ -33,3 +33,8 @@ test("incomplete, unmapped and already published payouts remain blocked", () => 
     assert.equal(isWorkforcePayoutDisplayPublishable(status), false, status);
   }
 });
+
+test("a missing route cannot be published as zero fuel",()=>{
+ assert.equal(isWorkforcePayoutCalculationPublishable('Route distance pending'),false);
+ assert.equal(isWorkforcePayoutDisplayPublishable('Route distance pending'),false);
+});

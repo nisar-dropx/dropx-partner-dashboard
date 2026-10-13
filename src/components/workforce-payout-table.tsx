@@ -1,5 +1,6 @@
 "use client";
 
+import { routePendingLabel, type DailyRouteFuel } from "@/lib/workforce-route-distance";
 import { ChevronDown, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -87,6 +88,7 @@ export type WorkforcePayoutRow = {
     workDayUnits: number;
     attendanceSource: string;
     deliveryReview?: { deliveries: number; threshold: number };
+    routeFuel?: DailyRouteFuel;
     methodAmounts: Array<{ id: string; label: string; amount: number }>;
     baseAmount: number;
     lines: WorkforcePayoutLine[];
@@ -1144,6 +1146,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                       <span><small>Gross deductions</small><strong className={row.deductions ? "negative" : undefined}>{row.deductions ? `- ${money(row.deductions)}` : money(0)}</strong></span>
                       <span><small>Net pay</small><strong>{money(row.netAmount)}</strong></span>
                     </div>
+                    {row.dailyBreakdown.some(day=>day.routeFuel) ? <section className="payout-breakup-summary"><h3>Calculated route km &amp; fuel</h3><p>Station departure + roads between Amazon delivery scans + station return. Finalised after the work day closes.</p><div className="table-wrap"><table><thead><tr><th>Day</th><th>Route km</th><th>Rate / km</th><th>Fuel allowance</th><th>Source / status</th></tr></thead><tbody>{row.dailyBreakdown.filter(day=>day.routeFuel).map(day=>{const fuel=day.routeFuel!;return <tr key={day.date}><td>{dateLabel(day.date)}</td><td>{fuel.km===null?'Pending':`${units(fuel.km)} km`}</td><td>{rateMoney(fuel.rate)}</td><td>{fuel.amount===null?'Pending':exactMoney(fuel.amount)}</td><td>{fuel.status==='pending'?routePendingLabel(fuel.reason):fuel.source==='manual'?'Uploaded units':`Station ${units(fuel.departureKm??0)} + delivery ${units(fuel.deliveryKm??0)} + return ${units(fuel.returnKm??0)} km`}</td></tr>})}</tbody></table></div></section> : null}
                     {attendanceRanges.length ? <div className="payout-breakup-summary">
                       {attendanceRanges.map((range) => <span key={`${range.basis}|${range.effectiveFrom}|${range.effectiveTo}`}>
                         <small>Uploaded attendance range</small>
