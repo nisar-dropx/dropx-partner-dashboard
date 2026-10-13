@@ -765,7 +765,12 @@ with (security_invoker = true)
 as
 with paid_allocation_basis as (
   select
-    allocation.*,
+    allocation.company_id,
+    allocation.id,
+    allocation.payment_item_id,
+    allocation.publication_id,
+    allocation.station_id,
+    allocation.instruction_amount_snapshot,
     item.batch_id,
     item.workforce_id as original_workforce_id,
     item.period_start,

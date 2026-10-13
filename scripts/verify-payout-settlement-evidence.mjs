@@ -177,7 +177,8 @@ await db.exec(`
     payment_item_id uuid not null,
     publication_id uuid not null,
     station_id uuid not null,
-    instruction_amount_snapshot numeric(14,2) not null
+    instruction_amount_snapshot numeric(14,2) not null,
+    created_at timestamptz not null default clock_timestamp()
   );
   create table public.workforce_payout_payment_credit_transfers(
     company_id uuid not null,
