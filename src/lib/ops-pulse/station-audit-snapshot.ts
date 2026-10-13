@@ -36,7 +36,15 @@ export type AuditStationSnapshot = {
   /** Delivery Performance › Performance: sent out today and not yet delivered or returned. */
   held: { held: number; assigned: number; asOf: string | null } | null;
   /** COD deposit slip for today and yesterday. */
-  slips: { date: string; status: string; uploaded: boolean; pending: boolean }[] | null;
+  slips:
+    | {
+        date: string;
+        status: string;
+        uploaded: boolean;
+        /** Still owed after that day's submission deadline has passed. */
+        overdue: boolean;
+      }[]
+    | null;
 };
 
 /** A slow or failing source must never hold up the audit window. */
@@ -105,7 +113,7 @@ export async function loadAuditStationSnapshot(
             date: days[index],
             status: row.status,
             uploaded: row.slipUploaded,
-            pending: row.pending,
+            overdue: row.overdue,
           })),
       )
     : null;

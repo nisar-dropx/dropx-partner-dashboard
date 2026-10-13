@@ -3,12 +3,23 @@ import fs from 'node:fs';
 import ts from 'typescript';
 import { PGlite } from '@electric-sql/pglite';
 function lib(path){const m={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(m,m.exports);return m.exports;}
-const {parseAuditTids,compareAuditTids,selectedAuditEmployees,readAuditTidSheet}=lib('src/lib/ops-pulse/station-audit-reconciliation.ts');
+const {parseAuditTids,compareAuditTids,selectedAuditEmployees,readAuditTidSheet,auditTidTemplate,auditDifferencesWorkbook,auditHelpSheet}=lib('src/lib/ops-pulse/station-audit-reconciliation.ts');
+// Template: an empty first sheet, then the column guide, then a filled sample that reads back cleanly.
+const template=auditTidTemplate();assert.deepEqual(template.map(s=>s.name),['Tracking IDs','Column guide','Sample']);
+assert.throws(()=>readAuditTidSheet(template[0].rows),/No tracking IDs found/,'an unfilled template says so instead of importing nothing silently');
+assert.deepEqual(template.filter(s=>!auditHelpSheet.test(s.name)).map(s=>s.name),['Tracking IDs'],'guide and sample sheets are never read on upload');
+const sample=readAuditTidSheet(template[2].rows);assert.equal(sample.ids.length,4);assert.equal(sample.skipped,0);assert.equal(Object.keys(sample.reasons).length,3);
+for(const column of ['Tracking ID','Reason','Type'])assert.ok(template[1].rows.some(row=>row[0]===column&&row[1].length>40),`${column} is explained`);
+for(const sheet of template)assert.ok(sheet.rows.every(row=>row.length<=sheet.widths.length)&&sheet.name.length<=31);
+const differences=auditDifferencesWorkbook([{tid:'TID123',kind:'Missing',reason:''},{tid:'TID789',kind:'Excess',reason:'Extra bag'}]);
+assert.deepEqual(differences.map(s=>s.name),['Differences','Column guide']);assert.deepEqual(readAuditTidSheet(differences[0].rows),{ids:['TID123','TID789'],reasons:{TID789:'Extra bag'},duplicates:0,skipped:0,hasReasons:true},'the Type column is not mistaken for tracking IDs or reasons');
 // Spreadsheet import: heading found below a title row, reasons read, bad cells counted, numbers kept exact.
 assert.deepEqual(readAuditTidSheet([['Ageing report'],['Sl','Tracking ID','Remarks'],[1,'tid123','Not on shelf'],[2,'TID123',''],[3,'not a tid',''],[4,'',''],[5,123456789012,' Damaged ']]),{ids:['TID123','123456789012'],reasons:{TID123:'Not on shelf','123456789012':'Damaged'},duplicates:1,skipped:1,hasReasons:true});
 assert.deepEqual(readAuditTidSheet([['x','TID100'],['y','TID200']]),{ids:['TID100','TID200'],reasons:{},duplicates:0,skipped:0,hasReasons:false},'a sheet without headings uses the column holding tracking IDs');
 assert.equal(readAuditTidSheet([['AWB'],[1.5e21],['TID9000']]).ids.join(),'TID9000','a number too large to be exact is never guessed');
-assert.throws(()=>readAuditTidSheet([['Name','City'],['Asha','Kochi']]),/No tracking IDs found/);assert.throws(()=>readAuditTidSheet([['Tracking ID'],['']]),/No tracking IDs found under/);
+assert.throws(()=>readAuditTidSheet([['Name','City'],['Asha','Kochi']]),/No tracking IDs found/);assert.throws(()=>readAuditTidSheet([['Tracking ID'],['']]),/No tracking IDs found/);
+assert.deepEqual(readAuditTidSheet([['Shipment ageing report'],[],['Sl','Shipment status','Tracking ID','Auditor notes'],[1,'At station','TID5000','Torn'],[2,'At station','TID6000','']]),{ids:['TID5000','TID6000'],reasons:{TID5000:'Torn'},duplicates:0,skipped:0,hasReasons:true},'a title row or a status column is never taken for the tracking-ID column');
+assert.equal(readAuditTidSheet([['AWB'],[1.5e21],['TID9000']]).skipped,1,'an inexact number is reported as skipped');
 assert.throws(()=>readAuditTidSheet([['TID'],...Array.from({length:10001},(_,i)=>[`TID${i}`])]),/10,000/);assert.equal(readAuditTidSheet([['TID','Reason'],['TID1234','x'.repeat(900)]]).reasons.TID1234.length,300);
 const {missingAuditPhotos}=lib('src/lib/ops-pulse/station-audit-photos.ts');
 assert.deepEqual(parseAuditTids(' tid123\nTID123\tTID456;\n'),{ids:['TID123','TID456'],duplicates:1});
