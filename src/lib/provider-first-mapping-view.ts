@@ -36,6 +36,7 @@ export type ProviderFirstWorkerView = {
   profileStationId?: string;
   profileLocationLabel?: string;
   currentMappings?: ProviderFirstRegisteredMappingView[];
+  mappingHistory?: ProviderFirstRegisteredMappingView[];
   registeredLocationMappings?: ProviderFirstRegisteredMappingView[];
   registeredLocationMapping?: ProviderFirstRegisteredMappingView;
   onboardingStatus: string;
@@ -205,6 +206,19 @@ function registeredWorkerMappings(worker: ProviderFirstWorkerView) {
   return mappings;
 }
 
+function historicalWorkerMappings(worker: ProviderFirstWorkerView) {
+  const supplied = [
+    ...(worker.mappingHistory ?? []),
+    ...(worker.registeredLocationMappings ?? []),
+    ...(worker.registeredLocationMapping ? [worker.registeredLocationMapping] : []),
+    ...(worker.currentMappings ?? [])
+  ];
+  return supplied.filter((mapping) =>
+    (mapping.status === "active" && !mapping.effectiveTo)
+      || (mapping.status === "closed" && Boolean(mapping.effectiveTo))
+  ).filter((mapping, index, mappings) => mappings.findIndex((candidate) => candidate.mappingId === mapping.mappingId) === index);
+}
+
 function mappingIdentityMatchesRow(
   mapping: Pick<ProviderFirstRegisteredMappingView, "providerId" | "mappedProviderMemberId">,
   row: Pick<ProviderFirstMappingRowView, "providerId" | "providerMemberId">
@@ -232,6 +246,7 @@ export function providerFirstMappingReferenceForRow(
 ) {
   if (!worker) return undefined;
   const currentMappings = currentWorkerMappings(worker);
+  const mappingHistory = historicalWorkerMappings(worker);
   const registeredStationId = String(worker.profileStationId ?? "").trim();
   const registered = registeredWorkerMappings(worker).filter((mapping) =>
     mapping.mappingId
@@ -244,6 +259,21 @@ export function providerFirstMappingReferenceForRow(
     mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
   );
 
+  // A closed row remains the explicit edit target after its end date is
+  // cleared or extended. Without this, changing 01-30 Sep to 01 Sep-open
+  // drops mappingId and the save is misclassified as a new overlapping row.
+  // The database payment/publication guards still decide whether that stored
+  // period is financially unlocked and therefore editable.
+  const selectedClosedMapping = mappingHistory.find((mapping) =>
+    mapping.mappingId === row.mappingId
+      && mapping.status === "closed"
+      && Boolean(mapping.effectiveTo)
+      && mapping.stationId === row.stationId
+      && mapping.effectiveFrom === row.effectiveFrom
+      && mappingIdentityMatchesRow(mapping, row)
+  );
+  if (selectedClosedMapping) return selectedClosedMapping;
+
   // An existing current row remains the edit target only when its identity and
   // period actually cover the row. A later current mapping must not hide the
   // exact historical registered-location anchor for an earlier bounded row.
@@ -253,7 +283,16 @@ export function providerFirstMappingReferenceForRow(
   // Before dates have been chosen, use the newest exact registered anchor as
   // the template. Once dates exist, never silently reuse a non-containing
   // anchor; the row must fail validation until a covering interval is chosen.
-  if (!row.effectiveFrom && registered.length) return registered[0];
+  if (!row.effectiveFrom) {
+    const closedAtDestination = mappingHistory.find((mapping) =>
+      mapping.status === "closed"
+        && Boolean(mapping.effectiveTo)
+        && mapping.stationId === row.stationId
+        && mappingIdentityMatchesRow(mapping, row)
+    );
+    if (closedAtDestination) return closedAtDestination;
+    if (registered.length) return registered[0];
+  }
 
   // Preserve a conflicting current destination mapping as evidence so the UI
   // can report its provider/member conflict instead of treating the ID as free.
@@ -323,6 +362,15 @@ export function providerFirstLocationIsAllowed(
   const registeredStationId = String(worker.profileStationId ?? "").trim();
   if (!registeredStationId) return false;
   const currentMappings = currentWorkerMappings(worker);
+  const selectedClosedMapping = historicalWorkerMappings(worker).find((mapping) =>
+    mapping.mappingId === row.mappingId
+      && mapping.status === "closed"
+      && Boolean(mapping.effectiveTo)
+      && mapping.stationId === row.stationId
+      && mapping.effectiveFrom === row.effectiveFrom
+      && mappingIdentityMatchesRow(mapping, row)
+  );
+  if (selectedClosedMapping) return true;
   if (row.stationId === registeredStationId) {
     // An unmapped profile may be bootstrapped at its own location. If a current
     // mapping exists, an exact historical interval wins over an unrelated

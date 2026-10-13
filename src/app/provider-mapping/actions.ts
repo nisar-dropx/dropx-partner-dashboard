@@ -1272,8 +1272,17 @@ async function providerFirstReplacementState({
       .order("effective_from", { ascending: false })
       .order("created_at", { ascending: false })
     : Promise.resolve({ data: [], error: null });
+  const submittedMappingQuery = submittedMappingId
+    ? supabaseAdmin
+      .from("field_executive_provider_mappings")
+      .select("id, workforce_id, employee_id, contractor_id, field_executive_id, station_id, provider_id, provider_member_id, effective_from, effective_to, status")
+      .eq("company_id", companyId)
+      .eq("id", submittedMappingId)
+      .neq("status", "cancelled")
+      .maybeSingle()
+    : Promise.resolve({ data: null, error: null });
 
-  const [targetResult, providerResult, registeredMappingResult] = await Promise.all([
+  const [targetResult, providerResult, registeredMappingResult, submittedMappingResult] = await Promise.all([
     supabaseAdmin
       .from("field_executive_provider_mappings")
       .select("id, workforce_id, employee_id, contractor_id, field_executive_id, station_id, provider_id, provider_member_id, effective_from, effective_to, status")
@@ -1287,11 +1296,13 @@ async function providerFirstReplacementState({
       p_provider: providerId,
       p_provider_member_id: providerMemberId
     }),
-    registeredMappingQuery
+    registeredMappingQuery,
+    submittedMappingQuery
   ]);
   if (targetResult.error) throw new Error(targetResult.error.message);
   if (providerResult.error) throw new Error(providerResult.error.message);
   if (registeredMappingResult.error) throw new Error(registeredMappingResult.error.message);
+  if (submittedMappingResult.error) throw new Error(submittedMappingResult.error.message);
   const rawTargetMappings = (targetResult.data ?? []) as ProviderFirstActiveMapping[];
   const rawProviderMappings = (providerResult.data ?? []) as ProviderFirstActiveMapping[];
   const providerMappingIds = [...new Set(rawProviderMappings.map((mapping) => String(mapping.id ?? "")).filter(Boolean))];
@@ -1321,6 +1332,19 @@ async function providerFirstReplacementState({
       || (mapping.status === "closed" && Boolean(mapping.effective_to))
   );
   const normalizedMemberId = providerMemberIdentity(providerMemberId);
+  const submittedStoredMapping = submittedMappingResult.data as ProviderFirstActiveMapping | null;
+  const submittedClosedMapping = submittedStoredMapping
+    && submittedStoredMapping.status === "closed"
+    && Boolean(submittedStoredMapping.effective_to)
+    && String(submittedStoredMapping.effective_from ?? "") === requestedEffectiveFrom
+    && submittedStoredMapping.station_id === stationId
+    && submittedStoredMapping.provider_id === providerId
+    && providerMemberIdentity(submittedStoredMapping.provider_member_id) === normalizedMemberId
+    && (submittedStoredMapping.workforce_id === workforceId
+      || Boolean(sourceColumn && sourceProfileId
+        && String(submittedStoredMapping[sourceColumn as keyof ProviderFirstActiveMapping] ?? "") === sourceProfileId))
+      ? submittedStoredMapping
+      : null;
   const targetMappings = rawTargetMappings.filter((mapping) => mapping.workforce_id === workforceId
     || (sourceColumn && sourceProfileId && String(mapping[sourceColumn as keyof ProviderFirstActiveMapping] ?? "") === sourceProfileId));
   const activeMappingOverlapsRequestedPeriod = (mapping: ProviderFirstActiveMapping) =>
@@ -1358,6 +1382,7 @@ async function providerFirstReplacementState({
   const ownerRelevantMappings = [
     ...relevantTargetMappings,
     ...relevantProviderMappings,
+    ...(submittedClosedMapping ? [submittedClosedMapping] : []),
     ...(registeredLocationMapping ? [registeredLocationMapping] : [])
   ];
   const legacyOwnerFilters = ownerRelevantMappings.flatMap((mapping) => [
@@ -1396,11 +1421,23 @@ async function providerFirstReplacementState({
   const providerOwner = providerOwners.size ? [...providerOwners][0] : null;
   const destinationMapping = relevantProviderMappings.find((mapping) => mapping.station_id === stationId) ?? null;
   const submittedMapping = submittedMappingId
-    ? [...relevantTargetMappings, ...relevantProviderMappings, ...(registeredLocationMapping ? [registeredLocationMapping] : [])]
+    ? [...relevantTargetMappings, ...relevantProviderMappings, ...(submittedClosedMapping ? [submittedClosedMapping] : []), ...(registeredLocationMapping ? [registeredLocationMapping] : [])]
       .find((mapping) => mapping.id === submittedMappingId) ?? null
     : null;
   if (submittedMappingId && !submittedMapping) {
     throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
+  }
+  if (submittedClosedMapping) {
+    if (expectedReplacementId) {
+      throw new Error(`Row ${index + 1}: The mapping changed after confirmation. Review it and try again.`);
+    }
+    return {
+      confirmation: null,
+      locationRemap: null,
+      keepAll: null,
+      ownerReplacement: null,
+      currentMappingLocationDriftEdit: true
+    };
   }
   if (destinationMapping && canonicalOwner(destinationMapping) === workforceId) {
     if (submittedMappingId !== destinationMapping.id) {
