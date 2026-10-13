@@ -568,6 +568,11 @@ export function depositAttachmentsFor(row: Pick<CodSubmissionRow, "deposit_slip_
   return depositAttachments.length ? depositAttachments : attachmentsFor(row);
 }
 
+/** A slip stored as a PDF; anything else is shown as a photo. */
+export function isPdfAttachment(attachment: Pick<CodAttachment, "content_type" | "file_name"> | null | undefined) {
+  return (attachment?.content_type || "").toLowerCase() === "application/pdf" || /\.pdf$/i.test(attachment?.file_name || "");
+}
+
 export function depositSlipViewUrl(submissionId: string) {
   return `/api/ops-pulse/cod/submissions/slip?id=${encodeURIComponent(submissionId)}`;
 }

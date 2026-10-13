@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { depositAttachmentsFor, type CodAttachment, type CodSubmissionRow } from "@/lib/ops-pulse/cod";
+import { depositAttachmentsFor, isPdfAttachment, type CodAttachment, type CodSubmissionRow } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -60,10 +60,11 @@ export async function GET(request: Request) {
 
     const bytes = await file.data.arrayBuffer();
     const disposition = searchParams.get("download") === "1" ? "attachment" : "inline";
-    const fileName = attachment.file_name || "deposit-slip.jpg";
+    const pdf = isPdfAttachment(attachment);
+    const fileName = attachment.file_name || (pdf ? "deposit-slip.pdf" : "deposit-slip.jpg");
     return new NextResponse(bytes, {
       headers: {
-        "Content-Type": attachment.content_type || "image/jpeg",
+        "Content-Type": pdf ? "application/pdf" : attachment.content_type || "image/jpeg",
         "Content-Disposition": `${disposition}; filename="${fileName.replace(/"/g, "")}"`,
         "Cache-Control": "private, max-age=60"
       }

@@ -123,7 +123,7 @@ export function CodSubmissionForm({
         <label className="span-2">Photo or PDF of deposit slip
           <DepositSlipInput required />
           <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-            Upload a clear photo (JPG or PNG) or the PDF of the CMS / bank deposit slip. A PDF is converted to an image.
+            Upload a clear photo (JPG or PNG) or the PDF of the CMS / bank deposit slip.
           </span>
         </label>
         <label className="span-3">Remarks

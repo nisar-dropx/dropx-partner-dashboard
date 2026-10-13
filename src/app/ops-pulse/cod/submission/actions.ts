@@ -276,7 +276,8 @@ async function uploadSlipPhotos(companyId: string, submissionId: string, formDat
           label,
           section: "cod-submissions",
           submissionId,
-          imagesOnly: true
+          imagesOnly: true,
+          allowPdf: true
         })
       )
     )
