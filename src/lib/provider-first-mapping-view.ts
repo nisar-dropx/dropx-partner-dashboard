@@ -1,3 +1,4 @@
+import { mappingLookupToday } from "./provider-mapping-lookup.ts";
 import { matchNames } from "./name-match.ts";
 import type { PaymentAllocationHistoryEntry } from "./payment-allocation-history.ts";
 import type { ProductionThresholdConfig } from "./production-threshold-config.ts";
@@ -40,6 +41,7 @@ export type ProviderFirstWorkerView = {
   registeredLocationMappings?: ProviderFirstRegisteredMappingView[];
   registeredLocationMapping?: ProviderFirstRegisteredMappingView;
   onboardingStatus: string;
+  hasRestrictedMapping?: boolean;
 };
 
 export type ProviderFirstMappingRowView = {
@@ -60,7 +62,41 @@ export type ProviderFirstMappingRowView = {
   effectiveFrom: string;
   effectiveTo: string;
   history: PaymentAllocationHistoryEntry[];
+  relatedStationIds?: string[];
 };
+
+export type MappingStationTopology = { id: string; parent_station_id?: string | null; provider_id?: string | null; modelCode: string };
+
+/** Only the configured XPT/parent family shares associates; names/codes are not relationships. */
+export function providerMappingStationFamily(stationId: string, stations: MappingStationTopology[]) {
+  const station = stations.find((item) => item.id === stationId);
+  if (!station) return [stationId];
+  const parentId = station.modelCode.toUpperCase() === "XPT" && station.parent_station_id
+    ? station.parent_station_id : station.id;
+  return stations.filter((item) => item.provider_id === station.provider_id && (
+    item.id === stationId || item.id === parentId
+    || (item.modelCode.toUpperCase() === "XPT" && item.parent_station_id === parentId)
+  )).map((item) => item.id);
+}
+
+/** Preserve the selected value, but offer only valid, unoccupied choices for this row. */
+export function providerFirstWorkerIsSelectable(row: ProviderFirstMappingRowView, worker: ProviderFirstWorkerView, drafts: ProviderFirstMappingRowView[] = []) {
+  if (row.workforceId === worker.id) return true;
+  if (worker.hasRestrictedMapping) return false;
+  const profileStation = worker.profileStationId || worker.stationId;
+  if (!(row.relatedStationIds ?? [row.stationId]).includes(profileStation)) return false;
+  const identityMatches = (providerId: string, memberId: string) => providerId === row.providerId
+    && providerMemberKey("", memberId) === providerMemberKey("", row.providerMemberId);
+  const occupied = [...currentWorkerMappings(worker), ...(worker.mappingHistory ?? []).filter(item => item.status === "closed" && item.effectiveTo >= mappingLookupToday())];
+  if (occupied.some((item) => !identityMatches(item.providerId, item.mappedProviderMemberId))) return false;
+  if (drafts.some((item) => item !== row && item.workforceId === worker.id
+    && !identityMatches(item.providerId, item.providerMemberId))) return false;
+  const reference = providerFirstMappingReferenceForRow(row, worker);
+  const candidate = { ...row, workforceId: worker.id, mappingId: reference?.mappingId ?? "",
+    effectiveFrom: reference?.effectiveFrom ?? (row.effectiveFrom || worker.dateOfJoin),
+    effectiveTo: reference?.effectiveTo ?? row.effectiveTo };
+  return providerFirstLocationIsAllowed(candidate, worker);
+}
 
 export type ProviderFirstMappingReplacement = {
   kind: "owner" | "location";

@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 import { getAuthorization } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { isScientificProviderMemberId, providerFirstMappingPeriodContains, providerFirstNamesMatch, providerMemberIdFromSpreadsheetCells } from "@/lib/provider-first-mapping-view";
+import { mappingScheduleError, type MappingPaymentPeriod } from "@/lib/provider-mapping-schedule";
 import { ongoingMappingClosureError } from "@/lib/provider-mapping-period";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { parseProductionThresholdConfig, type ProductionThresholdConfig } from "@/lib/production-threshold-config";
@@ -570,6 +571,7 @@ async function saveExecutiveMappingRow(
   companyId: string,
   allowedLocationIds: Set<string> | null,
   options: {
+    prepareScheduleOnly?: boolean;
     allowWorkforceLocationRemap?: boolean;
     allowWorkforceLocationDriftEdit?: boolean;
     keepExistingLocationMappingId?: string | null;
@@ -951,7 +953,8 @@ async function saveExecutiveMappingRow(
       requestedEffectiveFrom: effectiveFrom,
       requestedEffectiveTo: effectiveTo
     }) : null;
-    if (closureError) throw new Error(`Row ${index + 1}: ${closureError}`);
+    if (closureError && !options.prepareScheduleOnly) throw new Error(`Row ${index + 1}: ${closureError}`);
+    if (options.prepareScheduleOnly) return mappingPayload;
 
     const { error } = options.keepExistingLocationMappingId
       ? await supabaseAdmin.rpc("workforce_keep_joining_mapping", {
@@ -2109,4 +2112,44 @@ export async function saveProviderFirstMapping(formData: FormData) {
     providerFirstMappingRedirect({ error: error instanceof Error ? error.message : "Unable to save provider-first mapping." });
   }
   providerFirstMappingRedirect({ notice: "Provider Member ID linked to workforce. Configure the payment method and rates on this ID Mapping page if needed." });
+}
+
+
+/** Prepare every period through the ordinary validator, then commit all periods in one transaction. */
+export async function saveProviderMappingSchedule(formData: FormData) {
+  try {
+    const auth = await getAuthorization();
+    if (!auth || !canEditProviderMappings(auth)) throw new Error("You do not have permission to edit provider mappings.");
+    const companyId = requireCompanyId(auth);
+    if (!supabaseAdmin) throw new Error("The database is temporarily unavailable.");
+    const count = Number(formData.get("row_count"));
+    if (!Number.isInteger(count) || count < 2 || count > 12) throw new Error("Plan between 2 and 12 payment periods.");
+    const allowed = auth.hasAllLocationAccess || auth.isMasterOwner || auth.roleCode === "OWNER" ? null : new Set(auth.locationScopeIds);
+    const workerId = rowRequired(formData,0,"id","Associate");
+    const stationId = rowRequired(formData,0,"station_id","Station");
+    const providerId = rowRequired(formData,0,"provider_id","Provider");
+    const memberId = rowRequired(formData,0,"provider_member_id","Provider ID");
+    const periods: MappingPaymentPeriod[] = [];
+    for (let index=0;index<count;index++) {
+      if (rowRequired(formData,index,"id","Associate") !== workerId || rowRequired(formData,index,"station_id","Station") !== stationId || rowRequired(formData,index,"provider_id","Provider") !== providerId || rowRequired(formData,index,"provider_member_id","Provider ID") !== memberId || rowRequired(formData,index,"source_type","Source") !== "workforce" || rowValue(formData,index,"replace_mapping_id")) throw new Error("A payment schedule must use one associate, provider ID and station. Save an ownership correction separately first.");
+      periods.push({effectiveFrom:rowRequired(formData,index,"effective_from","Start date"),effectiveTo:rowValue(formData,index,"effective_to") ?? "",paymentMethodId:rowRequired(formData,index,"payment_method_id","Payment method"),paymentValues:JSON.parse(rowValue(formData,index,"payment_values_json") ?? "{}"),productionThresholdMinimumUnits:rowValue(formData,index,"production_threshold_minimum_units") ?? ""});
+    }
+    const periodError = mappingScheduleError(periods);
+    if (periodError) throw new Error(periodError);
+    const expected = await supabaseAdmin.from("field_executive_provider_mappings").select("id,updated_at,workforce_id,provider_id,provider_member_id").eq("company_id",companyId).eq("station_id",stationId).eq("workforce_id",workerId).neq("status","cancelled");
+    if (expected.error) throw expected.error;
+    const prepared = [];
+    for (let index=0;index<count;index++) {
+      const mappingId = rowValue(formData,index,"mapping_id");
+      if (mappingId && !expected.data.some(row => row.id === mappingId && row.provider_id === providerId && providerMemberIdentity(row.provider_member_id) === providerMemberIdentity(memberId))) throw new Error("This mapping belongs to another associate or has changed. Reload and review it first.");
+      await assertProviderFirstRowScope(companyId,workerId,stationId,"workforce",allowed,index+1,null,Boolean(mappingId));
+      const payload = await saveExecutiveMappingRow(formData,index,auth.userId,companyId,allowed,{prepareScheduleOnly:true,allowWorkforceLocationDriftEdit:Boolean(mappingId)});
+      if (!payload) throw new Error("Could not prepare the payment schedule.");
+      prepared.push(payload);
+    }
+    const result = await supabaseAdmin.rpc("workforce_save_mapping_schedule",{p_company:companyId,p_actor:auth.userId,p_workforce:workerId,p_dropx:rowRequired(formData,0,"dropx_id","DropX ID"),p_periods:prepared,p_locations:allowed ? [...allowed] : null,p_actor_name:auth.fullName ?? "Mapping reviewer",p_expected_versions:expected.data.map(row => ({id:row.id,updated_at:row.updated_at}))});
+    if (result.error) throw result.error;
+    revalidateTag("ops-cps"); revalidatePath("/provider-id-mapping"); revalidatePath("/payments/workforce-payouts");
+    return {ok:true,message:`${count} payment periods saved.`, mappings: result.data as Array<{id:string;effective_from:string;effective_to:string|null;payment_method_id:string;payment_values:Record<string,string|number>;production_threshold_config:unknown;status:string}>};
+  } catch(error) { return {ok:false,message:error instanceof Error ? error.message : typeof error === "object" && error && "message" in error ? String(error.message) : "Could not save the schedule. No periods were saved.",mappings:[]}; }
 }

@@ -2,6 +2,11 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import { saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
+import { ProviderMappingSchedule, type SavedScheduleMappings } from "@/components/provider-mapping-schedule";
+import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
+import { ProviderMappingLookup } from "@/components/provider-mapping-lookup";
+import { mappingLookupToday } from "@/lib/provider-mapping-lookup";
+import type { ProviderMappingLookupEntry } from "@/lib/provider-mapping-lookup";
 import { SearchableSelect } from "@/components/searchable-select";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
 import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
@@ -13,6 +18,7 @@ import {
   isScientificProviderMemberId,
   providerFirstNamesMatch,
   providerFirstLocationIsAllowed,
+  providerFirstWorkerIsSelectable,
   providerFirstLocationRemap,
   providerFirstMappingReferenceForRow,
   providerFirstMappingReplacement,
@@ -145,8 +151,9 @@ function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches || busy} onClick={() => onSave(index)} type="button">{busy ? "Saving..." : dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialOutboundMonth, canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialOutboundMonth, lookupEntries = [], canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
   shipmentMonths: string[];
+  lookupEntries?: ProviderMappingLookupEntry[];
   initialOutboundMonth: string;
   initialQuery?: string;
   initialStationId?: string;
@@ -155,6 +162,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   workers: ProviderFirstWorker[];
   paymentMethods: PaymentMethodOption[];
 }) {
+  const [scheduleIndex, setScheduleIndex] = useState<number | null>(null);
   const [rows, setRows] = useState(() => mappings);
   const [baselineRows, setBaselineRows] = useState(() => mappings);
   const [workerRows, setWorkerRows] = useState(() => workers);
@@ -340,6 +348,52 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       history = history.map((entry) => entry.id === previous.mappingId ? { ...entry, effectiveTo, storedStatus: "closed" } : entry);
     }
     return uniquePaymentAllocationHistory([...history.filter((entry) => entry.id !== next.mappingId), nextEntry]);
+  }
+
+  const currentLookupEntries = useMemo(() => {
+    const live = new Map(lookupEntries.map(entry => [entry.key, entry]));
+    for (const [index,row] of baselineRows.entries()) {
+      if (row === mappings[index]) continue;
+      const worker = workerById.get(row.workforceId);
+      for (const [key,entry] of live) {
+        if (!entry.history.length && ((entry.stationId === row.stationId && entry.providerMemberId === row.providerMemberId) || (row.workforceId && entry.workforceId === row.workforceId))) live.delete(key);
+      }
+      for (const entry of row.history) {
+        const previousEntry = lookupEntries.find(item => item.history.some(record => record.id === entry.id));
+        if (previousEntry) {
+          live.set(entry.id,{...previousEntry,history:[entry]});
+        } else if (!entry.locationLabel || entry.locationLabel === row.stationLabel) {
+          live.set(entry.id,{key:entry.id,stationId:row.stationId,stationLabel:row.stationLabel,workforceId:row.workforceId,dropxId:row.dropxId,fullName:row.dropxName,providerMemberId:row.providerMemberId,providerMemberName:row.providerMemberName,profileLocationLabel:worker?.profileLocationLabel ?? worker?.locationLabel ?? '',history:[entry]});
+        }
+      }
+      if (!row.workforceId) live.set(`provider:${row.stationId}:${row.providerMemberId}`,{key:`provider:${row.stationId}:${row.providerMemberId}`,stationId:row.stationId,stationLabel:row.stationLabel,workforceId:'',dropxId:'',fullName:'',providerMemberId:row.providerMemberId,providerMemberName:row.providerMemberName,profileLocationLabel:'',history:[]});
+    }
+    return [...live.values()];
+  }, [lookupEntries,baselineRows,mappings,workerById]);
+
+  function applySavedSchedule(index: number, saved: SavedScheduleMappings) {
+    const original = rows[index];
+    const worker = workerById.get(original.workforceId);
+    const savedRows = saved.filter(stored => stored.status !== "cancelled").map(stored => {
+      const snapshot = parseProductionThresholdSnapshot(stored.production_threshold_config);
+      return { ...original, mappingId: stored.id, paymentMethodId: stored.payment_method_id, paymentValues: Object.fromEntries(Object.entries(stored.payment_values ?? {}).map(([key,value]) => [key,String(value)])), effectiveFrom: stored.effective_from, effectiveTo: stored.effective_to ?? "", productionThresholdConfig: snapshot ? { period:snapshot.period,component_codes:snapshot.component_codes } : null, productionThresholdMinimumUnits: snapshot ? String(snapshot.minimum_units) : "" };
+    });
+    let history = original.history;
+    for (const savedRow of savedRows) history = reconciledHistory(savedRow,savedRow,history);
+    const current = savedRows.find(item => !item.effectiveTo) ?? savedRows.filter(item => item.effectiveTo >= mappingLookupToday()).at(-1);
+    const canonical = current ? {...current,history} : clearCurrentMapping(original,history);
+    setRows(previous => previous.map((item,i) => i === index ? canonical : item));
+    setBaselineRows(previous => previous.map((item,i) => i === index ? canonical : item));
+    if (worker) setWorkerRows(previous => previous.map(item => {
+      if (item.id !== original.workforceId) return item;
+      const periods = savedRows.map(registeredMappingFromRow);
+      const ids = new Set(periods.map(period => period.mappingId));
+      const currentMappings = [...(item.currentMappings ?? []).filter(period => !ids.has(period.mappingId)), ...periods.filter(period => !period.effectiveTo)];
+      const mappingHistory = [...(item.mappingHistory ?? []).filter(period => !ids.has(period.mappingId)),...periods];
+      const registeredLocationMappings = item.profileStationId === original.stationId ? [...(item.registeredLocationMappings ?? []).filter(period => !ids.has(period.mappingId)),...periods] : item.registeredLocationMappings;
+      return {...item,currentMappings,mappingHistory,registeredLocationMappings,registeredLocationMapping:registeredLocationMappings?.[0], ...(current ? {mappingId:current.mappingId,paymentMethodId:current.paymentMethodId,paymentValues:current.paymentValues,effectiveFrom:current.effectiveFrom,effectiveTo:current.effectiveTo,mappedProviderMemberId:current.providerMemberId} : {mappingId:"",mappedProviderMemberId:""})};
+    }));
+    setScheduleIndex(null); setSaveNotice({kind:"success",message:"Payment periods saved together. The scheduled methods will apply on their effective dates."});
   }
 
   function chooseWorker(index: number, workerId: string) {
@@ -703,12 +757,13 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     }
   }
 
-  if (!rows.length) return <section className="panel"><div className="empty-state"><strong>No provider members found.</strong><p className="subtle">Import provider production data first, then map each Provider Member ID to a workforce DropX ID.</p></div></section>;
+
 
   return <div className="worksheet-form">
+    <ProviderMappingLookup entries={currentLookupEntries} onShowMapping={(stationId, providerId) => { clearFilters(); setStationFilters([stationId]); setQuery(providerId); }} />
     <section className="panel">
       <div className="panel-head provider-first-panel-head">
-        <div><h2>Provider member mapping</h2>{saveNotice ? <p aria-live="polite" className={saveNotice.kind === "error" ? "mapping-upload-error" : "mapping-upload-success"}>{saveNotice.message}</p> : null}</div>
+        <div><h2>Provider member mapping</h2><p className="subtle">Available associates from this station and its parent/XPT group. Use Find mapping to locate an ID already assigned.</p>{saveNotice ? <p aria-live="polite" className={saveNotice.kind === "error" ? "mapping-upload-error" : "mapping-upload-success"}>{saveNotice.message}</p> : null}</div>
         <button className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict || hasDirtyLocationMismatch || isSaving} onClick={() => void saveIndexes(dirtyIndexes)} type="button">{isSaving ? "Saving..." : !canEdit ? "No edit access" : hasDirtyLocationMismatch ? "Fix location mismatches" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : hasDirty ? "Save changes" : "No edits"}</button>
       </div>
       <div className="provider-first-filters">
@@ -746,7 +801,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Select DropX workforce" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions.filter(option => providerFirstWorkerIsSelectable(row, workerById.get(option.value)!, rows))} placeholder="Select available station associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>
@@ -754,15 +809,15 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               <input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="1" onChange={(event) => update(index, { productionThresholdMinimumUnits: event.target.value })} placeholder="Enter minimum units" step="1" type="number" value={row.productionThresholdMinimumUnits} />
               <span className="provider-first-selected-detail">Combined across {productionThresholdConfig.component_codes.map((code) => components.find((component) => component.code === code)?.label ?? code).join(" + ")}</span>
             </label> : null}
-            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">To change method during a month, save the new method with its start date. The previous method automatically ends on the preceding day.</p></div>
+            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
-            {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Confirmation is required when saving.</div> : null}
+            {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Save this location mapping before adding payment periods.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
-          <div className="mapping-row-actions"><PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
+          <div className="mapping-row-actions"><button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton loadMappingAudit entries={row.history} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
         </div>;
       })}{!paginatedIndexes.length ? <div className="empty-state"><strong>No matching provider members.</strong><p className="subtle">Change or clear the filters to see more records.</p></div> : null}</div>
       <div className="mapping-pagination">
@@ -770,6 +825,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <div className="mapping-pagination-actions"><button className="button secondary compact" disabled={pageWindow.page <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} type="button">Previous</button><span>Page {pageWindow.page} of {pageWindow.totalPages}</span><button className="button secondary compact" disabled={pageWindow.page >= pageWindow.totalPages} onClick={() => setCurrentPage((page) => Math.min(pageWindow.totalPages, page + 1))} type="button">Next</button></div>
       </div>
     </section>
+    {scheduleIndex !== null ? <ProviderMappingSchedule row={rows[scheduleIndex]} methods={paymentMethods} onClose={() => setScheduleIndex(null)} onSaved={(saved) => applySavedSchedule(scheduleIndex,saved)} /> : null}
     {replacementConfirmation ? (() => {
       const active = replacementConfirmation.replacements[replacementConfirmation.cursor];
       return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setReplacementConfirmation(null); }}>

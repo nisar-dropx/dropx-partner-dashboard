@@ -23648,3 +23648,20 @@ td strong,
   max-width: 90vw;
   padding: 20px 26px;
 }
+
+/* Mapping discovery stays independent from the editable worksheet filters. */
+.mapping-lookup-controls { display:grid; grid-template-columns: minmax(240px,2fr) minmax(180px,1fr) auto; gap:16px; align-items:end; }
+.mapping-lookup-controls label { display:grid; gap:6px; font-size:12px; font-weight:600; }
+.mapping-lookup-controls .mapping-lookup-history { display:flex; align-items:center; padding-bottom:10px; }
+.mapping-lookup-history input { width:auto; }
+.mapping-lookup-results { max-height:420px; overflow:auto; }
+.mapping-lookup-result { display:grid; grid-template-columns:1.2fr 1.3fr 1fr auto; gap:16px; padding:14px 0; border-top:1px solid #e5eaf0; font-size:13px; }
+.mapping-lookup-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.mapping-audit-list { display:grid; gap:6px; margin-top:12px; padding-top:10px; border-top:1px solid #e5eaf0; font-size:12px; }
+.mapping-audit-list time { color:#596b82; }
+@media (max-width:850px) { .mapping-lookup-controls,.mapping-lookup-result { grid-template-columns:1fr; } }
+.mapping-period-plan { border:1px solid #dfe6ee; border-radius:10px; margin:16px 0; padding:16px; min-width:0; }
+.mapping-period-plan legend { font-size:13px; font-weight:700; padding:0 6px; }
+.mapping-plan-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
+.mapping-plan-fields label { display:grid; align-content:start; gap:6px; font-size:12px; font-weight:600; }
+.provider-first-row .mapping-row-actions { flex-wrap:wrap; }

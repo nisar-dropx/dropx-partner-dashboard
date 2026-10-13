@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as mapping from '../lib/provider-first-mapping-view.ts';
 import * as history from '../lib/payment-allocation-history.ts';
+import * as lookup from '../lib/provider-mapping-lookup.ts';
 import * as threshold from '../lib/production-threshold-snapshot.ts';
 import { dashboardDateInputValue } from '../lib/date-format.ts';
 
@@ -39,10 +40,13 @@ function worksheet(props = {}, save = async () => ({ ok: false, savedRows: [], m
   const boundaries = {
     react: hooks,
     '@/app/provider-mapping/actions': { saveProviderFirstMappingsInline: save },
+    '@/components/provider-mapping-lookup': { ProviderMappingLookup: 'MappingLookup' },
+    '@/components/provider-mapping-schedule': { ProviderMappingSchedule: 'MappingSchedule' },
     '@/components/searchable-select': { SearchableSelect: 'SearchableSelect' },
     '@/components/payment-allocation-history-button': { PaymentAllocationHistoryButton: 'History' },
     '@/components/provider-mapping-worksheet': { MappingMultiFilter: 'MappingMultiFilter' },
     '@/lib/provider-first-mapping-view': mapping,
+    '@/lib/provider-mapping-lookup': lookup,
     '@/lib/payment-allocation-history': history,
     '@/lib/production-threshold-snapshot': threshold
   };
@@ -153,4 +157,25 @@ test('current month uses IST at month and year boundaries and is passed by the s
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.match(pkg.scripts['test:provider-mapping-period'], /provider-first-mapping-worksheet\.test\.mjs/);
   assert.match(pkg.scripts.build, /test:provider-mapping-period/);
+});
+
+test('payment-period plus requires the first end date and opens the plan without hiding the row',()=>{
+ const ui=worksheet();completeDraft(ui);
+ const plus=()=>ui.one(n=>n.type==='button'&&n.props.children==='+ Add payment period');
+ assert.equal(plus().props.disabled,true);
+ ui.one(n=>n.type==='input'&&n.props.type==='date'&&!n.props.required).props.onChange({target:{value:'2026-10-10'}});ui.render();
+ assert.equal(plus().props.disabled,false);
+ plus().props.onClick();ui.render();
+ assert.equal(ui.one(n=>n.type==='MappingSchedule').props.row.effectiveTo,'2026-10-10');
+ assert.equal(ui.cards().length,1);
+});
+
+test('dropdown filters available station associates and lookup reflects only successful saves',async()=>{
+ const ui=worksheet({workers:[worker,{...worker,id:'elsewhere',profileStationId:'station-2'}],lookupEntries:[{key:'u',stationId:'station-1',providerMemberId:row.providerMemberId,history:[]}]},async data=>saved(data));
+ assert.deepEqual(ui.select('provider_first_worker_0').options.map(option=>option.value),[worker.id]);
+ completeDraft(ui);
+ assert.equal(ui.one(n=>n.type==='MappingLookup').props.entries[0].history.length,0);
+ await ui.save();
+ assert.equal(ui.one(n=>n.type==='MappingLookup').props.entries[0].dropxId,worker.dropxId);
+ assert.equal(ui.one(n=>n.type==='MappingLookup').props.entries[0].history[0].id,'saved-1');
 });
