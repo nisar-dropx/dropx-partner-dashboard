@@ -5,6 +5,13 @@ import {codStatusChecks,compareCodRows} from './cod-status.ts';
 const at=s=>Date.parse(s+'+05:30'), now=new Date(at('2026-10-13T12:00:00'));
 const pkg=(day,amount=100)=>({trackingId:day,amount,paymentMethod:'CASH',collectedAt:at(day+'T11:00:00'),transactionAt:at('2026-10-13T11:30:00')});
 const data=(packages,pendingAmount=packages.reduce((s,p)=>s+p.amount,0))=>({complete:true,driverCount:2,pendingCount:pendingAmount?1:0,pendingAmount,completedPercent:pendingAmount?50:100,drivers:pendingAmount?[{id:'da',name:'DA',pendingAmount,packages}]:[]});
+test('SCC recovered cash is counted without turning its update time into a collection date',()=>{
+ const d=data([{trackingId:'missing-roster',amount:2925.81,paymentMethod:'CASH',collectedAt:null,transactionAt:null,source:'scc_cash_with_associate',sourceUpdatedAt:now.getTime()}]);
+ const all=reconciliationView(d,'','21:00',now);assert.equal(all.amount,2925.81);assert.equal(all.unknownAmount,2925.81);assert.equal(all.todayAmount,0);assert.equal(all.check.tone,'unavailable');
+ assert.equal(reconciliationView(d,'undated','21:00',now).amount,2925.81);
+ assert.equal(reconciliationView(d,'2026-10-13','21:00',now).check.tone,'unavailable');
+ assert.equal(reconciliationAgeing(d,1,now).count,0);
+});
 test('daytime cash is normal, configurable evening deadline flags outstanding cash',()=>{
  const r=data([pkg('2026-10-13')]);
  assert.equal(reconciliationView(r,'','21:00',now).check.tone,'active');
