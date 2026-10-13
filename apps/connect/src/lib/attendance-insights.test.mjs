@@ -266,3 +266,20 @@ test("the day a week-off comp-off is taken shows as that leave", () => {
   }));
   assert.equal(holidayCompOff.calendarClass, "paid-leave");
 });
+
+test("scores a week off that was worked on the hours worked", () => {
+  const full = attendanceDayInsight(row({ attendanceStatus: "Present (Weekly Off)", payDayType: "week_off" }));
+  assert.equal(full.calendarClass, "full");
+  assert.equal(full.payDayType, "present");
+
+  const short = attendanceDayInsight(row({ attendanceStatus: "Half Day (Weekly Off)", payDayType: "half_day", inTime: "11:36", outTime: "16:31", workHours: "04:55" }));
+  assert.equal(short.calendarClass, "half");
+  assert.equal(short.payDayType, "half_day");
+  assert.equal(short.tone, "amber");
+  assert.match(short.issues.at(-1).message, /weekly off for less than a full day/);
+
+  const brief = attendanceDayInsight(row({ attendanceStatus: "Weekly Off", payDayType: "week_off", inTime: "09:00", outTime: "10:00", workHours: "01:00" }));
+  assert.equal(brief.calendarClass, "week-off");
+  assert.equal(brief.payDayType, "week_off");
+  assert.match(brief.detail, /under half a day/);
+});

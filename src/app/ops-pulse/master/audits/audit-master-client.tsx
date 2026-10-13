@@ -266,6 +266,30 @@ export function AuditMasterClient({
                     </label>
                   ))}
                 </fieldset>
+                {programmeSettings.cross_audit_ready && (
+                  <fieldset style={fieldStyle}>
+                    <legend>Cross-station audit roles</legend>
+                    <small className="subtle">
+                      Create or assign an audit at any station, to any
+                      auditor, and approve cross-station requests. A reporting
+                      manager can always approve their own team’s requests.
+                    </small>
+                    <input type="hidden" name="cross_audit_roles" value="1" />
+                    {roles.map((role) => (
+                      <label key={role.id}>
+                        <input
+                          type="checkbox"
+                          name="cross_audit_role_ids"
+                          value={role.id}
+                          defaultChecked={programmeSettings.cross_audit_role_ids.includes(
+                            role.id,
+                          )}
+                        />{" "}
+                        {role.name} <small>({role.code})</small>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
               </div>
               <fieldset style={{ ...fieldStyle, marginTop: 16 }}>
                 <legend>Excluded location models</legend>

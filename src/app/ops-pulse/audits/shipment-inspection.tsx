@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
   compareAuditTids,
   parseAuditTids,
+  readAuditTidSheet,
   type AuditEmployee,
 } from "@/lib/ops-pulse/station-audit-reconciliation";
 import type {
@@ -86,6 +87,43 @@ export function EmployeePicker({
     </div>
   );
 }
+/** Opens the file picker for one spreadsheet; the same file can be chosen again. */
+function SheetButton({
+  label,
+  onFile,
+}: {
+  label: string;
+  onFile: (file: File) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button
+        type="button"
+        className={styles.miniButton}
+        onClick={() => input.current?.click()}
+      >
+        {label}
+      </button>
+      <input
+        ref={input}
+        type="file"
+        hidden
+        tabIndex={-1}
+        aria-label={label}
+        accept=".xlsx,.xls,.csv"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+    </>
+  );
+}
+type SheetTarget = "expected" | "scanned" | "reasons";
+const plural = (count: number, word: string) =>
+  `${count} ${word}${count === 1 ? "" : "s"}`;
 export function ShipmentInspection({
   lists,
   exceptions,
@@ -162,6 +200,118 @@ export function ShipmentInspection({
     );
     setPage(0);
   };
+  const [sheetNotice, setSheetNotice] = useState<
+    Partial<Record<SheetTarget, string>>
+  >({});
+  // Reads a spreadsheet in the browser. Tracking IDs join the chosen list and any
+  // reason typed beside one becomes that shipment's observation.
+  const importSheet = async (target: SheetTarget, file: File) => {
+    try {
+      if (file.size > 10 * 1024 * 1024)
+        throw new Error("Choose a file up to 10 MB.");
+      const XLSX = await import("xlsx");
+      // Text files keep their cells as typed, so long numeric IDs stay exact.
+      const book = XLSX.read(await file.arrayBuffer(), {
+        type: "array",
+        raw: true,
+      });
+      const sheet = book.SheetNames.map((name) => book.Sheets[name]).find(
+        (candidate) => candidate?.["!ref"],
+      );
+      if (!sheet) throw new Error("This file has no rows.");
+      const read = readAuditTidSheet(
+        XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+          header: 1,
+          raw: true,
+          defval: "",
+        }),
+      );
+      const reasonCount = Object.keys(read.reasons).length;
+      if (target === "reasons") {
+        if (!read.hasReasons)
+          throw new Error(
+            "Add a Reason column beside the tracking IDs, then upload again.",
+          );
+        const open = new Set(rows.map((row) => row.tid));
+        const matched = Object.entries(read.reasons).filter(([tid]) =>
+          open.has(tid),
+        );
+        if (!matched.length)
+          throw new Error(
+            "None of the reasons in this file belong to a missing or excess shipment listed here.",
+          );
+        setNotes((old) => ({ ...old, ...Object.fromEntries(matched) }));
+        setSheetNotice((old) => ({
+          ...old,
+          reasons: [
+            `${file.name}: ${plural(matched.length, "reason")} filled`,
+            reasonCount > matched.length
+              ? `${reasonCount - matched.length} not in the differences`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        }));
+        return;
+      }
+      let listed: string[] = [];
+      try {
+        listed = parseAuditTids(target === "expected" ? expected : scanned).ids;
+      } catch {
+        throw new Error(
+          "Correct the tracking IDs already in this list before adding a file.",
+        );
+      }
+      const have = new Set(listed);
+      const fresh = read.ids.filter((tid) => !have.has(tid));
+      if (listed.length + fresh.length > 10000)
+        throw new Error("Maximum 10,000 unique TIDs per list.");
+      (target === "expected" ? setExpected : setScanned)(
+        [...listed, ...fresh].join("\n"),
+      );
+      if (reasonCount) setNotes((old) => ({ ...old, ...read.reasons }));
+      setPage(0);
+      setSheetNotice((old) => ({
+        ...old,
+        [target]: [
+          `${file.name}: ${plural(fresh.length, "tracking ID")} added`,
+          read.ids.length > fresh.length
+            ? `${read.ids.length - fresh.length} already in the list`
+            : "",
+          read.duplicates ? `${plural(read.duplicates, "repeat")} ignored` : "",
+          read.skipped
+            ? `${plural(read.skipped, "row")} skipped (not a tracking ID)`
+            : "",
+          reasonCount ? `${plural(reasonCount, "reason")} read` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      }));
+    } catch (e) {
+      setSheetNotice((old) => ({
+        ...old,
+        [target]: `${file.name}: ${e instanceof Error ? e.message : "this file could not be read."}`,
+      }));
+    }
+  };
+  const downloadDifferences = async () => {
+    try {
+      const XLSX = await import("xlsx");
+      const sheet = XLSX.utils.aoa_to_sheet([
+        ["Tracking ID", "Type", "Reason"],
+        ...rows.map((row) => [row.tid, row.kind, notes[row.tid] || ""]),
+      ]);
+      sheet["!cols"] = [{ wch: 26 }, { wch: 10 }, { wch: 60 }];
+      const book = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(book, sheet, "Differences");
+      XLSX.writeFile(book, "audit-differences.xlsx");
+    } catch {
+      setSheetNotice((old) => ({
+        ...old,
+        reasons: "The differences could not be downloaded. Try again.",
+      }));
+    }
+  };
   const addScan = () => {
     try {
       const next = parseAuditTids(scan).ids;
@@ -186,13 +336,21 @@ export function ShipmentInspection({
       </div>
       <div className={styles.sectionBody}>
         <p className={styles.checkHelp}>
-          Paste only tracking IDs from the ageing report. Scan every physical
-          shipment; duplicate TIDs count once. Counts and differences are
-          calculated automatically.
+          Paste tracking IDs or upload an Excel or CSV file for either list.
+          Scan every physical shipment; duplicate TIDs count once. Counts and
+          differences are calculated automatically. A Reason column in the
+          file fills the observation for that shipment.
         </p>
         <div className={styles.reconciliationGrid}>
           <div>
             <h3>1. ERP ageing · {result.a.ids.length}</h3>
+            <div className={styles.sheetTools}>
+              <SheetButton
+                label="Upload Excel / CSV"
+                onFile={(file) => void importSheet("expected", file)}
+              />
+              <small role="status">{sheetNotice.expected}</small>
+            </div>
             <textarea
               aria-label="ERP ageing TIDs"
               name="expected_tids"
@@ -208,6 +366,13 @@ export function ShipmentInspection({
           </div>
           <div>
             <h3>2. Physically scanned · {result.b.ids.length}</h3>
+            <div className={styles.sheetTools}>
+              <SheetButton
+                label="Upload Excel / CSV"
+                onFile={(file) => void importSheet("scanned", file)}
+              />
+              <small role="status">{sheetNotice.scanned}</small>
+            </div>
             <div className={styles.scanInput}>
               <input
                 aria-label="Scan physical shipment"
@@ -250,6 +415,25 @@ export function ShipmentInspection({
               {result.matched} matched · {result.missing.length} missing ·{" "}
               {result.excess.length} excess
             </p>
+            {rows.length > 0 && (
+              <div className={styles.sheetTools}>
+                <button
+                  type="button"
+                  className={styles.miniButton}
+                  onClick={() => void downloadDifferences()}
+                >
+                  Download as Excel
+                </button>
+                <SheetButton
+                  label="Upload reasons"
+                  onFile={(file) => void importSheet("reasons", file)}
+                />
+                <small role="status">
+                  {sheetNotice.reasons ||
+                    "Fill the Reason column in the downloaded file, then upload it."}
+                </small>
+              </div>
+            )}
             {rows.length > 0 && (
               <div className={styles.responseFilters}>
                 <span>Show</span>

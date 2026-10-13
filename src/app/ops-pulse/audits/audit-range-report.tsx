@@ -7,6 +7,7 @@ import {
   auditResponseLabel,
   auditStatusLabel,
   isFastAudit,
+  isUnscheduledAudit,
 } from "@/lib/ops-pulse/station-audit-planning";
 import {
   auditProgress,
@@ -22,6 +23,9 @@ import styles from "./audit-workspace.module.css";
 
 export function AuditRangeReport({
   audits,
+  plan,
+  planCounts,
+  onPlan,
   workspace,
   range,
   error,
@@ -31,6 +35,10 @@ export function AuditRangeReport({
   onOpen,
 }: {
   audits: StationAudit[];
+  /** "all", "scheduled" (planned programme) or "unscheduled". */
+  plan: string;
+  planCounts: { all: number; unscheduled: number };
+  onPlan: (plan: string) => void;
   workspace: StationAuditWorkspace;
   range: { from: string; to: string };
   error: string;
@@ -111,6 +119,22 @@ export function AuditRangeReport({
           </button>
         </form>
       </div>
+      <div className={styles.typeSwitch} aria-label="Planned or unscheduled">
+        {[
+          ["all", `All · ${planCounts.all}`],
+          ["scheduled", `Scheduled · ${planCounts.all - planCounts.unscheduled}`],
+          ["unscheduled", `Unscheduled · ${planCounts.unscheduled}`],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={plan === key || (key === "all" && !["scheduled", "unscheduled"].includes(plan))}
+            onClick={() => onPlan(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {validation && (
         <p role="alert" className={styles.notice}>
           {validation}
@@ -182,7 +206,11 @@ export function AuditRangeReport({
                           (type) => type.id === audit.audit_type_id,
                         )?.name}
                     </small>
-                    <small>{audit.audit_number}</small>
+                    <small>
+                      {audit.audit_number}
+                      {isUnscheduledAudit(audit) ? " · Unscheduled" : ""}
+                      {audit.cross_station ? " · Cross-station" : ""}
+                    </small>
                   </td>
                   <td>
                     {auditDay(audit.scheduled_for)}
@@ -256,9 +284,9 @@ export function AuditRangeReport({
         </table>
       </div>
       <p className={styles.reportHint}>
-        Includes scheduled audit records only. Unscheduled programme slots
-        remain in Monthly plan. Submitted fieldwork is shown separately from
-        final closure.
+        Lists audits that exist, planned or unscheduled. Programme slots with no
+        audit yet remain in Monthly plan. Submitted fieldwork is shown
+        separately from final closure.
       </p>
     </section>
   );

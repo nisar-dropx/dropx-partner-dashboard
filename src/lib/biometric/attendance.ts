@@ -562,14 +562,19 @@ function attendanceDayStatus({
   status: string;
   workMinutes: number;
 }) {
-  if (dayType && dayType !== "working" && dayType !== "unassigned") {
-    const dayLabel = dayType.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const restDay = Boolean(dayType && dayType !== "working" && dayType !== "unassigned");
+  const dayLabel = restDay ? dayType.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "";
+  // A week off worked with both punches is scored on its hours below, the way
+  // People payroll pays it. Every other rest day keeps its own label.
+  if (restDay && !(dayType === "weekly_off" && punchCount >= 2)) {
     return punchCount > 0 ? `Present (${dayLabel})` : dayLabel;
   }
-  if (status === "A" || punchCount === 0) return treatmentLabel(rules.no_punch_treatment, "Absent");
-  if (punchCount === 1) return treatmentLabel(rules.single_punch_treatment, "Needs Review");
-  if (punchCount % 2 === 1 && rules.odd_punch_treatment !== "first_last") {
-    return treatmentLabel(rules.odd_punch_treatment, "Needs Review");
+  if (!restDay) {
+    if (status === "A" || punchCount === 0) return treatmentLabel(rules.no_punch_treatment, "Absent");
+    if (punchCount === 1) return treatmentLabel(rules.single_punch_treatment, "Needs Review");
+    if (punchCount % 2 === 1 && rules.odd_punch_treatment !== "first_last") {
+      return treatmentLabel(rules.odd_punch_treatment, "Needs Review");
+    }
   }
 
   const percentageBasis = String(rules.work_duration_basis ?? "").toLowerCase().includes("percent");
@@ -579,6 +584,15 @@ function attendanceDayStatus({
   const halfThreshold = percentageBasis && scheduledMinutes > 0
     ? Math.round(scheduledMinutes * Math.max(0, Number(rules.half_day_percent ?? 50)) / 100)
     : Math.max(1, Number(rules.half_day_minutes ?? 270));
+  if (restDay) {
+    // Full hours: present on the week off. Short hours: a half day, as on any
+    // other day. Under half a day: it stays the paid week off.
+    if (workMinutes >= fullThreshold) return `Present (${dayLabel})`;
+    if (workMinutes < halfThreshold) return dayLabel;
+    const partial = treatmentLabel(rules.partial_day_treatment, "Half Day");
+    if (partial === "Half Day") return `Half Day (${dayLabel})`;
+    return partial === "Full Day" || partial === "Present" ? `Present (${dayLabel})` : dayLabel;
+  }
   if (workMinutes >= fullThreshold) return "Full Day";
   if (workMinutes >= halfThreshold) return treatmentLabel(rules.partial_day_treatment, "Half Day");
   return treatmentLabel(rules.below_half_day_treatment, "Absent");

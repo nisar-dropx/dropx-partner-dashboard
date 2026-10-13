@@ -108,6 +108,10 @@ export type AuditProgrammeSettings = {
   excluded_location_model_ids: string[];
   excluded_location_ids: string[];
   exclude_head_office: boolean;
+  /** Roles that create or assign audits at any station and approve cross-station requests. */
+  cross_audit_role_ids: string[];
+  /** False until the cross-station database update has been applied. */
+  cross_audit_ready: boolean;
 };
 export type AuditRole = {
   id: string;
@@ -126,6 +130,8 @@ export type StationAudit = {
   scheduled_for: string;
   scheduled_reason: string | null;
   schedule_source: string;
+  /** The auditor is outside this station's scope and reaches only this audit. */
+  cross_station?: boolean;
   status_code: string;
   assigned_to: string | null;
   assignment_verified: boolean;
@@ -257,7 +263,31 @@ export type AuditEvent = {
   after_data: Record<string, unknown>;
 };
 
+export type AuditRequest = {
+  id: string;
+  location_id: string;
+  audit_type_id: string;
+  requested_by: string;
+  requested_name: string | null;
+  preferred_date: string | null;
+  reason: string;
+  status: string;
+  decided_name: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  audit_id: string | null;
+  created_at: string;
+  station_code: string;
+  station_name: string | null;
+  /** The viewer may approve or decline this request. */
+  canDecide: boolean;
+};
 export type StationAuditWorkspace = {
+  /** Stations outside the viewer's scope that hold an audit assigned to them. */
+  crossStations: AuditStation[];
+  requests: AuditRequest[];
+  /** The viewer creates and assigns audits at any eligible station. */
+  anyStation: boolean;
   assignees: AuditAssignee[];
   events: AuditEvent[];
   truncated: boolean;
@@ -292,6 +322,93 @@ export function canUseStationAuditLocation(
     authorization.hasAllLocationAccess ||
     authorization.locationScopeIds.includes(locationId)
   );
+}
+
+export function canAssignAnyStation(
+  authorization: Pick<AuthorizationContext, "isMasterOwner" | "effectiveRoleIds">,
+  settings: Pick<AuditProgrammeSettings, "cross_audit_role_ids">,
+) {
+  return (
+    authorization.isMasterOwner ||
+    authorization.effectiveRoleIds.some((roleId) =>
+      settings.cross_audit_role_ids.includes(roleId),
+    )
+  );
+}
+
+/**
+ * The viewer's reach inside station audits. Cross-audit managers act on every
+ * eligible station here; their access to other pages is unchanged.
+ */
+export function stationAuditScope<T extends AuthorizationContext>(
+  authorization: T,
+  settings: AuditProgrammeSettings,
+): T {
+  return canManageStationAudits(authorization, settings) &&
+    canAssignAnyStation(authorization, settings) &&
+    !authorization.hasAllLocationAccess
+    ? { ...authorization, hasAllLocationAccess: true }
+    : authorization;
+}
+
+/** In scope, or the one audit a cross-station auditor has been assigned. */
+export function canUseStationAudit(
+  authorization: Pick<
+    AuthorizationContext,
+    "hasAllLocationAccess" | "locationScopeIds" | "userId"
+  >,
+  audit: {
+    location_id: string;
+    assigned_to?: string | null;
+    assignment_verified?: boolean | null;
+    cross_station?: boolean | null;
+  },
+) {
+  return (
+    canUseStationAuditLocation(authorization, audit.location_id) ||
+    (audit.cross_station === true &&
+      audit.assignment_verified === true &&
+      Boolean(authorization.userId) &&
+      audit.assigned_to === authorization.userId)
+  );
+}
+
+/** A missing table, column or function means the database update is still pending. */
+export function isAuditSchemaPending(error: { code?: string; message?: string } | null) {
+  return Boolean(
+    error &&
+      (["42P01", "42703", "42883", "PGRST202", "PGRST204", "PGRST205"].includes(
+        error.code ?? "",
+      ) ||
+        /could not find the (function|table)|does not exist|schema cache/i.test(
+          error.message ?? "",
+        )),
+  );
+}
+export const auditSchemaPendingMessage =
+  "This needs a database update that has not been applied yet. Ask the technical team to apply the latest station audit migration.";
+
+/**
+ * Whether the viewer may open this audit. The cross-station assignment is looked
+ * up only when the station is outside their scope, so in-scope requests cost nothing.
+ */
+export async function canOpenStationAudit(
+  companyId: string,
+  authorization: AuthorizationContext,
+  settings: AuditProgrammeSettings,
+  audit: { id: string; location_id: string },
+) {
+  const scope = stationAuditScope(authorization, settings);
+  if (canUseStationAuditLocation(scope, audit.location_id)) return true;
+  if (!scope.userId) return false;
+  const row = await db()
+    .from("ops_station_audits")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("id", audit.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  return Boolean(row.data && canUseStationAudit(scope, row.data));
 }
 
 export function canManageStationAudits(
@@ -428,9 +545,8 @@ export async function loadStationAuditMaster(companyId: string) {
         .order("label"),
       db()
         .from("ops_audit_programme_settings")
-        .select(
-          "company_id,delete_user_ids,scheduler_role_ids,responder_role_ids,excluded_location_model_ids,excluded_location_ids,exclude_head_office",
-        )
+        // Every column, so a setting added by a later database update is optional.
+        .select("*")
         .eq("company_id", companyId)
         .maybeSingle(),
     ]);
@@ -462,6 +578,13 @@ export async function loadStationAuditMaster(companyId: string) {
         programmeSettings.data?.excluded_location_ids,
       ),
       exclude_head_office: programmeSettings.data?.exclude_head_office === true,
+      cross_audit_role_ids: stringList(
+        programmeSettings.data?.cross_audit_role_ids,
+      ),
+      cross_audit_ready: Boolean(
+        programmeSettings.data &&
+          "cross_audit_role_ids" in programmeSettings.data,
+      ),
     } satisfies AuditProgrammeSettings,
   };
 }
@@ -521,9 +644,7 @@ export async function loadAuditStations(
 ) {
   let query = db()
     .from("stations")
-    .select(
-      "id,station_code,station_name,city,cluster,cluster_name,region,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email,location_model_id,is_ho",
-    )
+    .select(stationColumns)
     .eq("company_id", companyId)
     .eq("is_active", true)
     .eq("hide_from_location_list", false)
@@ -537,6 +658,78 @@ export async function loadAuditStations(
   return ((result.data ?? []) as AuditStation[]).filter((station) =>
     isStationAuditEligible(station, settings),
   );
+}
+
+const stationColumns =
+  "id,station_code,station_name,city,cluster,cluster_name,region,station_email,station_manager_email,cluster_manager_email,ops_manager_email,finance_manager_email,location_model_id,is_ho";
+const auditColumns =
+  "*,ops_audit_types(code,name,requires_video_link,default_response_hours,video_link_help),stations(station_code,station_name,city,cluster,cluster_name)";
+
+/** Active users who report to this person. Empty when the reporting line is not recorded. */
+export async function loadAuditReportees(companyId: string, userId: string) {
+  const result = await db()
+    .from("profiles")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("reports_to_user_id", userId)
+    .eq("is_active", true);
+  return result.error ? [] : (result.data ?? []).map((row) => String(row.id));
+}
+
+/**
+ * Cross-station requests the viewer raised or may decide: open ones, and those
+ * decided in the last 30 days. Empty until the database update is applied.
+ */
+export async function loadAuditRequests(
+  companyId: string,
+  authorization: Pick<AuthorizationContext, "userId">,
+  anyStation: boolean,
+): Promise<AuditRequest[]> {
+  const reportees = anyStation
+    ? []
+    : await loadAuditReportees(companyId, authorization.userId);
+  let query = db()
+    .from("ops_station_audit_requests")
+    .select(
+      "id,location_id,audit_type_id,requested_by,requested_name,preferred_date,reason,status,decided_name,decided_at,decision_note,audit_id,created_at,stations(station_code,station_name)",
+    )
+    .eq("company_id", companyId)
+    .or(
+      `status.eq.pending,created_at.gte.${new Date(Date.now() - 30 * 86400000).toISOString()}`,
+    )
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (!anyStation)
+    query = query.in("requested_by", [authorization.userId, ...reportees]);
+  const result = await query;
+  if (result.error) {
+    if (isAuditSchemaPending(result.error)) return [];
+    throw new Error(result.error.message);
+  }
+  return (result.data ?? []).map((row: any) => {
+    const station = Array.isArray(row.stations) ? row.stations[0] : row.stations;
+    return {
+      id: row.id,
+      location_id: row.location_id,
+      audit_type_id: row.audit_type_id,
+      requested_by: row.requested_by,
+      requested_name: row.requested_name,
+      preferred_date: row.preferred_date,
+      reason: row.reason,
+      status: row.status,
+      decided_name: row.decided_name,
+      decided_at: row.decided_at,
+      decision_note: row.decision_note,
+      audit_id: row.audit_id,
+      created_at: row.created_at,
+      station_code: String(station?.station_code ?? ""),
+      station_name: station?.station_name ?? null,
+      canDecide:
+        row.status === "pending" &&
+        row.requested_by !== authorization.userId &&
+        (anyStation || reportees.includes(row.requested_by)),
+    } satisfies AuditRequest;
+  });
 }
 
 export async function loadStationAuditWorkspace(
@@ -565,20 +758,45 @@ export async function loadStationAuditWorkspace(
           stationIds,
         )
       : [];
-  master.options = master.options.flatMap((option) => {
-    if (option.option_group !== "airways") return [option];
-    const ids = stringList(option.metadata.station_ids).filter((id) =>
-      stationIds.includes(id),
-    );
-    return ids.length
-      ? [{ ...option, metadata: { ...option.metadata, station_ids: ids } }]
-      : [];
-  });
-  if (!stationIds.length)
+  const anyStation =
+    !stationOnly && canAssignAnyStation(authorization, master.programmeSettings);
+  const requests = stationOnly
+    ? []
+    : await loadAuditRequests(companyId, authorization, anyStation);
+  // Audits this person performs at a station outside their own scope.
+  const crossResult = stationOnly
+    ? { data: [], error: null }
+    : await db()
+        .from("ops_station_audits")
+        .select(auditColumns)
+        .eq("company_id", companyId)
+        .is("deleted_at", null)
+        .eq("cross_station", true)
+        .eq("assigned_to", authorization.userId)
+        .eq("assignment_verified", true)
+        .neq("status_code", "closed")
+        .order("scheduled_for", { ascending: true })
+        .limit(200);
+  if (crossResult.error && !isAuditSchemaPending(crossResult.error))
+    throw new Error(crossResult.error.message);
+  const crossAudits = ((crossResult.data ?? []) as StationAudit[]).filter(
+    (audit) => !stationIds.includes(audit.location_id),
+  );
+  const crossStationIds = [...new Set(crossAudits.map((a) => a.location_id))];
+  const crossStationsResult = crossStationIds.length
+    ? await db()
+        .from("stations")
+        .select(stationColumns)
+        .eq("company_id", companyId)
+        .in("id", crossStationIds)
+    : { data: [], error: null };
+  if (crossStationsResult.error)
+    throw new Error(crossStationsResult.error.message);
+  const crossStations = (crossStationsResult.data ?? []) as AuditStation[];
+  const base = { ...master, assignees, stations, crossStations, requests, anyStation };
+  if (!stationIds.length && !crossAudits.length)
     return {
-      ...master,
-      assignees,
-      stations,
+      ...base,
       events: [],
       truncated: false,
       audits: [],
@@ -591,9 +809,7 @@ export async function loadStationAuditWorkspace(
     };
   let auditsQuery = db()
     .from("ops_station_audits")
-    .select(
-      "*,ops_audit_types(code,name,requires_video_link,default_response_hours,video_link_help),stations(station_code,station_name,city,cluster,cluster_name)",
-    )
+    .select(auditColumns)
     .eq("company_id", companyId)
     .is("deleted_at", null)
     .in("location_id", stationIds);
@@ -608,11 +824,13 @@ export async function loadStationAuditWorkspace(
     : auditsQuery.or(
         `and(scheduled_for.gte.${from}T00:00:00+05:30,scheduled_for.lte.${to}T23:59:59.999+05:30),and(assigned_to.eq.${authorization.userId},assignment_verified.eq.true,status_code.neq.closed)`,
       );
-  const auditsResult = await allAuditRows((start, end) => auditsQuery
-    .order("scheduled_for", { ascending: true }).order("id")
-    .range(start, end));
+  const auditsResult = stationIds.length
+    ? await allAuditRows((start, end) => auditsQuery
+        .order("scheduled_for", { ascending: true }).order("id")
+        .range(start, end))
+    : { data: [], error: null };
   if (auditsResult.error) throw new Error(auditsResult.error.message);
-  const audits = ((auditsResult.data ?? []) as StationAudit[])
+  const audits = [...((auditsResult.data ?? []) as StationAudit[]), ...crossAudits]
     .filter((audit) => !stationOnly || stationCanSeeAudit(audit))
     .map((audit) =>
       stationOnly ? { ...audit, manager_summary: null } : audit,
@@ -620,9 +838,7 @@ export async function loadStationAuditWorkspace(
   const auditIds = audits.map((audit) => audit.id);
   if (!auditIds.length)
     return {
-      ...master,
-      assignees,
-      stations,
+      ...base,
       events: [],
       truncated: false,
       audits,
@@ -732,6 +948,7 @@ export async function loadStationAuditWorkspace(
                 "email_sent",
                 "email_failed",
                 "started",
+                "type_changed",
                 "submitted",
                 "amended",
                 "closed",
@@ -754,9 +971,7 @@ export async function loadStationAuditWorkspace(
     events.error;
   if (error) throw new Error(error.message);
   return {
-    ...master,
-    assignees,
-    stations,
+    ...base,
     audits,
     events: (events.data ?? []).map((event) =>
       stationOnly ? { ...event, before_data: {}, after_data: {} } : event,
@@ -817,8 +1032,17 @@ export async function createStationAudit(input: {
   assignedUserId?: string;
   reason?: string;
   source?: string;
+  /** Outside the monthly programme: no date window and no planned slot is used. */
+  unscheduled?: boolean;
+  /** Begins at once when the auditor is the person creating it. */
+  startNow?: boolean;
+  /** The caller has confirmed this person may place an audit at any eligible station. */
+  anyStation?: boolean;
 }) {
-  if (!canUseStationAuditLocation(input.authorization, input.locationId))
+  if (
+    !input.anyStation &&
+    !canUseStationAuditLocation(input.authorization, input.locationId)
+  )
     throw new Error("This station is outside your Ops Pulse access.");
   const [typeResult, master] = await Promise.all([
     db()
@@ -836,26 +1060,42 @@ export async function createStationAudit(input: {
   const type = mapType(typeResult.data);
   const stations = await loadAuditStations(
     input.companyId,
-    input.authorization,
+    input.anyStation
+      ? { hasAllLocationAccess: true, locationScopeIds: [] }
+      : input.authorization,
     master.programmeSettings,
   );
   const station = stations.find((row) => row.id === input.locationId);
   if (!station)
     throw new Error("This station is unavailable or outside your scope.");
+  // With any-station reach the auditor may come from another station's team.
   const assignees = await loadAuditAssignees(
     input.companyId,
     master.programmeSettings.scheduler_role_ids,
-    [station.id],
+    input.anyStation ? stations.map((row) => row.id) : [station.id],
   );
   const assignee = assignees.find(
     (row) => row.id === (input.assignedUserId || input.authorization.userId),
   );
   if (!assignee)
     throw new Error(
-      "Choose an active auditor with audit access to this station.",
+      input.anyStation
+        ? "Choose an active user who holds an audit manager role."
+        : "Choose an active auditor with audit access to this station.",
     );
-  const cycle = auditCycleFor(type, input.scheduledDate, input.periodSlot);
-  const scheduledFor = auditTimestamp(input.scheduledDate, input.scheduledTime);
+  const crossStation = !assignee.stationIds.includes(station.id);
+  const startNow =
+    input.startNow === true && assignee.id === input.authorization.userId;
+  const scheduledDate = input.startNow ? ymdInKolkata() : input.scheduledDate;
+  const cycle = input.unscheduled
+    ? {
+        cycleKey: scheduledDate.slice(0, 7),
+        periodSlot: `unscheduled-${randomUUID().slice(0, 8)}`,
+      }
+    : auditCycleFor(type, scheduledDate, input.periodSlot);
+  const scheduledFor = input.startNow
+    ? new Date().toISOString()
+    : auditTimestamp(scheduledDate, input.scheduledTime);
   const responseDue = new Date(
     Date.parse(scheduledFor) + type.default_response_hours * 60 * 60 * 1000,
   ).toISOString();
@@ -863,7 +1103,7 @@ export async function createStationAudit(input: {
     .from("ops_station_audits")
     .insert({
       company_id: input.companyId,
-      audit_number: auditNumber(station.station_code, input.scheduledDate),
+      audit_number: auditNumber(station.station_code, scheduledDate),
       audit_type_id: type.id,
       location_id: station.id,
       station_snapshot: snapshotStation(station),
@@ -871,8 +1111,13 @@ export async function createStationAudit(input: {
       period_slot: cycle.periodSlot,
       scheduled_for: scheduledFor,
       scheduled_reason: String(input.reason ?? "").trim() || null,
-      schedule_source: input.source ?? "manual",
-      status_code: "scheduled",
+      schedule_source: input.unscheduled
+        ? "unscheduled"
+        : (input.source ?? "manual"),
+      status_code: startNow ? "in_progress" : "scheduled",
+      ...(startNow ? { started_at: scheduledFor } : {}),
+      // Sent only when set, so planned audits save before the database update too.
+      ...(crossStation ? { cross_station: true } : {}),
       assigned_to: assignee.id,
       assigned_name: assignee.name,
       assigned_email: assignee.email,
@@ -887,6 +1132,15 @@ export async function createStationAudit(input: {
       throw new Error(
         "This station already has this audit programme slot. Change the date or the configured period slot.",
       );
+    // Before the database update, the window rule still rejects audits outside the programme.
+    if (
+      isAuditSchemaPending(result.error) ||
+      (input.unscheduled &&
+        /audit window|configured window|already has an audit/i.test(
+          result.error.message,
+        ))
+    )
+      throw new Error(auditSchemaPendingMessage);
     throw new Error(result.error.message);
   }
   await writeStationAuditEvent({
@@ -899,9 +1153,19 @@ export async function createStationAudit(input: {
       cycle,
       assigned_to: assignee.id,
       assigned_name: assignee.name,
-      source: input.source ?? "manual",
+      source: input.unscheduled ? "unscheduled" : (input.source ?? "manual"),
+      cross_station: crossStation,
     },
   });
+  if (startNow)
+    await writeStationAuditEvent({
+      companyId: input.companyId,
+      auditId: result.data.id,
+      eventType: "started",
+      authorization: input.authorization,
+      before: { status: "scheduled" },
+      after: { status: "in_progress" },
+    });
   return result.data;
 }
 

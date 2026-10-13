@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   canManageStationAudits,
   canRespondToStationAudits,
-  canUseStationAuditLocation,
+  canOpenStationAudit,
   isStationAuditEligible,
   loadStationAuditMaster,
 } from "@/lib/ops-pulse/station-audits";
@@ -62,7 +62,12 @@ export async function POST(request: Request) {
     if (
       !audit ||
       !station ||
-      !canUseStationAuditLocation(auth, audit.location_id) ||
+      !(await canOpenStationAudit(
+        auth.companyId,
+        auth,
+        master.programmeSettings,
+        audit,
+      )) ||
       !isStationAuditEligible(
         {
           id: audit.location_id,

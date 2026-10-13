@@ -30,6 +30,80 @@ export function parseAuditTids(raw: string) {
     throw new Error("Maximum 10,000 unique TIDs per list.");
   return { ids, duplicates: tokens.length - ids.length };
 }
+const sheetTid = /^(?=.*\d)[A-Z0-9][A-Z0-9_-]{3,79}$/;
+const tidHeading = /track|\btid\b|awb|waybill|shipment|consignment|barcode/i;
+const reasonHeading = /reason|remark|observation|comment|note/i;
+const sheetCell = (value: unknown) =>
+  typeof value === "number"
+    ? Number.isSafeInteger(value)
+      ? String(value)
+      : ""
+    : String(value ?? "").trim();
+export type AuditTidSheet = {
+  ids: string[];
+  /** Reason typed next to a tracking ID, when the sheet has such a column. */
+  reasons: Record<string, string>;
+  duplicates: number;
+  /** Rows whose tracking-ID cell was filled but is not a tracking ID. */
+  skipped: number;
+  hasReasons: boolean;
+};
+/**
+ * Reads tracking IDs, and reasons where given, from the rows of a spreadsheet.
+ * The tracking-ID column is found by its heading; a sheet without headings uses
+ * the column that holds the most tracking IDs.
+ */
+export function readAuditTidSheet(rows: unknown[][]): AuditTidSheet {
+  const cells = rows.map((row) => (Array.isArray(row) ? row.map(sheetCell) : []));
+  let start = 0,
+    tidColumn = -1,
+    reasonColumn = -1;
+  for (let index = 0; index < Math.min(cells.length, 20) && tidColumn < 0; index++) {
+    const heading = cells[index].findIndex(
+      (cell) => tidHeading.test(cell) && !sheetTid.test(cell.toUpperCase()),
+    );
+    if (heading < 0) continue;
+    tidColumn = heading;
+    reasonColumn = cells[index].findIndex(
+      (cell, column) => column !== heading && reasonHeading.test(cell),
+    );
+    start = index + 1;
+  }
+  if (tidColumn < 0) {
+    const counts = new Map<number, number>();
+    for (const row of cells.slice(0, 500))
+      row.forEach((cell, column) => {
+        if (sheetTid.test(cell.toUpperCase()))
+          counts.set(column, (counts.get(column) ?? 0) + 1);
+      });
+    for (const [column, count] of counts)
+      if (count > (counts.get(tidColumn) ?? 0)) tidColumn = column;
+  }
+  if (tidColumn < 0)
+    throw new Error(
+      "No tracking IDs found in this file. Keep them in one column under a heading such as Tracking ID.",
+    );
+  const ids = new Set<string>();
+  const reasons: Record<string, string> = {};
+  let duplicates = 0,
+    skipped = 0;
+  for (const row of cells.slice(start)) {
+    const tid = (row[tidColumn] || "").toUpperCase();
+    if (!tid) continue;
+    if (!sheetTid.test(tid)) {
+      skipped += 1;
+      continue;
+    }
+    if (ids.has(tid)) duplicates += 1;
+    ids.add(tid);
+    const reason = reasonColumn < 0 ? "" : (row[reasonColumn] || "").slice(0, 300);
+    if (reason) reasons[tid] = reason;
+  }
+  if (!ids.size)
+    throw new Error("No tracking IDs found under the tracking-ID heading.");
+  if (ids.size > 10000) throw new Error("Maximum 10,000 unique TIDs per list.");
+  return { ids: [...ids], reasons, duplicates, skipped, hasReasons: reasonColumn >= 0 };
+}
 export function compareAuditTids(expected: string[], scanned: string[]) {
   const a = new Set(expected),
     b = new Set(scanned);

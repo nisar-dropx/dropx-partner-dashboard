@@ -4,7 +4,8 @@ import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
   canManageStationAudits,
-  canUseStationAuditLocation,
+  canOpenStationAudit,
+  stationAuditScope,
   canRespondToStationAudits,
   loadStationAuditMaster,
   loadStationAuditWorkspace,
@@ -26,21 +27,23 @@ export default async function StationAuditsPage({
 }: {
   searchParams?: { audit?: string; month?: string; from?: string; to?: string; view?: string };
 }) {
-  const authorization = await requirePagePermission("station_audits", "access");
-  const companyId = requireCompanyId(authorization);
+  const viewer = await requirePagePermission("station_audits", "access");
+  const companyId = requireCompanyId(viewer);
   let month = validAuditDate(`${searchParams?.month}-01`)
     ? searchParams!.month!
     : auditDay().slice(0, 7);
   if (searchParams?.from && searchParams?.to && !auditReportRangeError(searchParams.from, searchParams.to)) month = searchParams.from.slice(0, 7);
   const master = await loadStationAuditMaster(companyId);
+  // Cross-audit roles reach every eligible station inside station audits.
+  const authorization = stationAuditScope(viewer, master.programmeSettings);
   const canManage = canManageStationAudits(authorization, master.programmeSettings);
   // Completion emails may link to an audit outside the current calendar month.
   if (searchParams?.audit && supabaseAdmin) {
     const focused = await supabaseAdmin.from("ops_station_audits")
-      .select("location_id,scheduled_for,status_code,completed_at,station_response_status")
+      .select("id,location_id,scheduled_for,status_code,completed_at,station_response_status")
       .eq("company_id", companyId).eq("id", searchParams.audit).is("deleted_at", null).maybeSingle();
-    if (focused.data && canUseStationAuditLocation(authorization, focused.data.location_id)
-      && (canManage || stationCanSeeAudit(focused.data))) {
+    if (focused.data && (canManage || stationCanSeeAudit(focused.data))
+      && await canOpenStationAudit(companyId, authorization, master.programmeSettings, focused.data)) {
       month = auditDay(focused.data.scheduled_for).slice(0, 7);
     }
   }
