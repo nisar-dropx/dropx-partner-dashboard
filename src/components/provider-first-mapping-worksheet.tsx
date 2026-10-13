@@ -21,6 +21,7 @@ import {
   providerFirstWorkerIsSelectable,
   providerFirstLocationRemap,
   providerFirstMappingReferenceForRow,
+  providerFirstPaymentTemplateForRow,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstPageWindow,
@@ -179,6 +180,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [savingIndexes, setSavingIndexes] = useState<Set<number>>(() => new Set());
   const [saveNotice, setSaveNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [paymentTemplateSources, setPaymentTemplateSources] = useState<Record<number, ProviderFirstRegisteredMappingView>>({});
   const [replacementConfirmation, setReplacementConfirmation] = useState<ReplacementSaveConfirmation | null>(null);
   const [paidHistoryConfirmation, setPaidHistoryConfirmation] = useState<PaidHistorySaveConfirmation | null>(null);
 
@@ -243,6 +245,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
 
   function update(index: number, change: Partial<ProviderFirstMappingRow>) {
     setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
+    if (Object.prototype.hasOwnProperty.call(change, "paymentMethodId")) {
+      setPaymentTemplateSources(current => { const next = { ...current }; delete next[index]; return next; });
+    }
     setSaveNotice(null);
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   }
@@ -401,12 +406,13 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
 
   function chooseWorker(index: number, workerId: string) {
     const worker = workerById.get(workerId);
+    if (worker && rows[index].workforceId === worker.id) return;
+    setPaymentTemplateSources(current => { const next = { ...current }; delete next[index]; return next; });
     if (!worker) {
       update(index, { workforceId: "", dropxId: "", dropxName: "", mappingId: baselineRows[index].mappingId, paymentMethodId: "", paymentValues: {}, productionThresholdConfig: null, productionThresholdMinimumUnits: "", effectiveFrom: "", effectiveTo: "" });
       return;
     }
     const row = rows[index];
-    if (row.workforceId === worker.id) return;
     if (!baselineRows[index].workforceId) {
       update(index, {
         workforceId: worker.id,
@@ -441,6 +447,19 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       effectiveFrom: targetHasMappingReference ? mappingReference?.effectiveFrom ?? "" : row.effectiveFrom || worker.dateOfJoin,
       effectiveTo: targetHasMappingReference ? mappingReference?.effectiveTo ?? "" : row.effectiveTo
     });
+  }
+
+  function usePreviousPaymentDetails(index: number) {
+    const row = rows[index];
+    const previous = providerFirstPaymentTemplateForRow(row, workerById.get(row.workforceId));
+    if (!previous || baselineRows[index].workforceId || !paymentMethodById.has(previous.paymentMethodId)) return;
+    update(index, {
+      paymentMethodId: previous.paymentMethodId,
+      paymentValues: { ...previous.paymentValues },
+      productionThresholdConfig: previous.productionThresholdConfig,
+      productionThresholdMinimumUnits: previous.productionThresholdMinimumUnits
+    });
+    setPaymentTemplateSources(current => ({ ...current, [index]: previous }));
   }
 
   async function saveIndexes(
@@ -799,6 +818,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       <div className="mapping-rows provider-first-rows">{paginatedIndexes.map((index) => {
         const row = rows[index];
         const selectedWorker = workerById.get(row.workforceId);
+        const previousPayment = !baselineRows[index].workforceId ? providerFirstPaymentTemplateForRow(row, selectedWorker) : undefined;
+        const copiedPayment = !baselineRows[index].workforceId ? paymentTemplateSources[index] : undefined;
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
         const locationRemap = providerFirstLocationRemap(row, selectedWorker);
         const locationMismatch = Boolean(selectedWorker && !providerFirstLocationIsAllowed(row, selectedWorker));
@@ -830,6 +851,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               <span className="provider-first-selected-detail">Combined across {productionThresholdConfig.component_codes.map((code) => components.find((component) => component.code === code)?.label ?? code).join(" + ")}</span>
             </label> : null}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">{!baselineRows[index].workforceId && !row.paymentMethodId ? "Choose the payment method, rates and start date. Previous payment details are in History. " : ""}Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</p></div>
+            {copiedPayment ? <div className="mapping-period-help" role="status"><strong>Previous payment details loaded.</strong> Method and rates copied from {paymentMethodById.get(copiedPayment.paymentMethodId)?.name ?? "previous payment method"} · {copiedPayment.locationLabel} · {copiedPayment.effectiveFrom} to {copiedPayment.effectiveTo || "Ongoing"}. Review the rates and choose dates for this assignment before saving. Previous dates were not copied.</div> : previousPayment ? <div className="mapping-period-help">Previous payment details are available from {previousPayment.effectiveFrom} to {previousPayment.effectiveTo || "Ongoing"}. Use them below to copy the method and rates; enter dates for this assignment.</div> : null}
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Save this location mapping before adding payment periods.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
@@ -837,7 +859,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
-          <div className="mapping-row-actions"><button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton loadMappingAudit entries={row.history} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
+          <div className="mapping-row-actions">{previousPayment && !row.paymentMethodId && paymentMethodById.has(previousPayment.paymentMethodId) ? <button type="button" className="button secondary compact" disabled={!canEditRow} onClick={() => usePreviousPaymentDetails(index)}>Use previous payment details</button> : null}<button type="button" className="button secondary compact" title={row.effectiveTo ? "Plan consecutive payment methods together" : "Enter an end date to add another payment period"} disabled={!canEditRow || !row.workforceId || !row.effectiveFrom || !row.effectiveTo || mappingConflict || locationMismatch || Boolean(locationRemap) || !providerFirstNamesMatch(row.providerMemberName,row.dropxName) || Boolean(baselineRows[index].workforceId && baselineRows[index].workforceId !== row.workforceId)} onClick={() => setScheduleIndex(index)}>+ Add payment period</button><PaymentAllocationHistoryButton loadMappingAudit entries={row.history} subjectLabel={`${row.providerMemberName} · ${row.providerMemberId}`} /><RowButton busy={isSaving} canEdit={canEdit && !roundedSourceId} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || providerFirstNamesMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} onSave={(rowIndex) => void saveIndexes([rowIndex])} /></div>
         </div>;
       })}{!paginatedIndexes.length ? <div className="empty-state"><strong>No matching provider members.</strong><p className="subtle">Change or clear the filters to see more records.</p></div> : null}</div>
       <div className="mapping-pagination">

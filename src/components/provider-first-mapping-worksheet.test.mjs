@@ -139,6 +139,41 @@ test('existing mapped rows retain their saved pay details when reselected', () =
   assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['2026-10-01', '2026-10-20']);
 });
 
+test('previous payment details are copied only on request, explain their source, and retain new dates', async () => {
+  const previous = { mappingId: 'september-closed', stationId: row.stationId, locationLabel: 'KOZA', providerId: row.providerId, mappedProviderMemberId: row.providerMemberId, paymentMethodId: method.id, paymentValues: { DELIVERY: '13' }, productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '2026-09-01', effectiveTo: '2026-09-30', status: 'closed' };
+  let submitted;
+  const ui = worksheet({ workers: [{ ...worker, mappingHistory: [previous] }] }, async data => { submitted = data; return saved(data); });
+  ui.change('provider_first_worker_0', worker.id);
+  assert.equal(ui.select('provider_first_payment_method_0').value, '');
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-10-01' } }); ui.render();
+  ui.one(node => node.type === 'button' && node.props.children === 'Use previous payment details').props.onClick(); ui.render();
+  assert.equal(submitted, undefined, 'Copying only changes the draft');
+  assert.equal(ui.select('provider_first_payment_method_0').value, method.id);
+  assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '13');
+  assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['2026-10-01', '']);
+  const notice = ui.one(node => node.type === 'div' && node.props.role === 'status');
+  const text = JSON.stringify(notice.props.children);
+  assert.match(text, /Previous payment details loaded/);
+  assert.match(text, /Variable pay/);
+  assert.match(text, /KOZA/);
+  assert.match(text, /2026-09-01/);
+  assert.match(text, /2026-09-30/);
+  assert.match(text, /Previous dates were not copied/);
+  await ui.save();
+  assert.equal(submitted.get('rows[0][mapping_id]'), '');
+  assert.equal(submitted.get('rows[0][effective_from]'), '2026-10-01');
+  assert.equal(submitted.get('rows[0][effective_to]'), '');
+});
+
+test('previous payment templates select the latest exact identity and reject unrelated history', () => {
+  const selected = { ...row, workforceId: worker.id };
+  const old = { mappingId: 'old', stationId: row.stationId, locationLabel: 'KOZA', providerId: row.providerId, mappedProviderMemberId: row.providerMemberId, paymentMethodId: method.id, paymentValues: { DELIVERY: '13' }, productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '2026-08-01', effectiveTo: '2026-08-31', status: 'closed' };
+  const recent = { ...old, mappingId: 'recent', paymentValues: { DELIVERY: '17' }, effectiveFrom: '2026-09-01', effectiveTo: '2026-09-30' };
+  const unrelated = [ { ...recent, mappingId: 'wrong-member', mappedProviderMemberId: 'other' }, { ...recent, mappingId: 'wrong-provider', providerId: 'other' }, { ...recent, mappingId: 'wrong-station', stationId: 'other' }, { ...recent, mappingId: 'future', effectiveFrom: '2099-01-01', effectiveTo: '2099-01-31' } ];
+  assert.equal(mapping.providerFirstPaymentTemplateForRow(selected, { ...worker, mappingHistory: unrelated }), undefined);
+  assert.equal(mapping.providerFirstPaymentTemplateForRow(selected, { ...worker, mappingHistory: [old, ...unrelated, recent] }).mappingId, 'recent');
+});
+
 test('opens with current outbound month and Unmapped, including when that month has no imported data', () => {
   const ui = worksheet({ shipmentMonths: ['2026-09'], mappings: [{ ...row, outboundMonths: ['2026-09'] }] });
   assert.deepEqual(ui.filter('Outbound month').selected, ['2026-10']);

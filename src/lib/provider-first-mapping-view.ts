@@ -275,6 +275,17 @@ function mappingPeriodContainsRow(
   );
 }
 
+/** A previous rate card is a user-selected template, never a new assignment's dates or edit ID. */
+export function providerFirstPaymentTemplateForRow(row: ProviderFirstMappingRowView, worker: ProviderFirstWorkerView | undefined) {
+  if (!worker || worker.id !== row.workforceId) return undefined;
+  const allowedStations = row.relatedStationIds ?? [row.stationId];
+  return [...historicalWorkerMappings(worker), ...currentWorkerMappings(worker)]
+    .filter(mapping => mapping.paymentMethodId && mapping.effectiveFrom <= mappingLookupToday()
+      && mappingIdentityMatchesRow(mapping, row) && allowedStations.includes(mapping.stationId))
+    .sort((a, b) => Number(b.stationId === row.stationId) - Number(a.stationId === row.stationId)
+      || b.effectiveFrom.localeCompare(a.effectiveFrom) || b.mappingId.localeCompare(a.mappingId))[0];
+}
+
 /** Selects the exact stored mapping that should supply dates/rates and anchor a save. */
 export function providerFirstMappingReferenceForRow(
   row: ProviderFirstMappingRowView,
