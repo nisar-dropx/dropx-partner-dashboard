@@ -294,6 +294,33 @@ export function ShipmentInspection({
       }));
     }
   };
+  // The same two columns work for the ERP ageing list, the physical scan and reasons.
+  const downloadTemplate = async () => {
+    try {
+      const XLSX = await import("xlsx");
+      const sheet = XLSX.utils.aoa_to_sheet([["Tracking ID", "Reason"]]);
+      sheet["!cols"] = [{ wch: 26 }, { wch: 60 }];
+      const guide = XLSX.utils.aoa_to_sheet([
+        ["How to use this template"],
+        ["1. Enter one tracking ID per row under Tracking ID, starting in row 2."],
+        ["2. Reason is optional. When filled, it becomes the auditor observation for that shipment."],
+        ["3. Keep the headings in row 1. Other columns are ignored."],
+        ["4. Upload the file under ERP ageing or under Physically scanned."],
+        ["5. Up to 10,000 tracking IDs per list. Repeated IDs count once."],
+        ["6. To fill reasons only, use Download as Excel in Differences, complete the Reason column and choose Upload reasons."],
+      ]);
+      guide["!cols"] = [{ wch: 110 }];
+      const book = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(book, sheet, "Tracking IDs");
+      XLSX.utils.book_append_sheet(book, guide, "How to use");
+      XLSX.writeFile(book, "audit-tracking-id-template.xlsx");
+    } catch {
+      setSheetNotice((old) => ({
+        ...old,
+        expected: "The template could not be downloaded. Try again.",
+      }));
+    }
+  };
   const downloadDifferences = async () => {
     try {
       const XLSX = await import("xlsx");
@@ -339,7 +366,15 @@ export function ShipmentInspection({
           Paste tracking IDs or upload an Excel or CSV file for either list.
           Scan every physical shipment; duplicate TIDs count once. Counts and
           differences are calculated automatically. A Reason column in the
-          file fills the observation for that shipment.
+          file fills the observation for that shipment.{" "}
+          <button
+            type="button"
+            className={styles.textButton}
+            style={{ padding: 0 }}
+            onClick={() => void downloadTemplate()}
+          >
+            Download the Excel template
+          </button>
         </p>
         <div className={styles.reconciliationGrid}>
           <div>
