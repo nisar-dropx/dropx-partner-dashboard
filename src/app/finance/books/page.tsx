@@ -330,6 +330,7 @@ export default async function BooksPage({
           action={<Refresh />}
         />
         <nav className="books-tabs" aria-label="Accounting views">
+          <Link href="/finance/treasury">Cash & reconciliation</Link>
           {tabs.map(([id, label]) => (
             <Link
               key={id}

@@ -152,6 +152,7 @@ export async function saveBooks(
       );
     }
     revalidatePath("/finance/books");
+    revalidatePath("/finance/treasury");
     return {
       ok: true,
       message:
