@@ -85,6 +85,60 @@ function saved(data) {
   return { ok: true, message: 'Mapping saved.', savedRows: [{ clientKey: value('client_key'), workforceId: value('id'), mappingId: 'saved-1', paymentMethodId: value('payment_method_id'), paymentValues: JSON.parse(value('payment_values_json')), productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: value('effective_from'), effectiveTo: value('effective_to') }] };
 }
 
+test('unmapped selection never inherits a closed September method, rates, thresholds or dates', async () => {
+  const oldPeriod = { mappingId: 'september-closed', stationId: row.stationId, locationLabel: 'KOZA', providerId: row.providerId, mappedProviderMemberId: row.providerMemberId, paymentMethodId: 'old-method', paymentValues: { DELIVERY: '13' }, productionThresholdConfig: { period: 'day', component_codes: ['DELIVERY'] }, productionThresholdMinimumUnits: '20', effectiveFrom: '2026-09-01', effectiveTo: '2026-09-30', status: 'closed' };
+  const historicWorker = { ...worker, dateOfJoin: '2026-09-01', mappingHistory: [oldPeriod], registeredLocationMappings: [oldPeriod] };
+  const historyEntry = { id: oldPeriod.mappingId, paymentMethodId: oldPeriod.paymentMethodId, paymentMethodName: 'Old method', paymentValues: oldPeriod.paymentValues, effectiveFrom: oldPeriod.effectiveFrom, effectiveTo: oldPeriod.effectiveTo, storedStatus: 'closed' };
+  let submitted;
+  const ui = worksheet({ workers: [historicWorker], mappings: [{ ...row, history: [historyEntry] }] }, async data => { submitted = data; return saved(data); });
+  ui.change('provider_first_worker_0', worker.id);
+  assert.equal(ui.cards().length, 1);
+  assert.equal(ui.select('provider_first_payment_method_0').value, '');
+  assert.equal(ui.all(node => node.type === 'input' && node.props.type === 'number').length, 0);
+  assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['', '']);
+  assert.deepEqual(ui.one(node => node.type === 'History').props.entries, [historyEntry]);
+  assert.equal(ui.one(node => node.type === 'button' && node.props.children === '+ Add payment period').props.disabled, true);
+  await ui.save();
+  assert.equal(submitted, undefined, 'Incomplete new pay details must not be submitted');
+  ui.change('provider_first_payment_method_0', method.id);
+  ui.one(node => node.type === 'input' && node.props.type === 'number').props.onChange({ target: { value: '17' } }); ui.render();
+  // Choosing even the old exact interval must not restore its rate or edit ID.
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-09-01' } }); ui.render();
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && !node.props.required).props.onChange({ target: { value: '2026-09-30' } }); ui.render();
+  assert.equal(ui.select('provider_first_payment_method_0').value, method.id);
+  assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '17');
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-10-01' } }); ui.render();
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && !node.props.required).props.onChange({ target: { value: '' } }); ui.render();
+  await ui.save();
+  assert.equal(submitted.get('rows[0][mapping_id]'), '');
+  assert.equal(submitted.get('rows[0][payment_values_json]'), '{"DELIVERY":"17"}');
+  assert.equal(submitted.get('rows[0][effective_from]'), '2026-10-01');
+  assert.equal(submitted.get('rows[0][effective_to]'), '');
+  assert.equal(submitted.get('rows[0][production_threshold_minimum_units]'), '');
+});
+
+test('reselecting the same new associate preserves manual fields; switching associates clears them', () => {
+  const second = { ...worker, id: 'worker-2', dropxId: 'DROPX2' };
+  const ui = worksheet({ workers: [worker, second] });
+  completeDraft(ui);
+  ui.change('provider_first_worker_0', worker.id);
+  assert.equal(ui.select('provider_first_payment_method_0').value, method.id);
+  assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '15');
+  ui.change('provider_first_worker_0', second.id);
+  assert.equal(ui.select('provider_first_payment_method_0').value, '');
+  assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['', '']);
+});
+
+test('existing mapped rows retain their saved pay details when reselected', () => {
+  const mapped = { ...row, workforceId: worker.id, dropxId: worker.dropxId, dropxName: worker.fullName, mappingId: 'saved-1', paymentMethodId: method.id, paymentValues: { DELIVERY: '15' }, effectiveFrom: '2026-10-01', effectiveTo: '2026-10-20' };
+  const ui = worksheet({ mappings: [mapped] });
+  ui.filter('Mapping').setSelected(['mapped']); ui.render();
+  ui.change('provider_first_worker_0', worker.id);
+  assert.equal(ui.select('provider_first_payment_method_0').value, method.id);
+  assert.equal(ui.one(node => node.type === 'input' && node.props.type === 'number').props.value, '15');
+  assert.deepEqual(ui.all(node => node.type === 'input' && node.props.type === 'date').map(node => node.props.value), ['2026-10-01', '2026-10-20']);
+});
+
 test('opens with current outbound month and Unmapped, including when that month has no imported data', () => {
   const ui = worksheet({ shipmentMonths: ['2026-09'], mappings: [{ ...row, outboundMonths: ['2026-09'] }] });
   assert.deepEqual(ui.filter('Outbound month').selected, ['2026-10']);

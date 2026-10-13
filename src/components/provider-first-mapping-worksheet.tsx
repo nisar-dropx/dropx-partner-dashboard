@@ -253,6 +253,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     setRows((current) => current.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
       const next = { ...row, ...change };
+      // A new assignment is entered explicitly. Dates must not turn an old
+      // closed period into the edit target or overwrite the user's rates.
+      if (!baselineRows[index].workforceId) return next;
       return providerFirstRowForMappingPeriod(next, workerById.get(next.workforceId));
     }));
   }
@@ -403,6 +406,23 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       return;
     }
     const row = rows[index];
+    if (row.workforceId === worker.id) return;
+    if (!baselineRows[index].workforceId) {
+      update(index, {
+        workforceId: worker.id,
+        dropxId: worker.dropxId,
+        dropxName: worker.fullName,
+        providerId: row.providerId || worker.providerId,
+        mappingId: "",
+        paymentMethodId: "",
+        paymentValues: {},
+        productionThresholdConfig: null,
+        productionThresholdMinimumUnits: "",
+        effectiveFrom: "",
+        effectiveTo: ""
+      });
+      return;
+    }
     // Keep active mapping state independent from registered-location evidence.
     // A third location must inherit the exact registered anchor, even when the
     // worker also has an active mapping at a different additional location.
@@ -809,7 +829,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               <input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="1" onChange={(event) => update(index, { productionThresholdMinimumUnits: event.target.value })} placeholder="Enter minimum units" step="1" type="number" value={row.productionThresholdMinimumUnits} />
               <span className="provider-first-selected-detail">Combined across {productionThresholdConfig.component_codes.map((code) => components.find((component) => component.code === code)?.label ?? code).join(" + ")}</span>
             </label> : null}
-            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</p></div>
+            <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">{!baselineRows[index].workforceId && !row.paymentMethodId ? "Choose the payment method, rates and start date. Previous payment details are in History. " : ""}Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</p></div>
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Save this location mapping before adding payment periods.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
