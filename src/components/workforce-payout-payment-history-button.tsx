@@ -346,7 +346,7 @@ export function WorkforcePayoutPaymentHistoryButton({
 
   const modal = open && typeof document !== "undefined" ? createPortal(
     <div className="modal-backdrop payment-history-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
-      <section aria-labelledby={titleId} aria-modal="true" className="modal-panel wide payment-history-modal" ref={modalRef} role="dialog">
+      <section aria-labelledby={titleId} aria-modal="true" className="modal-panel wide payment-history-modal bank-payment-history-modal" ref={modalRef} role="dialog">
         <div className="panel-head payment-history-head">
           <div><h2 id={titleId}>Bank payment history</h2><p className="subtle">{subjectLabel} · {periodStart.slice(0, 7)}</p></div>
           <button className="button secondary compact" onClick={() => setOpen(false)} ref={closeRef} type="button">Close</button>
@@ -422,7 +422,7 @@ export function WorkforcePayoutPaymentHistoryButton({
           {!loading && !error && entries.length ? <div className="table-wrap"><table>
             <thead><tr><th>Reference</th><th>Location</th><th>Amount</th><th>Status</th><th>Debit A/c</th><th>Credit A/c</th><th>Credit IFSC</th><th>UTR/CIN</th><th>Value Date</th><th>Bank remarks</th><th>Generated on</th><th>Finalized on</th><th>Remarks</th>{canManageStatus ? <th>Action</th> : null}</tr></thead>
             <tbody>{entries.map((entry) => <tr key={entry.id}>
-              <td><strong>{entry.referenceNo}</strong><small>Version {entry.version}</small>{entry.creditTransfer ? <><small><strong>Paid credit transferred in</strong>{entry.creditTransfer.transferredAt ? ` · ${dateTime(entry.creditTransfer.transferredAt)}` : ""}</small><small>Originally paid to {profileLabel(entry.creditTransfer.original)}. The original reference and UTR are unchanged.</small></> : null}{canManageStatus && entry.redownloadable ? <a className="inline-link" href={`/api/payments/workforce-payouts/bank-file?audience=${encodeURIComponent(audience)}&batch_id=${encodeURIComponent(entry.batchId)}`}>Download again</a> : null}</td>
+              <td><strong>{entry.referenceNo}</strong>{entry.creditTransfer ? <><small><strong>Paid credit transferred in</strong>{entry.creditTransfer.transferredAt ? ` · ${dateTime(entry.creditTransfer.transferredAt)}` : ""}</small><small>Originally paid to {profileLabel(entry.creditTransfer.original)}. The original reference and UTR are unchanged.</small></> : null}{canManageStatus && entry.redownloadable ? <a className="inline-link" href={`/api/payments/workforce-payouts/bank-file?audience=${encodeURIComponent(audience)}&batch_id=${encodeURIComponent(entry.batchId)}`}>Download again</a> : null}</td>
               <td>{entry.locationCode || "—"}</td>
               <td>{money(entry.amount)}</td>
               <td><span className={`status-pill ${statusTone(entry.status)}`}>{titleStatus(entry.status)}</span></td>

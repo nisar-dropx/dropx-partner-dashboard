@@ -23418,6 +23418,7 @@ td strong,
 .payment-history-button { white-space: nowrap; }
 .payment-history-backdrop { z-index: 1200; }
 .payment-history-modal { width: min(920px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); overflow: hidden; }
+.modal-panel.payment-history-modal.bank-payment-history-modal { width: min(1540px, calc(100vw - 32px)); }
 .payment-history-head { align-items: flex-start; }
 .payment-history-head h2 { margin: 0; }
 .payment-history-head p { margin: 3px 0 0; }
@@ -23440,6 +23441,7 @@ td strong,
 
 @media (max-width: 700px) {
   .payment-history-modal { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
+  .modal-panel.payment-history-modal.bank-payment-history-modal { width: calc(100vw - 20px); }
   .payment-history-body { max-height: calc(100vh - 130px); padding: 10px; }
   .payment-history-entry-head { align-items: stretch; flex-direction: column; }
 }

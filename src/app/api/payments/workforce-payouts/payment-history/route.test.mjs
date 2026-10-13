@@ -4,6 +4,7 @@ import test from "node:test";
 
 const route = await readFile(new URL("./route.ts", import.meta.url), "utf8");
 const modal = await readFile(new URL("../../../../../components/workforce-payout-payment-history-button.tsx", import.meta.url), "utf8");
+const styles = await readFile(new URL("../../../../../app/globals.css", import.meta.url), "utf8");
 
 test("Workforce paid history follows effective credit ownership while Helper history stays physical", () => {
   assert.match(route, /audience === "workforce"[\s\S]*?physicalItemsQuery\.neq\("status", "paid"\)/);
@@ -64,4 +65,11 @@ test("read-only payment history hides every payment mutation and download action
   assert.match(modal, /canManageStatus && entry\.redownloadable[\s\S]*?Download again/);
   assert.match(modal, /\{canManageStatus \? <td>[\s\S]*?>Finalize<\/button>[\s\S]*?Payment Failed[\s\S]*?Payment Cancelled/);
   assert.doesNotMatch(modal, /Mark on hold|Release hold/);
+});
+
+test("bank payment history uses the full desktop width without displaying a separate version label", () => {
+  assert.match(modal, /bank-payment-history-modal/);
+  assert.match(modal, /\{entry\.referenceNo\}/);
+  assert.doesNotMatch(modal, /<small>Version \{entry\.version\}<\/small>/);
+  assert.match(styles, /\.modal-panel\.payment-history-modal\.bank-payment-history-modal\s*\{\s*width:\s*min\(1540px,\s*calc\(100vw - 32px\)\);\s*\}/);
 });
