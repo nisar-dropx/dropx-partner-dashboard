@@ -159,7 +159,7 @@
 
 .summaryTotals {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin: 16px 0;
 }
@@ -521,8 +521,10 @@
   }
 
   .summaryTotals {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .summaryTotals > div { padding: 12px; }
+  .summaryTotals strong { font-size: 16px; }
 
   .section {
     padding: 15px 12px;
@@ -593,3 +595,9 @@
     width: 62%;
   }
 }
+
+.payGroup{margin:0 0 18px;border:1px solid #e8eaf0;border-radius:16px;overflow:hidden}.payGroup>header{display:flex;justify-content:space-between;gap:16px;align-items:center;background:#f8f5f8;padding:15px 18px}.payGroup h3{margin:0;font-size:15px;color:#823650}.payGroup>header>strong{font-size:17px}.payLine{display:flex;justify-content:space-between;gap:18px;padding:18px;border-top:1px solid #edf0f4}.payLine>div{min-width:0}.payLine>div>strong{font-size:14px}.payLine>strong{white-space:nowrap;font-size:17px}.payLine p{font-size:12px;color:#667085;line-height:1.6;margin:6px 0 0}.payLine small{font-size:11px;color:#667085}.zeroActivity{border:1px solid #e6e9ef;padding:15px;border-radius:12px;color:#667085;font-size:12px}.zeroActivity summary{cursor:pointer;font-size:13px;min-height:30px;line-height:30px;font-weight:600}.zeroActivity>div{display:flex;justify-content:space-between;gap:12px;padding:8px 0}.zeroActivity>p{line-height:1.6}@media(max-width:600px){.payGroup>header{padding:13px}.payLine{padding:14px;gap:10px}.payLine>strong{font-size:16px}.payGroup h3{font-size:14px}}
+
+/* Two-column tables must not inherit the former four-column rate widths. */
+.deductionTable thead th:first-child{width:55%}.deductionTable thead th:nth-child(2){width:45%}
+.bankTable tbody th{width:45%}.bankTable tbody td{width:55%;overflow-wrap:anywhere}

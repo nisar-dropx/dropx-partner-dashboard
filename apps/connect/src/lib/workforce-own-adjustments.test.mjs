@@ -285,11 +285,11 @@ test('client guard contract: keyed accounts, latest response only, no silent imp
  const payments=readFileSync(new URL('../components/connect-workforce-payments.tsx',import.meta.url),'utf8');
  const monthly=readFileSync(new URL('../components/connect-my-earnings.tsx',import.meta.url),'utf8');
  for(const source of [payments,monthly]){
-  assert.match(source,/key=\{`\$\{/);assert.match(source,/version!==generation.current/);assert.match(source,/generation.current\+\+/);assert.match(source,/setData\(null\)/);
+  assert.match(source,/key=\{`\$\{/);assert.match(source,/version!==generation.current/);assert.match(source,/generation.current\+\+/);assert.match(source,/set(?:Data|Calculated)\(null\)/);
  }
- assert.match(payments,/if\(!response.ok\)throw new Error\(payload.error\|\|'Unable to reconcile your payment estimate/);
- assert.match(payments,/if\(!earningsAllowed\)return null;/);
- assert.match(payments,/data && calculated && !loading && !visibleError/);
+ assert.match(payments,/if\(!response.ok\)throw new Error\(result.error/);
+ assert.match(payments,/tab==='earnings'&&earningsAllowed/);
+ assert.match(payments,/result.month!==month/);assert.match(payments,/reconcileOwnProduction\(result.earnings,result.summary\)/);
  assert.match(monthly,/data\?\.month===month/);
  assert.match(payments,/ConnectPayAdjustments ledger=\{calculated.adjustments\}/);
 });

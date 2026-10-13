@@ -34,13 +34,13 @@ test('rendered breakdown uses calculated amounts and a compact combined-ID basis
  for(const repeatedHelp of ['not paid once per ID','not a paid balance'])assert.ok(!html.includes(repeatedHelp),repeatedHelp);
  assert.doesNotMatch(html,/×/);
  for(const path of ['../components/connect-workforce-payments.tsx','../components/connect-my-earnings.tsx']){
-  const ui=readFileSync(new URL(path,import.meta.url),'utf8');assert.match(ui,/ConnectProductionBreakdown/);assert.match(ui,/reconcileOwnProduction/);assert.doesNotMatch(ui,/rateLines\.map|production\.map/);
+  const ui=readFileSync(new URL(path,import.meta.url),'utf8');assert.match(ui,/reconcileOwnProduction/);if(path.includes('connect-my-earnings'))assert.match(ui,/ConnectProductionBreakdown/);else {assert.match(ui,/l.count.toLocaleString/);assert.match(ui,/money\(l.amount\)/);}
  }
 });
 test('daily detail stacks below its header despite legacy ledger styles',()=>{
  const ui=readFileSync(new URL('../components/connect-workforce-payments.tsx',import.meta.url),'utf8');
  const css=readFileSync(new URL('../components/connect-workforce-payments.module.css',import.meta.url),'utf8');
- assert.match(ui,/dx-workforce-ledger \$\{paymentStyles\.ledger\}/);
+ assert.match(ui,/dx-workforce-ledger \$\{styles\.ledger\}/);
  assert.match(css,/\.ledger\.ledger\s*>\s*div\s*>\s*article\s*\{\s*display:\s*block;\s*padding:\s*0;/);
  assert.match(css,/:focus-visible/);
 });

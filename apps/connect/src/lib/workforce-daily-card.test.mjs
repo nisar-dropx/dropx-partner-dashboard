@@ -18,7 +18,7 @@ test('source ordering does not change allocated cents or mutate input',()=>{cons
 test('payment layout isolates shared dashboard column spans at every breakpoint', () => {
   const source = readFileSync(new URL('../components/connect-workforce-payments.tsx', import.meta.url), 'utf8');
   const styles = readFileSync(new URL('../components/connect-workforce-payments.module.css', import.meta.url), 'utf8');
-  assert.match(source, /dx-workforce-payments \$\{paymentStyles\.page\}/);
+  assert.match(source, /dx-workforce-payments \$\{styles\.page\}/);
   assert.match(styles, /\.page\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   assert.match(styles, /\.page\s*>\s*\*\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
   assert.match(styles, /\.page\s*>\s*\*\s*\{[^}]*min-width:\s*0/);
@@ -26,5 +26,5 @@ test('payment layout isolates shared dashboard column spans at every breakpoint'
 test('payment page keeps recurring financial help concise', () => {
   const source = readFileSync(new URL('../components/connect-workforce-payments.tsx', import.meta.url), 'utf8');
   for (const text of ['tap for break-up', 'Final payout remains subject', 'These are provider-mapping reference rates']) assert.equal(source.includes(text), false);
-  for (const text of ['Payouts', 'Earnings breakdown', 'Daily earnings']) assert.equal(source.includes(text), true);
+  for (const text of ['Payouts', 'My rate card', 'Daily earnings']) assert.equal(source.includes(text), true);
 });
