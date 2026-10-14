@@ -27,15 +27,17 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  const codes=stations.map(s=>s.station_code);
  const cps=await db.rpc('ops_cps_base_v2',{p_company:company,p_from:start,p_through:end,p_stations:codes});
  if(cps.error||!cps.data||!Array.isArray(cps.data.breakup))throw Error('Operating expense sources could not be read.');
- const costs=new Map<string,Entry>();let heldCosts=0;
+ const costs=new Map<string,Entry>();let heldCosts=0,pendingFleet=0;
  for(const r of cps.data.breakup as Row[]){
   // Payroll models and configurable CPS inputs are estimates, not final payroll.
   if(['Shipment payment mapping','CPS Inputs'].includes(r.source))continue;
+  if(r.source==='Fleet Vehicle Master'&&/PENDING-/i.test(r.sub_head??''))pendingFleet++;
   if(/salary|payroll|associate payout|helper payout|employee payout/i.test(r.sub_head??'')){heldCosts++;continue;}
   const id=`cost:${JSON.stringify([r.station_code,r.source,r.head,r.sub_head])}`;
   const existing=costs.get(id);if(existing)existing.paise+=paise(r.amount);else costs.set(id,{id,month,station:r.station_code,sourceStation:r.station_code,side:'expense',head:r.sub_head||r.head,description:r.source==='Finance Rent Master'?'Contract rent and maintenance for this month':`${r.sub_head||r.head} · recorded operating expenses`,paise:paise(r.amount),source:r.source,reference:`${r.source} / ${month}`,date:end});
  }
  entries.push(...costs.values());
+ if(pendingFleet)issues.push(`${pendingFleet} daily fleet accrual rows use pending vehicle identifiers. Verify their final bills before closing the month.`);
  if(heldCosts)issues.push(`${heldCosts} salary-labelled expense groups are excluded to avoid counting payroll twice. Review salary payments outside published payroll.`);
  const allWorkforce=latestPublications(workforce,'workforce_id'),allHelpers=latestPublications(helpers,'helper_id');
  let payrollCount=0;
@@ -67,11 +69,12 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   const station=stationById.get(p.location_id)||'HO / unallocated';const g=employeeCosts.get(station)??{paise:0,count:0};g.paise+=cost;g.count++;employeeCosts.set(station,g);payrollCount++;
  }
  for(const [station,g] of employeeCosts)add({id:`payroll:employee:${station}`,station,side:'expense',head:'Employee payroll',description:`${g.count} approved payroll rows · earned pay plus employer contributions, before recoveries`,paise:g.paise,source:'Approved employee payroll',reference:`Employee payroll / ${month}`,date:end});
+ if(!employeeCosts.size)issues.push('No approved employee payroll was found for this month. Employee and HO salary costs require final payroll or documented expense entries.');
  if(!payrollCount)issues.push('No published or approved payroll was found for this month. The recorded margin is incomplete until final payroll or documented expenses are added.');
  // NL outcomes are allocation plans. No name/amount matching is used to manufacture a payroll posting.
  const planMap=new Map(nlPlans.map(p=>[`${p.month}:${p.case_key}`,p]));
  for(const c of nlCases){const p=planMap.get(`${c.month}:${c.case_key}`),alloc=Array.isArray(p?.allocations)?p.allocations:[];
-  losses.push({id:`nl:${c.month}:${c.case_key}`,month:c.month,station:c.station_code,reference:c.case_key,paise:paise(c.amount),outcome:p?.outcome_label||c.source_status||'Awaiting dispute outcome',plannedPaise:alloc.reduce((n:number,a:Row)=>n+paise(a.amount??0),0),payrollMonth:p?.deduction_month||'',responsible:alloc.map((a:Row)=>a.employee_code||a.ref).join(', '),postedPaise:0,evidence:c.source_present?'Ops Pulse loss register':'No longer present in the current source'});
+  losses.push({id:`nl:${c.month}:${c.case_key}`,month:c.month,station:c.station_code,reference:c.case_key,paise:paise(c.amount),outcome:p?.outcome_label||c.source_status||'Awaiting dispute outcome',plannedPaise:alloc.reduce((n:number,a:Row)=>n+paise(a.amount??0),0),payrollMonth:p?.deduction_month||'',responsible:alloc.map((a:Row)=>a.full_name||a.employee_code||a.ref).join(', '),postedPaise:0,evidence:c.source_present?'Ops Pulse loss register':'No longer present in the current source'});
  }
  // Payment recovery events marked applied may predate publication. Verify the actual payroll evidence too.
  const recoveryIds=recoveryCases.map(r=>r.id);const allocations:Row[]=[],events:Row[]=[];
@@ -112,6 +115,6 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   }
  }
  if(nlPlans.some(p=>Array.isArray(p.allocations)&&p.allocations.length))issues.push('NL allocations are plans. Their source currently has no explicit payroll posting link; confirm the deduction evidence before recording recovery.');
- issues.push('Final P&L remains open for expense completeness review. Contract rent is accrued; configured CPS estimates are excluded. Invoice chargebacks already count as expenses, so loss-register amounts are not charged again.');
- return {company,month,capturedAt,stations:topology,entries,losses,issues:[...new Set(issues)],counts:{invoiceIndependentCostGroups:costs.size,payrollRows:payrollCount,nlLosses:nlCases.length,paymentRecoveryCases:recoveryCases.length,confirmedRecoveryEntries:entries.filter(e=>e.recovery).length}};
+ issues.push('Final P&L remains open for expense completeness review. Contract premises rent and fleet rent are accrued; configured CPS estimates are excluded. Invoice chargebacks already count as expenses, so loss-register amounts are not charged again.');
+ return {company,month,capturedAt,stations:topology,entries,losses,issues:[...new Set(issues)],counts:{invoiceIndependentCostGroups:costs.size,payrollRows:payrollCount,employeePayrollRows:[...employeeCosts.values()].reduce((n,g)=>n+g.count,0),finalEmployeeRuns:finalRuns.filter(r=>r.period_start<=end&&r.period_end>=start).length,nlLosses:nlCases.length,paymentRecoveryCases:recoveryCases.length,confirmedRecoveryEntries:entries.filter(e=>e.recovery).length}};
 }
