@@ -145,7 +145,8 @@ export async function findPositionApprover(
   companyId: string,
   roleIds: string[],
   locationId?: string | null,
-  at = new Date()
+  at = new Date(),
+  excludedUserId?: string
 ) {
   if (!supabaseAdmin || !roleIds.length) return null;
   const positionsResult = await supabaseAdmin
@@ -174,7 +175,7 @@ export async function findPositionApprover(
   if (assignmentResult.error) throw new Error(assignmentResult.error.message);
   const day = dateOnly(at);
   const activeAssignments = ((assignmentResult.data ?? []) as AssignmentRow[])
-    .filter((assignment) => activeOnDate(assignment, day))
+    .filter((assignment) => activeOnDate(assignment, day) && assignment.profile_id !== excludedUserId)
     .sort((left, right) => {
       if (left.assignment_type !== right.assignment_type) return left.assignment_type === "acting" ? -1 : 1;
       return right.created_at.localeCompare(left.created_at);

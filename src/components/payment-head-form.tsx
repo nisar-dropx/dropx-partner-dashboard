@@ -32,7 +32,8 @@ type PaymentHeadFormProps = {
     final_approval_role_id?: string | null;
     final_approval_role_ids?: string[] | null;
     payment_process_role_ids?: string[] | null;
-    supported_payment_modes?: PaymentMode[] | null;
+    vehicle_scope?: "none" | "owned_station";
+  supported_payment_modes?: PaymentMode[] | null;
     requires_supporting_document: boolean;
     request_expense_approval: boolean;
     expense_approval_threshold?: number | null;
@@ -579,6 +580,13 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
           <p>Choose the methods requesters can use and any expense-approval controls.</p>
         </div>
         <div className="form-grid three">
+        <label>Vehicle requirement
+          <select className="field" name="vehicle_scope" defaultValue={initialHead?.vehicle_scope ?? 'none'}>
+            <option value="none">No vehicle required</option>
+            <option value="owned_station">Company-owned vehicle at request station</option>
+          </select>
+          <span className="helper-text">Require a vehicle for maintenance and other vehicle-related heads.</span>
+        </label>
         <label className="span-3">
           Supported Payment Methods
           <PaymentModeMultiSelect selectedValues={initialHead?.supported_payment_modes} />

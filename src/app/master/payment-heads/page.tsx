@@ -1,3 +1,4 @@
+import { PaymentHeadVehicleHistory } from "@/components/payment-head-vehicle-history";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentHeadForm } from "@/components/payment-head-form";
@@ -31,6 +32,7 @@ type PaymentHeadRow = {
   final_approval_role_id: string | null;
   final_approval_role_ids: string[] | null;
   payment_process_role_ids: string[] | null;
+  vehicle_scope?: "none" | "owned_station";
   supported_payment_modes: PaymentMode[] | null;
   requires_supporting_document: boolean;
   request_expense_approval: boolean;
@@ -68,7 +70,7 @@ async function loadPaymentHeads(companyId: string) {
   const [headsResult, rolesResult] = await Promise.all([
     supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days), payment_head_approval_steps (id, step_order, candidates, is_required)")
+      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, vehicle_scope, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days), payment_head_approval_steps (id, step_order, candidates, is_required)")
       .eq("company_id", companyId)
       .order("code"),
     supabaseAdmin
@@ -252,6 +254,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                 final_approval_role_ids: editHead.final_approval_role_ids,
                 payment_process_role_ids: editHead.payment_process_role_ids,
                 supported_payment_modes: editHead.supported_payment_modes,
+                vehicle_scope: editHead.vehicle_scope,
                 requires_supporting_document: editHead.requires_supporting_document,
                 request_expense_approval: editHead.request_expense_approval,
                 expense_approval_threshold: editHead.expense_approval_threshold,
@@ -261,6 +264,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
               roleOptions={roleOptions}
               submitLabel="Save changes"
             />
+            <PaymentHeadVehicleHistory companyId={companyId} headId={editHead.id} />
           </section>
         </div>
       ) : null}

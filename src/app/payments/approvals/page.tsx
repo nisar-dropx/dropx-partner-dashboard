@@ -1,3 +1,6 @@
+import { PaymentRequestProvenance } from "@/components/payment-request-provenance";
+import type { PaymentApprovalOrigin } from "@/lib/payment-requester-routing";
+import type { PaymentVehicleSnapshot } from "@/lib/payment-vehicle-policy";
 import { isPendingPaymentApproval } from '@/lib/payment-pending-approval';
 import {adhocVehicleLabel} from '@/lib/adhoc-vehicle-policy';
 import { PaymentCostSummary } from "@/components/payment-cost-summary";
@@ -39,6 +42,8 @@ import {
 type RequestRow = {
   id: string;
   request_no: string;
+  approval_origin: PaymentApprovalOrigin | null;
+  expense_vehicle_snapshot: PaymentVehicleSnapshot | null;
   location_id: string | null;
   location_code: string;
   location_model_id?: string | null;
@@ -202,6 +207,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     .select(`
       id,
       request_no,
+      approval_origin,
+      expense_vehicle_snapshot,
       location_id,
       location_code,
       payment_head_id,
@@ -559,7 +566,7 @@ export default async function PaymentApprovalsPage({
                   const displayAmount = paymentApprovalAmount(request);
                   return (
                     <tr key={request.id}>
-                      <td><strong>{request.request_no}</strong></td>
+                      <td><strong>{request.request_no}</strong><PaymentRequestProvenance compact origin={request.approval_origin} vehicle={request.expense_vehicle_snapshot} requester={request.profiles?.full_name} steps={request.total_steps} /></td>
                       <td>{request.location_code}</td>
                       <td>{request.payment_heads?.name ?? "-"}</td>
                       <td>
@@ -595,6 +602,7 @@ export default async function PaymentApprovalsPage({
               <PendingLink className="icon-button" href={`/payments/approvals?${currentParams.toString()}`} scroll={false} prefetch={false} refresh={false} aria-label="Close">x</PendingLink>
             </div>
             <div className="panel-body">
+              <PaymentRequestProvenance origin={selectedRequest.approval_origin} vehicle={selectedRequest.expense_vehicle_snapshot} requester={selectedRequest.profiles?.full_name} steps={selectedRequest.total_steps} />
               {firstSearchParam(searchParams?.approvalError) ? (
                 <div className="message-panel error" style={{ marginBottom: 16 }}>
                   <strong>Payment approval not updated</strong>

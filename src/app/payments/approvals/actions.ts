@@ -450,7 +450,7 @@ export async function approvePaymentRequest(formData: FormData) {
       const lastSentBack = (history.data ?? []).filter((row) => row.action !== "approved").at(-1)?.created_at ?? null;
       const priorApprovals = (history.data ?? []).filter((row) => row.action === "approved" && (!lastSentBack || row.created_at > lastSentBack));
       const approvedUserIds = new Set<string>([authorization.userId, ...priorApprovals.map((row) => row.approver_user_id).filter((id): id is string => Boolean(id))]);
-      const advance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id, approvedUserIds);
+      const advance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id, approvedUserIds, request.requested_by);
       if (advance.done) {
         await updatePaymentRequest(request.id, companyId, {
           status: "approved",

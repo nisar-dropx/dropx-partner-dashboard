@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { serializePaymentFileGroups } from "@/lib/payment-file-types";
+import { parsePaymentVehicleScope } from "@/lib/payment-vehicle-policy";
 import { normalizePaymentModes } from "@/lib/payment-modes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -164,6 +165,8 @@ async function createPaymentHeadUnsafe(formData: FormData) {
       final_approval_role_ids: finalApprovalRoleIds,
       payment_process_role_ids: paymentProcessRoleIds,
       supported_payment_modes: supportedPaymentModes,
+      vehicle_scope: parsePaymentVehicleScope(formData.get("vehicle_scope")),
+      vehicle_scope_updated_by: authorization.userId,
       requires_supporting_document: questions.some((question) => question.answer_type === "file"),
       request_expense_approval: requestExpenseApproval,
       expense_approval_threshold: requestExpenseApproval ? expenseApprovalThreshold : null,
@@ -258,6 +261,8 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
       final_approval_role_ids: finalApprovalRoleIds,
       payment_process_role_ids: paymentProcessRoleIds,
       supported_payment_modes: supportedPaymentModes,
+      vehicle_scope: parsePaymentVehicleScope(formData.get("vehicle_scope")),
+      vehicle_scope_updated_by: authorization.userId,
       requires_supporting_document: questions.some((question) => question.answer_type === "file"),
       request_expense_approval: requestExpenseApproval,
       expense_approval_threshold: requestExpenseApproval ? expenseApprovalThreshold : null,

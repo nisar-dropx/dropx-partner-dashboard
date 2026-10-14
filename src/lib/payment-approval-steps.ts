@@ -190,13 +190,16 @@ async function redirectThroughDelegation(companyId: string, target: { userId: st
  * to company_product_memberships. Roster availability never removes approval
  * responsibility: use an explicit delegate or keep the request with its manager.
  */
-export async function resolveStepApprover(companyId: string, step: ApprovalStepRow, locationId: string | null | undefined): Promise<ApproverTarget> {
+export async function resolveStepApprover(companyId: string, step: ApprovalStepRow, locationId: string | null | undefined, excludedUserId?: string): Promise<ApproverTarget> {
   if (!supabaseAdmin) return null;
 
   for (const candidate of step.candidates) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
-    const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
-    if (positionApprover) return redirectThroughDelegation(companyId, positionApprover);
+    const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId, new Date(), excludedUserId);
+    if (positionApprover) {
+      const delegated = await redirectThroughDelegation(companyId, positionApprover);
+      if (delegated.userId !== excludedUserId) return delegated;
+    }
 
     const userIds = await candidateUserIds(companyId, candidate.role_id, candidate.scope, locationId);
     if (!userIds.length) continue;
@@ -211,7 +214,9 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
     if (profiles.error) throw new Error(profiles.error.message);
 
     for (const profile of profiles.data ?? []) {
-      return redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
+      if (profile.id === excludedUserId) continue;
+      const delegated = await redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
+      if (delegated.userId !== excludedUserId) return delegated;
     }
   }
 
@@ -233,8 +238,8 @@ export type InitialApprovalTarget = {
  * starting point is always consistent with how approvePaymentRequest will
  * later walk it forward.
  */
-export async function resolveInitialApprovalTarget(companyId: string, steps: ApprovalStepRow[], locationId: string | null | undefined): Promise<InitialApprovalTarget> {
-  const { step, approver } = await resolveInitialStage(steps, step => resolveStepApprover(companyId, step, locationId));
+export async function resolveInitialApprovalTarget(companyId: string, steps: ApprovalStepRow[], locationId: string | null | undefined, requesterId?: string): Promise<InitialApprovalTarget> {
+  const { step, approver } = await resolveInitialStage(steps, step => resolveStepApprover(companyId, step, locationId, requesterId));
   return {
     approver,
     currentStepOrder: step?.step_order ?? 1,
@@ -261,12 +266,13 @@ export async function advanceApproval(
   steps: ApprovalStepRow[],
   currentStepOrder: number,
   locationId: string | null | undefined,
-  alreadyApprovedUserIds: ReadonlySet<string> = new Set()
+  alreadyApprovedUserIds: ReadonlySet<string> = new Set(),
+  requesterId?: string | null
 ): Promise<AdvanceResult> {
   const remaining = steps.filter((step) => step.step_order > currentStepOrder).sort((left, right) => left.step_order - right.step_order);
 
   for (const step of remaining) {
-    const approver = await resolveStepApprover(companyId, step, locationId);
+    const approver = await resolveStepApprover(companyId, step, locationId, requesterId ?? undefined);
     // Someone who already approved this request is not asked again at a later
     // step (e.g. the AOM approving on the CLM's behalf, or a Zonal Head who is
     // also the Business Head) - their approval already covers it. A mandatory

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { PaymentExpenseVehiclePicker } from "./payment-expense-vehicle-picker";
 import { PaymentCostSummary } from "./payment-cost-summary";
 import { estimatedShipments } from "@/lib/expense-variance";
 import { AdhocReasonSelector } from "./adhoc-reason-selector";
@@ -34,6 +35,7 @@ type PaymentHead = {
   requires_supporting_document: boolean;
   request_expense_approval?: boolean | null;
   expense_approval_threshold?: number | null;
+  vehicle_scope?: "none" | "owned_station";
   supported_payment_modes?: PaymentMode[] | null;
   payment_head_questions: PaymentQuestion[];
 };
@@ -387,7 +389,8 @@ export function PaymentRequestForm({
         </>
       ) : null}
 
-      {selectedHead ? <PaymentCostSummary estimate={hasAmount ? amount : null} shipments={estimatedShipments(selectedHead.payment_head_questions.map(q => ({ answer_value: costAnswers[q.id] ?? null, payment_head_questions: q })))} /> : null}
+      {selectedHead?.vehicle_scope === 'owned_station' ? <PaymentExpenseVehiclePicker key={`${selectedHead.id}:${selectedLocationId}`} locationId={selectedLocationId} disabled={blockedByExpenseApproval} /> : null}
+      {selectedHead?.payment_head_questions.some(q => isPaymentTrackingQuestion(q) || /^estimated shipments$/i.test(q.question_text.trim())) ? <PaymentCostSummary estimate={hasAmount ? amount : null} shipments={estimatedShipments(selectedHead.payment_head_questions.map(q => ({ answer_value: costAnswers[q.id] ?? null, payment_head_questions: q })))} /> : null}
       {selectedHead?.code === "VAN_ADHOC" && volumeReason.trim().toLowerCase() === "high volume" ? <PaymentVolumeContext key={`${selectedLocationId}:${volumeDate}`} locationId={selectedLocationId} date={volumeDate} /> : null}
 
       {selectedHead?.payment_head_questions.length ? (

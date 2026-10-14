@@ -39,12 +39,13 @@ async function authorizationModelIds(companyId: string, authorization: Authoriza
 
 export async function getPaymentApprovalEligibility(companyId: string, authorization: AuthorizationContext, requests: PaymentApprovalScopeRequest[]) {
   if (authorization.roleCode === "OWNER" || authorization.isMasterOwner) {
-    return new Set(requests.map((request) => request.id));
+    return new Set(requests.filter(request => request.requested_by !== authorization.userId).map((request) => request.id));
   }
   const eligibleIds = new Set<string>();
   const modelIds = await authorizationModelIds(companyId, authorization);
 
   for (const request of requests) {
+    if (request.requested_by === authorization.userId) continue;
     if (!canAccessPaymentLocation(authorization, request.location_id)) {
       continue;
     }

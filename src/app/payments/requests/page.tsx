@@ -1,3 +1,6 @@
+import { PaymentRequestProvenance } from "@/components/payment-request-provenance";
+import type { PaymentApprovalOrigin } from "@/lib/payment-requester-routing";
+import type { PaymentVehicleSnapshot } from "@/lib/payment-vehicle-policy";
 import { PaymentTrackingInput } from "@/components/payment-tracking-input";
 import { isPaymentTrackingQuestion } from "@/lib/payment-shipment-count";
 import { AppShell } from "@/components/app-shell";
@@ -43,6 +46,7 @@ type PaymentHeadRow = {
   requires_supporting_document: boolean;
   request_expense_approval: boolean;
   expense_approval_threshold: number | null;
+  vehicle_scope?: "none" | "owned_station";
   supported_payment_modes: PaymentMode[] | null;
   payment_head_questions?: QuestionRow[] | null;
 };
@@ -52,6 +56,8 @@ type PaymentRequestRow = {
   adhoc_provider_employee_id: string | null;
   adhoc_work_date: string | null;
   request_no: string;
+  approval_origin: PaymentApprovalOrigin | null;
+  expense_vehicle_snapshot: PaymentVehicleSnapshot | null;
   location_id: string | null;
   location_code: string;
   payment_head_id: string;
@@ -264,13 +270,13 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
+      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, vehicle_scope, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date, work_date, source_type, source_id, requested_for_name, category, details")
+      .select("id, approval_origin, expense_vehicle_snapshot, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date, work_date, source_type, source_id, requested_for_name, category, details")
       .eq("company_id", companyId)
       .not("amount", "is", null)
       .order("created_at", { ascending: false });
@@ -579,7 +585,7 @@ export default async function PaymentRequestsPage({
                   const head = headById.get(request.payment_head_id);
                   return (
                     <tr key={request.id}>
-                      <td><strong>{request.request_no}</strong>{request.adhoc_provider_employee_id ? <div><small>{request.adhoc_da_name} · {request.adhoc_provider_employee_id}<br />Work date: {request.adhoc_work_date}</small></div> : null}</td>
+                      <td><strong>{request.request_no}</strong><PaymentRequestProvenance compact origin={request.approval_origin} vehicle={request.expense_vehicle_snapshot} />{request.adhoc_provider_employee_id ? <div><small>{request.adhoc_da_name} · {request.adhoc_provider_employee_id}<br />Work date: {request.adhoc_work_date}</small></div> : null}</td>
                       <td>{request.location_code}</td>
                       <td>{head?.name ?? "-"}</td>
                       <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>

@@ -19,6 +19,8 @@ import {
 } from "@/lib/payment-request-attachments";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
+import { requesterSafeSteps, type PaymentApprovalOrigin } from "@/lib/payment-requester-routing";
+import { paymentVehicleFields } from "@/lib/payment-expense-vehicles";
 import { loadApprovalSteps, resolveInitialApprovalTarget, resolveStepApprover, type ApprovalStepRow } from "@/lib/payment-approval-steps";
 import { initialStageStatus } from "@/lib/payment-stage-policy";
 import { paymentRequestCancelEligibility } from "@/lib/payment-request-cancel";
@@ -327,7 +329,7 @@ export async function createExpenseRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+        .select("id, code, vehicle_scope, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", paymentHeadId)
         .eq("company_id", companyId)
         .single()
@@ -348,7 +350,26 @@ export async function createExpenseRequest(formData: FormData) {
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
-    const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
+    const vehicleFields = await paymentVehicleFields(companyId, locationResult.data.station_code, headResult.data.vehicle_scope, formData.get("expense_vehicle_id"));
+    let configuredSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
+    if (!configuredSteps.length) {
+      const initialRoles = configuredRoleIds(headResult.data.initial_approval_role_ids, headResult.data.initial_approval_role_id);
+      const finalRoles = configuredRoleIds(headResult.data.final_approval_role_ids, headResult.data.final_approval_role_id);
+      if (!finalRoles.length) throw new Error("Final approval role is not configured for this payment head.");
+      configuredSteps = [
+        ...(initialRoles.length ? [{ id: 'legacy-initial', step_order: 1, candidates: initialRoles.map(role_id => ({ role_id, scope: 'station' as const })), is_required: true }] : []),
+        { id: 'legacy-final', step_order: initialRoles.length ? 2 : 1, candidates: finalRoles.map(role_id => ({ role_id, scope: 'company' as const })), is_required: true }
+      ];
+      const editable = await roleIdsWithPageEditAccess(companyId, [...initialRoles, ...finalRoles], 'payment_approvals');
+      configuredSteps = configuredSteps.map(step => ({ ...step, has_local_candidates: step.candidates.some(c => c.scope !== 'company'), candidates: step.candidates.filter(c => editable.has(c.role_id)) }));
+    }
+    const routing = await requesterSafeSteps(configuredSteps, authorization.userId,
+      (step, excluded) => resolveStepApprover(companyId, step, locationResult.data.id, excluded));
+    const approvalSteps = routing.steps;
+    const approvalOrigin: PaymentApprovalOrigin | null = routing.skipped.length ? {
+      requester_id: authorization.userId, requester_role_id: authorization.roleId,
+      original_step_count: configuredSteps.length, skipped: routing.skipped
+    } : null;
 
     const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
     validateQuestionDates(formData, expenseQuestions);
@@ -372,41 +393,26 @@ export async function createExpenseRequest(formData: FormData) {
     let finalApprovalRoleId: string | null;
     let finalApprovalRoleIds: string[];
 
-    if (approvalSteps.length) {
-      const target = await resolveInitialApprovalTarget(companyId, approvalSteps, locationResult.data.id);
-      approver = target.approver ?? { userId: null, roleId: null };
-      currentApprovalRoleIds = target.currentApprovalRoleIds;
-      currentStepOrder = target.currentStepOrder;
-      totalSteps = target.totalSteps;
-      // A missing assignment must not create an invisible pending request.
-      if (!target.approver) throw new Error("No active initial approver is assigned for this station and payment head. Ask an administrator to correct Payment Approvals in Master; this request has not been submitted.");
-      approvalStatus = initialStageStatus(target.approver);
-      const lastStep = approvalSteps[approvalSteps.length - 1];
-      finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
-      finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
-    } else {
-      const initialApprovalRoleIds = configuredRoleIds(headResult.data.initial_approval_role_ids, headResult.data.initial_approval_role_id);
-      finalApprovalRoleIds = configuredRoleIds(headResult.data.final_approval_role_ids, headResult.data.final_approval_role_id);
-      if (!finalApprovalRoleIds.length) throw new Error("Final approval role is not configured for this payment head.");
-      const requesterIsInitialApprover = authorization.effectiveRoleIds.some((roleId) => initialApprovalRoleIds.includes(roleId));
-      const startsWithFinalApproval = !initialApprovalRoleIds.length || requesterIsInitialApprover;
-      currentApprovalRoleIds = startsWithFinalApproval ? finalApprovalRoleIds : initialApprovalRoleIds;
-      approver = await approverForRoles(
-        companyId,
-        currentApprovalRoleIds,
-        startsWithFinalApproval ? "final approver roles" : "initial approver roles",
-        locationResult.data.id
-      );
-      currentStepOrder = startsWithFinalApproval ? 2 : 1;
-      totalSteps = null;
-      approvalStatus = startsWithFinalApproval ? "APPROVED" : "PENDING";
-      finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
-    }
+    const target = await resolveInitialApprovalTarget(companyId, approvalSteps, locationResult.data.id, authorization.userId);
+    approver = target.approver ?? { userId: null, roleId: null };
+    currentApprovalRoleIds = target.currentApprovalRoleIds;
+    currentStepOrder = target.currentStepOrder;
+    totalSteps = target.totalSteps;
+    // A missing assignment must not create an invisible pending request.
+    if (!target.approver) throw new Error("No active initial approver is assigned for this station and payment head. Ask an administrator to correct Payment Approvals in Master; this request has not been submitted.");
+    approvalStatus = initialStageStatus(target.approver);
+    const lastStep = approvalSteps[approvalSteps.length - 1];
+    finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
+    finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
 
+    if (approver.userId === authorization.userId) throw new Error("An independent approver is required.");
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
       .insert(withCompany({
         ...adhocRequest.fields,
+        ...vehicleFields,
+        approval_origin: approvalOrigin,
+        ...(approvalSteps.length ? { adhoc_approval_steps: approvalSteps } : {}),
         request_no: requestNo,
         location_id: locationResult.data.id,
         location_code: locationResult.data.station_code,
@@ -552,7 +558,7 @@ export async function createPaymentRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+        .select("id, code, vehicle_scope, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", paymentHeadId)
         .eq("company_id", companyId)
         .single()
@@ -596,7 +602,26 @@ export async function createPaymentRequest(formData: FormData) {
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
     const adhocRequest = await prepareAdhocRequest(companyId, headResult.data.code, locationResult.data.station_code, formData, headResult.data.payment_head_questions);
-    const approvalSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
+    const vehicleFields = await paymentVehicleFields(companyId, locationResult.data.station_code, headResult.data.vehicle_scope, formData.get("expense_vehicle_id"));
+    let configuredSteps = adhocRequest.steps ?? await loadApprovalSteps(companyId, paymentHeadId);
+    if (!configuredSteps.length) {
+      const initialRoles = configuredRoleIds(headResult.data.initial_approval_role_ids, headResult.data.initial_approval_role_id);
+      const finalRoles = configuredRoleIds(headResult.data.final_approval_role_ids, headResult.data.final_approval_role_id);
+      if (!finalRoles.length) throw new Error("Final approval role is not configured for this payment head.");
+      configuredSteps = [
+        ...(initialRoles.length ? [{ id: 'legacy-initial', step_order: 1, candidates: initialRoles.map(role_id => ({ role_id, scope: 'station' as const })), is_required: true }] : []),
+        { id: 'legacy-final', step_order: initialRoles.length ? 2 : 1, candidates: finalRoles.map(role_id => ({ role_id, scope: 'company' as const })), is_required: true }
+      ];
+      const editable = await roleIdsWithPageEditAccess(companyId, [...initialRoles, ...finalRoles], 'payment_approvals');
+      configuredSteps = configuredSteps.map(step => ({ ...step, has_local_candidates: step.candidates.some(c => c.scope !== 'company'), candidates: step.candidates.filter(c => editable.has(c.role_id)) }));
+    }
+    const routing = await requesterSafeSteps(configuredSteps, authorization.userId,
+      (step, excluded) => resolveStepApprover(companyId, step, locationResult.data.id, excluded));
+    const approvalSteps = routing.steps;
+    const approvalOrigin: PaymentApprovalOrigin | null = routing.skipped.length ? {
+      requester_id: authorization.userId, requester_role_id: authorization.roleId,
+      original_step_count: configuredSteps.length, skipped: routing.skipped
+    } : null;
 
     const requestNo = await nextPaymentRequestNo(companyId);
     const isAdhocDa = headResult.data.code === "ADHOC_DA";
@@ -614,36 +639,18 @@ export async function createPaymentRequest(formData: FormData) {
     let finalApprovalRoleId: string | null;
     let finalApprovalRoleIds: string[];
 
-    if (approvalSteps.length) {
-      const target = await resolveInitialApprovalTarget(companyId, approvalSteps, locationResult.data.id);
-      approver = target.approver ?? { userId: null, roleId: null };
-      currentApprovalRoleIds = target.currentApprovalRoleIds;
-      currentStepOrder = target.currentStepOrder;
-      totalSteps = target.totalSteps;
-      // Step order is not evidence of an earlier approval.
-      if (!target.approver) throw new Error("No active initial approver is assigned for this station and payment head. Ask an administrator to correct Payment Approvals in Master; this request has not been submitted.");
-      approvalStatus = initialStageStatus(target.approver);
-      const lastStep = approvalSteps[approvalSteps.length - 1];
-      finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
-      finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
-    } else {
-      const initialApprovalRoleIds = configuredRoleIds(headResult.data.initial_approval_role_ids, headResult.data.initial_approval_role_id);
-      finalApprovalRoleIds = configuredRoleIds(headResult.data.final_approval_role_ids, headResult.data.final_approval_role_id);
-      if (!finalApprovalRoleIds.length) throw new Error("Final approval role is not configured for this payment head.");
-      const requesterIsInitialApprover = authorization.effectiveRoleIds.some((roleId) => initialApprovalRoleIds.includes(roleId));
-      const startsWithFinalApproval = !initialApprovalRoleIds.length || requesterIsInitialApprover;
-      currentApprovalRoleIds = startsWithFinalApproval ? finalApprovalRoleIds : initialApprovalRoleIds;
-      approver = await approverForRoles(
-        companyId,
-        currentApprovalRoleIds,
-        startsWithFinalApproval ? "final approver roles" : "initial approver roles",
-        locationResult.data.id
-      );
-      currentStepOrder = startsWithFinalApproval ? 2 : 1;
-      totalSteps = null;
-      approvalStatus = startsWithFinalApproval ? "APPROVED" : "PENDING";
-      finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
-    }
+    const target = await resolveInitialApprovalTarget(companyId, approvalSteps, locationResult.data.id, authorization.userId);
+    approver = target.approver ?? { userId: null, roleId: null };
+    currentApprovalRoleIds = target.currentApprovalRoleIds;
+    currentStepOrder = target.currentStepOrder;
+    totalSteps = target.totalSteps;
+    // Step order is not evidence of an earlier approval.
+    if (!target.approver) throw new Error("No active initial approver is assigned for this station and payment head. Ask an administrator to correct Payment Approvals in Master; this request has not been submitted.");
+    approvalStatus = initialStageStatus(target.approver);
+    const lastStep = approvalSteps[approvalSteps.length - 1];
+    finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
+    finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
+
     const paymentQuestions = questionsForStage(headResult.data.payment_head_questions, "payment");
     validateQuestionDates(formData, paymentQuestions);
     const fileQuestions = paymentQuestions.filter((question) => question.answer_type === "file");
@@ -655,9 +662,13 @@ export async function createPaymentRequest(formData: FormData) {
       }
     }
 
+    if (approver.userId === authorization.userId) throw new Error("An independent approver is required.");
     const requestPayload = withCompany({
       ...adhocFields,
       ...adhocRequest.fields,
+      ...vehicleFields,
+      approval_origin: approvalOrigin,
+      ...(approvalSteps.length ? { adhoc_approval_steps: approvalSteps } : {}),
         request_no: requestNo,
       location_id: locationResult.data.id,
       location_code: locationResult.data.station_code,
@@ -1134,7 +1145,8 @@ export async function resubmitExpenseRequest(formData: FormData) {
         ? approvalSteps.find((step) => step.candidates.some((candidate) => candidate.role_id === returnedRoleId))
         : null;
       const targetStep = returnedStep ?? approvalSteps[0];
-      const resolved = await resolveStepApprover(companyId, targetStep, request.location_id);
+      const resolved = await resolveStepApprover(companyId, targetStep, request.location_id, request.requested_by ?? undefined);
+      if (!resolved) throw new Error("No independent approver is assigned. Ask an administrator to correct Payment Approvals before resubmitting.");
       currentApprovalRoleIds = targetStep.candidates.map((candidate) => candidate.role_id);
       currentApprovalStep = targetStep.step_order;
       approver = resolved ?? { userId: null, roleId: returnedRoleId ?? currentApprovalRoleIds[0] ?? null };
@@ -1314,7 +1326,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_manager_email").eq("id", request.location_id).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+        .select("id, code, vehicle_scope, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", request.payment_head_id)
         .eq("company_id", companyId)
         .single(),
@@ -1393,7 +1405,8 @@ export async function resubmitPaymentRequest(formData: FormData) {
           ? approvalSteps.find((step) => step.candidates.some((candidate) => candidate.role_id === returnedRoleId))
           : null;
         const targetStep = returnedStep ?? approvalSteps[0];
-        const resolved = await resolveStepApprover(companyId, targetStep, request.location_id);
+        const resolved = await resolveStepApprover(companyId, targetStep, request.location_id, request.requested_by ?? undefined);
+        if (!resolved) throw new Error("No independent approver is assigned. Ask an administrator to correct Payment Approvals before resubmitting.");
         currentApprovalRoleIds = targetStep.candidates.map((candidate) => candidate.role_id);
         currentApprovalStep = targetStep.step_order;
         approver = resolved ?? { userId: null, roleId: returnedRoleId ?? currentApprovalRoleIds[0] ?? null };
