@@ -24,7 +24,10 @@ const kindFor = (field: string) =>
 /** Browsers often report no type for spreadsheets, so fall back to the file extension. */
 function auditFileType(field: string, file: File) {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  const supporting = field === "evidence_files" || field === "response_evidence";
+  const supporting =
+    field === "evidence_files" ||
+    field === "response_evidence" ||
+    field.startsWith("check_photo_");
   const type =
     proofMime.test(file.type)
       ? file.type
