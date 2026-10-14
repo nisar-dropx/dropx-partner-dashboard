@@ -143,6 +143,52 @@ test("a closed registered-location mapping permits only fully contained bounded 
   }
 });
 
+test("location validation waits for a start date when an exact registered mapping exists", () => {
+  const registeredMapping = {
+    mappingId: "mapping-history",
+    stationId: "station-a",
+    locationLabel: "KGQC",
+    providerId: "provider-1",
+    mappedProviderMemberId: "2000074247130",
+    paymentMethodId: "method-1",
+    paymentValues: {},
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-30",
+    status: "closed"
+  };
+  const historicalWorker = {
+    ...baseWorker,
+    mappingId: "",
+    paymentMethodId: "",
+    mappedProviderMemberId: "",
+    effectiveFrom: "",
+    effectiveTo: "",
+    registeredLocationMappings: [registeredMapping]
+  };
+  const awaitingStartDate = {
+    ...secondLocationRow,
+    mappingId: "",
+    effectiveFrom: "",
+    effectiveTo: ""
+  };
+
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, baseWorker), true);
+  assert.equal(providerFirstLocationRemap(awaitingStartDate, baseWorker), null);
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, historicalWorker), true);
+  assert.equal(providerFirstLocationRemap(awaitingStartDate, historicalWorker), null);
+  assert.equal(providerFirstLocationIsAllowed({
+    ...awaitingStartDate,
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "2026-10-31"
+  }, historicalWorker), false);
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, {
+    ...historicalWorker,
+    registeredLocationMappings: [{ ...registeredMapping, mappedProviderMemberId: "another-member" }]
+  }), false);
+});
+
 test("the exact closed mapping remains the edit target when it is reopened at the same location", () => {
   const closedMapping = {
     mappingId: "mapping-history",

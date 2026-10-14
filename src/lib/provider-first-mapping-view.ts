@@ -133,6 +133,7 @@ export function providerFirstLocationRemap(
   const reference = providerFirstMappingReferenceForRow(row, worker);
   if (!worker
     || !reference
+    || !isIsoCalendarDate(row.effectiveFrom)
     || !row.workforceId
     || row.workforceId !== worker.id
     || !reference.mappingId
@@ -451,6 +452,18 @@ export function providerFirstLocationIsAllowed(
       mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
     );
     return historicalMatch || !currentMappings.length || currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row));
+  }
+  // Selecting a DropX ID happens before the operator chooses the requested
+  // period. At that point an exact, valid registered-location mapping is
+  // sufficient evidence for the additional-location workflow; there is no
+  // requested interval to compare yet. As soon as a start date is entered,
+  // the normal full-period containment rule below applies unchanged.
+  if (!String(row.effectiveFrom ?? "").trim()) {
+    return registeredWorkerMappings(worker).some((mapping) =>
+      Boolean(mapping.mappingId)
+        && mapping.stationId === registeredStationId
+        && mappingIdentityMatchesRow(mapping, row)
+    );
   }
   return registeredWorkerMappings(worker).some((mapping) =>
     Boolean(mapping.mappingId)
