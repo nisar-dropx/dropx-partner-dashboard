@@ -14,6 +14,7 @@ function fixture({ssa=true, cm=true}={}) {
   const ids=['worker','tl',...(cm?['cm']:[]),'aom','finance','hr'];
   state.tables.hr_engagements=ids.map(id=>({id:`e-${id}`,person_id:id,company_id:'company',worker_type:'employee',employee_id:id,status:'active',start_date:'2020-01-01',end_date:null}));
   state.tables.hr_people=ids.map(id=>({id,company_id:'company',display_name:id,status:'active'}));
+  state.tables.profiles=ids.map(id=>({id:`${id}-login`,company_id:'company',is_active:true}));
   state.tables.hr_work_assignments=ids.map(id=>({id:`a-${id}`,company_id:'company',engagement_id:`e-${id}`,designation_id:({worker:ssa?'SSA':'TL',tl:'TL',cm:'CLM',aom:'AOM',finance:'FINMGR',hr:'HRM'})[id],location_id:'station',position_title:id,is_primary:true,effective_from:'2020-01-01',effective_to:null}));
   // Only worker/TL are posted at the station; managers are reached through its People hierarchy.
   for(const a of state.tables.hr_work_assignments) if(!['a-worker','a-tl'].includes(a.id)) a.location_id='office';
@@ -212,6 +213,8 @@ test('One reimbursement: inactive, expired, future, unlinked and cross-company F
     f=>f.state.tables.hr_work_assignments.find(a=>a.id==='a-finance').effective_to='2026-09-01',
     f=>f.state.tables.hr_work_assignments.find(a=>a.id==='a-finance').effective_from='2027-01-01',
     f=>f.state.logins.delete('finance'),
+    f=>f.state.tables.profiles.find(p=>p.id==='finance-login').is_active=false,
+    f=>f.state.tables.profiles.find(p=>p.id==='finance-login').company_id='other',
     f=>f.state.tables.hr_people.find(p=>p.id==='finance').company_id='other',
     f=>f.state.tables.hr_engagements.find(e=>e.person_id==='finance').company_id='other',
     f=>f.state.tables.hr_work_assignments.find(a=>a.id==='a-finance').company_id='other',

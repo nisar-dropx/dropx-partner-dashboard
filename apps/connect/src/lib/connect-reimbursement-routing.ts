@@ -79,6 +79,11 @@ export async function resolveOneReimbursementWorkflow(input: {
     if (!person.data) continue;
     const userId = await resolveConnectApproverUserId(input.companyId, engagement.person_id);
     if (!userId) continue;
+    // A historical person link can still point at a disabled company login.
+    const profile = await supabaseAdmin.from("profiles").select("id")
+      .eq("company_id", input.companyId).eq("id", userId).eq("is_active", true).maybeSingle();
+    if (profile.error) throw new Error(profile.error.message);
+    if (!profile.data) continue;
     eligible.set(engagement.person_id, {
       step_name: "Finance approval", stage_code: "finance",
       approver_user_id: userId, approver_person_id: engagement.person_id,
