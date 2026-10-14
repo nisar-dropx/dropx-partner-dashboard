@@ -15,8 +15,8 @@ export function sourceReadError(label: string, error: ReadError, status?: number
  return Error(`${label} could not be read: ${detail}`);
 }
 
-export async function boundedReads(queries: (()=>PromiseLike<any>)[]) {
- const values: any[] = [];
+export async function boundedReads<const T extends readonly (()=>PromiseLike<unknown>)[]>(queries: T): Promise<{[K in keyof T]: Awaited<ReturnType<T[K]>>}> {
+ const values: unknown[] = [];
  for(let i=0;i<queries.length;i+=3) values.push(...await Promise.all(queries.slice(i,i+3).map(query=>query())));
- return values;
+ return values as {[K in keyof T]: Awaited<ReturnType<T[K]>>};
 }
