@@ -243,6 +243,26 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     resetPage();
   }
 
+  function downloadCsv() {
+    const esc = (value: string) => /[",\r\n]/.test(value) ? `"${value.replace(/"/g, "\"\"")}"` : value;
+    const head = ["Provider member ID", "Provider member name", "Location", "Provider ID", "DropX ID", "DropX name", "Mapping status", "Payment method", "Payment values", "Minimum units", "Effective from", "Effective to", "Outbound months"];
+    const lines = visibleIndexes.map((index) => {
+      const row = rows[index];
+      const values = Object.entries(row.paymentValues).filter(([, value]) => value !== "").map(([key, value]) => `${key}: ${value}`).join("; ");
+      return [
+        row.providerMemberId, row.providerMemberName, row.stationLabel, row.providerId, row.dropxId, row.dropxName,
+        row.workforceId ? "Mapped" : "Unmapped", paymentMethodById.get(row.paymentMethodId)?.name ?? "", values,
+        row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo, (row.outboundMonths ?? []).join("; ")
+      ].map((value) => esc(String(value ?? ""))).join(",");
+    });
+    const url = URL.createObjectURL(new Blob(["﻿" + [head.map(esc).join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `provider-member-mapping-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function update(index: number, change: Partial<ProviderFirstMappingRow>) {
     setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
     if (Object.prototype.hasOwnProperty.call(change, "paymentMethodId")) {
@@ -813,7 +833,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
         <label className="mapping-page-size">Rows<select onChange={(event) => { const value = event.target.value; setPageSize(value === "all" ? "all" : Number(value) as ProviderFirstPageSize); resetPage(); }} value={pageSize}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="all">All</option></select></label>
-        <div className="provider-first-filter-summary"><strong>{visibleIndexes.length}</strong><span>of {rows.length}</span>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
+        <div className="provider-first-filter-summary"><strong>{visibleIndexes.length}</strong><span>of {rows.length}</span><button className="button secondary compact" disabled={!visibleIndexes.length} onClick={downloadCsv} type="button">CSV</button>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
       </div>
       <div className="mapping-rows provider-first-rows">{paginatedIndexes.map((index) => {
         const row = rows[index];
