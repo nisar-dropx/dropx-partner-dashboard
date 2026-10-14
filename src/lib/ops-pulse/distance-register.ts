@@ -42,6 +42,67 @@ export const distanceMethods: Record<string, string> = {
   manual: "Imported kilometres",
   pending: "Awaiting evidence",
 };
+export type DistanceViewFilters = {
+  from: string;
+  to: string;
+  stations: string[];
+  regions: string[];
+  clusters: string[];
+  statuses: string[];
+  methods: string[];
+  query: string;
+};
+export function distanceStatus(row: DistanceEntry) {
+  if (row.status === "ready") return "Ready";
+  return ["input_conflict", "route_needs_review", "identity_mismatch", "conflicting_scan", "amazon_identity_missing", "mapping_changed"].includes(row.reason || "")
+    ? "Needs attention" : "Pending";
+}
+export function filterDistanceEntries(rows: DistanceEntry[], filters: DistanceViewFilters) {
+  const query = filters.query.trim().toLowerCase();
+  return rows.filter((r) => r.date >= filters.from && r.date <= filters.to &&
+    (!filters.stations.length || filters.stations.includes(r.station)) &&
+    (!filters.regions.length || filters.regions.includes(r.region)) &&
+    (!filters.clusters.length || filters.clusters.includes(r.cluster)) &&
+    (!filters.statuses.length || filters.statuses.includes(distanceStatus(r))) &&
+    (!filters.methods.length || filters.methods.includes(distanceMethods[r.method] || r.method)) &&
+    (!query || [r.name, r.amazonId, r.dropxId, r.transporterId].some((value) => value.toLowerCase().includes(query))));
+}
+export type DistanceAssociate = {
+  key: string;
+  name: string;
+  amazonIds: string[];
+  dropxIds: string[];
+  transporterIds: string[];
+  stations: string[];
+  rows: DistanceEntry[];
+  days: number;
+  pendingDays: number;
+  km: number | null;
+  fuel: number | null;
+};
+export function groupDistanceAssociates(rows: DistanceEntry[]): DistanceAssociate[] {
+  const grouped = new Map<string, DistanceEntry[]>();
+  for (const row of rows) {
+    // Workforce identity groups historical Amazon mappings without merging namesakes.
+    const group = grouped.get(row.workforceId) || [];
+    group.push(row);
+    grouped.set(row.workforceId, group);
+  }
+  return [...grouped].map(([key, entries]) => {
+    const days = [...entries].sort((a, b) => b.date.localeCompare(a.date) || a.station.localeCompare(b.station));
+    const unique = (field: "amazonId" | "dropxId" | "transporterId" | "station") =>
+      [...new Set(days.flatMap((r) => r[field].split(" / ")).filter(Boolean))];
+    const ready = days.filter((r) => r.status === "ready");
+    return {
+      key, name: days[0].name, amazonIds: unique("amazonId"), dropxIds: unique("dropxId"),
+      transporterIds: unique("transporterId"), stations: unique("station"), rows: days,
+      days: new Set(days.map((r) => r.date)).size,
+      pendingDays: new Set(days.filter((r) => r.status !== "ready").map((r) => r.date)).size,
+      km: ready.length ? ready.reduce((sum, r) => sum + (r.km ?? 0), 0) : null,
+      fuel: ready.length ? ready.reduce((sum, r) => sum + (r.fuel ?? 0), 0) : null,
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+}
 export function distancePeriod(
   from: string | undefined,
   to: string | undefined,

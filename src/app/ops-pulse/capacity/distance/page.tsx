@@ -75,7 +75,7 @@ export default async function DistancePage({
         <PageHead
           eyebrow="Capacity"
           title="Distance & Fuel"
-          subtitle="Associate-level daily kilometres and fuel, with the route evidence behind each day."
+          subtitle="Distance and fuel by associate. Open an associate for the daily breakdown and route details."
         />
         <CapacityWorkspaceTabs
           active="distance"
@@ -177,9 +177,7 @@ export default async function DistancePage({
         ) : (
           <CapacityDistanceTable
             rows={rows}
-            statuses={statuses}
-            methods={methods}
-            query={q}
+            filters={{ ...period, ...filters, statuses, methods, query: q }}
             key={JSON.stringify([period, filters, statuses, methods, q])}
           />
         )}
