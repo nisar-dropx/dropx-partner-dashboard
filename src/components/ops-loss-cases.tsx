@@ -34,7 +34,63 @@ function cellText(row: LossRow, col: Column): string {
   return String(v);
 }
 
-export function OpsLossCases({ report, station, stationName, rows, closeHref, fileLabel, showPeriod = false }: {
+export function OpsLossCases(props: {
+  report: "nl" | "slp" | "potential";
+  station: string;
+  stationName: string | null;
+  rows: LossRow[];
+  closeHref: string;
+  fileLabel: string;
+  showPeriod?: boolean;
+  sourceHeaders?: string[];
+  selectedPeriod?: string | null;
+}) {
+  const { report, ...rest } = props;
+  return report === "potential" ? <PotentialCases {...rest} /> : <TypedCases report={report} {...rest} />;
+}
+
+/**
+ * Potential loss: the file's own columns (the worker keeps each row as Amazon sent it in `extra`).
+ * Downloads cover every station, so this table only views and searches.
+ */
+function PotentialCases({ station, stationName, rows, closeHref, showPeriod = false, sourceHeaders = [] }: {
+  station: string;
+  stationName: string | null;
+  rows: LossRow[];
+  closeHref: string;
+  showPeriod?: boolean;
+  sourceHeaders?: string[];
+}) {
+  const [query, setQuery] = useState("");
+  const columns = useMemo(() => [...new Set([...sourceHeaders, ...rows.flatMap((r) => Object.keys(r.extra ?? {}))])].filter((h) => rows.some((r) => r.extra?.[h])), [rows, sourceHeaders]);
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? rows.filter((r) => Object.values(r.extra ?? {}).some((v) => String(v).toLowerCase().includes(q))) : rows;
+  }, [rows, query]);
+  const span = columns.length + (showPeriod ? 1 : 0);
+
+  return <section className={styles.panel} aria-label={`${station} packages`}>
+    <div className={styles.panelHead}>
+      <div>
+        <h2>{station}{stationName ? ` · ${stationName}` : ""}</h2>
+        <p>{rows.length.toLocaleString("en-IN")} {rows.length === 1 ? "package" : "packages"}{query ? ` · ${shown.length} match` : ""}</p>
+      </div>
+      <div className={styles.toolbar}>
+        <label className={styles.search}><span aria-hidden>⌕</span><input type="search" placeholder="Search any column" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search packages" /></label>
+        <Link href={closeHref} scroll={false} className={styles.button}>Close</Link>
+      </div>
+    </div>
+    <div className={styles.tableWrap}><table className={styles.table}>
+      <thead><tr>{showPeriod ? <th>Snapshot</th> : null}{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+      <tbody>
+        {shown.map((r) => <tr key={r.case_key}>{showPeriod ? <td className={styles.nowrap}>{r.period ? dateFmt(r.period) : ""}</td> : null}{columns.map((c) => <td key={c}>{r.extra?.[c] ?? ""}</td>)}</tr>)}
+        {!shown.length ? <tr><td colSpan={Math.max(span, 1)}><div className={styles.empty}>No packages match “{query}”.</div></td></tr> : null}
+      </tbody>
+    </table></div>
+  </section>;
+}
+
+function TypedCases({ report, station, stationName, rows, closeHref, fileLabel, showPeriod = false }: {
   report: "nl" | "slp";
   station: string;
   stationName: string | null;

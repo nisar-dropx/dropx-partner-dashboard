@@ -1,7 +1,7 @@
 import Link from "next/link";
 import styles from "@/components/ops-loss-report.module.css";
 import { OpsLossCases } from "@/components/ops-loss-cases";
-import type { LossReportView } from "@/lib/ops-pulse/loss-reports";
+import { ALL_SNAPSHOTS, type LossReportView } from "@/lib/ops-pulse/loss-reports";
 
 export type LossTab = { key: string; label: string; href: string };
 
@@ -29,10 +29,13 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
   const top = totals[0];
   const maxShare = hasAmount ? Math.max(...totals.map((t) => t.total_amount), 1) : Math.max(...totals.map((t) => t.row_count), 1);
   const selected = totals.find((t) => t.station_code === selectedStation);
+  // Potential loss opens on the newest daily snapshot, so "all" has to be explicit in the URL.
+  const potential = activeTab === "potential";
+  const day = (p: string) => potential ? new Date(`${p}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : p;
   const href = (opts: { station?: string | null; period?: string | null }) => {
     const q = new URLSearchParams();
-    const p = opts.period === undefined ? view.selectedPeriod : opts.period;
-    if (p) q.set("period", p);
+    const p = (opts.period === undefined ? view.selectedPeriod : opts.period) ?? (potential ? ALL_SNAPSHOTS : null);
+    if (p && !(potential && p === view.periods[0])) q.set("period", p);
     if (opts.station) q.set("station", opts.station);
     const qs = q.toString();
     return qs ? `${basePath}?${qs}` : basePath;
@@ -50,7 +53,7 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
 
     {run ? <div className={styles.context}>
       <span>Source <strong>{view.periods.length > 1 ? `${view.periods.length} Amazon files` : (run.source_file ?? "Amazon report").trim()}</strong></span>
-      {!view.periods.length && run.period_label ? <><i className={styles.dot} /><span>Period <strong>{run.period_label}</strong></span></> : null}
+      {!view.periods.length && run.period_label && !potential ? <><i className={styles.dot} /><span>Period <strong>{run.period_label}</strong></span></> : null}
       <i className={styles.dot} /><span>Data changed <strong>{time(run.finished_at)}</strong></span>
       {run.checked_at && run.checked_at !== run.finished_at ? <><i className={styles.dot} /><span>Last checked <strong>{time(run.checked_at)}</strong></span></> : null}
       {view.scopedToAll ? null : <><i className={styles.dot} /><span>Your stations only</span></>}
@@ -61,22 +64,26 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
       <details><summary>Technical details</summary><code>{view.lastFailure.error}</code></details>
     </div> : null}
 
-    {view.periods.length > 1 ? <nav className={styles.chips} aria-label="Period">
-      <span>Period</span>
-      <Link href={href({ period: null })} scroll={false} className={`${styles.chip} ${!view.selectedPeriod ? styles.activeChip : ""}`}>All periods</Link>
-      {view.periods.map((p) => <Link key={p} href={href({ period: p })} scroll={false} className={`${styles.chip} ${view.selectedPeriod === p ? styles.activeChip : ""}`}>{p}</Link>)}
+    {view.periods.length > 1 ? <nav className={styles.chips} aria-label={potential ? "Snapshot" : "Period"}>
+      <span>{potential ? "Snapshot" : "Period"}</span>
+      {view.periods.map((p, i) => <Link key={p} href={href({ period: p })} scroll={false} className={`${styles.chip} ${view.selectedPeriod === p ? styles.activeChip : ""}`}>{day(p)}{potential && i === 0 ? " · latest" : ""}</Link>)}
+      <Link href={href({ period: null })} scroll={false} className={`${styles.chip} ${!view.selectedPeriod ? styles.activeChip : ""}`}>{potential ? "All snapshots" : "All periods"}</Link>
     </nav> : null}
 
     {!run ? <section className={styles.panel}><div className={styles.empty}><strong>No report pulled yet</strong>It appears here automatically after the loss worker&apos;s next successful run.</div></section> : <>
       <div className={styles.metrics}>
-        {hasAmount ? <div className={`${styles.metric} ${styles.orange}`}><span>Total loss</span><strong>{money(totalAmount)}</strong><small>across your stations</small></div> : null}
-        <div className={`${styles.metric} ${styles.blue}`}><span>Cases</span><strong>{totalRows.toLocaleString("en-IN")}</strong><small>{view.selectedPeriod ? `in ${view.selectedPeriod}` : `${run.total_rows.toLocaleString("en-IN")} in Amazon's ${view.periods.length > 1 ? "files" : "file"}`}</small></div>
+        {hasAmount ? <div className={`${styles.metric} ${styles.orange}`}><span>{potential ? "Potential loss" : "Total loss"}</span><strong>{money(totalAmount)}</strong><small>across your stations</small></div> : null}
+        <div className={`${styles.metric} ${styles.blue}`}><span>Cases</span><strong>{totalRows.toLocaleString("en-IN")}</strong><small>{view.selectedPeriod ? `in ${day(view.selectedPeriod)}` : `${run.total_rows.toLocaleString("en-IN")} in Amazon's ${view.periods.length > 1 ? "files" : "file"}`}</small></div>
         <div className={`${styles.metric} ${styles.purple}`}><span>Stations affected</span><strong>{totals.length}</strong><small>with at least one case</small></div>
         <div className={`${styles.metric} ${styles.green}`}><span>Highest station</span><strong>{top ? top.station_code : "—"}</strong><small>{top ? (hasAmount ? money(top.total_amount) : `${top.row_count} cases`) : "no cases"}</small></div>
       </div>
 
       <section className={styles.panel}>
-        <div className={styles.panelHead}><div><h2>Station-wise losses</h2><p>Select a station to see its cases.</p></div></div>
+        <div className={styles.panelHead}><div><h2>Station-wise {potential ? "potential loss" : "losses"}</h2><p>Select a station to see its {potential ? "packages" : "cases"}.</p></div>
+          {potential && totals.length ? <div className={styles.toolbar}>
+            {(["xlsx", "csv"] as const).map((f) => <a key={f} className={`${styles.button} ${f === "xlsx" ? styles.primary : ""}`} href={`/api/ops-pulse/losses/potential/export?format=${f}&period=${view.selectedPeriod ?? ALL_SNAPSHOTS}`} download>Download {f === "xlsx" ? "Excel" : "CSV"}</a>)}
+          </div> : null}
+        </div>
         <div className={styles.tableWrap}><table className={styles.table}>
           <thead><tr><th>Station</th><th className={styles.numeric}>Cases</th>{hasAmount ? <th className={styles.numeric}>Loss amount</th> : null}<th>Share</th><th /></tr></thead>
           <tbody>
@@ -102,12 +109,14 @@ export function OpsLossReport({ title, intro, basePath, view, tabs, activeTab }:
 
       {selected ? <OpsLossCases
         key={selected.station_code}
-        report={activeTab === "nl" ? "nl" : "slp"}
+        report={activeTab === "nl" ? "nl" : potential ? "potential" : "slp"}
+        sourceHeaders={run.headers}
         station={selected.station_code}
         stationName={selected.station_name}
         rows={rows}
         closeHref={href({ station: null })}
         showPeriod={view.periods.length > 1 && !view.selectedPeriod}
+        selectedPeriod={view.selectedPeriod}
         fileLabel={`${activeTab}-${selected.station_code}`}
       /> : null}
     </>}
