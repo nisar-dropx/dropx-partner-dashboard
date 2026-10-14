@@ -1,10 +1,4 @@
-export const auditPhotoTypes = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-]);
+/** Any stored proof (image, PDF, Excel or CSV) satisfies a check's required evidence. */
 export function missingAuditPhotos(
   items: Array<{ id: string; label: string; photo_required?: boolean }>,
   evidence: Array<{
@@ -19,8 +13,7 @@ export function missingAuditPhotos(
       !evidence.some(
         (e) =>
           e.checklist_item_id === item.id &&
-          e.evidence_kind_code === "checklist_photo" &&
-          auditPhotoTypes.has(e.content_type || ""),
+          e.evidence_kind_code === "checklist_photo",
       ),
   );
 }

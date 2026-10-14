@@ -19,7 +19,9 @@ assert.equal((await post({phase:'complete',path:`other/station-audits/a/proof/u/
 exists=false;assert.equal((await post({phase:'complete',path:signedPaths[0]})).status,400);assert.equal(saved,null);exists=true;
 assert.equal((await post({phase:'complete',path:signedPaths[0],kind:'erp_screenshot'})).status,200);assert.equal(saved.evidence_kind_code,'erp_screenshot');assert.equal(saved.audit_id,'a');
 assert.equal((await post({...prepare,checklistItemId:'wrong'})).status,400);
-assert.equal((await post({...prepare,checklistItemId:'check',contentType:'application/pdf'})).status,400);
+assert.equal((await post({...prepare,checklistItemId:'check',contentType:'application/pdf'})).status,200,'checks accept PDF proof');
+assert.equal((await post({...prepare,checklistItemId:'check',contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})).status,200,'checks accept Excel proof');
+assert.equal((await post({...prepare,checklistItemId:'check',contentType:'text/html'})).status,400);
 assert.equal((await post({...prepare,checklistItemId:'check'})).status,200);
 assert.equal((await post({phase:'complete',checklistItemId:'check',path:signedPaths.at(-1)})).status,200);assert.equal(saved.checklist_item_id,'check');assert.equal(saved.evidence_kind_code,'checklist_photo');
 audit={...audit,status_code:'scheduled',started_at:null};assert.equal((await post(prepare)).status,403);

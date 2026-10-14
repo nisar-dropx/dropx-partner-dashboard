@@ -1347,14 +1347,14 @@ function AuditCheck({
               type="file"
               name={`check_photo_${item.id}`}
               aria-label={`Photos for ${item.label}`}
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              accept="image/*,application/pdf,.xlsx,.xls,.csv"
               multiple
               required={!photos.length}
             />
             <small>
               {photos.length
-                ? `${photos.length} saved photo(s). Add more if needed.`
-                : "Attach clear photos for this check. Up to 30 MB per photo."}
+                ? `${photos.length} saved file(s). Add more if needed.`
+                : "Attach photos, PDF, Excel or CSV for this check. Up to 30 MB each."}
             </small>
           </label>
           <ChecklistPhotos photos={photos} />

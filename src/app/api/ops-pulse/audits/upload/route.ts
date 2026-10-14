@@ -1,4 +1,3 @@
-import { auditPhotoTypes } from "@/lib/ops-pulse/station-audit-photos";
 import { randomUUID } from "node:crypto";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -114,18 +113,10 @@ export async function POST(request: Request) {
       : null;
     if (checkId && (!performer || !check))
       throw new Error("Checklist photo is not available for this audit.");
-    if (
-      checkId &&
-      input.phase === "prepare" &&
-      !auditPhotoTypes.has(String(input.contentType))
-    )
-      throw new Error(
-        "Attach an image for this check. PDF files do not count as photos.",
-      );
     const prefix = `${auth.companyId}/station-audits/${audit.id}/proof/${auth.userId}/${checkId ? `${checkId}/` : ""}`;
     if (input.phase === "prepare") {
       const requested = String(input.contentType);
-      const supporting = !checkId && input.kind === "document";
+      const supporting = Boolean(checkId) || input.kind === "document";
       if (!proofTypes.has(requested) && !(supporting && documentTypes.has(requested)))
         throw new Error(supporting ? documentTypeError : proofTypeError);
       const size = Number(input.size);
@@ -174,11 +165,9 @@ export async function POST(request: Request) {
     if (!file || !file.metadata?.size || Number(file.metadata.size) > maxSize)
       throw new Error("The proof upload is incomplete. Please try again.");
     const stored = String(file.metadata.mimetype);
-    const supportingDocument = !checkId && input.kind === "document";
+    const supportingDocument = Boolean(checkId) || input.kind === "document";
     if (!proofTypes.has(stored) && !(supportingDocument && documentTypes.has(stored)))
       throw new Error(supportingDocument ? documentTypeError : proofTypeError);
-    if (checkId && !auditPhotoTypes.has(String(file.metadata.mimetype)))
-      throw new Error("Attach an image for this check.");
     const kind = checkId
       ? "checklist_photo"
       : performer && ["erp_screenshot", "cash_variance"].includes(input.kind)
