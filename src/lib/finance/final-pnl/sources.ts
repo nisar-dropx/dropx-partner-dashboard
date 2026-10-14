@@ -1,24 +1,25 @@
 import 'server-only';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {readAllRows} from '@/lib/supabase-pagination';
-import {baseStations,latestPublications,monthEnd,monthValue,paise,type Sources,type Entry,type Loss} from './model';
+import {baseStations,latestPublications,monthEnd,monthValue,paise,recoveryRecognitionMonth,type Sources,type Entry,type Loss} from './model';
 export const FINAL_PNL_COMPANY='43866344-b550-4e8a-9a2d-9d23f3d8a997';
 type Row=Record<string,any>;
 async function rows(query:any,label:string):Promise<Row[]>{const result=await readAllRows(query);if(result.error)throw Error(`${label} could not be read: ${result.error.message}`);return result.data??[];}
 export async function loadSources(db:SupabaseClient,company:string,month:string):Promise<Sources>{
  monthValue(month);if(company!==FINAL_PNL_COMPANY)throw Error('This company has no invoice connection.');
  const capturedAt=new Date().toISOString(),start=`${month}-01`,end=monthEnd(month);
+ const historyStart='2020-01-01';
  const table=(name:string,fields='*')=>db.from(name).select(fields).eq('company_id',company);
  const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims]=await Promise.all([
   rows(table('stations','id,station_code,parent_station_id').order('id'),'Station topology'),
   rows(table('cod_station_settings','location_id,portal_station_code').order('location_id'),'Station aliases'),
-  rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,snapshot,published_at,period_start,period_end,payroll_run_id').gte('period_end',start).order('id'),'Published workforce payouts'),
-  rows(table('helper_payout_publications','id,helper_id,station_id,revision,snapshot,published_at,period_start,period_end').gte('period_end',start).order('id'),'Published helper payouts'),
-  rows(table('hr_payroll_runs','id,period_start,period_end,status,published_at,approved_at').gte('period_end',start).order('id'),'Employee payroll runs'),
-  rows(table('nl_loss_month_cases','month,case_key,station_code,amount,source_status,source_present,details,report').eq('month',month).order('case_key'),'Ops Pulse losses'),
-  rows(table('nl_loss_recoveries','month,case_key,outcome_label,allocations,deduction_month,remarks,is_deleted,source_amount').eq('month',month).eq('is_deleted',false).order('case_key'),'Ops Pulse recovery plans'),
-  rows(table('payment_recovery_cases','id,tid,station_id,station_code_snapshot,debit_date,debit_month,debit_amount,payout_month,status').gte('debit_month',start).lte('debit_month',end).order('id'),'Payment recovery cases'),
-  rows(table('workforce_station_loss_claims','id,workforce_id,station_id,adjustment_id,incident_date,reference').gte('incident_date',start).lte('incident_date',end).order('id'),'Station loss claims')
+  rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,snapshot,published_at,period_start,period_end,payroll_run_id').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
+  rows(table('helper_payout_publications','id,helper_id,station_id,revision,snapshot,published_at,period_start,period_end').gte('period_end',historyStart).order('id'),'Published helper payouts'),
+  rows(table('hr_payroll_runs','id,period_start,period_end,status,published_at,approved_at').gte('period_end',historyStart).order('id'),'Employee payroll runs'),
+  rows(table('nl_loss_month_cases','month,case_key,station_code,amount,source_status,source_present,details,report').lte('month',month).order('case_key'),'Ops Pulse losses'),
+  rows(table('nl_loss_recoveries','month,case_key,outcome_label,allocations,deduction_month,remarks,is_deleted,source_amount').lte('month',month).eq('is_deleted',false).order('case_key'),'Ops Pulse recovery plans'),
+  rows(table('payment_recovery_cases','id,tid,station_id,station_code_snapshot,debit_date,debit_month,debit_amount,payout_month,status').lte('debit_month',end).order('id'),'Payment recovery cases'),
+  rows(table('workforce_station_loss_claims','id,workforce_id,station_id,adjustment_id,incident_date,reference').lte('incident_date',end).order('id'),'Station loss claims')
  ]);
  const topology=baseStations(stations as any,aliases as any),stationById=new Map(stations.map(s=>[s.id,s.station_code]));
  const issues:string[]=[],entries:Entry[]=[],losses:Loss[]=[];
@@ -68,9 +69,9 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  for(const [station,g] of employeeCosts)add({id:`payroll:employee:${station}`,station,side:'expense',head:'Employee payroll',description:`${g.count} approved payroll rows · earned pay plus employer contributions, before recoveries`,paise:g.paise,source:'Approved employee payroll',reference:`Employee payroll / ${month}`,date:end});
  if(!payrollCount)issues.push('No published or approved payroll was found for this month. The recorded margin is incomplete until final payroll or documented expenses are added.');
  // NL outcomes are allocation plans. No name/amount matching is used to manufacture a payroll posting.
- const planMap=new Map(nlPlans.map(p=>[p.case_key,p]));
- for(const c of nlCases){const p=planMap.get(c.case_key),alloc=Array.isArray(p?.allocations)?p.allocations:[];
-  losses.push({id:`nl:${c.case_key}`,month,station:c.station_code,reference:c.case_key,paise:paise(c.amount),outcome:p?.outcome_label||c.source_status||'Awaiting dispute outcome',plannedPaise:alloc.reduce((n:number,a:Row)=>n+paise(a.amount??0),0),payrollMonth:p?.deduction_month||'',responsible:alloc.map((a:Row)=>a.employee_code||a.ref).join(', '),postedPaise:0,evidence:c.source_present?'Ops Pulse loss register':'No longer present in the current source'});
+ const planMap=new Map(nlPlans.map(p=>[`${p.month}:${p.case_key}`,p]));
+ for(const c of nlCases){const p=planMap.get(`${c.month}:${c.case_key}`),alloc=Array.isArray(p?.allocations)?p.allocations:[];
+  losses.push({id:`nl:${c.month}:${c.case_key}`,month:c.month,station:c.station_code,reference:c.case_key,paise:paise(c.amount),outcome:p?.outcome_label||c.source_status||'Awaiting dispute outcome',plannedPaise:alloc.reduce((n:number,a:Row)=>n+paise(a.amount??0),0),payrollMonth:p?.deduction_month||'',responsible:alloc.map((a:Row)=>a.employee_code||a.ref).join(', '),postedPaise:0,evidence:c.source_present?'Ops Pulse loss register':'No longer present in the current source'});
  }
  // Payment recovery events marked applied may predate publication. Verify the actual payroll evidence too.
  const recoveryIds=recoveryCases.map(r=>r.id);const allocations:Row[]=[],events:Row[]=[];
@@ -80,7 +81,11 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  }
  const personIds=[...new Set(allocations.map(a=>a.payout_run_person_id).filter(Boolean))];
  for(let i=0;i<personIds.length;i+=100)hrItems.push(...await rows(table('hr_payroll_run_items','id,run_person_id,code,source,amount').in('run_person_id',personIds.slice(i,i+100)).eq('source','payment_recovery').order('id'),'Employee recovery deductions'));
- const allocationTotals=new Map<string,number>();for(const a of allocations){const key=a.payout_run_person_id||a.deduction_value_id;if(key)allocationTotals.set(key,(allocationTotals.get(key)??0)+paise(a.allocation_amount));}
+ const allLinkedAllocations:Row[]=[...allocations];
+ const deductionIds=[...new Set(allocations.map(a=>a.deduction_value_id).filter(Boolean))];
+ for(let i=0;i<deductionIds.length;i+=100)allLinkedAllocations.push(...await rows(table('payment_recovery_allocations','id,payout_run_person_id,deduction_value_id,allocation_amount').in('deduction_value_id',deductionIds.slice(i,i+100)).order('id'),'Recovery deduction totals'));
+ for(let i=0;i<personIds.length;i+=100)allLinkedAllocations.push(...await rows(table('payment_recovery_allocations','id,payout_run_person_id,deduction_value_id,allocation_amount').in('payout_run_person_id',personIds.slice(i,i+100)).order('id'),'Employee recovery totals'));
+ const allocationTotals=new Map<string,number>();for(const a of new Map(allLinkedAllocations.map(a=>[a.id,a])).values()){const key=a.payout_run_person_id||a.deduction_value_id;if(key)allocationTotals.set(key,(allocationTotals.get(key)??0)+paise(a.allocation_amount));}
  for(const c of recoveryCases){const caseKey=`payment:${c.id}`,caseAlloc=allocations.filter(a=>a.recovery_case_id===c.id);let posted=0;
   for(const e of events.filter(e=>e.recovery_case_id===c.id)){
    let confirmed=['provider_credit','manual_recovery'].includes(e.event_type)&&!!e.reference;
@@ -90,9 +95,11 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
     else if(a?.deduction_value_id){const pubs=allWorkforce.filter(p=>p.workforce_id===a.workforce_id&&p.station_id===a.station_id&&p.period_start===e.period_start&&p.period_end===e.period_end);confirmed=pubs.some(p=>(p.snapshot?.lines??[]).filter((l:Row)=>l.source_type==='deduction'&&l.calculation_snapshot?.category==='RECOVERY').reduce((n:number,l:Row)=>n+Math.abs(paise(l.net_amount)),0)>=(allocationTotals.get(a.deduction_value_id)??Infinity));}
    }
    if(!confirmed)continue;const n=paise(e.amount);posted+=n;
+   const recognitionMonth=recoveryRecognitionMonth(e.period_start,e.created_at,e.event_type==='payout_deduction');
+   if(recognitionMonth!==month)continue;
    add({id:`recovery:event:${e.id}`,station:c.station_code_snapshot||stationById.get(c.station_id)||'UNKNOWN',side:'income',head:'Loss recovery',description:`${c.tid} · ${e.event_type.replaceAll('_',' ')}`,paise:n,source:'Confirmed recovery evidence',reference:e.reference||e.id,date:e.created_at.slice(0,10),recovery:true,caseKey,payrollMonth:e.period_start?.slice(0,7)||''});
   }
-  losses.push({id:caseKey,month,station:c.station_code_snapshot||stationById.get(c.station_id)||'UNKNOWN',reference:c.tid,paise:paise(c.debit_amount),outcome:c.status,plannedPaise:caseAlloc.reduce((n,a)=>n+paise(a.allocation_amount),0),payrollMonth:c.payout_month?.slice(0,7)||'',responsible:'Payment recovery allocations',postedPaise:posted,evidence:posted?'Confirmed recovery register / payroll':'Awaiting confirmed recovery evidence'});
+  losses.push({id:caseKey,month:(c.debit_month||c.debit_date).slice(0,7),station:c.station_code_snapshot||stationById.get(c.station_id)||'UNKNOWN',reference:c.tid,paise:paise(c.debit_amount),outcome:c.status,plannedPaise:caseAlloc.reduce((n,a)=>n+paise(a.allocation_amount),0),payrollMonth:c.payout_month?.slice(0,7)||'',responsible:'Payment recovery allocations',postedPaise:posted,evidence:posted?'Confirmed recovery register / payroll':'Awaiting confirmed recovery evidence'});
  }
  // Legacy loss claims have an explicit adjustment -> payroll-run link.
  if(claims.length){const adjustmentIds=claims.map(c=>c.adjustment_id).filter(Boolean);const adjustments:Row[]=[];
@@ -100,8 +107,8 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   const runIds=[...new Set(adjustments.map(a=>a.payroll_run_id).filter(Boolean))],runs:Row[]=[];
   for(let i=0;i<runIds.length;i+=100)runs.push(...await rows(table('workforce_payroll_runs','id,status,period_start,period_end').in('id',runIds.slice(i,i+100)).order('id'),'Confirmed workforce payroll'));
   for(const c of claims){const a=adjustments.find(a=>a.id===c.adjustment_id);if(!a)continue;const run=runs.find(r=>r.id===a.payroll_run_id);const posted=!!run&&['approved','confirmed','paid'].includes(run.status)&&a.status==='posted';const id=`claim:${c.id}`,n=paise(a.amount),station=stationById.get(c.station_id)||'UNKNOWN';
-   losses.push({id,month,station,reference:c.reference||c.id,paise:n,outcome:a.status,plannedPaise:n,payrollMonth:run?.period_start?.slice(0,7)||a.effective_date?.slice(0,7)||'',responsible:'Workforce loss claim',postedPaise:posted?n:0,evidence:posted?'Posted adjustment linked to confirmed payroll':'Awaiting confirmed payroll'});
-   if(posted)add({id:`recovery:claim:${c.id}`,station,side:'income',head:'Loss recovery',description:'Station loss adjustment posted to payroll',paise:n,source:'Confirmed workforce payroll',reference:c.reference||c.id,date:a.effective_date,recovery:true,caseKey:id,payrollMonth:run!.period_start.slice(0,7)});
+   losses.push({id,month:c.incident_date.slice(0,7),station,reference:c.reference||c.id,paise:n,outcome:a.status,plannedPaise:n,payrollMonth:run?.period_start?.slice(0,7)||a.effective_date?.slice(0,7)||'',responsible:'Workforce loss claim',postedPaise:posted?n:0,evidence:posted?'Posted adjustment linked to confirmed payroll':'Awaiting confirmed payroll'});
+   if(posted&&run!.period_start.slice(0,7)===month)add({id:`recovery:claim:${c.id}`,station,side:'income',head:'Loss recovery',description:'Station loss adjustment posted to payroll',paise:n,source:'Confirmed workforce payroll',reference:c.reference||c.id,date:a.effective_date,recovery:true,caseKey:id,payrollMonth:run!.period_start.slice(0,7)});
   }
  }
  if(nlPlans.some(p=>Array.isArray(p.allocations)&&p.allocations.length))issues.push('NL allocations are plans. Their source currently has no explicit payroll posting link; confirm the deduction evidence before recording recovery.');

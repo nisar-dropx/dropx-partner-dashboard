@@ -30,3 +30,5 @@ export function latestPublications(rows:Record<string,any>[],personKey:string){
  const seen=new Set<string>();return [...rows].sort((a,b)=>Number(b.revision)-Number(a.revision)||String(b.published_at).localeCompare(String(a.published_at))).filter(row=>{const key=[row[personKey],row.station_id,row.period_start,row.period_end].join(':');if(seen.has(key))return false;seen.add(key);return true;});
 }
 export function csvCell(value:unknown){const text=String(value??'');return '"'+(/^[=+@\-\t\r]/.test(text)?"'"+text:text).replaceAll('"','""')+'"';}
+
+export function recoveryRecognitionMonth(payrollPeriod:string|null|undefined,postingDate:string,salaryDeduction:boolean){return monthValue((salaryDeduction?payrollPeriod:postingDate)?.slice(0,7));}
