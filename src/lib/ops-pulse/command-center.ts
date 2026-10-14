@@ -2,6 +2,7 @@ import { cpsReviewItems, cpsStationGroups, summarizeCps, type CpsPlace, type Cps
 import { hawkeyeValueForTarget } from './hawkeye';
 import { selectStationDailyRow } from './performance-source-policy';
 import type { PerformanceTarget } from './performance-targets';
+import type { AttentionItem } from './command-attention';
 
 export type CommandPerformanceFact = {
   id: string; batch_id: string; source_type: string; report_date: string | null;
@@ -83,6 +84,20 @@ export function buildCommandCenter(input: {
       { label:'Overhead', amount:total.overhead }, { label:'Other', amount:total.other }].sort((a,b) => b.amount-a.amount) : [] };
 }
 export type CommandCenterModel = ReturnType<typeof buildCommandCenter>;
+
+export function commandMetricAttention({model:m,period,codes,canCost,canCostAttention,canReview,canPerformance,performanceDate,today}:{model:CommandCenterModel;period:CommandPeriod;codes:string[];canCost:boolean;canCostAttention?:boolean;canReview:boolean;canPerformance:boolean;performanceDate:string;today:string}):AttentionItem[] {
+  const items:AttentionItem[]=[];
+  const cost=commandCostHref(period,codes);
+  const performance=(view:string)=>`/ops-pulse/performance?${new URLSearchParams({view,date:performanceDate,stations:codes.join(',')})}`;
+  if(canReview)items.push({key:'reviews',title:'Review Desk',value:m.reviewCount===null?'Unavailable':`${m.reviewCount} open reviews`,count:m.reviewCount??0,detail:'Unclosed operational reviews through today',href:performance('reviews'),action:'Open review queue',tone:m.reviewCount===null?'unknown':m.reviewCount?'action':'clear'});
+  if(canPerformance)items.push({key:'performance',title:'Service exceptions',value:m.performanceRisk===null?'Not assessed':`${m.performanceRisk} groups flagged`,count:(m.performanceRisk??0)+m.performanceMissing,detail:`${performanceDate} · ${m.performanceMissing} groups need data / targets`,href:performance('daily'),action:'Open performance',tone:m.performanceRisk||m.performanceMissing?'action':m.performanceRisk===null?'unknown':'clear'});
+  if(canCost){
+    const gaps=m.rows.filter(r=>r.gaps>0||r.missingDays>(period.to===today?r.members.length:0)).length;
+    items.push({key:'cost-data',title:'Cost & shipment inputs',value:m.total?`${gaps} groups need data`:'Unavailable',count:gaps,detail:`${period.from}–${period.to} · today's unfinished imports are not overdue`,href:commandCostHref(period,codes,undefined,canCostAttention?'unmapped':'overview'),action:'Review source gaps',tone:!m.total?'unknown':gaps?'action':'clear'});
+    if(m.aboveTarget||m.missingTargets)items.push({key:'cost',title:'Cost controls',value:`${m.aboveTarget} above target`,count:m.aboveTarget+m.missingTargets,detail:`${m.missingTargets} groups without targets${m.provisional?' · provisional costs':''}`,href:cost,action:'Open CPS controls',tone:'action'});
+  }
+  return items;
+}
 
 export function filterCommandRows(rows:CommandCenterModel['rows'],search:string,filter:string) {
   const query=search.trim().toLowerCase();

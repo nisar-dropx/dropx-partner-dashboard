@@ -1,10 +1,32 @@
 import { auditQueueBucket, addAuditDays } from './station-audit-planning';
+import type { CodPendingRow } from './cod-pending';
 
-export type AttentionItem = { key:string; title:string; value:string; detail:string; href:string; action:string; tone:'urgent'|'action'|'unknown'|'clear' };
+export type AttentionItem = { key:string; title:string; value:string; detail:string; href:string; action:string; tone:'urgent'|'action'|'unknown'|'clear'; count?:number; dueAt?:string };
 export function attentionOrder(items:AttentionItem[]) {
   const rank={urgent:0,action:1,unknown:2,clear:3};
-  const order=['audits','people','cod','vehicles','payments','rosters','capacity','documents'];
-  return [...items].sort((a,b)=>rank[a.tone]-rank[b.tone]||order.indexOf(a.key)-order.indexOf(b.key));
+  const order=['audits','cod','cms','people','vehicles','payments','rosters','capacity','documents'];
+  const due=(i:AttentionItem)=>i.dueAt&&Number.isFinite(Date.parse(i.dueAt))?Date.parse(i.dueAt):Infinity;
+  return [...items].sort((a,b)=>rank[a.tone]-rank[b.tone]||due(a)-due(b)||(b.count??0)-(a.count??0)||order.indexOf(a.key)-order.indexOf(b.key)||a.key.localeCompare(b.key));
+}
+export function codAttention(rows:CodPendingRow[],date:string,canReport:boolean):AttentionItem[] {
+  const missing=rows.filter(r=>r.status==='Missing slip'||r.status==='Slip missing proof');
+  const corrections=rows.filter(r=>r.pending&&!missing.includes(r));
+  const cms=rows.filter(r=>!r.entries.length&&r.exception?.kind==='Banker Not Reported');
+  const review=rows.filter(r=>!r.pending&&['Review pending','Pending verification'].includes(r.status));
+  const link=(r:CodPendingRow|undefined,status:string)=>canReport
+    ? `/ops-pulse/cod/pending?${new URLSearchParams({date,status,...(r?{location:r.station.id}:{})})}`
+    : `/ops-pulse/cod/submission?${new URLSearchParams({deposit_date:date,...(r?{location:r.station.id,client:r.client}:{})})}`;
+  const items:AttentionItem[]=[{key:'cod',title:'COD slips',value:`${missing.length} missing uploads`,count:missing.length,
+    detail:`${date} · ${missing.filter(r=>r.overdue).length} overdue · No Cash / banker exceptions excluded`,
+    href:link(missing[0],'pending'),action:missing[0]?`Open ${missing[0].station.station_code} slip`:'Open slip workspace',
+    dueAt:missing[0]?.deadline,tone:missing.some(r=>r.overdue)?'urgent':missing.length?'action':'clear'},
+    {key:'cms',title:'CMS / banker follow-up',value:`${cms.length} not reported`,count:cms.length,
+    detail:`${date} · recorded banker-not-reported exceptions, not staff attendance`,
+    href:link(cms[0],'Banker Not Reported'),action:cms[0]?`Open ${cms[0].station.station_code} update`:'Open daily updates',tone:cms.length?'action':'clear'}];
+  if(corrections.length||review.length)items.push({key:'cod-review',title:'COD review',value:`${corrections.length+review.length} stations`,count:corrections.length+review.length,
+    detail:`${corrections.length} need corrections · ${review.length} awaiting verification · ${date}`,
+    href:link(corrections[0]||review[0],'all'),action:'Review slips',tone:corrections.some(r=>r.overdue)?'urgent':'action'});
+  return items;
 }
 export function auditAttention(rows:{scheduled_for:string;status_code:string;completed_at?:string|null;station_response_status?:string;response_due_at?:string|null}[],today:string,now:number) {
   const open=rows.filter(r=>r.status_code!=='closed');

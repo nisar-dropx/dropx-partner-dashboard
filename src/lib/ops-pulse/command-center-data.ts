@@ -15,7 +15,7 @@ export async function loadCommandCenter(a: AuthorizationContext, locations: CodL
   const canCost = hasPermission(a, 'cps_overview', 'access');
   const canReview = amazon && hasPermission(a, 'performance_review', 'access');
   const canPerformance = amazon && (hasPermission(a, 'performance', 'access') || canReview);
-  const performanceDate = period.to === today ? new Date(Date.parse(today + 'T00:00:00Z') - 86400000).toISOString().slice(0,10) : period.to;
+  const performanceDate = new Date(Date.parse(today + 'T00:00:00Z') - 86400000).toISOString().slice(0,10);
   const errors: string[] = [];
   async function attempt<T>(label: string, work: () => Promise<T>): Promise<T | null> {
     try { return await work(); } catch (error) { console.error('Command center', label, error instanceof Error ? error.message : 'unavailable'); errors.push(label); return null; }
@@ -44,7 +44,7 @@ export async function loadCommandCenter(a: AuthorizationContext, locations: CodL
       if (!supabaseAdmin) throw Error('Database unavailable');
       const r = await readAllRows(supabaseAdmin.from('ops_performance_reviews').select('id,station_code,source_date,status')
         .eq('company_id',company).in('station_code',codes).eq('review_type','daily_operations')
-        .in('status',['open','in_review']).lte('source_date',period.to).order('id'));
+        .in('status',['open','in_review']).lte('source_date',today).order('id'));
       if (r.error) throw Error('Reviews unavailable');
       return r.data as CommandReview[];
     }) : null

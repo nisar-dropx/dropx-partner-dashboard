@@ -25,17 +25,47 @@ function fixture(permissions=[],fail=false){
  const calls=[];const query=table=>new Proxy({table},{get:(o,k)=>k==='then'?resolve=>Promise.resolve(resolve({data:[],error:fail?{message:'offline'}:null})):k in o?o[k]:(...args)=>{calls.push([table,k,...args]);return query(table);}});
  const db={from:query};
  const mod=compile('./command-attention-data.ts',{'server-only':{},'@/lib/authorization':{hasPermission:(_a,p)=>permissions.includes(p)},'@/lib/company-scope':{requireCompanyId:()=> 'C'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows:async q=>await q},'@/lib/fleet/da-mapping-client':{mappingAdmin:{rpc:async(_n,args)=>{calls.push(['fleet',args]);return {data:{totalPending:5,overdue:4}};}}},'@/lib/fleet/da-mapping-server':{mappingCanView:()=>permissions.includes('fleet_da_mapping'),mappingStationScope:async()=>({stations:[{code:'A'},{code:'B'}]})},'./station-audits':{loadStationAuditMaster:async()=>({programmeSettings:{}}),loadAuditStations:async()=>[{id:'a'},{id:'b'}],canManageStationAudits:()=>true},'./station-audit-planning':planning,'./ds-command-data':{loadDsApprovals:async()=>({payment:null,rosterCount:null})},'./station-manpower':{loadOpsStationManpower:async(...a)=>{calls.push(['people',...a]);return {people:[]};}},'./ds-command-center':{summarizeStorePeople:()=>({notReported:0,missingOut:0,unplanned:0})},'./cod-pending-access':{canAccessDailyCodPending:()=>permissions.includes('cod_reports')},'./cod-pending-data':{loadCodPendingReport:async(...a)=>{calls.push(['cod',...a.slice(1)]);return []; }},'./capacity-snapshot':{loadCapacitySnapshot:async args=>{calls.push(['capacity',args]);return {errors:[],stations:[]};}},'./command-attention':domain});
- return {calls,run:(mode='amazon_edsp')=>mod.loadCommandAttention({userId:'u',roleId:'r',hasAllLocationAccess:false,locationScopeIds:['a']},[{id:'a',station_code:'A'},{id:'b',station_code:'B'}],today,mode)};
+ return {calls,run:(mode='amazon_edsp',time=now)=>mod.loadCommandAttention({userId:'u',roleId:'r',hasAllLocationAccess:false,locationScopeIds:['a']},[{id:'a',station_code:'A'},{id:'b',station_code:'B'}],today,mode,time)};
 }
 test('no source reads without module permission',async()=>{const f=fixture();assert.deepEqual(await f.run(),[]);assert.deepEqual(f.calls,[]);});
-test('audit personal assignment verified; all operational reads intersect selected authorization',async()=>{
+test('audit managers see selected-location oversight, not just personal assignments; every read stays authorized',async()=>{
  const f=fixture(['station_audits','fleet_da_mapping','cod_reports','capacity_overview','ops_rostering']);await f.run();
- assert(f.calls.some(c=>c[0]==='ops_station_audits'&&c[1]==='eq'&&c[2]==='assigned_to'&&c[3]==='u'));
- assert(f.calls.some(c=>c[0]==='ops_station_audits'&&c[1]==='eq'&&c[2]==='assignment_verified'&&c[3]===true));
+ assert(!f.calls.some(c=>c[0]==='ops_station_audits'&&c[2]==='assigned_to'));
+ assert.deepEqual(f.calls.find(c=>c[0]==='ops_station_audits'&&c[1]==='in'&&c[2]==='location_id')[3],['a']);
  assert.deepEqual(f.calls.find(c=>c[0]==='fleet')[1].p_stations,['A']);
  assert.deepEqual(f.calls.find(c=>c[0]==='cod').slice(1),['C',['a'],false,'2026-10-14']);
  assert.deepEqual(f.calls.find(c=>c[0]==='people')[2].map(x=>x.id),['a']);
  assert.deepEqual(f.calls.find(c=>c[0]==='capacity')[1].locations.map(x=>x.id),['a']);
+});
+test('COD switches to today only after upload deadline; location submitters receive allowed actions',async()=>{
+ const f=fixture(['cod_submission']);const items=await f.run('amazon_edsp',Date.parse(today+'T21:00:00+05:30'));
+ assert.deepEqual(f.calls.find(c=>c[0]==='cod').slice(1),['C',['a'],false,today]);
+ assert(items.every(i=>i.href.startsWith('/ops-pulse/cod/submission?')));
+});
+test('missing slip cards exclude No Cash / banker exceptions, separate proof, correction and verification',()=>{
+ const row={station:{id:'a',station_code:'A'},entries:[],client:'amazon',deadline:'2026-10-14T15:00:00Z',pending:false,overdue:false};
+ const items=domain.codAttention([
+   {...row,status:'Missing slip',pending:true,overdue:true},
+   {...row,status:'Slip missing proof',pending:true},
+   {...row,status:'No Cash',exception:{kind:'No Cash'}},
+   {...row,status:'Banker Not Reported',exception:{kind:'Banker Not Reported'}},
+   {...row,status:'Review pending',entries:[{}]},
+   {...row,status:'Returned',entries:[{}],pending:true}
+ ],'2026-10-14',true);
+ assert.equal(items.find(i=>i.key==='cod').count,2);assert.equal(items.find(i=>i.key==='cod').tone,'urgent');
+ assert.equal(items.find(i=>i.key==='cms').count,1);assert.equal(items.find(i=>i.key==='cod-review').count,2);
+ assert.match(items[0].href,/date=2026-10-14.*location=a/);
+});
+test('priority changes by overdue, earliest due date, and affected count instead of fixed module position',()=>{
+ const ordered=domain.attentionOrder([{key:'audits',tone:'action',count:1},{key:'cod',tone:'urgent',count:1,dueAt:'2026-10-14'},{key:'vehicles',tone:'urgent',count:5,dueAt:'2026-10-13'},{key:'people',tone:'action',count:7}]);
+ assert.deepEqual(ordered.map(i=>i.key),['vehicles','cod','people','audits']);
+});
+test('dashboard offers linked snapshots rather than duplicating section tables and charts',()=>{
+ const lm=readFileSync(new URL('../../components/ops-command-center.tsx',import.meta.url),'utf8');
+ const ds=readFileSync(new URL('../../app/ops-pulse/dark-store-home.tsx',import.meta.url),'utf8');
+ assert.doesNotMatch(lm,/<table|Daily deliveries|Cost drivers|Station priorities/);
+ assert.doesNotMatch(ds,/<table|Store overview|At a glance/);
+ assert.match(lm,/href=\{costHref\}/);assert.match(ds,/extraItems=\{extraItems\}/);
 });
 test('Dark Store excludes Last Mile cash, capacity and fleet; keeps audits and shared approvals',async()=>{
  const f=fixture(['station_audits','fleet_da_mapping','cod_reports','capacity_overview','ops_rostering','payment_approvals']);const items=await f.run('amazon_now');

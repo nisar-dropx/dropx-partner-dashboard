@@ -11,6 +11,7 @@ import { loadCodLocations, todayKolkata } from '@/lib/ops-pulse/cod';
 import { operatingModeLabel, resolveOperatingContext } from '@/lib/ops-pulse/operating-context';
 import { cpsPeriod, isoDate } from '@/lib/ops-pulse/cps';
 import { loadCommandCenter } from '@/lib/ops-pulse/command-center-data';
+import { commandMetricAttention } from '@/lib/ops-pulse/command-center';
 import { loadOpsStationManpower } from '@/lib/ops-pulse/station-manpower';
 import { hasEddAccess } from '@/lib/ops-pulse/edd-access';
 import { DarkStoreHome, CommandLoading } from './dark-store-home';
@@ -51,7 +52,7 @@ async function LastMile({authorization:a,context,searchParams}:ContentProps) {
   return <div className={styles.command}>
     <header className={styles.hero}><div><p className={styles.eyebrow}>LM · {operatingModeLabel(context.mode).toUpperCase()} · {locations.length} SELECTED LOCATIONS</p><h1>Last Mile command center</h1><p>Operational priorities, service performance and shipment economics.</p></div><form action="/ops-pulse" className={styles.dateForm}><label>From<input type="date" name="from" defaultValue={period.from} max={today} required/></label><label>Through<input type="date" name="to" defaultValue={period.to} max={today} required/></label><button>Refresh</button></form></header>
     <nav className={styles.tools} aria-label="Operational workspaces">{links.map(([,label,href])=><Link key={label} href={href}>{label} ↗</Link>)}{context.mode==='amazon_edsp'&&hasEddAccess(a)&&<Link href="/ops-pulse/edd/flash">Live delivery view ↗</Link>}</nav>
-    <Suspense fallback={<CommandLoading label="Checking audits, people and operational queues"/>}><OpsCommandAttention authorization={a} locations={locations} today={today} mode={context.mode}/></Suspense>
+    <Suspense fallback={<CommandLoading label="Checking audits, people and operational queues"/>}><OpsCommandAttention authorization={a} locations={locations} today={today} mode={context.mode} extraItems={commandMetricAttention({...result,period,codes,today})}/></Suspense>
     {!locations.length ? <div className={styles.notice}>No operational locations are assigned to this workspace.</div> : <OpsCommandCenter key={`${period.from}:${period.to}:${codes.join(',')}`} {...result} period={period} codes={codes}/>}
   </div>;
 }
