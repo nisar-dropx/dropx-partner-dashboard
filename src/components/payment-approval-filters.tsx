@@ -120,6 +120,7 @@ function ApprovalMultiSelect({ allLabel, label, options, selectedValues, onChang
 export function PaymentApprovalFilters({
   search,
   status,
+  oversight = false,
   stationOptions,
   paymentHeadOptions,
   dateOptions,
@@ -129,6 +130,7 @@ export function PaymentApprovalFilters({
 }: {
   search: string;
   status: string;
+  oversight?: boolean;
   stationOptions: PaymentApprovalFilterOption[];
   paymentHeadOptions: PaymentApprovalFilterOption[];
   dateOptions: PaymentApprovalFilterOption[];
@@ -188,10 +190,10 @@ export function PaymentApprovalFilters({
         value={status}
       >
         <option value="pending">Pending / Resubmitted</option>
-        <option value="acted">Approved by me</option>
+        {!oversight ? <option value="acted">Approved by me</option> : <option value="approved">Approved / Finance / Paid</option>}
         <option value="returned">Returned</option>
         <option value="rejected">Rejected</option>
-        <option value="all">All</option>
+        <option value="all">{oversight ? "All requests in scope" : "All my requests"}</option>
       </select>
       <ApprovalMultiSelect
         allLabel="All stations"
@@ -299,6 +301,7 @@ function pushParams(
   searchParams: ReturnType<typeof useSearchParams>,
   params: URLSearchParams
 ) {
+  params.delete("page");
   if (!params.get("status")) params.set("status", "pending");
   const query = params.toString();
   const nextHref = `${pathname}${query ? `?${query}` : ""}`;

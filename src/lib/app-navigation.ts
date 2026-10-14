@@ -62,6 +62,7 @@ export const navItems: NavItem[] = [
       { code: "expense_requests", label: "Expense Request", href: "/payments/expense-request" },
       { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
       { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
+      { code: "payment_oversight", label: "Payment oversight", href: "/payments/approvals?view=scope" },
       { code: "payment_process", label: "Process", href: "/payments/process" },
       { code: "workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
       { code: "payment_recoveries", label: "Recovery", href: "/payments/recoveries" },

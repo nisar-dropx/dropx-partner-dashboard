@@ -1,3 +1,4 @@
+import { paymentRoutingDay } from "./payment-delegation-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type PositionAccess = {
@@ -29,7 +30,7 @@ type AssignmentRow = {
 };
 
 function dateOnly(value = new Date()) {
-  return value.toISOString().slice(0, 10);
+  return paymentRoutingDay(value);
 }
 
 function activeOnDate(assignment: Pick<AssignmentRow, "is_active" | "valid_from" | "valid_until">, day: string) {
@@ -202,7 +203,7 @@ export async function findPositionApprover(
  * moment they try to act. Filter candidate role ids down to ones that are
  * both routable AND actually allowed to approve before picking an approver.
  */
-export async function roleIdsWithPageEditAccess(companyId: string, roleIds: string[], pageCode: string): Promise<Set<string>> {
+export async function roleIdsWithPageEditAccess(companyId: string, roleIds: string[], pageCode: string, strict = false): Promise<Set<string>> {
   if (!supabaseAdmin || !roleIds.length) return new Set();
 
   const rolesResult = await supabaseAdmin
@@ -210,7 +211,7 @@ export async function roleIdsWithPageEditAccess(companyId: string, roleIds: stri
     .select("id, code")
     .eq("company_id", companyId)
     .in("id", roleIds);
-  if (rolesResult.error) return new Set(roleIds);
+  if (rolesResult.error) { if (strict) throw new Error(rolesResult.error.message); return new Set(roleIds); }
   const ownerRoleIds = (rolesResult.data ?? [])
     .filter((role) => String(role.code ?? "").trim().toUpperCase() === "OWNER")
     .map((role) => role.id);
@@ -221,11 +222,13 @@ export async function roleIdsWithPageEditAccess(companyId: string, roleIds: stri
     .eq("company_id", companyId)
     .eq("code", pageCode)
     .maybeSingle();
+  if (pageResult.error && strict) throw new Error(pageResult.error.message);
   if (!pageResult.data) {
     pageResult = await supabaseAdmin.from("app_pages").select("id").eq("code", pageCode).is("company_id", null).maybeSingle();
   }
   const pageId = pageResult.data?.id;
-  if (!pageId) return new Set(roleIds);
+  if (pageResult.error && strict) throw new Error(pageResult.error.message);
+  if (!pageId) return strict ? new Set(ownerRoleIds) : new Set(roleIds);
 
   const grantsResult = await supabaseAdmin
     .from("role_page_permissions")
@@ -233,7 +236,7 @@ export async function roleIdsWithPageEditAccess(companyId: string, roleIds: stri
     .eq("company_id", companyId)
     .eq("page_id", pageId)
     .in("role_id", roleIds);
-  if (grantsResult.error) return new Set(roleIds);
+  if (grantsResult.error) { if (strict) throw new Error(grantsResult.error.message); return new Set(roleIds); }
 
   const editableRoleIds = (grantsResult.data ?? [])
     .filter((grant) => grant.can_edit)

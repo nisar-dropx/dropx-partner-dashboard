@@ -16,12 +16,12 @@ export async function initialApprovalReadyIds(companyId: string, requestIds: str
       .select("payment_head_id,step_order,candidates,is_required")
       .eq("company_id", companyId).in("payment_head_id", heads) : { data: [], error: null };
     if (steps.error) throw new Error(steps.error.message);
-    const approvals: { payment_request_id: string; action: string; approver_role_id: string | null }[] = [];
+    const approvals: { payment_request_id: string; action: string; approver_role_id: string | null; approval_step_order: number | null; created_at: string }[] = [];
     // Paginate history: never mistake a truncated response for no approval.
     for (let page = 0; ; page += 1000) {
       const logs = await supabaseAdmin.from("payment_request_approvals")
-        .select("payment_request_id,action,approver_role_id")
-        .eq("company_id", companyId).eq("action", "approved")
+        .select("payment_request_id,action,approver_role_id,approval_step_order,created_at")
+        .eq("company_id", companyId).in("action", ["approved", "returned", "resubmitted", "rejected"])
         .in("payment_request_id", ids).order("id").range(page, page + 999);
       if (logs.error) throw new Error(logs.error.message);
       approvals.push(...(logs.data ?? []));
@@ -31,7 +31,9 @@ export async function initialApprovalReadyIds(companyId: string, requestIds: str
       const configuredSteps = (Array.isArray(request.adhoc_approval_steps)
         ? request.adhoc_approval_steps
         : (steps.data ?? []).filter(step => step.payment_head_id === request.payment_head_id)) as ApprovalStage[];
-      const recordedApprovals = approvals.filter(log => log.payment_request_id === request.id);
+      const requestLogs = approvals.filter(log => log.payment_request_id === request.id).sort((a, b) => a.created_at.localeCompare(b.created_at));
+      const lastReset = requestLogs.filter(log => log.action !== "approved").at(-1)?.created_at;
+      const recordedApprovals = requestLogs.filter(log => log.action === "approved" && (!lastReset || log.created_at > lastReset));
       if (hasInitialApprovalForPersistedRequest(
         configuredSteps,
         Number(request.current_step_order) || 1,
