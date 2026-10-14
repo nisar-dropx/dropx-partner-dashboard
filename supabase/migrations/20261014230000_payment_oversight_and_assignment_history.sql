@@ -17,7 +17,7 @@ where r.is_active and (
       and a.code = 'payment_approvals' and g.can_edit
   )
 )
-on conflict (role_id, page_id) do nothing;
+on conflict (company_id, role_id, page_id) do nothing;
 
 alter table public.payment_requests
   add column if not exists approval_pending_since timestamptz,

@@ -11,7 +11,7 @@ test('oversight migration grants read-only role access and atomically tracks han
       create table companies(id uuid primary key);
       create table app_pages(id uuid primary key default gen_random_uuid(),company_id uuid,code text,name text,sort_order int,is_active bool,unique(company_id,code));
       create table user_roles(id uuid primary key,company_id uuid,code text,is_active bool);
-      create table role_page_permissions(company_id uuid,role_id uuid,page_id uuid,can_view bool,can_add bool,can_edit bool,primary key(role_id,page_id));
+      create table role_page_permissions(company_id uuid,role_id uuid,page_id uuid,can_view bool,can_add bool,can_edit bool,unique(company_id,role_id,page_id));
       create table payment_requests(id uuid primary key,company_id uuid,created_at timestamptz default now(),updated_at timestamptz default now(),updated_by uuid,status text,approval_status text,current_approver_user_id uuid,current_approver_role_id uuid,current_step_order int);
       create table payment_request_approvals(id uuid primary key default gen_random_uuid(),company_id uuid,payment_request_id uuid,action text,created_at timestamptz default now());
       insert into companies values('00000000-0000-0000-0000-000000000001');
