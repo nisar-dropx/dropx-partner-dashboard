@@ -5,8 +5,11 @@ export interface Entry {
 }
 export interface Loss {id:string;month:string;station:string;reference:string;paise:number;outcome:string;plannedPaise:number;payrollMonth:string;responsible:string;postedPaise:number;evidence:string;}
 export interface Schedule {id:string;month:string;caseKey:string;station:string;payrollMonth:string;paise:number;responsible:string;note:string;version?:number;deleted?:boolean;}
-export interface Sources {company:string;month:string;capturedAt:string;stations:{code:string;base:string;aliases:string[]}[];entries:Entry[];losses:Loss[];issues:string[];counts:Record<string,number>;}
+export interface Dimension {code:string;name:string;region:string;state:string;model:string;cluster:string;managers:string[];isHo:boolean;}
+export interface Sources {
+ dimensions?:Dimension[];company:string;month:string;capturedAt:string;stations:{code:string;base:string;aliases:string[]}[];entries:Entry[];losses:Loss[];issues:string[];counts:Record<string,number>;}
 export interface Report {
+ dimensions?:Dimension[];
  month:string;entries:Entry[];schedules:Schedule[];losses:Loss[];stations:string[];issues:string[];capturedAt:string|null;counts:Record<string,number>;
  totals:{income:number;expense:number;profit:number;recovery:number;gst:number};
  invoices:{key:string;month:string;station:string;reference:string;date:string;taxPaise:number;totalPaise:number;issues:string[]}[];
