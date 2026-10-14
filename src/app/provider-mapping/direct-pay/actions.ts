@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { isDashboardPaymentSettingsDirectPayEntry } from "@/lib/provider-mapping-host";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeDirectPaymentValues,
@@ -55,7 +56,12 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
   const audience = text(formData.get("subject_type")) === "helpers" ? "helpers" : "workforce";
-  const permissionScope = text(formData.get("permission_scope")) === "payment_settings"
+  const pageCode = currentProviderMappingPageCode();
+  const permissionScope = isDashboardPaymentSettingsDirectPayEntry(
+    pageCode,
+    audience,
+    text(formData.get("permission_scope")) === "payment_settings" ? "payment-settings" : null
+  )
     ? "payment_settings"
     : "provider_mapping";
   if (permissionScope === "payment_settings") {
@@ -63,7 +69,7 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
       redirect("/unauthorized?page=payment_settings&action=edit");
     }
   } else if (!canEditProviderMappings(authorization)) {
-    redirect(`/unauthorized?page=${currentProviderMappingPageCode()}&action=edit`);
+    redirect(`/unauthorized?page=${pageCode}&action=edit`);
   }
 
   try {

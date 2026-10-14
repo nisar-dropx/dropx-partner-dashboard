@@ -46,7 +46,7 @@ assert.doesNotMatch(
   "Unrelated company-wide revision churn must not reject rows whose signed calculation hash is unchanged."
 );
 assert.match(routeSource, /if \(!authorization\.hasAllLocationAccess\)/);
-assert.match(pageSource, /canPublishNotifications=\{authorization\.hasAllLocationAccess\}/);
+assert.match(pageSource, /canPublishNotifications=\{canEdit && authorization\.hasAllLocationAccess\}/);
 assert.match(
   pageSource,
   /status === "sent" \|\| status === "superseded" \|\| status === "disabled"[\s\S]*\? "Payment published"/,

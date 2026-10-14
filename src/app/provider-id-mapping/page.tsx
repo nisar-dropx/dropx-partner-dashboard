@@ -11,7 +11,7 @@ import { canonicalizeProviderFirstMembers, providerMemberIdentityKey, providerMe
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
-import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 
@@ -30,8 +30,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const pageCode = currentProviderMappingPageCode();
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const permission = authorization.permissions[pageCode];
-  const canEdit = Boolean(permission?.canAdd || permission?.canEdit);
+  const canEdit = canEditProviderMappings(authorization);
   const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
   const scope = new Set(authorization.locationScopeIds);
   const allowed = (id: string | null) => allLocations || Boolean(id && scope.has(id));

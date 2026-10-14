@@ -22,3 +22,13 @@ export function providerMappingPageCodeForHost(value: string | null | undefined)
   }
   return null;
 }
+
+export function isDashboardPaymentSettingsDirectPayEntry(
+  pageCode: ProviderMappingPageCode,
+  audience: string | null | undefined,
+  source: string | null | undefined
+) {
+  return pageCode === "provider_mapping"
+    && audience === "helpers"
+    && source === "payment-settings";
+}

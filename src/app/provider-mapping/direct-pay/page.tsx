@@ -6,9 +6,10 @@ import {
   type DirectPaymentAllocationRow
 } from "@/components/direct-payment-allocation-worksheet";
 import { PageHead } from "@/components/page-head";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { isDashboardPaymentSettingsDirectPayEntry } from "@/lib/provider-mapping-host";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
@@ -109,14 +110,13 @@ export default async function DirectPaymentAllocationsPage({
 }) {
   const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
   const pageCode = currentProviderMappingPageCode();
-  const paymentSettingsEntry = audience === "helpers" && searchParams.source === "payment-settings";
+  const paymentSettingsEntry = isDashboardPaymentSettingsDirectPayEntry(pageCode, audience, searchParams.source);
   const accessPageCode = paymentSettingsEntry ? "payment_settings" : pageCode;
   const authorization = await requirePagePermission(accessPageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const permission = authorization.permissions[accessPageCode];
   const canEdit = paymentSettingsEntry
-    ? Boolean(permission?.canEdit)
-    : Boolean(permission?.canAdd || permission?.canEdit);
+    ? hasPermission(authorization, "payment_settings", "edit")
+    : canEditProviderMappings(authorization);
   const flash = loadFlash();
 
   if (!supabaseAdmin) {

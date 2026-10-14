@@ -41,14 +41,21 @@ const checks = [
   [access.includes('headers().get("host")') && access.includes("providerMappingPageCodeForCurrentHost") && !access.includes("x-forwarded-host"), "Provider mapping permission selection must use the same trusted Host value as middleware."],
   [accessSurface.indexOf('headers().get("host")') < accessSurface.indexOf('headers().get("x-forwarded-host")'), "Authorization role and location scope must prefer the same Host value used by middleware."],
   [hostAccess.includes('host === "ops.dropxlogistics.com"') && hostAccess.includes('host === "dashboard.dropxlogistics.com"') && hostAccess.includes("return null"), "Provider mapping must use isolated permissions on recognized Dashboard and Ops hosts and deny other surfaces."],
-  [canonicalPage.includes("currentProviderMappingPageCode()") && canonicalPage.includes('requirePagePermission(pageCode, "access")') && canonicalPage.includes("pageCode={pageCode}"), "The canonical provider-first page must enforce the host-specific permission without changing its UI."],
+  [canonicalPage.includes("currentProviderMappingPageCode()") && canonicalPage.includes('requirePagePermission(pageCode, "access")') && canonicalPage.includes("canEditProviderMappings(authorization)") && canonicalPage.includes("pageCode={pageCode}"), "The canonical provider-first page must enforce host-specific access and derive editing from the server permission helper."],
   [legacyProviderFirstPage.includes('redirect("/provider-id-mapping")') && !legacyProviderFirstPage.includes("currentProviderMappingPageCode"), "The legacy provider-first route must stay redirect-only so its build entry does not retain the heavy mapping graph."],
   [canonicalPage.includes('href="/provider-id-mapping"') && directPayPage.includes('href="/provider-id-mapping"') && !canonicalPage.includes("Existing worksheet") && !directPayPage.includes("Existing worksheet") && !canonicalPage.includes('/provider-mapping/provider-first') && !directPayPage.includes('/provider-mapping/provider-first'), "Both mapping views must use the canonical URL and omit the legacy Existing worksheet tab and route."],
   [directPayPage.includes("currentProviderMappingPageCode()")
+    && directPayPage.includes("isDashboardPaymentSettingsDirectPayEntry(pageCode, audience, searchParams.source)")
     && directPayPage.includes('accessPageCode = paymentSettingsEntry ? "payment_settings" : pageCode')
     && directPayPage.includes('requirePagePermission(accessPageCode, "access")')
     && directPayPage.includes("pageCode={accessPageCode}"), "Direct-pay must keep host-specific provider-mapping access while allowing the explicit Helper payment-settings entry."],
-  [actions.includes("canEditProviderMappings(authorization)") && directPayActions.includes("canEditProviderMappings(authorization)"), "All mapping writes must enforce the host-specific Add/Edit grant."],
+  [access.includes('return hasPermission(authorization, pageCode, "edit");')
+    && !access.includes('hasPermission(authorization, pageCode, "add")')
+    && actions.includes("canEditProviderMappings(authorization)")
+    && directPayActions.includes("canEditProviderMappings(authorization)"), "All mapping writes must require the host-specific Edit grant; Add-only and read-only users must not mutate mappings."],
+  [hostAccess.includes("isDashboardPaymentSettingsDirectPayEntry")
+    && directPayActions.includes("isDashboardPaymentSettingsDirectPayEntry(")
+    && directPayActions.includes("const pageCode = currentProviderMappingPageCode()"), "The payment-settings Helper entry must be limited to Dashboard and must not bypass the Ops ID Mapping permission."],
   [lookupApi.includes("providerMappingPageCodeForCurrentHost()") && lookupApi.includes("authorization.locationScopeIds") && lookupApi.includes('.in("station_code", stationCodes)'), "The member lookup API must enforce the recognized host, Ops grant, and assigned-location scope."],
   [canonicalPage.includes("authorization.locationScopeIds") && actions.includes("assertProviderFirstRowScope") && actions.includes('select("id, location_id")') && actions.includes("locationRemapFromStationId") && actions.includes('sourceType !== "workforce"'), "Provider mapping reads and writes must remain scoped to assigned locations and canonical workforce records."],
   [actions.includes('select("id, effective_from, effective_to, station_id') && actions.includes("existing.station_id") && actions.includes("workerMapping.station_id"), "Bulk, legacy, and provider-first updates must reject existing mappings outside the assigned-location scope."],
