@@ -25,6 +25,11 @@ import {
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+// requirePagePermission redirects (e.g. to login on an expired session); let Next follow it instead of showing "NEXT_REDIRECT".
+function isNextRedirect(error: unknown) {
+  return String((error as { digest?: unknown })?.digest ?? error).includes("NEXT_REDIRECT");
+}
+
 export type CodSubmissionActionState = {
   ok: boolean;
   error?: string;
@@ -385,6 +390,7 @@ export async function createCodSubmission(
       notice: savedNotice(remittance.outcome, "uploaded")
     };
   } catch (error) {
+    if (isNextRedirect(error)) throw error;
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Unable to submit COD proof."
@@ -500,6 +506,7 @@ export async function updateCodSubmission(
       notice: savedNotice(remittance.outcome, "updated")
     };
   } catch (error) {
+    if (isNextRedirect(error)) throw error;
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Unable to update COD submission."
