@@ -1517,7 +1517,10 @@ async function providerFirstReplacementState({
   }
   const replacement = {
     kind: changeKind,
-    allowKeepAll: changeKind === "location",
+    // Keep all is only valid when an existing mapping at the registered
+    // location anchors a second location. When the destination itself is the
+    // profile's registered location, this is a correction and must Move.
+    allowKeepAll: changeKind === "location" && needsRegisteredLocationException,
     allowMove: changeKind !== "location" || !needsRegisteredLocationException,
     clientKey,
     mappingId: existingMapping.id,
@@ -1532,6 +1535,9 @@ async function providerFirstReplacementState({
   if (expectedReplacementId === existingMapping.id) {
     if (changeKind === "owner" && replacementAction === "keep") {
       throw new Error(`Row ${index + 1}: Keep all is available only when the same DropX ID works at multiple locations.`);
+    }
+    if (changeKind === "location" && !needsRegisteredLocationException && replacementAction === "keep") {
+      throw new Error(`Row ${index + 1}: Move mapping is required when correcting the Provider ID to the DropX profile's registered location.`);
     }
     if (changeKind === "location" && needsRegisteredLocationException && replacementAction === "move") {
       throw new Error(`Row ${index + 1}: Keep all is required for an additional location so the verified registered-location mapping remains preserved for that period.`);

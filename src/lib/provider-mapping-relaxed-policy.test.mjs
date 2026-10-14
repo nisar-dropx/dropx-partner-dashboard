@@ -119,6 +119,7 @@ test("a closed registered-location mapping permits only fully contained bounded 
   assert.equal(providerFirstLocationIsAllowed(narrowerSeptember, historicalWorker), true);
   assert.deepEqual(providerFirstLocationRemap(exactSeptember, historicalWorker), {
     kind: "location",
+    allowKeepAll: true,
     allowMove: false,
     mappingId: "mapping-history",
     providerMemberId: "2000074247130",

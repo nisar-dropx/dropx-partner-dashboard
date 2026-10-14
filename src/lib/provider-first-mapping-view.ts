@@ -144,9 +144,11 @@ export function providerFirstLocationRemap(
     || !providerFirstLocationIsAllowed(row, worker)) {
     return null;
   }
+  const movesToRegisteredLocation = row.stationId === String(worker.profileStationId ?? "").trim();
   return {
     kind: "location",
-    ...(row.stationId === String(worker.profileStationId ?? "").trim() ? {} : { allowMove: false }),
+    allowKeepAll: !movesToRegisteredLocation,
+    allowMove: movesToRegisteredLocation,
     mappingId: reference.mappingId,
     providerMemberId: row.providerMemberId,
     providerMemberName: row.providerMemberName,
@@ -477,6 +479,9 @@ export function providerFirstMappingReplacementMessage(replacement: ProviderFirs
   if (replacement.kind === "location") {
     if (replacement.allowMove === false) {
       return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at its registered location ${replacement.existingLocationLabel ?? "the current location"}.\nUse Keep all to add ${replacement.newLocationLabel ?? "the selected location"} for the same DropX ID while preserving the verified registered-location mapping.`;
+    }
+    if (replacement.allowKeepAll === false) {
+      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the previous location"}.\nMove it to the profile's registered location ${replacement.newLocationLabel ?? "the selected location"}. Moving ends the old location on the preceding day and preserves its earlier mapping and payout history.`;
     }
     return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nMove it to ${replacement.newLocationLabel ?? "the selected location"}, or keep both location mappings for the same DropX ID?\nMoving ends the old location on the preceding day. Keep all preserves both locations.`;
   }

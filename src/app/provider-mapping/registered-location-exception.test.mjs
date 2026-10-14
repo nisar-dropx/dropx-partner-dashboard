@@ -67,6 +67,7 @@ test("allows a second location only from the exact mapping at the profile regist
   assert.equal(providerFirstLocationIsAllowed(secondLocation, worker), true);
   assert.deepEqual(providerFirstLocationRemap(secondLocation, worker), {
     kind: "location",
+    allowKeepAll: true,
     allowMove: false,
     mappingId: "mapping-a",
     providerMemberId: "member-1",
@@ -153,6 +154,14 @@ test("server selects a same-owner historical registered anchor that contains the
   assert.match(actions, /mapping\.status === "closed" && Boolean\(mapping\.effective_to\)/);
   assert.match(actions, /!relevantProviderMappings\.length && !relevantTargetMappings\.length && !registeredLocationMapping/);
   assert.match(actions, /\.\.\.\(registeredLocationMapping \? \[registeredLocationMapping\] : \[\]\)/);
+  assert.match(
+    actions,
+    /changeKind === "location" && !needsRegisteredLocationException && replacementAction === "keep"[\s\S]*?throw new Error/
+  );
+  assert.match(
+    actions,
+    /changeKind === "location" && needsRegisteredLocationException && replacementAction === "move"[\s\S]*?throw new Error/
+  );
   assert.match(actions, /Keep all is required for an additional location/);
 });
 

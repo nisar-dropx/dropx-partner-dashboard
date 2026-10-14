@@ -132,6 +132,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
   const remap = providerFirstLocationRemap(destination, sourceWorker);
   assert.deepEqual(remap, {
     kind: "location",
+    allowKeepAll: true,
     allowMove: false,
     mappingId: "mapping-1",
     providerMemberId: "member-1",
@@ -142,6 +143,7 @@ test("permits only an exact same-provider, same-member location remap", () => {
     newLocationLabel: "JUGF - Sundergarh",
     effectiveFrom: "2026-09-01"
   });
+  assert.equal(remap.allowMove, false);
   assert.equal(
     providerFirstMappingReplacementMessage(remap),
     "Provider ID member-1 - Asha Devi is already mapped to DROPX1 - Asha Devi at its registered location JUGD - Jharsuguda.\nUse Keep all to add JUGF - Sundergarh for the same DropX ID while preserving the verified registered-location mapping."
@@ -242,6 +244,8 @@ test("uses the effective mapping station when the Workforce profile already move
     }, driftedWorker),
     {
       kind: "location",
+      allowKeepAll: false,
+      allowMove: true,
       mappingId: "mapping-1",
       providerMemberId: "member-1",
       providerMemberName: "Asha Devi",
@@ -252,6 +256,18 @@ test("uses the effective mapping station when the Workforce profile already move
       effectiveFrom: "2026-10-04"
     }
   );
+  const moveToProfile = providerFirstLocationRemap({
+    ...row,
+    stationId: "station-2",
+    stationLabel: "JUGF",
+    effectiveFrom: "2026-10-04"
+  }, driftedWorker);
+  assert.equal(moveToProfile?.allowKeepAll, false);
+  assert.equal(
+    providerFirstMappingReplacementMessage(moveToProfile),
+    "Provider ID member-1 - Asha Devi is currently mapped to DROPX1 - Asha Devi at JUGD.\nMove it to the profile's registered location JUGF. Moving ends the old location on the preceding day and preserves its earlier mapping and payout history."
+  );
+  assert.doesNotMatch(providerFirstMappingReplacementMessage(moveToProfile), /Keep all|keep both/i);
 });
 
 test("does not reuse a future current mapping for an earlier bounded period", () => {
