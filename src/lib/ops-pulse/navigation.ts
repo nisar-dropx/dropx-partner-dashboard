@@ -164,11 +164,13 @@ export function opsNavItemsForMode(mode: OperatingMode, authorization?: Authoriz
   if (mode === "amazon_now") return [
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
+    {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
     businessDocuments,payments,
     {code:'cpu_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,
     administration[0],
     {code:'master_data',label:'Ops Masters',icon:'*',children:[
       {code:'cps_inputs',label:'CPU Master & units',href:'/cpu/master'},
+      {code:'store_audit_master',label:'Audit Master',href:'/master/store-audits'},
       {code:'master_locations',label:'Location Master',href:'/master/location'},
       {code:'master_providers',label:'Client / Provider Master',href:'/master/providers'},
       {code:'master_models',label:'Operation Models',href:'/master/models'}

@@ -32,6 +32,7 @@ export async function loadAuditAssignees(
   companyId: string,
   schedulerRoleIds: string[],
   visibleStationIds: string[],
+  pageCode = "station_audits",
 ) {
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
   const [profiles, memberships, roles, pages] = await Promise.all([
@@ -55,7 +56,7 @@ export async function loadAuditAssignees(
       .from("app_pages")
       .select("id")
       .eq("company_id", companyId)
-      .eq("code", "station_audits")
+      .eq("code", pageCode)
       .eq("is_active", true),
   ]);
   for (const result of [profiles, memberships, roles, pages])

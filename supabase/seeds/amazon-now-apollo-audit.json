@@ -1,0 +1,982 @@
+{
+  "name": "Amazon Now \u00b7 Apollo store audit",
+  "description": "Based on Apollo Audit Readiness Checklist, supplied 15 Oct 2026. Questions and evidence rules are editable. Surprise audit: stores see results only after completion.",
+  "sections": [
+    {
+      "id": "priority",
+      "name": "Fix first",
+      "guidance": "Priority checks: repeated failures in the source checklist.",
+      "questions": [
+        {
+          "id": "priority_01",
+          "label": "Expiry removal: zero physical vs. system mismatch; remove every expired unit in system before disposal",
+          "guidance": "Show the physical expiry check and matching system removal record.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Remove expired units in the system, reconcile the physical quantity and dispose under SOP.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_02",
+          "label": "Cleaning & sanitation record displayed & updated to date",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Update and display the cleaning and sanitation record.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_03",
+          "label": "Liquid items stowed vertically",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Restow liquid items vertically and inspect for leakage.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_04",
+          "label": "Cleaning schedule available at site",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Display the current cleaning schedule and assign responsibility.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_05",
+          "label": "No dust in food bins",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Clean affected bins and verify the cleaning frequency.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_06",
+          "label": "Deckling plates not damaged",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Replace or repair damaged deckling plates.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_07",
+          "label": "No over-stuffing / over-hanging (check 5 bays)",
+          "guidance": "Inspect five bays; record their identifiers and each exception.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Restow affected bays within their safe capacity.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_08",
+          "label": "UTR roster pasted & visible to staff",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Display the current UTR roster.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_09",
+          "label": "Partner escalation matrix documented & displayed",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Update and display the escalation matrix.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_10",
+          "label": "Long ASINs kept in bat bins",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Move long ASINs into the designated bat bins.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_11",
+          "label": "No food spillage beneath racks / bins",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Remove spillage and clean beneath the affected racks and bins.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "priority_12",
+          "label": "PGT tasks performed regularly",
+          "guidance": "Check recent task records and execution.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Complete overdue PGT tasks and record the recurring owner.",
+          "hours": 24,
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "id": "hygiene",
+      "name": "Hygiene & Upkeep",
+      "guidance": "",
+      "questions": [
+        {
+          "id": "hygiene_01",
+          "label": "No liquid ASIN leakage",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Isolate leaking stock and clean the affected storage area.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "hygiene_02",
+          "label": "Washrooms clean (UTR + rider)",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Clean both washrooms and update the cleaning record.",
+          "hours": 48,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "food",
+      "name": "Food Safety",
+      "guidance": "Record actual readings and affected areas where relevant. Thresholds below are transcribed from the supplied checklist.",
+      "questions": [
+        {
+          "id": "food_01",
+          "label": "Veg / non-veg & food / non-food on separate shelves",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Segregate the affected stock onto separate shelves.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "food_02",
+          "label": "No leakage on any building wall",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Raise a repair action and protect stock from the affected wall.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "food_03",
+          "label": "Product temperature validated on addback from CRET001",
+          "guidance": "Record the product temperature and supporting return/addback record.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Validate product temperature and follow the approved addback process.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "food_04",
+          "label": "Bin dividers present (2 aisles each: Ambient, Tropical, Chiller, Frozen)",
+          "guidance": "Check two aisles in each listed zone.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Install missing dividers in the identified aisles.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "food_05",
+          "label": "Chiller temperature 0 to 5 C (+/- 4 C)",
+          "guidance": "Record the measured temperature and a photo of the reading.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Escalate temperature deviation, protect stock and verify the corrected reading.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "food_06",
+          "label": "Rodent traps at designated locations",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Restore designated trap placement and escalate pest activity.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "food_07",
+          "label": "Frozen temperature -22 to -18 C (+/- 4 C)",
+          "guidance": "Record the measured temperature and a photo of the reading.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Escalate temperature deviation, protect stock and verify the corrected reading.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "food_08",
+          "label": "Frozen / meat / seafood in chilled bags with min. 2 gel pads",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Repack affected items in chilled bags with at least two gel pads.",
+          "hours": 24,
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "id": "quality",
+      "name": "Quality",
+      "guidance": "",
+      "questions": [
+        {
+          "id": "quality_01",
+          "label": "Unshaped / small items (non six-side) in drawer bins",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Move applicable items into drawer bins.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_02",
+          "label": "Big & soft items in single layer",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Restow big and soft items in a single layer.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_03",
+          "label": "Punnets (fruit / veg) max 2 layers, lid up",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Restow punnets lid-up, no more than two layers.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_04",
+          "label": "Simple Bin Count, Simple Record Count & Cycle Count closed by shift end",
+          "guidance": "Check the shift-end count records.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Complete and close outstanding counts with the shift owner.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_05",
+          "label": "MAP / cover items stowed vertically",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Restow MAP/cover items vertically.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_06",
+          "label": "Corrugated box items stowed horizontally",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Restow corrugated box items horizontally.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_07",
+          "label": "No heavy items on top of light / fragile IDs",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Remove heavy items from light or fragile stock.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_08",
+          "label": "Quality Manager aware of roles & responsibilities",
+          "guidance": "Record the discussion and knowledge gaps.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Brief the Quality Manager and verify understanding.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_09",
+          "label": "No rotten / over / under-ripe products in bins",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Remove unsuitable produce and inspect neighbouring bins.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "quality_10",
+          "label": "QRC / quality OPLs pasted at store",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Display the current QRC / quality OPLs.",
+          "hours": 48,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "picker",
+      "name": "Picker Knowledge",
+      "guidance": "Quiz two pickers on the floor. Record who was checked and any coaching needed.",
+      "questions": [
+        {
+          "id": "picker_01",
+          "label": "Hazmat kept in separate bags",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Coach both pickers and demonstrate separate hazmat packing.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "picker_02",
+          "label": "Correct bag size per order (basis units)",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Coach pickers on bag selection based on order units.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "picker_03",
+          "label": "Veg / non-veg kept in separate bags",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Coach pickers and demonstrate separate packing.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "picker_04",
+          "label": "Damage process understood & followed",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Brief the damage process and verify understanding.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "picker_05",
+          "label": "Six-side (title) check followed",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Demonstrate the six-side check and verify execution.",
+          "hours": 48,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "people",
+      "name": "People Presence & Knowledge",
+      "guidance": "",
+      "questions": [
+        {
+          "id": "people_01",
+          "label": "Process Expert aware of responsibilities",
+          "guidance": "Record the discussion and knowledge gaps.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "gap",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Brief the Process Expert and verify understanding.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "people_02",
+          "label": "Adequate staffing planned at store",
+          "guidance": "Review the roster against the staffing plan.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the staffing plan and assign shift coverage.",
+          "hours": 48,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "compliance",
+      "name": "Compliance & Documents",
+      "guidance": "Keep one valid copy of each in a station file. Capture the document and validity where applicable.",
+      "questions": [
+        {
+          "id": "compliance_01",
+          "label": "Pest control contract available & valid",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Obtain or renew the pest control contract and retain a valid copy.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "compliance_02",
+          "label": "Emergency contacts displayed",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Display current emergency contact details.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "compliance_03",
+          "label": "Contract Labour (R&A) Act certificate available",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Obtain and file the applicable certificate.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "compliance_04",
+          "label": "GST APOB available",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Obtain and file the GST APOB.",
+          "hours": 48,
+          "severity": "normal"
+        },
+        {
+          "id": "compliance_05",
+          "label": "Trade license available & valid",
+          "guidance": "",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Obtain or renew the trade licence and retain a valid copy.",
+          "hours": 48,
+          "severity": "normal"
+        }
+      ]
+    },
+    {
+      "id": "integrity",
+      "name": "Integrity Checks",
+      "guidance": "",
+      "questions": [
+        {
+          "id": "integrity_01",
+          "label": "No physical vs. virtual mismatch on recommended-ASIN audit",
+          "guidance": "Record ASINs checked and the physical/system quantities.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Investigate each difference and reconcile the physical and system quantities.",
+          "hours": 24,
+          "severity": "high"
+        },
+        {
+          "id": "integrity_02",
+          "label": "Expiry products disposed as per SOP",
+          "guidance": "Check the disposal record and system removal evidence.",
+          "required": true,
+          "allowNA": true,
+          "evidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "responseEvidence": {
+            "when": "always",
+            "min": 1,
+            "max": 5
+          },
+          "action": "Correct the disposal process and retain the required records.",
+          "hours": 24,
+          "severity": "high"
+        }
+      ]
+    }
+  ]
+}
