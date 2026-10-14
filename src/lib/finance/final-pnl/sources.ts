@@ -2,7 +2,7 @@ import 'server-only';
 import {boundedReads,sourceReadError,transientSourceError} from './source-read';
 import {managerShares,type ManagerPayroll} from './manager-shares';
 import type {SupabaseClient} from '@supabase/supabase-js';
-import {baseStations,latestPublications,monthEnd,monthValue,paise,recoveryRecognitionMonth,type Sources,type Entry,type Loss} from './model';
+import {baseStations,latestPublications,monthEnd,monthValue,paise,recoveryRecognitionMonth,reportingState,type Sources,type Entry,type Loss} from './model';
 export const FINAL_PNL_COMPANY='43866344-b550-4e8a-9a2d-9d23f3d8a997';
 type Row=Record<string,any>;
 async function rows(query:any,label:string):Promise<Row[]>{
@@ -141,6 +141,6 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  }
  if(nlPlans.some(p=>Array.isArray(p.allocations)&&p.allocations.length))issues.push('NL allocations are plans. Their source currently has no explicit payroll posting link; confirm the deduction evidence before recording recovery.');
  issues.push('Final P&L remains open for expense completeness review. Contract premises rent and fleet rent are accrued; configured CPS estimates are excluded. Invoice chargebacks already count as expenses, so loss-register amounts are not charged again.');
- const dimensions=[...new Set(topology.map(s=>s.base))].map(code=>{const station=stations.find(s=>s.station_code===code)!;const model=Array.isArray(station.location_models)?station.location_models[0]:station.location_models;const children=topology.filter(s=>s.base===code).map(s=>s.code);const managers=[...new Set(children.flatMap(child=>[...(manager.managersByStation.get(child)??[])]))].sort();return {code,name:station.station_name||code,region:businessMasters.find(m=>m.data.station_code===code)?.data.region||station.region||'Unassigned',state:station.state||'Unassigned',model:station.is_ho?'HO':model?.code||'Unassigned',cluster:station.cluster||'Unassigned',managers:managers.length?managers:['Unassigned'],isHo:!!station.is_ho};});
+ const dimensions=[...new Set(topology.map(s=>s.base))].map(code=>{const station=stations.find(s=>s.station_code===code)!;const model=Array.isArray(station.location_models)?station.location_models[0]:station.location_models;const children=topology.filter(s=>s.base===code).map(s=>s.code);const managers=[...new Set(children.flatMap(child=>[...(manager.managersByStation.get(child)??[])]))].sort();return {code,name:station.station_name||code,region:businessMasters.find(m=>m.data.station_code===code)?.data.region||station.region||'Unassigned',state:reportingState(station.state),model:station.is_ho?'HO':model?.code||'Unassigned',cluster:station.cluster||'Unassigned',managers:managers.length?managers:['Unassigned'],isHo:!!station.is_ho};});
  return {company,month,capturedAt,dimensions,stations:topology,entries,losses,issues:[...new Set(issues)],counts:{managerCount:manager.managerCount,accruedManagerCount:manager.accruedManagerCount,managerSharePaise:manager.entries.reduce((n,e)=>n+e.paise,0),invoiceIndependentCostGroups:costs.size,payrollRows:payrollCount,employeePayrollRows:hrSeen.size,finalEmployeeRuns:finalRuns.filter(r=>r.period_start<=end&&r.period_end>=start).length,nlLosses:nlCases.length,paymentRecoveryCases:recoveryCases.length,confirmedRecoveryEntries:entries.filter(e=>e.recovery).length}};
 }
