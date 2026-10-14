@@ -344,12 +344,17 @@ test('employee-backed CTC follows effective Workforce station after a transfer',
  r=rebuildCps(base([day('B','2026-09-01',0)]),f);
  assert.equal(r.daily[0].da_salary,0,'current station B must not receive the pre-transfer CTC');
 });
-test('effective payment policy distinguishes optional, required and non-field dates',()=>{
+test('effective payment policy is independent of the Field Operations flag',()=>{
  const policy=(is_field_operations,provider_mapping_required)=>[{workforce_id:'w1',station_id:'station-a',station_code_snapshot:'A',designation_is_active:true,effective_from:'2026-09-01',effective_to:null,is_field_operations,provider_mapping_required}];
- for(const [history,expected] of [[policy(true,false),'Direct payment allocation missing'],[policy(true,true),'Provider ID not linked'],[policy(false,false),null]]) {
+ for(const [history,expected] of [
+  [policy(true,false),'Direct payment allocation missing'],
+  [policy(false,false),'Direct payment allocation missing'],
+  [policy(true,true),'Provider ID not linked'],
+  [policy(false,true),'Provider ID not linked']
+ ]) {
   const f=facts();f.shipments=[];f.mappings=[];f.allocations=[];f.policy_history=history;
   const r=rebuildCps(base([day('A','2026-09-01',0)]),f);
-  if(expected) assert.ok(r.gaps.some(g=>g.kind===expected)); else assert.ok(!r.gaps.some(g=>g.dropx_id==='D1'));
+  assert.ok(r.gaps.some(g=>g.kind===expected&&g.dropx_id==='D1'));
  }
 });
 test('dates before the first truthful policy snapshot suppress policy-derived gaps',()=>{

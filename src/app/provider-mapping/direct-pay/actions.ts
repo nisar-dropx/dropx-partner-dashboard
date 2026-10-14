@@ -104,10 +104,9 @@ export async function saveDirectPaymentAllocation(formData: FormData) {
 
       const designationResult = await supabaseAdmin
         .from("designations")
-        .select("id, code, name, is_active, is_field_operations, provider_mapping_required")
+        .select("id, code, name, is_active, provider_mapping_required")
         .eq("company_id", companyId)
         .eq("is_active", true)
-        .eq("is_field_operations", true)
         .eq("provider_mapping_required", false);
       if (designationResult.error) throw new Error(designationResult.error.message);
       const designationText = String(person.designation ?? "").trim().toLowerCase();

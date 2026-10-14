@@ -658,7 +658,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         // Current flags are not evidence of historical policy. New source payloads
         // supply an effective-dated ledger; dates before its first honest snapshot
         // deliberately produce no policy-derived gap.
-        if(!policy?.designation_is_active || !policy.is_field_operations) continue;
+        if(!policy?.designation_is_active) continue;
         if(!policy.provider_mapping_required) gap('Direct payment allocation missing',station,date,'',w.full_name,w.dropx_id,0,0,'Workforce direct pay');
         continue;
       }
@@ -711,7 +711,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const through=dates.at(-1);
   if(through) for(const w of facts.workforce) {
     const policy=paymentPolicyOn(w,through);
-    if(!policy?.designation_is_active || !policy.is_field_operations || !policy.provider_mapping_required) continue;
+    if(!policy?.designation_is_active || !policy.provider_mapping_required) continue;
     const station=stationById.get(policy.station_id)?.station_code
       ??policy.station_code_snapshot
       ??(!policyHistoryProvided?stationById.get(w.location_id)?.station_code:undefined);
@@ -737,7 +737,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const linkedWorkforce=facts.workforce.find(w=>w.source_profile_type==='employee'&&w.source_profile_id===e.id);
     const linkedPolicy=linkedWorkforce?paymentPolicyOn(linkedWorkforce,date):null;
     const linkedAllocation=linkedWorkforce?directAllocations.filter(a=>a.workforce_id===linkedWorkforce.id&&allocationActiveOn(a as {effective_from:string;effective_to?:string|null},date)).sort((a,b)=>String(b.effective_from).localeCompare(String(a.effective_from)))[0]:undefined;
-    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||(linkedPolicy?.designation_is_active&&linkedPolicy.is_field_operations)));
+    const datedWorkforceOwnership=Boolean(linkedWorkforce&&(linkedAllocation||linkedPolicy?.designation_is_active));
     const workforceStation=stationById.get(linkedAllocation?.station_id)?.station_code
       ??stationById.get(linkedPolicy?.station_id)?.station_code
       ??linkedPolicy?.station_code_snapshot;

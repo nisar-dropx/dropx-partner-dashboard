@@ -138,7 +138,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   }
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => {
     const designation = designationById.get(String(worker.designation_id ?? "")) ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
-    return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || registeredMappingByWorkforce.has(worker.id) || designation?.is_field_operations && designation.provider_mapping_required !== false);
+    return allowed(worker.location_id) && worker.dropx_id && (mappingByWorkforce.has(worker.id) || registeredMappingByWorkforce.has(worker.id) || Boolean(designation && designation.provider_mapping_required !== false));
   }).map((worker) => {
     const registeredMappings = registeredMappingByWorkforce.get(worker.id) ?? [];
     const activeWorkerMappings = currentMappingsByWorkforce.get(worker.id) ?? [];

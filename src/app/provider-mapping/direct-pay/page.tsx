@@ -131,7 +131,6 @@ export default async function DirectPaymentAllocationsPage({
       .select("id, code, name")
       .eq("company_id", companyId)
       .eq("is_active", true)
-      .eq("is_field_operations", true)
       .eq("provider_mapping_required", false)
       .order("code"),
     supabaseAdmin.from("stations")
@@ -286,7 +285,7 @@ export default async function DirectPaymentAllocationsPage({
       eyebrow={paymentSettingsEntry ? "Workforce & Helper Payment" : "Provider-independent pay"}
       subtitle={audience === "helpers"
         ? "Assign attendance, workday or fixed-amount payment methods to Helpers. This setup is provider-independent and does not grant access to ID mapping."
-        : "Assign attendance, workday or fixed-amount payment methods to Field Operations designations that do not require provider mapping."}
+        : "Assign attendance, workday or fixed-amount payment methods to active designations that do not require provider mapping. Field Operations is configured independently."}
       title={paymentSettingsEntry ? "Helper Payment Setup" : "Direct pay allocations"}
     />
     {!paymentSettingsEntry ? <>
