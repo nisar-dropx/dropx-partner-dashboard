@@ -274,6 +274,28 @@ function mappingPeriodContainsRow(
   );
 }
 
+/**
+ * Current mappings are open-ended. A bounded historical row overlaps one only
+ * when the current mapping starts on or before the requested end date. Keep
+ * invalid and open-ended drafts attached to the current mapping so the normal
+ * row validation can report incomplete dates without changing edit identity.
+ */
+function currentMappingOverlapsRow(
+  mapping: Pick<ProviderFirstRegisteredMappingView, "effectiveFrom">,
+  row: Pick<ProviderFirstMappingRowView, "effectiveFrom" | "effectiveTo">
+) {
+  const mappingFrom = String(mapping.effectiveFrom ?? "").trim();
+  const requestedFrom = String(row.effectiveFrom ?? "").trim();
+  const requestedTo = String(row.effectiveTo ?? "").trim();
+  if (!isIsoCalendarDate(mappingFrom)
+    || !isIsoCalendarDate(requestedFrom)
+    || !isIsoCalendarDate(requestedTo)
+    || requestedFrom > requestedTo) {
+    return true;
+  }
+  return mappingFrom <= requestedTo;
+}
+
 /** A previous rate card is a user-selected template, never a new assignment's dates or edit ID. */
 export function providerFirstPaymentTemplateForRow(row: ProviderFirstMappingRowView, worker: ProviderFirstWorkerView | undefined) {
   if (!worker || worker.id !== row.workforceId) return undefined;
@@ -346,9 +368,13 @@ export function providerFirstMappingReferenceForRow(
   if (conflictingCurrent) return conflictingCurrent;
 
   // Moving a matching active mapping back to the profile's registered station
-  // remains the ordinary correction path.
+  // remains the ordinary correction path. Do not reuse a future mapping as the
+  // edit ID for an earlier bounded period; that period is a new historical row.
   if (row.stationId === registeredStationId) {
-    return currentMappings.find((mapping) => mappingIdentityMatchesRow(mapping, row));
+    return currentMappings.find((mapping) =>
+      mappingIdentityMatchesRow(mapping, row)
+        && currentMappingOverlapsRow(mapping, row)
+    );
   }
   return undefined;
 }

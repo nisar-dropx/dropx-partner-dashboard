@@ -150,7 +150,7 @@ test("server and database repeat the registered-location proof for current and h
   assert.match(actions, /registeredLocationMapping = registeredMappings\.find/);
   assert.match(actions, /needsRegisteredLocationException && !registeredLocationMapping/);
   assert.match(actions, /Keep all is required for an additional location/);
-  assert.match(actions, /if \(!mappingId && !options\.keepExistingLocationMappingId\)/);
+  assert.match(actions, /if \(!mappingId && !confirmedReplacementMappingId && !options\.keepExistingLocationMappingId\)/);
   assert.match(migration, /anchor\.station_id = registered_station/);
   assert.match(migration, /mapping\.status = 'active'/);
   assert.match(migration, /mapping\.effective_to is null/);

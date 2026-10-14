@@ -575,6 +575,7 @@ async function saveExecutiveMappingRow(
     allowWorkforceLocationRemap?: boolean;
     allowWorkforceLocationDriftEdit?: boolean;
     keepExistingLocationMappingId?: string | null;
+    confirmedReplacementMappingId?: string | null;
     paymentTransferDecision?: ProviderFirstPaymentTransferDecision | null;
   } = {}
 ) {
@@ -778,7 +779,15 @@ async function saveExecutiveMappingRow(
   if (submittedProviderId && submittedProviderId !== providerId) {
     throw new Error(`Row ${index + 1}: Provider does not match the selected location. Refresh the page and try again.`);
   }
-  if (!mappingId && !options.keepExistingLocationMappingId) {
+  // Provider-first replacement state validates the exact confirmed mapping
+  // before this save path runs, and the replacement RPC verifies it again
+  // under a lock. Never let an untrusted submitted ID bypass this preflight.
+  const confirmedReplacementMappingId = options.confirmedReplacementMappingId ?? null;
+  if (replacementMappingId && replacementMappingId !== confirmedReplacementMappingId
+    && !options.keepExistingLocationMappingId) {
+    throw new Error(`Row ${index + 1}: Mapping replacement confirmation is invalid. Reload the page and try again.`);
+  }
+  if (!mappingId && !confirmedReplacementMappingId && !options.keepExistingLocationMappingId) {
     const workerColumn = sourceType === "workforce" ? "workforce_id"
       : sourceType === "employee" ? "employee_id"
         : sourceType === "contractor" ? "contractor_id"
@@ -1744,6 +1753,7 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
         allowWorkforceLocationRemap: Boolean(replacementState.locationRemap || replacementState.keepAll),
         allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit,
         keepExistingLocationMappingId: replacementState.keepAll?.mappingId ?? null,
+        confirmedReplacementMappingId: replacementState.locationRemap?.mappingId ?? replacementState.ownerReplacement?.mappingId ?? null,
         paymentTransferDecision: paymentTransferState.decision
       });
       savedRows += 1;
@@ -1915,6 +1925,7 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         allowWorkforceLocationRemap: Boolean(replacementState.locationRemap || replacementState.keepAll),
         allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit,
         keepExistingLocationMappingId: replacementState.keepAll?.mappingId ?? null,
+        confirmedReplacementMappingId: replacementState.locationRemap?.mappingId ?? replacementState.ownerReplacement?.mappingId ?? null,
         paymentTransferDecision: paymentTransferState.decision
       });
 

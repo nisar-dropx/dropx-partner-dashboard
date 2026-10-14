@@ -9,9 +9,11 @@ import {
   isScientificProviderMemberId,
   providerFirstPageWindow,
   providerFirstLocationRemap,
+  providerFirstMappingReferenceForRow,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
   providerFirstNamesMatch,
+  providerFirstRowForMappingPeriod,
   providerFirstRowIssue,
   providerFirstValidationStatus,
   providerFirstWorkerIsSelectable,
@@ -219,6 +221,91 @@ test("uses the effective mapping station when the Workforce profile already move
       newLocationLabel: "JUGF",
       effectiveFrom: "2026-10-04"
     }
+  );
+});
+
+test("does not reuse a future current mapping for an earlier bounded period", () => {
+  const futureMapping = {
+    mappingId: "mapping-october",
+    stationId: row.stationId,
+    locationLabel: row.stationLabel,
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "",
+    status: "active"
+  };
+  const futureWorker = {
+    ...worker,
+    mappingId: futureMapping.mappingId,
+    effectiveFrom: futureMapping.effectiveFrom,
+    currentMappings: [futureMapping],
+    mappingHistory: [futureMapping],
+    registeredLocationMappings: [futureMapping]
+  };
+  const septemberRow = {
+    ...row,
+    mappingId: futureMapping.mappingId,
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-30"
+  };
+
+  assert.equal(providerFirstMappingReferenceForRow(septemberRow, futureWorker), undefined);
+  assert.deepEqual(providerFirstRowForMappingPeriod(septemberRow, futureWorker), {
+    ...septemberRow,
+    mappingId: "",
+    paymentMethodId: "",
+    paymentValues: {},
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: ""
+  });
+});
+
+test("keeps a current mapping reference when the requested period overlaps it", () => {
+  const futureMapping = {
+    mappingId: "mapping-october",
+    stationId: row.stationId,
+    locationLabel: row.stationLabel,
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "12" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "",
+    status: "active"
+  };
+  const futureWorker = {
+    ...worker,
+    mappingId: futureMapping.mappingId,
+    effectiveFrom: futureMapping.effectiveFrom,
+    currentMappings: [futureMapping],
+    mappingHistory: [futureMapping],
+    registeredLocationMappings: [futureMapping]
+  };
+
+  assert.equal(
+    providerFirstMappingReferenceForRow({
+      ...row,
+      mappingId: futureMapping.mappingId,
+      effectiveFrom: "2026-09-01",
+      effectiveTo: ""
+    }, futureWorker)?.mappingId,
+    futureMapping.mappingId
+  );
+  assert.equal(
+    providerFirstMappingReferenceForRow({
+      ...row,
+      mappingId: futureMapping.mappingId,
+      effectiveFrom: "2026-09-01",
+      effectiveTo: "2026-10-15"
+    }, futureWorker)?.mappingId,
+    futureMapping.mappingId
   );
 });
 
