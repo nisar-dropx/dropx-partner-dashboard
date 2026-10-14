@@ -7,3 +7,6 @@ export async function syncMonth(month:string){try{const ctx=await finalContext('
 export async function saveChange(data:{month:string;id:string;kind:'entry'|'schedule';version:number;deleted?:boolean;reason:string;value:unknown}){
  try{const ctx=await finalContext(data.version===0&&data.id.startsWith('manual:')||data.version===0&&data.id.startsWith('schedule:')?'add':'edit');monthValue(data.month);await worker(ctx.companyId,'change',{...data,actor:ctx.authorization.userId});revalidatePath('/finance/final-pnl');return {ok:true,message:data.deleted?'Entry removed from totals; its history is retained.':'Saved with correction history.'};}catch(e){return {ok:false,message:e instanceof Error?e.message:'Save failed.'};}
 }
+export async function saveOverhead(data:{month:string;pool:string;method:string;recipients:string[];weights:Record<string,number>;version:number;reason:string}){
+ try{const ctx=await finalContext('edit');monthValue(data.month);await worker(ctx.companyId,'overhead',{...data,actor:ctx.authorization.userId});revalidatePath('/finance/final-pnl');return {ok:true,message:'HO allocation saved for this month with correction history.'};}catch(e){return {ok:false,message:e instanceof Error?e.message:'Allocation failed.'};}
+}

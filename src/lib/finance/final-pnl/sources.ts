@@ -1,4 +1,6 @@
 import 'server-only';
+import {hoSalaries} from './ho-salaries';
+import {operatingCosts} from './operating-costs';
 import {boundedReads,sourceReadError,transientSourceError} from './source-read';
 import {managerShares,type ManagerPayroll} from './manager-shares';
 import type {SupabaseClient} from '@supabase/supabase-js';
@@ -23,7 +25,7 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  const capturedAt=new Date().toISOString(),start=`${month}-01`,end=monthEnd(month);
  const historyStart='2020-01-01';
  const table=(name:string,fields='*')=>db.from(name).select(fields).eq('company_id',company);
- const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims,peopleFacts,peoplePolicies,peopleRules,businessMasters,workforceProfiles]=await boundedReads([
+ const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims,peopleFacts,peoplePolicies,peopleRules,businessMasters,workforceProfiles,paymentDetails,hoFacts]=await boundedReads([
   ()=>rows(table('stations','id,station_code,station_name,parent_station_id,region,state,city,cluster,is_ho,is_active,hide_from_location_list,location_models(code,name)').order('id'),'Station topology'),
   ()=>rows(table('cod_station_settings','location_id,portal_station_code').order('location_id'),'Station aliases'),
   ()=>rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end,payroll_run_id').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
@@ -34,26 +36,21 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   ()=>rows(table('payment_recovery_cases','id,tid,station_id,station_code_snapshot,debit_date,debit_month,debit_amount,payout_month,status').lte('debit_month',end).order('id'),'Payment recovery cases'),
   ()=>rows(table('workforce_station_loss_claims','id,workforce_id,station_id,adjustment_id,incident_date,reference').lte('incident_date',end).order('id'),'Station loss claims'),
   ()=>db.rpc('ops_cps_people_assignments',{p_company:company,p_from:start,p_through:end}),
-  ()=>rows(table('ops_cps_people_policies','designation_code,designation_name,mode,head,label,allocation,effective_from').lte('effective_from',end).order('designation_code').order('effective_from'),'Manager allocation policies'),
-  ()=>rows(table('ops_cps_cost_inputs','id,employee_id,station_codes,head,allocation,effective_from,effective_to').not('employee_id','is',null).eq('is_active',true).lte('effective_from',end).order('id'),'Manager allocation rules'),
-  ()=>rows(table('finance_business_master','id,kind,data').eq('kind','reporting_region').is('deleted_at',null).order('id'),'Reporting regions'),
-  ()=>rows(table('workforce','id,source_profile_type,source_profile_id').in('source_profile_type',['employee','contractor']).order('id'),'Payroll identity links')
+  ()=>rows(table('ops_cps_people_policies','designation_code,designation_name,mode,head,label,allocation,effective_from').lte('effective_from',end).order('designation_code').order('effective_from'),'People allocation policies'),
+  ()=>rows(table('ops_cps_cost_inputs','id,employee_id,station_codes,head,allocation,effective_from,effective_to').not('employee_id','is',null).eq('is_active',true).lte('effective_from',end).order('id'),'People allocation rules'),
+  ()=>rows(table('finance_business_master','id,kind,data').in('kind',['reporting_region','now_store','overhead']).is('deleted_at',null).order('id'),'Reporting regions'),
+  ()=>rows(table('workforce','id,source_profile_type,source_profile_id').in('source_profile_type',['employee','contractor']).order('id'),'Payroll identity links'),
+  ()=>rows(table('payment_requests','id,location_id,station_code,location_code,work_date,request_no,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,amount_approved,amount,amount_requested,payment_heads(name)').gte('work_date',start).lte('work_date',end).order('id'),'Expense request details'),
+  ()=>db.rpc('finance_ho_people',{p_company:company,p_from:start,p_through:end})
  ]);
- const topology=baseStations(stations as any,aliases as any),stationById=new Map(stations.map(s=>[s.id,s.station_code]));
+ const topology=baseStations(stations as any,aliases as any).map(t=>{const s=stations.find(s=>s.station_code===t.code)!;return {...t,active:s.is_active!==false,isHo:!!s.is_ho,hidden:!!s.hide_from_location_list};}),stationById=new Map(stations.map(s=>[s.id,s.station_code]));
  const issues:string[]=[],entries:Entry[]=[],losses:Loss[]=[];
  const add=(entry:Omit<Entry,'month'|'sourceStation'>)=>{entries.push({...entry,month,sourceStation:entry.station});};
  const codes=stations.map(s=>s.station_code);
  const cps=await db.rpc('ops_cps_base_v2',{p_company:company,p_from:start,p_through:end,p_stations:codes});
  if(cps.error||!cps.data||!Array.isArray(cps.data.breakup))throw Error('Operating expense sources could not be read.');
- const costs=new Map<string,Entry>();let heldCosts=0,pendingFleet=0;
- for(const r of cps.data.breakup as Row[]){
-  // Payroll models and configurable CPS inputs are estimates, not final payroll.
-  if(['Shipment payment mapping','CPS Inputs'].includes(r.source))continue;
-  if(r.source==='Fleet Vehicle Master'&&/PENDING-/i.test(r.sub_head??''))pendingFleet++;
-  if(/salary|payroll|associate payout|helper payout|employee payout/i.test(r.sub_head??'')){heldCosts++;continue;}
-  const id=`cost:${JSON.stringify([r.station_code,r.source,r.head,r.sub_head])}`;
-  const existing=costs.get(id);if(existing)existing.paise+=paise(r.amount);else costs.set(id,{id,month,station:r.station_code,sourceStation:r.station_code,side:'expense',head:r.sub_head||r.head,description:r.source==='Finance Rent Master'?'Contract rent and maintenance for this month':`${r.sub_head||r.head} · recorded operating expenses`,paise:paise(r.amount),source:r.source,reference:`${r.source} / ${month}`,date:end});
- }
+ const {costs,heldCosts,pendingFleet,unresolvedPaymentDays}=operatingCosts(month,cps.data.breakup,cps.data.expense_periods??[],paymentDetails,stations);
+ if(unresolvedPaymentDays)issues.push(`${unresolvedPaymentDays} payment expense days retain their reconciled source total; individual request detail requires review.`);
  entries.push(...costs.values());
  if(pendingFleet)issues.push(`${pendingFleet} daily fleet accrual rows use pending vehicle identifiers. Verify their final bills before closing the month.`);
  if(heldCosts)issues.push(`${heldCosts} salary-labelled expense groups are excluded to avoid counting payroll twice. Review salary payments outside published payroll.`);
@@ -63,12 +60,15 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  for(let i=0;i<finalRuns.length;i+=50){const ids=finalRuns.slice(i,i+50).map(r=>r.id);if(!ids.length)continue;
   hrPeople.push(...await rows(table('hr_payroll_run_people','id,run_id,worker_type,worker_id,location_id,gross_pay,attendance_deductions,other_earnings,employer_contributions,net_pay,statutory_deductions,other_deductions,is_adjusted').in('run_id',ids).order('id'),'Final employee payroll'));
  }
- if(peopleFacts.error||!peopleFacts.data||!Array.isArray(peopleFacts.data.employees))throw Error('Manager salary and responsibility assignments could not be read.');
+ if(peopleFacts.error||!peopleFacts.data||!Array.isArray(peopleFacts.data.employees))throw Error('People salary and responsibility assignments could not be read.');
  const runMap=new Map(finalRuns.map(r=>[r.id,r]));
- const managerPayroll:ManagerPayroll[]=hrPeople.flatMap(p=>{const run=runMap.get(p.run_id)!;return run.period_start<=end&&run.period_end>=start?[{id:p.id,personId:p.worker_id,profileType:p.worker_type,from:run.period_start,to:run.period_end,paise:paise(p.net_pay)+paise(p.statutory_deductions)+paise(p.other_deductions)+paise(p.employer_contributions),source:'Approved manager payroll'}]:[];});
- for(const p of allWorkforce){const link=workforceProfiles.find(w=>w.id===p.workforce_id);if(link&&p.period_start<=end&&p.period_end>=start&&p.item?.gross_amount!=null)managerPayroll.push({id:`workforce:${p.id}`,personId:link.source_profile_id,profileType:link.source_profile_type,from:p.period_start,to:p.period_end,paise:paise(p.item.gross_amount),source:'Published manager payroll'});}
+ const managerPayroll:ManagerPayroll[]=hrPeople.flatMap(p=>{const run=runMap.get(p.run_id)!;return run.period_start<=end&&run.period_end>=start?[{id:p.id,personId:p.worker_id,profileType:p.worker_type,from:run.period_start,to:run.period_end,paise:paise(p.net_pay)+paise(p.statutory_deductions)+paise(p.other_deductions)+paise(p.employer_contributions),source:'Approved People payroll'}]:[];});
+ for(const p of allWorkforce){const link=workforceProfiles.find(w=>w.id===p.workforce_id);if(link&&p.period_start<=end&&p.period_end>=start&&p.item?.gross_amount!=null)managerPayroll.push({id:`workforce:${p.id}`,personId:link.source_profile_id,profileType:link.source_profile_type,from:p.period_start,to:p.period_end,paise:paise(p.item.gross_amount),source:'Published People payroll'});}
  const manager=managerShares({month,stations,people:peopleFacts.data,policies:peoplePolicies,rules:peopleRules,payroll:managerPayroll});
- entries.push(...manager.entries);issues.push(...manager.issues);
+ if(hoFacts.error||!hoFacts.data||!Array.isArray(hoFacts.data.people))throw Error('HO People salary sources could not be read. The saved report is retained.');
+ const ho=hoSalaries(month,hoFacts.data,stations,manager.entries,managerPayroll);
+ for(const [id,value] of ho.consumedPayroll)manager.consumedPayroll.set(id,(manager.consumedPayroll.get(id)??0)+value);
+ entries.push(...manager.entries,...ho.entries);issues.push(...manager.issues,...ho.issues);
  let payrollCount=0;
  for(const [kind,list] of [['Workforce',allWorkforce],['Helper',allHelpers]] as const){
   const groups=new Map<string,{paise:number;count:number}>();
@@ -94,7 +94,7 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   const station=stationById.get(p.location_id)||'HO / unallocated';const g=employeeCosts.get(station)??{paise:0,count:0};g.paise+=cost;g.count++;employeeCosts.set(station,g);payrollCount++;
  }
  for(const [station,g] of employeeCosts)add({id:`payroll:employee:${station}`,station,side:'expense',head:'Employee payroll',description:`${g.count} approved payroll rows · earned pay plus employer contributions, before recoveries`,paise:g.paise,source:'Approved employee payroll',reference:`Employee payroll / ${month}`,date:end});
- if(!hrSeen.size)issues.push('No approved employee payroll was found for this month. Manager shares use disclosed salary accruals; other employee and HO salary costs still require final payroll or documented expense entries.');
+ if(!hrSeen.size)issues.push('No approved employee payroll was found for this month. Manager and station-team salaries use disclosed People accruals; roles excluded by the cost policy still require final payroll or documented expenses.');
  if(!payrollCount)issues.push('No published or approved payroll was found for this month. The recorded margin is incomplete until final payroll or documented expenses are added.');
  // NL outcomes are allocation plans. No name/amount matching is used to manufacture a payroll posting.
  const planMap=new Map(nlPlans.map(p=>[`${p.month}:${p.case_key}`,p]));
@@ -141,6 +141,6 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  }
  if(nlPlans.some(p=>Array.isArray(p.allocations)&&p.allocations.length))issues.push('NL allocations are plans. Their source currently has no explicit payroll posting link; confirm the deduction evidence before recording recovery.');
  issues.push('Final P&L remains open for expense completeness review. Contract premises rent and fleet rent are accrued; configured CPS estimates are excluded. Invoice chargebacks already count as expenses, so loss-register amounts are not charged again.');
- const dimensions=[...new Set(topology.map(s=>s.base))].map(code=>{const station=stations.find(s=>s.station_code===code)!;const model=Array.isArray(station.location_models)?station.location_models[0]:station.location_models;const children=topology.filter(s=>s.base===code).map(s=>s.code);const managers=[...new Set(children.flatMap(child=>[...(manager.managersByStation.get(child)??[])]))].sort();return {code,name:station.station_name||code,region:businessMasters.find(m=>m.data.station_code===code)?.data.region||station.region||'Unassigned',state:reportingState(station.state),model:station.is_ho?'HO':model?.code||'Unassigned',cluster:station.cluster||'Unassigned',managers:managers.length?managers:['Unassigned'],isHo:!!station.is_ho};});
- return {company,month,capturedAt,dimensions,stations:topology,entries,losses,issues:[...new Set(issues)],counts:{managerCount:manager.managerCount,accruedManagerCount:manager.accruedManagerCount,managerSharePaise:manager.entries.reduce((n,e)=>n+e.paise,0),invoiceIndependentCostGroups:costs.size,payrollRows:payrollCount,employeePayrollRows:hrSeen.size,finalEmployeeRuns:finalRuns.filter(r=>r.period_start<=end&&r.period_end>=start).length,nlLosses:nlCases.length,paymentRecoveryCases:recoveryCases.length,confirmedRecoveryEntries:entries.filter(e=>e.recovery).length}};
+ const dimensions=[...new Set(topology.map(s=>s.base))].map(code=>{const station=stations.find(s=>s.station_code===code)!;const model=Array.isArray(station.location_models)?station.location_models[0]:station.location_models;const children=topology.filter(s=>s.base===code).map(s=>s.code);const managers=[...new Set(children.flatMap(child=>[...(manager.managersByStation.get(child)??[])]))].sort();return {code,name:station.station_name||code,region:businessMasters.find(m=>m.kind==='reporting_region'&&m.data.station_code===code)?.data.region||station.region||'Unassigned',state:reportingState(station.state),model:station.is_ho?'HO':model?.code||'Unassigned',format:model?.code==='NOW'?(businessMasters.filter(m=>m.kind==='now_store'&&m.data.station_code===code&&m.data.effective_from<=end&&(!m.data.effective_to||m.data.effective_to>=start)).sort((a,b)=>b.data.effective_from.localeCompare(a.data.effective_from))[0]?.data.category||'Unassigned'):'Not applicable',cluster:station.cluster||'Unassigned',managers:managers.length?managers:['Unassigned'],isHo:!!station.is_ho};});
+ return {company,month,capturedAt,dimensions,overheadRules:businessMasters.filter(m=>m.kind==='overhead').map(m=>m.data),stations:topology,entries,losses,issues:[...new Set(issues)],counts:{managerCount:manager.managerCount,accruedManagerCount:manager.accruedManagerCount,managerSharePaise:manager.entries.filter(e=>e.head==='Manager share').reduce((n,e)=>n+e.paise,0),hoSalaryRows:ho.entries.length,peopleCount:manager.peopleCount,accruedPeopleCount:manager.accruedPeopleCount,utrSalaryPaise:manager.entries.filter(e=>e.head==='UTR salaries').reduce((n,e)=>n+e.paise,0),expenseDetailRows:entries.reduce((n,e)=>n+(e.details?.length??0),0),invoiceIndependentCostGroups:costs.size,payrollRows:payrollCount,employeePayrollRows:hrSeen.size,finalEmployeeRuns:finalRuns.filter(r=>r.period_start<=end&&r.period_end>=start).length,nlLosses:nlCases.length,paymentRecoveryCases:recoveryCases.length,confirmedRecoveryEntries:entries.filter(e=>e.recovery).length}};
 }
