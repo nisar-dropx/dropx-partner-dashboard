@@ -208,3 +208,17 @@ test("parent CPS combines costs and shipments once, without averaging member CPS
  const childOnly=cpsStationGroups([{code:"X",name:"XPT",isXpt:true,parent:"P"}]);
  assert.deepEqual(childOnly[0].members,["X"]);assert.match(childOnly[0].subtitle,/only in your access/);
 });
+
+test('CPS includes return-only days, excludes MFN and weights targets by eligible shipments', () => {
+  const returns = {...day,deliveries:0,c_return:10,mfn:99,mfn_return:4,activity:113,total:150,target:16};
+  const returned = summarizeCps([returns]);
+  assert.equal(returned.shipments,10);assert.equal(returned.cps,15);assert.equal(returned.target,16);
+  const sellerOnly = summarizeCps([{...returns,c_return:0}]);
+  assert.equal(sellerOnly.shipments,0);assert.equal(sellerOnly.cps,null);
+  const summary = summarizeCps([returns,{...day,deliveries:90,c_return:0,total:1530,target:20}]);
+  assert.equal(summary.shipments,100);assert.equal(summary.cps,16.8);assert.equal(summary.target,19.6);
+  assert.equal(summary.impact,1680-1960);
+  assert.equal(summarizeCps([{...returns,target:null},day]).target,null,'an untargeted return-only day cannot disappear');
+  const parent = groupCps([returns,{...day,station_code:'XPT',deliveries:90,c_return:0,total:1530}],()=> 'Parent')[0];
+  assert.equal(parent.shipments,100);assert.equal(parent.cps,16.8);
+});

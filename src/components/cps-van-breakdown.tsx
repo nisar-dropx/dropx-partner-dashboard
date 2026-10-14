@@ -4,12 +4,12 @@ import { ratio, type CpsSnapshot } from "@/lib/ops-pulse/cps";
 
 const money = (value: number | null) => value == null ? "—" : `₹${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-function SourceItem({ item, snapshot, deliveries }: { item: CostItem; snapshot: CpsSnapshot; deliveries: number }) {
+function SourceItem({ item, snapshot, shipments }: { item: CostItem; snapshot: CpsSnapshot; shipments: number }) {
   const vehicles = item.source === "Fleet Vehicle Master" ? (snapshot.vehicles ?? []).filter(v =>
     item.label === `Vehicle rent · ${v.vehicle_no}` && item.lines.some(l => l.station_code === v.station_code)) : [];
   const days = [...new Set(item.lines.map(l => l.work_date))].sort();
   return <details className="cps-cost-item">
-    <summary><span><ChevronDown size={14}/><strong>{item.label}</strong><small>{item.source} · {days.length} cost days</small></span><strong>{money(item.amount)}</strong><span>{money(ratio(item.amount, deliveries))}</span></summary>
+    <summary><span><ChevronDown size={14}/><strong>{item.label}</strong><small>{item.source} · {days.length} cost days</small></span><strong>{money(item.amount)}</strong><span>{money(ratio(item.amount, shipments))}</span></summary>
     {vehicles.length > 0 && <div className="cps-rent-details">
       {vehicles.map((v,i) => <article key={`${v.vehicle_id}|${v.station_code}|${v.from_date}|${i}`}>
         <header><strong>{v.vehicle_no} · {v.station_code}</strong><span>{v.model}</span></header>
@@ -27,15 +27,15 @@ function SourceItem({ item, snapshot, deliveries }: { item: CostItem; snapshot: 
     </tbody><tfoot><tr><th colSpan={2}>Item total</th><th>{money(item.amount)}</th></tr></tfoot></table></div>
   </details>;
 }
-export function CpsVanBreakdown({ snapshot, deliveries, amount }: { snapshot: CpsSnapshot; deliveries: number; amount: number }) {
+export function CpsVanBreakdown({ snapshot, shipments, amount }: { snapshot: CpsSnapshot; shipments: number; amount: number }) {
   const groups = groupVanCosts(snapshot.breakup);
   return <div className="cps-grouped-costs">
     <div className="cps-cost-columns"><span>Cost group · expand for details</span><span>Period cost</span><span>CPS</span></div>
     {groups.map(group => <details className="cps-cost-group" key={group.key}>
-      <summary><span><ChevronDown size={16}/><strong>{group.label}</strong><small>{group.items.length} {group.key === "rental" ? "vehicles" : "cost items"} · {new Set(group.items.map(i=>i.source)).size} {new Set(group.items.map(i=>i.source)).size === 1 ? "source" : "sources"}</small></span><strong>{money(group.amount)}</strong><span>{money(ratio(group.amount,deliveries))}</span></summary>
-      <div className="cps-cost-group-body">{group.items.map(item => <SourceItem key={item.key} item={item} snapshot={snapshot} deliveries={deliveries}/>)}</div>
+      <summary><span><ChevronDown size={16}/><strong>{group.label}</strong><small>{group.items.length} {group.key === "rental" ? "vehicles" : "cost items"} · {new Set(group.items.map(i=>i.source)).size} {new Set(group.items.map(i=>i.source)).size === 1 ? "source" : "sources"}</small></span><strong>{money(group.amount)}</strong><span>{money(ratio(group.amount,shipments))}</span></summary>
+      <div className="cps-cost-group-body">{group.items.map(item => <SourceItem key={item.key} item={item} snapshot={snapshot} shipments={shipments}/>)}</div>
     </details>)}
-    <div className="cps-grouped-total"><strong>Van total</strong><strong>{money(amount)}</strong><strong>{money(ratio(amount,deliveries))}</strong></div>
-    <p className="cps-footnote">Amounts cover the selected dates. CPS uses the same delivered-shipment total throughout. Expand a group, then a cost item, for rates and daily charges.</p>
+    <div className="cps-grouped-total"><strong>Van total</strong><strong>{money(amount)}</strong><strong>{money(ratio(amount,shipments))}</strong></div>
+    <p className="cps-footnote">Amounts cover the selected dates. CPS uses the same delivery + customer-return count throughout. Expand a group, then a cost item, for rates and daily charges.</p>
   </div>;
 }

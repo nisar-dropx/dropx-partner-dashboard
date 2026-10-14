@@ -12,6 +12,7 @@ import {
   groupCps,
   cpsStationGroups,
   ratio,
+  cpsShipmentCount,
   type CpsParams,
 } from "@/lib/ops-pulse/cps";
 import { compressedWorkbookResponse } from "@/lib/report-workbook";
@@ -20,6 +21,7 @@ export const maxDuration = 60;
 const headers = { "Cache-Control": "private, no-store" };
 const summaryRow = (s: ReturnType<typeof summarizeCps>) => ({
   Deliveries: s.deliveries,
+  "CPS shipments (delivery + C-return)": s.shipments,
   Activity: s.activity,
   "Amazon deliveries": s.amazon,
   "SWA deliveries": s.swa,
@@ -29,16 +31,16 @@ const summaryRow = (s: ReturnType<typeof summarizeCps>) => ({
   "UTR cost": s.utr,
   "Van cost": s.van,
   "Other cost (incl rent & overhead)": s.other+s.rent+s.overhead,
-  "DA CPS": ratio(s.da,s.deliveries),
-  "UTR CPS": ratio(s.utr,s.deliveries),
-  "Van CPS": ratio(s.van,s.deliveries),
-  "Other CPS": ratio(s.other+s.rent+s.overhead,s.deliveries),
+  "DA CPS": ratio(s.da,s.shipments),
+  "UTR CPS": ratio(s.utr,s.shipments),
+  "Van CPS": ratio(s.van,s.shipments),
+  "Other CPS": ratio(s.other+s.rent+s.overhead,s.shipments),
   "Rent": s.rent,
   "Overhead": s.overhead,
   "DA salary": s.salary,
   "DA variable": s.variable,
   "DA fuel": s.fuel,
-  "DA salary CPS": ratio(s.salary,s.deliveries),
+  "DA salary CPS": ratio(s.salary,s.shipments),
   "Uncosted deliveries": s.exposedDeliveries,
   "Recorded cost": s.total,
   "Recorded CPS": s.cps,
@@ -80,10 +82,10 @@ export async function GET(request: Request) {
     const groups = cpsStationGroups(scope.selected.map(l => ({ code: l.station_code, name: l.station_name || l.station_code, parent: l.parent_station_code, isXpt: l.is_xpt })));
     const byGroup = new Map(groups.map(g => [g.code, g]));
     const groupByMember = new Map(groups.flatMap(g => g.members.map(code => [code, g.code] as const)));
-    const deliveryByDay = new Map(
+    const shipmentsByDay = new Map(
       result.daily.map((d) => [
         `${d.work_date}|${d.station_code}`,
-        Number(d.deliveries),
+        cpsShipmentCount(d.deliveries, d.c_return),
       ]),
     );
     const people =
@@ -110,7 +112,7 @@ export async function GET(request: Request) {
               ...summaryRow(summarizeCps(result.daily)),
               "Allocation notices": (result.allocation_notices??[]).join("; "),
               Calculation:
-                "EDSP + authorized XPT costs and delivered shipments combined once under their parent. Total recorded cost divided by delivered shipments. Missing costs and shipment days are flagged. Not an average of CPS.",
+                "EDSP + authorized XPT costs and CPS shipments combined once under their parent. CPS = included cost / (deliveries, including SWA, + customer returns). SWA is already in deliveries and counted once. Seller pickup / MFN and seller-return counts and pay are excluded from CPS; full payroll / P&L remains separate. Missing costs and shipment days are flagged. Not an average of CPS.",
               Sources:
                 "People CTC, live workforce rate cards, daily shipments, fuel imports, Cashbook, approved operating payments, Finance rent, Fleet vehicle rent and cost setup.",
             },
@@ -146,7 +148,7 @@ export async function GET(request: Request) {
             Amount: l.amount,
             "CPS contribution": ratio(
               Number(l.amount),
-              deliveryByDay.get(`${l.work_date}|${l.station_code}`) ?? 0,
+              shipmentsByDay.get(`${l.work_date}|${l.station_code}`) ?? 0,
             ),
           })),
         },
@@ -154,7 +156,7 @@ export async function GET(request: Request) {
         {name:"Bill periods",rows:result.expense_periods??[]},
         {name:"Vehicle rent",rows:(result.vehicles??[]).map(v=>({Vehicle:v.vehicle_no,Model:v.model,Station:v.station_code,"Monthly rent":v.monthly_rent,From:v.from_date,Through:v.through_date,"Deployed days":v.days,"Period rent":v.amount,Status:v.monthly_rent==null?'Setup required':'Configured'}))},
         ...(result.gaps ? [{name:"Needs attention",rows:result.gaps.map(g=>({Issue:g.kind,Owner:g.owner,Station:g.station_code,"DropX ID":g.dropx_id,"Provider ID":g.provider_id,Name:g.name,"First seen":g.first_date,Through:g.last_date,Days:g.days,"Affected deliveries":g.deliveries,Action:g.href}))}] : []),
-        ...(result.people ? [{name:"DA productivity",rows:result.people.map(p=>({"DropX ID":p.dropx_id,Name:p.name,Station:p.station_code,Deliveries:p.deliveries,"Fixed pay":p.salary,"Variable pay":p.variable,"DA fuel":p.fuel,"Van cost":p.van,"Salary CPS":ratio(p.salary,p.deliveries),"Paid days":p.paid_days,"Zero delivery paid days":p.zero_delivery_days}))}] : []),
+        ...(result.people ? [{name:"DA productivity",rows:result.people.map(p=>({"DropX ID":p.dropx_id,Name:p.name,Station:p.station_code,Deliveries:p.deliveries,"C-return":p.customer_returns,"CPS shipments":cpsShipmentCount(p.deliveries,p.customer_returns),"Fixed pay":p.salary,"Variable pay":p.variable,"DA fuel":p.fuel,"Van cost":p.van,"Salary CPS":ratio(p.salary,cpsShipmentCount(p.deliveries,p.customer_returns)),"Paid days":p.paid_days,"Zero delivery paid days":p.zero_delivery_days}))}] : []),
         ...(people
           ? [
               {
@@ -169,6 +171,8 @@ export async function GET(request: Request) {
                   "Pay scheme": r.pay_type,
                   Deliveries: r.total_delivery,
                   "C-return": r.c_return,
+                  "CPS shipments": cpsShipmentCount(r.total_delivery, r.c_return),
+                  "DA CPS": r.mapping_status === "Mapped" ? ratio(r.da_total_pay, cpsShipmentCount(r.total_delivery, r.c_return)) : null,
                   "Variable pay":
                     r.mapping_status === "Mapped" ? r.variable_pay : null,
                   "MG or salary":

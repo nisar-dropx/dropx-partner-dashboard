@@ -77,7 +77,7 @@ export function CpsTargets({targets, stations, today, canAdd}: {
           )}
           <p>
             Set the total target per delivered shipment. A parent station’s target includes its mapped XPTs in OpsPulse and DropX One.
-            Add a dated revision to change a target without overwriting earlier periods. When a period spans revisions, targets are weighted by delivered shipments.
+            Add a dated revision to change a target without overwriting earlier periods. When a period spans revisions, targets are weighted by deliveries + customer returns.
           </p>
           <div className="cps-table-wrap">
             <table>

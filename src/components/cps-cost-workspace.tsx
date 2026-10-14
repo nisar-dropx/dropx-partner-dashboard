@@ -19,6 +19,7 @@ import {
   cpsReviewItems,
   groupCps,
   ratio,
+  cpsShipmentCount,
   summarizeCps,
   type CpsHead,
   type CpsSnapshot,
@@ -134,9 +135,9 @@ export function CpsCostWorkspace({
     <>
       <section className="cps-summary-strip" aria-label="CPS summary">
         <div>
-          <span>Delivered shipments</span>
-          <strong>{count(total.deliveries)}</strong>
-          <small>For this station and selected dates</small>
+          <span>CPS shipments</span>
+          <strong>{count(total.shipments)}</strong>
+          <small>{count(total.deliveries)} deliveries (including SWA) + {count(total.returns)} customer returns</small>
         </div>
         <div className="cps-total">
           <span>
@@ -145,7 +146,7 @@ export function CpsCostWorkspace({
               : "Total CPS"}
           </span>
           <strong>{money(total.cps, 2)}</strong>
-          <small>Total expenses ÷ delivered shipments</small>
+          <small>Total expenses ÷ CPS shipments</small>
         </div>
       </section>
       {(gaps.length > 0 || total.missingDays > 0 || assumedBills > 0) && (
@@ -315,7 +316,7 @@ export function CpsCostWorkspace({
           <h2>Where the money goes</h2>
           <p>Select a cost group to see its source and details.</p>
         </div>
-        <span>₹ per delivered shipment</span>
+        <span>₹ per CPS shipment</span>
       </div>
       <section className="cps-cost-cards" aria-label="Cost groups">
         {categories.map(({ head: key, label, note, icon: Icon }) => (
@@ -331,7 +332,7 @@ export function CpsCostWorkspace({
               <Icon size={18} />
               {label}
             </span>
-            <strong>{money(ratio(costs[key], total.deliveries), 2)}</strong>
+            <strong>{money(ratio(costs[key], total.shipments), 2)}</strong>
             <div>
               {money(costs[key])}
               <small>
@@ -365,7 +366,7 @@ export function CpsCostWorkspace({
           <strong>{money(costs[head])}</strong>
         </div>
         {head === "DA" && <CpsDaCohorts rows={snapshot.da_details ?? []} />}
-        {head === "Van" ? <CpsVanBreakdown snapshot={snapshot} deliveries={total.deliveries} amount={costs.Van}/> : <div className="cps-table-wrap">
+        {head === "Van" ? <CpsVanBreakdown snapshot={snapshot} shipments={total.shipments} amount={costs.Van}/> : <div className="cps-table-wrap">
           <table>
             <thead>
               <tr>
@@ -418,7 +419,7 @@ export function CpsCostWorkspace({
                           <span className="cps-source-tag">{r.source}</span>
                         </td>
                         <td>{money(r.amount, 2)}</td>
-                        <td>{money(ratio(r.amount, total.deliveries), 2)}</td>
+                        <td>{money(ratio(r.amount, total.shipments), 2)}</td>
                       </tr>
                       {expanded === key && (
                         <tr className="cps-expanded-row">
@@ -440,13 +441,13 @@ export function CpsCostWorkspace({
                                               (d) => d.station_code === station,
                                             )
                                             .reduce(
-                                              (n, d) => n + d.deliveries,
+                                              (n, d) => n + cpsShipmentCount(d.deliveries, d.c_return),
                                               0,
                                             ),
                                         ),
                                         2,
                                       )}{" "}
-                                      / delivered
+                                      / CPS shipment
                                     </small>
                                   </article>
                                 ))}
@@ -470,7 +471,7 @@ export function CpsCostWorkspace({
               <tr>
                 <th colSpan={2}>{head} total</th>
                 <th>{money(costs[head], 2)}</th>
-                <th>{money(ratio(costs[head], total.deliveries), 2)}</th>
+                <th>{money(ratio(costs[head], total.shipments), 2)}</th>
               </tr>
             </tfoot>
           </table>
@@ -590,7 +591,7 @@ export function CpsCostWorkspace({
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Delivered</th>
+                <th>CPS shipments</th>
                 <th>DA</th>
                 <th>UTR</th>
                 <th>Van</th>
@@ -605,7 +606,7 @@ export function CpsCostWorkspace({
                 .map((d) => (
                   <tr key={d.key}>
                     <td>{d.key}</td>
-                    <td>{count(d.deliveries)}</td>
+                    <td>{count(d.shipments)}<small>{count(d.deliveries)} deliveries + {count(d.returns)} returns</small></td>
                     <td>{money(d.da)}</td>
                     <td>{money(d.utr)}</td>
                     <td>{money(d.van)}</td>

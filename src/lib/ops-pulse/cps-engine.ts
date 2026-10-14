@@ -73,7 +73,7 @@ export type CpsGap = {
 export type CpsPersonCost = {
   id: string; dropx_id: string; name: string; station_code: string;
   salary: number; variable: number; fuel: number; van: number;
-  deliveries: number; paid_days: number; zero_delivery_days: number;
+  deliveries: number; customer_returns: number; paid_days: number; zero_delivery_days: number;
 };
 export type LiveAssociate = RecordRow & {
   id: string; work_date: string; station_code: string; provider_employee_id: string;
@@ -219,11 +219,14 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const policyFor = (e: RecordRow, date: string) => (facts.people_policies ?? [])
     .filter(p=>p.designation_code===e.designation && p.effective_from<=date)
     .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];
+  // CPS covers deliveries (including SWA) and customer returns. Seller/MFN pay
+  // stays in payroll/P&L even when the component master has no exclusion policy.
+  const sellerSource = (source: unknown) => ['SELLERPICKUP','SLLLERRETURN','SELLERRETURN','MFN','MFNRETURN'].includes(compact(source));
   const sourceComponents = <T extends RecordRow>(rows: T[], date: string) => rows.map(c=>({...c,cps_cost_source:
-    (facts.component_policies??[]).filter(p=>key(p.component_code)===key(c.component_code) && p.effective_from<=date)
-      .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode??'workforce'}));
-  const sellerExcludedOn=(date:string)=>['SELLER_PICKUP','SLLLER_RETURN','SELLER_RETURN','MFN','MFN_RETURN'].some(code=>
-    (facts.component_policies??[]).filter(p=>key(p.component_code)===code&&p.effective_from<=date).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode==='pnl_only');
+    sellerSource(c.component_code) || sellerSource(c.provider_calculation_sources?.amazon || c.calculation_source)
+      ? 'pnl_only'
+      : (facts.component_policies??[]).filter(p=>key(p.component_code)===key(c.component_code) && p.effective_from<=date)
+        .sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0]?.mode??'workforce'}));
   const inputMaps=buildWorkforcePayoutInputMaps(facts.payout_inputs??{});
   const routeEnabledOn=(date:string)=>Boolean(facts.route_distance?.enabledFrom && date>=facts.route_distance.enabledFrom);
   const stationById=new Map(facts.stations.map(s=>[s.id,s]));
@@ -283,7 +286,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     attendanceByWorkerDate.set(workerDate,shipmentAttendanceRecord(date,shipmentDeliveries.get(workerDate)??0,capture) as RecordRow);
   }
   attendanceByWorkerDate=new Map(overlayWorkforcePayoutAttendance(attendanceByWorkerDate as Map<string,DirectPayAttendance>,inputMaps.attendanceByWorkforceDate));
-  const paymentCard=(card:RecordRow,cs:RecordRow[],workerId:string,date:string,stationId=card.station_id):RecordRow=>({ ...card,exclude_seller_costs:sellerExcludedOn(date),
+  const paymentCard=(card:RecordRow,cs:RecordRow[],workerId:string,date:string,stationId=card.station_id):RecordRow=>({ ...card,exclude_seller_costs:true,
     payment_values:Object.fromEntries(cs.map(c=>{const code=key(c.component_code);return [code,resolveWorkforcePaymentFieldRate(inputMaps,{workforceId:workerId,stationId:String(stationId??''),paymentFieldId:c.payment_field_id,fieldCode:code,date,fallbackRate:Object.entries(card.payment_values??{}).find(([k])=>key(k)===code)?.[1]})]}))
   });
   const rangeValidation=new Map<string,boolean>();
@@ -603,8 +606,8 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       add(row.station_code,g.date,'DA','Variable delivery pay',row.variable_pay,'Workforce rate card');
       add(row.station_code,g.date,'DA','DA fuel',row.fuel_pay,'Workforce rate card');
       add(row.station_code,g.date,'Van','Vehicle pay from rate card',row.van_pay,'Workforce rate card');
-      const k=`${g.worker.id}|${row.station_code}`,p=people.get(k)??{id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,station_code:row.station_code,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
-      p.salary+=row.mg_pay;p.variable+=row.variable_pay;p.fuel+=row.fuel_pay;p.van+=row.van_pay;p.deliveries+=num(row.total_delivery);
+      const k=`${g.worker.id}|${row.station_code}`,p=people.get(k)??{id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,station_code:row.station_code,salary:0,variable:0,fuel:0,van:0,deliveries:0,customer_returns:0,paid_days:0,zero_delivery_days:0};
+      p.salary+=row.mg_pay;p.variable+=row.variable_pay;p.fuel+=row.fuel_pay;p.van+=row.van_pay;p.deliveries+=num(row.total_delivery);p.customer_returns+=num(row.c_return);
       if(first){p.paid_days++;if((volumes.get(row.station_code)??0)===0 && costs.salary>0)p.zero_delivery_days++;}people.set(k,p);
     }
   }
@@ -703,7 +706,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         cohort:'guarantee',worked:result.present,work_basis:result.present?'attendance':'no work evidence',
         deliveries:0,customer_returns:0,seller_pickups:0,seller_returns:0,salary,variable:0,fuel,van,
         pending_fixed_pay:Boolean(directRange&&!directRange.complete),source:'Direct workforce allocation',card_from:latest.effective_from,rates:detailRates(paymentCard(latest,directComponents,w.id,date),directComponents,'Direct')});
-      const personKey=`${w.id}|${station}`,person=people.get(personKey)??{id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
+      const personKey=`${w.id}|${station}`,person=people.get(personKey)??{id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,customer_returns:0,paid_days:0,zero_delivery_days:0};
       person.salary+=salary;person.fuel+=fuel;person.van+=van;if(result.total>0){person.paid_days++;person.zero_delivery_days++;}people.set(personKey,person);
     }
   }
@@ -781,7 +784,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         row.from_date=row.from_date<date?row.from_date:date;row.through_date=row.through_date>date?row.through_date:date;row.amount+=amount;staff.set(staffKey,row);
       }
       if((head==='DA'||head==='Van') && selected.has(station)) {
-        const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,paid_days:0,zero_delivery_days:0};
+        const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,customer_returns:0,paid_days:0,zero_delivery_days:0};
         if(head==='Van')p.van+=amount;else p.salary+=amount;people.set(k,p);
         if(head==='DA') detailDays.push({worker_id:linkedWorkforce?.id??e.id,dropx_id:linkedWorkforce?.dropx_id??e.employee_code,
           name:linkedWorkforce?.full_name??e.full_name,station_code:station,date,provider_ids:[],cohort:'guarantee',

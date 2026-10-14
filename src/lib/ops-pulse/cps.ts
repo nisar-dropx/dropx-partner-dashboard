@@ -239,6 +239,7 @@ export function mergeCpsMonths(parts: CpsSnapshot[]): CpsSnapshot {
       (a, b) => ({
         ...a,
         deliveries: a.deliveries + b.deliveries,
+        customer_returns: (a.customer_returns ?? 0) + (b.customer_returns ?? 0),
         salary: a.salary + b.salary,
         variable: a.variable + b.variable,
         fuel: a.fuel + b.fuel,
@@ -385,6 +386,10 @@ export type CpsVehicleCost = {
   days: number;
   amount: number | null;
 };
+// total_delivery already includes SWA; seller/MFN activity is not a CPS shipment.
+export function cpsShipmentCount(deliveries: number, customerReturns: number = 0) {
+  return Number(deliveries ?? 0) + Number(customerReturns ?? 0);
+}
 export function ratio(cost: number, deliveries: number) {
   return deliveries > 0 ? cost / deliveries : null;
 }
@@ -392,6 +397,7 @@ export function summarizeCps(rows: CpsDay[]) {
   const totals = rows.reduce(
     (a, r) => ({
       deliveries: a.deliveries + Number(r.deliveries),
+      shipments: a.shipments + cpsShipmentCount(r.deliveries, r.c_return),
       activity: a.activity + Number(r.activity),
       amazon: a.amazon + Number(r.amazon_delivery ?? 0),
       swa: a.swa + Number(r.swa_delivery ?? 0),
@@ -417,13 +423,14 @@ export function summarizeCps(rows: CpsDay[]) {
       missingDays: a.missingDays + (r.shipment_present ? 0 : 1),
       missingUtr: a.missingUtr + (r.utr_configured ? 0 : 1),
       targetedVolume:
-        a.targetedVolume + (r.target == null ? 0 : Number(r.deliveries)),
+        a.targetedVolume + (r.target == null ? 0 : cpsShipmentCount(r.deliveries, r.c_return)),
       targetCost:
         a.targetCost +
-        (r.target == null ? 0 : Number(r.target) * Number(r.deliveries)),
+        (r.target == null ? 0 : Number(r.target) * cpsShipmentCount(r.deliveries, r.c_return)),
     }),
     {
       deliveries: 0,
+      shipments: 0,
       activity: 0,
       amazon: 0,
       swa: 0,
@@ -451,10 +458,10 @@ export function summarizeCps(rows: CpsDay[]) {
       targetCost: 0,
     },
   );
-  const cps = ratio(totals.total, totals.deliveries);
+  const cps = ratio(totals.total, totals.shipments);
   const target =
-    totals.targetedVolume === totals.deliveries
-      ? ratio(totals.targetCost, totals.deliveries)
+    totals.targetedVolume === totals.shipments
+      ? ratio(totals.targetCost, totals.shipments)
       : null;
   const provisional = Boolean(
     totals.missingDays ||
@@ -494,7 +501,7 @@ export function cpsIssues(row: ReturnType<typeof summarizeCps>) {
     row.unpaid ? `${row.unpaid} configured associate-days with no payout` : "",
     row.missingUtr ? "People CTC / station staff coverage needs review" : "",
     row.costGaps ? "Workforce or cost allocation issues need attention" : "",
-    row.target == null ? "Target not configured for all deliveries" : "",
+    row.target == null ? "Target not configured for all CPS shipments" : "",
   ].filter(Boolean);
 }
 export type CpsCostInput = {
