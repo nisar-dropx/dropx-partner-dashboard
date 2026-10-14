@@ -34,9 +34,9 @@ export function paise(value:unknown):number{const n=Number(value);if(value===nul
 export function money(value:number){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value/100);}
 export function previousMonth(now=new Date()){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit'}).formatToParts(now);const y=Number(parts.find(p=>p.type==='year')!.value),m=Number(parts.find(p=>p.type==='month')!.value);return `${m===1?y-1:y}-${String(m===1?12:m-1).padStart(2,'0')}`;}
 export function monthEnd(month:string){monthValue(month);const [year,m]=month.split('-').map(Number);return new Date(Date.UTC(year!,m!,0)).toISOString().slice(0,10);}
-export function baseStations(stations:{id:string;station_code:string;parent_station_id:string|null}[],aliases:{location_id:string;portal_station_code:string|null}[]){
+export function baseStations(stations:{id:string;station_code:string;parent_station_id:string|null;is_ho?:boolean}[],aliases:{location_id:string;portal_station_code:string|null}[]){
  const byId=new Map(stations.map(s=>[s.id,s]));
- return stations.map(s=>{let base=s;const seen=new Set([s.id]);while(base.parent_station_id){const parent=byId.get(base.parent_station_id);if(!parent)throw Error(`Missing parent for ${s.station_code}`);if(seen.has(parent.id))throw Error('Station hierarchy contains a cycle.');seen.add(parent.id);base=parent;}
+ return stations.map(s=>{let base=s;const seen=new Set([s.id]);while(base.parent_station_id&&!base.is_ho){const parent=byId.get(base.parent_station_id);if(!parent)throw Error(`Missing parent for ${s.station_code}`);if(parent.is_ho)break;if(seen.has(parent.id))throw Error('Station hierarchy contains a cycle.');seen.add(parent.id);base=parent;}
   return {code:s.station_code,base:base.station_code,aliases:aliases.filter(a=>a.location_id===s.id&&a.portal_station_code).map(a=>a.portal_station_code!)};
  });
 }
