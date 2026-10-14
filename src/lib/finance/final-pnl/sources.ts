@@ -1,4 +1,5 @@
 import 'server-only';
+import {boundedReads,sourceReadError,transientSourceError} from './source-read';
 import {managerShares,type ManagerPayroll} from './manager-shares';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {baseStations,latestPublications,monthEnd,monthValue,paise,recoveryRecognitionMonth,type Sources,type Entry,type Loss} from './model';
@@ -9,10 +10,10 @@ async function rows(query:any,label:string):Promise<Row[]>{
  for(let offset=0;offset<100000;offset+=500){
   let page=await query.range(offset,offset+499);
   // Retry only a transient read failure, without replaying already read pages.
-  if(page.error&&/abort|timeout|fetch failed|503|502|504|ECONN/i.test(page.error.message??'')){
+  if(page.error&&transientSourceError(page.error,page.status)){
    await new Promise(resolve=>setTimeout(resolve,300));page=await query.range(offset,offset+499);
   }
-  if(page.error)throw Error(`${label} could not be read: ${page.error.message}`);
+  if(page.error)throw sourceReadError(label,page.error,page.status);
   result.push(...(page.data??[]));if((page.data??[]).length<500)return result;
  }
  throw Error(`${label} exceeds the bounded source limit.`);
@@ -22,21 +23,21 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  const capturedAt=new Date().toISOString(),start=`${month}-01`,end=monthEnd(month);
  const historyStart='2020-01-01';
  const table=(name:string,fields='*')=>db.from(name).select(fields).eq('company_id',company);
- const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims,peopleFacts,peoplePolicies,peopleRules,businessMasters,workforceProfiles]=await Promise.all([
-  rows(table('stations','id,station_code,station_name,parent_station_id,region,state,city,cluster,is_ho,is_active,hide_from_location_list,location_models(code,name)').order('id'),'Station topology'),
-  rows(table('cod_station_settings','location_id,portal_station_code').order('location_id'),'Station aliases'),
-  rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end,payroll_run_id').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
-  rows(table('helper_payout_publications','id,helper_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end').gte('period_end',historyStart).order('id'),'Published helper payouts'),
-  rows(table('hr_payroll_runs','id,period_start,period_end,status,published_at,approved_at').gte('period_end',historyStart).order('id'),'Employee payroll runs'),
-  rows(table('nl_loss_month_cases','month,case_key,station_code,amount,source_status,source_present').lte('month',month).order('month').order('case_key'),'Ops Pulse losses'),
-  rows(table('nl_loss_recoveries','month,case_key,outcome_label,allocations,deduction_month,remarks,is_deleted,source_amount').lte('month',month).eq('is_deleted',false).order('month').order('case_key'),'Ops Pulse recovery plans'),
-  rows(table('payment_recovery_cases','id,tid,station_id,station_code_snapshot,debit_date,debit_month,debit_amount,payout_month,status').lte('debit_month',end).order('id'),'Payment recovery cases'),
-  rows(table('workforce_station_loss_claims','id,workforce_id,station_id,adjustment_id,incident_date,reference').lte('incident_date',end).order('id'),'Station loss claims'),
-  db.rpc('ops_cps_people_assignments',{p_company:company,p_from:start,p_through:end}),
-  rows(table('ops_cps_people_policies','designation_code,designation_name,mode,head,label,allocation,effective_from').lte('effective_from',end).order('designation_code').order('effective_from'),'Manager allocation policies'),
-  rows(table('ops_cps_cost_inputs','id,employee_id,station_codes,head,allocation,effective_from,effective_to').not('employee_id','is',null).eq('is_active',true).lte('effective_from',end).order('id'),'Manager allocation rules'),
-  rows(table('finance_business_master','id,kind,data').eq('kind','reporting_region').is('deleted_at',null).order('id'),'Reporting regions'),
-  rows(table('workforce','id,source_profile_type,source_profile_id').in('source_profile_type',['employee','contractor']).order('id'),'Payroll identity links')
+ const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims,peopleFacts,peoplePolicies,peopleRules,businessMasters,workforceProfiles]=await boundedReads([
+  ()=>rows(table('stations','id,station_code,station_name,parent_station_id,region,state,city,cluster,is_ho,is_active,hide_from_location_list,location_models(code,name)').order('id'),'Station topology'),
+  ()=>rows(table('cod_station_settings','location_id,portal_station_code').order('location_id'),'Station aliases'),
+  ()=>rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end,payroll_run_id').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
+  ()=>rows(table('helper_payout_publications','id,helper_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end').gte('period_end',historyStart).order('id'),'Published helper payouts'),
+  ()=>rows(table('hr_payroll_runs','id,period_start,period_end,status,published_at,approved_at').gte('period_end',historyStart).order('id'),'Employee payroll runs'),
+  ()=>rows(table('nl_loss_month_cases','month,case_key,station_code,amount,source_status,source_present').lte('month',month).order('month').order('case_key'),'Ops Pulse losses'),
+  ()=>rows(table('nl_loss_recoveries','month,case_key,outcome_label,allocations,deduction_month,remarks,is_deleted,source_amount').lte('month',month).eq('is_deleted',false).order('month').order('case_key'),'Ops Pulse recovery plans'),
+  ()=>rows(table('payment_recovery_cases','id,tid,station_id,station_code_snapshot,debit_date,debit_month,debit_amount,payout_month,status').lte('debit_month',end).order('id'),'Payment recovery cases'),
+  ()=>rows(table('workforce_station_loss_claims','id,workforce_id,station_id,adjustment_id,incident_date,reference').lte('incident_date',end).order('id'),'Station loss claims'),
+  ()=>db.rpc('ops_cps_people_assignments',{p_company:company,p_from:start,p_through:end}),
+  ()=>rows(table('ops_cps_people_policies','designation_code,designation_name,mode,head,label,allocation,effective_from').lte('effective_from',end).order('designation_code').order('effective_from'),'Manager allocation policies'),
+  ()=>rows(table('ops_cps_cost_inputs','id,employee_id,station_codes,head,allocation,effective_from,effective_to').not('employee_id','is',null).eq('is_active',true).lte('effective_from',end).order('id'),'Manager allocation rules'),
+  ()=>rows(table('finance_business_master','id,kind,data').eq('kind','reporting_region').is('deleted_at',null).order('id'),'Reporting regions'),
+  ()=>rows(table('workforce','id,source_profile_type,source_profile_id').in('source_profile_type',['employee','contractor']).order('id'),'Payroll identity links')
  ]);
  const topology=baseStations(stations as any,aliases as any),stationById=new Map(stations.map(s=>[s.id,s.station_code]));
  const issues:string[]=[],entries:Entry[]=[],losses:Loss[]=[];
