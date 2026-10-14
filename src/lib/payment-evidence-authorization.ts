@@ -9,7 +9,7 @@ const first = <T,>(value: T | T[] | null): T | null => Array.isArray(value) ? va
 export async function authorizePaymentEvidence(request: Request) {
     const auth = await getAuthorization();
     if (!auth) return { error: Response.json({error: 'Login required'}, {status: 401}) };
-    if (!hasPermission(auth, 'payment_approvals', 'access') && !hasPermission(auth, 'payment_oversight', 'access')) return { error: Response.json({error: 'Access denied'}, {status: 403}) };
+    if (!hasPermission(auth, 'payment_approvals', 'access')) return { error: Response.json({error: 'Access denied'}, {status: 403}) };
     const id = new URL(request.url).searchParams.get('request') ?? '';
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) return { error: Response.json({error: 'Invalid request'}, {status: 400}) };
     if (!supabaseAdmin) return { error: Response.json({error: 'Details unavailable'}, {status: 503}) };

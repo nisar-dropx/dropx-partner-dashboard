@@ -6,8 +6,8 @@ import { matchesCurrentPaymentAssignee, hasInitialApprovalForStage } from './pay
 import { isPendingPaymentApproval } from './payment-pending-approval.ts';
 import { buildPaymentApprovalFlow } from './payment-approval-flow.ts';
 
-const auth = { hasAllLocationAccess:false, locationScopeIds:['NLRE'], permissions:{payment_oversight:{canView:true}} };
-test('oversight sees first-stage and completed requests in scope without becoming an approver', () => {
+const auth = { hasAllLocationAccess:false, locationScopeIds:['NLRE'], permissions:{payment_approvals:{canView:true}} };
+test('approval-page access can track first-stage and completed requests in scope without becoming an approver', () => {
   for (const status of ['PENDING','FINAL_APPROVED','PROCESSED']) {
     const request={ location_id:'NLRE', status, current_approver_user_id:'cluster-manager' };
     assert.equal(canOverseePayment(auth,request),true);
@@ -17,6 +17,13 @@ test('oversight sees first-stage and completed requests in scope without becomin
   assert.equal(canOverseePayment(auth,{location_id:null}),false);
   assert.equal(canOverseePayment({...auth,permissions:{}},{location_id:'NLRE'}),false);
   assert.equal(canOverseePayment({...auth,locationScopeIds:[]},{location_id:'NLRE'}),false);
+});
+test('tracking inherits approval-page access without a separate grant', () => {
+  const request={location_id:'NLRE'};
+  assert.equal(canOverseePayment({...auth,permissions:{payment_oversight:{canView:true}}},request),false);
+  assert.equal(canOverseePayment({...auth,permissions:{payment_approvals:{canView:false,canEdit:true}}},request),true);
+  assert.equal(canOverseePayment({...auth,permissions:{payment_approvals:{canView:false,canAdd:true}}},request),true);
+  assert.equal(canOverseePayment({...auth,permissions:{payment_approvals:{canView:false,canAdd:false,canEdit:false}}},request),false);
 });
 test('approval and processing terminal states cannot appear as actionable just because an assignee was retained',()=>{
   for(const status of ['FINAL_APPROVED','OWNER_APPROVED','RE_APPROVED','PROCESSED','PROCESSING','RETURNED','REJECTED','CANCELLED'])

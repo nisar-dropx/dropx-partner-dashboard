@@ -1,9 +1,10 @@
 /** Visibility never grants approval authority. Location scope remains authoritative. */
 export function canOverseePayment(
-  authorization: { hasAllLocationAccess: boolean; locationScopeIds: string[]; permissions: Record<string, { canView: boolean }> },
+  authorization: { hasAllLocationAccess: boolean; locationScopeIds: string[]; permissions: Record<string, { canView: boolean; canAdd?: boolean; canEdit?: boolean }> },
   request: { location_id: string | null }
 ) {
-  return Boolean(authorization.permissions.payment_oversight?.canView) &&
+  const permission = authorization.permissions.payment_approvals;
+  return Boolean(permission && (permission.canView || permission.canAdd || permission.canEdit)) &&
     (authorization.hasAllLocationAccess || Boolean(request.location_id && authorization.locationScopeIds.includes(request.location_id)));
 }
 
