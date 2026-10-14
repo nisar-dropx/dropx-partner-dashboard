@@ -105,6 +105,12 @@ test("forged station and intersecting filters cannot widen permitted locations",
     0,
   );
 });
+test("command-center exact scope is an authorization intersection, including empty scope", async () => {
+  const d=dataModule(null,[all[0]]);
+  assert.deepEqual((await d.cpsScope(context,{scope:'A,B'})).all.map(l=>l.station_code),['A']);
+  assert.deepEqual((await d.cpsScope(context,{scope:'B'})).all,[]);
+  assert.deepEqual((await d.cpsScope(context,{scope:''})).all,[]);
+});
 test("RPC receives company, sorted station scope and exact period; empty scope does not query", async () => {
   const calls = [];
   const db = {

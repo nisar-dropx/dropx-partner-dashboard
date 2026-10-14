@@ -1,5 +1,14 @@
 import type { OpsStationManpowerPerson } from './station-manpower';
 
+export function summarizeStoreCpu(rows: {units:number|null; cost:number; days:number; through:string|null; provisional?:boolean}[]) {
+  const ready=rows.filter(r=>r.units!==null && r.units>0 && r.days>0 && r.through!==null);
+  const sameCutoff=new Set(ready.map(r=>r.through)).size===1;
+  const hasCostGaps=rows.some(r=>r.provisional);
+  const complete=ready.length===rows.length && rows.length>0 && sameCutoff && !hasCostGaps;
+  const cost=ready.reduce((n,r)=>n+r.cost,0), units=ready.reduce((n,r)=>n+r.units!,0);
+  return {ready:ready.length,complete,cost,units,hasCostGaps,cpu:complete?cost/units:null,through:complete?ready[0].through:null};
+}
+
 export function summarizeStorePeople(people: OpsStationManpowerPerson[], now: number) {
   const summary = { active: people.length, reported: 0, working: 0, completed: 0, due: 0, dueReported: 0, notReported: 0, upcoming: 0, off: 0, leave: 0, unplanned: 0, missingOut: 0 };
   for (const p of people) {
