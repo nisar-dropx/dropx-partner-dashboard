@@ -1263,6 +1263,10 @@ export async function resubmitExpenseRequest(formData: FormData) {
 export async function resubmitPaymentRequest(formData: FormData) {
   const authorization = await requirePagePermission("payment_requests", "add");
   const companyId = requireCompanyId(authorization);
+  const returnToExpense = clean(formData.get("return_to")) === "expense";
+  const redirectBack = (params: { notice?: string; error?: string }): never => returnToExpense
+    ? expenseRequestsRedirect(params.error ? { expenseError: params.error } : { expenseNotice: params.notice ?? "" })
+    : paymentRequestsRedirect(params.error ? { paymentError: params.error } : { paymentNotice: params.notice ?? "" });
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     const admin = supabaseAdmin;
@@ -1532,6 +1536,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
       }, companyId), companyId);
 
     revalidatePath("/payments/requests");
+    revalidatePath("/payments/expense-request");
     revalidatePath("/payments/approvals");
     revalidatePath("/payments/process");
     revalidatePath("/payments/report");
@@ -1543,17 +1548,13 @@ export async function resubmitPaymentRequest(formData: FormData) {
       requestId: request.id
     });
     if (!emailResult.sent) {
-      paymentRequestsRedirect({
-        paymentNotice: paymentEmailNotice("Payment request resubmitted successfully.", emailResult.reason)
-      });
+      redirectBack({ notice: paymentEmailNotice("Payment request resubmitted successfully.", emailResult.reason) });
     }
   } catch (error) {
-    paymentRequestsRedirect({
-      paymentError: paymentRequestErrorMessage(error)
-    });
+    redirectBack({ error: paymentRequestErrorMessage(error) });
   }
 
-  paymentRequestsRedirect({ paymentNotice: "Payment request resubmitted successfully." });
+  redirectBack({ notice: "Payment request resubmitted successfully." });
 }
 
 export async function cancelPaymentRequest(formData: FormData) {
