@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(resolve(root, path), "utf8");
 const resolver = read("apps/connect/src/lib/connect-expense-data.ts");
+const oneRouting = read("apps/connect/src/lib/connect-reimbursement-routing.ts");
 const workflow = read("apps/connect/src/lib/approval-workflow-routing.ts");
 const route = read("apps/connect/app/api/connect/reimbursements/route.ts");
 const employeeUi = read("apps/connect/src/components/connect-reimbursements.tsx");
@@ -13,9 +14,10 @@ const migration = read("supabase/migrations/20260915134500_reimbursement_manager
 const adjustment = read("supabase/migrations/20261006130000_reimbursement_finance_adjustment.sql");
 
 const checks = [
-  [resolver.includes('reportingChainMaxLevel: 2') && resolver.includes('level3StepName: "Finance approval"'), "claims resolve two reporting-manager levels before Finance"],
+  [resolver.includes('resolveOneReimbursementWorkflow') && oneRouting.includes('maxLevel: 2') && oneRouting.includes('steps.push(finance)'), "One claims retain configured manager levels and always end with Finance"],
+  [oneRouting.includes('code === "FINMGR"') && oneRouting.includes('engagement.person_id === input.requesterPersonId'), "final authority requires an active Finance Manager, never the claimant"],
   [!resolver.includes("trimReimbursementStepsAfterBusinessHead"), "National/Business Head no longer skips the remaining configured chain"],
-  [resolver.includes('stage_code: step.step_name === "Finance approval" ? "finance" : "manager"'), "approval responsibility uses a stable stage code"],
+  [resolver.includes('stage_code: step.stage_code') && oneRouting.includes('stage_code: "finance"'), "approval responsibility uses a stable stage code, not a display label"],
   [workflow.includes("reportingChainMaxLevel") && workflow.includes("level3StepName"), "workflow resolver supports reporting-chain managers plus a functional final owner"],
   [route.includes("withPolicyExceptionApprovers") && route.includes('stage_code: "policy_exception"'), "special policy exceptions are inserted before Finance"],
   [route.includes("finance_policy_snapshot: quoteById.get(item.id)"), "immutable Finance policy snapshots are submitted with each expense line"],

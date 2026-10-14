@@ -14,6 +14,7 @@ function fixture({ssa=true, cm=true}={}) {
   const ids=['worker','tl',...(cm?['cm']:[]),'aom','finance','hr'];
   state.tables.hr_engagements=ids.map(id=>({id:`e-${id}`,person_id:id,company_id:'company',worker_type:'employee',employee_id:id,status:'active',start_date:'2020-01-01',end_date:null}));
   state.tables.hr_people=ids.map(id=>({id,company_id:'company',display_name:id,status:'active'}));
+  state.tables.profiles=ids.map(id=>({id:`${id}-login`,company_id:'company',is_active:true}));
   state.tables.hr_work_assignments=ids.map(id=>({id:`a-${id}`,company_id:'company',engagement_id:`e-${id}`,designation_id:({worker:ssa?'SSA':'TL',tl:'TL',cm:'CLM',aom:'AOM',finance:'FINMGR',hr:'HRM'})[id],location_id:'station',position_title:id,is_primary:true,effective_from:'2020-01-01',effective_to:null}));
   // Only worker/TL are posted at the station; managers are reached through its People hierarchy.
   for(const a of state.tables.hr_work_assignments) if(!['a-worker','a-tl'].includes(a.id)) a.location_id='office';
@@ -32,7 +33,11 @@ function fixture({ssa=true, cm=true}={}) {
       limit(n){rows=rows.slice(0,n);return q},range(a,b){rows=rows.slice(a,b+1);return q},
       maybeSingle(){assert.ok(rows.length<=1);return Promise.resolve({data:rows[0]??null,error:null})},
       then(resolve,reject){return Promise.resolve({data:rows,error:null}).then(resolve,reject)}};return q;
-  },rpc:async()=>({data:false,error:null})};
+  },rpc:async(name,args,options)=>{
+    assert.equal(name,'hr_workflow_applies_hr_precheck_finalize_flag');
+    state.rpcCalls??=[];state.rpcCalls.push({name,args,options});
+    return {data:false,error:null};
+  }};
   const cache=new Map();
   function load(file,extra='') {
     file=path.resolve(root,file);
@@ -164,4 +169,91 @@ test('evenly split Cluster Managers with no reporting line are still left for Pe
   const f=fixture();addOtherClusterManager(f);
   f.state.tables.hr_reporting_relationships=f.state.tables.hr_reporting_relationships.filter(r=>r.subject_assignment_id!=='a-worker');
   await assert.rejects(f.manager(),/More than one request approver/);
+});
+
+function oneReimbursement(f, overrides={}) {
+  return f.load('apps/connect/src/lib/connect-reimbursement-routing.ts').resolveOneReimbursementWorkflow({
+    ...f.input,requesterPersonId:'worker',directRequester:false,...overrides
+  });
+}
+test('One reimbursement: HLM-style route without a final stage still ends at Finance',async()=>{
+  const f=fixture({ssa:false});Object.assign(f.route,{workflow_code:'reimbursement',level_2_required:false,hr_final_required:false});
+  const before=JSON.stringify(f.state.tables);
+  const result=await oneReimbursement(f);
+  assert.deepEqual(result.steps.map(s=>[s.approver_person_id,s.stage_code]),[['tl','manager'],['finance','finance']]);
+  assert.equal(result.steps.at(-1).step_name,'Finance approval');
+  assert.equal(JSON.stringify(f.state.tables),before,'resolution must not mutate shared routes or data');
+  assert.deepEqual(f.state.rpcCalls[0].options,{get:true},'the approval guide must use a read-only RPC in preview');
+});
+test('One reimbursement: SSA keeps CM/AOM checks and ends at Finance regardless of wrong final designation',async()=>{
+  const f=fixture();Object.assign(f.route,{workflow_code:'reimbursement',level_2_designation_id:'AOM',hr_final_required:true,hr_final_designation_id:'HRM',hr_final_fallback_mode:'specific_person',hr_final_fallback_person_id:'hr'});
+  const result=await oneReimbursement(f);
+  assert.deepEqual(result.steps.map(s=>s.approver_person_id),['cm','aom','finance']);
+  assert.deepEqual(result.steps.map(s=>s.stage_code),['manager','manager','finance']);
+});
+test('One reimbursement: a short senior hierarchy and a top-level requester still require Finance',async()=>{
+  const f=fixture({ssa:false});f.route.workflow_code='reimbursement';
+  f.state.tables.hr_reporting_relationships=f.state.tables.hr_reporting_relationships.filter(r=>r.subject_assignment_id==='a-worker');
+  assert.deepEqual((await oneReimbursement(f)).steps.map(s=>s.approver_person_id),['tl','finance']);
+  f.state.tables.hr_reporting_relationships=[];
+  await assert.rejects(oneReimbursement(f),/No reporting manager/);
+  assert.deepEqual((await oneReimbursement(f,{directRequester:true})).steps.map(s=>s.approver_person_id),['finance']);
+});
+test('One reimbursement: Finance in the reporting chain is deduplicated and moved to the final stage',async()=>{
+  const f=fixture({ssa:false});f.route.workflow_code='reimbursement';
+  f.state.tables.hr_reporting_relationships.find(r=>r.subject_assignment_id==='a-worker').manager_assignment_id='a-finance';
+  assert.deepEqual((await oneReimbursement(f)).steps.map(s=>[s.approver_person_id,s.stage_code]),[['finance','finance']]);
+});
+test('One reimbursement: the requester cannot approve their own Finance stage',async()=>{
+  const f=fixture({ssa:false});f.route.workflow_code='reimbursement';
+  await assert.rejects(oneReimbursement(f,{requesterPersonId:'finance'}),/active Finance Manager/);
+});
+test('One reimbursement: inactive, expired, future, unlinked and cross-company Finance seats fail closed',async()=>{
+  for(const edit of [
+    f=>f.state.tables.designations.find(d=>d.id==='FINMGR').is_active=false,
+    f=>f.state.tables.hr_people.find(p=>p.id==='finance').status='inactive',
+    f=>f.state.tables.hr_engagements.find(e=>e.person_id==='finance').status='inactive',
+    f=>f.state.tables.hr_engagements.find(e=>e.person_id==='finance').start_date='2027-01-01',
+    f=>f.state.tables.hr_engagements.find(e=>e.person_id==='finance').end_date='2026-09-01',
+    f=>f.state.tables.hr_work_assignments.find(a=>a.id==='a-finance').effective_to='2026-09-01',
+    f=>f.state.tables.hr_work_assignments.find(a=>a.id==='a-finance').effective_from='2027-01-01',
+    f=>f.state.logins.delete('finance'),
+    f=>f.state.tables.profiles.find(p=>p.id==='finance-login').is_active=false,
+    f=>f.state.tables.profiles.find(p=>p.id==='finance-login').company_id='other',
+    f=>f.state.tables.hr_people.find(p=>p.id==='finance').company_id='other',
+    f=>f.state.tables.hr_engagements.find(e=>e.person_id==='finance').company_id='other',
+    f=>f.state.tables.hr_work_assignments.find(a=>a.id==='a-finance').company_id='other',
+    f=>f.state.tables.hr_work_assignments.push({...f.state.tables.hr_work_assignments.find(a=>a.id==='a-finance'),id:'transferred',designation_id:'HRM',effective_from:'2026-10-01'})
+  ]) {
+    const f=fixture({ssa:false});f.route.workflow_code='reimbursement';edit(f);
+    await assert.rejects(oneReimbursement(f),/active Finance Manager/);
+  }
+});
+test('One reimbursement: several Finance Managers require an explicit eligible seat',async()=>{
+  const f=fixture({ssa:false});f.route.workflow_code='reimbursement';
+  f.state.tables.hr_work_assignments.find(a=>a.id==='a-hr').designation_id='FINMGR';
+  await assert.rejects(oneReimbursement(f),/More than one Finance Manager/);
+  Object.assign(f.route,{hr_final_fallback_mode:'specific_person',hr_final_fallback_person_id:'finance'});
+  assert.equal((await oneReimbursement(f)).steps.at(-1).approver_person_id,'finance');
+  f.route.hr_final_fallback_person_id='tl';
+  await assert.rejects(oneReimbursement(f),/More than one Finance Manager/);
+});
+test('One reimbursement: contractor requesters use the same Finance final policy',async()=>{
+  const f=fixture({ssa:false});f.route.workflow_code='reimbursement';
+  Object.assign(f.state.tables.hr_engagements.find(e=>e.person_id==='worker'),{worker_type:'contractor',employee_id:null,contractor_id:'worker'});
+  assert.equal((await oneReimbursement(f,{workerType:'contractor'})).steps.at(-1).stage_code,'finance');
+});
+test('One reimbursement: missing manager route is explicit and cannot bypass approvals',async()=>{
+  const f=fixture({ssa:false});f.state.tables.hr_approval_workflow_routes=[];
+  await assert.rejects(oneReimbursement(f),/manager route is not configured/);
+});
+test('One policy does not change the shared reimbursement or other request resolvers',async()=>{
+  const f=fixture({ssa:false});Object.assign(f.route,{workflow_code:'reimbursement',level_2_required:false,hr_final_required:false});
+  for(const file of ['src/lib/approval-workflow-routing.ts','apps/connect/src/lib/approval-workflow-routing.ts']) {
+    const result=await f.load(file).resolveConfiguredApprovalWorkflow({...f.input,workflowCode:'reimbursement'});
+    assert.deepEqual(result.steps.map(s=>s.approver_person_id),['tl']);
+  }
+  assert.equal((await oneReimbursement(f)).steps.at(-1).approver_person_id,'finance');
+  f.route.workflow_code='leave_request';
+  assert.deepEqual((await f.load('apps/connect/src/lib/approval-workflow-routing.ts').resolveConfiguredApprovalWorkflow({...f.input,workflowCode:'leave_request'})).steps.map(s=>s.approver_person_id),['tl']);
 });

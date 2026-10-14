@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
+import * as React from 'react';
+import * as jsxRuntime from 'react/jsx-runtime';
+import { renderToStaticMarkup } from 'react-dom/server';
 const policy={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payment-policy.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(policy.exports,policy);
 const direct={exports:{}};
@@ -16,8 +19,10 @@ const workforceProductionThreshold={exports:{}};
 new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../workforce-production-threshold.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(workforceProductionThreshold.exports,workforceProductionThreshold,(id)=>{if(id==='./production-threshold-config.ts')return productionThresholdConfig.exports;if(id==='./production-threshold-snapshot.ts')return productionThresholdSnapshot.exports;throw new Error(`Unexpected import ${id}`);});
 const payoutInputs={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-payout-input-calculation.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(payoutInputs.exports,payoutInputs);
+const cps={exports:{}};
+new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(cps.exports,cps);
 const details={exports:{}};
-new Function('exports','module',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details);
+new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('./cps-details.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(details.exports,details,(id)=>{if(id==='./cps')return cps.exports;throw new Error(`Unexpected import ${id}`);});
 const routeDistance={exports:{}};
 new Function('exports','module',ts.transpileModule(readFileSync(new URL('../workforce-route-distance.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(routeDistance.exports,routeDistance);
 const mod={exports:{}};
@@ -430,7 +435,7 @@ test('People assignments use dated mapped stations, deduplicate duties and prese
 });
 
 
-test('DA cohorts use their own delivered count and show returns and effective rates',()=>{
+test('DA cohorts use their own delivery plus customer-return count and show effective rates',()=>{
  const f=facts(); f.shipments[0].c_return=5;
  f.components.push({payment_method_id:'per-packet',component_code:'RETURN',label:'Customer return',component_type:'production',calculation_source:'c_return'});
  f.mappings[0].payment_values.RETURN=4;
@@ -439,7 +444,7 @@ test('DA cohorts use their own delivered count and show returns and effective ra
  f.shipments.push({...f.shipments[0],id:'s2',provider_employee_id:'AM2',total_delivery:50,c_return:0});
  const r=rebuildCps(base([day('A','2026-09-01',150)]),f);
  const v=details.exports.daCohortTotals(r.da_details,'variable'),mg=details.exports.daCohortTotals(r.da_details,'guarantee');
- assert.equal(v.amount,1020);assert.equal(v.cps,10.2);assert.equal(mg.amount,600);assert.equal(mg.cps,12);
+ assert.equal(v.amount,1020);near(v.cps,1020/105);assert.equal(v.shipments,105);assert.equal(mg.amount,600);assert.equal(mg.cps,12);
  near(v.amount+mg.amount,r.daily[0].da);assert.equal(v.people[0].customer_returns,5);
  assert.deepEqual(v.people[0].periods[0].rates.find(r=>r.label==='Customer return'),{label:'Customer return',rate:4,basis:'c return'});
  assert.equal(mg.people[0].salary,200);assert.equal(mg.people[0].variable,400);
@@ -630,4 +635,46 @@ test('missing configured kilometre input is visible while known pay remains coun
  f.components.push({payment_method_id:'per-packet',payment_field_id:'km',component_code:'KM_RUN',label:'Kilometres',component_type:'production',calculation_type:'count_x_rate',is_custom_production:true});
  const r=rebuildCps(base(),f);assert.equal(r.daily[0].da,1000);assert.ok(r.gaps.some(g=>g.kind==='Kilometres input missing'));
 
+});
+
+// The reported production incident: returns were paid but missing from the divisor.
+test('CPS lifecycle: delivery + C-return pay/count reconcile across associate, station, fuel and months',()=>{
+ const f=facts();
+ Object.assign(f.shipments[0],{total_delivery:1043,amazon_delivery:1000,swa_delivery:43,c_return:89,mfn:20,mfn_return:3,total_activity:1155});
+ f.mappings[0].payment_values={DELIVERY:17,CUSTOMER_RETURN:15,SELLER_PICKUP:12,SLLLER_RETURN:8};
+ f.components.push(...['CUSTOMER_RETURN','SELLER_PICKUP','SLLLER_RETURN'].map(component_code=>({payment_method_id:'per-packet',component_code,component_type:'production',calculation_type:'count_x_rate'})));
+ const snapshot=rebuildCps(base([{...day('A','2026-09-01',1043),amazon_delivery:1000,swa_delivery:43,c_return:89,mfn:20,mfn_return:3,activity:1155}]),f);
+ const summary=cps.exports.summarizeCps(snapshot.daily);
+ const cohort=details.exports.daCohortTotals(snapshot.da_details,'variable');
+ assert.equal(summary.shipments,1132); assert.equal(summary.deliveries,1043); assert.equal(summary.swa,43);
+ assert.equal(summary.da,19066); assert.equal(cohort.amount,19066); assert.equal(cohort.shipments,1132);
+ near(summary.cps,19066/1132);near(cohort.cps,summary.cps);assert.equal(summary.cps.toFixed(2),'16.84');
+ const ui={exports:{}};
+ new Function('exports','module','require',ts.transpileModule(readFileSync(new URL('../../components/cps-associate-breakdown.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(ui.exports,ui,(id)=>{
+   if(id==='react')return React;if(id==='react/jsx-runtime')return jsxRuntime;
+   if(id==='@/lib/ops-pulse/cps')return cps.exports;if(id==='@/lib/ops-pulse/cps-details')return details.exports;throw new Error(id);
+ });
+ const html=renderToStaticMarkup(React.createElement(ui.exports.CpsAssociateTable,{rows:snapshot.da_details}));
+ assert.match(html,/₹16.84/);assert.match(html,/1,132 CPS shipments/);assert.match(html,/1,043 deliveries \+ 89 customer returns/);assert.doesNotMatch(html,/₹18.28/);
+
+ assert.deepEqual(snapshot.da_details[0].periods[0].production_details.map(p=>p.label).sort(),['CUSTOMER_RETURN','DELIVERY']);
+ assert.equal(snapshot.people[0].customer_returns,89);
+ const fullPay=calculateRateCard(f.mappings[0],f.components,f.shipments[0],'2026-09-01',false,{});
+ assert.equal(fullPay.variable,19330,'full payroll/P&L retains the 264 seller pay');
+ assert.equal(f.shipments[0].mfn,20,'source activity is unchanged');
+ const fuel=details.exports.cpsFuelTrend({...snapshot,breakup:[{work_date:'2026-09-01',head:'DA',sub_head:'DA fuel',amount:1132}]})[0];
+ assert.equal(fuel.shipments,1132);assert.equal(fuel.cps,1);
+ const merged=cps.exports.mergeCpsMonths([snapshot,snapshot]);
+ assert.equal(merged.people[0].customer_returns,178);
+ near(cps.exports.summarizeCps(merged.daily).cps,summary.cps);
+});
+test('seller production sources and legacy MFN rates are excluded without a master policy',()=>{
+ const f=facts();f.shipments[0].mfn=10;f.shipments[0].mfn_return=5;
+ f.mappings[0].payment_values.PICKUPS=9;
+ f.components.push({payment_method_id:'per-packet',component_code:'PICKUPS',component_type:'production',calculation_source:'mfn'});
+ assert.equal(rebuildCps(base(),f).daily[0].da,1000);
+ assert.equal(calculateRateCard(f.mappings[0],f.components,f.shipments[0],'2026-09-01',false,{}).variable,1090);
+ f.mappings[0]={...f.mappings[0],payment_method_id:null,delivery_rate:10,mfn_rate:9,mfn_return_rate:7};
+ assert.equal(rebuildCps(base(),f).daily[0].da,1000);
+ assert.equal(calculateRateCard(f.mappings[0],[],f.shipments[0],'2026-09-01',false,{}).variable,1125);
 });

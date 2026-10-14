@@ -431,7 +431,7 @@ async function expenseApprovalGuidePayload(account: ConnectAccount) {
   }
 
   const claimRoute = await resolveExpenseApprovers(account, 1);
-  const financeIndex = claimRoute.steps.findIndex((step) => step.step_name === "Finance approval");
+  const financeIndex = claimRoute.steps.findIndex((step) => step.stage_code === "finance");
   const claimSteps = claimRoute.steps.map((step, index) => ({
     order: index + 1,
     kind: index === financeIndex ? "finance" : "manager",
@@ -600,7 +600,7 @@ async function withPolicyExceptionApprovers(
       stage_code: "policy_exception" as const
     } satisfies ClaimApprovalStep;
   });
-  const financeIndex = steps.findIndex((step) => step.step_name === "Finance approval");
+  const financeIndex = steps.findIndex((step) => step.stage_code === "finance");
   if (financeIndex < 0) throw new Error("A final Finance approval step is required before Payment Processing.");
   return [
     ...steps.slice(0, financeIndex),

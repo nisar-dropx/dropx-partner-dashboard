@@ -79,7 +79,7 @@ export function CpsExplorer({
           <div>
             <h2>Station comparison</h2>
             <p>
-              Each parent row combines its authorized EDSP and XPT costs and delivered shipments. CPS is combined cost ÷ combined deliveries.
+              Each parent row combines its authorized EDSP and XPT costs and CPS shipments. CPS is combined cost ÷ (deliveries, including SWA, + customer returns).
             </p>
           </div>
           {canExport && comparison.length > 0 && (
@@ -157,7 +157,7 @@ export function CpsExplorer({
               <tr>
                 {[
                   "Station",
-                  "Delivered",
+                  "CPS shipments",
                   "DA CPS",
                   "UTR CPS",
                   "Van CPS",
@@ -186,7 +186,7 @@ export function CpsExplorer({
                       </button>
                       <small>{byGroup.get(r.key)?.subtitle || names[r.key]}</small>
                     </td>
-                    <td>{r.deliveries.toLocaleString("en-IN")}</td>
+                    <td>{r.shipments.toLocaleString("en-IN")}<small>{r.deliveries.toLocaleString("en-IN")} deliveries + {r.returns.toLocaleString("en-IN")} returns</small></td>
                     {(["DA", "UTR", "Van", "Other"] as Head[]).map((h) => (
                       <td key={h}>
                         <button
@@ -203,7 +203,7 @@ export function CpsExplorer({
                                   : h === "Van"
                                     ? r.van
                                     : r.other + r.rent + r.overhead,
-                              r.deliveries,
+                              r.shipments,
                             ),
                           )}
                         </button>

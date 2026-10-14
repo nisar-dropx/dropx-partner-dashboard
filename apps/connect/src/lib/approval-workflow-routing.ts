@@ -121,7 +121,7 @@ async function workflowAppliesHrPrecheckFinalizeFlag(companyId: string, workflow
   const result = await db().rpc("hr_workflow_applies_hr_precheck_finalize_flag", {
     p_company_id: companyId,
     p_workflow_code: workflowCode
-  });
+  }, { get: true }); // STABLE master-data read; POST is correctly blocked in user preview.
   if (result.error) {
     if (/does not exist|schema cache/i.test(result.error.message)) return false;
     throw new Error(result.error.message);

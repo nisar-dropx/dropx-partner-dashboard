@@ -2,7 +2,7 @@ import { resolveSsaApprovalManager } from "../../../../src/lib/ssa-approval-mana
 import "server-only";
 
 import { isManagingPartnerDesignation } from "./approval-designation-labels";
-import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
+import { resolveOneReimbursementWorkflow } from "./connect-reimbursement-routing";
 import { resolveConnectApproverUserId } from "./connect-approver-identity";
 import { supabaseAdmin } from "./supabase-admin";
 import type { ConnectAccount } from "./connect-auth";
@@ -144,20 +144,14 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
   const { identity, policy } = await resolveExpensePolicy(account, amount);
   const directRequester = await isDirectExpenseRequester(account);
 
-  const configured = await resolveConfiguredApprovalWorkflow({
+  const configured = await resolveOneReimbursementWorkflow({
     companyId: account.companyId,
-    workflowCode: "reimbursement",
     workerId: identity.workerId,
     workerType: identity.workerType,
     asOf: identity.today,
-    maxLevel: 3,
-    reportingChainOnly: true,
-    reportingChainMaxLevel: 2,
-    level3StepName: "Finance approval",
-    // A short hierarchy is valid for senior leaders. Finance remains mandatory below.
-    allowMissingApprovers: true
+    requesterPersonId: identity.personId,
+    directRequester: directRequester.direct
   });
-  if (!configured) throw new Error("The reimbursement approval route is not configured for your designation. Contact HR.");
 
   const steps: ExpenseApprovalStepDraft[] = configured.steps.map((step, index) => ({
     step_order: index + 1,
@@ -169,15 +163,8 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
     resolved_via: step.resolved_via,
     original_approver_person_id: step.original_approver_person_id,
     fallback_reason: step.fallback_reason,
-    stage_code: step.step_name === "Finance approval" ? "finance" : "manager"
+    stage_code: step.stage_code
   }));
-  const financeIndex = steps.findIndex((step) => step.step_name === "Finance approval");
-  if (financeIndex < 0) {
-    throw new Error("A final Finance approver is not configured for this reimbursement route. Contact HR.");
-  }
-  if (!directRequester.direct && financeIndex === 0) {
-    throw new Error("No reporting manager is configured. Configure the reporting hierarchy before submitting a claim.");
-  }
   return {
     identity,
     policy,

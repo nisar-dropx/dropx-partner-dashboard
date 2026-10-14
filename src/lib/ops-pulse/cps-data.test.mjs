@@ -270,6 +270,8 @@ test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", 
     work_date: `2026-08-${String(i + 1).padStart(2, "0")}`,
     deliveries: 100,
     activity: 110,
+    c_return: 10,
+    swa_delivery: 20,
     associate_rows: 2,
     unmapped: 1,
     unpaid: 0,
@@ -343,7 +345,12 @@ test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", 
   const [summary] = XLSX.utils.sheet_to_json(book.Sheets.Summary);
   assert.equal(summary.Deliveries, 3100);
   assert.equal(summary["Recorded cost"], 46500);
-  assert.equal(summary["Recorded CPS"], 15);
+  assert.equal(summary["CPS shipments (delivery + C-return)"], 3410);
+  assert.equal(summary["SWA deliveries"], 620, "SWA is a delivery subset, not an extra denominator");
+  assert.equal(summary["Recorded CPS"], 46500 / 3410);
+  assert.equal(summary["DA CPS"], 27900 / 3410);
+  const [cost] = XLSX.utils.sheet_to_json(book.Sheets["Cost breakup"]);
+  assert.equal(cost["CPS contribution"], 300 / 110);
   assert.equal(summary.Status, "Provisional");
   assert.match(summary["Data gaps"], /payment setup/);
   const cell = book.Sheets["Cost breakup"].D2;

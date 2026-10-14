@@ -513,7 +513,8 @@ async function loadLatestExitCase(context: WorkerContext) {
 async function serializeCase(row: Record<string, any>) {
   const [{ data: tasks }, { data: documents }, { data: events }, { data: approvals }] = await Promise.all([
     db().from("hr_exit_tasks").select("id, category, name, due_date, status, is_required").eq("case_id", row.id).order("created_at"),
-    db().from("hr_exit_documents").select("id, document_type, file_name, status, generated_at, storage_path, template_id").eq("case_id", row.id).neq("status", "void").order("generated_at", { ascending: false }),
+    // The person sees only documents HR sent (issued), never generated drafts.
+    db().from("hr_exit_documents").select("id, document_type, file_name, status, generated_at, storage_path, template_id").eq("case_id", row.id).in("status", ["issued", "acknowledged"]).order("generated_at", { ascending: false }),
     db().from("hr_exit_events").select("id, event_code, title, actor_name, created_at, details").eq("case_id", row.id).order("created_at"),
     db().from("hr_exit_approvals").select("id, step_order, step_name, approver_role, approver_source, hierarchy_level, approver_role_id, assigned_user_id, status, comments, acted_at, created_at, hr_roles(name)").eq("case_id", row.id).order("step_order")
   ]);

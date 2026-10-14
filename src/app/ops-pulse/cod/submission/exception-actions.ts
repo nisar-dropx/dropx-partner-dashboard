@@ -65,5 +65,5 @@ export async function recordCodException(_prev:ExceptionState|null,form:FormData
   if(!saved.data?.length)throw new Error('This update changed. Reload before editing.');
   for(const path of ['/cod/submission','/cod/pending','/ops-pulse/cod/submission','/ops-pulse/cod/pending'])revalidatePath(path);
   return{ok:true,notice:kind==='No Cash'?'No Cash recorded with ERP proof.':'Banker Not Reported recorded. The existing email will be checked in the Control Tower mailbox; no new email was sent.'};
- }catch(error){return{ok:false,error:error instanceof Error?error.message:'Unable to record update.'};}
+ }catch(error){if(String((error as {digest?:unknown})?.digest??error).includes('NEXT_REDIRECT'))throw error;return{ok:false,error:error instanceof Error?error.message:'Unable to record update.'};}
 }

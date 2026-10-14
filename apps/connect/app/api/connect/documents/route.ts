@@ -95,7 +95,8 @@ export async function GET(request: Request) {
       // generated on demand (see connect-exit-document.ts), never stored.
       profileType === "workforce" ? Promise.resolve({ data: [], error: null }) : supabaseAdmin.from("hr_exit_documents")
         .select("id,document_type,file_name,generated_at,status,hr_exit_cases!inner(worker_type,employee_id,contractor_id)")
-        .eq("company_id", account.companyId).neq("status", "void")
+        // Only documents HR sent (issued) reach the person; generated drafts stay with HR.
+        .eq("company_id", account.companyId).in("status", ["issued", "acknowledged"])
         .eq("hr_exit_cases.worker_type", profileType)
         .eq(profileType === "employee" ? "hr_exit_cases.employee_id" : "hr_exit_cases.contractor_id", account.id)
         .order("generated_at", { ascending: false }),
