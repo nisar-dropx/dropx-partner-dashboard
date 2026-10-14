@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import {
   providerFirstLocationIsAllowed,
   providerFirstLocationRemap
 } from "../../lib/provider-first-mapping-view.ts";
+
+async function latestWorkforceSaveMappingDefinition() {
+  const migrationsUrl = new URL("../../../supabase/migrations/", import.meta.url);
+  const migrations = (await readdir(migrationsUrl)).filter((name) => name.endsWith(".sql")).sort();
+  let definition = "";
+  for (const migration of migrations) {
+    const source = await readFile(new URL(migration, migrationsUrl), "utf8");
+    const start = source.lastIndexOf("create or replace function public.workforce_save_mapping(");
+    if (start < 0) continue;
+    const match = source.slice(start).match(/^create or replace function public\.workforce_save_mapping\([\s\S]*?\$function\$;/);
+    assert.ok(match, `${migration} must contain a complete workforce_save_mapping definition`);
+    definition = match[0];
+  }
+  assert.ok(definition, "a workforce_save_mapping definition must exist");
+  return definition;
+}
 
 const worker = {
   id: "worker-1",
@@ -218,6 +234,14 @@ test("server and database repeat the registered-location proof for current and h
       payment_values jsonb default '{}'::jsonb,
       production_threshold_config jsonb,
       pay_type text,
+      delivery_rate numeric,
+      pickup_rate numeric,
+      mfn_rate numeric,
+      mfn_return_rate numeric,
+      guarantee_amount numeric,
+      guarantee_schedule text,
+      fuel_rate numeric,
+      reason text,
       status text not null default 'active',
       created_by uuid,
       created_at timestamptz default now(),
@@ -346,7 +370,7 @@ test("server and database repeat the registered-location proof for current and h
         'provider_id', '${provider}',
         'station_id', '${stationD}',
         'provider_member_id', ' MEMBER-1 ',
-        'effective_from', '2026-09-15',
+        'effective_from', '2026-10-01',
         'effective_to', null,
         'payment_method_id', '${paymentMethod}',
         'payment_values', '{}'::jsonb,
@@ -363,6 +387,59 @@ test("server and database repeat the registered-location proof for current and h
       and status = 'active' and effective_to is null;
   `);
   assert.equal(kept.rows[0].count, 1);
+
+  // Editing one valid Keep-all location must ignore the overlapping
+  // registered-location anchor for the same canonical provider identity. A
+  // genuinely different provider member for the same DropX ID remains an
+  // invalid overlap.
+  await db.exec(await latestWorkforceSaveMappingDefinition());
+  const keptMapping = await db.query(`
+    select id
+    from public.field_executive_provider_mappings
+    where workforce_id = '${workerA}' and station_id = '${stationD}'
+      and status = 'active' and effective_to is null;
+  `);
+  const keptMappingId = keptMapping.rows[0].id;
+  const saveKeptMapping = (memberId) => db.exec(`
+    select public.workforce_save_mapping(
+      '${company}', '${actor}', '${workerA}', '${keptMappingId}', 'DX-A',
+      jsonb_build_object(
+        'provider_id', '${provider}',
+        'station_id', '${stationD}',
+        'provider_member_id', '${memberId}',
+        'effective_from', '2026-09-01',
+        'effective_to', null,
+        'payment_method_id', '${paymentMethod}',
+        'payment_values', jsonb_build_object('DELIVERY', 11),
+        'status', 'active'
+      ),
+      null::uuid[]
+    );
+  `);
+  await saveKeptMapping(" member-1 ");
+  const editedKeepAll = await db.query(`
+    select effective_from::text as effective_from, payment_values
+    from public.field_executive_provider_mappings
+    where id = '${keptMappingId}';
+  `);
+  assert.deepEqual(editedKeepAll.rows, [{ effective_from: "2026-09-01", payment_values: { DELIVERY: 11 } }]);
+  await assert.rejects(
+    saveKeptMapping("MEMBER-DIFFERENT"),
+    /This DropX ID already has an overlapping provider mapping/
+  );
+  await db.exec(`
+    insert into public.field_executive_provider_mappings(
+      company_id,workforce_id,provider_id,station_id,provider_member_id,
+      effective_from,effective_to,payment_method_id,status
+    ) values (
+      '${company}','${workerA}','${provider}','${stationD}','MEMBER-1',
+      '2026-09-20','2026-09-25','${paymentMethod}','closed'
+    );
+  `);
+  await assert.rejects(
+    saveKeptMapping("MEMBER-1"),
+    /Provider ID already has an overlapping mapping/
+  );
 
   // A closed registered-location mapping can anchor Keep all only when its
   // inclusive dates cover the complete bounded destination period.
