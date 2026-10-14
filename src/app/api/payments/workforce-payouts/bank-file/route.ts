@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildWorkforceFedOneWorkbook } from "@/lib/workforce-payout-bank-file";
@@ -125,6 +125,37 @@ function databaseStatus(message: string) {
   return /processing|changed|refresh|mapping|published|balance|payable|bank detail|operation|already|current payout|review|active workforce profile/i.test(message) ? 409 : 400;
 }
 
+function immutableLocationsAreInScope(authorization: AuthorizationContext, locationIds: unknown[]) {
+  if (authorization.hasAllLocationAccess) return true;
+  const allowed = new Set(authorization.locationScopeIds.map((id) => String(id).trim().toLowerCase()));
+  return locationIds.length > 0 && locationIds.every((value) => {
+    const locationId = String(value ?? "").trim().toLowerCase();
+    return UUID.test(locationId) && allowed.has(locationId);
+  });
+}
+
+async function selectedStationsScopeError(
+  authorization: AuthorizationContext,
+  companyId: string,
+  stationIds: string[]
+) {
+  if (authorization.hasAllLocationAccess) return null;
+  const requestedIds = [...new Set(stationIds.map((id) => id.trim().toLowerCase()))];
+  if (!requestedIds.length) return errorResponse("No permitted payout location was selected.", 403);
+  const result = await supabaseAdmin!
+    .from("stations")
+    .select("id")
+    .eq("company_id", companyId)
+    .in("id", requestedIds);
+  if (result.error) return errorResponse("The selected payout locations could not be authorized.", 503);
+  const immutableStationIds = (result.data ?? []).map((station) => station.id);
+  if (immutableStationIds.length !== requestedIds.length
+    || !immutableLocationsAreInScope(authorization, immutableStationIds)) {
+    return errorResponse("One or more selected payouts are outside your location scope.", 403);
+  }
+  return null;
+}
+
 async function authorize(audience: PayoutAudience) {
   const label = audienceLabel(audience);
   const authorization = await getAuthorization();
@@ -134,9 +165,6 @@ async function authorize(audience: PayoutAudience) {
   const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
   if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
-  }
-  if (!authorization.hasAllLocationAccess) {
-    return { error: errorResponse("Workforce bank processing requires all-location access.", 403) } as const;
   }
   if (!supabaseAdmin) return { error: errorResponse("Database configuration is unavailable.", 503) } as const;
   return { authorization, companyId: requireCompanyId(authorization) } as const;
@@ -216,7 +244,7 @@ export async function GET(request: Request) {
         .eq("id", batchId)
         .maybeSingle(),
       readAllRows(itemQuery
-        .select("batch_id,status,dropx_id_snapshot,reference_no,instruction_amount,bank_account_no_snapshot,ifsc_snapshot,beneficiary_name_snapshot,beneficiary_email_snapshot,credit_remarks_snapshot")
+        .select("batch_id,status,location_id_snapshot,dropx_id_snapshot,reference_no,instruction_amount,bank_account_no_snapshot,ifsc_snapshot,beneficiary_name_snapshot,beneficiary_email_snapshot,credit_remarks_snapshot")
         .eq("company_id", access.companyId)
         .eq("batch_id", batchId)
         .order("dropx_id_snapshot")
@@ -229,6 +257,9 @@ export async function GET(request: Request) {
     const items = itemsResult.data ?? [];
     if (String(batch.status) !== "processing" || !items.length || items.some((item) => String(item.status) !== "processing")) {
       return errorResponse("Only an entirely unfinalized Payment Processing batch can be downloaded again.", 409);
+    }
+    if (!immutableLocationsAreInScope(access.authorization, items.map((item) => item.location_id_snapshot))) {
+      return errorResponse("This payment batch includes a location outside your location scope.", 403);
     }
     return workbookResponse({
       batch_id: batch.id,
@@ -286,6 +317,12 @@ export async function POST(request: Request) {
         : "Select at least one unique Workforce payout row.",
       400
     );
+    const scopeError = await selectedStationsScopeError(
+      access.authorization,
+      access.companyId,
+      payoutRows.map((row) => row.stationId)
+    );
+    if (scopeError) return scopeError;
 
     // Idempotency belongs to the user's normalized request, not to the live
     // calculation snapshot used by the first-execution safety gate. Keep this

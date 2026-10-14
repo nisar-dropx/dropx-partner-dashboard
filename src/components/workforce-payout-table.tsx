@@ -35,7 +35,10 @@ import {
 import { WorkforcePayoutBankRedownloadButton } from "@/components/workforce-payout-bank-redownload-button";
 import { WorkforcePayoutManualEditor } from "@/components/workforce-payout-manual-editor";
 import { WorkforcePayoutBulkCancellation } from "@/components/workforce-payout-bulk-cancellation";
-import { WorkforcePayoutBulkHold } from "@/components/workforce-payout-bulk-hold";
+import {
+  WorkforcePayoutBulkHold,
+  type WorkforcePayoutHoldSelection
+} from "@/components/workforce-payout-bulk-hold";
 import { WorkforcePayoutPaymentHistoryButton } from "@/components/workforce-payout-payment-history-button";
 import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import {
@@ -187,6 +190,27 @@ function isPayoutProcessing(row: WorkforcePayoutRow) {
 function canChangePayoutHold(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId || workforcePayoutRowSourceIdentities(row).length)
     && !isPayoutProcessing(row);
+}
+
+function payoutHoldSelectionTarget(
+  row: WorkforcePayoutRow,
+  audience: "workforce" | "helpers",
+  hasAllLocationAccess: boolean
+): WorkforcePayoutHoldSelection | null {
+  const workforceId = String(row.reviewSubjectId ?? "").trim().toLowerCase();
+  const sourceTargets = audience === "workforce" ? workforcePayoutRowSourceIdentities(row) : [];
+  if (!hasAllLocationAccess) {
+    return audience === "workforce" && sourceTargets.length
+      ? { workforceId: undefined, sourceTargets, dropxId: row.dropxId, name: row.name }
+      : null;
+  }
+  if (!workforceId && !sourceTargets.length) return null;
+  return {
+    workforceId: workforceId || undefined,
+    sourceTargets,
+    dropxId: row.dropxId,
+    name: row.name
+  };
 }
 function isPayoutOnHold(row: WorkforcePayoutRow) {
   return isPayoutOnHoldStatus(row.paymentSummary?.status ?? row.status)
@@ -371,7 +395,7 @@ function PayoutActionMenu({ children, label }: { children: ReactNode; label: str
   </details>;
 }
 
-export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, mappingUnlocks = [], periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, hasAllLocationAccess = false, mappingUnlocks = [], periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; hasAllLocationAccess?: boolean; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
   const router = useRouter();
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
@@ -454,7 +478,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     || (canManuallyEdit && canManuallyEditPayout(row))
     || (canManageLocks && row.publicationLockState === "locked" && row.paymentSummary?.status !== "Payment Processing")
     || (canProcessPayments && (bankActionableIds.has(row.id) || canCancelProcessingPayment(row)))
-    || (canProcessPayments && audience === "workforce" && canChangePayoutHold(row))), [audience, bankActionableIds, canDeductAdvances, canManageLocks, canManuallyEdit, canProcessPayments, canPublish, filtered]);
+    || (canProcessPayments && canChangePayoutHold(row) && Boolean(payoutHoldSelectionTarget(row, audience, hasAllLocationAccess)))), [audience, bankActionableIds, canDeductAdvances, canManageLocks, canManuallyEdit, canProcessPayments, canPublish, filtered, hasAllLocationAccess]);
   const selectableIds = useMemo(() => new Set(selectable.map((row) => row.id)), [selectable]);
   const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
   const reviewSelectedRows = useMemo(() => selectedRows.filter((row) => canSendPayoutForReview(row, audience)), [audience, selectedRows]);
@@ -489,10 +513,13 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     }>();
     if (audience !== "workforce") return { holdItems: [], releaseItems: [] };
     selectedRows.forEach((row) => {
-      const workforceId = String(row.reviewSubjectId ?? "").trim().toLowerCase();
-      const rowSourceTargets = workforcePayoutRowSourceIdentities(row);
+      const profileWorkforceId = String(row.reviewSubjectId ?? "").trim().toLowerCase();
+      const holdTarget = payoutHoldSelectionTarget(row, audience, hasAllLocationAccess);
+      if (!holdTarget) return;
+      const workforceId = holdTarget.workforceId ?? "";
+      const rowSourceTargets = holdTarget.sourceTargets;
       if ((!workforceId && !rowSourceTargets.length)
-        || (workforceId && processingHoldSubjectIds.has(workforceId))
+        || (profileWorkforceId && processingHoldSubjectIds.has(profileWorkforceId))
         || !canChangePayoutHold(row)) return;
       const targetKey = workforceId
         ? `workforce:${workforceId}`
@@ -519,7 +546,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       holdItems: uniqueTargets.filter((target) => !target.onHold),
       releaseItems: uniqueTargets.filter((target) => target.onHold)
     };
-  }, [audience, processingHoldSubjectIds, selectedRows]);
+  }, [audience, hasAllLocationAccess, processingHoldSubjectIds, selectedRows]);
   const bankSelectionIndex = useMemo(() => buildWorkforcePayoutBankSelectionIndex(
     rows,
     (row) => bankActionableIds.has(row.id),
@@ -952,7 +979,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
           {relockTargets.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish ({relockTargets.length})</button> : null}
         </PayoutActionMenu> : null}
         {canProcessPayments ? <PayoutActionMenu label="Bank & payment">
-          {audience === "workforce" ? <WorkforcePayoutBulkHold
+          {audience === "workforce" && (hasAllLocationAccess || holdSelections.holdItems.length > 0 || holdSelections.releaseItems.length > 0) ? <WorkforcePayoutBulkHold
             disabled={actionBusy && !holdBusy}
             holdItems={holdSelections.holdItems}
             onBusyChange={setHoldBusy}
@@ -997,7 +1024,6 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     {cancellationNotice ? <div aria-live="polite" className="payout-inline-message success">{cancellationNotice}</div> : null}
     {holdNotice ? <div aria-live="polite" className="payout-inline-message success">{holdNotice}</div> : null}
     {mappingUnlocks.length ? <div className="payout-inline-message" role="status"><strong>{mappingUnlocks.length} mapping {mappingUnlocks.length === 1 ? "correction is" : "corrections are"} open for this month.</strong> The last stable payout remains in DropX One as revising until you relock and republish. <span>{mappingUnlocks.slice(0, 5).map((entry) => entry.dropxId || entry.name).join(", ")}{mappingUnlocks.length > 5 ? ` and ${mappingUnlocks.length - 5} more` : ""}.</span></div> : null}
-    {canEdit && !canPublishNotifications ? <div className="payout-inline-message">Send Notification requires all-location access because every publishable location row for a DropX ID must be published and frozen together.</div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
     {hasAdvanceSelectionConflict ? <div aria-live="polite" className="payout-inline-message error" id="advance-deduction-selection-help">Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row, so the extra row may be required for publication.</div> : null}
     {canProcessPayments && selectedRows.length > 0 && selectedBankUnavailableCount > 0 ? <div aria-live="polite" className="payout-inline-message warn">
@@ -1025,7 +1051,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
           {canManuallyEdit && manualSelectedRows.length ? <WorkforcePayoutManualEditor audience={audience} buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status, ...manualAttendancePeriod(row, periodStart, periodEnd) }))} toDate={periodEnd} /> : null}
           {canDeductAdvances ? <button aria-describedby={hasAdvanceSelectionConflict ? "advance-deduction-selection-help" : undefined} className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Advance deduction requires one location row per Workforce member. Send Notification requires every publishable location row for that ID." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
         </PayoutActionMenu> : null}
-        {canEdit ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={sendNotification} title={!canPublishNotifications ? "Send Notification requires all-location access so every payout row for the DropX ID can be frozen together." : !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for notification; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Queuing…" : `Send Notification${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
+        {canEdit ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={sendNotification} title={!canPublishNotifications ? "Send Notification is unavailable for this account." : !canPublishPeriod ? "Send Notification is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for notification; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Queuing…" : `Send Notification${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" disabled={actionBusy} onClick={() => setSelected(new Set())} type="button">Clear selection</button>
       </div>
     </div> : showSelection ? <div className="payout-selection-hint">
@@ -1067,20 +1093,15 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
             const displayStatus = audience === "helpers" && row.status.trim().toLowerCase() === "ready for review"
               ? "Ready for Payment"
               : row.status;
-            const individualHoldWorkforceId = String(row.reviewSubjectId ?? "").trim().toLowerCase();
-            const individualHoldSources = audience === "workforce" ? workforcePayoutRowSourceIdentities(row) : [];
-            const individualHoldBlockedByProcessing = Boolean(individualHoldWorkforceId && processingHoldSubjectIds.has(individualHoldWorkforceId));
+            const individualHoldProfileId = String(row.reviewSubjectId ?? "").trim().toLowerCase();
+            const individualHoldTarget = payoutHoldSelectionTarget(row, audience, hasAllLocationAccess);
+            const individualHoldBlockedByProcessing = Boolean(individualHoldProfileId && processingHoldSubjectIds.has(individualHoldProfileId));
             const canManageIndividualHold = canProcessPayments
               && canViewPaymentHistory
               && Boolean(row.reviewSubjectId && row.locationId && row.paymentSummary)
+              && Boolean(individualHoldTarget)
               && canChangePayoutHold(row)
               && !individualHoldBlockedByProcessing;
-            const individualHoldItem = {
-              workforceId: individualHoldWorkforceId || undefined,
-              sourceTargets: individualHoldSources,
-              dropxId: row.dropxId,
-              name: row.name
-            };
             const hasRowAdvanceSelectionConflict = Boolean(row.reviewSubjectId && advanceSelectionConflictIds.has(row.reviewSubjectId));
             const selectionTitle = hasRowAdvanceSelectionConflict
                 ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Send Notification requires all publishable location rows."
@@ -1129,7 +1150,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                         {canManageIndividualHold ? <WorkforcePayoutBulkHold
                           audience={audience}
                           disabled={actionBusy && !individualHoldBusy}
-                          holdItems={isPayoutOnHold(row) ? [] : [individualHoldItem]}
+                          holdItems={isPayoutOnHold(row) || !individualHoldTarget ? [] : [individualHoldTarget]}
                           mode="single"
                           onBusyChange={setIndividualHoldBusy}
                           onCompleted={(action, changed) => setHoldNotice(action === "hold"
@@ -1137,7 +1158,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                             : changed ? `${row.dropxId || row.name} payment hold was released.` : `${row.dropxId || row.name} hold was already released.`)}
                           periodEnd={periodEnd}
                           periodStart={periodStart}
-                          releaseItems={isPayoutOnHold(row) ? [individualHoldItem] : []}
+                          releaseItems={isPayoutOnHold(row) && individualHoldTarget ? [individualHoldTarget] : []}
                         /> : null}
                         {canViewPaymentHistory && row.reviewSubjectId && row.locationId && row.paymentSummary ? <WorkforcePayoutPaymentHistoryButton audience={audience} canManageStatus={canProcessPayments} historyCount={row.paymentSummary.historyCount} periodEnd={periodEnd} periodStart={periodStart} stationId={row.locationId} subjectLabel={`${row.dropxId || row.name} · ${row.name} · ${row.location}`} workforceId={row.reviewSubjectId} /> : null}
                       </div>

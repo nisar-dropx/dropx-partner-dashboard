@@ -115,6 +115,26 @@ test("Workforce publication accepts configured zero payouts and verifies signed 
   assert.match(revalidator, /maxAttempts:\s*3/);
 });
 
+test("payout notification publication fails closed to the caller's location scope for Workforce and Helpers", () => {
+  const publisher = read("../app/api/payments/workforce-payouts/send-review/route.ts");
+  const workforceMigration = read("../../supabase/migrations/20261008010000_workforce_payout_app_notifications.sql");
+  const helperMigration = read("../../supabase/migrations/20261010200000_helper_payout_publication_notifications.sql");
+  const scopeCheck = publisher.indexOf("allowedLocationIds && normalized.some");
+  const helperBranch = publisher.indexOf('subjectTypes.has("helper")');
+
+  assert.match(
+    publisher,
+    /const allowedLocationScope = authorization\.hasAllLocationAccess[\s\S]*?authorization\.locationScopeIds[\s\S]*?\.filter\(\(locationId\) => UUID\.test\(locationId\)\)/,
+    "The route must normalize valid account locations and use an empty scoped list as deny-all."
+  );
+  assert.ok(scopeCheck >= 0 && scopeCheck < helperBranch, "Every submitted location must be checked before either population is processed.");
+  assert.match(publisher, /One or more selected payouts are outside your location scope/);
+  assert.equal(publisher.match(/p_locations: allowedLocationScope/g)?.length, 2, "Both publication RPCs must receive the same caller scope.");
+  assert.doesNotMatch(publisher, /Send Notification requires all-location access/);
+  assert.match(workforceMigration, /p_locations is not null and not \(item_location = any\(p_locations\)\)/);
+  assert.match(helperMigration, /p_locations is not null and not \(item_location = any\(p_locations\)\)/);
+});
+
 test("a continuously updating full worksheet remains usable but cannot publish before selected-ID revalidation", () => {
   const page = read("../app/payments/workforce-payouts/page.tsx");
   const publisher = read("../app/api/payments/workforce-payouts/send-review/route.ts");

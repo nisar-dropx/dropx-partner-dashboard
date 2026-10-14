@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
+import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { readAllRows } from "@/lib/supabase-pagination";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -84,6 +86,73 @@ function bulkHoldOperationId(operationId: string, workforceId: string, action: s
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-${variant}${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 
+function immutableLocationsAreInScope(authorization: AuthorizationContext, locationIds: unknown[]) {
+  if (authorization.hasAllLocationAccess) return true;
+  const allowed = new Set(authorization.locationScopeIds.map((id) => String(id).trim().toLowerCase()));
+  return locationIds.length > 0 && locationIds.every((value) => {
+    const locationId = String(value ?? "").trim().toLowerCase();
+    return UUID.test(locationId) && allowed.has(locationId);
+  });
+}
+
+async function paymentItemsScopeError({
+  audience,
+  authorization,
+  companyId,
+  paymentItemIds
+}: {
+  audience: PayoutAudience;
+  authorization: AuthorizationContext;
+  companyId: string;
+  paymentItemIds: string[];
+}) {
+  if (authorization.hasAllLocationAccess) return null;
+  const table = audience === "helpers" ? "helper_payout_payment_items" : "workforce_payout_payment_items";
+  const results = await mapWithConcurrency(
+    chunkedValues(paymentItemIds, 200),
+    4,
+    (ids) => readAllRows(supabaseAdmin!
+      .from(table)
+      .select("id,location_id_snapshot")
+      .eq("company_id", companyId)
+      .in("id", ids)
+      .order("id"))
+  );
+  const databaseError = results.find((result) => result.error)?.error;
+  if (databaseError) return errorResponse("The selected payment locations could not be authorized.", 503);
+  const rows = results.flatMap((result) => result.data ?? []);
+  const resolvedIds = new Set(rows.map((row) => String(row.id ?? "").trim().toLowerCase()));
+  if (resolvedIds.size !== paymentItemIds.length || paymentItemIds.some((id) => !resolvedIds.has(id))
+    || !immutableLocationsAreInScope(authorization, rows.map((row) => row.location_id_snapshot))) {
+    return errorResponse("One or more selected payments are outside your location scope.", 403);
+  }
+  return null;
+}
+
+async function companyStationsScopeError({
+  authorization,
+  companyId,
+  stationIds
+}: {
+  authorization: AuthorizationContext;
+  companyId: string;
+  stationIds: string[];
+}) {
+  if (authorization.hasAllLocationAccess || !stationIds.length) return null;
+  const requestedIds = [...new Set(stationIds.map((id) => id.trim().toLowerCase()))];
+  const result = await supabaseAdmin!
+    .from("stations")
+    .select("id")
+    .eq("company_id", companyId)
+    .in("id", requestedIds);
+  if (result.error) return errorResponse("The selected payout locations could not be authorized.", 503);
+  const immutableIds = (result.data ?? []).map((station) => station.id);
+  if (immutableIds.length !== requestedIds.length || !immutableLocationsAreInScope(authorization, immutableIds)) {
+    return errorResponse("One or more selected payouts are outside your location scope.", 403);
+  }
+  return null;
+}
+
 async function processingPayoutSubjectIds({
   audience,
   companyId,
@@ -143,9 +212,6 @@ export async function POST(request: Request) {
     if (authorization.readOnly || !hasPermission(authorization, pageCode, "edit") || !canUsePaymentActions) {
       return errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403);
     }
-    if (!authorization.hasAllLocationAccess) {
-      return errorResponse("Workforce payment status changes require all-location access.", 403);
-    }
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
 
     let body: Record<string, unknown>;
@@ -191,6 +257,13 @@ export async function POST(request: Request) {
       if (!validDate(valueDate)) return errorResponse("Enter a valid payment value date.", 400);
       if (!utrCin) return errorResponse("Enter a meaningful UTR/CIN for this payment.", 400);
       if (!bankRemarks || bankRemarks.length < 3) return errorResponse("Enter bank processing remarks of at least 3 characters.", 400);
+      const scopeError = await paymentItemsScopeError({
+        audience,
+        authorization,
+        companyId,
+        paymentItemIds: [paymentItemId]
+      });
+      if (scopeError) return scopeError;
       const rpcParameters = {
         p_company_id: companyId,
         p_actor_user_id: authorization.userId,
@@ -225,6 +298,13 @@ export async function POST(request: Request) {
         if (new Set(paymentItemIds).size !== paymentItemIds.length) {
           return errorResponse("Each processing payment may be selected only once.", 400);
         }
+        const scopeError = await paymentItemsScopeError({
+          audience,
+          authorization,
+          companyId,
+          paymentItemIds
+        });
+        if (scopeError) return scopeError;
         const rpcParameters = {
           p_company_id: companyId,
           p_actor_user_id: authorization.userId,
@@ -242,6 +322,13 @@ export async function POST(request: Request) {
       }
       const paymentItemId = String(body.paymentItemId ?? "").trim().toLowerCase();
       if (!UUID.test(paymentItemId)) return errorResponse("A valid processing payment is required.", 400);
+      const scopeError = await paymentItemsScopeError({
+        audience,
+        authorization,
+        companyId,
+        paymentItemIds: [paymentItemId]
+      });
+      if (scopeError) return scopeError;
       const rpcParameters = {
         p_company_id: companyId,
         p_actor_user_id: authorization.userId,
@@ -286,6 +373,18 @@ export async function POST(request: Request) {
     if (sourceTargets.length && audience !== "workforce") {
       return errorResponse("Provider payout source holds are available only for Workforce payments.", 400);
     }
+    // Profile holds follow a person across present and future locations. A
+    // location-scoped editor may therefore mutate only the exact provider
+    // source visible at an authorised station, never a profile-wide target.
+    if (!authorization.hasAllLocationAccess && workforceIds.length) {
+      return errorResponse("Profile-wide payment holds require all-location access.", 403);
+    }
+    const sourceScopeError = await companyStationsScopeError({
+      authorization,
+      companyId,
+      stationIds: sourceTargets.map((source) => source.station_id)
+    });
+    if (sourceScopeError) return sourceScopeError;
     const processingIds = workforceIds.length
       ? await processingPayoutSubjectIds({ audience, companyId, periodEnd, periodStart, workforceIds })
       : new Set<string>();

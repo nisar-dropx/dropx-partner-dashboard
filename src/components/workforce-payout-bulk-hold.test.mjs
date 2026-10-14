@@ -4,19 +4,43 @@ import test from "node:test";
 
 const component = readFileSync(new URL("./workforce-payout-bulk-hold.tsx", import.meta.url), "utf8");
 const table = readFileSync(new URL("./workforce-payout-table.tsx", import.meta.url), "utf8");
+const page = readFileSync(new URL("../app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
 const historyButton = readFileSync(new URL("./workforce-payout-payment-history-button.tsx", import.meta.url), "utf8");
 const paymentStatusRoute = readFileSync(new URL("../app/api/payments/workforce-payouts/payment-status/route.ts", import.meta.url), "utf8");
 
-test("selected multi-location Workforce rows are deduplicated into profile hold targets", () => {
+test("all-location Workforce rows retain profile-wide deduplicated hold targets", () => {
   assert.match(table, /const targets = new Map<string,/);
+  assert.match(table, /if \(!hasAllLocationAccess\) \{[\s\S]*?\}\s*if \(!workforceId && !sourceTargets\.length\) return null;[\s\S]*?workforceId: workforceId \|\| undefined/);
   assert.match(table, /const targetKey = workforceId[\s\S]*?`workforce:\$\{workforceId\}`[\s\S]*?rowSourceTargets/);
   assert.match(table, /targets\.set\(targetKey,/);
   assert.match(table, /const uniqueTargets = \[\.\.\.targets\.values\(\)\]/);
   assert.match(table, /holdItems: uniqueTargets\.filter\(\(target\) => !target\.onHold\)/);
   assert.match(table, /releaseItems: uniqueTargets\.filter\(\(target\) => target\.onHold\)/);
   assert.match(table, /canChangePayoutHold\(row\)/);
-  assert.match(table, /processingHoldSubjectIds\.has\(workforceId\)/);
+  assert.match(table, /processingHoldSubjectIds\.has\(profileWorkforceId\)/);
   assert.match(table, /normalizedPayoutStatus\(row\.paymentSummary\?\.status \?\? row\.status\) === "payment processing"/);
+});
+
+test("scoped provider-backed rows use only their visible station source for hold and unhold", () => {
+  assert.match(page, /hasAllLocationAccess=\{authorization\.hasAllLocationAccess\}/);
+  assert.match(table, /hasAllLocationAccess = false/);
+  assert.match(table, /return audience === "workforce" && sourceTargets\.length[\s\S]*?\{ workforceId: undefined, sourceTargets, dropxId: row\.dropxId, name: row\.name \}[\s\S]*?: null/);
+  assert.match(table, /const holdTarget = payoutHoldSelectionTarget\(row, audience, hasAllLocationAccess\)/);
+  assert.match(table, /if \(!holdTarget\) return;/);
+  assert.match(table, /const workforceId = holdTarget\.workforceId \?\? ""/);
+  assert.match(table, /const targetKey = workforceId[\s\S]*?: `source:\$\{rowSourceTargets\.map\(workforcePayoutSourceIdentityKey\)\.sort\(\)\.join\("\|"\)\}`/);
+  assert.match(table, /const individualHoldTarget = payoutHoldSelectionTarget\(row, audience, hasAllLocationAccess\)/);
+  assert.match(table, /Boolean\(individualHoldTarget\)[\s\S]*?canChangePayoutHold\(row\)/);
+  assert.match(table, /holdItems=\{isPayoutOnHold\(row\) \|\| !individualHoldTarget \? \[\] : \[individualHoldTarget\]\}/);
+  assert.match(component, /audience === "workforce" && \(action === "release_hold" \|\| !item\.workforceId\) \? item\.sourceTargets : \[\]/);
+});
+
+test("scoped direct-pay Workforce and Helper rows expose no hold target or control", () => {
+  assert.match(table, /const sourceTargets = audience === "workforce" \? workforcePayoutRowSourceIdentities\(row\) : \[\]/);
+  assert.match(table, /if \(!hasAllLocationAccess\)[\s\S]*?return audience === "workforce" && sourceTargets\.length[\s\S]*?: null/);
+  assert.match(table, /canChangePayoutHold\(row\) && Boolean\(payoutHoldSelectionTarget\(row, audience, hasAllLocationAccess\)\)/);
+  assert.match(table, /Boolean\(individualHoldTarget\)/);
+  assert.match(table, /audience === "workforce" && \(hasAllLocationAccess \|\| holdSelections\.holdItems\.length > 0 \|\| holdSelections\.releaseItems\.length > 0\) \? <WorkforcePayoutBulkHold/);
 });
 
 test("bulk hold and unhold submit one audited Workforce profile selection", () => {
@@ -47,6 +71,18 @@ test("the payment status route uses the atomic Workforce bulk hold RPC and rejec
   assert.match(paymentStatusRoute, /rpc\("workforce_set_payout_combined_payment_holds"/);
   assert.match(paymentStatusRoute, /p_workforce_ids: workforceIds/);
   assert.match(paymentStatusRoute, /p_sources: sourceTargets/);
+});
+
+test("scoped editors cannot submit profile-wide Workforce or Helper holds", () => {
+  assert.match(paymentStatusRoute, /!authorization\.hasAllLocationAccess && workforceIds\.length/);
+  assert.match(paymentStatusRoute, /Profile-wide payment holds require all-location access/);
+  assert.doesNotMatch(paymentStatusRoute, /async function payoutSubjectsScopeError/);
+  assert.ok(
+    paymentStatusRoute.indexOf("!authorization.hasAllLocationAccess && workforceIds.length")
+      < paymentStatusRoute.indexOf('rpc("workforce_set_payout_combined_payment_holds"'),
+    "profile-wide requests must be rejected before any hold RPC"
+  );
+  assert.match(paymentStatusRoute, /companyStationsScopeError\(\{[\s\S]*?stationIds: sourceTargets\.map\(\(source\) => source\.station_id\)/);
 });
 
 test("report-only source rows can be held and mapped source holds can be released", () => {

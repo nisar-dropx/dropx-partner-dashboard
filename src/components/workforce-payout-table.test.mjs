@@ -60,6 +60,6 @@ test("payout overview consolidates columns and moves history controls into the e
 test("individual hold and unhold live beside row history instead of inside payment history", () => {
   assert.match(source, /const canManageIndividualHold = canProcessPayments[\s\S]*?canViewPaymentHistory[\s\S]*?canChangePayoutHold\(row\)[\s\S]*?!individualHoldBlockedByProcessing/);
   assert.match(source, /canManageIndividualHold \? <WorkforcePayoutBulkHold[\s\S]*?mode="single"/);
-  assert.match(source, /holdItems=\{isPayoutOnHold\(row\) \? \[\] : \[individualHoldItem\]\}/);
-  assert.match(source, /releaseItems=\{isPayoutOnHold\(row\) \? \[individualHoldItem\] : \[\]\}/);
+  assert.match(source, /holdItems=\{isPayoutOnHold\(row\) \|\| !individualHoldTarget \? \[\] : \[individualHoldTarget\]\}/);
+  assert.match(source, /releaseItems=\{isPayoutOnHold\(row\) && individualHoldTarget \? \[individualHoldTarget\] : \[\]\}/);
 });
