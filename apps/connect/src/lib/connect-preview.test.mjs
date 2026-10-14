@@ -17,11 +17,19 @@ function fixture({owner=true,role='admin',designation=null,expired=false,revoked
  const tables={connect_login_sessions:[{id:'session',country_code:'91',mobile_number:'911234567890',expires_at:new Date(Date.now()+(expired?-1000:86400000)).toISOString(),revoked_at:revoked?'now':null,session_hash:createHash('sha256').update('private-session-token').digest('hex')}],profiles:[{id:'actor',company_id:company,is_active:true,is_master_owner:owner,role_id:'role',mobile:'1234567890',mobile_country_code:'91'}],user_roles:[{id:'role',company_id:company,code:role,is_active:true}],workforce:[{id:target.id,company_id:otherCompany?'33333333-3333-3333-3333-333333333333':company,is_active:true,mobile:'9999999999',mobile_country_code:'91',deleted_at:null}]};
  const db={from(table){let rows=[...(tables[table]||[])],single=false;const q={select(){return q},eq(k,v){rows=rows.filter(r=>r[k]===v);return q},in(k,vs){rows=rows.filter(r=>vs.includes(r[k]));return q},is(k,v){rows=rows.filter(r=>(r[k]??null)===v);return q},or(){return q},order(){return q},limit(){return q},maybeSingle(){single=true;return q},then(resolve,reject){return Promise.resolve({data:single?rows[0]??null:rows,error:null}).then(resolve,reject)}};return q}};
  const api=load('./connect-preview.ts',{'server-only':{},crypto:{createHash},'next/headers':{cookies:()=>({get:k=>jar.has(k)?{value:jar.get(k)}:undefined})},react:{cache:f=>f},'./supabase-admin':{supabaseAdmin:db},'./connect-auth':{connectSessionCookieName:'dropx_connect_session',findConnectPreviewAccounts:async(_c,m)=>m==='911234567890'?[own]:[selected,{...selected,id:'different-role',profileType:'contractor'}]},'./connect-preview-policy':policy,'./connect-preview-cookie':signing});
- return {...api,jar,tables,selected};
+ return {...api,jar,tables,selected,own};
 }
-test('eligibility is limited to owner, Tech and active FSD/Finance Manager designation codes',()=>{
+test('eligibility includes HR Head codes without granting general HR or display-name access',()=>{
  for(const input of [[true,null,null],[false,'OWNER',null],[false,'TECH',null],[false,null,'FSD'],[false,null,'FINMGR']])assert.equal(policy.previewRoleAllowed(...input),true);
- for(const input of [[false,'admin',null],[false,'HR',null],[false,'FINANCE_HEAD',null],[false,'OPERATIONS_TECH',null],[false,null,'DA']])assert.equal(policy.previewRoleAllowed(...input),false);
+ for(const code of ['HRM','HR_HEAD','PEOPLE_HRM','OPERATIONS_HRM','WORKFORCE_HRM','RECRUIT_HRM']){
+  assert.equal(policy.previewRoleAllowed(false,null,code),true,`designation ${code}`);
+  assert.equal(policy.previewRoleAllowed(false,code,null),true,`role ${code}`);
+ }
+ assert.equal(policy.previewRoleAllowed(false,'HR_HAEAD',null),true);
+ for(const code of ['admin','HR','HRE','HR_EXECUTIVE','HR_MANAGER','PEOPLE_HEAD','HR Head','FINANCE_HEAD','OPERATIONS_TECH','DA',null]){
+  assert.equal(policy.previewRoleAllowed(false,code,null),false,`role ${code}`);
+  assert.equal(policy.previewRoleAllowed(false,null,code),false,`designation ${code}`);
+ }
 });
 test('signed preview expires, rejects tampering and is bound to original session',()=>{
  const signed=signing.signPreview(target,'token',1000);assert.deepEqual({...signing.readPreview(signed,'token',2000),expiresAt:undefined},{...target,expiresAt:undefined});
@@ -32,6 +40,63 @@ test('actor authorization uses original session and denies expired/revoked/ordin
  for(const options of [{expired:true},{revoked:true}])assert.equal(await fixture(options).getConnectPreviewActor(),null);
  assert.deepEqual((await fixture({owner:false}).getConnectPreviewActor()).companyIds,[]);
  for(const options of [{},{owner:false,role:'TECH'},{owner:false,designation:'FINMGR'}])assert.deepEqual((await fixture(options).getConnectPreviewActor()).companyIds,[company]);
+});
+test('HR Head preview uses the active original actor and remains company-scoped and read-only',async()=>{
+ for(const options of [{designation:'HRM'},{designation:'HR_HEAD'},{role:'HR_HAEAD'},{role:'HR_HEAD'}]){
+  const f=fixture({owner:false,...options});
+  const actor=await f.getConnectPreviewActor();
+  assert.deepEqual(actor.companyIds,[company]);
+  assert.equal((await f.loadPreviewAccount(target,actor)).readOnlyPreview,true);
+  await assert.rejects(f.loadPreviewAccount({...target,companyId:'33333333-3333-3333-3333-333333333333'},actor));
+  for(const invalid of [{expired:true},{revoked:true}])assert.equal(await fixture({owner:false,...options,...invalid}).getConnectPreviewActor(),null);
+ }
+ const f=fixture({owner:false,designation:'HRM'});
+ for(const profileType of ['employee','contractor']){
+  f.own.profileType=profileType;
+  assert.deepEqual((await f.getConnectPreviewActor()).companyIds,[company]);
+ }
+ for(const profileType of ['workforce','vendor','user']){
+  f.own.profileType=profileType;
+  assert.deepEqual((await f.getConnectPreviewActor()).companyIds,[]);
+ }
+ f.own.profileType='employee';
+ const other={...f.own,companyId:'33333333-3333-3333-3333-333333333333',designationCode:'HRE'};
+ assert.deepEqual((await f.getConnectPreviewActor([f.own,other])).companyIds,[company]);
+});
+test('HR Head access is revoked when its designation, active role, or active profile is removed',async()=>{
+ const signed=signing.signPreview(target,'private-session-token');
+ const designation=fixture({owner:false,designation:'HRM',preview:signed});
+ assert.equal((await designation.resolveConnectPreview()).id,target.id);
+ designation.own.designationCode='HRE';
+ await assert.rejects(designation.resolveConnectPreview());
+ for(const invalidate of [
+  f=>{f.tables.user_roles[0].is_active=false},
+  f=>{f.tables.user_roles[0].company_id='33333333-3333-3333-3333-333333333333'},
+  f=>{f.tables.user_roles[0].code='HRE'},
+  f=>{f.tables.profiles[0].is_active=false},
+  f=>{f.tables.profiles[0].role_id=null},
+ ]){
+  const f=fixture({owner:false,role:'HR_HAEAD',preview:signed});
+  assert.equal((await f.resolveConnectPreview()).id,target.id);
+  invalidate(f);
+  assert.deepEqual((await f.getConnectPreviewActor()).companyIds,[]);
+  await assert.rejects(f.resolveConnectPreview());
+ }
+});
+test('HR Head capability reaches the UI API and disappears after the role changes',async()=>{
+ const f=fixture({owner:false,designation:'HRM'});
+ const api=load('../../app/api/connect/preview/route.ts',{
+  'next/headers':{cookies:()=>({})},
+  'next/server':{NextResponse:{json:(body,options)=>Response.json(body,options)}},
+  '@/lib/connect-preview':f,
+  '@/lib/connect-preview-policy':policy,
+  '@/lib/connect-preview-cookie':signing,
+ });
+ const req=query=>({nextUrl:new URL(`https://one.example/api/connect/preview?${query}`)});
+ assert.deepEqual(await (await api.GET(req('capabilities=1'))).json(),{canPreviewUsers:true});
+ f.own.designationCode='HRE';
+ assert.deepEqual(await (await api.GET(req('capabilities=1'))).json(),{canPreviewUsers:false});
+ assert.equal((await api.GET(req('q=DA'))).status,403);
 });
 test('target resolution preserves profile type, denies cross-company and inactive targets, and excludes beta',async()=>{
  const f=fixture();const actor=await f.getConnectPreviewActor();const account=await f.loadPreviewAccount(target,actor);

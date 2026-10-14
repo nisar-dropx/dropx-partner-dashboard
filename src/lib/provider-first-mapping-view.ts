@@ -416,6 +416,18 @@ export function providerFirstRowForMappingPeriod(
   };
 }
 
+/** A cross-location anchor cannot validate a period until the user supplies dates. */
+export function providerFirstLocationNeedsDates(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView | undefined
+) {
+  if (!worker || worker.id !== row.workforceId || row.effectiveFrom
+    || !worker.profileStationId || row.stationId === worker.profileStationId) return false;
+  return registeredWorkerMappings(worker).some((mapping) =>
+    Boolean(mapping.mappingId) && mappingIdentityMatchesRow(mapping, row)
+  );
+}
+
 /**
  * A Provider ID may be retained at a second location only when the selected
  * DropX profile already has that exact provider/member identity mapped at its
@@ -454,18 +466,6 @@ export function providerFirstLocationIsAllowed(
       mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
     );
     return historicalMatch || !currentMappings.length || currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row));
-  }
-  // Selecting a DropX ID happens before the operator chooses the requested
-  // period. At that point an exact, valid registered-location mapping is
-  // sufficient evidence for the additional-location workflow; there is no
-  // requested interval to compare yet. As soon as a start date is entered,
-  // the normal full-period containment rule below applies unchanged.
-  if (!String(row.effectiveFrom ?? "").trim()) {
-    return registeredWorkerMappings(worker).some((mapping) =>
-      Boolean(mapping.mappingId)
-        && mapping.stationId === registeredStationId
-        && mappingIdentityMatchesRow(mapping, row)
-    );
   }
   return registeredWorkerMappings(worker).some((mapping) =>
     Boolean(mapping.mappingId)
@@ -757,6 +757,7 @@ export function providerFirstRowIssue(
   if (mappingReference && !mappingIdentityMatchesRow(mappingReference, row)) {
     return "This DropX ID is already mapped to another Provider or Provider Member ID.";
   }
+  if (providerFirstLocationNeedsDates(row, worker)) return "Enter Effective from to validate this location against the existing mapping.";
   if (!providerFirstLocationIsAllowed(row, worker)) return "Location mismatch.";
   if (!providerFirstNamesMatch(row.providerMemberName, row.dropxName)) return "Name mismatch.";
   if (!row.providerId) return "The selected location has no provider.";

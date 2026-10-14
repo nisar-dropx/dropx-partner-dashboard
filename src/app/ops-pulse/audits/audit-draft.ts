@@ -1,7 +1,7 @@
 /**
  * Keeps an in-progress audit form on this device so a closed dialog, a refresh or a
- * dropped connection does not lose the auditor's entries. Attached files cannot be
- * stored and have to be chosen again.
+ * dropped connection does not lose the auditor's entries. Attached files are not part
+ * of this copy; Save draft uploads them to the audit as saved proof instead.
  */
 type DraftField = { name: string; index: number; value?: string; checked?: boolean };
 export type AuditFormDraft<Extra> = { savedAt: string; fields: DraftField[]; extra: Extra };

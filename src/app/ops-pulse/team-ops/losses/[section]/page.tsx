@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { OpsLossReport, type LossTab } from "@/components/ops-loss-report";
 import { requirePagePermission } from "@/lib/authorization";
-import { loadLossReport } from "@/lib/ops-pulse/loss-reports";
+import { loadLossReport, type LossReportKind } from "@/lib/ops-pulse/loss-reports";
 import {
   loadRecoveryView,
   lossSchemaReady,
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 /** Sub-pages of Team Ops → Losses. Order = tab order. */
 const sections: Record<
   string,
-  { report: RecoveryKind; label: string; title: string; intro: string }
+  { report: RecoveryKind | Extract<LossReportKind, "potential_loss">; label: string; title: string; intro: string }
 > = {
   nl: {
     report: "nl",
@@ -38,6 +38,13 @@ const sections: Record<
     title: "SLP · Final recovery",
     intro:
       "The settled recovery for the period (EDSP SLP Final Recovery File).",
+  },
+  potential: {
+    report: "potential_loss",
+    label: "Potential Loss",
+    title: "Potential package loss",
+    intro:
+      "Amazon's daily list of packages at risk of becoming a loss (EDSP Daily_Potential Package Loss_Consolidated Report). Report only — nothing here is assigned for recovery.",
   },
 };
 const tabs: LossTab[] = Object.entries(sections).map(([key, s]) => ({
@@ -82,14 +89,15 @@ export default async function LossesSectionPage({
         />
       );
     }
-    if (await lossSchemaReady())
+    // Potential loss is a read-only report (no recovery ledger), so it always uses the plain listing.
+    if (section.report !== "potential_loss" && (await lossSchemaReady()))
       return (
         <NlLossReport
           view={await loadRecoveryView(auth, section.report, searchParams)}
           tabs={tabs}
         />
       );
-    // Read-only SLP listing until the recovery ledger migration is applied.
+    // Read-only listing: potential loss always; SLP until the recovery ledger migration is applied.
     return (
       <OpsLossReport
         title={section.title}

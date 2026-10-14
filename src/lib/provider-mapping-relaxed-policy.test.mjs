@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   providerFirstLocationIsAllowed,
+  providerFirstLocationNeedsDates,
   providerFirstLocationRemap,
   providerFirstMappingPeriodContains,
   providerFirstMappingReferenceForRow,
@@ -175,9 +176,11 @@ test("location validation waits for a start date when an exact registered mappin
     effectiveTo: ""
   };
 
-  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, baseWorker), true);
+  assert.equal(providerFirstLocationNeedsDates(awaitingStartDate, baseWorker), true);
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, baseWorker), false);
   assert.equal(providerFirstLocationRemap(awaitingStartDate, baseWorker), null);
-  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, historicalWorker), true);
+  assert.equal(providerFirstLocationNeedsDates(awaitingStartDate, historicalWorker), true);
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, historicalWorker), false);
   assert.equal(providerFirstLocationRemap(awaitingStartDate, historicalWorker), null);
   assert.equal(providerFirstLocationIsAllowed({
     ...awaitingStartDate,

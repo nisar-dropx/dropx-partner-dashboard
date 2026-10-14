@@ -9,6 +9,8 @@ import {
   isScientificProviderMemberId,
   providerFirstPageWindow,
   providerFirstLocationRemap,
+  providerFirstLocationNeedsDates,
+  providerFirstLocationIsAllowed,
   providerFirstMappingReferenceForRow,
   providerFirstMappingReplacement,
   providerFirstMappingReplacementMessage,
@@ -23,6 +25,27 @@ import {
   providerSourceMemberKey,
   scientificProviderIdCouldRepresent
 } from "./provider-first-mapping-view.ts";
+
+test('legacy DropX prefixes do not block a parent/XPT mapping; missing dates get a specific prompt', () => {
+  const parentMapping = { mappingId: 'parent-mapping', stationId: 'JUGD-id', locationLabel: 'JUGD',
+    providerId: 'amazon', mappedProviderMemberId: '2000051462860', effectiveFrom: '2026-09-01', effectiveTo: '', status: 'active' };
+  const person = { id: 'pritam', dropxId: 'SDGH140021', fullName: 'PRITAM KUMAR BHAISAL',
+    profileStationId: 'JUGD-id', profileLocationLabel: 'JUGD', stationId: 'JUGD-id',
+    registeredLocationMappings: [parentMapping], currentMappings: [parentMapping] };
+  const assignment = { workforceId: 'pritam', stationId: 'JUGF-id', stationLabel: 'JUGF',
+    relatedStationIds: ['JUGD-id','JUGF-id'], providerId: 'amazon', providerMemberId: '2000051462860',
+    effectiveFrom: '', effectiveTo: '' };
+  assert.equal(providerFirstLocationNeedsDates(assignment, person), true);
+  assert.match(providerFirstRowIssue(assignment, person), /Enter Effective from/);
+  assert.equal(providerFirstLocationIsAllowed(assignment, person), false);
+  const dated = {...assignment, effectiveFrom: '2026-10-01'};
+  assert.equal(providerFirstLocationNeedsDates(dated, person), false);
+  assert.equal(providerFirstLocationIsAllowed(dated, person), true);
+  assert.equal(providerFirstLocationRemap(dated, person)?.allowMove, false);
+  assert.equal(providerFirstLocationIsAllowed({...dated,effectiveFrom:'2026-08-01'}, person), false);
+  assert.equal(providerFirstLocationNeedsDates({...assignment,providerMemberId:'someone-else'}, person), false);
+  assert.equal(providerFirstLocationIsAllowed({...dated,providerMemberId:'someone-else'}, person), false);
+});
 
 const method = { id: "method-1", components: [{ code: "DELIVERY", label: "Delivery rate" }], productionThresholdConfig: null };
 const worker = {

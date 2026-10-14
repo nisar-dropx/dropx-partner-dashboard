@@ -12,8 +12,13 @@ export function validPreviewTarget(value: unknown): value is PreviewTarget {
     /^[0-9a-f-]{36}$/i.test(v.id) && /^[0-9a-f-]{36}$/i.test(v.companyId));
 }
 export function previewRoleAllowed(masterOwner: boolean, roleCode?: string | null, designationCode?: string | null) {
+  // HRM is the HR Head designation; the prefixed codes are the same seat in
+  // product access masters. Do not grant access from a display name or general HR role.
+  const hrHeadCodes = ["HRM", "HR_HEAD", "PEOPLE_HRM", "OPERATIONS_HRM", "WORKFORCE_HRM", "RECRUIT_HRM"];
+  const hrHead = hrHeadCodes.includes(designationCode ?? "") ||
+    hrHeadCodes.includes(roleCode ?? "") || roleCode === "HR_HAEAD"; // Existing access-master spelling.
   return masterOwner || roleCode === "OWNER" || roleCode === "TECH" ||
-    designationCode === "FSD" || designationCode === "FINMGR";
+    designationCode === "FSD" || designationCode === "FINMGR" || hrHead;
 }
 export function blocksPreviewMutation(method: string, path: string, preview: boolean) {
   return preview && !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase()) &&

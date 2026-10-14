@@ -5,7 +5,9 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 
 /** Written by nl-loss-cloak-worker (loss_report_* tables). */
-export type LossReportKind = "nl" | "slp_initial" | "slp_final";
+export type LossReportKind = "nl" | "slp_initial" | "slp_final" | "potential_loss";
+/** Potential loss: `?period=all` shows every kept daily snapshot; no period = the newest. */
+export const ALL_SNAPSHOTS = "all";
 
 export type LossRun = {
   id: string;
@@ -39,7 +41,7 @@ export type LossReportView = {
   rows: LossRow[];
   selectedStation: string | null;
   scopedToAll: boolean;
-  /** SLP only: file periods (newest first) and the one being viewed (null = all). */
+  /** SLP / potential loss: file periods or daily snapshots (newest first) and the one being viewed (null = all). */
   periods: string[];
   selectedPeriod: string | null;
 };
@@ -112,8 +114,11 @@ export async function loadLossReport(auth: AuthorizationContext, report: LossRep
     const all = (result.data ?? []) as Array<{ station_code: string | null; amount: number | null; period: string | null; impact_date: string | null }>;
     const latestByPeriod = new Map<string, string>();
     for (const r of all) if (r.period) latestByPeriod.set(r.period, [latestByPeriod.get(r.period) ?? "", r.impact_date ?? ""].sort().pop()!);
-    periods = [...latestByPeriod.entries()].sort((x, y) => y[1].localeCompare(x[1])).map(([p]) => p);
+    periods = report === "potential_loss"
+      ? [...latestByPeriod.keys()].sort().reverse() // snapshot dates (YYYY-MM-DD)
+      : [...latestByPeriod.entries()].sort((x, y) => y[1].localeCompare(x[1])).map(([p]) => p);
     selectedPeriod = period && periods.includes(period) ? period : null;
+    if (report === "potential_loss" && !period) selectedPeriod = periods[0] ?? null;
     const agg = new Map<string, { row_count: number; total_amount: number }>();
     for (const r of all) {
       if (selectedPeriod && r.period !== selectedPeriod) continue;
@@ -138,4 +143,21 @@ export async function loadLossReport(auth: AuthorizationContext, report: LossRep
     rows = (rowResult.data ?? []) as LossRow[];
   }
   return { run, lastFailure, totals, rows, selectedStation: selectedAllowed, scopedToAll: codes === null, periods, selectedPeriod };
+}
+
+/** Every potential-loss case the user may see for one snapshot (null = all kept), for the Excel / CSV download. */
+export async function loadPotentialLossRows(auth: AuthorizationContext, period: string | null): Promise<{ headers: string[]; rows: LossRow[] }> {
+  if (!supabaseAdmin) throw new Error("Database is unavailable.");
+  const companyId = requireCompanyId(auth);
+  const [{ codes }, runResult] = await Promise.all([
+    allowedStations(auth, companyId),
+    supabaseAdmin.from("loss_report_runs").select("headers").eq("report", "potential_loss").eq("status", "completed").order("started_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  if (codes && !codes.size) return { headers: [], rows: [] };
+  let q = supabaseAdmin.from("loss_cases").select(CASE_COLUMNS).eq("report", "potential_loss");
+  if (period) q = q.eq("period", period);
+  if (codes) q = q.in("station_code", [...codes]);
+  const result = await readAllRows(q.order("period", { ascending: false }).order("station_code").order("amount", { ascending: false, nullsFirst: false }));
+  if (result.error) throw new Error("Potential loss cases could not be loaded.");
+  return { headers: (runResult.data?.headers as string[] | undefined) ?? [], rows: (result.data ?? []) as LossRow[] };
 }

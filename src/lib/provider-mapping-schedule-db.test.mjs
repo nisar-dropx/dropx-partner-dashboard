@@ -84,6 +84,21 @@ test('payment plans save atomically, preserve payroll locks and reject concurren
  const company=id(1),worker=id(2),station=id(3),provider=id(4),actor=id(5),method=id(6);
  await db.query('insert into workforce(id,company_id,location_id) values($1,$2,$3)',[worker,company,station]);
  await db.query('insert into stations(id,company_id,provider_id) values($1,$2,$3)',[station,company,provider]);
+ // Simulate an attendance reconciliation holding the biometric assignment
+ // lease. A payment-only save must not enter the guarded assignment at all.
+ await db.exec(`
+   alter table workforce add column biometric_id text, add column date_of_join date;
+   create schema auth;
+   create function auth.uid() returns uuid language sql as $$ select null::uuid $$;
+   create function public.replace_biometric_enrolment_assignment(uuid,uuid,text,uuid,uuid)
+   returns void language plpgsql as $$ begin
+     raise exception 'Attendance reconciliation owns the biometric lease' using errcode='55P03';
+   end $$;
+ `);
+ await db.exec(await migration('20261014062000_skip_unchanged_biometric_master_sync.sql'));
+ await db.exec(`create trigger workforce_biometric_enrolment_sync
+   after insert or update of biometric_id, location_id, is_active, date_of_join on workforce
+   for each row execute function public.sync_biometric_enrolment_from_master('field_executive')`);
  const period=(from,to,rate)=>({company_id:company,workforce_id:worker,provider_id:provider,station_id:station,provider_member_id:'111',effective_from:from,effective_to:to,payment_method_id:method,payment_values:{DELIVERY:rate},status:to?'closed':'active',pay_type:'PER_PACKET'});
  const versions=async()=>(await db.query('select id,updated_at from field_executive_provider_mappings where status <> $1',['cancelled'])).rows;
  const call=async(plan,expected,locations=null)=>db.query('select workforce_save_mapping_schedule($1,$2,$3,$4,$5::jsonb,$6::uuid[],$7,$8::jsonb) as records',[company,actor,worker,'DX1',JSON.stringify(plan),locations,'Real Reviewer',JSON.stringify(expected ?? await versions())]);
@@ -93,6 +108,11 @@ test('payment plans save atomically, preserve payroll locks and reject concurren
  assert.equal(result.rows[0].records[0].effective_to,'2026-10-31');
  assert.equal(result.rows[0].records[1].payment_values.DELIVERY,12);
  assert.equal((await db.query('select count(*)::int n from workforce_joining_events')).rows[0].n,2);
+ // The fix must not bypass reconciliation for genuine assignment changes.
+ for (const [column,value] of [['location_id',id(99)],['biometric_id','1234'],['is_active',true],['date_of_join','2026-10-01']]) {
+   await assert.rejects(db.query(`update workforce set ${column}=$1 where id=$2`,[value,worker]),/owns the biometric lease/);
+ }
+ await assert.rejects(db.query('insert into workforce(id,company_id,location_id) values($1,$2,$3)',[id(98),company,station]),/owns the biometric lease/);
  const before=await db.query('select * from field_executive_provider_mappings order by effective_from');
  // Reject whole plan when a later row overlaps another period; earlier row changes roll back.
  const overlap=[period('2026-10-01','2026-10-15',7),period('2026-10-16',null,8)];

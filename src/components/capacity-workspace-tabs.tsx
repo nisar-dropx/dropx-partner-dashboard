@@ -13,5 +13,6 @@ export function CapacityWorkspaceTabs({ active, allowed }: { active: CapacityWor
     {allowed.includes("overview") ? <PendingLink className={active === "overview" ? "active" : ""} disableWhenCurrent href={withScope("/ops-pulse/capacity")}>Capacity overview</PendingLink> : null}
     {allowed.includes("associates") ? <PendingLink className={active === "associates" ? "active" : ""} disableWhenCurrent href={withScope("/ops-pulse/capacity/associates")}>Associate SPR</PendingLink> : null}
     {allowed.includes("delivery") ? <PendingLink className={active === "delivery" ? "active" : ""} disableWhenCurrent href={withScope("/ops-pulse/performance/shipments")}>Delivery data</PendingLink> : null}
+    {allowed.includes("distance") ? <PendingLink className={active === "distance" ? "active" : ""} disableWhenCurrent href={withScope("/ops-pulse/capacity/distance")}>Distance &amp; Fuel</PendingLink> : null}
   </nav>;
 }

@@ -24,7 +24,10 @@ const kindFor = (field: string) =>
 /** Browsers often report no type for spreadsheets, so fall back to the file extension. */
 function auditFileType(field: string, file: File) {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  const supporting = field === "evidence_files" || field === "response_evidence";
+  const supporting =
+    field === "evidence_files" ||
+    field === "response_evidence" ||
+    field.startsWith("check_photo_");
   const type =
     proofMime.test(file.type)
       ? file.type
@@ -40,9 +43,18 @@ function auditFileType(field: string, file: File) {
   return type;
 }
 /** Stage files privately before the small report action, avoiding serverless body limits. */
+export type UploadedAuditFile = {
+  field: string;
+  evidenceId: string;
+  fileName: string;
+  contentType: string;
+  checklistItemId: string | null;
+  evidenceKind: string;
+};
 export async function uploadAuditFiles(
   data: FormData,
   onProgress?: (done: number, total: number) => void,
+  onUploaded?: (file: UploadedAuditFile) => void,
 ) {
   const fields = Array.from(
     new Set([
@@ -122,6 +134,17 @@ export async function uploadAuditFiles(
         `assessment_evidence_${field.slice("assessment_proof_".length)}`,
         completed.evidenceId,
       );
+    const checklistItemId = field.startsWith("check_photo_")
+      ? field.slice("check_photo_".length)
+      : null;
+    onUploaded?.({
+      field,
+      evidenceId: completed.evidenceId,
+      fileName: file.name,
+      contentType,
+      checklistItemId,
+      evidenceKind: checklistItemId ? "checklist_photo" : kind,
+    });
     onProgress?.(++done, files.length);
   };
   for (let index = 0; index < files.length; index += 3)

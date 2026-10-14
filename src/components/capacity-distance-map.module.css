@@ -1,0 +1,424 @@
+.card {
+  margin: 16px 0;
+  padding: 20px;
+  border: 1px solid #e5e9ef;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #fff, #faf7f9);
+  color: #223047;
+}
+.card header,
+.card header span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  justify-content: space-between;
+}
+.card header svg {
+  width: 19px;
+  color: #bd3b64;
+}
+.card header strong {
+  font-size: 15px;
+}
+.ready,
+.pending {
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 20px;
+  background: #e9f5ef;
+  color: #267b5b;
+}
+.pending {
+  background: #fff2df;
+  color: #97611c;
+}
+.fuelTotals {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 22px 0;
+}
+.fuelTotals > div {
+  display: grid;
+  gap: 7px;
+}
+.fuelTotals small,
+.legs small,
+.hint,
+.updated {
+  font-size: 12px;
+  color: #687589;
+  line-height: 1.6;
+}
+.fuelTotals strong {
+  font-size: 24px;
+  letter-spacing: -0.6px;
+}
+.fuelTotals strong small {
+  font-size: 12px;
+}
+.fuelTotals > span {
+  color: #a4acb7;
+}
+.legs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  border-top: 1px solid #e6e9ef;
+  padding-top: 16px;
+}
+.legs span {
+  display: grid;
+  gap: 4px;
+}
+.legs b {
+  font-size: 15px;
+}
+.hint {
+  margin: 14px 0;
+}
+.pendingNote {
+  padding: 12px;
+  background: #fff6e9;
+  color: #83541c;
+  font-size: 13px;
+  line-height: 1.6;
+  border-radius: 10px;
+}
+.mapButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #edc8d6;
+  border-radius: 10px;
+  background: #fff3f7;
+  color: #a62f57;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.mapButton svg {
+  width: 18px;
+}
+.updated {
+  display: block;
+  margin-top: 12px;
+}
+.mapWrap {
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid #e0e5ec;
+  border-radius: 12px;
+  background: #fff;
+}
+.map {
+  display: block;
+  width: 100%;
+  background: #e9eef1;
+  touch-action: none;
+  cursor: grab;
+}
+.mapControls {
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.mapControls div {
+  display: flex;
+  gap: 5px;
+}
+.mapControls button {
+  min-width: 36px;
+  min-height: 36px;
+  border: 1px solid #e0e5ec;
+  border-radius: 7px;
+  background: white;
+  font: inherit;
+  cursor: pointer;
+}
+.mapFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 10px;
+  color: #637187;
+}
+.mapFooter a {
+  color: inherit;
+}
+.mapFooter b {
+  background: #15283d;
+  border-radius: 50%;
+  color: white;
+  padding: 3px 6px;
+}
+.stopDetail {
+  display: grid;
+  gap: 5px;
+  background: #f9f1f5;
+  padding: 14px;
+  font-size: 13px;
+}
+.stopDetail small {
+  color: #647187;
+}
+.mapWrap > .hint {
+  padding: 0 12px;
+}
+@media (max-width: 520px) {
+  .card {
+    padding: 14px;
+    border-radius: 13px;
+  }
+  .fuelTotals {
+    gap: 6px;
+  }
+  .fuelTotals strong {
+    font-size: 19px;
+  }
+  .fuelTotals small {
+    font-size: 10px;
+  }
+  .card header strong {
+    font-size: 13px;
+  }
+  .legs {
+    gap: 7px;
+  }
+  .legs small {
+    font-size: 10px;
+  }
+  .legs b {
+    font-size: 13px;
+  }
+  .mapControls {
+    flex-wrap: wrap;
+  }
+  .map {
+    min-height: 240px;
+  }
+  .mapFooter {
+    flex-wrap: wrap;
+  }
+  .mapButton {
+    font-size: 13px;
+  }
+}
+.mapFooter.mapFooter > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mapFooter.mapFooter > span > b {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  border-radius: 50%;
+}
+/* Route exploration stays local after the first account-scoped geometry read. */
+.mapWrap {
+  border-radius: 18px;
+  box-shadow: 0 8px 28px #14233a08;
+}
+.mapHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px !important;
+  background: #fff;
+}
+.mapHeading > div {
+  display: grid;
+  gap: 4px;
+}
+.mapHeading strong {
+  font-size: 16px !important;
+  color: #1d2b41;
+}
+.mapHeading span {
+  font-size: 13px;
+  color: #647087;
+}
+.mapHeading button,
+.mapZoom button,
+.stopNavigation button {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #dde3ec;
+  border-radius: 12px;
+  background: #fff;
+  color: #23334b;
+  cursor: pointer;
+  font: inherit;
+}
+.mapHeading button svg,
+.mapZoom svg,
+.stopNavigation svg {
+  width: 20px;
+  height: 20px;
+}
+.mapViewport {
+  position: relative;
+}
+.map:active {
+  cursor: grabbing;
+}
+.mapZoom {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: grid;
+  gap: 6px;
+  filter: drop-shadow(0 3px 6px #18243915);
+}
+.mapZoom button:disabled,
+.stopNavigation button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.mapGestureHint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: #fffffff0;
+  font-size: 12px;
+  color: #35455c;
+  pointer-events: none;
+}
+.stopNavigation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: #faf6f8;
+  border-top: 1px solid #eadfe5;
+}
+.stopNavigation > div {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  text-align: center;
+}
+.stopNavigation strong {
+  font-size: 15px;
+}
+.stopNavigation span {
+  font-size: 13px;
+  color: #58677d;
+}
+.mapFooter {
+  padding: 12px 16px;
+  font-size: 11px;
+  flex-wrap: wrap;
+  line-height: 1.5;
+}
+.mapDialog {
+  border: 0;
+  border-radius: 20px;
+  padding: 0;
+  width: min(1200px, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  background: #fff;
+  margin: auto;
+  box-shadow: 0 24px 100px #111b3540;
+}
+.mapDialog::backdrop {
+  background: #111b35aa;
+  backdrop-filter: blur(4px);
+}
+.mapDialog .mapWrap {
+  margin: 0;
+  border: 0;
+}
+.mapWrap button:focus-visible,
+.map:focus-visible,
+.map g:focus-visible {
+  outline: 3px solid #cf426e;
+  outline-offset: 3px;
+}
+.fuelTotals strong {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.4px;
+}
+.hint,
+.updated {
+  font-size: 13px;
+}
+.card header {
+  flex-wrap: wrap;
+}
+.card header strong {
+  font-size: 16px;
+}
+.ready,
+.pending {
+  font-size: 12px;
+}
+.fuelTotals small,
+.legs small {
+  font-size: 12px;
+}
+.mapButton {
+  font-size: 14px;
+  min-height: 48px;
+}
+@media (max-width: 520px) {
+  .fuelTotals {
+    flex-wrap: wrap;
+    row-gap: 16px;
+  }
+  .fuelTotals strong {
+    font-size: 19px;
+  }
+  .fuelTotals small,
+  .legs small {
+    font-size: 12px;
+  }
+  .card header strong {
+    font-size: 15px;
+  }
+  .legs {
+    gap: 10px;
+  }
+  .legs b {
+    font-size: 14px;
+  }
+  .mapHeading {
+    padding: 12px !important;
+  }
+  .mapHeading strong {
+    font-size: 15px !important;
+  }
+  .mapHeading span {
+    font-size: 12px;
+  }
+  .mapFooter {
+    padding: 10px 12px;
+  }
+  .mapDialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 16px;
+  }
+}

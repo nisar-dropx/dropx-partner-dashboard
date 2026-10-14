@@ -1,6 +1,7 @@
 "use client";
 
 import { useDeferredValue, useMemo, useState } from "react";
+import { Download, FileSpreadsheet, FileText, X } from "lucide-react";
 import { saveProviderFirstMappingsInline } from "@/app/provider-mapping/actions";
 import { ProviderMappingSchedule, type SavedScheduleMappings } from "@/components/provider-mapping-schedule";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
@@ -18,6 +19,7 @@ import {
   isScientificProviderMemberId,
   providerFirstNamesMatch,
   providerFirstLocationIsAllowed,
+  providerFirstLocationNeedsDates,
   providerFirstWorkerIsSelectable,
   providerFirstLocationRemap,
   providerFirstMappingReferenceForRow,
@@ -90,6 +92,9 @@ function appendRow(
   formData.set(`${prefix}[clear_mapping]`, !row.workforceId && row.mappingId ? "yes" : "");
   formData.set(`${prefix}[clear_workforce_id]`, clearWorkforceId);
 }
+
+type ExportFilters = { months: string[]; stations: string[]; methods: string[]; mapping: string[]; validation: string[] };
+const emptyExportFilters: ExportFilters = { months: [], stations: [], methods: [], mapping: [], validation: [] };
 
 type ReplacementSaveConfirmation = {
   indexes: number[];
@@ -208,6 +213,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const hasDirtyLocationMismatch = dirtyIndexes.some((index) => {
     const selectedWorker = workerById.get(rows[index].workforceId);
     return Boolean(rows[index].workforceId)
+      && !providerFirstLocationNeedsDates(rows[index], selectedWorker)
       && !providerFirstLocationIsAllowed(rows[index], selectedWorker);
   });
   const isSaving = savingIndexes.size > 0;
@@ -229,6 +235,11 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   }), [baselineRows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"xlsx" | "csv">("xlsx");
+  const [exportFilters, setExportFilters] = useState<ExportFilters>(emptyExportFilters);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const hasFilters = Boolean(query || monthFilters.length || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
 
   function resetPage() { setCurrentPage(1); }
@@ -241,6 +252,75 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     setMappingFilters([]);
     setValidationFilters([]);
     resetPage();
+  }
+
+  // The download dialog has its own filters, starting at "all", so a download is
+  // never silently limited by whatever the worksheet happens to be filtered to.
+  const exportIndexes = useMemo(() => exportOpen ? filterProviderFirstRowIndexes({
+    rows: baselineRows,
+    workerById,
+    paymentMethodById,
+    filters: {
+      outboundMonths: exportFilters.months,
+      query: "",
+      stationIds: exportFilters.stations,
+      paymentMethodIds: exportFilters.methods,
+      mappingStatuses: exportFilters.mapping,
+      validationStatuses: exportFilters.validation
+    }
+  }) : [], [exportOpen, baselineRows, workerById, paymentMethodById, exportFilters]);
+
+  function openExport() {
+    setExportFilters(emptyExportFilters);
+    setExportError("");
+    setExportOpen(true);
+  }
+
+  async function downloadMappings() {
+    setExporting(true);
+    setExportError("");
+    try {
+      const exportRows = exportIndexes.map((index) => baselineRows[index]);
+      const paymentKeys = Array.from(new Set(exportRows.flatMap((row) => Object.keys(row.paymentValues ?? {})))).sort();
+      const head = ["Provider member ID", "Provider member name", "Location", "Provider ID", "DropX ID", "DropX name", "Mapping status", "Payment method", "Payment method code", ...paymentKeys, "Minimum units", "Effective from", "Effective to", "Outbound months"];
+      const body = exportRows.map((row) => {
+        const method = paymentMethodById.get(row.paymentMethodId);
+        return [
+          row.providerMemberId, row.providerMemberName, row.stationLabel, row.providerId, row.dropxId, row.dropxName,
+          row.workforceId ? "Mapped" : "Unmapped", method?.name ?? "", method?.code ?? "",
+          ...paymentKeys.map((key) => row.paymentValues?.[key] ?? ""),
+          row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo, (row.outboundMonths ?? []).join(", ")
+        ].map((value) => String(value ?? ""));
+      });
+      const fileBase = `provider-member-mapping-${new Date().toISOString().slice(0, 10)}`;
+      if (exportFormat === "xlsx") {
+        const XLSX = await import("xlsx");
+        const sheet = XLSX.utils.aoa_to_sheet([head, ...body]);
+        sheet["!cols"] = head.map((title) => ({ wch: Math.min(40, Math.max(12, title.length + 2)) }));
+        sheet["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: body.length, c: head.length - 1 } }) };
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, sheet, "Provider mapping");
+        XLSX.writeFile(workbook, `${fileBase}.xlsx`, { compression: true });
+      } else {
+        // Quote when needed and neutralise spreadsheet formulas in text cells.
+        const cell = (value: string) => {
+          const safe = /^[=+\-@\t\r]/.test(value) && !/^-?\d+(\.\d+)?$/.test(value) ? `'${value}` : value;
+          return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, "\"\"")}"` : safe;
+        };
+        const csv = "﻿" + [head, ...body].map((line) => line.map(cell).join(",")).join("\r\n");
+        const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${fileBase}.csv`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setExportOpen(false);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "The download could not be prepared.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   function update(index: number, change: Partial<ProviderFirstMappingRow>) {
@@ -813,7 +893,49 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
         <label className="mapping-page-size">Rows<select onChange={(event) => { const value = event.target.value; setPageSize(value === "all" ? "all" : Number(value) as ProviderFirstPageSize); resetPage(); }} value={pageSize}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="all">All</option></select></label>
-        <div className="provider-first-filter-summary"><strong>{visibleIndexes.length}</strong><span>of {rows.length}</span>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
+        <div className="provider-first-filter-summary"><strong>{visibleIndexes.length}</strong><span>of {rows.length}</span><button className="button secondary compact provider-mapping-download-trigger" disabled={!rows.length} onClick={openExport} type="button"><Download aria-hidden="true" size={15} /> Download</button>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
+        {exportOpen ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target && !exporting) setExportOpen(false); }}>
+          <section aria-labelledby="provider-mapping-download-title" aria-modal="true" className="modal-panel provider-mapping-download-dialog" role="dialog">
+            <div className="panel-head">
+              <div>
+                <h2 id="provider-mapping-download-title">Download provider mapping</h2>
+                <p className="subtle">All saved records are included by default. Narrow with the filters below if needed.</p>
+              </div>
+              <button aria-label="Close download" className="icon-button" disabled={exporting} onClick={() => setExportOpen(false)} type="button"><X aria-hidden="true" size={18} /></button>
+            </div>
+            <div className="provider-mapping-download-body">
+              <div className="provider-mapping-download-filters">
+                <MappingMultiFilter allLabel="All months" label="Outbound month" options={monthOptions} selected={exportFilters.months} setSelected={(months) => setExportFilters((current) => ({ ...current, months }))} />
+                <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={exportFilters.stations} setSelected={(stations) => setExportFilters((current) => ({ ...current, stations }))} />
+                <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={exportFilters.methods} setSelected={(methods) => setExportFilters((current) => ({ ...current, methods }))} />
+                <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={exportFilters.mapping} setSelected={(mapping) => setExportFilters((current) => ({ ...current, mapping }))} />
+                <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={exportFilters.validation} setSelected={(validation) => setExportFilters((current) => ({ ...current, validation }))} />
+              </div>
+              <fieldset className="provider-mapping-download-formats">
+                <legend>Format</legend>
+                <label className={exportFormat === "xlsx" ? "is-selected" : undefined}>
+                  <input checked={exportFormat === "xlsx"} name="provider-mapping-format" onChange={() => setExportFormat("xlsx")} type="radio" />
+                  <FileSpreadsheet aria-hidden="true" size={20} />
+                  <span><strong>Excel (.xlsx)</strong><small>Formatted sheet with column filters</small></span>
+                </label>
+                <label className={exportFormat === "csv" ? "is-selected" : undefined}>
+                  <input checked={exportFormat === "csv"} name="provider-mapping-format" onChange={() => setExportFormat("csv")} type="radio" />
+                  <FileText aria-hidden="true" size={20} />
+                  <span><strong>CSV (.csv)</strong><small>Plain text for any tool or import</small></span>
+                </label>
+              </fieldset>
+              {exportError ? <p className="mapping-upload-error" role="alert">{exportError}</p> : null}
+            </div>
+            <div className="provider-mapping-download-actions">
+              <span className="subtle"><strong>{exportIndexes.length}</strong> of {baselineRows.length} records</span>
+              <div>
+                {Object.values(exportFilters).some((values) => values.length) ? <button className="button secondary" disabled={exporting} onClick={() => setExportFilters(emptyExportFilters)} type="button">Reset to all</button> : null}
+                <button className="button secondary" disabled={exporting} onClick={() => setExportOpen(false)} type="button">Cancel</button>
+                <button className="button" disabled={exporting || !exportIndexes.length} onClick={() => void downloadMappings()} type="button"><Download aria-hidden="true" size={16} /> {exporting ? "Preparing..." : `Download ${exportFormat === "xlsx" ? "Excel" : "CSV"}`}</button>
+              </div>
+            </div>
+          </section>
+        </div> : null}
       </div>
       <div className="mapping-rows provider-first-rows">{paginatedIndexes.map((index) => {
         const row = rows[index];
@@ -822,7 +944,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const copiedPayment = !baselineRows[index].workforceId ? paymentTemplateSources[index] : undefined;
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
         const locationRemap = providerFirstLocationRemap(row, selectedWorker);
-        const locationMismatch = Boolean(selectedWorker && !providerFirstLocationIsAllowed(row, selectedWorker));
+        const locationNeedsDates = providerFirstLocationNeedsDates(row, selectedWorker);
+        const locationMismatch = Boolean(selectedWorker && !locationNeedsDates && !providerFirstLocationIsAllowed(row, selectedWorker));
         const profileLocationDrift = Boolean(selectedWorker?.profileStationId && selectedWorker.profileStationId !== selectedWorker.stationId);
         const priorMappingLocations = [...new Set(row.history.map((entry) => entry.locationLabel).filter(Boolean))];
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
@@ -855,7 +978,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             {copiedPayment ? <div className="mapping-period-help" role="status"><strong>Previous payment details loaded.</strong> Method and rates copied from {paymentMethodById.get(copiedPayment.paymentMethodId)?.name ?? "previous payment method"} · {copiedPayment.locationLabel} · {copiedPayment.effectiveFrom} to {copiedPayment.effectiveTo || "Ongoing"}. Review the rates and choose dates for this assignment before saving. Previous dates were not copied.</div> : previousPayment ? <div className="mapping-period-help">Previous payment details are available from {previousPayment.effectiveFrom} to {previousPayment.effectiveTo || "Ongoing"}. Use them below to copy the method and rates; enter dates for this assignment.</div> : null}
             {!row.mappingId && priorMappingLocations.length ? <div className="mapping-period-help"><strong>Existing mapping history:</strong> {priorMappingLocations.join(", ")}. This {row.stationLabel} row is not mapped; save its own effective-dated mapping before using this location&apos;s activity for payout.</div> : null}
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
-            {locationRemap ? <div className="mapping-period-help">Location change: {locationRemap.existingLocationLabel} → {locationRemap.newLocationLabel}. Save this location mapping before adding payment periods.</div> : null}
+            {locationNeedsDates ? <div className="mapping-period-help" role="status">Registered at {selectedWorker?.profileLocationLabel}. This provider ID already has a mapping there. Enter the effective dates to validate the additional {row.stationLabel} assignment. Location is checked from the Workforce record, not the prefix of the DropX ID.</div> : null}
+            {locationRemap ? <div className="mapping-period-help">{locationRemap.allowMove === false ? `Additional location: ${locationRemap.newLocationLabel}. Use Keep all when saving to preserve the existing ${locationRemap.existingLocationLabel} mapping.` : `Location change: ${locationRemap.existingLocationLabel} → ${locationRemap.newLocationLabel}.`} Save this location mapping before adding payment periods.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}

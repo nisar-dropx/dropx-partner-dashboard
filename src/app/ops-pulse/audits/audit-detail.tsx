@@ -23,7 +23,10 @@ import {
   saveAuditDraft,
 } from "./audit-draft";
 import { AuditEmailDelivery } from "./audit-email-delivery";
-import { uploadAuditFiles } from "@/lib/ops-pulse/station-audit-upload";
+import {
+  uploadAuditFiles,
+  type UploadedAuditFile,
+} from "@/lib/ops-pulse/station-audit-upload";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
   auditMonthRange,
@@ -180,6 +183,10 @@ export function AuditDetail({
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
+  const [draftEvidence, setDraftEvidence] = useState<
+    StationAuditWorkspace["evidence"]
+  >([]);
+  const [draftUploading, setDraftUploading] = useState(false);
   const editable =
     canPerform && (audit.status_code === "in_progress" || editing);
   const type = workspace.auditTypes.find(
@@ -263,7 +270,7 @@ export function AuditDetail({
         return;
       if (result.ok && announce)
         setDraftNotice(
-          `Draft saved to your account at ${draftTime(new Date().toISOString())}. You can continue on another device. Attached files are not kept.`,
+          `Draft saved to your account at ${draftTime(new Date().toISOString())}. You can continue on another device. Attached files are saved to the audit.`,
         );
       else {
         serverDirty.current = true;
@@ -299,13 +306,77 @@ export function AuditDetail({
       return;
     }
     setDraftNotice(
-      `Draft saved on this device at ${draftTime(savedAt)}. Attached files are not kept.`,
+      `Draft saved on this device at ${draftTime(savedAt)}. Click Save draft to keep attached files.`,
     );
     if (!serverTimer.current)
       serverTimer.current = window.setTimeout(
         () => void pushDraftToServer(false),
         20000,
       );
+  };
+  // Save draft also uploads any attached check, cash and evidence files to the
+  // audit, so they stay saved instead of having to be chosen again later.
+  const draftFileFields = (name: string) =>
+    name.startsWith("check_photo_") ||
+    ["evidence_files", "erp_evidence", "variance_evidence"].includes(name);
+  const saveDraftWithFiles = async () => {
+    const form = formRef.current;
+    if (!form || submitting.current || !draftReady.current) return;
+    const inputs = (
+      Array.from(form.elements).filter(
+        (element) =>
+          element instanceof HTMLInputElement &&
+          element.type === "file" &&
+          draftFileFields(element.name) &&
+          (element.files?.length ?? 0) > 0,
+      ) as HTMLInputElement[]
+    );
+    if (!inputs.length) {
+      saveDraft(true);
+      return;
+    }
+    const data = new FormData();
+    data.set("audit_id", audit.id);
+    for (const input of inputs)
+      for (const file of Array.from(input.files ?? []))
+        data.append(input.name, file);
+    setDraftUploading(true);
+    const uploaded: UploadedAuditFile[] = [];
+    try {
+      await uploadAuditFiles(
+        data,
+        (done, total) =>
+          setDraftNotice(total ? `Saving files ${done} / ${total}…` : ""),
+        (file) => uploaded.push(file),
+      );
+      for (const input of inputs) input.value = "";
+      saveDraft(true);
+    } catch (error) {
+      setDraftNotice(
+        `${error instanceof Error ? error.message : "Files could not be saved."} Your typed entries are kept; try Save draft again.`,
+      );
+      saveDraft(false);
+    } finally {
+      // Files that finished before any failure are saved on the audit either way.
+      if (uploaded.length) {
+        const now = new Date().toISOString();
+        setDraftEvidence((current) => [
+          ...current,
+          ...uploaded.map((file) => ({
+            id: file.evidenceId,
+            audit_id: audit.id,
+            file_name: file.fileName,
+            media_url: "",
+            caption: null,
+            evidence_kind_code: file.evidenceKind,
+            checklist_item_id: file.checklistItemId,
+            content_type: file.contentType,
+            uploaded_at: now,
+          })),
+        ]);
+      }
+      setDraftUploading(false);
+    }
   };
   const formReady = editable && !!inspection;
   useEffect(() => {
@@ -405,8 +476,19 @@ export function AuditDetail({
   const comments = workspace.comments.filter(
     (row) => row.audit_id === audit.id,
   );
-  const evidence = workspace.evidence.filter(
+  const savedEvidence = workspace.evidence.filter(
     (row) => row.audit_id === audit.id,
+  );
+  // Files uploaded by Save draft count as saved proof straight away, before the
+  // workspace is next reloaded.
+  const evidence = [
+    ...savedEvidence,
+    ...draftEvidence.filter(
+      (row) => !savedEvidence.some((saved) => saved.id === row.id),
+    ),
+  ];
+  const supportingEvidence = evidence.filter(
+    (row) => row.evidence_kind_code === "document" && !row.checklist_item_id,
   );
   const addShipment = () =>
     setShipments((rows) => [
@@ -1014,6 +1096,9 @@ export function AuditDetail({
                       accept="image/*,application/pdf,.xlsx,.xls,.csv"
                     />
                     <small>Images, PDF, Excel or CSV · up to 30 MB each</small>
+                    {supportingEvidence.length ? (
+                      <ChecklistPhotos photos={supportingEvidence} />
+                    ) : null}
                   </label>
                   <label className={styles.inputLabel}>
                     Evidence caption
@@ -1085,7 +1170,7 @@ export function AuditDetail({
                     type="submit"
                     formNoValidate
                     className="button"
-                    disabled={submit.pending || !inspection}
+                    disabled={submit.pending || draftUploading || !inspection}
                   >
                     {submit.pending
                       ? uploadProgress || "Submitting…"
@@ -1094,10 +1179,10 @@ export function AuditDetail({
                   <button
                     type="button"
                     className="button secondary"
-                    disabled={submit.pending || !inspection}
-                    onClick={() => saveDraft(true)}
+                    disabled={submit.pending || draftUploading || !inspection}
+                    onClick={() => void saveDraftWithFiles()}
                   >
-                    Save draft
+                    {draftUploading ? "Saving files…" : "Save draft"}
                   </button>
                   {submit.notice ? (
                     <span className={styles.notice}>{submit.notice}</span>
@@ -1347,14 +1432,14 @@ function AuditCheck({
               type="file"
               name={`check_photo_${item.id}`}
               aria-label={`Photos for ${item.label}`}
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              accept="image/*,application/pdf,.xlsx,.xls,.csv"
               multiple
               required={!photos.length}
             />
             <small>
               {photos.length
-                ? `${photos.length} saved photo(s). Add more if needed.`
-                : "Attach clear photos for this check. Up to 30 MB per photo."}
+                ? `${photos.length} saved file(s). Add more if needed.`
+                : "Attach photos, PDF, Excel or CSV for this check. Up to 30 MB each."}
             </small>
           </label>
           <ChecklistPhotos photos={photos} />
@@ -2366,7 +2451,7 @@ function ChecklistPhotos({
           target="_blank"
           rel="noreferrer"
         >
-          View photo · {photo.file_name || "Inspection proof"}
+          View file · {photo.file_name || "Inspection proof"}
         </a>
       ))}
     </div>

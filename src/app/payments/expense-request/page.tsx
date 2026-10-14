@@ -19,7 +19,7 @@ import { paymentApprovalStatusTone, paymentStatusLabel } from "@/lib/payment-sta
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
-import { createExpenseRequest, resubmitExpenseRequest, submitPaymentBankDetails } from "@/app/payments/requests/actions";
+import { createExpenseRequest, resubmitExpenseRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "@/app/payments/requests/actions";
 
 type LocationRow = {
   id: string;
@@ -352,7 +352,10 @@ export default async function ExpenseRequestPage({
     ? requests.find((request) => request.id === searchParams.resubmit && isResubmittable(request, authorization.userId)) ?? null
     : null;
   const resubmitHead = resubmitRequest ? headById.get(resubmitRequest.payment_head_id) ?? null : null;
-  const resubmitQuestions = questionsForStage(resubmitHead?.payment_head_questions, "expense");
+  // Returned after payout details were submitted (e.g. by finance): correct the
+  // payout details and send it back to processing instead of re-approving the estimate.
+  const resubmitPayout = resubmitRequest ? hasSubmittedPaymentDetails(resubmitRequest) : false;
+  const resubmitQuestions = questionsForStage(resubmitHead?.payment_head_questions, resubmitPayout ? "payment" : "expense");
   const [resubmitAnswersResult, returnRemark] = resubmitRequest && supabaseAdmin
     ? await Promise.all([
         supabaseAdmin
@@ -466,13 +469,14 @@ export default async function ExpenseRequestPage({
           <section className="modal-panel wide-modal" role="dialog" aria-modal="true" aria-labelledby="expense-resubmit-title">
             <div className="panel-head">
               <div>
-                <h2 id="expense-resubmit-title">Correct and resubmit expense request</h2>
-                <p className="subtle">{resubmitRequest.request_no} - Update the returned details and send it back for approval.</p>
+                <h2 id="expense-resubmit-title">{resubmitPayout ? "Correct and resubmit payment details" : "Correct and resubmit expense request"}</h2>
+                <p className="subtle">{resubmitRequest.request_no} - {resubmitPayout ? "Update the payment method or beneficiary details and send it back for payment processing." : "Update the returned details and send it back for approval."}</p>
               </div>
               <PendingLink className="icon-button" href="/payments/expense-request" scroll={false} aria-label="Close">x</PendingLink>
             </div>
-            <form action={resubmitExpenseRequest} className="panel-body payment-resubmit-form" encType="multipart/form-data">
+            <form action={resubmitPayout ? resubmitPaymentRequest : resubmitExpenseRequest} className="panel-body payment-resubmit-form" encType="multipart/form-data">
               <input type="hidden" name="request_id" value={resubmitRequest.id} />
+              {resubmitPayout ? <input type="hidden" name="return_to" value="expense" /> : null}
               {returnRemark?.comments ? (
                 <div className="message-panel warn" style={{ marginBottom: 16 }}>
                   <strong>Return remarks</strong>
@@ -488,10 +492,32 @@ export default async function ExpenseRequestPage({
                   Payment Head
                   <input className="field" value={resubmitHead?.name ?? "-"} readOnly />
                 </label>
-                <label>
-                  Estimated Amount *
-                  <input className="field" min="0" name="amount" required step="0.01" type="number" defaultValue={resubmitRequest.amount_requested ?? ""} />
-                </label>
+                {resubmitPayout ? (
+                  <label>
+                    Actual Amount *
+                    <input className="field" min="0" name="amount" required step="0.01" type="number" defaultValue={resubmitRequest.amount ?? ""} />
+                  </label>
+                ) : (
+                  <label>
+                    Estimated Amount *
+                    <input className="field" min="0" name="amount" required step="0.01" type="number" defaultValue={resubmitRequest.amount_requested ?? ""} />
+                  </label>
+                )}
+              </div>
+              {resubmitPayout ? (
+                <PaymentBeneficiaryFields
+                  allowedPaymentModes={resubmitHead?.supported_payment_modes}
+                  defaultAccountHolderName={resubmitRequest.account_holder_name}
+                  defaultBankAccountNo={resubmitRequest.payment_mode === "account_transfer" ? resubmitRequest.bank_account_no : null}
+                  defaultContactNo={resubmitRequest.contact_no}
+                  defaultEmail={resubmitRequest.email}
+                  defaultIfsc={resubmitRequest.payment_mode === "account_transfer" ? resubmitRequest.ifsc : null}
+                  defaultPaymentMode={resubmitRequest.payment_mode}
+                  defaultUpiId={resubmitRequest.payment_mode === "upi_payment" ? resubmitRequest.payment_reference : null}
+                  savedContacts={savedContacts}
+                />
+              ) : null}
+              <div className="form-grid three">
                 {resubmitQuestions.map((question) => {
                   const isWideField = question.answer_type === "textarea";
                   return (
