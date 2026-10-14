@@ -1,10 +1,21 @@
 import 'server-only';
 import type {SupabaseClient} from '@supabase/supabase-js';
-import {readAllRows} from '@/lib/supabase-pagination';
 import {baseStations,latestPublications,monthEnd,monthValue,paise,recoveryRecognitionMonth,type Sources,type Entry,type Loss} from './model';
 export const FINAL_PNL_COMPANY='43866344-b550-4e8a-9a2d-9d23f3d8a997';
 type Row=Record<string,any>;
-async function rows(query:any,label:string):Promise<Row[]>{const result=await readAllRows(query);if(result.error)throw Error(`${label} could not be read: ${result.error.message}`);return result.data??[];}
+async function rows(query:any,label:string):Promise<Row[]>{
+ const result:Row[]=[];
+ for(let offset=0;offset<100000;offset+=500){
+  let page=await query.range(offset,offset+499);
+  // Retry only a transient read failure, without replaying already read pages.
+  if(page.error&&/abort|timeout|fetch failed|503|502|504|ECONN/i.test(page.error.message??'')){
+   await new Promise(resolve=>setTimeout(resolve,300));page=await query.range(offset,offset+499);
+  }
+  if(page.error)throw Error(`${label} could not be read: ${page.error.message}`);
+  result.push(...(page.data??[]));if((page.data??[]).length<500)return result;
+ }
+ throw Error(`${label} exceeds the bounded source limit.`);
+}
 export async function loadSources(db:SupabaseClient,company:string,month:string):Promise<Sources>{
  monthValue(month);if(company!==FINAL_PNL_COMPANY)throw Error('This company has no invoice connection.');
  const capturedAt=new Date().toISOString(),start=`${month}-01`,end=monthEnd(month);
@@ -13,11 +24,11 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
  const [stations,aliases,workforce,helpers,hrRuns,nlCases,nlPlans,recoveryCases,claims]=await Promise.all([
   rows(table('stations','id,station_code,parent_station_id').order('id'),'Station topology'),
   rows(table('cod_station_settings','location_id,portal_station_code').order('location_id'),'Station aliases'),
-  rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,snapshot,published_at,period_start,period_end,payroll_run_id').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
-  rows(table('helper_payout_publications','id,helper_id,station_id,revision,snapshot,published_at,period_start,period_end').gte('period_end',historyStart).order('id'),'Published helper payouts'),
+  rows(table('workforce_payout_publications','id,workforce_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end,payroll_run_id').gte('period_end',historyStart).order('id'),'Published workforce payouts'),
+  rows(table('helper_payout_publications','id,helper_id,station_id,revision,item:snapshot->item,deductions:snapshot->worksheet->deduction_breakdown,published_at,period_start,period_end').gte('period_end',historyStart).order('id'),'Published helper payouts'),
   rows(table('hr_payroll_runs','id,period_start,period_end,status,published_at,approved_at').gte('period_end',historyStart).order('id'),'Employee payroll runs'),
-  rows(table('nl_loss_month_cases','month,case_key,station_code,amount,source_status,source_present,details,report').lte('month',month).order('case_key'),'Ops Pulse losses'),
-  rows(table('nl_loss_recoveries','month,case_key,outcome_label,allocations,deduction_month,remarks,is_deleted,source_amount').lte('month',month).eq('is_deleted',false).order('case_key'),'Ops Pulse recovery plans'),
+  rows(table('nl_loss_month_cases','month,case_key,station_code,amount,source_status,source_present').lte('month',month).order('month').order('case_key'),'Ops Pulse losses'),
+  rows(table('nl_loss_recoveries','month,case_key,outcome_label,allocations,deduction_month,remarks,is_deleted,source_amount').lte('month',month).eq('is_deleted',false).order('month').order('case_key'),'Ops Pulse recovery plans'),
   rows(table('payment_recovery_cases','id,tid,station_id,station_code_snapshot,debit_date,debit_month,debit_amount,payout_month,status').lte('debit_month',end).order('id'),'Payment recovery cases'),
   rows(table('workforce_station_loss_claims','id,workforce_id,station_id,adjustment_id,incident_date,reference').lte('incident_date',end).order('id'),'Station loss claims')
  ]);
@@ -46,7 +57,7 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
   for(const r of list){
    if(r.period_start>end||r.period_end<start)continue;
    if(r.period_start<start||r.period_end>end){issues.push(`${kind} publication ${r.id} crosses month boundaries; add a documented allocation.`);continue;}
-   const item=r.snapshot?.item;if(!item||item.gross_amount==null){issues.push(`${kind} publication ${r.id} has no final gross amount.`);continue;}
+   const item=r.item;if(!item||item.gross_amount==null){issues.push(`${kind} publication ${r.id} has no final gross amount.`);continue;}
    const station=stationById.get(r.station_id)||item.station_code||'UNKNOWN';
    const n=paise(item.gross_amount);const existing=groups.get(station)??{paise:0,count:0};existing.paise+=n;existing.count++;groups.set(station,existing);payrollCount++;
   }
@@ -95,7 +106,7 @@ export async function loadSources(db:SupabaseClient,company:string,month:string)
    if(e.event_type==='payout_deduction'){
     const a=caseAlloc.find(a=>a.id===e.allocation_id);
     if(a?.payout_run_person_id){const p=hrPeople.find(p=>p.id===a.payout_run_person_id);const item=hrItems.find(i=>i.run_person_id===a.payout_run_person_id&&i.code==='RECOVERY');confirmed=!!p&&!!item&&paise(item.amount)>=(allocationTotals.get(a.payout_run_person_id)??Infinity);}
-    else if(a?.deduction_value_id){const pubs=allWorkforce.filter(p=>p.workforce_id===a.workforce_id&&p.station_id===a.station_id&&p.period_start===e.period_start&&p.period_end===e.period_end);confirmed=pubs.some(p=>(p.snapshot?.lines??[]).filter((l:Row)=>l.source_type==='deduction'&&l.calculation_snapshot?.category==='RECOVERY').reduce((n:number,l:Row)=>n+Math.abs(paise(l.net_amount)),0)>=(allocationTotals.get(a.deduction_value_id)??Infinity));}
+    else if(a?.deduction_value_id){const pubs=allWorkforce.filter(p=>p.workforce_id===a.workforce_id&&p.station_id===a.station_id&&p.period_start===e.period_start&&p.period_end===e.period_end);confirmed=pubs.some(p=>(p.deductions??[]).filter((l:Row)=>l.code==='RECOVERY').reduce((n:number,l:Row)=>n+Math.abs(paise(l.amount)),0)>=(allocationTotals.get(a.deduction_value_id)??Infinity));}
    }
    if(!confirmed)continue;const n=paise(e.amount);posted+=n;
    const recognitionMonth=recoveryRecognitionMonth(e.period_start,e.created_at,e.event_type==='payout_deduction');
