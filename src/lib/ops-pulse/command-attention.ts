@@ -1,5 +1,6 @@
 import { auditQueueBucket, addAuditDays } from './station-audit-planning';
 import type { CodPendingRow } from './cod-pending';
+import type { StoreAudit } from './store-audits/model';
 
 export type AttentionItem = { key:string; title:string; value:string; detail:string; href:string; action:string; tone:'urgent'|'action'|'unknown'|'clear'; count?:number; dueAt?:string };
 export function attentionOrder(items:AttentionItem[]) {
@@ -37,6 +38,15 @@ export function auditAttention(rows:{scheduled_for:string;status_code:string;com
   const followup=buckets.filter(b=>b==='followup').length;
   const upcoming=buckets.filter(b=>b==='next2'||b==='week').length;
   return {overdue,due,followup,upcoming,action:open.filter((r,i)=>['overdue','today','followup'].includes(buckets[i])).length};
+}
+export function storeAuditAttention(rows:Pick<StoreAudit,'id'|'status'|'scheduled_for'|'completed_at'|'findings'|'answers'>[],today:string,now:number){
+  const open=rows.filter(r=>!['closed','cancelled'].includes(r.status));
+  const day=(r:typeof rows[number])=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date(r.scheduled_for));
+  const late=(r:typeof rows[number])=>!r.completed_at?day(r)<today:(r.findings??[]).some(f=>f.state==='open'&&Date.parse(r.answers?.[f.questionId]?.dueAt)<now);
+  const action=open.filter(r=>r.completed_at||day(r)<=today);
+  const overdue=action.filter(late).length;
+  const focus=[...action].sort((a,b)=>Number(late(b))-Number(late(a))||a.scheduled_for.localeCompare(b.scheduled_for))[0];
+  return{count:action.length,overdue,upcoming:open.filter(r=>!r.completed_at&&day(r)>today&&day(r)<=addAuditDays(today,7)).length,focus};
 }
 export type AttentionDocument={document_type_id:string;scope_type:string;scope_id:string|null;additional_scope_ids?:string[]|null;expiry_date:string|null;track_expiry?:boolean|null;document_types?:{doc_access_mode:string|null}|{doc_access_mode:string|null}[]|null};
 // Only location documents appear here. Broader company/state records remain in Business Docs.

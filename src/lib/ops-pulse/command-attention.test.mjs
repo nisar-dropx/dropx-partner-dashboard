@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
-const compile=(path,mocks={})=>{const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>{if(n in mocks)return mocks[n];throw Error(n);},m.exports,m);return m.exports;};
+const compile=(path,mocks={})=>{const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>{if(n in mocks)return mocks[n];if(n==='./store-audits/model')return {isManager:()=>true};throw Error(n);},m.exports,m);return m.exports;};
 const planning=compile('./station-audit-planning.ts');
 const domain=compile('./command-attention.ts',{'./station-audit-planning':planning});
 const today='2026-10-15',now=Date.parse(today+'T12:00:00+05:30');
@@ -68,8 +68,13 @@ test('dashboard offers linked snapshots rather than duplicating section tables a
  assert.match(lm,/href=\{costHref\}/);assert.match(ds,/extraItems=\{extraItems\}/);
 });
 test('Dark Store excludes Last Mile cash, capacity and fleet; keeps audits and shared approvals',async()=>{
- const f=fixture(['station_audits','fleet_da_mapping','cod_reports','capacity_overview','ops_rostering','payment_approvals']);const items=await f.run('amazon_now');
+ const f=fixture(['station_audits','store_audits','fleet_da_mapping','cod_reports','capacity_overview','ops_rostering','payment_approvals']);const items=await f.run('amazon_now');
  assert.deepEqual(items.map(x=>x.key).sort(),['audits','payments','rosters']);assert(!f.calls.some(c=>['fleet','cod','capacity','people'].includes(c[0])));
+});
+test('store audit counts respect current work, response deadlines, cancellations and closed findings',()=>{
+ const row={id:'a',status:'scheduled',scheduled_for:'2026-10-14T12:00:00+05:30',completed_at:null,findings:[],answers:{}};
+ const result=domain.storeAuditAttention([row,{...row,id:'future',scheduled_for:'2026-10-17T12:00:00+05:30'},{...row,id:'closed',status:'closed'},{...row,id:'cancelled',status:'cancelled'},{...row,id:'response',completed_at:row.scheduled_for,status:'awaiting_response',findings:[{questionId:'q',state:'open'}],answers:{q:{dueAt:row.scheduled_for}}}],today,now);
+ assert.equal(result.count,2);assert.equal(result.overdue,2);assert.equal(result.upcoming,1);assert.equal(result.focus.id,'a');
 });
 test('source failures and missing approval results remain unavailable, not zero',async()=>{const f=fixture(['station_audits','business_documents','payment_approvals'],true);const items=await f.run();assert(items.every(i=>i.tone==='unknown'&&i.value==='Unavailable'));});
 test('both dashboards show operational attention before cost and do not hide audit queue in disclosure',()=>{

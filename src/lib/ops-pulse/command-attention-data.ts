@@ -14,7 +14,8 @@ import { canAccessDailyCodPending } from './cod-pending-access';
 import { loadCodPendingReport } from './cod-pending-data';
 import { loadCapacitySnapshot } from './capacity-snapshot';
 import type { CodLocationRow } from './cod';
-import { attentionOrder, auditAttention, codAttention, documentAttention, type AttentionDocument, type AttentionItem } from './command-attention';
+import { isManager as isStoreAuditManager } from './store-audits/model';
+import { attentionOrder, auditAttention, storeAuditAttention, codAttention, documentAttention, type AttentionDocument, type AttentionItem } from './command-attention';
 
 export async function loadCommandAttention(a:AuthorizationContext,locations:CodLocationRow[],today:string,mode:string,now=Date.now()) {
   const company=requireCompanyId(a),yesterday=addAuditDays(today,-1);
@@ -27,7 +28,7 @@ export async function loadCommandAttention(a:AuthorizationContext,locations:CodL
     catch{items.push({key,title,href,value:'Unavailable',detail:'Could not check this source. Open the workspace to retry.',action:'Check source',tone:'unknown'});}
   }
   await Promise.all([
-    check(has('station_audits')&&ids.length>0,'audits','Audits','/ops-pulse/audits',async()=>{
+    check(mode!=='amazon_now'&&has('station_audits')&&ids.length>0,'audits','Audits','/ops-pulse/audits',async()=>{
       if(!supabaseAdmin)throw Error('Unavailable');
       const master=await loadStationAuditMaster(company);
       const manager=canManageStationAudits(a,master.programmeSettings);
@@ -41,6 +42,17 @@ export async function loadCommandAttention(a:AuthorizationContext,locations:CodL
       const s=auditAttention(r.data??[],today,now);
       const focus=(r.data??[]).filter(x=>!x.completed_at||x.station_response_status==='requested').sort((x,y)=>String(x.response_due_at||x.scheduled_for).localeCompare(String(y.response_due_at||y.scheduled_for)))[0];
       return{value:`${s.action} to action`,count:s.action,dueAt:focus?.response_due_at||focus?.scheduled_for,href:focus?`/ops-pulse/audits?audit=${encodeURIComponent(focus.id)}`:'/ops-pulse/audits',detail:`${s.overdue} overdue · ${s.due} today · ${s.followup} follow-ups · ${s.upcoming} next 7 days`,action:manager?'Review location audits':'Respond to audits',tone:s.overdue?'urgent':s.action||s.upcoming?'action':'clear'};
+    }),
+    check(mode==='amazon_now'&&has('store_audits')&&ids.length>0,'audits','Store audits','/ops-pulse/store-audits',async()=>{
+      if(!supabaseAdmin)throw Error('Unavailable');
+      const master=await supabaseAdmin.from('ops_store_audit_master').select('settings').eq('company_id',company).maybeSingle();
+      if(master.error||!master.data?.settings)throw Error('Unavailable');
+      const manager=isStoreAuditManager(a,master.data.settings);
+      let q=supabaseAdmin.from('ops_store_audits').select('id,status,scheduled_for,completed_at,findings,answers').eq('company_id',company).in('location_id',ids).is('deleted_at',null).in('status',manager?['scheduled','in_progress','awaiting_response','under_review']:['awaiting_response','under_review']);
+      if(!manager)q=q.not('completed_at','is',null);
+      const r=await readAllRows(q.order('id'));if(r.error)throw Error('Unavailable');
+      const s=storeAuditAttention(r.data??[],today,now);
+      return{value:`${s.count} to action`,count:s.count,dueAt:s.focus?.scheduled_for,detail:`${s.overdue} overdue · ${s.upcoming} next 7 days · store audit programme`,href:s.focus?`/ops-pulse/store-audits?audit=${encodeURIComponent(s.focus.id)}`:'/ops-pulse/store-audits',action:'Open store audits',tone:s.overdue?'urgent':s.count||s.upcoming?'action':'clear'};
     }),
     check(mode!=='amazon_now'&&has('ops_rostering')&&ids.length>0,'people','Shift readiness','/ops-pulse?view=manpower',async()=>{
       const data=await loadOpsStationManpower(company,selected,today),s=summarizeStorePeople(data.people,now);
