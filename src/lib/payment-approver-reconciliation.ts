@@ -1,3 +1,4 @@
+import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadApprovalSteps, resolveStepApprover } from "@/lib/payment-approval-steps";
 import { effectiveApprovalStepOrder, isPendingPaymentApproval } from "@/lib/payment-stage-policy";
@@ -14,6 +15,9 @@ type PendingPaymentRequest = {
   payment_head_id: string | null;
   request_no: string;
   status: string | null;
+  adhoc_approval_steps: unknown;
+  approval_routing_reason: string | null;
+  updated_at: string | null;
 };
 
 export type PaymentApproverReconciliationResult = {
@@ -34,12 +38,11 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
 
   let query = supabaseAdmin
     .from("payment_requests")
-    .select("id,request_no,company_id,location_id,payment_head_id,status,approval_status,current_step_order,current_approver_user_id,current_approver_role_id")
+    .select("id,request_no,company_id,location_id,payment_head_id,status,approval_status,current_step_order,current_approver_user_id,current_approver_role_id,adhoc_approval_steps,approval_routing_reason,updated_at")
     .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
-    .order("updated_at", { ascending: false })
-    .limit(options.limit ?? 250);
+    .order("id");
   if (options.companyId) query = query.eq("company_id", options.companyId);
-  const pendingResult = await query;
+  const pendingResult = options.limit ? await query.limit(options.limit) : await readAllRows(query);
   if (pendingResult.error) throw new Error(pendingResult.error.message);
 
   const rows = ((pendingResult.data ?? []) as PendingPaymentRequest[])
@@ -51,10 +54,10 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
     result.checked += 1;
     if (!request.payment_head_id || !request.location_id) continue;
     try {
-      const stepsKey = `${request.company_id}:${request.payment_head_id}`;
+      const stepsKey = `${request.company_id}:${request.payment_head_id}:${JSON.stringify(request.adhoc_approval_steps ?? null)}`;
       let steps = stepsCache.get(stepsKey);
       if (!steps) {
-        steps = await loadApprovalSteps(request.company_id, request.payment_head_id);
+        steps = await loadApprovalSteps(request.company_id, request.payment_head_id, request.id);
         stepsCache.set(stepsKey, steps);
       }
       if (!steps.length) continue; // Preserve legacy two-phase requests.
@@ -73,10 +76,13 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
         target = await resolveStepApprover(request.company_id, step, request.location_id);
         targetCache.set(targetKey, target);
       }
-      if (!paymentApproverNeedsReconciliation(request, target, resolvedStepOrder)) continue;
+      if (!paymentApproverNeedsReconciliation(request, target, resolvedStepOrder) && (!target?.routingReason || target.routingReason === request.approval_routing_reason)) continue;
 
       const now = new Date().toISOString();
       const update = target ? {
+        ...(request.approval_status === "NO_APPROVER_CONFIGURED" ? { approval_status: "PENDING" } : {}),
+        approval_routing_reason: target.routingReason || "Approver mapping refreshed",
+        updated_by: null,
         current_approver_user_id: target.userId,
         current_approver_role_id: target.roleId,
         current_approver_role_ids: [target.roleId],
@@ -85,6 +91,8 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
         updated_at: now
       } : {
         approval_status: "NO_APPROVER_CONFIGURED",
+        approval_routing_reason: "No eligible approver: check required role, location access and leave cover",
+        updated_by: null,
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
@@ -99,6 +107,7 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
       updateQuery = request.current_approver_user_id
         ? updateQuery.eq("current_approver_user_id", request.current_approver_user_id)
         : updateQuery.is("current_approver_user_id", null);
+      updateQuery = request.updated_at ? updateQuery.eq("updated_at", request.updated_at) : updateQuery.is("updated_at", null);
       const saved = await updateQuery.select("id").maybeSingle();
       if (saved.error) throw new Error(saved.error.message);
       if (!saved.data) continue; // Another action advanced the request concurrently.

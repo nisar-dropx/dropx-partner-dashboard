@@ -414,6 +414,28 @@ export async function approvePaymentRequest(formData: FormData) {
     ? effectiveApprovalStepOrder(steps, storedStepOrder, request.current_approver_role_id)
     : storedStepOrder;
 
+  // Resolve before recording approval: a People outage must leave this action retryable.
+  let preparedAdvance: Awaited<ReturnType<typeof advanceApproval>> | null = null;
+  if (steps.length && !ownerCanFinalize) {
+    // Everyone who has approved this request since it was last sent back to
+    // the station (including this approval), so a person who already approved
+    // is not routed the same request again. Counted across approval cycles: a
+    // cycle can restart without the request changing (e.g. its payment head's
+    // flow was reconfigured), and those earlier approvals still stand. A
+    // return / resubmit / rejection means the request changed, so approvals
+    // before it do not count.
+    const history = await supabaseAdmin.from("payment_request_approvals")
+      .select("action, approver_user_id, created_at")
+      .eq("payment_request_id", request.id)
+      .in("action", ["approved", "returned", "resubmitted", "rejected"])
+      .order("created_at", { ascending: true });
+    if (history.error) throw new Error("Could not verify approval history. Please retry.");
+    const lastSentBack = (history.data ?? []).filter((row) => row.action !== "approved").at(-1)?.created_at ?? null;
+    const priorApprovals = (history.data ?? []).filter((row) => row.action === "approved" && (!lastSentBack || row.created_at > lastSentBack));
+    const approvedUserIds = new Set<string>([authorization.userId, ...priorApprovals.map((row) => row.approver_user_id).filter((id): id is string => Boolean(id))]);
+    preparedAdvance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id, approvedUserIds);
+  }
+
   await insertPaymentApprovalLog({
     payment_request_id: request.id,
     approver_user_id: authorization.userId,
@@ -435,22 +457,7 @@ export async function approvePaymentRequest(formData: FormData) {
         updated_by: authorization.userId
       });
     } else {
-      // Everyone who has approved this request since it was last sent back to
-      // the station (including this approval), so a person who already approved
-      // is not routed the same request again. Counted across approval cycles: a
-      // cycle can restart without the request changing (e.g. its payment head's
-      // flow was reconfigured), and those earlier approvals still stand. A
-      // return / resubmit / rejection means the request changed, so approvals
-      // before it do not count.
-      const history = await supabaseAdmin.from("payment_request_approvals")
-        .select("action, approver_user_id, created_at")
-        .eq("payment_request_id", request.id)
-        .in("action", ["approved", "returned", "resubmitted", "rejected"])
-        .order("created_at", { ascending: true });
-      const lastSentBack = (history.data ?? []).filter((row) => row.action !== "approved").at(-1)?.created_at ?? null;
-      const priorApprovals = (history.data ?? []).filter((row) => row.action === "approved" && (!lastSentBack || row.created_at > lastSentBack));
-      const approvedUserIds = new Set<string>([authorization.userId, ...priorApprovals.map((row) => row.approver_user_id).filter((id): id is string => Boolean(id))]);
-      const advance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id, approvedUserIds);
+      const advance = preparedAdvance!;
       if (advance.done) {
         await updatePaymentRequest(request.id, companyId, {
           status: "approved",
@@ -482,6 +489,7 @@ export async function approvePaymentRequest(formData: FormData) {
           current_approver_user_id: target.userId,
           current_approver_role_id: target.roleId,
           current_approver_role_ids: [target.roleId],
+          approval_routing_reason: target.routingReason || "Advanced to the next configured approval stage",
           updated_at: new Date().toISOString(),
           updated_by: authorization.userId
         }, {
@@ -491,6 +499,7 @@ export async function approvePaymentRequest(formData: FormData) {
           current_approver_user_id: target.userId,
           current_approver_role_id: target.roleId,
           current_approver_role_ids: [target.roleId],
+          approval_routing_reason: target.routingReason || "Advanced to the next configured approval stage",
           updated_at: new Date().toISOString(),
           updated_by: authorization.userId
         });
