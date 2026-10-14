@@ -30,13 +30,13 @@ export function managerShares(input:{month:string;stations:Row[];people:Row;poli
    codes=[...new Set(codes)].sort();
    if(!codes.length){issues.add(`Manager ${person.employee_code||person.full_name}: no effective cost allocation; assign a home or responsible station.`);continue;}
    if(codes.some(code=>!byCode.has(code)))throw Error('A manager allocation references an unknown station.');
-   if(policy.designation_code==='CLM')for(const code of codes){const names=managersByStation.get(code)??new Set<string>();names.add(person.full_name);managersByStation.set(code,names);}
+   if(['CLM','CM'].includes(policy.designation_code)||/cluster (manager|head)/i.test(policy.designation_name??''))for(const code of codes){const names=managersByStation.get(code)??new Set<string>();names.add(person.full_name);managersByStation.set(code,names);}
    const actual=payroll.filter(p=>p.personId===person.id&&p.profileType===(person.profile_type??'employee')&&p.from<=date&&p.to>=date);
    if(actual.length>1)throw Error(`Overlapping final manager payroll for ${person.employee_code||person.full_name}.`);
    const salary=(people.salaries??[]).filter((s:Row)=>s.employee_id===person.id&&active(s,date)).sort((a:Row,b:Row)=>b.effective_from.localeCompare(a.effective_from)||String(b.id).localeCompare(String(a.id)))[0];
    let cost:number,source:string,basis:string;
    if(actual.length){const p=actual[0];if(p.from<start||p.to>end)throw Error('Manager payroll spans accounting months; allocate its payroll period first.');const covered=dates.filter(d=>d>=p.from&&d<=p.to&&employed(d)),index=covered.indexOf(date)+1;cost=Math.round(p.paise*index/covered.length)-Math.round(p.paise*(index-1)/covered.length);source=p.source;basis=`Final payroll ${p.id} · ${p.from} to ${p.to}`;consumedPayroll.set(p.id,(consumedPayroll.get(p.id)??0)+cost);}
-   else{if(salary?.monthly_ctc==null||!Number.isFinite(Number(salary.monthly_ctc))||Number(salary.monthly_ctc)<0){issues.add(`Manager ${person.employee_code||person.full_name}: monthly salary is missing for ${month}.`);continue;}cost=daily(Math.round(Number(salary.monthly_ctc)*100),start,end,date);source='Manager salary accrual';basis=`Monthly salary ₹${Number(salary.monthly_ctc).toFixed(2)} · effective ${salary.effective_from}`;accruedPeople.add(identity);}
+   else{if(salary?.monthly_ctc==null||!Number.isFinite(Number(salary.monthly_ctc))||Number(salary.monthly_ctc)<=0){issues.add(`Manager ${person.employee_code||person.full_name}: monthly salary is missing for ${month}.`);continue;}cost=daily(Math.round(Number(salary.monthly_ctc)*100),start,end,date);source='Manager salary accrual';basis=`Monthly salary ₹${Number(salary.monthly_ctc).toFixed(2)} · effective ${salary.effective_from}`;accruedPeople.add(identity);}
    managerPeople.add(identity);const method=rule?.allocation??policy.allocation??'equal';
    const weights=codes.map(code=>[code,method==='delivery_share'?Math.max(0,(people.volumes??[]).filter((v:Row)=>v.station_code===code&&v.work_date===date).reduce((n:number,v:Row)=>n+Number(v.deliveries||0),0)):1] as [string,number]);
    for(const [station,amount] of split(cost,weights)){
