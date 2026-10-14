@@ -1267,6 +1267,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
   const redirectBack = (params: { notice?: string; error?: string }): never => returnToExpense
     ? expenseRequestsRedirect(params.error ? { expenseError: params.error } : { expenseNotice: params.notice ?? "" })
     : paymentRequestsRedirect(params.error ? { paymentError: params.error } : { paymentNotice: params.notice ?? "" });
+  let notice = "Payment request resubmitted successfully.";
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     const admin = supabaseAdmin;
@@ -1547,14 +1548,13 @@ export async function resubmitPaymentRequest(formData: FormData) {
       remarks,
       requestId: request.id
     });
-    if (!emailResult.sent) {
-      redirectBack({ notice: paymentEmailNotice("Payment request resubmitted successfully.", emailResult.reason) });
-    }
+    // Redirect after the try block: redirect() throws, and the catch would report it as a failure.
+    if (!emailResult.sent) notice = paymentEmailNotice(notice, emailResult.reason);
   } catch (error) {
     redirectBack({ error: paymentRequestErrorMessage(error) });
   }
 
-  redirectBack({ notice: "Payment request resubmitted successfully." });
+  redirectBack({ notice });
 }
 
 export async function cancelPaymentRequest(formData: FormData) {
