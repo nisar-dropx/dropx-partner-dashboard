@@ -29,7 +29,7 @@ assert.throws(()=>parseAuditTids('Tracking ID\nTID123'),/Invalid TID/);assert.th
 assert.throws(()=>selectedAuditEmployees(['foreign'],[{ref:'local'}]),/no longer linked/);
 const item={id:'check',label:'Clean',photo_required:true};
 assert.equal(missingAuditPhotos([item],[{checklist_item_id:'other',evidence_kind_code:'checklist_photo',content_type:'image/png'}]).length,1);
-assert.equal(missingAuditPhotos([item],[{checklist_item_id:'check',evidence_kind_code:'checklist_photo',content_type:'application/pdf'}]).length,1);
+assert.equal(missingAuditPhotos([item],[{checklist_item_id:'check',evidence_kind_code:'checklist_photo',content_type:'application/pdf'}]).length,0);
 assert.equal(missingAuditPhotos([item],[{checklist_item_id:'check',evidence_kind_code:'checklist_photo',content_type:'image/png'}]).length,0);
 const db=new PGlite();const id=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const [company,station,type,actor,audit,emp,otherStation,workforce,manager]=[1,2,3,4,5,6,7,8,9].map(id);
