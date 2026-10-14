@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { saveDirectPaymentAllocation } from "@/app/provider-mapping/direct-pay/actions";
 import { PaymentAllocationHistoryButton } from "@/components/payment-allocation-history-button";
+import { StatusPill } from "@/components/status-pill";
 import type { PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import type { DirectPaymentMethod } from "@/lib/workforce-payment-allocation";
 
@@ -10,6 +11,8 @@ export type DirectPaymentAllocationRow = {
   personId: string;
   dropxId: string;
   fullName: string;
+  profileStatus: string;
+  profileEditable: boolean;
   stationLabel: string;
   designationLabel: string;
   dateOfJoin: string;
@@ -44,6 +47,7 @@ function AllocationCells({
   permissionScope: "provider_mapping" | "payment_settings";
   row: DirectPaymentAllocationRow;
 }) {
+  const editable = canEdit && row.profileEditable;
   const currentMethodAvailable = methods.some((method) => method.id === row.paymentMethodId);
   const [methodId, setMethodId] = useState(currentMethodAvailable ? row.paymentMethodId : "");
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
@@ -63,7 +67,7 @@ function AllocationCells({
         <input form={formId} name="payment_values_json" type="hidden" value={JSON.stringify(methodValues)} />
         <select
           className="select"
-          disabled={!canEdit}
+          disabled={!editable}
           form={formId}
           name="payment_method_id"
           onChange={(event) => {
@@ -88,7 +92,7 @@ function AllocationCells({
           <span style={{ fontSize: 11, fontWeight: 700 }}>{component.label} · {scheduleLabel(component.schedule)}</span>
           <input
             className="field"
-            disabled={!canEdit}
+            disabled={!editable}
             form={formId}
             inputMode="decimal"
             min="0"
@@ -101,16 +105,16 @@ function AllocationCells({
         </label>) : <span className="subtle">Select an attendance, workday or fixed-amount method.</span>}
       </td>
       <td style={{ minWidth: 150 }}>
-        <input className="field" defaultValue={row.effectiveFrom} disabled={!canEdit} form={formId} name="effective_from" required type="date" />
+        <input className="field" defaultValue={row.effectiveFrom} disabled={!editable} form={formId} name="effective_from" required type="date" />
       </td>
       <td style={{ minWidth: 150 }}>
-        <input className="field" defaultValue={row.effectiveTo} disabled={!canEdit} form={formId} name="effective_to" type="date" />
+        <input className="field" defaultValue={row.effectiveTo} disabled={!editable} form={formId} name="effective_to" type="date" />
       </td>
       <td style={{ minWidth: 190 }}>
-        <input className="field" disabled={!canEdit} form={formId} maxLength={500} name="change_reason" placeholder="Reason for change" />
+        <input className="field" disabled={!editable} form={formId} maxLength={500} name="change_reason" placeholder="Reason for change" />
       </td>
       <td style={{ minWidth: 105 }}>
-        <div className="payout-detail-actions"><PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId} · ${row.fullName}`} /><button className="button compact" disabled={!methodId || !canEdit} form={formId} type="submit">Save</button></div>
+        <div className="payout-detail-actions"><PaymentAllocationHistoryButton entries={row.history} subjectLabel={`${row.dropxId} · ${row.fullName}`} /><button className="button compact" disabled={!methodId || !editable} form={formId} title={!row.profileEditable ? `${row.profileStatus} profiles are read-only for payment allocation.` : undefined} type="submit">{row.profileEditable ? "Save" : "View only"}</button></div>
       </td>
     </>
   );
@@ -138,7 +142,7 @@ export function DirectPaymentAllocationWorksheet({
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) return rows;
-    return rows.filter((row) => [row.dropxId, row.fullName, row.stationLabel, row.designationLabel]
+    return rows.filter((row) => [row.dropxId, row.fullName, row.profileStatus, row.stationLabel, row.designationLabel]
       .some((value) => value.toLocaleLowerCase().includes(needle)));
   }, [query, rows]);
 
@@ -168,6 +172,7 @@ export function DirectPaymentAllocationWorksheet({
             <tr>
               <th>DropX ID</th>
               <th>Person</th>
+              <th>Status</th>
               <th>Location</th>
               <th>Designation</th>
               <th>Payment method</th>
@@ -182,10 +187,11 @@ export function DirectPaymentAllocationWorksheet({
             {filtered.length ? filtered.map((row) => <tr key={row.personId}>
               <td><strong>{row.dropxId}</strong></td>
               <td>{row.fullName}</td>
+              <td><StatusPill status={row.profileStatus} /></td>
               <td>{row.stationLabel}</td>
               <td>{row.designationLabel}</td>
               <AllocationCells audience={audience} canEdit={canEdit} formId={`direct-allocation-${audience}-${row.personId}`} methods={methods} permissionScope={permissionScope} row={row} />
-            </tr>) : <tr><td className="empty-cell" colSpan={10}>No direct-pay {subjectLabel} records match this search.</td></tr>}
+            </tr>) : <tr><td className="empty-cell" colSpan={11}>No direct-pay {subjectLabel} records match this search.</td></tr>}
           </tbody>
         </table>
       </div>

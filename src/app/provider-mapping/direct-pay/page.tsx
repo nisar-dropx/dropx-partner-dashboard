@@ -14,6 +14,11 @@ import { readAllRows } from "@/lib/supabase-pagination";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory } from "@/lib/payment-allocation-history";
 import {
+  directPaymentProfileIsEditable,
+  directPaymentProfileIsVisible,
+  directPaymentProfileStatus
+} from "@/lib/direct-payment-profile-visibility";
+import {
   directPaymentMethodEligible,
   type DirectPaymentComponent,
   type DirectPaymentMethod
@@ -28,6 +33,10 @@ type PersonRow = {
   designation_id: string | null;
   designation: string | null;
   date_of_join: string | null;
+  onboarding_status: string | null;
+  lifecycle_status?: string | null;
+  is_active: boolean | null;
+  deleted_at?: string | null;
 };
 type AllocationRow = {
   id: string;
@@ -145,24 +154,22 @@ export default async function DirectPaymentAllocationsPage({
   if (!loadError && (audience === "helpers" || designations.length)) {
     const personResult = audience === "helpers"
       ? await readAllRows(supabaseAdmin.from("helpers")
-        .select("id, dropx_id, full_name, location_id, designation, date_of_join")
+        .select("id, dropx_id, full_name, location_id, designation, date_of_join, onboarding_status, is_active")
         .eq("company_id", companyId)
-        .eq("is_active", true)
-        .eq("onboarding_status", "active")
         .order("dropx_id")
         .order("id"))
       : await readAllRows(supabaseAdmin.from("workforce")
-        .select("id, dropx_id, full_name, location_id, designation_id, designation, date_of_join")
+        .select("id, dropx_id, full_name, location_id, designation_id, designation, date_of_join, onboarding_status, lifecycle_status, is_active, deleted_at")
         .eq("company_id", companyId)
-        .eq("is_active", true)
         .is("deleted_at", null)
         .order("dropx_id")
         .order("id"));
     loadError = personResult.error;
-    people = ((personResult.data ?? []) as PersonRow[]).filter((person) => audience === "helpers" || Boolean(
-      designationById.get(String(person.designation_id ?? ""))
-      ?? designationByName.get(String(person.designation ?? "").trim().toLowerCase())
-    ));
+    people = ((personResult.data ?? []) as PersonRow[]).filter((person) => directPaymentProfileIsVisible(person, audience)
+      && (audience === "helpers" || Boolean(
+        designationById.get(String(person.designation_id ?? ""))
+        ?? designationByName.get(String(person.designation ?? "").trim().toLowerCase())
+      )));
   }
 
   const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
@@ -227,6 +234,8 @@ export default async function DirectPaymentAllocationsPage({
       personId: person.id,
       dropxId: person.dropx_id || "Not assigned",
       fullName: person.full_name,
+      profileStatus: directPaymentProfileStatus(person, audience),
+      profileEditable: directPaymentProfileIsEditable(person, audience),
       stationLabel: stationById.get(person.location_id ?? "") ?? "Location unavailable",
       designationLabel: audience === "helpers"
         ? person.designation || "Designation unavailable"
