@@ -33,7 +33,11 @@ function fixture({ssa=true, cm=true}={}) {
       limit(n){rows=rows.slice(0,n);return q},range(a,b){rows=rows.slice(a,b+1);return q},
       maybeSingle(){assert.ok(rows.length<=1);return Promise.resolve({data:rows[0]??null,error:null})},
       then(resolve,reject){return Promise.resolve({data:rows,error:null}).then(resolve,reject)}};return q;
-  },rpc:async()=>({data:false,error:null})};
+  },rpc:async(name,args,options)=>{
+    assert.equal(name,'hr_workflow_applies_hr_precheck_finalize_flag');
+    state.rpcCalls??=[];state.rpcCalls.push({name,args,options});
+    return {data:false,error:null};
+  }};
   const cache=new Map();
   function load(file,extra='') {
     file=path.resolve(root,file);
@@ -179,6 +183,7 @@ test('One reimbursement: HLM-style route without a final stage still ends at Fin
   assert.deepEqual(result.steps.map(s=>[s.approver_person_id,s.stage_code]),[['tl','manager'],['finance','finance']]);
   assert.equal(result.steps.at(-1).step_name,'Finance approval');
   assert.equal(JSON.stringify(f.state.tables),before,'resolution must not mutate shared routes or data');
+  assert.deepEqual(f.state.rpcCalls[0].options,{get:true},'the approval guide must use a read-only RPC in preview');
 });
 test('One reimbursement: SSA keeps CM/AOM checks and ends at Finance regardless of wrong final designation',async()=>{
   const f=fixture();Object.assign(f.route,{workflow_code:'reimbursement',level_2_designation_id:'AOM',hr_final_required:true,hr_final_designation_id:'HRM',hr_final_fallback_mode:'specific_person',hr_final_fallback_person_id:'hr'});
