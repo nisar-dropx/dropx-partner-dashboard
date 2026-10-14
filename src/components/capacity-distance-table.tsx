@@ -12,6 +12,7 @@ import {
   distanceMethods,
   type DistanceEntry,
 } from "@/lib/ops-pulse/distance-register";
+import { summarizeDistanceAssociates } from "@/lib/ops-pulse/distance-associates";
 import { routePendingLabel } from "@/lib/workforce-route-distance";
 import styles from "./capacity-distance.module.css";
 import type { RouteGeometry } from "./capacity-distance-map";
@@ -63,6 +64,7 @@ export function CapacityDistanceTable({
   query: string;
 }) {
   const [page, setPage] = useState(0),
+    [associateId, setAssociateId] = useState<string | null>(null),
     [selected, setSelected] = useState<DistanceEntry | null>(null),
     [sort, setSort] = useState<"date" | "km">("date");
   const filtered = useMemo(
@@ -87,8 +89,16 @@ export function CapacityDistanceTable({
         ),
     [rows, statuses, methods, query, sort],
   );
-  const shown = filtered.slice(page * 50, page * 50 + 50),
-    ready = filtered.filter((r) => r.status === "ready"),
+  const associates = useMemo(() => summarizeDistanceAssociates(filtered).sort((a, b) =>
+    sort === "km" ? (b.km ?? -1) - (a.km ?? -1) || a.name.localeCompare(b.name)
+      : a.name.localeCompare(b.name) || a.id.localeCompare(b.id)), [filtered, sort]);
+  const associate = associates.find(row => row.id === associateId);
+  useEffect(() => { setPage(0); setAssociateId(null); setSelected(null); }, [rows, statuses, methods, query]);
+  const visibleRows = associate ? filtered.filter(row => row.workforceId === associate.id) : filtered;
+  const count = associate ? visibleRows.length : associates.length;
+  const safePage = Math.min(page, Math.max(0, Math.ceil(count / 50) - 1));
+  const shown = visibleRows.slice(safePage * 50, safePage * 50 + 50),
+    ready = visibleRows.filter((r) => r.status === "ready"),
     total = ready.reduce((s, r) => s + (r.km || 0), 0),
     fuel = ready.reduce((s, r) => s + (r.fuel || 0), 0);
   return (
@@ -108,14 +118,14 @@ export function CapacityDistanceTable({
         </article>
         <article>
           <span>Awaiting distance</span>
-          <strong>{filtered.length - ready.length}</strong>
+          <strong>{visibleRows.length - ready.length}</strong>
           <p>Pending or needs attention</p>
         </article>
         <article>
-          <span>Associates</span>
-          <strong>{new Set(filtered.map((r) => r.workforceId)).size}</strong>
+          <span>{associate ? "Recorded dates" : "Associates"}</span>
+          <strong>{associate ? associate.dates : associates.length}</strong>
           <p>
-            {new Set(filtered.map((r) => r.station)).size} stations in this
+            {new Set(visibleRows.map((r) => r.station)).size} stations in this
             selection
           </p>
         </article>
@@ -123,8 +133,9 @@ export function CapacityDistanceTable({
       <section className={styles.panel}>
         <header className={styles.tableHead}>
           <div>
-            <h2>Daily distance register</h2>
-            <span>{filtered.length} associate-days</span>
+            {associate ? <button type="button" className={styles.sort} onClick={() => { setAssociateId(null); setPage(0); }}><ChevronLeft size={15} /> All associates</button> : null}
+            <h2>{associate ? associate.name : "Associate distance summary"}</h2>
+            <span>{associate ? `${associate.dates} dates · ${associate.stations.join(", ")} · Daily breakdown` : `${associates.length} associates · ${filtered.length} associate-days · Select an associate to view dates`}</span>
           </div>
           <button
             type="button"
@@ -135,10 +146,20 @@ export function CapacityDistanceTable({
             }}
           >
             <ArrowDownUp size={15} />
-            {sort === "date" ? "Latest first" : "Highest km first"}
+            {sort === "date" ? (associate ? "Latest first" : "Name A–Z") : "Highest km first"}
           </button>
         </header>
-        <div className={styles.tableWrap}>
+        {!associate ? <div className={styles.summaryList}>
+          <div className={styles.summaryLabels}><span>Associate / station</span><span>Dates / data source</span><span>Distance / fuel</span><span>Coverage</span><span /></div>
+          {associates.slice(safePage * 50, safePage * 50 + 50).map(a => <article key={a.id} className={styles.summaryRow}>
+            <div><button type="button" className={styles.associateName} onClick={() => { setAssociateId(a.id); setPage(0); }}>{a.name}</button><small>{a.stations.join(" · ")}</small><small>Amazon: {a.amazonIds.join(" / ") || "Not linked"} · DropX: {a.dropxIds.join(" / ") || "Not mapped"}</small></div>
+            <div><strong>{date(a.from)}{a.to !== a.from ? ` – ${date(a.to)}` : ""}</strong><small>{a.dates} dates · {a.sources.map(s => `${distanceMethods[s.method] || s.method} (${s.count})`).join(" · ")}</small></div>
+            <div><strong>{a.km === null ? "Distance pending" : `${number(a.km)} km`}</strong><small>{a.fuel === null ? "Fuel pending" : `₹${number(a.fuel)} fuel`}{a.pending && a.ready ? " · partial total" : ""}</small></div>
+            <div><span className={`${styles.badge} ${a.pending ? styles.pending : styles.ready}`}>{a.pending ? `${a.pending} pending` : "All ready"}</span><small>{a.ready} / {a.days.length} station-days ready</small></div>
+            <button type="button" className={styles.open} aria-label={`View dates for ${a.name}`} onClick={() => { setAssociateId(a.id); setPage(0); }}>View dates <ChevronRight size={16} /></button>
+          </article>)}
+          {!associates.length ? <p className={styles.empty}>No associates match these filters. Try another date, station or status.</p> : null}
+        </div> : <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
@@ -227,27 +248,27 @@ export function CapacityDistanceTable({
               ) : null}
             </tbody>
           </table>
-        </div>
+        </div>}
         <footer className={styles.pagination}>
           <span>
-            {filtered.length
-              ? `${page * 50 + 1}–${Math.min((page + 1) * 50, filtered.length)} of ${filtered.length}`
+            {count
+              ? `${safePage * 50 + 1}–${Math.min((safePage + 1) * 50, count)} of ${count} ${associate ? "station-days" : "associates"}`
               : "0 records"}
           </span>
           <div>
             <button
               type="button"
               aria-label="Previous page"
-              disabled={page === 0}
-              onClick={() => setPage((p) => p - 1)}
+              disabled={safePage === 0}
+              onClick={() => setPage(safePage - 1)}
             >
               <ChevronLeft size={18} />
             </button>
             <button
               type="button"
               aria-label="Next page"
-              disabled={(page + 1) * 50 >= filtered.length}
-              onClick={() => setPage((p) => p + 1)}
+              disabled={(safePage + 1) * 50 >= count}
+              onClick={() => setPage(safePage + 1)}
             >
               <ChevronRight size={18} />
             </button>

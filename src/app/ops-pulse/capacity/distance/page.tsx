@@ -75,7 +75,7 @@ export default async function DistancePage({
         <PageHead
           eyebrow="Capacity"
           title="Distance & Fuel"
-          subtitle="Associate-level daily kilometres and fuel, with the route evidence behind each day."
+          subtitle="Distance and fuel by associate. Select an associate to view dates and route evidence."
         />
         <CapacityWorkspaceTabs
           active="distance"
