@@ -55,7 +55,7 @@ export async function GET(request: Request, { params }: { params: { kind: string
     if (params.kind === "exit") {
       const document = await supabaseAdmin.from("hr_exit_documents")
         .select("id, case_id, document_type, file_name, template_id, template_version, issue_date, reference_number, status, hr_exit_cases!inner(id, case_number, worker_type, employee_id, contractor_id, reason_id, approved_last_working_date, effective_date, settlement_status)")
-        .eq("company_id", account.companyId).eq("id", params.id).neq("status", "void")
+        .eq("company_id", account.companyId).eq("id", params.id).in("status", ["issued", "acknowledged"])
         .eq("hr_exit_cases.worker_type", profileType)
         .eq(profileType === "employee" ? "hr_exit_cases.employee_id" : "hr_exit_cases.contractor_id", account.id)
         .maybeSingle();
