@@ -7,18 +7,19 @@ export interface Entry {
 }
 export interface Loss {id:string;month:string;station:string;reference:string;paise:number;outcome:string;plannedPaise:number;payrollMonth:string;responsible:string;postedPaise:number;evidence:string;}
 export interface Schedule {id:string;month:string;caseKey:string;station:string;payrollMonth:string;paise:number;responsible:string;note:string;version?:number;deleted?:boolean;}
+export interface DeliveryVolume {station:string;delivered:number|null;reportedDays:number;through:string|null;missingSources:string[];unit:'deliveries'|'units';}
 export interface Dimension {code:string;name:string;region:string;state:string;model:string;format?:string;cluster:string;managers:string[];isHo:boolean;}
 export function reportingState(value:unknown):string {
  const state=String(value??'').trim();
  const known:Record<string,string>={AP:'Andhra Pradesh','ANDHRA PRADESH':'Andhra Pradesh',KL:'Kerala',KERALA:'Kerala',OD:'Odisha',OR:'Odisha',ODISHA:'Odisha',ORISSA:'Odisha',CG:'Chhattisgarh',CHHATTISGARH:'Chhattisgarh',KA:'Karnataka',KARNATAKA:'Karnataka',TS:'Telangana',TG:'Telangana',TELANGANA:'Telangana',UP:'Uttar Pradesh','UTTAR PRADESH':'Uttar Pradesh',TN:'Tamil Nadu','TAMIL NADU':'Tamil Nadu'};
  return known[state.toUpperCase()]??(state||'Unassigned');
 }
-export interface OverheadRule {station_code:string;mode:'regional'|'corporate';recipient_codes:string[];allocation?:'equal'|'revenue'|'custom';weights?:Record<string,number>;effective_from:string;effective_to?:string|null;version?:number;}
-export interface OverheadPool {code:string;entries:Entry[];rule:OverheadRule|null;total:number;allocated:number;unallocated:number;income:number;issue:string;allocations:Entry[];}
+export interface OverheadRule {station_code:string;mode:'regional'|'corporate';recipient_codes:string[];allocation?:'equal'|'revenue'|'custom'|'volume'|'unallocated';recipient_models?:string[];weights?:Record<string,number>;effective_from:string;effective_to?:string|null;version?:number;}
+export interface OverheadPool {code:string;entries:Entry[];rule:OverheadRule|null;total:number;allocated:number;unallocated:number;income:number;issue:string;allocations:Entry[];mode:'regional'|'corporate';corporateShares:{model:string;paise:number;revenuePaise:number;weight:number}[];}
 export interface Sources {
- dimensions?:Dimension[];overheadRules?:OverheadRule[];company:string;month:string;capturedAt:string;stations:{code:string;base:string;aliases:string[];active?:boolean;isHo?:boolean;hidden?:boolean}[];entries:Entry[];losses:Loss[];issues:string[];counts:Record<string,number>;}
+ volumes?:DeliveryVolume[];dimensions?:Dimension[];overheadRules?:OverheadRule[];company:string;month:string;capturedAt:string;stations:{code:string;base:string;aliases:string[];active?:boolean;isHo?:boolean;hidden?:boolean}[];entries:Entry[];losses:Loss[];issues:string[];counts:Record<string,number>;}
 export interface Report {
- overheadPools?:OverheadPool[];excludedInactiveEntries?:number;
+ volumes?:DeliveryVolume[];overheadPools?:OverheadPool[];excludedInactiveEntries?:number;
  dimensions?:Dimension[];
  month:string;entries:Entry[];schedules:Schedule[];losses:Loss[];stations:string[];issues:string[];capturedAt:string|null;counts:Record<string,number>;
  totals:{income:number;expense:number;profit:number;recovery:number;gst:number};
