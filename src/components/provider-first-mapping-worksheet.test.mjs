@@ -259,9 +259,9 @@ test('payment-period plus requires the first end date and opens the plan without
  assert.equal(ui.cards().length,1);
 });
 
-test('dropdown filters available station associates and lookup reflects only successful saves',async()=>{
+test('dropdown offers every authorized associate across locations and lookup reflects only successful saves',async()=>{
  const ui=worksheet({workers:[worker,{...worker,id:'elsewhere',profileStationId:'station-2'}],lookupEntries:[{key:'u',stationId:'station-1',providerMemberId:row.providerMemberId,history:[]}]},async data=>saved(data));
- assert.deepEqual(ui.select('provider_first_worker_0').options.map(option=>option.value),[worker.id]);
+ assert.deepEqual(ui.select('provider_first_worker_0').options.map(option=>option.value),[worker.id,'elsewhere']);
  completeDraft(ui);
  assert.equal(ui.one(n=>n.type==='MappingLookup').props.entries[0].history.length,0);
  await ui.save();

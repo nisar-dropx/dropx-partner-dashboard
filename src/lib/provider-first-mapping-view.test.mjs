@@ -14,6 +14,7 @@ import {
   providerFirstNamesMatch,
   providerFirstRowIssue,
   providerFirstValidationStatus,
+  providerFirstWorkerIsSelectable,
   providerMemberIdFromSpreadsheetCells,
   providerMemberKey,
   providerSourceMemberKey,
@@ -119,6 +120,76 @@ test("permits only an exact same-provider, same-member location remap", () => {
   assert.equal(providerFirstLocationRemap({ ...destination, mappingId: "stale-mapping" }, sourceWorker), null);
   assert.equal(providerFirstLocationRemap({ ...destination, effectiveFrom: "2026-08-31" }, sourceWorker), null);
   assert.equal(providerFirstValidationStatus({ ...destination, providerId: "provider-2" }, sourceWorker, method), "needs_attention");
+});
+
+test("offers cross-location candidates while retaining ownership and draft-conflict guards", () => {
+  const available = {
+    ...worker,
+    id: "worker-2",
+    dropxId: "DROPX2",
+    stationId: "station-2",
+    profileStationId: "station-2",
+    locationLabel: "KLZA",
+    profileLocationLabel: "KLZA",
+    mappingId: "",
+    providerId: "",
+    mappedProviderMemberId: "",
+    effectiveFrom: "",
+    paymentMethodId: "",
+    paymentValues: {},
+    currentMappings: [],
+    mappingHistory: []
+  };
+  const unmappedRow = {
+    ...row,
+    workforceId: "",
+    dropxId: "",
+    dropxName: "",
+    mappingId: "",
+    relatedStationIds: ["station-1"]
+  };
+
+  assert.equal(providerFirstWorkerIsSelectable(unmappedRow, available, [unmappedRow]), true);
+  assert.equal(providerFirstWorkerIsSelectable(unmappedRow, { ...available, hasRestrictedMapping: true }, [unmappedRow]), false);
+
+  const occupiedMapping = {
+    mappingId: "occupied",
+    stationId: available.stationId,
+    locationLabel: available.locationLabel,
+    providerId: "provider-2",
+    mappedProviderMemberId: "member-2",
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: "10" },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "",
+    status: "active"
+  };
+  assert.equal(providerFirstWorkerIsSelectable(unmappedRow, { ...available, currentMappings: [occupiedMapping] }, [unmappedRow]), false);
+
+  const conflictingDraft = {
+    ...unmappedRow,
+    providerId: "provider-2",
+    providerMemberId: "member-2",
+    workforceId: available.id
+  };
+  assert.equal(providerFirstWorkerIsSelectable(unmappedRow, available, [unmappedRow, conflictingDraft]), false);
+});
+
+test("offers an exact second-location candidate when its registered-location mapping covers the period", () => {
+  const secondLocationRow = {
+    ...row,
+    stationId: "station-2",
+    stationLabel: "KLZA",
+    relatedStationIds: ["station-2"],
+    workforceId: "",
+    dropxId: "",
+    dropxName: "",
+    mappingId: ""
+  };
+
+  assert.equal(providerFirstWorkerIsSelectable(secondLocationRow, worker, [secondLocationRow]), true);
 });
 
 test("uses the effective mapping station when the Workforce profile already moved", () => {
@@ -395,6 +466,7 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /Mapped: \$\{worker\.locationLabel\} · Profile:/);
   assert.match(component, /saved\?\.profileStationId/);
   assert.match(page, /mapping\?\.station_id \?\? profileStationId/);
+  assert.match(page, /return allowed\(worker\.location_id\)/);
   assert.match(component, /\[replace_mapping_id\]/);
   assert.match(component, /\[replacement_confirmed\]/);
   assert.match(component, /replacement && !confirmedMappingIds\[index\]/);

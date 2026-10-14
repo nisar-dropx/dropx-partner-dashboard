@@ -16,9 +16,9 @@ test('inclusive payment dates permit cross-month plans and only the final open e
 });
 const row={stationId:'a',relatedStationIds:['a','x'],providerId:'amz',providerMemberId:'111',workforceId:'',effectiveFrom:'2026-10-01',effectiveTo:''};
 const worker={id:'w',profileStationId:'a',stationId:'a',providerId:'amz',dateOfJoin:'2026-10-01',mappingId:'',mappedProviderMemberId:'',currentMappings:[]};
-test('dropdown excludes other stations, assigned IDs and unsaved reservations but preserves current selection',()=>{
+test('dropdown includes other permitted stations, excludes assigned IDs and unsaved reservations, and preserves current selection',()=>{
  assert.equal(providerFirstWorkerIsSelectable(row,worker),true);
- assert.equal(providerFirstWorkerIsSelectable(row,{...worker,profileStationId:'b'}),false);
+ assert.equal(providerFirstWorkerIsSelectable(row,{...worker,profileStationId:'b'}),true);
  assert.equal(providerFirstWorkerIsSelectable(row,{...worker,hasRestrictedMapping:true}),false);
  assert.equal(providerFirstWorkerIsSelectable(row,{...worker,mappingHistory:[{mappingId:'bounded',providerId:'amz',mappedProviderMemberId:'222',status:'closed',effectiveTo:'2999-12-31'}]}),false);
  assert.equal(providerFirstWorkerIsSelectable(row,{...worker,currentMappings:[{mappingId:'m',stationId:'a',providerId:'amz',mappedProviderMemberId:'222',effectiveTo:'',status:'active'}]}),false);

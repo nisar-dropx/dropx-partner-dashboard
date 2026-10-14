@@ -79,23 +79,22 @@ export function providerMappingStationFamily(stationId: string, stations: Mappin
   )).map((item) => item.id);
 }
 
-/** Preserve the selected value, but offer only valid, unoccupied choices for this row. */
+/**
+ * Preserve the selected value and hide only choices that are unavailable
+ * because of a restricted or conflicting mapping. Location compatibility is
+ * validated after selection so every account-authorized associate remains
+ * searchable, including the registered-location exception workflow.
+ */
 export function providerFirstWorkerIsSelectable(row: ProviderFirstMappingRowView, worker: ProviderFirstWorkerView, drafts: ProviderFirstMappingRowView[] = []) {
   if (row.workforceId === worker.id) return true;
   if (worker.hasRestrictedMapping) return false;
-  const profileStation = worker.profileStationId || worker.stationId;
-  if (!(row.relatedStationIds ?? [row.stationId]).includes(profileStation)) return false;
   const identityMatches = (providerId: string, memberId: string) => providerId === row.providerId
     && providerMemberKey("", memberId) === providerMemberKey("", row.providerMemberId);
   const occupied = [...currentWorkerMappings(worker), ...(worker.mappingHistory ?? []).filter(item => item.status === "closed" && item.effectiveTo >= mappingLookupToday())];
   if (occupied.some((item) => !identityMatches(item.providerId, item.mappedProviderMemberId))) return false;
   if (drafts.some((item) => item !== row && item.workforceId === worker.id
     && !identityMatches(item.providerId, item.providerMemberId))) return false;
-  const reference = providerFirstMappingReferenceForRow(row, worker);
-  const candidate = { ...row, workforceId: worker.id, mappingId: reference?.mappingId ?? "",
-    effectiveFrom: reference?.effectiveFrom ?? (row.effectiveFrom || worker.dateOfJoin),
-    effectiveTo: reference?.effectiveTo ?? row.effectiveTo };
-  return providerFirstLocationIsAllowed(candidate, worker);
+  return true;
 }
 
 export type ProviderFirstMappingReplacement = {
