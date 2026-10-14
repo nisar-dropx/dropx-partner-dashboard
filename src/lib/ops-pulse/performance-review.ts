@@ -1,3 +1,6 @@
+import { loadReviewAssociatePay } from "./review-associate-pay-data";
+import type { ReviewAssociatePay } from "./review-associate-pay";
+import { readAllRows } from "../supabase-pagination";
 import type { AuthorizationContext } from "@/lib/authorization";
 import { allRoutingRows, loadPeopleReviewRoute, syncPeopleReviewRoutes } from "./people-review-routing";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
@@ -211,21 +214,7 @@ export type PerformanceOperationalSnapshot = {
   variableDaPay: number;
 };
 
-export type PerformanceAssociateDelivery = {
-  assigned: number | null;
-  associateId: string;
-  deliveryRate: number | null;
-  delivered: number;
-  /** Same-month delivery total and active delivery days, for review drill-downs. */
-  mtdActiveDays: number;
-  mtdDailyAllocations: PerformanceAssociateDailyAllocation[];
-  mtdDelivered: number;
-  name: string;
-  paymentScheme: string | null;
-  paymentSetupStatus: string | null;
-  rateCard: string | null;
-  totalPay: number | null;
-};
+export type PerformanceAssociateDelivery = ReviewAssociatePay;
 
 export type PerformanceAssociateDailyAllocation = { date: string; delivered: number };
 
@@ -255,12 +244,6 @@ export type PerformanceReviewChainStep = {
   assignmentId?: string;
   designationId?: string;
 };
-
-type Relation<T> = T | T[] | null | undefined;
-
-function one<T>(relation: Relation<T>) {
-  return Array.isArray(relation) ? relation[0] ?? null : relation ?? null;
-}
 
 function normalized(value: unknown) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
@@ -381,40 +364,6 @@ export function isApprovedPayment(request: { status: string | null; approval_sta
     && !request.current_approver_user_id && !request.current_approver_role_id;
 }
 
-function readablePayType(value: unknown) {
-  const raw = String(value ?? "").trim();
-  if (!raw || normalized(raw) === "UNALLOCATED") return null;
-  return raw.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function mappedDeliveryRate(mapping: Record<string, unknown> | undefined, components: Array<Record<string, unknown>>) {
-  if (!mapping) return null;
-  const legacy = numberOrNull(mapping.delivery_rate);
-  if (legacy != null && legacy > 0) return legacy;
-  const values = mapping.payment_values && typeof mapping.payment_values === "object" && !Array.isArray(mapping.payment_values)
-    ? mapping.payment_values as Record<string, unknown>
-    : {};
-  for (const component of components) {
-    const field = one(component.payment_fields as Relation<Record<string, unknown>>);
-    const code = String(field?.code ?? component.component_code ?? "").trim();
-    const source = normalized((field?.provider_calculation_sources as Record<string, unknown> | null)?.amazon ?? field?.calculation_source ?? code);
-    const isProduction = component.component_type === "production" || normalized(field?.calculation_type) === "COUNT_X_RATE";
-    // A rate is only displayed when it pays Amazon delivery (not C-return,
-    // MFN, fuel or an MG); this is the exact per-package figure requested.
-    if (!isProduction || !["DELIVERY", "AMAZONDELIVERY"].includes(source)) continue;
-    const rate = numberOrNull(values[code] ?? values[String(component.component_code ?? "")] );
-    if (rate != null && rate > 0) return rate;
-  }
-  // Older payment methods did not persist a calculation source. Their
-  // delivery component is still safely identifiable by its code.
-  for (const [code, value] of Object.entries(values)) {
-    if (!/DELIVERY|DEL[_ ]?RATE|PER[_ ]?PACKET/i.test(code) || /RETURN|MFN|FUEL|MG|GUARANTEE/i.test(code)) continue;
-    const rate = numberOrNull(value);
-    if (rate != null && rate > 0) return rate;
-  }
-  return null;
-}
-
 export async function loadPerformanceOperationalSnapshots(companyId: string, sourceDate: string, locations: CodLocationRow[]) {
   const empty = new Map<string, PerformanceOperationalSnapshot>();
   if (!supabaseAdmin || !locations.length) return { rows: empty, error: supabaseAdmin ? null : "Database service is unavailable." };
@@ -428,11 +377,11 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       .select("station_code,total_delivery,total_cost").eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("cps_cost_breakup_daily")
       .select("station_code,head,sub_head,source,amount,count,cps").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
-    supabaseAdmin.from("cps_shipment_daily")
+    readAllRows(supabaseAdmin.from("cps_shipment_daily")
       .select("station_code,provider_employee_id,provider_employee_name,dropx_name,pay_type,total_delivery,assigned_count,del_rate,c_return_rate,mfn_rate,mfn_return_rate,mg_salary,fuel_rate,variable_pay,mg_pay,fuel_pay,da_total_pay,mapping_status")
-      .eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
-    supabaseAdmin.from("delivered_shipment_facts")
-      .select("station_code,driver_id,driver_name,package_count").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
+      .eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes).order("id")),
+    readAllRows(supabaseAdmin.from("delivered_shipment_facts")
+      .select("station_code,driver_id,driver_name,package_count").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes).order("id")),
     supabaseAdmin.from("capacity_station_daily_cache")
       .select("station_code,delivered,active_ids").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("capacity_station_daily_cache")
@@ -441,36 +390,17 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     supabaseAdmin.from("ops_performance_station_settings")
       .select("station_id,opening_window_start,opening_window_end").eq("company_id", companyId).in("station_id", locationIds),
     loadOpsStationManpower(companyId, locations, sourceDate).catch(() => null),
-    supabaseAdmin.from("cps_shipment_daily")
-      .select("station_code,work_date,provider_employee_id,provider_employee_name,dropx_name,total_delivery")
-      .eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes),
-    supabaseAdmin.from("delivered_shipment_facts")
+    readAllRows(supabaseAdmin.from("cps_shipment_daily")
+      .select("station_code,work_date,provider_employee_id,provider_employee_name,dropx_name,total_delivery,assigned_count")
+      .eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes).order("id")),
+    readAllRows(supabaseAdmin.from("delivered_shipment_facts")
       .select("station_code,work_date,driver_id,driver_name,package_count").eq("company_id", companyId)
-      .gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes)
+      .gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes).order("id"))
   ]);
-  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error ?? monthShipmentResult.error ?? monthDetailResult.error;
+  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error ?? monthShipmentResult.error ?? monthDetailResult.error;
   if (error) return { rows: empty, error: error.message };
-  const providerMemberIds = [...new Set((shipmentResult.data ?? []).map((row) => String(row.provider_employee_id ?? "").trim()).filter(Boolean))];
-  const mappingsResult = providerMemberIds.length
-    ? await supabaseAdmin.from("field_executive_provider_mappings")
-      .select("provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,delivery_rate")
-      .eq("company_id", companyId).eq("status", "active").in("provider_member_id", providerMemberIds)
-    : { data: [], error: null };
-  if (mappingsResult.error) return { rows: empty, error: mappingsResult.error.message };
-  const methodIds = [...new Set((mappingsResult.data ?? []).map((mapping) => mapping.payment_method_id).filter(Boolean))] as string[];
-  const componentsResult = methodIds.length
-    ? await supabaseAdmin.from("payment_method_components")
-      .select("payment_method_id,component_code,component_type,payment_fields(code,calculation_type,calculation_source,provider_calculation_sources)")
-      .in("payment_method_id", methodIds).eq("is_active", true)
-    : { data: [], error: null };
-  if (componentsResult.error) return { rows: empty, error: componentsResult.error.message };
   const stationIdByCode = new Map(locations.map((location) => [location.station_code, location.id]));
-  const componentsByMethod = new Map<string, Array<Record<string, unknown>>>();
-  (componentsResult.data ?? []).forEach((component) => {
-    const entries = componentsByMethod.get(component.payment_method_id) ?? [];
-    entries.push(component as Record<string, unknown>);
-    componentsByMethod.set(component.payment_method_id, entries);
-  });
+  const associatePayPromise = loadReviewAssociatePay(companyId, sourceDate, locations, monthDetailResult.data ?? [], monthShipmentResult.data ?? []);
   const adHocHeads = (headsResult.data ?? []).filter(isAdHocHead);
   const adHocHeadIds = adHocHeads.map((head) => head.id);
   const adHocHeadById = new Map(adHocHeads.map((head) => [head.id, head]));
@@ -567,171 +497,32 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       subHead: row.sub_head || "Operating cost"
     });
   });
-  type MutableAssociate = PerformanceAssociateDelivery & { hasDetailedDelivery: boolean; mtdDetailByDate: Map<string, number>; mtdFallbackByDate: Map<string, number> };
-  const associatesByStation = new Map<string, Map<string, MutableAssociate>>();
-  const associateMap = (stationCode: string) => {
-    const existing = associatesByStation.get(stationCode);
-    if (existing) return existing;
-    const created = new Map<string, MutableAssociate>();
-    associatesByStation.set(stationCode, created);
-    return created;
-  };
-  const detailFeByStation = new Map<string, Set<string>>();
-  (detailResult.data ?? []).forEach((row) => {
-    const current = empty.get(row.station_code);
-    if (!current) return;
-    current.deliveredCount += numberOrNull(row.package_count) ?? 1;
-    current.deliveryDataAvailable = true;
-    const drivers = detailFeByStation.get(row.station_code) ?? new Set<string>();
-    const associateId = normalized(row.driver_id) || `NAME_${normalized(row.driver_name)}`;
-    if (associateId) {
-      drivers.add(associateId);
-      const people = associateMap(row.station_code);
-      const person = people.get(associateId) ?? {
-        assigned: null,
-        associateId: String(row.driver_id || "—"),
-        deliveryRate: null,
-        delivered: 0,
-        mtdActiveDays: 0,
-        mtdDailyAllocations: [],
-        mtdDelivered: 0,
-        mtdDetailByDate: new Map(),
-        mtdFallbackByDate: new Map(),
-        hasDetailedDelivery: true,
-        name: String(row.driver_name || row.driver_id || "Unidentified associate"),
-        paymentScheme: null,
-        paymentSetupStatus: null,
-        rateCard: null,
-        totalPay: null
-      };
-      person.delivered += numberOrNull(row.package_count) ?? 1;
-      person.hasDetailedDelivery = true;
-      if ((!person.name || person.name === "Unidentified associate") && row.driver_name) person.name = row.driver_name;
-      people.set(associateId, person);
-    }
-    detailFeByStation.set(row.station_code, drivers);
-  });
-  (capacityResult.data ?? []).forEach((row) => {
-    const current = empty.get(row.station_code);
-    if (!current) return;
-    const delivered = numberOrNull(row.delivered) ?? 0;
-    if (numberOrNull(row.delivered) != null) current.deliveryDataAvailable = true;
-    const activeIds = numberOrNull(row.active_ids) ?? 0;
-    if (delivered) current.deliveredCount = delivered;
-    if (activeIds) current.activeFeCount = activeIds;
-  });
-  const daCostByStation = new Map<string, number>();
-  const shipmentDeliveryByStation = new Map<string, number>();
-  (shipmentResult.data ?? []).forEach((row) => {
-    const current = empty.get(row.station_code);
-    if (!current) return;
-    const delivered = numberOrNull(row.total_delivery) ?? 0;
-    if (numberOrNull(row.total_delivery) != null) current.deliveryDataAvailable = true;
-    shipmentDeliveryByStation.set(row.station_code, (shipmentDeliveryByStation.get(row.station_code) ?? 0) + delivered);
-    current.variableDaPay += numberOrNull(row.variable_pay) ?? 0;
-    current.mgSalaryPay += numberOrNull(row.mg_pay) ?? 0;
-    current.fuelPay += numberOrNull(row.fuel_pay) ?? 0;
-    daCostByStation.set(row.station_code, (daCostByStation.get(row.station_code) ?? 0) + (numberOrNull(row.da_total_pay) ?? 0));
-    if (normalized(row.mapping_status) !== "MAPPED") current.unmappedFeCount += 1;
-    const associateId = normalized(row.provider_employee_id) || `NAME_${normalized(row.dropx_name || row.provider_employee_name)}`;
-    if (associateId) {
-      const people = associateMap(row.station_code);
-      const person = people.get(associateId) ?? {
-        assigned: null,
-        associateId: String(row.provider_employee_id || "—"),
-        deliveryRate: null,
-        delivered: 0,
-        mtdActiveDays: 0,
-        mtdDailyAllocations: [],
-        mtdDelivered: 0,
-        mtdDetailByDate: new Map(),
-        mtdFallbackByDate: new Map(),
-        hasDetailedDelivery: false,
-        name: String(row.dropx_name || row.provider_employee_name || row.provider_employee_id || "Unidentified associate"),
-        paymentScheme: null,
-        paymentSetupStatus: null,
-        rateCard: null,
-        totalPay: null
-      };
-      if (!person.hasDetailedDelivery) person.delivered += delivered;
-      person.assigned = (person.assigned ?? 0) + (numberOrNull(row.assigned_count) ?? 0);
-      person.name = String(row.dropx_name || row.provider_employee_name || person.name);
-      person.paymentScheme = readablePayType(row.pay_type) ?? person.paymentScheme;
-      person.paymentSetupStatus = String(row.mapping_status || "").trim() || person.paymentSetupStatus;
-      const importedRate = numberOrNull(row.del_rate);
-      const mapping = (mappingsResult.data ?? []).find((candidate) =>
-        String(candidate.provider_member_id ?? "").trim().toUpperCase() === String(row.provider_employee_id ?? "").trim().toUpperCase()
-        && (!candidate.station_id || candidate.station_id === stationIdByCode.get(row.station_code))
-        && String(candidate.effective_from ?? "") <= sourceDate
-        && (!candidate.effective_to || String(candidate.effective_to) >= sourceDate)
-      );
-      const mappedRate = mappedDeliveryRate(mapping as Record<string, unknown> | undefined, mapping?.payment_method_id ? componentsByMethod.get(mapping.payment_method_id) ?? [] : []);
-      person.deliveryRate = importedRate != null && importedRate > 0 ? importedRate : mappedRate ?? person.deliveryRate;
-      person.rateCard = person.deliveryRate != null ? `₹${person.deliveryRate.toLocaleString("en-IN", { maximumFractionDigits: 2 })} / delivery` : null;
-      const totalPay = numberOrNull(row.da_total_pay);
-      if (totalPay != null && (person.paymentScheme || person.rateCard || totalPay > 0)) person.totalPay = (person.totalPay ?? 0) + totalPay;
-      people.set(associateId, person);
-    }
-  });
-  // Prefer the package-level delivery ledger for the MTD drill-down. It uses
-  // the same driver identity as the selected-day allocation, unlike a payment
-  // mapping that may have changed part way through the month.
-  (monthDetailResult.data ?? []).forEach((row) => {
-    const associateId = normalized(row.driver_id) || `NAME_${normalized(row.driver_name)}`;
-    const person = associateId ? associatesByStation.get(row.station_code)?.get(associateId) : null;
-    const delivered = numberOrNull(row.package_count) ?? 1;
-    if (!person || delivered <= 0) return;
-    const date = String(row.work_date);
-    person.mtdDetailByDate.set(date, (person.mtdDetailByDate.get(date) ?? 0) + delivered);
-  });
-  // Payment shipment rows remain the fallback for associates whose daily
-  // package-level detail was not imported for the selected month.
-  (monthShipmentResult.data ?? []).forEach((row) => {
-    const associateId = normalized(row.provider_employee_id) || `NAME_${normalized(row.dropx_name || row.provider_employee_name)}`;
-    const people = associateId ? associatesByStation.get(row.station_code) : null;
-    const person = associateId ? people?.get(associateId) : null;
-    const delivered = numberOrNull(row.total_delivery) ?? 0;
-    if (!person || delivered <= 0) return;
-    const date = String(row.work_date);
-    person.mtdFallbackByDate.set(date, (person.mtdFallbackByDate.get(date) ?? 0) + delivered);
-  });
-  for (const people of associatesByStation.values()) {
-    for (const person of people.values()) {
-      const daily = person.mtdDetailByDate.size ? person.mtdDetailByDate : person.mtdFallbackByDate;
-      person.mtdDailyAllocations = [...daily.entries()]
-        .map(([date, delivered]) => ({ date, delivered }))
-        .sort((left, right) => right.date.localeCompare(left.date));
-      person.mtdActiveDays = person.mtdDailyAllocations.length;
-      person.mtdDelivered = person.mtdDailyAllocations.reduce((sum, day) => sum + day.delivered, 0);
-    }
-  }
-  stationCodes.forEach((code) => {
+  const associatePay = await associatePayPromise;
+  for (const code of stationCodes) {
     const current = empty.get(code)!;
-    const detailDrivers = detailFeByStation.get(code)?.size ?? 0;
-    const shipmentDrivers = new Set((shipmentResult.data ?? []).filter((row) => row.station_code === code && row.provider_employee_id).map((row) => normalized(row.provider_employee_id))).size;
-    current.activeFeCount = current.activeFeCount || detailDrivers || shipmentDrivers;
-    if (!current.deliveredCount) current.deliveredCount = shipmentDeliveryByStation.get(code) ?? 0;
-    if ((daCostByStation.get(code) ?? 0) > 0) current.salaryDaCost = daCostByStation.get(code) ?? 0;
+    const rows = associatePay.get(code.toUpperCase()) ?? [];
+    const detailed = (detailResult.data ?? []).filter(row => row.station_code === code);
+    const shipments = (shipmentResult.data ?? []).filter(row => row.station_code === code);
+    const capacity = (capacityResult.data ?? []).find(row => row.station_code === code);
+    current.associateDeliveries = rows;
+    current.deliveryDataAvailable = detailed.length > 0 || shipments.length > 0 || numberOrNull(capacity?.delivered) != null;
+    current.deliveredCount = numberOrNull(capacity?.delivered) ?? (detailed.length
+      ? detailed.reduce((sum, row) => sum + (numberOrNull(row.package_count) ?? 1), 0)
+      : shipments.reduce((sum, row) => sum + (numberOrNull(row.total_delivery) ?? 0), 0));
+    current.activeFeCount = numberOrNull(capacity?.active_ids) || rows.filter(row => row.delivered > 0).length;
     current.averageAllocation = current.activeFeCount ? current.deliveredCount / current.activeFeCount : null;
+    current.unmappedFeCount = rows.filter(row => row.paymentSetupStatus !== "Mapped").length;
+    // Station cards retain their existing source. The associate drill-down uses
+    // live CPS costs and labels its own denominator explicitly.
+    for (const row of shipments) {
+      current.variableDaPay += numberOrNull(row.variable_pay) ?? 0;
+      current.mgSalaryPay += numberOrNull(row.mg_pay) ?? 0;
+      current.fuelPay += numberOrNull(row.fuel_pay) ?? 0;
+    }
+    const importedDaCost = shipments.reduce((sum, row) => sum + (numberOrNull(row.da_total_pay) ?? 0), 0);
+    if (importedDaCost > 0) current.salaryDaCost = importedDaCost;
     current.salaryDaCps = current.deliveredCount ? current.salaryDaCost / current.deliveredCount : null;
-    current.associateDeliveries = [...(associatesByStation.get(code)?.values() ?? [])]
-      .map((person) => ({
-        assigned: person.assigned,
-        associateId: person.associateId,
-        deliveryRate: person.deliveryRate,
-        delivered: person.delivered,
-        mtdActiveDays: person.mtdActiveDays,
-        mtdDailyAllocations: person.mtdDailyAllocations,
-        mtdDelivered: person.mtdDelivered,
-        name: person.name,
-        paymentScheme: person.paymentScheme,
-        paymentSetupStatus: person.paymentSetupStatus,
-        rateCard: person.rateCard,
-        totalPay: person.totalPay
-      }))
-      .filter((person) => person.delivered > 0 || (person.assigned ?? 0) > 0)
-      .sort((left, right) => right.delivered - left.delivered || left.name.localeCompare(right.name));
-  });
+  }
   const deliveredMtdByStation = new Map<string, number>();
   (monthCapacityResult.data ?? []).forEach((row) => deliveredMtdByStation.set(row.station_code, (deliveredMtdByStation.get(row.station_code) ?? 0) + (numberOrNull(row.delivered) ?? 0)));
   stationCodes.forEach((code) => {
