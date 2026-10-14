@@ -18,6 +18,7 @@ import {
   providerFirstValidationStatus,
   providerFirstWorkerIsSelectable,
   providerMemberIdFromSpreadsheetCells,
+  providerMemberIdentityKey,
   providerMemberKey,
   providerSourceMemberKey,
   scientificProviderIdCouldRepresent
@@ -65,6 +66,35 @@ const row = {
 test("keys provider members by station and normalized member ID", () => {
   assert.equal(providerMemberKey("station-1", " abc "), "station-1|ABC");
   assert.notEqual(providerMemberKey("station-1", "ABC"), providerMemberKey("station-2", "ABC"));
+});
+
+test("keys history across locations by exact provider and member identity without changing mapping identity", () => {
+  const oldStationMappingKey = providerMemberKey("station-old", " 2000080007500 ");
+  const newStationMappingKey = providerMemberKey("station-new", "2000080007500");
+  assert.notEqual(oldStationMappingKey, newStationMappingKey, "mapping ownership must remain station-specific");
+
+  const oldStationHistoryKey = providerMemberIdentityKey(" Provider-A ", " 2000080007500 ");
+  const newStationHistoryKey = providerMemberIdentityKey("provider-a", "2000080007500");
+  assert.equal(oldStationHistoryKey, newStationHistoryKey, "the same provider identity should expose its prior-location history");
+  assert.notEqual(
+    oldStationHistoryKey,
+    providerMemberIdentityKey("provider-b", "2000080007500"),
+    "the same member ID at a different provider must not leak history"
+  );
+  assert.notEqual(
+    oldStationHistoryKey,
+    providerMemberIdentityKey("provider-a", "2000080007501"),
+    "a different member at the same provider must not leak history"
+  );
+});
+
+test("provider mapping page preserves inactive-location history without inferring a new location mapping", async () => {
+  const page = await readFile(new URL("../app/provider-id-mapping/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /from\("stations"\)[^\n]+\.eq\("company_id", companyId\)\.order\("station_code"\)/);
+  assert.doesNotMatch(page, /from\("stations"\)[^\n]+\.eq\("is_active", true\)/);
+  assert.match(page, /const link = mappingByMember\.get\(providerMemberKey\(member\.stationId, member\.id\)\)/);
+  assert.match(page, /historyByProviderMember\.get\(providerMemberIdentityKey\(member\.providerId, member\.id\)\)/);
+  assert.match(page, /workforceId: worker\?\.id \?\? ""/);
 });
 
 test("requests an exact confirmation only when an existing provider mapping changes DropX owner", () => {

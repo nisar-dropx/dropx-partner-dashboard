@@ -623,6 +623,15 @@ export function providerMemberKey(stationId: string, providerMemberId: string) {
   return `${String(stationId ?? "").trim()}|${String(providerMemberId ?? "").trim().toUpperCase()}`;
 }
 
+/**
+ * Groups the same provider-owned identity across stations. Use this for audit
+ * and payment-allocation history only: an actual provider mapping remains
+ * station-specific and must continue to use providerMemberKey.
+ */
+export function providerMemberIdentityKey(providerId: string, providerMemberId: string) {
+  return `${String(providerId ?? "").trim().toLowerCase()}|${String(providerMemberId ?? "").trim().toUpperCase()}`;
+}
+
 function sameProviderMember(left: string, right: string) {
   return String(left ?? "").trim().toUpperCase() === String(right ?? "").trim().toUpperCase();
 }

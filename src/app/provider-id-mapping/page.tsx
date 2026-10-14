@@ -7,8 +7,8 @@ import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type Provi
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { canonicalizeProviderFirstMembers, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
-import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
+import { canonicalizeProviderFirstMembers, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
+import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
@@ -40,7 +40,10 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode={pageCode}><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
   const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult, designationsResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, parent_station_id, location_models(code)").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    // Payouts and mapping history remain valid after a station is deactivated.
+    // Load every authorized company station so those stored mappings do not
+    // disappear from this historical reconciliation screen.
+    supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id, parent_station_id, is_active, location_models(code)").eq("company_id", companyId).order("station_code"),
     readAllRows(supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status, designation_id, designation").eq("company_id", companyId).is("deleted_at", null).order("id")),
     supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, production_threshold_config, effective_from, effective_to, status, reason").eq("company_id", companyId).order("effective_from", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
@@ -111,6 +114,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     .map((method) => ({ id: method.id, code: method.code, name: method.name, isActive: method.is_active, productionThresholdConfig: parseProductionThresholdConfig(method.production_threshold_config), components: (method.payment_method_components ?? []).slice().sort((a, b) => a.sort_order - b.sort_order).map((component) => ({ code: component.component_code, label: component.label, type: component.component_type })) }));
   const rawMethodById = new Map(((methodsResult.data ?? []) as PaymentMethodRow[]).map((method) => [method.id, method]));
   const historyByMember = new Map<string, PaymentAllocationHistoryEntry[]>();
+  const historyByProviderMember = new Map<string, PaymentAllocationHistoryEntry[]>();
   const historyByWorkforce = new Map<string, PaymentAllocationHistoryEntry[]>();
   for (const mapping of mappingHistory) {
     const key = providerMemberKey(String(mapping.station_id ?? ""), mapping.provider_member_id);
@@ -131,6 +135,13 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
       rates: paymentAllocationHistoryRates(mapping.payment_values, (method?.payment_method_components ?? []).map((component) => ({ code: component.component_code, label: component.label, sortOrder: component.sort_order })))
     };
     historyByMember.set(key, [...(historyByMember.get(key) ?? []), entry]);
+    const providerMemberIdentity = mapping.provider_id
+      ? providerMemberIdentityKey(mapping.provider_id, mapping.provider_member_id)
+      : "";
+    if (providerMemberIdentity) historyByProviderMember.set(providerMemberIdentity, [
+      ...(historyByProviderMember.get(providerMemberIdentity) ?? []),
+      entry
+    ]);
     if (mapping.workforce_id) historyByWorkforce.set(mapping.workforce_id, [
       ...(historyByWorkforce.get(mapping.workforce_id) ?? []),
       entry
@@ -177,9 +188,16 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
   const mappings: ProviderFirstMappingRow[] = Array.from(latestMembers.values()).map((member) => {
     const link = mappingByMember.get(providerMemberKey(member.stationId, member.id));
     const worker = link?.workforce_id ? workforceById.get(link.workforce_id) : null;
+    const exactMemberHistory = historyByMember.get(providerMemberKey(member.stationId, member.id)) ?? [];
+    // A provider member can move between locations. History is identity-wide
+    // evidence for the operator, but the current row remains location-specific:
+    // never turn a prior-location mapping into a mapping at this location.
+    const identityHistory = member.providerId
+      ? historyByProviderMember.get(providerMemberIdentityKey(member.providerId, member.id)) ?? []
+      : [];
     const history = link?.workforce_id
       ? historyByWorkforce.get(link.workforce_id) ?? []
-      : historyByMember.get(providerMemberKey(member.stationId, member.id)) ?? [];
+      : uniquePaymentAllocationHistory([...exactMemberHistory, ...identityHistory]);
     const thresholdSnapshot = parseProductionThresholdSnapshot(link?.production_threshold_config);
     return { relatedStationIds: providerMappingStationFamily(member.stationId, topology), outboundMonths: member.outboundMonths, providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
   });
