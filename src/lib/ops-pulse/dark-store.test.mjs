@@ -6,3 +6,7 @@ const params={period:'custom',from:'2026-10-01',to:'2026-10-07'};
 test('CPU uses processed units with matching cost days and one contract accrual',async()=>{const {rows,locations}=await fixture([{station_code:'DS',month:'2026-10-01',through_date:'2026-10-02',units:100}]).loadCpu({},params);assert.equal(locations.length,1);assert.equal(rows[0].units,100);assert.equal(rows[0].cost,2060);assert.equal(rows[0].cpu,20.6);assert.equal(rows[0].days,2);assert.equal(rows[0].groups.find(g=>g.head==='Store team').amount,60);assert(!JSON.stringify(rows).includes('Private staff'));});
 test('missing or explicit zero units never produce a fabricated CPU',async()=>{for(const volumes of [[],[{station_code:'DS',month:'2026-10-01',through_date:'2026-10-02',units:0}]])assert.equal((await fixture(volumes).loadCpu({},params)).rows[0].cpu,null);});
 test('a last-mile or unauthorized location cannot be requested through CPU',async()=>{await assert.rejects(fixture([]).loadCpu({},{...params,station:'LM'}),/outside/);});
+test('command-center scope restricts CPU rows and picker; empty or forged scope does not widen',async()=>{
+ for(const scope of ['', 'LM', 'OTHER']){const r=await fixture([]).loadCpu({},{...params,scope});assert.equal(r.rows.length,0);assert.equal(r.locations.length,0);}
+ const r=await fixture([]).loadCpu({},{...params,scope:'DS,OTHER'});assert.deepEqual(r.rows.map(x=>x.code),['DS']);
+});

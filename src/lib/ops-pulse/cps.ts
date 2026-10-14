@@ -18,6 +18,8 @@ export type CpsParams = {
   date?: string;
   month?: string;
   station?: string;
+  /** Exact authorized location subset for Command Center drill-throughs. */
+  scope?: string;
   cluster?: string;
   region?: string;
   page?: string;

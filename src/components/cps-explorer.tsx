@@ -46,7 +46,7 @@ export function CpsExplorer({
   const [search, setSearch] = useState("");
   const [comparison, setComparison] = useState(() => groups.map(p => p.code));
   const [view,setView] = useState(params.view === "unmapped" ? "attention" : "costs");
-  const [attentionStation,setAttentionStation] = useState("");
+  const [attentionStation,setAttentionStation] = useState(params.view === "unmapped" && params.station ? station : "");
   const names = Object.fromEntries(groups.map(p => [p.code, p.name]));
   const rows = groupCps(snapshot.daily, r => groupByMember.get(r.station_code) || r.station_code).sort((a, b) => a.key.localeCompare(b.key));
   const matched = groups.filter(p => p.search.toLowerCase().includes(search.toLowerCase()));
