@@ -153,7 +153,7 @@ export function CapacityDistanceTable({
           <div className={styles.summaryLabels}><span>Associate / station</span><span>Dates / data source</span><span>Distance / fuel</span><span>Coverage</span><span /></div>
           {associates.slice(safePage * 50, safePage * 50 + 50).map(a => <article key={a.id} className={styles.summaryRow}>
             <div><button type="button" className={styles.associateName} onClick={() => { setAssociateId(a.id); setPage(0); }}>{a.name}</button><small>{a.stations.join(" · ")}</small><small>Amazon: {a.amazonIds.join(" / ") || "Not linked"} · DropX: {a.dropxIds.join(" / ") || "Not mapped"}</small></div>
-            <div><strong>{date(a.from)}{a.to !== a.from ? ` – ${date(a.to)}` : ""}</strong><small>{a.dates} dates · {a.sources.map(s => `${distanceMethods[s.method] || s.method} (${s.count})`).join(" · ")}</small></div>
+            <div><strong>{date(a.from)}{a.to !== a.from ? ` – ${date(a.to)}` : ""}</strong><small>{a.dates} {a.dates === 1 ? "date" : "dates"} · {a.sources.map(s => `${distanceMethods[s.method] || s.method} (${s.count})`).join(" · ")}</small></div>
             <div><strong>{a.km === null ? "Distance pending" : `${number(a.km)} km`}</strong><small>{a.fuel === null ? "Fuel pending" : `₹${number(a.fuel)} fuel`}{a.pending && a.ready ? " · partial total" : ""}</small></div>
             <div><span className={`${styles.badge} ${a.pending ? styles.pending : styles.ready}`}>{a.pending ? `${a.pending} pending` : "All ready"}</span><small>{a.ready} / {a.days.length} station-days ready</small></div>
             <button type="button" className={styles.open} aria-label={`View dates for ${a.name}`} onClick={() => { setAssociateId(a.id); setPage(0); }}>View dates <ChevronRight size={16} /></button>

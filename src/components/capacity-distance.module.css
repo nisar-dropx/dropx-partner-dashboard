@@ -399,7 +399,7 @@
   .filters > :nth-child(even) :global(.multi-select-menu) { left: auto; right: 0; }
 }
 
-.summaryLabels, .summaryRow { display: grid; grid-template-columns: minmax(200px, 1.6fr) minmax(200px, 1.4fr) minmax(120px, .8fr) minmax(120px, .7fr) auto; gap: 16px; align-items: center; padding: 12px 18px; }
+.summaryLabels, .summaryRow { display: grid; grid-template-columns: minmax(200px, 1.6fr) minmax(200px, 1.4fr) minmax(120px, .8fr) minmax(120px, .7fr) 110px; gap: 16px; align-items: center; padding: 12px 18px; }
 .summaryLabels { background: #f5f7fa; color: #66778e; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .summaryRow { border-top: 1px solid #edf0f4; font-size: 12px; }
 .summaryRow > div { min-width: 0; }
