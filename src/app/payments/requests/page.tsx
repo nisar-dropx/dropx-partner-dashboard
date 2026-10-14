@@ -87,7 +87,7 @@ type AnswerRow = {
   attachments?: unknown;
 };
 type ApprovalRemarkRow = { action: string | null; comments: string | null; created_at: string };
-type HistoryRow = ApprovalRemarkRow & { approver_user_id: string | null; approver_role_id: string | null };
+type HistoryRow = ApprovalRemarkRow & { approval_step_order?: number | null; approver_user_id: string | null; approver_role_id: string | null };
 
 async function loadApprovalFlow(companyId: string, request: PaymentRequestRow, history: HistoryRow[]) {
   if (!supabaseAdmin) return null;
@@ -99,7 +99,7 @@ async function loadApprovalFlow(companyId: string, request: PaymentRequestRow, h
     admin.from("payment_heads")
       .select("initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids")
       .eq("company_id", companyId).eq("id", request.payment_head_id).maybeSingle(),
-    loadApprovalSteps(companyId, request.payment_head_id).catch(() => [])
+    loadApprovalSteps(companyId, request.payment_head_id, request.id).catch(() => [])
   ]);
   const roleList = (many: unknown, one: unknown) =>
     Array.from(new Set([...(Array.isArray(many) ? many : []), one].filter((id): id is string => typeof id === "string" && Boolean(id))));
@@ -134,7 +134,9 @@ async function loadApprovalFlow(companyId: string, request: PaymentRequestRow, h
       ...step,
       rolesText: rolesLabel(step.roleIds),
       approvedBy: step.approvedByUserId ? personName.get(step.approvedByUserId) ?? null : null,
-      pendingWith: step.state === "current"
+      pendingWith: step.state === "skipped"
+                                    ? "No separate approval recorded"
+                                  : step.state === "current"
         ? (currentUserId ? personName.get(currentUserId) ?? null : null) ?? (currentRoleIds.length ? `Any ${rolesLabel(currentRoleIds)}` : `Any ${rolesLabel(step.roleIds)}`)
         : null
     })),
@@ -468,7 +470,7 @@ export default async function PaymentRequestsPage({
       .eq("payment_request_id", viewRequest.id),
     supabaseAdmin
       .from("payment_request_approvals")
-      .select("action, comments, created_at, approver_user_id, approver_role_id")
+      .select("action, comments, created_at, approver_user_id, approver_role_id, approval_step_order")
       .eq("company_id", companyId)
       .or(`payment_request_id.eq.${viewRequest.id},request_id.eq.${viewRequest.id}`)
       .order("created_at", { ascending: true })
@@ -816,6 +818,8 @@ export default async function PaymentRequestsPage({
                                   ? step.key === "finance"
                                     ? "Paid"
                                     : `Approved${step.approvedBy ? ` by ${step.approvedBy}` : ""}${step.approvedAt ? ` · ${formatDashboardDateTime(step.approvedAt)}` : ""}`
+                                  : step.state === "skipped"
+                                    ? "No separate approval recorded"
                                   : step.state === "current"
                                     ? `Pending with ${step.pendingWith ?? step.rolesText}`
                                     : step.state === "returned"

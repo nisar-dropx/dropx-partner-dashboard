@@ -14,9 +14,12 @@ import { PaymentApprovalActionForm } from "@/components/payment-approval-action-
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { Eye } from "lucide-react";
-import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
+import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
+import { canOverseePayment, paymentPendingAge } from "@/lib/payment-oversight-policy";
+import { readAllRows } from "@/lib/supabase-pagination";
+import { loadPaymentRoutingDetail } from "@/lib/payment-routing-detail";
 import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
 import { paymentApprovalAmount } from "@/lib/payment-approval-amount";
 import { paymentShipmentCount, isPaymentTrackingQuestion, parsePaymentTrackingIds } from "@/lib/payment-shipment-count";
@@ -67,6 +70,10 @@ type RequestRow = {
   total_steps: number | null;
   created_at: string;
   updated_at: string | null;
+  approval_pending_since: string | null;
+  approval_routing_reason: string | null;
+  currentOwner?: string;
+  currentRole?: string;
   processed_at: string | null;
   payment_heads?: { name: string; code: string } | null;
   profiles?: { full_name: string | null; email: string | null } | null;
@@ -98,6 +105,8 @@ type ApprovalLogRow = {
 };
 
 type ApprovalSearchParams = {
+  view?: string | string[];
+  page?: string | string[];
   status?: string | string[];
   search?: string | string[];
   stage?: string | string[];
@@ -110,6 +119,7 @@ type ApprovalSearchParams = {
 };
 
 type ApprovalFilters = PaymentApprovalFacetSelection & {
+  oversight: boolean;
   status?: string;
   search?: string;
   stage?: string;
@@ -187,6 +197,7 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       answers: [] as AnswerRow[],
       logs: [] as ApprovalLogRow[],
       canDownloadProcessData: false,
+      eligibleIds: new Set<string>(),
       filterOptions: {
         stations: [] as PaymentApprovalFilterOption[],
         paymentHeads: [] as PaymentApprovalFilterOption[],
@@ -229,13 +240,15 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       total_steps,
       created_at,
       updated_at,
+      approval_pending_since,
+      approval_routing_reason,
       processed_at,
       payment_heads ( name, code ),
       profiles:requested_by ( full_name, email ),
       stations ( location_model_id )
     `)
     .eq("company_id", companyId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false }).order("id");
 
   if (!authorization.hasAllLocationAccess) {
     query = query.in(
@@ -247,7 +260,7 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   }
 
   const [requestsResult, processHeadsResult] = await Promise.all([
-    query,
+    readAllRows(query),
     authorization.roleId ? supabaseAdmin
       .from("payment_heads")
       .select("id", { count: "exact", head: true })
@@ -260,7 +273,9 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     profiles: firstRelation(request.profiles),
     location_model_id: firstRelation(request.stations)?.location_model_id ?? null
   }));
-  const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests);
+  const eligibleIds = !filters.oversight && hasPermission(authorization, "payment_approvals", "access")
+    ? await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests)
+    : new Set<string>();
   const normalizedFilter = filters.status || "pending";
   const stageTones = APPROVAL_STAGES.find((stage) => stage.value === filters.stage)?.tones ?? null;
   const approvalHistoryResult = normalizedFilter === "acted" || normalizedFilter === "all"
@@ -280,11 +295,15 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   const statusScopedRequests = unscopedRequests.filter((request) => {
     const isCurrentAssignment = eligibleIds.has(request.id);
     const wasApprovedByCurrentUser = approvedByCurrentUserIds.has(request.id);
-    if (!isCurrentAssignment && !wasApprovedByCurrentUser) return false;
+    if (filters.oversight) {
+      if (!canOverseePayment(authorization, request)) return false;
+    } else if (!isCurrentAssignment && !wasApprovedByCurrentUser) return false;
     const requestStatus = String(request.status ?? "").trim().toLowerCase();
     const approvalStatus = String(request.approval_status || request.status || "").trim().toUpperCase();
     if (normalizedFilter === "pending") {
       if (!isPendingPaymentApproval(request)) return false;
+    } else if (normalizedFilter === "approved") {
+      if (!["payment-stage-approved", "payment-stage-processing", "payment-stage-complete"].includes(paymentApprovalStatusTone(request) ?? "")) return false;
     } else if (normalizedFilter === "returned") {
       if (requestStatus !== "returned" && approvalStatus !== "RETURNED") return false;
     } else if (normalizedFilter === "rejected") {
@@ -336,8 +355,20 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     ].join(" ").toLowerCase();
     return haystack.includes(normalizedSearch);
   });
+  const ownerIds = [...new Set(requests.map(row => row.current_approver_user_id).filter((id): id is string => Boolean(id)))];
+  const roleIds = [...new Set(requests.map(row => row.current_approver_role_id).filter((id): id is string => Boolean(id)))];
+  const [owners, roles] = await Promise.all([
+    ownerIds.length ? supabaseAdmin.from("profiles").select("id,full_name,email").eq("company_id", companyId).in("id", ownerIds) : { data: [] },
+    roleIds.length ? supabaseAdmin.from("user_roles").select("id,name").eq("company_id", companyId).in("id", roleIds) : { data: [] }
+  ]);
+  const ownerNames = new Map((owners.data ?? []).map(row => [row.id, row.full_name || row.email]));
+  const roleNames = new Map((roles.data ?? []).map(row => [row.id, row.name]));
   return {
-    requests,
+    requests: requests.map(row => ({ ...row,
+      currentOwner: ownerNames.get(row.current_approver_user_id) ?? (isPendingPaymentApproval(row) ? "Approver not configured" : "—"),
+      currentRole: roleNames.get(row.current_approver_role_id) ?? ""
+    })),
+    eligibleIds,
     canDownloadProcessData: Boolean(authorization.roleId && (processHeadsResult.count ?? 0) > 0),
     filterOptions: { stations: stationOptions, paymentHeads: paymentHeadOptions, dates: dateOptions },
     selectedFilters,
@@ -352,30 +383,39 @@ export default async function PaymentApprovalsPage({
 }: {
   searchParams?: ApprovalSearchParams;
 }) {
-  const authorization = await requirePagePermission("payment_approvals", "access");
+  const oversight = firstSearchParam(searchParams?.view) === "scope";
+  const pageCode = oversight ? "payment_oversight" : "payment_approvals";
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const pagePermission = authorization.permissions.payment_approvals;
+  const pagePermission = authorization.permissions[pageCode];
   const requestedStatus = firstSearchParam(searchParams?.status);
   const requestedStage = firstSearchParam(searchParams?.stage);
   const currentStage = APPROVAL_STAGES.some((stage) => stage.value === requestedStage) ? requestedStage : "";
   // A milestone chip looks across everything assigned to or approved by the user, not just the pending queue.
   const currentStatus = currentStage
     ? "all"
-    : ["pending", "acted", "returned", "rejected", "all"].includes(requestedStatus) ? requestedStatus : "pending";
+    : ["pending", "acted", "approved", "returned", "rejected", "all"].includes(requestedStatus) ? requestedStatus : "pending";
   const currentSearch = firstSearchParam(searchParams?.search);
   const requestedFilters: PaymentApprovalFacetSelection = {
     stations: selectedPaymentApprovalValues(searchParams?.station),
     paymentHeads: selectedPaymentApprovalValues(searchParams?.head),
     dates: selectedPaymentApprovalValues(searchParams?.date)
   };
-  const { requests, canDownloadProcessData, filterOptions, selectedFilters, error } = await loadApprovals(companyId, authorization, {
+  const { requests: matchingRequests, eligibleIds, canDownloadProcessData, filterOptions, selectedFilters, error } = await loadApprovals(companyId, authorization, {
+    oversight,
     status: currentStatus,
     search: currentSearch,
     stage: currentStage,
     ...requestedFilters
   });
+  const pageSize = 50;
+  const pageCount = Math.max(1, Math.ceil(matchingRequests.length / pageSize));
+  const pageNumber = Math.min(pageCount, Math.max(1, Math.floor(Number(firstSearchParam(searchParams?.page)) || 1)));
+  const requests = matchingRequests.slice((pageNumber - 1) * pageSize, pageNumber * pageSize);
   const currentParams = new URLSearchParams();
+  if (pageNumber > 1) currentParams.set("page", String(pageNumber));
   currentParams.set("status", currentStatus);
+  if (oversight) currentParams.set("view", "scope");
   if (currentStage) currentParams.set("stage", currentStage);
   if (currentSearch) currentParams.set("search", currentSearch);
   selectedFilters.stations.forEach((value) => currentParams.append("station", value));
@@ -383,6 +423,7 @@ export default async function PaymentApprovalsPage({
   selectedFilters.dates.forEach((value) => currentParams.append("date", value));
   const stageHref = (stage: string) => {
     const next = new URLSearchParams(currentParams);
+    next.delete("page");
     next.set("status", stage ? "all" : "pending");
     if (stage) next.set("stage", stage);
     else next.delete("stage");
@@ -390,7 +431,8 @@ export default async function PaymentApprovalsPage({
   };
   const isDatabaseUnreachable = error === DATABASE_UNREACHABLE_MESSAGE;
   const manageId = firstSearchParam(searchParams?.manage);
-  const selectedRequest = manageId ? requests.find((request) => request.id === manageId) ?? null : null;
+  const selectedRequest = manageId ? matchingRequests.find((request) => request.id === manageId) ?? null : null;
+  const routingDetail = selectedRequest ? await loadPaymentRoutingDetail(companyId, selectedRequest) : null;
   const selectedAmount = selectedRequest ? paymentApprovalAmount(selectedRequest) : null;
   const selectedDetailData = selectedRequest && supabaseAdmin ? await Promise.all([
     supabaseAdmin
@@ -465,20 +507,25 @@ export default async function PaymentApprovalsPage({
       ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     : [];
   const canShowApprovalActions =
-    pagePermission.canEdit &&
+    !oversight && pagePermission.canEdit &&
+    Boolean(selectedRequest && eligibleIds.has(selectedRequest.id) && isPendingPaymentApproval(selectedRequest)) &&
     !currentUserAlreadyActed &&
     !["approved", "rejected", "cancelled", "returned"].includes(selectedRequest?.status.toLowerCase() ?? "") &&
     String(selectedRequest?.approval_status ?? "").toUpperCase() !== "RETURNED";
 
   return (
-    <AppShell active="Payment Approvals" pageCode="payment_approvals">
+    <AppShell active={oversight ? "Payment oversight" : "Payment Approvals"} pageCode={pageCode}>
       <PageHead
         eyebrow="Payments"
-        title="Approvals"
-        subtitle="All requests assigned to you across your authorized locations. This queue is shared across Last Mile and Dark Store workspaces."
+        title={oversight ? "Payment oversight" : "Approvals"}
+        subtitle={oversight ? "View every request stage across your permitted locations, including requests waiting with another approver. This view does not grant approval authority." : "Requests pending your action across Last Mile and Dark Store. Open oversight to track requests waiting with other approvers."}
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
+      <div className="payment-approval-stage-legend" aria-label="Payment views">
+        {hasPermission(authorization, "payment_approvals", "access") ? <PendingLink className={`button compact ${oversight ? "secondary" : ""}`} href="/payments/approvals">Pending my action</PendingLink> : null}
+        {hasPermission(authorization, "payment_oversight", "access") ? <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} href="/payments/approvals?view=scope">All pending in my scope</PendingLink> : null}
+      </div>
       {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
@@ -504,13 +551,18 @@ export default async function PaymentApprovalsPage({
           <div className="panel-head">
             <div>
               <h2>Approval list</h2>
-              <p className="subtle">{requests.length} records</p>
+              <p className="subtle">{matchingRequests.length} records · page {pageNumber} of {pageCount}</p>
             </div>
-            {canDownloadProcessData ? (
+            {!oversight && canDownloadProcessData ? (
               <a className="button secondary compact" href="/api/payments/approvals/download">Download raw Excel</a>
             ) : null}
           </div>
+          {pageCount > 1 ? <div className="panel-body" style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
+            {pageNumber > 1 ? <PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "page", String(pageNumber - 1))}`} scroll={false}>Previous</PendingLink> : null}
+            {pageNumber < pageCount ? <PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "page", String(pageNumber + 1))}`} scroll={false}>Next 50</PendingLink> : null}
+          </div> : null}
           <PaymentApprovalFilters
+            oversight={oversight}
             dateOptions={filterOptions.dates}
             paymentHeadOptions={filterOptions.paymentHeads}
             search={currentSearch}
@@ -527,7 +579,7 @@ export default async function PaymentApprovalsPage({
               href={stageHref("")}
               scroll={false}
             >
-              Pending for me
+              {oversight ? "All pending in scope" : "Pending for me"}
             </PendingLink>
             {APPROVAL_STAGES.map((stage) => (
               <PendingLink
@@ -550,8 +602,10 @@ export default async function PaymentApprovalsPage({
                   <th>Amount</th>
                   <th>Requested By</th>
                   <th>Status</th>
+                  <th>Current approver / stage</th>
+                  <th>Pending since</th>
                   <th>Created</th>
-                  {pagePermission.canEdit ? <th>Action</th> : null}
+                  <th>{oversight ? "Details" : "Action"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -568,12 +622,14 @@ export default async function PaymentApprovalsPage({
                       </td>
                       <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
                       <td><StatusPill status={paymentStatusLabel(request)} tone={paymentApprovalStatusTone(request)} /></td>
+                      <td><strong>{request.currentOwner}</strong><small className="subtle" style={{ display: "block" }}>{request.currentRole}{request.total_steps ? ` · ${request.current_step_order ?? 1} of ${request.total_steps}` : ""}</small>{request.approval_routing_reason ? <small className="subtle" style={{ display: "block", maxWidth: 240 }}>{request.approval_routing_reason}</small> : null}</td>
+                      <td>{isPendingPaymentApproval(request) ? <><strong>{paymentPendingAge(request.approval_pending_since)}</strong><small className="subtle" style={{ display: "block" }}>{request.approval_pending_since ? formatDashboardDateTime(request.approval_pending_since) : ""}</small></> : "—"}</td>
                       <td>{formatDashboardDate(request.created_at)}</td>
-                      {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false} prefetch={false} refresh={false} pendingOverlay={`Opening ${request.request_no}…`}>Review</PendingLink></td> : null}
+                      <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false} prefetch={false} refresh={false} pendingOverlay={`Opening ${request.request_no}…`}>{oversight ? "View" : "Review"}</PendingLink></td>
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 8 : 7}>{currentStatus === "pending" ? "No approvals pending." : "No requests match this view."}</td></tr>
+                  <tr><td className="empty-cell" colSpan={10}>{currentStatus === "pending" ? "No approvals pending." : "No requests match this view."}</td></tr>
                 )}
               </tbody>
             </table>
@@ -607,6 +663,13 @@ export default async function PaymentApprovalsPage({
                 <article><small>Approval status</small><StatusPill status={paymentStatusLabel(selectedRequest)} tone={paymentApprovalStatusTone(selectedRequest)} /></article>
                 <article><small>Location</small><strong>{selectedLocationLabel}</strong>{shipmentCount !== null ? <span>{shipmentCount.toLocaleString("en-IN")} shipments</span> : null}</article>
               </div>
+              {routingDetail ? <div className="message-panel" style={{ padding: 16, marginBottom: 12 }}>
+                <strong>{isPendingPaymentApproval(selectedRequest) ? `Pending with ${selectedRequest.currentOwner}` : "Approval route"}</strong>
+                <p className="subtle">{routingDetail.nextLabel}</p>
+                {selectedRequest.approval_routing_reason ? <p>{selectedRequest.approval_routing_reason}</p> : null}
+                {routingDetail.error ? <p role="status">{routingDetail.error}</p> : null}
+                {oversight ? <p className="subtle">Read-only oversight. Only the current approver or authorized cover can act in their approval queue.</p> : null}
+              </div> : null}
               {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason}</strong><p style={{margin:"4px 0 0"}}>{adhocVehicleLabel(replacement)} · Replacement date: {replacement.date}</p></div> : null}
               <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />
               {volumeDate ? <Suspense key={`${selectedRequest.id}:${volumeDate}`} fallback={<p className="subtle" role="status">Loading volume evidence… You can continue reviewing this request.</p>}><PaymentApprovalVolume company={companyId} station={selectedRequest.location_code} date={volumeDate} /></Suspense> : null}
@@ -686,6 +749,11 @@ export default async function PaymentApprovalsPage({
                   />
                 </>
               ) : null}
+              {routingDetail?.events.length ? <details className="payment-review-additional-details"><summary>Assignment history · {routingDetail.events.length}</summary>
+                <div className="table-wrap"><table><thead><tr><th>From</th><th>To</th><th>Stage</th><th>Reason</th><th>Changed by</th><th>Date · IST</th></tr></thead><tbody>
+                  {routingDetail.events.map(event => <tr key={event.id}><td>{event.from}</td><td>{event.to}</td><td>{event.step}</td><td>{event.reason}</td><td>{event.actor}</td><td>{formatDashboardDateTime(event.created_at)}</td></tr>)}
+                </tbody></table></div>
+              </details> : null}
               {lifecycleRows.length ? (
                 <>
                   <div className="section-divider" />

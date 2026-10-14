@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
+import { findPositionApprover, loadEffectivePositionAccess, roleIdsWithPageEditAccess } from "@/lib/position-access";
+import { paymentRoutingDay, resolvePaymentCover } from "@/lib/payment-delegation-policy";
 import { resolveInitialStage } from "@/lib/payment-stage-policy";
 
 export type ApprovalStepCandidate = { role_id: string; scope: "station" | "cluster" | "company" };
@@ -10,7 +11,7 @@ export type ApprovalStepRow = {
   is_required: boolean;
   has_local_candidates?: boolean;
 };
-export type ApproverTarget = { userId: string; roleId: string } | null;
+export type ApproverTarget = { userId: string; roleId: string; routingReason?: string | null } | null;
 
 /**
  * Loads the ordered step list for a payment head, filtering each step's
@@ -35,7 +36,7 @@ export async function loadApprovalSteps(companyId: string, paymentHeadId: string
     if(Array.isArray(request.data.adhoc_approval_steps)) rows = request.data.adhoc_approval_steps as ApprovalStepRow[];
   }
   const allRoleIds = Array.from(new Set(rows.flatMap((row) => row.candidates.map((candidate) => candidate.role_id))));
-  const editableRoleIds = await roleIdsWithPageEditAccess(companyId, allRoleIds, "payment_approvals");
+  const editableRoleIds = await roleIdsWithPageEditAccess(companyId, allRoleIds, "payment_approvals", true);
 
   return rows.map((row) => ({
     ...row,
@@ -128,59 +129,81 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
   return matchedCluster.filter((id): id is string => Boolean(id));
 }
 
-/**
- * hr_approval_delegations (HRMS) is auto-populated when a manager's business
- * trip or leave request is finally approved, pointing at their own reporting
- * manager for the trip/leave dates - workflow-agnostic, so it also governs
- * payment approvals here, not just HRMS's own workflows. Substitutes the
- * delegate for a resolved approver when one applies today; falls through to
- * the original approver unchanged if there's no HRMS identity link, no
- * delegation row, or the lookup errors (e.g. this company has no HRMS data).
- */
-async function redirectThroughDelegation(companyId: string, target: { userId: string; roleId: string }): Promise<{ userId: string; roleId: string }> {
-  if (!supabaseAdmin) return target;
-  const today = new Date().toISOString().slice(0, 10);
+/** Validate substitute access against the same Operations role/location source as the inbox. */
+async function delegateCanAct(companyId: string, userId: string, locationId: string | null | undefined) {
+  if (!supabaseAdmin) return false;
+  const [profile, memberships, position] = await Promise.all([
+    supabaseAdmin.from("profiles").select("id,is_active,role_id,location_scope_ids").eq("company_id", companyId).eq("id",userId).maybeSingle(),
+    supabaseAdmin.from("company_product_memberships").select("role_id,has_all_location_access,location_scope_ids").eq("company_id",companyId).eq("user_id",userId).eq("product_code","operations").eq("is_active",true),
+    loadEffectivePositionAccess(companyId,userId)
+  ]);
+  if (profile.error || memberships.error) throw new Error("Could not verify approver access.");
+  if (!profile.data?.is_active) return false;
+  const members = memberships.data ?? [];
+  const roleIds = members.length ? members.map(row => row.role_id).filter(Boolean) : [...new Set([profile.data.role_id,...position.roleIds].filter(Boolean))];
+  if (!roleIds.length) return false;
+  const roles = await supabaseAdmin.from("user_roles").select("id,code,location_access_mode").eq("company_id",companyId).eq("is_active",true).in("id",roleIds);
+  if (roles.error) throw new Error("Could not verify approver roles.");
+  const active = roles.data ?? [];
+  const owner = active.some(row => row.code === "OWNER");
+  const allLocations = owner || active.some(row => row.location_access_mode === "all_locations") || members.some(row => row.has_all_location_access);
+  const locations = members.flatMap(row => row.location_scope_ids ?? []);
+  if (!allLocations && (!locationId || !locations.includes(locationId))) return false;
+  const editable = await roleIdsWithPageEditAccess(companyId,active.map(row => row.id),"payment_approvals",true);
+  return owner || editable.size > 0;
+}
 
-  const link = await supabaseAdmin
-    .from("hr_user_person_links")
-    .select("person_id")
-    .eq("company_id", companyId)
-    .eq("user_id", target.userId)
-    .eq("status", "active")
-    .maybeSingle();
-  if (link.error || !link.data?.person_id) return target;
-
-  const delegation = await supabaseAdmin
-    .from("hr_approval_delegations")
-    .select("delegate_person_id")
-    .eq("company_id", companyId)
-    .eq("approver_person_id", link.data.person_id)
-    .eq("is_active", true)
-    .lte("effective_from", today)
-    .gte("effective_to", today)
-    .is("workflow_code", null)
-    .maybeSingle();
-  if (delegation.error || !delegation.data?.delegate_person_id) return target;
-
-  const delegateLink = await supabaseAdmin
-    .from("hr_user_person_links")
-    .select("user_id")
-    .eq("company_id", companyId)
-    .eq("person_id", delegation.data.delegate_person_id)
-    .eq("status", "active")
-    .maybeSingle();
-  if (delegateLink.error || !delegateLink.data?.user_id) return target;
-
-  const delegateProfile = await supabaseAdmin
-    .from("profiles")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("id", delegateLink.data.user_id)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (delegateProfile.error || !delegateProfile.data?.id) return target;
-
-  return { userId: delegateProfile.data.id, roleId: target.roleId };
+async function redirectThroughDelegation(companyId: string, target: NonNullable<ApproverTarget>, locationId?: string | null): Promise<ApproverTarget> {
+  if (!supabaseAdmin) return null;
+  const admin = supabaseAdmin;
+  const today = paymentRoutingDay();
+  const result = await resolvePaymentCover(target.userId, async userId => {
+    const [link, profile] = await Promise.all([
+      admin.from("hr_user_person_links").select("person_id").eq("company_id",companyId).eq("user_id",userId).eq("status","active").maybeSingle(),
+      admin.from("profiles").select("full_name,is_active").eq("company_id",companyId).eq("id",userId).maybeSingle()
+    ]);
+    if (link.error || profile.error) throw new Error("Could not verify People leave cover.");
+    const base = { name: profile.data?.full_name || "Approver", canAct: Boolean(profile.data?.is_active), unavailable: false, delegateUserId: null as string | null };
+    if (!link.data?.person_id) return { ...base, canAct: base.canAct && await delegateCanAct(companyId,userId,locationId) };
+    const personId = link.data.person_id;
+    const cover = await admin.from("hr_approval_delegations").select("delegate_person_id,reason")
+      .eq("company_id",companyId).eq("approver_person_id",personId).eq("is_active",true)
+      .lte("effective_from",today).gte("effective_to",today).is("workflow_code",null);
+    if (cover.error) throw new Error("Could not verify active leave cover.");
+    const valid = [];
+    for (const row of cover.data ?? []) {
+      // Ignore obsolete automatic cover after an approved absence is cancelled.
+      const automatic = String(row.reason ?? "").match(/^Auto-delegated: (leave|business trip) ([a-f0-9-]{36})$/i);
+      if (automatic) {
+        const absence = await admin.from(automatic[1] === "leave" ? "hr_leave_requests" : "hr_business_trip_requests")
+          .select("id").eq("company_id",companyId).eq("id",automatic[2]).eq("status","approved").lte("start_date",today).gte("end_date",today).maybeSingle();
+        if (absence.error) throw new Error("Could not verify approved absence.");
+        if (!absence.data) continue;
+      }
+      valid.push(row.delegate_person_id);
+    }
+    const delegates = [...new Set(valid)];
+    if (delegates.length > 1) return { ...base, conflictingCover: true };
+    if (delegates.length) {
+      const delegate = await admin.from("hr_user_person_links").select("user_id").eq("company_id",companyId).eq("person_id",delegates[0]).eq("status","active").maybeSingle();
+      if (delegate.error) throw new Error("Could not verify delegate identity.");
+      return { ...base, unavailable: true, delegateUserId: delegate.data?.user_id ?? null };
+    }
+    // Approved absence without a valid delegate must use the role fallback;
+    // daily roster absence/week-off does not remove approval responsibility.
+    const engagements = await admin.from("hr_engagements").select("employee_id,contractor_id").eq("company_id",companyId).eq("person_id",personId);
+    if (engagements.error) throw new Error("Could not verify approver engagement.");
+    const employeeIds = [...new Set((engagements.data ?? []).map(row => row.employee_id).filter(Boolean))];
+    const contractorIds = [...new Set((engagements.data ?? []).map(row => row.contractor_id).filter(Boolean))];
+    const checks = await Promise.all([
+      admin.from("hr_business_trip_requests").select("id",{count:"exact",head:true}).eq("company_id",companyId).eq("person_id",personId).eq("status","approved").lte("start_date",today).gte("end_date",today),
+      ...([['employee_id',employeeIds],['contractor_id',contractorIds]] as [string,string[]][]).filter(([,ids]) => ids.length).map(([column,ids]) =>
+        admin.from("hr_leave_requests").select("id",{count:"exact",head:true}).eq("company_id",companyId).in(column,ids).eq("status","approved").lte("start_date",today).gte("end_date",today))
+    ]);
+    if (checks.some(check => check.error)) throw new Error("Could not verify approver availability.");
+    return { ...base, unavailable: checks.some(check => (check.count ?? 0) > 0), canAct: base.canAct && await delegateCanAct(companyId,userId,locationId) };
+  });
+  return result ? { ...target, ...result } : null;
 }
 
 /**
@@ -193,10 +216,13 @@ async function redirectThroughDelegation(companyId: string, target: { userId: st
 export async function resolveStepApprover(companyId: string, step: ApprovalStepRow, locationId: string | null | undefined): Promise<ApproverTarget> {
   if (!supabaseAdmin) return null;
 
-  for (const candidate of step.candidates) {
+  for (const [candidateIndex, candidate] of step.candidates.entries()) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
     const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
-    if (positionApprover) return redirectThroughDelegation(companyId, positionApprover);
+    if (positionApprover) {
+      const covered = await redirectThroughDelegation(companyId, positionApprover, locationId);
+      if (covered) return { ...covered, routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment") };
+    }
 
     const userIds = await candidateUserIds(companyId, candidate.role_id, candidate.scope, locationId);
     if (!userIds.length) continue;
@@ -211,7 +237,9 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
     if (profiles.error) throw new Error(profiles.error.message);
 
     for (const profile of profiles.data ?? []) {
-      return redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
+      if (profile.id === positionApprover?.userId) continue;
+      const covered = await redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id }, locationId);
+      if (covered) return { ...covered, routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment") };
     }
   }
 

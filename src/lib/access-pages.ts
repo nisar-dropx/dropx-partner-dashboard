@@ -89,6 +89,7 @@ export const accessPages = [
   { code: "expense_requests", name: "Expense Request", sort_order: 105 },
   { code: "payment_requests", name: "Payment Requests", sort_order: 106 },
   { code: "payment_approvals", name: "Payment Approvals", sort_order: 107 },
+  { code: "payment_oversight", name: "Payment Oversight (view only)", sort_order: 108 },
   { code: "payment_process", name: "Payment Process", sort_order: 108 },
   { code: "payment_reports", name: "Payment Report", sort_order: 109 },
   { code: "workforce_payouts", name: "Workforce Payouts", sort_order: 110 },

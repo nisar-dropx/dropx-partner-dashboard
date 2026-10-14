@@ -48,21 +48,23 @@ export function initialStageStatus(approver: StageTarget) {
 
 export function hasInitialApprovalForStage(
   steps: ApprovalStage[], currentStepOrder: number,
-  approvals: { action: string | null; approver_role_id: string | null }[]
+  approvals: { action: string | null; approver_role_id: string | null; approval_step_order?: number | null }[]
 ) {
   const current = steps.find(step => step.step_order === currentStepOrder);
   if (!current) return false;
   if (isLocalApprovalStage(current)) return true;
-  const priorLocalRoles = new Set(steps.filter(step => step.step_order < currentStepOrder && step.is_required && isLocalApprovalStage(step))
-    .flatMap(step => step.candidates.map(candidate => candidate.role_id)));
+  const priorLocalSteps = steps.filter(step => step.step_order < currentStepOrder && step.is_required && isLocalApprovalStage(step));
+  const priorLocalRoles = new Set(priorLocalSteps.flatMap(step => step.candidates.map(candidate => candidate.role_id)));
   if (!priorLocalRoles.size) return true; // Company-only, or all earlier local stages were explicitly optional.
   return approvals.some(approval => String(approval.action).toLowerCase() === "approved" &&
-    Boolean(approval.approver_role_id && priorLocalRoles.has(approval.approver_role_id)));
+    (approval.approval_step_order != null
+      ? priorLocalSteps.some(step => step.step_order === approval.approval_step_order)
+      : Boolean(approval.approver_role_id && priorLocalRoles.has(approval.approver_role_id))));
 }
 
 export function hasInitialApprovalForPersistedRequest(
   steps: ApprovalStage[], currentStepOrder: number, totalSteps: number | null,
-  approvals: { action: string | null; approver_role_id: string | null }[]
+  approvals: { action: string | null; approver_role_id: string | null; approval_step_order?: number | null }[]
 ) {
   if (!totalSteps) return true; // Legacy two-phase routing has no step master.
   // Do not reinterpret already-approved, longer historical workflows using
@@ -84,6 +86,6 @@ export function matchesCurrentPaymentAssignee(
 }
 
 export function isPendingPaymentApproval(status: string | null, approvalStatus: string | null) {
-  const terminal = new Set(["FINAL_APPROVED", "RE_APPROVED", "PROCESSED", "PROCESSING", "RETURNED", "REJECTED", "CANCELLED"]);
+  const terminal = new Set(["OWNER_APPROVED", "FINAL_APPROVED", "RE_APPROVED", "PROCESSED", "PROCESSING", "RETURNED", "REJECTED", "CANCELLED"]);
   return String(status).toUpperCase() !== "APPROVED" && !terminal.has(String(status).toUpperCase()) && !terminal.has(String(approvalStatus).toUpperCase());
 }
