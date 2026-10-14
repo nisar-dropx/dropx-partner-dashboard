@@ -96,10 +96,10 @@ test('approval routing failure does not write an approval or advance the request
   assert.equal(inserts,0);assert.equal(db.updates.length,0);
 });
 
-test('oversight evidence access enforces company, location and permission independently of assignment',async()=>{
+test('approval-page tracking evidence access enforces company, location and permission independently of assignment',async()=>{
   const id='00000000-0000-0000-0000-000000000001';
   const db=database({payment_requests:[{id,company_id:'co',location_id:'NLRE',payment_heads:{code:'VAN_ADHOC'}}]});
-  let auth={userId:'observer',hasAllLocationAccess:false,locationScopeIds:['NLRE'],permissions:{payment_oversight:{canView:true}}};
+  let auth={userId:'observer',hasAllLocationAccess:false,locationScopeIds:['NLRE'],permissions:{payment_approvals:{canView:true}}};
   const {canOverseePayment}=await import('./payment-oversight-policy.ts');
   const {authorizePaymentEvidence}=compile('./payment-evidence-authorization.ts',{
     'server-only':{},'@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:(a,c)=>Boolean(a.permissions[c]?.canView)},
@@ -111,6 +111,30 @@ test('oversight evidence access enforces company, location and permission indepe
   assert.equal((await authorizePaymentEvidence(request)).payment.id,id);
   auth={...auth,locationScopeIds:['OTHER']};assert.equal((await authorizePaymentEvidence(request)).error.status,403);
   auth={...auth,locationScopeIds:['NLRE'],permissions:{}};assert.equal((await authorizePaymentEvidence(request)).error.status,403);
-  auth={...auth,permissions:{payment_oversight:{canView:true}}};
+  auth={...auth,permissions:{payment_oversight:{canView:true}}};assert.equal((await authorizePaymentEvidence(request)).error.status,403);
+  auth={...auth,permissions:{payment_approvals:{canView:true}}};
   assert.equal((await authorizePaymentEvidence(new Request('https://ops.dropxlogistics.com/?request=00000000-0000-0000-0000-000000000002'))).error.status,404);
+});
+
+
+test('the action queue includes fallback and leave cover but excludes another approver and another location',async()=>{
+  const db=database({stations:[{company_id:'co',id:'NLRE',location_model_id:'EDSP'}]});
+  const {getPaymentApprovalEligibility}=compile('./payment-approval-scope.ts',{
+    '@/lib/supabase-admin':{supabaseAdmin:db},
+    '@/lib/payment-stage-policy':stage,
+    '@/lib/payment-initial-approval-gate':{initialApprovalReadyIds:async(_c,ids)=>new Set(ids)}
+  });
+  const auth={userId:'area',roleCode:'AOM',effectiveRoleIds:['aom'],hasAllLocationAccess:false,locationScopeIds:['NLRE']};
+  const request=(id,current_approver_user_id,current_approver_role_id,location_id='NLRE')=>({id,location_id,location_model_id:'EDSP',requested_by:'station',current_approver_user_id,current_approver_role_id});
+  const requests=[
+    request('normal','area','aom'),
+    request('fallback','area','cm'),
+    request('another-person-same-role','cluster','aom'),
+    request('earlier-stage','cluster','cm'),
+    request('outside-location','area','aom','JDBD')
+  ];
+  assert.deepEqual([...await getPaymentApprovalEligibility('co',auth,requests)],['normal','fallback']);
+  const {canOverseePayment}=await import('./payment-oversight-policy.ts');
+  const trackingAuth={...auth,permissions:{payment_approvals:{canView:true,canEdit:true}}};
+  assert.deepEqual(requests.filter(r=>canOverseePayment(trackingAuth,r)).map(r=>r.id),['normal','fallback','another-person-same-role','earlier-stage']);
 });

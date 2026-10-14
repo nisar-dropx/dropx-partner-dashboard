@@ -122,19 +122,22 @@ function CostTrendCard({ metric, label, value, summary, children }: { metric: st
 }
 
 function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociateDelivery[]; total: number }) {
-  return <div className="performance-associate-popover">
+  const splitTotal = rows.reduce((sum, person) => sum + person.delivered, 0);
+  return <div className="performance-associate-popover performance-associate-pay">
     <ReviewDetailsClose label="Close associate delivery details"/>
     <div className="performance-associate-popover-scroll">
-      <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Assigned</span><span>Payment scheme</span><span>Delivery rate</span></div>
+      <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Payment / rate</span><span>Day cost</span><span>CPS</span></div>
       <div className="performance-associate-popover-body">{rows.length ? rows.map((person) => <div className="performance-associate-row" key={`${person.associateId}-${person.name}`}>
-        <span><strong>{person.name}</strong><small>{person.associateId}</small></span>
-        <b>{person.delivered.toLocaleString("en-IN")}</b>
-        <b>{person.assigned && person.assigned > 0 ? person.assigned.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "—"}</b>
-        <span>{person.paymentScheme || "—"}</span>
-        <span>{person.deliveryRate == null ? "—" : `₹${person.deliveryRate.toLocaleString("en-IN", { maximumFractionDigits: 2 })} / delivery`}</span>
+        <span><strong>{person.name}</strong><small>{person.associateId}</small>{person.providerIds.some(id => id !== person.associateId) && <details className="performance-associate-ids"><summary>Linked IDs</summary><small>{person.providerIds.filter(id => id !== person.associateId).join(" · ")}</small></details>}{person.paymentSetupStatus !== "Mapped" && <small className="performance-associate-pay-warning">{person.paymentSetupStatus}</small>}</span>
+        <span><b>{person.delivered.toLocaleString("en-IN")}</b>{person.assigned != null && <small>{person.assigned.toLocaleString("en-IN")} assigned</small>}</span>
+        <span><strong>{person.paymentScheme || "Mapping needs review"}</strong>{person.rates.length ? person.rates.map((rate, index) => <small key={index}>{rate.label}: {money(rate.rate, 2)} · {rate.basis}</small>) : <small>Rate amount unavailable</small>}</span>
+        <span><b>{person.costStatus && !person.totalPay ? "Pending" : money(person.totalPay, 2)}</b>{person.costStatus && <small className="performance-associate-pay-warning">{person.costStatus}{person.totalPay != null && person.totalPay > 0 ? " · known cost only" : ""}</small>}</span>
+        <span className="performance-associate-cps"><b>{money(person.associateCps, 2)}</b><small>{person.costStatus ? "Pending" : person.cpsShipments === 0 ? "No shipments" : `${person.cpsShipments?.toLocaleString("en-IN") ?? "—"} CPS shipments`}</small><small title="This associate’s day cost divided by all station CPS shipments">Station impact: {money(person.stationCpsImpact, 2)}</small></span>
       </div>) : <p>No associate-level delivery rows are available for this date.</p>}</div>
     </div>
-    <div className="performance-associate-popover-foot"><span>{rows.length} delivering associate{rows.length === 1 ? "" : "s"}</span><b>{total.toLocaleString("en-IN")} total delivered</b></div>
+    <div className="performance-associate-popover-foot"><span>{rows.filter(row => row.delivered > 0).length} delivering associates · {rows.filter(row => row.delivered === 0).length} cost-only rows</span><b>{splitTotal.toLocaleString("en-IN")} split delivered</b></div>
+    {splitTotal !== total && <p className="performance-associate-pay-warning">Station headline: {total.toLocaleString("en-IN")}. The source counts differ from this split; unresolved identity links or different shipment feeds need reconciliation.</p>}
+    <details className="performance-associate-pay-basis"><summary>Rate source &amp; CPS calculation</summary><p className="performance-associate-pay-note">Rates and amounts come from effective-dated ID &amp; pay mapping. Day cost uses the live CPS calculation, including applicable attendance, monthly proration and production minimums—not the full monthly amount or a bank payment.</p><p className="performance-associate-pay-note">CPS shipments = deliveries (including SWA) + customer returns from the CPS feed. Associate CPS = day cost ÷ their CPS shipments. Station CPS impact = day cost ÷ all station CPS shipments. Cost includes associate fixed/MG, variable pay and fuel; excludes vehicle costs, station overhead and seller/MFN activity. Missing or partial cost stays pending, not ₹0.</p></details>
   </div>;
 }
 
@@ -294,7 +297,7 @@ export function PerformanceReviewDesk(props: Props) {
       <section className="panel performance-review-section" id="review-performance">
         <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>Station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><div className="review-history-actions"><TrendButton group="performance" metric="metric_health" label="Performance"/><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div></div>
         <div className="performance-review-facts">
-          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{deliveryLabel}</strong><small>{deliveryAvailable ? `${snapshot.associateDeliveries.length} delivering associates · selected day` : "Selected-day delivery import unavailable"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
+          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{deliveryLabel}</strong><small>{deliveryAvailable ? `${snapshot.associateDeliveries.filter(person => person.delivered > 0).length} delivering associates / IDs · selected day` : "Selected-day delivery import unavailable"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
           <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{deliveryAvailable ? <>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs <b className={belowMinimumAllocation.length ? "allocation-risk-badge" : "allocation-good-badge"}>{belowMinimumAllocation.length} below {props.allocationTarget.toLocaleString("en-IN")} minimum</b></> : "Selected-day delivery import unavailable"}</small></summary><BelowMinimumAllocationBreakdown rows={snapshot.associateDeliveries} target={props.allocationTarget} date={date}/></ReviewDetails>
           <PerformanceOpeningCard snapshot={snapshot}/>
           <PerformanceEddClearanceCard key={`${selectedCode}-${date}`} data={props.eddClearance} stationCode={selectedCode}/>

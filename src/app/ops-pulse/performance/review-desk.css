@@ -247,6 +247,17 @@
 .performance-review-desk .performance-opening-popover p,.performance-review-desk .performance-opening-popover p b { font-size: 12px; }
 .performance-review-desk .performance-associate-popover :is(.performance-associate-popover-head,.performance-associate-row span,.performance-associate-row strong,.performance-associate-row b,.performance-associate-popover-foot) { font-size: 12px; }
 .performance-review-desk .performance-associate-popover-scroll { border: 1px solid #e2e8f0; border-radius: 8px; }
+.performance-review-desk .performance-associate-pay :is(.performance-associate-popover-head,.performance-associate-row) { grid-template-columns: minmax(180px,1.5fr) 70px minmax(185px,1.3fr) minmax(90px,.7fr) minmax(120px,.8fr); min-width: 700px; align-items: start; gap: 12px; padding: 7px 10px; }
+.performance-review-desk .performance-associate-pay .performance-associate-popover-scroll { max-height: 430px; }
+.performance-review-desk .performance-associate-pay .performance-associate-row small { display: block; overflow-wrap: anywhere; }
+.performance-review-desk .performance-associate-pay .performance-associate-row strong { white-space: normal; }
+.performance-review-desk .performance-associate-pay .performance-associate-cps { text-align: right; }
+.performance-review-desk .performance-associate-pay .performance-associate-cps > b { color: #9a3412; font-size: 14px; }
+.performance-review-desk .performance-associate-pay .performance-associate-popover-head > :last-child { text-align: right; }
+.performance-review-desk .performance-associate-ids > summary,.performance-review-desk .performance-associate-pay-basis > summary { cursor: pointer; color: #64748b; font-size: 11px; line-height: 1.5; }
+.performance-review-desk .performance-associate-pay-basis { margin-top: 7px; }
+.performance-review-desk .performance-associate-pay-note { font-size: 11px; line-height: 1.5; color: #64748b; margin: 8px 0; }
+.performance-review-desk .performance-associate-pay-warning { font-size: 11px; line-height: 1.5; color: #9a3412; margin: 4px 0; }
 .performance-review-desk .allocation-risk-badge,.performance-review-desk .allocation-good-badge { padding: 3px 6px; border-radius: 999px; font-size: 10px; font-weight: 800; }
 .performance-review-desk .allocation-risk-badge { color: #9f1239; background: #fff1f2; }
 .performance-review-desk .allocation-good-badge { color: #166534; background: #dcfce7; }

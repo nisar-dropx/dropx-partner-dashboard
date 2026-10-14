@@ -384,7 +384,7 @@ export default async function PaymentApprovalsPage({
   searchParams?: ApprovalSearchParams;
 }) {
   const oversight = firstSearchParam(searchParams?.view) === "scope";
-  const pageCode = oversight ? "payment_oversight" : "payment_approvals";
+  const pageCode = "payment_approvals";
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions[pageCode];
@@ -514,18 +514,18 @@ export default async function PaymentApprovalsPage({
     String(selectedRequest?.approval_status ?? "").toUpperCase() !== "RETURNED";
 
   return (
-    <AppShell active={oversight ? "Payment oversight" : "Payment Approvals"} pageCode={pageCode}>
+    <AppShell active="Payment Approvals" pageCode={pageCode}>
       <PageHead
         eyebrow="Payments"
-        title={oversight ? "Payment oversight" : "Approvals"}
-        subtitle={oversight ? "View every request stage across your permitted locations, including requests waiting with another approver. This view does not grant approval authority." : "Requests pending your action across Last Mile and Dark Store. Open oversight to track requests waiting with other approvers."}
+        title="Approvals"
+        subtitle="Your approval queue across Last Mile and Dark Store, including requests assigned to you as fallback or leave cover."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
-      <div className="payment-approval-stage-legend" aria-label="Payment views">
-        {hasPermission(authorization, "payment_approvals", "access") ? <PendingLink className={`button compact ${oversight ? "secondary" : ""}`} href="/payments/approvals">Pending my action</PendingLink> : null}
-        {hasPermission(authorization, "payment_oversight", "access") ? <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} href="/payments/approvals?view=scope">All pending in my scope</PendingLink> : null}
-      </div>
+      <nav className="payment-approval-stage-legend" aria-label="Approval views">
+        <PendingLink className={`button compact ${oversight ? "secondary" : ""}`} aria-current={!oversight ? "page" : undefined} prefetch={false} href="/payments/approvals">Needs my action</PendingLink>
+        <PendingLink className={`button compact ${oversight ? "" : "secondary"}`} aria-current={oversight ? "page" : undefined} prefetch={false} href="/payments/approvals?view=scope">Track requests in my locations</PendingLink>
+      </nav>
       {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
@@ -546,11 +546,12 @@ export default async function PaymentApprovalsPage({
         </section>
       ) : null}
 
-      {!error && pagePermission.canView ? (
+      {!error ? (
         <section className="panel">
           <div className="panel-head">
             <div>
-              <h2>Approval list</h2>
+              <h2>{oversight ? "Requests in my locations" : "My approval queue"}</h2>
+              {oversight ? <p className="subtle">Read-only tracking across your permitted locations. See who each request is waiting with, or filter for approved and completed requests.</p> : null}
               <p className="subtle">{matchingRequests.length} records · page {pageNumber} of {pageCount}</p>
             </div>
             {!oversight && canDownloadProcessData ? (
@@ -579,7 +580,7 @@ export default async function PaymentApprovalsPage({
               href={stageHref("")}
               scroll={false}
             >
-              {oversight ? "All pending in scope" : "Pending for me"}
+              {oversight ? "All pending in my locations" : "Needs my action"}
             </PendingLink>
             {APPROVAL_STAGES.map((stage) => (
               <PendingLink
@@ -668,7 +669,7 @@ export default async function PaymentApprovalsPage({
                 <p className="subtle">{routingDetail.nextLabel}</p>
                 {selectedRequest.approval_routing_reason ? <p>{selectedRequest.approval_routing_reason}</p> : null}
                 {routingDetail.error ? <p role="status">{routingDetail.error}</p> : null}
-                {oversight ? <p className="subtle">Read-only oversight. Only the current approver or authorized cover can act in their approval queue.</p> : null}
+                {oversight ? <p className="subtle">Read-only request tracking. To act on an assignment, open Needs my action.</p> : null}
               </div> : null}
               {replacement ? <div className="message-panel" style={{padding:"12px 16px",marginBottom:12}}><strong>{replacement.reason}</strong><p style={{margin:"4px 0 0"}}>{adhocVehicleLabel(replacement)} · Replacement date: {replacement.date}</p></div> : null}
               <PaymentCostSummary estimate={selectedRequest.amount_requested} actual={selectedRequest.amount} shipments={estimatedShipments(answers)} />

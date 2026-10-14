@@ -38,5 +38,15 @@ test('oversight migration grants read-only role access and atomically tracks han
     assert.equal((await db.query('select approval_pending_since from payment_requests')).rows[0].approval_pending_since,null);
     assert.equal((await db.query('select relrowsecurity from pg_class where relname=\'payment_approval_routing_events\'')).rows[0].relrowsecurity,true);
     assert.equal((await db.query("select has_table_privilege('authenticated','payment_approval_routing_events','SELECT') as allowed")).rows[0].allowed,false);
+    // Retiring the separate page must preserve permissions and routing history.
+    await db.exec(`insert into app_pages(company_id,code,name,is_active) values('00000000-0000-0000-0000-000000000001','payment_approvals','Payment Approvals',true);`);
+    const beforeGrants=(await db.query('select * from role_page_permissions')).rows;
+    const beforeEvents=(await db.query('select * from payment_approval_routing_events')).rows;
+    const retirement=readFileSync(new URL('../../supabase/migrations/20261014233000_inline_payment_request_tracking.sql',import.meta.url),'utf8');
+    await db.exec(retirement);
+    await db.exec(retirement); // Safe to reapply after a disconnected SQL editor.
+    assert.deepEqual((await db.query('select code,is_active from app_pages order by code')).rows,[{code:'payment_approvals',is_active:true},{code:'payment_oversight',is_active:false}]);
+    assert.deepEqual((await db.query('select * from role_page_permissions')).rows,beforeGrants);
+    assert.deepEqual((await db.query('select * from payment_approval_routing_events')).rows,beforeEvents);
   } finally { await db.close(); }
 });
