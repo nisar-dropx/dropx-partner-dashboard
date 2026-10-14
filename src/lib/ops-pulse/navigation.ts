@@ -24,6 +24,7 @@ const commonStart: NavItem[] = [
       { code: "capacity_overview", label: "Overview", href: "/capacity" },
       { code: "capacity_associates", label: "Associate SPR", href: "/capacity/associates" },
       { code: "capacity_delivery", label: "Delivery Data", href: "/performance/shipments" },
+      { code: "capacity_associates", label: "Distance & Fuel", href: "/capacity/distance" },
       { code: "capacity_hiring", label: "Hiring Review", href: "/capacity/hiring" }
     ]
   },
