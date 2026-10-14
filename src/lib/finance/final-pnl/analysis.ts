@@ -9,14 +9,32 @@ export function updateFilters(dimensions:Dimension[],filters:PnlFilters,key:keyo
  for(const other of ['model','format','region','state','manager','station'] as const){if(other===key)continue;const allowed=facetOptions(dimensions,next,other);next[other]=filters[other].filter(v=>allowed.includes(v));}
  return next;
 }
-export function modelLabel(code:string){return ({NOW:'Amazon Now',AMXL:'Amazon XL',MDH:'Flipkart MDH',ODH:'Flipkart ODH',FM:'Meesho FM',HO:'Head office'} as Record<string,string>)[code]??code;}
-export function statementHead(e:Entry){
- if(e.side!=='expense')return e.head;
- if(/^vehicle rent\s*[·-]/i.test(e.head))return 'Vehicle rent';
- if(/^vehicle run(?:\s*[·-]|$)/i.test(e.head))return 'Vehicle run';
- if(/^ad[ -]?hoc van$/i.test(e.head.trim()))return 'Adhoc Van';
- return e.head;
+export function modelLabel(code:string){return ({NOW:'Amazon Now',AMXL:'Amazon XL',MDH:'Flipkart MDH',ODH:'Flipkart ODH',FM:'Meesho FM',HO:'HO'} as Record<string,string>)[code]??code;}
+/** Presentation groups only: keep original heads, source IDs and amounts intact. */
+export function statementHead(e:Pick<Entry,'side'|'head'>){
+ const head=e.head.trim().replace(/\s+/g,' ');
+ if(e.side!=='expense')return head;
+ if(/^(?:vehicle rent|van rental expenses)(?:\s*[·:–—-]|$)/i.test(head))return 'Vehicle rent';
+ if(/^vehicle run(?:\s*[·:–—-]|$)/i.test(head))return 'Vehicle run';
+ if(/^(?:ad[ -]?hoc van|van ad[ -]?hoc)(?:\s*[·:–—-]|$)/i.test(head))return 'Adhoc Van';
+ const aliases:Record<string,string>={
+  'van fuel':'Vehicle fuel','van fuel expenses':'Vehicle fuel','iocl fuel':'Vehicle fuel','bpcl fuel':'Vehicle fuel',
+  'vehicle service/maintanace':'Vehicle maintenance','vehicle maintanance expenses':'Vehicle maintenance',
+  'vehicle maintenance expenses':'Vehicle maintenance','vehicle repair / tyre':'Vehicle maintenance',
+  'broadband charge':'Broadband','broadband expenses':'Broadband',
+  'office and stationary':'Stationery','office and stationery':'Stationery',
+  'office rent':'Facility rent and maintenance',
+ };
+ return aliases[head.toLowerCase()]??head;
 }
+const headOrder=['Workforce payouts','Helper payouts','UTR salaries','Manager share','HO salaries','Vehicle run','Vehicle rent','Vehicle fuel','Vehicle maintenance','Adhoc Van','Adhoc Driver','Adhoc DA / WM','Facility rent and maintenance','Electricity Bill','Broadband','Drinking Water','Water Bill','Cleaning Expenses','Stationery','Loss chargeback','Regional HO allocation'];
+export function statementGroups(entries:Entry[]){
+ const groups=new Map<string,{key:string;head:string;side:Entry['side'];entries:Entry[];paise:number}>();
+ for(const entry of entries){if(entry.deleted)continue;const head=statementHead(entry),key=entry.side+':'+head.toLowerCase();const group=groups.get(key)??{key,head,side:entry.side,entries:[],paise:0};group.entries.push(entry);group.paise+=entry.paise;groups.set(key,group);}
+ const rank=(head:string)=>{const i=headOrder.indexOf(head);return i<0?headOrder.length:i;};
+ return [...groups.values()].sort((a,b)=>a.side.localeCompare(b.side)||(a.side==='expense'?rank(a.head)-rank(b.head):0)||a.head.localeCompare(b.head));
+}
+export function hoLabel(code:string,mode:'regional'|'corporate'){return mode==='corporate'?`${code} Corporate`:code;}
 export type GroupBy='region'|'state'|'model'|'manager'|'station';
 export function dimensionFor(code:string,dimensions:Dimension[]):Dimension{return dimensions.find(d=>d.code===code)??{code,name:code,region:'Unassigned',state:'Unassigned',model:'Unassigned',cluster:'Unassigned',managers:['Unassigned'],isHo:/^HO(?:_|$)/i.test(code)};}
 export function matchesDimension(d:Dimension,f:PnlFilters){return (!f.region.length||f.region.includes(d.region))&&(!f.state.length||f.state.includes(d.state))&&(!f.model.length||f.model.includes(d.model))&&(!f.format.length||f.format.includes(d.format||'Not applicable'))&&(!f.manager.length||d.managers.some(m=>f.manager.includes(m)))&&(!f.station.length||f.station.includes(d.code));}
