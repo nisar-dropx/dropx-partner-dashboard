@@ -80,6 +80,23 @@ function completeDraft(ui, index = 0) {
   ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-10-03' } });
   ui.render();
 }
+
+test('selecting a legacy-ID parent-station associate asks for dates instead of a false location mismatch', async () => {
+  const anchor = {mappingId:'parent-map',stationId:'parent',locationLabel:'JUGD',providerId:'amazon',
+    mappedProviderMemberId:row.providerMemberId,paymentMethodId:method.id,paymentValues:{DELIVERY:'15'},
+    effectiveFrom:'2026-09-01',effectiveTo:'',status:'active'};
+  const ui = worksheet({mappings:[{...row,stationLabel:'JUGF',relatedStationIds:['parent','station-1']}],
+    workers:[{...worker,dropxId:'SDGH140021',stationId:'parent',profileStationId:'parent',
+      profileLocationLabel:'JUGD',registeredLocationMappings:[anchor],currentMappings:[anchor]}]});
+  ui.change('provider_first_worker_0',worker.id);
+  assert.equal(ui.all(n=>n.props?.className==='mapping-row-error').length,0);
+  assert.match(JSON.stringify(ui.all(n=>n.props?.role==='status')),/Registered at.*JUGD/);
+  await ui.save();
+  assert.match(JSON.stringify(ui.all(n=>n.props?.className==='mapping-row-error')),/Enter Effective from/);
+  ui.one(n=>n.type==='input' && n.props.type==='date' && n.props.required).props.onChange({target:{value:'2026-10-01'}});
+  ui.render();
+  assert.match(JSON.stringify(ui.all(n=>n.props?.className==='mapping-period-help')),/Keep all.*JUGD/);
+});
 function saved(data) {
   const value = key => data.get(`rows[0][${key}]`);
   return { ok: true, message: 'Mapping saved.', savedRows: [{ clientKey: value('client_key'), workforceId: value('id'), mappingId: 'saved-1', paymentMethodId: value('payment_method_id'), paymentValues: JSON.parse(value('payment_values_json')), productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: value('effective_from'), effectiveTo: value('effective_to') }] };
