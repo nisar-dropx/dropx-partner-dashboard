@@ -20,7 +20,7 @@ export const financeAccessPageCodes = [
   "advance_requests",
   "expense_requests",
   "payment_requests",
-  "payment_approvals", "payment_oversight",
+  "payment_approvals",
   "payment_process",
   "workforce_payouts",
   "payment_reports",

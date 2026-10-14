@@ -66,7 +66,6 @@ const payments: NavItem = {
     { code: "payment_process", label: "Pay Advances", href: "/payments/pay-advances" },
     { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
     { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
-      { code: "payment_oversight", label: "Payment oversight", href: "/payments/approvals?view=scope" },
     { code: "payment_reports", label: "Payment Report", href: "/payments/report" }
   ]
 };

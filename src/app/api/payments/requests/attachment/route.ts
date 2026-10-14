@@ -25,8 +25,7 @@ export async function GET(request: NextRequest) {
     if (
       !hasPermission(authorization, "expense_requests", "access") &&
       !hasPermission(authorization, "payment_requests", "access") &&
-      !hasPermission(authorization, "payment_approvals", "access") &&
-      !hasPermission(authorization, "payment_oversight", "access")
+      !hasPermission(authorization, "payment_approvals", "access")
     ) {
       return NextResponse.json({ error: "Document access denied." }, { status: 403 });
     }
