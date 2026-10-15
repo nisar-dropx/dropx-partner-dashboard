@@ -289,6 +289,27 @@ export function attendanceDayInsight(
     };
   }
 
+  // A single punch on a rest day keeps the paid rest day, but if the person worked
+  // they must be able to regularize the missing punch so it counts as worked.
+  if ((isWeekOffDay || isHolidayDay) && missingPunch && !(options.today && options.shiftOpen)) {
+    const restDay = isWeekOffDay ? "weekly off" : "holiday";
+    return {
+      calendarClass: "week-off",
+      detail: `Only one punch is recorded on your ${restDay}, so it stays a paid ${restDay}. If you worked, request regularization for the missing punch so the day counts as worked.`,
+      headline: `Missing punch on ${restDay}`,
+      issues: [{
+        code: "missing_punch",
+        label: "Missing punch",
+        message: `Punch in and punch out are both needed for a worked ${restDay}.`,
+        tone: "amber"
+      }],
+      label: `Missing punch · ${isWeekOffDay ? "Week off" : "Holiday"}`,
+      needsRegularization: true,
+      payDayType: isWeekOffDay ? "week_off" : "paid_holiday",
+      tone: "amber"
+    };
+  }
+
   if (isWeekOffDay && payDayType !== "half_day") {
     return {
       calendarClass: "week-off",

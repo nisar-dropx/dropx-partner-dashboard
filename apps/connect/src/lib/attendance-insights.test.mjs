@@ -229,14 +229,25 @@ test("a worked week off shows as present, not as a day off (SREEKANTH, 13 Sep)",
   assert.equal(attendanceDayInsight(row({ status: "H", attendanceStatus: "Holiday" })).label, "Worked on holiday");
 });
 
-test("a single stray punch on a week off is still a week off", () => {
-  assert.equal(attendanceDayInsight(row({
+test("a single punch on a week off stays a week off but can be regularized", () => {
+  const stray = attendanceDayInsight(row({
     status: "WO",
     attendanceStatus: "Weekly Off",
     inTime: "09:49",
     outTime: "--:--",
     punchCount: 1
-  })).calendarClass, "week-off");
+  }));
+  assert.equal(stray.calendarClass, "week-off");
+  assert.equal(stray.payDayType, "week_off");
+  assert.equal(stray.needsRegularization, true);
+  assert.equal(stray.issues[0].code, "missing_punch");
+
+  const present = attendanceDayInsight(row({ attendanceStatus: "Present (Weekly Off)", inTime: "09:30", outTime: "", punchCount: 1 }));
+  assert.equal(present.needsRegularization, true);
+  assert.equal(present.calendarClass, "week-off");
+
+  const openToday = attendanceDayInsight(row({ attendanceStatus: "Present (Weekly Off)", inTime: "09:30", outTime: "", punchCount: 1 }), { today: true, shiftOpen: true });
+  assert.equal(openToday.needsRegularization, false);
 });
 
 test("the day a week-off comp-off is taken shows as that leave", () => {

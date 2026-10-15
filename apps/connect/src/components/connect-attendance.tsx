@@ -567,7 +567,8 @@ export function ConnectAttendance({ account, active = true, initialFilter = "all
               && selected.statusKind !== "paid_leave"
               && selected.workMode !== "wfh"
               && selected.workMode !== "business_trip"
-              && !["week-off", "paid-leave", "leave"].includes(selectedInsight.calendarClass)
+              && !["paid-leave", "leave"].includes(selectedInsight.calendarClass)
+              && (selectedInsight.calendarClass !== "week-off" || selectedInsight.needsRegularization)
               && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
               && selected.regularizationOpen !== false
               ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.issues.some(issue => issue.code === "missing_punch") ? "Regularize missing punch" : "Request regularization"}</button>
