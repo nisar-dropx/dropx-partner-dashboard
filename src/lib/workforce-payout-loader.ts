@@ -11,6 +11,7 @@ import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { calculateAutomaticDeductionLines, type AutomaticDeductionHead, type DeductionWorkerContext } from "@/lib/workforce-deductions";
 import { allocationActiveOn, cumulativeDirectPayUnitsBefore, directPayAttendanceBasis, directPayAttendanceUnit, directPayForDay, preferredDirectPayAttendance, type DirectPayComponent } from "@/lib/direct-workforce-pay";
+import { directPaymentProfileIsVisible } from "@/lib/direct-payment-profile-visibility";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { workforcePaymentMonthStart, workforcePaymentPolicyForDate, type WorkforcePaymentPolicy } from "@/lib/workforce-payment-policy";
@@ -161,9 +162,9 @@ export async function loadWorkforcePayoutRows(
       || scopedMappingIds.has(String(row.id))
       || scopedProviderKeys.has(`${String(row.station_id)}|${normalizePayoutIdentity(row.provider_member_id)}`)));
   const mappings = authorizedMappings.filter((row: any) => row.payment_method_id && String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
-  const allDirectAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id)
+  let allDirectAllocations = (directAllocationsResult.data ?? []).filter((row: any) => allowed.has(row.station_id)
     && (!scopeEnabled || scopedIdentityIds.has(String(row.workforce_id))));
-  const directAllocations = allDirectAllocations.filter((row: any) => String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
+  let directAllocations = allDirectAllocations.filter((row: any) => String(row.effective_from) <= toDate && (!row.effective_to || String(row.effective_to) >= fromDate));
   const scopedStationIds = scopeEnabled
     ? new Set([...authorizedMappings, ...allDirectAllocations].map((row: any) => String(row.station_id)).filter(Boolean))
     : null;
@@ -198,8 +199,21 @@ export async function loadWorkforcePayoutRows(
     if (row.id) workerBySource.set(row.id, row);
     if (row.source_profile_id) workerBySource.set(row.source_profile_id, row);
   });
+  // Direct allocations are profile-driven, so a truly Inactive profile must
+  // not create a payout row or influence attendance/overlap validation. Keep
+  // provider mappings independent: their stored Provider ID remains valid
+  // payout evidence even when the linked profile is no longer active.
+  const directAllocationProfileIsVisible = (allocation: any) => directPaymentProfileIsVisible(
+    workerBySource.get(String(allocation.workforce_id)) ?? {},
+    "workforce"
+  );
+  allDirectAllocations = allDirectAllocations.filter(directAllocationProfileIsVisible);
+  directAllocations = directAllocations.filter(directAllocationProfileIsVisible);
+  const visibleDirectWorkforceIds = [...new Set(allDirectAllocations
+    .map((allocation: any) => String(allocation.workforce_id ?? ""))
+    .filter(Boolean))];
   const canonicalWorkers = Array.from(new Map([
-    ...directWorkforceIds,
+    ...visibleDirectWorkforceIds,
     ...mappings.map((mapping: any) => workerBySource.get(mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id)?.id)
   ].filter(Boolean).map((id) => [id, workerBySource.get(id)])).values()).filter(Boolean);
   const thresholdHistoryStart = workforcePaymentMonthStart(fromDate);
@@ -1641,6 +1655,11 @@ export async function loadWorkforcePayoutRows(
     if (applied.has(identityKey)) continue;
     const worker = canonicalWorkerById.get(workforceId);
     if (!worker) continue;
+    // This fallback row represents a provider-independent/direct-pay input.
+    // Keep genuinely inactive profiles out of Direct Pay even when an old
+    // addition or deduction still exists. Provider-mapped rows are assembled
+    // above and are intentionally unaffected by this filter.
+    if (!directPaymentProfileIsVisible(worker, "workforce")) continue;
     const locationId = group.locationId || null;
     const location: any = locationId ? locationById.get(locationId) : null;
     const values = additionalValuesByIdentity.get(identityKey) ?? [];

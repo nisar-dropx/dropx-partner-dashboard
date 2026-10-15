@@ -53,6 +53,7 @@ await db.exec(`
     deleted_at timestamptz,
     source_profile_type text,
     source_profile_id uuid,
+    onboarding_status text,
     lifecycle_status text,
     deactivated_at timestamptz,
     last_working_date date
@@ -111,9 +112,10 @@ const matchingScript = readFileSync(
   "utf8"
 );
 assert.equal(baseMigration, matchingScript, "deploy script must exactly match the migration");
-const saveFunctionSql = baseMigration.slice(
-  baseMigration.indexOf("create or replace function public.save_workforce_payment_allocation("),
-  baseMigration.indexOf("alter table public.workforce_payment_allocations enable row level security;")
+const normalizedBaseMigration = baseMigration.replaceAll("\r\n", "\n");
+const saveFunctionSql = normalizedBaseMigration.slice(
+  normalizedBaseMigration.indexOf("create or replace function public.save_workforce_payment_allocation("),
+  normalizedBaseMigration.indexOf("alter table public.workforce_payment_allocations enable row level security;")
 );
 const saveLockPosition = saveFunctionSql.indexOf("perform pg_advisory_xact_lock(hashtextextended(");
 const workforceRowLockPosition = saveFunctionSql.indexOf("for update;");
@@ -162,6 +164,22 @@ await db.exec(readFileSync(
   "utf8"
 ));
 
+const pendingSetupMigration = readFileSync(
+  new URL("../supabase/migrations/20261016093000_direct_pay_pending_workforce_setup.sql", import.meta.url),
+  "utf8"
+);
+const pendingSetupScript = readFileSync(
+  new URL("./direct_pay_pending_workforce_setup_v1.sql", import.meta.url),
+  "utf8"
+);
+assert.equal(
+  pendingSetupMigration,
+  pendingSetupScript,
+  "pending direct-pay deploy script must exactly match the migration"
+);
+await db.exec(pendingSetupMigration);
+await db.exec(pendingSetupMigration);
+
 await db.query("insert into companies values ($1)", [company]);
 await db.query("insert into companies values ($1)", [secondCompany]);
 await db.query(`insert into stations values
@@ -207,6 +225,15 @@ async function addWorker({ station = stationA, designation = optionalA } = {}) {
   [id, company, station, designation, designationRow.rows[0].code]);
   return id;
 }
+async function addPendingWorker({ station = stationA, designation = optionalA } = {}) {
+  const id = nextWorker();
+  const designationRow = await db.query("select code from designations where id=$1", [designation]);
+  await db.query(`insert into workforce (
+    id,company_id,location_id,designation_id,designation,is_active,onboarding_status,lifecycle_status
+  ) values ($1,$2,$3,$4,$5,false,'pending','onboarding')`,
+  [id, company, station, designation, designationRow.rows[0].code]);
+  return id;
+}
 async function saveAllocation(workforceId, effectiveFrom) {
   const result = await db.query(`select public.save_workforce_payment_allocation(
     $1,$2,$3,$4::jsonb,$5::date,null,'test allocation',null
@@ -223,6 +250,65 @@ async function allocations(workforceId) {
   order by effective_from,id`, [workforceId]);
   return result.rows;
 }
+
+// A prepared direct allocation belongs to a non-terminal registration, not an
+// employment cutoff. Profile corrections before registration must keep the
+// allocation live, and activation must not restore an obsolete copy or create
+// an overlapping period.
+const pendingWorker = await addPendingWorker();
+const pendingAllocationId = await saveAllocation(pendingWorker, today);
+const pendingBefore = (await allocations(pendingWorker))[0];
+
+await db.query("update workforce set location_id=$1 where id=$2", [stationB, pendingWorker]);
+await db.query(
+  "update workforce set designation_id=$1,designation='DIRECT_B' where id=$2",
+  [optionalB, pendingWorker]
+);
+
+const pendingEditedRows = await allocations(pendingWorker);
+assert.equal(pendingEditedRows.length, 1);
+assert.equal(pendingEditedRows[0].id, pendingAllocationId);
+assert.equal(pendingEditedRows[0].station_id, stationB);
+assert.equal(pendingEditedRows[0].station_code_snapshot, "B");
+assert.equal(pendingEditedRows[0].designation_id, optionalB);
+assert.equal(pendingEditedRows[0].designation_code_snapshot, "DIRECT_B");
+assert.equal(pendingEditedRows[0].effective_from, today);
+assert.equal(pendingEditedRows[0].effective_to, null);
+assert.equal(pendingEditedRows[0].status, "active");
+assert.equal(pendingEditedRows[0].transition_restore_state, null);
+assert.deepEqual(pendingEditedRows[0].payment_values, pendingBefore.payment_values);
+assert.deepEqual(pendingEditedRows[0].payment_components, pendingBefore.payment_components);
+
+await db.query(`update workforce set
+  is_active=true,onboarding_status='active',lifecycle_status='active'
+  where id=$1`, [pendingWorker]);
+
+const pendingActivatedRows = await allocations(pendingWorker);
+assert.equal(pendingActivatedRows.length, 1);
+assert.equal(pendingActivatedRows[0].id, pendingAllocationId);
+assert.equal(pendingActivatedRows[0].station_id, stationB);
+assert.equal(pendingActivatedRows[0].designation_id, optionalB);
+assert.equal(pendingActivatedRows[0].effective_to, null);
+assert.equal(pendingActivatedRows[0].status, "active");
+assert.equal(pendingActivatedRows[0].transition_restore_state, null);
+assert.equal((await db.query(`select count(*)::integer as count
+  from workforce_payment_allocations first_allocation
+  join workforce_payment_allocations second_allocation
+    on second_allocation.company_id = first_allocation.company_id
+   and second_allocation.workforce_id = first_allocation.workforce_id
+   and second_allocation.id > first_allocation.id
+   and second_allocation.status <> 'cancelled'
+   and first_allocation.status <> 'cancelled'
+   and daterange(
+     second_allocation.effective_from,
+     coalesce(second_allocation.effective_to, 'infinity'::date),
+     '[]'
+   ) && daterange(
+     first_allocation.effective_from,
+     coalesce(first_allocation.effective_to, 'infinity'::date),
+     '[]'
+   )
+  where first_allocation.workforce_id=$1`, [pendingWorker])).rows[0].count, 0);
 
 // The application service role can read and execute the security-definer save
 // RPC, but cannot issue allocation INSERT/UPDATE/DELETE statements directly.

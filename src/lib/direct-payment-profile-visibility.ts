@@ -29,15 +29,23 @@ export function directPaymentProfileIsVisible(
   return directPaymentProfileStatus(source, audience).toLowerCase() !== "inactive";
 }
 
-/**
- * Keep write eligibility aligned with the existing server actions/RPCs. Rows
- * made visible by this change remain read-only until they become save-eligible.
- */
+/** Keep UI write eligibility aligned with the direct-allocation RPC policy. */
 export function directPaymentProfileIsEditable(
   source: DirectPaymentProfileSource,
   audience: DirectPaymentAudience
 ) {
-  if (source.deleted_at || source.is_active !== true) return false;
-  return audience === "workforce"
-    || String(source.onboarding_status ?? "").trim().toLowerCase() === "active";
+  if (source.deleted_at) return false;
+  if (source.is_active === true) {
+    return audience === "workforce"
+      || String(source.onboarding_status ?? "").trim().toLowerCase() === "active";
+  }
+  if (audience !== "workforce") return false;
+
+  // A Workforce profile awaiting app registration is intentionally not
+  // operationally active yet, but its pay can still be configured in advance.
+  // Keep terminal and genuinely inactive profiles read-only.
+  const onboarding = String(source.onboarding_status ?? "").trim().toLowerCase();
+  const lifecycle = String(source.people_lifecycle_status ?? source.lifecycle_status ?? "").trim().toLowerCase();
+  return ["pending", "under_review", "returned", "approved"].includes(onboarding)
+    && ["", "onboarding", "active"].includes(lifecycle);
 }

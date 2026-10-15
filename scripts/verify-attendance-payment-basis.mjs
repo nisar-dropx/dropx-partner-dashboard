@@ -4,7 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import ts from "typescript";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [form, actions, providerMappingActions, providerFirstPage, directAllocationActions, dashboardCalculator, dashboardPayout, connectCalculator, connectPaymentData, reportImportRoute, reportImportAttendance, migration, deployScript, providerMigration, providerDeployScript] = await Promise.all([
+const [form, actions, providerMappingActions, providerFirstPage, directAllocationActions, dashboardCalculator, dashboardPayout, connectCalculator, connectPaymentData, reportImportRoute, reportImportAttendance, migration, deployScript, providerMigration, providerDeployScript, allocationRevisionMigration] = await Promise.all([
   read("src/components/payment-field-form.tsx"),
   read("src/app/master/payment-methods/actions.ts"),
   read("src/app/provider-mapping/actions.ts"),
@@ -19,7 +19,8 @@ const [form, actions, providerMappingActions, providerFirstPage, directAllocatio
   read("supabase/migrations/20260928170000_attendance_payment_basis_snapshot.sql"),
   read("scripts/payment_field_attendance_calculation_v1.sql"),
   read("supabase/migrations/20260928220000_provider_attendance_payment_basis.sql"),
-  read("scripts/provider_attendance_payment_basis_v1.sql")
+  read("scripts/provider_attendance_payment_basis_v1.sql"),
+  read("supabase/migrations/20261016090000_workforce_payment_allocation_effective_date_revision.sql")
 ]);
 
 assert.match(form, /name="calculation_basis"/);
@@ -44,7 +45,9 @@ assert.match(reportImportRoute, /const amazonMappingSelect = "[^"]*workforce_id,
 assert.match(reportImportRoute, /field_executive_provider_mappings[\s\S]*\.select\(amazonMappingSelect\)/);
 assert.match(reportImportRoute, /attendance_daily[\s\S]*workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes/);
 assert.match(reportImportRoute, /productionComponent[\s\S]*productionForSource[\s\S]*attendanceComponent[\s\S]*directPayForDay/);
-assert.match(directAllocationActions, /save_workforce_payment_allocation_v2/);
+assert.match(directAllocationActions, /save_workforce_payment_allocation_v3/);
+assert.match(allocationRevisionMigration, /save_workforce_payment_allocation_v2/,
+  "the dated-revision RPC must preserve the v2 component-basis snapshot path");
 assert.match(migration, /apply_workforce_payment_component_basis/);
 assert.match(migration, /save_workforce_payment_allocation_v2/);
 assert.match(migration, /revoke execute on function public\.save_workforce_payment_allocation\(uuid, uuid, uuid, jsonb, date, date, text, uuid\)[\s\S]*from service_role/);
