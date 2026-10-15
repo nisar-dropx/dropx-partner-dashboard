@@ -157,10 +157,11 @@ function RowButton({ busy, canEdit, dirty, index, nameMatches, onSave }: {
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches || busy} onClick={() => onSave(index)} type="button">{busy ? "Saving..." : dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialOutboundMonth, lookupEntries = [], canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStationId = "", initialOutboundMonth, initialMappingStatus = "unmapped", lookupEntries = [], canEdit, mappings, workers, paymentMethods, shipmentMonths }: {
   shipmentMonths: string[];
   lookupEntries?: ProviderMappingLookupEntry[];
   initialOutboundMonth: string;
+  initialMappingStatus?: "all" | "mapped" | "unmapped";
   initialQuery?: string;
   initialStationId?: string;
   canEdit: boolean;
@@ -175,10 +176,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   const [query, setQuery] = useState(initialQuery);
   const deferredQuery = useDeferredValue(query);
   const [stationFilters, setStationFilters] = useState<string[]>(initialStationId ? [initialStationId] : []);
-  const [monthFilters, setMonthFilters] = useState<string[]>([initialOutboundMonth]);
+  const [monthFilters, setMonthFilters] = useState<string[]>(initialOutboundMonth ? [initialOutboundMonth] : []);
   const monthOptions = useMemo(() => providerMappingMonthOptions([...shipmentMonths, initialOutboundMonth]), [shipmentMonths, initialOutboundMonth]);
   const [methodFilters, setMethodFilters] = useState<string[]>([]);
-  const [mappingFilters, setMappingFilters] = useState<string[]>(["unmapped"]);
+  const [mappingFilters, setMappingFilters] = useState<string[]>(initialMappingStatus === "all" ? [] : [initialMappingStatus]);
   const [validationFilters, setValidationFilters] = useState<string[]>([]);
   const [pageSize, setPageSize] = useState<ProviderFirstPageSize>(50);
   const [currentPage, setCurrentPage] = useState(1);
