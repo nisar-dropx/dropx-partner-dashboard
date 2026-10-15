@@ -16,6 +16,8 @@ import { createProfileSubmittedNotification } from "../../../../src/lib/app-noti
 import { todayInIndia } from "../../../../src/lib/india-date";
 import { loadTrustedVehicleFuel } from "../../../../src/lib/trusted-vehicle-verification";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
+import { profileEditLocalMobile } from "@/lib/connect-profile-edit";
+import { normalizeStoredConnectMobile } from "@/lib/country-codes";
 import {
   isNonEmployeeProfileType,
   profileFieldRuleCategory,
@@ -70,6 +72,7 @@ type FieldExecutiveRow = {
   profile_photo_path: string | null;
   onboarding_status: string | null;
   profile_return_remarks?: string | null;
+  profile_edit_review_pending?: boolean | null;
   stations?: { station_code: string | null; station_name: string | null } | { station_code: string | null; station_name: string | null }[] | null;
 };
 
@@ -202,7 +205,7 @@ async function loadSessionAccounts() {
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin
     .from("connect_login_sessions")
-    .select("id, country_code, mobile_number, expires_at, revoked_at")
+    .select("id, country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
     .eq("session_hash", sessionHash)
     .maybeSingle();
   if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -211,15 +214,23 @@ async function loadSessionAccounts() {
     cookies().delete(connectSessionCookieName);
     throw new Error("Connect session expired. Please log in again.");
   }
-  return findConnectSessionAccounts(session.country_code, session.mobile_number);
+  const sessionMobile = normalizeStoredConnectMobile(
+    session.mobile_number,
+    session.country_code,
+    session.mobile_number_format
+  );
+  return {
+    accounts: await findConnectSessionAccounts(sessionMobile.countryCode, sessionMobile.mobile),
+    sessionMobile
+  };
 }
 
 async function requireExecutiveAccess(executiveId: string, profileType: string) {
   if (!isNonEmployeeProfileType(profileType)) throw new Error("Invalid workforce profile type.");
-  const accounts = await loadSessionAccounts();
+  const { accounts, sessionMobile } = await loadSessionAccounts();
   const account = accounts.find((item) => item.profileType === profileType && item.id === executiveId);
   if (!account) throw new Error("Workforce profile is not available for this login.");
-  return { ...account, profileType };
+  return { ...account, profileType, sessionMobile };
 }
 
 async function loadExecutive(executiveId: string, companyId: string, profileType: NonEmployeeProfileType) {
@@ -227,14 +238,14 @@ async function loadExecutive(executiveId: string, companyId: string, profileType
   const table = workforceTable(profileType);
   const result = await supabaseAdmin
     .from(table)
-    .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, stations (station_code, station_name)")
+    .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, profile_edit_review_pending, stations (station_code, station_name)")
     .eq("id", executiveId)
     .eq("company_id", companyId)
     .maybeSingle();
   if (result.error && /eshram_uan|column/i.test(result.error.message)) {
     const fallbackResult = await supabaseAdmin
       .from(table)
-      .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, stations (station_code, station_name)")
+      .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, profile_edit_review_pending, stations (station_code, station_name)")
       .eq("id", executiveId)
       .eq("company_id", companyId)
       .maybeSingle();
@@ -302,7 +313,11 @@ async function loadApplicableAgreement(row: FieldExecutiveRow): Promise<Workforc
   };
 }
 
-async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmployeeProfileType) {
+async function serializeExecutive(
+  row: FieldExecutiveRow,
+  profileType: NonEmployeeProfileType,
+  sessionMobile?: { mobile: string }
+) {
   const station = firstRelation(row.stations);
   const designationResult = row.designation && supabaseAdmin
     ? await supabaseAdmin
@@ -321,8 +336,12 @@ async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmploy
   )).dropx_one;
   const agreement = profileType === "field_executive" ? await loadApplicableAgreement(row) : null;
   const designationCode = String(designationResult?.data?.code ?? "").trim().toUpperCase();
+  const mobileCountryCode = row.mobile_country_code ?? "91";
+  const mobileNumber = profileEditLocalMobile(row.mobile, mobileCountryCode, sessionMobile?.mobile);
   return {
     id: row.id,
+    mobileCountryCode,
+    mobileNumber,
     readOnly: {
       reference: row.dropx_id ?? "-",
       biometricId: row.biometric_id ?? "-",
@@ -331,7 +350,7 @@ async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmploy
       location: station?.station_code ?? "-",
       designation: row.designation ?? workforceLabel(profileType),
       dateOfJoin: formatDisplayDate(row.date_of_join),
-      mobile: `+${row.mobile_country_code ?? "91"} ${row.mobile}`
+      mobile: `+${mobileCountryCode} ${mobileNumber}`
     },
     editable: {
       gender: row.gender ?? "",
@@ -384,6 +403,7 @@ async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmploy
     profilePhotoUrl: await signedProfileUrl(row.profile_photo_path),
     status: row.onboarding_status ?? "pending",
     returnRemarks: row.profile_return_remarks ?? "",
+    profileEditReviewPending: row.profile_edit_review_pending === true,
     agreement
   };
 }
@@ -395,7 +415,7 @@ export async function GET(request: Request) {
     const profileType = url.searchParams.get("profileType") ?? "field_executive";
     const account = await requireExecutiveAccess(executiveId, profileType);
     const executive = await loadExecutive(account.id, account.companyId, account.profileType);
-    return NextResponse.json({ ok: true, profile: await serializeExecutive(executive, account.profileType) });
+    return NextResponse.json({ ok: true, profile: await serializeExecutive(executive, account.profileType, account.sessionMobile) });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load profile.") }, { status: 400 });
   }
@@ -437,6 +457,9 @@ export async function POST(request: Request) {
       }
     }
     const currentStatus = String(currentExecutive.onboarding_status ?? "pending").trim().toLowerCase();
+    if (currentExecutive.profile_edit_review_pending === true) {
+      throw new Error("Returned profile edits must be corrected with Edit profile and WhatsApp OTP.");
+    }
     if (!["pending", "returned"].includes(currentStatus)) {
       throw new Error("Profile cannot be edited after submission.");
     }
@@ -658,7 +681,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({
       ok: true,
-      profile: await serializeExecutive(executive, account.profileType),
+      profile: await serializeExecutive(executive, account.profileType, account.sessionMobile),
       notice: isFieldExecutive ? "Registration submitted to the HO Workforce team for review." : "Profile saved successfully."
     });
   } catch (error) {

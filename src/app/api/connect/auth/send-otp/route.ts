@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { createOtpSecretHash, clampOtpExpiryMinutes, generateOtp, normalizeMobile } from "@/lib/connect-otp";
+import { createOtpSecretHash, clampOtpExpiryMinutes, generateOtp } from "@/lib/connect-otp";
+import {
+  connectMobileCountryFilter,
+  ConnectMobileValidationError,
+  normalizeConnectMobile
+} from "@/lib/country-codes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { extractWhatsAppTemplateVariables, type WhatsAppTemplateComponent } from "@/lib/whatsapp-template";
 
@@ -68,52 +73,55 @@ export async function POST(request: Request) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; purpose?: unknown };
-    const countryCode = String(body.countryCode ?? "91").replace(/\D/g, "") || "91";
+    const { countryCode, mobile: to, localMobile } = normalizeConnectMobile(body.mobile, body.countryCode);
+    const mobileCountryFilter = connectMobileCountryFilter(countryCode);
     const purpose = String(body.purpose ?? "connect_login") === "connect_pin_reset" ? "connect_pin_reset" : "connect_login";
-    const to = normalizeMobile(body.mobile, countryCode);
-    if (!to || to.length < 11) {
-      return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
-    }
-
-    const localMobile = to.startsWith(countryCode) ? to.slice(countryCode.length) : to;
     let [profileMatches, executiveMatches, employeeMatches]: [AccountMatchResult, AccountMatchResult, AccountMatchResult] = await Promise.all([
       supabaseAdmin
         .from("profiles")
         .select("id, company_id, is_active, mobile_country_code")
         .eq("is_active", true)
-        .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
+        .or(mobileCountryFilter)
         .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
       supabaseAdmin
         .from("workforce")
         .select("id, company_id, is_active, mobile_country_code")
         .eq("is_active", true)
-        .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
+        .or(mobileCountryFilter)
         .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
       supabaseAdmin
         .from("employees")
         .select("id, company_id, is_active, mobile_country_code")
         .eq("is_active", true)
-        .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
+        .or(mobileCountryFilter)
         .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
     ]);
-    if (isMissingColumnError(profileMatches.error) || isMissingColumnError(executiveMatches.error) || isMissingColumnError(employeeMatches.error)) {
-      [profileMatches, executiveMatches, employeeMatches] = await Promise.all([
-        supabaseAdmin
+    if (isMissingColumnError(profileMatches.error)) {
+      profileMatches = countryCode === "91"
+        ? await supabaseAdmin
           .from("profiles")
           .select("id, company_id, is_active")
           .eq("is_active", true)
-          .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
-        supabaseAdmin
+          .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
+        : { data: [], error: null };
+    }
+    if (isMissingColumnError(executiveMatches.error)) {
+      executiveMatches = countryCode === "91"
+        ? await supabaseAdmin
           .from("workforce")
           .select("id, company_id, is_active")
           .eq("is_active", true)
-          .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
-        supabaseAdmin
+          .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
+        : { data: [], error: null };
+    }
+    if (isMissingColumnError(employeeMatches.error)) {
+      employeeMatches = countryCode === "91"
+        ? await supabaseAdmin
           .from("employees")
           .select("id, company_id, is_active")
           .eq("is_active", true)
           .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
-      ]);
+        : { data: [], error: null };
     }
     if (profileMatches.error) throw new Error(profileMatches.error.message);
     if (executiveMatches.error) throw new Error(executiveMatches.error.message);
@@ -233,6 +241,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, channel: "whatsapp", expiresInMinutes: expiryMinutes });
   } catch (error) {
+    if (error instanceof ConnectMobileValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to send OTP." }, { status: 500 });
   }
 }

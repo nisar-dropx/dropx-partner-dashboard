@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
-import { findConnectAccounts } from "@/lib/connect-auth";
-import { createOtpSecretHash, clampOtpExpiryMinutes, generateOtp, normalizeMobile } from "@/lib/connect-otp";
+import { findConnectAccounts, normalizeConnectMobile } from "@/lib/connect-auth";
+import { ConnectMobileValidationError } from "@/lib/country-codes";
+import { createOtpSecretHash, clampOtpExpiryMinutes, generateOtp } from "@/lib/connect-otp";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { extractWhatsAppTemplateVariables, type WhatsAppTemplateComponent } from "@/lib/whatsapp-template";
 
@@ -60,12 +61,8 @@ export async function POST(request: Request) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; purpose?: unknown };
-    const countryCode = String(body.countryCode ?? "91").replace(/\D/g, "") || "91";
+    const { countryCode, mobile: to } = normalizeConnectMobile(body.mobile, body.countryCode);
     const purpose = String(body.purpose ?? "connect_login") === "connect_pin_reset" ? "connect_pin_reset" : "connect_login";
-    const to = normalizeMobile(body.mobile, countryCode);
-    if (!to || to.length < 11) {
-      return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
-    }
 
     const accounts = await findConnectAccounts(countryCode, to);
     const companyIds = Array.from(new Set(accounts.map((account) => account.companyId).filter(Boolean)));
@@ -179,6 +176,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, channel: "whatsapp", expiresInMinutes: expiryMinutes });
   } catch (error) {
+    if (error instanceof ConnectMobileValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json({ error: userFacingError(error, "Unable to send OTP.") }, { status: 500 });
   }
 }

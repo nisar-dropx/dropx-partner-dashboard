@@ -2,7 +2,7 @@
 
 import {
   BadgeCheck, BriefcaseBusiness, CalendarDays, ChevronRight, CircleX, DoorOpen, Download, Fingerprint,
-  Mail, MapPin, Phone, ShieldCheck, TriangleAlert, UserRound, WalletCards
+  LockKeyhole, Mail, MapPin, Pencil, Phone, ShieldCheck, TriangleAlert, UserRound, WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { minimumAgeError } from "../lib/profile-age";
@@ -11,6 +11,7 @@ import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
 import { userFacingError } from "../lib/user-facing-error";
 import { compressFormImages, formFileBytes, MAX_UPLOAD_REQUEST_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from "../lib/compress-form-images";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
+import { countryCodeOptions } from "@/lib/country-codes";
 
 export type AppAccount = {
   id: string;
@@ -37,6 +38,8 @@ export type AppAccount = {
 
 type Profile = {
   betaRegistrationReady?: boolean;
+  mobileCountryCode?: string;
+  mobileNumber?: string;
   readOnly: Record<string, string>;
   editable: Record<string, string>;
   designationCode?: string;
@@ -47,6 +50,7 @@ type Profile = {
   profilePhotoUrl?: string;
   status: string;
   returnRemarks?: string;
+  profileEditReviewPending?: boolean;
   agreement?: {
     id: string;
     code: string;
@@ -55,6 +59,32 @@ type Profile = {
     body: string;
     acceptedAt?: string | null;
   } | null;
+};
+
+type ProfileEditOtpState = {
+  open: boolean;
+  requestId: string;
+  leg: "current" | "new";
+  code: string;
+  mobileChanged: boolean;
+  currentMasked: string;
+  newMasked: string;
+  busy: boolean;
+  error: string;
+  message: string;
+};
+
+const emptyProfileEditOtp: ProfileEditOtpState = {
+  open: false,
+  requestId: "",
+  leg: "current",
+  code: "",
+  mobileChanged: false,
+  currentMasked: "",
+  newMasked: "",
+  busy: false,
+  error: "",
+  message: ""
 };
 
 type Verification = {
@@ -329,7 +359,7 @@ function ReadTile({ label, value, verified, url, full }: { label: string; value?
   </a>;
 }
 
-export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: AppAccount; onPhoto?: (url: string) => void; onSubmitted?: () => Promise<void> | void }) {
+export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = false }: { account: AppAccount; onPhoto?: (url: string) => void; onSubmitted?: () => Promise<void> | void; readOnly?: boolean }) {
   const executive = account.profileType !== "employee" && account.profileType !== "user";
   const isolatedPilot = Boolean(account.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
   const endpoint = isolatedPilot ? "/api/connect/pilot-profile" : executive ? "/api/connect/field-executive-profile" : "/api/connect/profile";
@@ -353,6 +383,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   const [agreementAccepted, setAgreementAccepted] = useState(false);
   const [agreementGatePassed, setAgreementGatePassed] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editOriginalValues, setEditOriginalValues] = useState<Record<string, string>>({});
+  const [editOtp, setEditOtp] = useState<ProfileEditOtpState>(emptyProfileEditOtp);
   const [chosenUploads, setChosenUploads] = useState<Record<string, { fileName: string; previewUrl: string | null }>>({});
   const chosenUploadsRef = useRef(chosenUploads);
   const formRef = useRef<HTMLFormElement>(null);
@@ -393,25 +426,34 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       })
     ]).then(([nextProfile, checks, draft]) => {
       const next = nextProfile as Profile;
+      const registrationDraft = statusReadOnly(next.status) ? null : draft;
       const uploads = { ...next.uploads };
       const uploadUrls = { ...next.uploadUrls };
-      if (draft) {
+      if (registrationDraft) {
         Object.entries(draftUploadSlots).forEach(([draftSlot, profileSlot]) => {
-          if (draft.uploads?.[draftSlot]) uploads[profileSlot] = true;
-          if (draft.uploadUrls?.[draftSlot]) uploadUrls[profileSlot] = draft.uploadUrls[draftSlot];
+          if (registrationDraft.uploads?.[draftSlot]) uploads[profileSlot] = true;
+          if (registrationDraft.uploadUrls?.[draftSlot]) uploadUrls[profileSlot] = registrationDraft.uploadUrls[draftSlot];
         });
       }
-      const editable = { ...(next.editable ?? {}), ...(draft ? draftEditableValues(draft.data) : {}) };
-      const draftChecks = draft?.verificationResults?.length ? draft.verificationResults : null;
+      const editable: Record<string, string> = {
+        ...(next.editable ?? {}),
+        ...(registrationDraft ? draftEditableValues(registrationDraft.data) : {}),
+        mobileCountryCode: next.mobileCountryCode || "91",
+        mobileNumber: next.mobileNumber || ""
+      };
+      const draftChecks = registrationDraft?.verificationResults?.length ? registrationDraft.verificationResults : null;
       setProfile({ ...next, uploads, uploadUrls });
+      setEditing(false);
+      setEditOriginalValues({});
+      setEditOtp(emptyProfileEditOtp);
       const agreementAlreadyAccepted = Boolean(next.agreement?.acceptedAt);
       setAgreementAccepted(agreementAlreadyAccepted);
       setAgreementGatePassed(agreementAlreadyAccepted);
       setValues(editable);
-      setPfAnswer(draft?.data?.has_pf_uan ?? (editable.pfUan ? "yes" : ""));
-      setEsiAnswer(draft?.data?.has_esi_no ?? (editable.esiNo ? "yes" : ""));
+      setPfAnswer(registrationDraft?.data?.has_pf_uan ?? (editable["pfUan"] ? "yes" : statusReadOnly(next.status) ? "no" : ""));
+      setEsiAnswer(registrationDraft?.data?.has_esi_no ?? (editable["esiNo"] ? "yes" : statusReadOnly(next.status) ? "no" : ""));
       setVerifications(isolatedPilot ? {} : Object.fromEntries((draftChecks ?? checks.verifications ?? []).map((item: Verification) => [item.kind, item])));
-      if (draft) setNotice("Draft restored.");
+      if (registrationDraft) setNotice("Draft restored.");
       if (next.profilePhotoUrl) onPhoto?.(next.profilePhotoUrl);
     }).catch((reason) => setError(userFacingError(reason, "Unable to load profile. Please try again.")));
   }, [account.id, account.profileType, endpoint, isolatedPilot, query]);
@@ -421,7 +463,13 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     return new Set(Array.isArray(configured) ? configured : executive ? defaultExecutive : defaultEmployee);
   }, [executive, profile]);
   const required = useMemo(() => new Set(profile?.fieldRules?.required ?? []), [profile]);
-  const completed = statusReadOnly(profile?.status);
+  const completed = statusReadOnly(profile?.status) && !editing;
+  const returnedSelfEdit = String(profile?.status ?? "").trim().toLowerCase() === "under_review" &&
+    profile?.profileEditReviewPending === true &&
+    Boolean(profile?.returnRemarks?.trim());
+  const canEditProfile = !readOnly && !isolatedPilot &&
+    ["employee", "workforce", "field_executive", "contractor", "vendor"].includes(account.profileType) &&
+    (String(profile?.status ?? "").trim().toLowerCase() === "active" || returnedSelfEdit);
 
   const set = (key: string, value: string, clear: string[] = []) => {
     setValues((current) => ({
@@ -469,7 +517,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       pfUan: values.pfUan,
       drivingLicenseNo: values.drivingLicenseNo,
       dateOfBirth: values.dateOfBirth,
-      vehicleRegNo: values.vehicleRegistrationNo
+      vehicleRegNo: values.vehicleRegistrationNo,
+      profileEdit: editing
     };
     const response = await fetch("/api/connect/verification", {
       method: "POST",
@@ -538,28 +587,36 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       if (value && !rule.pattern.test(value)) return rule.message;
     }
 
+    if (editing) {
+      if (!countryCodeOptions.some((option) => option.code === values.mobileCountryCode)) return "Select a supported mobile country code.";
+      if (!/^\d{6,14}$/.test(values.mobileNumber || "")) return "Enter a 6 to 14 digit mobile number.";
+    }
+
     // An optional field left blank has nothing to verify, so it must not block submission.
     const applies = (field: string, value: string | undefined) => enabled.has(field) && (required.has(field) || Boolean(value?.trim()));
+    const changed = (...keys: string[]) => !editing || keys.some((key) => (values[key] || "") !== (editOriginalValues[key] || ""));
     const mandatory: Array<[string, string]> = [
-      ...(applies("pan_number", values.panNumber) ? [["pan", "PAN"] as [string, string]] : []),
-      ...(applies("pan_number", values.panNumber) && applies("aadhaar_number", values.aadhaarNumber) ? [["pan_aadhaar", "Aadhaar number"] as [string, string]] : []),
-      ...(applies("bank_account_no", values.bankAccountNo) && applies("ifsc", values.ifsc) ? [["bank", "Bank account"] as [string, string]] : []),
-      ...(pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? [["pf_uan", "PF UAN"] as [string, string]] : []),
-      ...(applies("driving_license_no", values.drivingLicenseNo) ? [["dl", "Driving license no"] as [string, string]] : []),
-      ...(applies("vehicle_reg_no", values.vehicleRegistrationNo) ? [["vehicle", "Vehicle reg no"] as [string, string]] : [])
+      ...(changed("panNumber") && applies("pan_number", values.panNumber) ? [["pan", "PAN"] as [string, string]] : []),
+      ...(changed("panNumber", "aadhaarNumber") && applies("pan_number", values.panNumber) && applies("aadhaar_number", values.aadhaarNumber) ? [["pan_aadhaar", "Aadhaar number"] as [string, string]] : []),
+      ...(changed("bankAccountNo", "ifsc") && applies("bank_account_no", values.bankAccountNo) && applies("ifsc", values.ifsc) ? [["bank", "Bank account"] as [string, string]] : []),
+      ...(changed("pfUan") && pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? [["pf_uan", "PF UAN"] as [string, string]] : []),
+      ...(changed("drivingLicenseNo", "dateOfBirth") && applies("driving_license_no", values.drivingLicenseNo) ? [["dl", "Driving license no"] as [string, string]] : []),
+      ...(changed("vehicleRegistrationNo") && applies("vehicle_reg_no", values.vehicleRegistrationNo) ? [["vehicle", "Vehicle reg no"] as [string, string]] : [])
     ];
     const pending = isolatedPilot ? [] : mandatory.filter(([kind]) => !attempted(kind)).map(([, label]) => label);
     if (pending.length) {
       return `Tap Verify for ${pending.join(", ")} before submitting.`;
     }
 
+    const requiredKinds = new Set(mandatory.map(([kind]) => kind));
     const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
+      .filter((kind) => !editing || requiredKinds.has(kind))
       .map((kind) => currentCheck(kind))
       .find((item) => item?.blockSubmit);
     if (!isolatedPilot && blockedCheck) {
       return blockedCheck.message || "A required identity verification did not match.";
     }
-    if (profile?.agreement && !agreementAccepted) {
+    if (!editing && profile?.agreement && !agreementAccepted) {
       return `Accept ${profile.agreement.title} before submitting registration.`;
     }
     return "";
@@ -574,7 +631,151 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       setError(validationError);
       return;
     }
-    setConfirmationOpen(true);
+    if (editing) {
+      void startProfileEdit();
+    } else {
+      setConfirmationOpen(true);
+    }
+  }
+
+  function editablePayload() {
+    const fields: Array<[string, string]> = [
+      ["gender", "gender"], ["date_of_birth", "dateOfBirth"], ["aadhaar_number", "aadhaarNumber"],
+      ["pan_number", "panNumber"], ["eshram_uan", "eshramUan"], ["is_handicapped", "isHandicapped"],
+      ["address", "address"], ["pincode", "pincode"], ["landmark", "landmark"], ["state_code", "stateCode"],
+      ["father_name", "fatherName"], ["blood_group", "bloodGroup"], ["bank_account_no", "bankAccountNo"],
+      ["ifsc", "ifsc"], ["pf_uan", "pfUan"], ["pf_account_no", "pfAccountNo"], ["esi_no", "esiNo"],
+      ["driving_license_no", "drivingLicenseNo"], ["driving_license_exp_date", "drivingLicenseExpiry"],
+      ["vehicle_reg_no", "vehicleRegistrationNo"], ["vehicle_reg_exp_date", "registrationExpiry"],
+      ["vehicle_insurance_exp_date", "insuranceExpiry"], ["vehicle_pollution_exp_date", "pollutionExpiry"],
+      ["emergency_contact_name", "emergencyContactName"], ["emergency_contact_number", "emergencyContactNumber"],
+      ["emergency_contact_relation", "emergencyContactRelation"]
+    ];
+    return Object.fromEntries(fields
+      .filter(([field]) => enabled.has(field))
+      .map(([, key]) => [key, values[key] || ""]));
+  }
+
+  async function startProfileEdit() {
+    if (!editing || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/connect/profile-edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "start",
+          accountId: account.id,
+          profileType: account.profileType,
+          mobileCountryCode: values.mobileCountryCode,
+          mobileNumber: values.mobileNumber,
+          payload: editablePayload()
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to send WhatsApp OTP.");
+      setEditOtp({
+        open: true,
+        requestId: payload.requestId,
+        leg: "current",
+        code: "",
+        mobileChanged: Boolean(payload.mobileChanged),
+        currentMasked: payload.currentMasked || "your current mobile number",
+        newMasked: payload.newMasked || "",
+        busy: false,
+        error: "",
+        message: "OTP sent on WhatsApp."
+      });
+    } catch (reason) {
+      setError(userFacingError(reason, "Unable to send WhatsApp OTP. Please try again."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function commitProfileEdit(requestId: string) {
+    const response = await fetch("/api/connect/profile-edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "commit", requestId })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Unable to save profile changes.");
+    if (payload.sessionRevoked) {
+      window.location.assign("/?profileUpdated=1");
+      return;
+    }
+    window.location.reload();
+  }
+
+  async function verifyProfileEditOtp() {
+    if (editOtp.busy || !/^\d{6}$/.test(editOtp.code)) {
+      if (!/^\d{6}$/.test(editOtp.code)) {
+        setEditOtp((current) => ({ ...current, error: "Enter the 6 digit OTP." }));
+      }
+      return;
+    }
+    setEditOtp((current) => ({ ...current, busy: true, error: "", message: "" }));
+    try {
+      const response = await fetch("/api/connect/profile-edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "verify", requestId: editOtp.requestId, leg: editOtp.leg, otp: editOtp.code })
+      });
+      const payload = await response.json();
+      if (!response.ok && payload.currentVerified && payload.nextLeg === "new") {
+        setEditOtp((current) => ({
+          ...current,
+          leg: "new",
+          code: "",
+          busy: false,
+          error: payload.error || "Current number verified, but the new-number OTP could not be sent. Tap Resend OTP.",
+          message: "Current number verified."
+        }));
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "OTP verification failed.");
+      if (payload.nextLeg === "new") {
+        setEditOtp((current) => ({
+          ...current,
+          leg: "new",
+          code: "",
+          busy: false,
+          error: payload.otpSent === false ? (payload.warning || "Current number verified, but the new OTP could not be sent. Tap Resend OTP.") : "",
+          message: payload.otpSent === false ? "Current number verified." : "Current number verified. A new OTP was sent to the new number."
+        }));
+        return;
+      }
+      await commitProfileEdit(editOtp.requestId);
+    } catch (reason) {
+      setEditOtp((current) => ({
+        ...current,
+        busy: false,
+        error: userFacingError(reason, "OTP verification failed. Please try again.")
+      }));
+    }
+  }
+
+  async function resendProfileEditOtp() {
+    if (editOtp.busy) return;
+    setEditOtp((current) => ({ ...current, busy: true, error: "", message: "" }));
+    try {
+      const response = await fetch("/api/connect/profile-edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resend", requestId: editOtp.requestId, leg: editOtp.leg })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to resend OTP.");
+      setEditOtp((current) => ({ ...current, busy: false, code: "", message: "A fresh OTP was sent on WhatsApp." }));
+    } catch (reason) {
+      setEditOtp((current) => ({
+        ...current,
+        busy: false,
+        error: userFacingError(reason, "Unable to resend OTP. Please try again.")
+      }));
+    }
   }
 
   async function submitProfile() {
@@ -777,11 +978,18 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     const exitDestination = ["employee", "user", "contractor"].includes(account.profileType) ? "People workflow" : "Workforce lifecycle";
     return <div className="dx-profile-view">
       {notice ? <div className="dx-alert success">{notice}</div> : null}
-      <div className="dx-profile-hero"><small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i></div>
-      <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
-        setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
-        onPhoto?.(url);
-      }} />
+      {error ? <div className="dx-alert error">{error}</div> : null}
+      {profile.returnRemarks ? <div className="dx-alert error"><strong>Profile changes returned for correction</strong><br />{profile.returnRemarks}</div> : null}
+      <div className="dx-profile-hero">
+        <small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i>
+        {canEditProfile ? <button className="dx-profile-edit-button" onClick={() => {
+          setEditOriginalValues({ ...values });
+          setEditing(true);
+          setError("");
+          setNotice("");
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }} type="button"><Pencil />Edit profile</button> : null}
+      </div>
       {sections.map((section, sectionIndex) => <section className={sectionIndex === 0 ? "primary" : ""} key={section.name}>
         {sectionIndex ? <h2>{section.name}</h2> : null}
         <div>{Object.entries(section.values).map(([label, value]) => <ReadTile
@@ -797,7 +1005,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     </div>;
   }
 
-  if (profile.agreement && !agreementGatePassed) {
+  if (!editing && profile.agreement && !agreementGatePassed) {
     return <div className="dx-agreement-gate">
       <div aria-label="Registration progress" className="dx-agreement-progress">
         <div className="active"><b>1</b><span>Agreement</span></div><i /><div><b>2</b><span>Registration</span></div>
@@ -895,22 +1103,28 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   const drivingEnabled = ["driving_license_no","driving_license_exp_date","vehicle_reg_no","vehicle_reg_exp_date","vehicle_insurance_exp_date","vehicle_pollution_exp_date"].some((field) => enabled.has(field));
 
   return <form className="dx-profile-form" onSubmit={prepareSubmit} ref={formRef}>
+    {editing ? <aside className="dx-profile-edit-note"><LockKeyhole /><div><strong>Edit your profile</strong><p>Name, DropX ID, biometric ID, email, location, designation and date of joining are locked. Saving requires a WhatsApp OTP from your current number{(values.mobileNumber || "") !== (editOriginalValues.mobileNumber || "") || (values.mobileCountryCode || "") !== (editOriginalValues.mobileCountryCode || "") ? " and your new number" : ""}.</p></div></aside> : null}
     {isolatedPilot ? <aside className="dx-beta-review-note"><ShieldCheck size={20}/><div><strong>Submit your details for review</strong><p>Your documents will be reviewed within this private beta. Submitting does not mark identity or bank checks as verified.</p></div></aside> : null}
     <p className="dx-company">{account.companyName}</p>
-    {!account.activationOnly ? <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
+    {!readOnly && !account.activationOnly && !editing ? <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
       setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
       onPhoto?.(url);
     }} /> : null}
-    {profile.status.trim().toLowerCase() === "returned" && profile.returnRemarks ? (
+    {profile.returnRemarks ? (
       <aside className="dx-return-notice">
-        <strong>Profile returned for correction</strong>
+        <strong>{editing ? "Profile changes returned for correction" : "Profile returned for correction"}</strong>
         <p>{profile.returnRemarks}</p>
       </aside>
     ) : null}
     <ProfileSection title={executive ? "Profile details" : "Employee details"}>
       {Object.entries(profile.readOnly)
+        .filter(([label]) => !editing || label !== "mobile")
         .filter(([label]) => !account.activationOnly || !["reference", "employeeId", "dropxId"].includes(label))
         .map(([label, value]) => <div className="dx-readonly" key={label}><span>{account.activationOnly && label === "biometricId" ? "Biometric ID · attendance only" : title(label)}</span><strong>{value || "-"}</strong></div>)}
+      {editing ? <div className="dx-mobile-edit-fields">
+        <label className="dx-field"><span>Country code *</span><select name="mobile_country_code" onChange={(event) => set("mobileCountryCode", event.target.value)} required value={values.mobileCountryCode || "91"}>{countryCodeOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}</select></label>
+        <label className="dx-field"><span>Mobile number *</span><input autoComplete="tel" inputMode="numeric" maxLength={14} minLength={6} name="mobile" onChange={(event) => set("mobileNumber", event.target.value.replace(/\D/g, "").slice(0, 14))} required value={values.mobileNumber || ""} /></label>
+      </div> : null}
     </ProfileSection>
     <ProfileSection title="Personal details">
       {input("gender","Gender",{ choices: ["Male","Female","Other"] })}
@@ -1000,10 +1214,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     <ProfileSection title="Emergency contact">
       {input("emergency_contact_number","Emergency contact number")}{input("emergency_contact_name","Contact person name")}{input("emergency_contact_relation","Relation",{ choices: relations })}
     </ProfileSection>
-    <ProfileSection title="Uploads">
+    {!editing ? <ProfileSection title="Uploads">
       {upload("aadhaar_front","Aadhaar front","aadhaarFront")}{upload("aadhaar_back","Aadhaar back","aadhaarBack")}{upload("pan_upload","PAN upload","pan")}{upload("dl_front","DL front","dlFront")}{upload("dl_back","DL back","dlBack")}{upload("profile_photo","Photo upload","photo")}
-    </ProfileSection>
-    {profile.agreement ? <ProfileSection title="Mandatory agreement">
+    </ProfileSection> : null}
+    {!editing && profile.agreement ? <ProfileSection title="Mandatory agreement">
       <div className="dx-agreement-copy">
         <strong>{profile.agreement.title}</strong>
         <small>Version {profile.agreement.version}</small>
@@ -1014,12 +1228,19 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
     <div className="dx-form-actions">
-      <button className="dx-draft-save" disabled={saving || draftSaving} onClick={saveDraft} type="button">
+      {editing ? <button className="dx-draft-save" disabled={saving} onClick={() => {
+        setValues({ ...editOriginalValues });
+        setPfAnswer(editOriginalValues.pfUan ? "yes" : "no");
+        setEsiAnswer(editOriginalValues.esiNo ? "yes" : "no");
+        setEditing(false);
+        setError("");
+        setNotice("");
+      }} type="button">Cancel</button> : <button className="dx-draft-save" disabled={saving || draftSaving} onClick={saveDraft} type="button">
         {draftSaving ? "Saving draft..." : "Save draft"}
-      </button>
-      <button className="dx-save" disabled={saving || draftSaving} type="submit">{saving ? "Submitting..." : "Submit"}</button>
+      </button>}
+      <button className="dx-save" disabled={saving || draftSaving} type="submit">{saving ? (editing ? "Sending OTP..." : "Submitting...") : (editing ? "Verify & save" : "Submit")}</button>
     </div>
-    {confirmationOpen ? (
+    {!editing && confirmationOpen ? (
       <div className="dx-submit-confirmation-backdrop" role="presentation">
         <section aria-labelledby="dx-submit-confirmation-title" aria-modal="true" className="dx-submit-confirmation" role="alertdialog">
           <h2 id="dx-submit-confirmation-title">Submit registration?</h2>
@@ -1029,6 +1250,42 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
             <button className="dx-confirm-cancel" disabled={saving} onClick={() => setConfirmationOpen(false)} type="button">Cancel</button>
             <button className="dx-confirm-submit" disabled={saving} onClick={submitProfile} type="button">
               {saving ? <><span className="dx-button-spinner" aria-hidden="true" />Submitting...</> : "Submit"}
+            </button>
+          </div>
+        </section>
+      </div>
+    ) : null}
+    {editing && editOtp.open ? (
+      <div className="dx-submit-confirmation-backdrop" role="presentation">
+        <section aria-labelledby="dx-profile-edit-otp-title" aria-modal="true" className="dx-submit-confirmation dx-profile-edit-otp" role="dialog">
+          <div className="dx-profile-edit-otp-icon"><LockKeyhole /></div>
+          <h2 id="dx-profile-edit-otp-title">Verify {editOtp.leg === "current" ? "current" : "new"} number</h2>
+          <p>Enter the WhatsApp OTP sent to <strong>{editOtp.leg === "current" ? editOtp.currentMasked : editOtp.newMasked}</strong>.</p>
+          {editOtp.leg === "current" && editOtp.mobileChanged ? <small>Your new number will be verified next.</small> : null}
+          <label className="dx-field dx-profile-edit-otp-field">
+            <span>6 digit OTP</span>
+            <input
+              autoComplete="one-time-code"
+              autoFocus
+              inputMode="numeric"
+              maxLength={6}
+              onChange={(event) => setEditOtp((current) => ({ ...current, code: event.target.value.replace(/\D/g, "").slice(0, 6), error: "" }))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void verifyProfileEditOtp();
+                }
+              }}
+              value={editOtp.code}
+            />
+          </label>
+          {editOtp.message ? <div className="dx-alert success">{editOtp.message}</div> : null}
+          {editOtp.error ? <div className="dx-alert error">{editOtp.error}</div> : null}
+          <button className="dx-profile-edit-resend" disabled={editOtp.busy} onClick={resendProfileEditOtp} type="button">Resend OTP</button>
+          <div>
+            <button className="dx-confirm-cancel" disabled={editOtp.busy} onClick={() => setEditOtp(emptyProfileEditOtp)} type="button">Cancel</button>
+            <button className="dx-confirm-submit" disabled={editOtp.busy || editOtp.code.length !== 6} onClick={verifyProfileEditOtp} type="button">
+              {editOtp.busy ? <><span className="dx-button-spinner" aria-hidden="true" />Verifying...</> : editOtp.leg === "new" ? "Verify & save" : "Verify"}
             </button>
           </div>
         </section>

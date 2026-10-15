@@ -20,6 +20,7 @@ import { reviewPeopleProfile } from "./actions";
 type ReviewIssue = {
   account_id: string;
   block_submit: boolean;
+  changed_fields?: string[];
   display_name: string | null;
   kind: string;
   manual_review: boolean;
@@ -38,18 +39,51 @@ type ReviewProfile = {
   location: string;
   designation: string;
   updatedAt: string | null;
+  profileEditReviewPending: boolean;
   values: Record<string, string>;
   attachmentPaths: Array<{ field: string; label: string; path: string }>;
   issues: ReviewIssue[];
 };
 
 const issueLabels: Record<string, string> = {
+  profile_edit: "Profile edit",
   pan: "PAN",
   pan_aadhaar: "Aadhaar / PAN link",
   dl: "Driving licence",
   pf_uan: "PF UAN",
   bank: "Bank account",
   vehicle: "Vehicle registration"
+};
+
+const profileEditFieldLabels: Record<string, string> = {
+  mobile: "Mobile number",
+  gender: "Gender",
+  date_of_birth: "Date of birth",
+  aadhaar_number: "Aadhaar number",
+  pan_number: "PAN",
+  eshram_uan: "eShram UAN",
+  is_handicapped: "Handicapped status",
+  address: "Address",
+  state: "State",
+  pincode: "Pincode",
+  landmark: "Landmark",
+  state_code: "State code",
+  father_name: "Father name",
+  blood_group: "Blood group",
+  bank_account_no: "Bank account number",
+  ifsc: "IFSC",
+  pf_uan: "PF UAN",
+  pf_account_no: "PF account number",
+  esi_no: "ESI number",
+  driving_license_no: "Driving licence number",
+  driving_license_exp_date: "Driving licence expiry",
+  vehicle_reg_no: "Vehicle registration",
+  vehicle_reg_exp_date: "Registration expiry",
+  vehicle_insurance_exp_date: "Vehicle insurance expiry",
+  vehicle_pollution_exp_date: "Pollution expiry",
+  emergency_contact_name: "Emergency contact name",
+  emergency_contact_number: "Emergency contact number",
+  emergency_contact_relation: "Emergency contact relation"
 };
 
 const issueValueKeys: Record<string, string[]> = {
@@ -83,6 +117,12 @@ function formatDateTime(value: string | null) {
 }
 
 function verificationValue(profile: ReviewProfile, kind: string) {
+  if (kind === "profile_edit") {
+    const changedFields = profile.issues.find((issue) => issue.kind === kind)?.changed_fields ?? [];
+    return changedFields.length
+      ? changedFields.map((field) => profileEditFieldLabels[field] ?? field).join(", ")
+      : "Profile details changed";
+  }
   const values = (issueValueKeys[kind] ?? []).map((key) => profile.values[key]).filter(Boolean);
   return values.length ? values.join(" / ") : "Not provided";
 }
@@ -102,9 +142,9 @@ async function loadReviewProfiles(
   const admin = supabaseAdmin;
 
   const attachmentColumns = attachmentFields.map((field) => field.key).join(", ");
-  const employeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
-  const workforceSelect = `id, dropx_id, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
-  const nonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
+  const employeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
+  const workforceSelect = `id, dropx_id, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
+  const nonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
   const nonEmployeeTypes = workforceProfileTypes.filter(
     (profileType): profileType is Exclude<WorkforceProfileType, "employee" | "workforce" | "field_executive"> =>
       profileType !== "employee" && profileType !== "workforce" && profileType !== "field_executive"
@@ -115,21 +155,21 @@ async function loadReviewProfiles(
       .from("employees")
       .select(employeeSelect)
       .eq("company_id", companyId)
-      .eq("profile_completion_status", "under_review")
+      .or("profile_completion_status.eq.under_review,profile_edit_review_pending.eq.true")
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true })),
     readAllRows(admin
       .from("workforce")
       .select(workforceSelect)
       .eq("company_id", companyId)
-      .eq("onboarding_status", "under_review")
+      .or("onboarding_status.eq.under_review,profile_edit_review_pending.eq.true")
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true })),
     ...nonEmployeeTypes.map((profileType) => readAllRows(admin
       .from(nonEmployeeProfileConfigs[profileType].table)
       .select(nonEmployeeSelect)
       .eq("company_id", companyId)
-      .eq("onboarding_status", "under_review")
+      .or("onboarding_status.eq.under_review,profile_edit_review_pending.eq.true")
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true })))
   ];
@@ -159,6 +199,7 @@ async function loadReviewProfiles(
         location: text(station?.station_code) || "-",
         designation: text(designation) || "-",
         updatedAt: text(raw.updated_at) || null,
+        profileEditReviewPending: raw.profile_edit_review_pending === true,
         values: {
           pan_number: text(raw.pan_number),
           aadhaar_number: text(raw.aadhaar_number),
@@ -182,19 +223,39 @@ async function loadReviewProfiles(
   }
 
   const verificationRows: ReviewIssue[] = [];
+  const latestProfileEditFields = new Map<string, string[]>();
   for (const [profileType, profileIds] of profileIdsByType) {
     for (const accountIds of profileReviewIdBatches(profileIds)) {
-      const result = await readAllRows(admin
-        .from("connect_profile_verifications")
-        .select("account_id, profile_type, kind, manual_review, block_submit, display_name, message, updated_at")
-        .eq("company_id", companyId)
-        .eq("manual_review", true)
-        .eq("profile_type", profileType)
-        .in("account_id", accountIds)
-        .order("account_id", { ascending: true })
-        .order("kind", { ascending: true }));
-      if (result.error) return { profiles: [] as ReviewProfile[], error: result.error.message };
-      verificationRows.push(...(result.data ?? []) as ReviewIssue[]);
+      const [verificationResult, editAuditResult] = await Promise.all([
+        readAllRows(admin
+          .from("connect_profile_verifications")
+          .select("account_id, profile_type, kind, manual_review, block_submit, display_name, message, updated_at")
+          .eq("company_id", companyId)
+          .eq("manual_review", true)
+          .eq("profile_type", profileType)
+          .in("account_id", accountIds)
+          .order("account_id", { ascending: true })
+          .order("kind", { ascending: true })),
+        readAllRows(admin
+          .from("connect_profile_edit_audit")
+          .select("account_id, profile_type, changed_fields, created_at")
+          .eq("company_id", companyId)
+          .eq("event_code", "committed")
+          .eq("profile_type", profileType)
+          .in("account_id", accountIds)
+          .order("created_at", { ascending: false }))
+      ]);
+      if (verificationResult.error) return { profiles: [] as ReviewProfile[], error: verificationResult.error.message };
+      if (editAuditResult.error) return { profiles: [] as ReviewProfile[], error: editAuditResult.error.message };
+      verificationRows.push(...(verificationResult.data ?? []) as ReviewIssue[]);
+      for (const row of (editAuditResult.data ?? []) as Array<Record<string, unknown>>) {
+        const key = reviewKey(profileType, text(row.account_id));
+        if (latestProfileEditFields.has(key)) continue;
+        latestProfileEditFields.set(
+          key,
+          Array.isArray(row.changed_fields) ? row.changed_fields.map(text).filter(Boolean) : []
+        );
+      }
     }
   }
 
@@ -206,6 +267,19 @@ async function loadReviewProfiles(
   }
   for (const profile of profiles) {
     profile.issues = issuesByProfile.get(reviewKey(profile.profileType, profile.id)) ?? [];
+    if (profile.profileEditReviewPending) {
+      profile.issues.unshift({
+        account_id: profile.id,
+        block_submit: false,
+        changed_fields: latestProfileEditFields.get(reviewKey(profile.profileType, profile.id)) ?? [],
+        display_name: null,
+        kind: "profile_edit",
+        manual_review: true,
+        message: "These OTP-verified profile changes require administrator approval.",
+        profile_type: profile.profileType,
+        updated_at: profile.updatedAt
+      });
+    }
   }
 
   profiles.sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)));
@@ -511,6 +585,7 @@ export default async function PeopleReviewPage({
                       <form action={reviewPeopleProfile} className="profile-review-approve">
                         <input name="id" type="hidden" value={selected.id} />
                         <input name="profile_type" type="hidden" value={selected.profileType} />
+                        <input name="review_version" type="hidden" value={selected.updatedAt ?? ""} />
                         <input name="review_action" type="hidden" value="approve" />
                         <SubmitButton
                           className="button profile-review-approve-button"
@@ -532,6 +607,7 @@ export default async function PeopleReviewPage({
                       <form action={reviewPeopleProfile} className="profile-review-return">
                         <input name="id" type="hidden" value={selected.id} />
                         <input name="profile_type" type="hidden" value={selected.profileType} />
+                        <input name="review_version" type="hidden" value={selected.updatedAt ?? ""} />
                         <input name="review_action" type="hidden" value="return" />
                         <label>
                           Return remarks <strong>*</strong>

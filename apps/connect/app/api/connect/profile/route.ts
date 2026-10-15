@@ -15,6 +15,8 @@ import { assertMinimumProfileAge } from "../../../../src/lib/profile-age";
 import { createProfileSubmittedNotification } from "../../../../src/lib/app-notifications";
 import { loadTrustedVehicleFuel } from "../../../../src/lib/trusted-vehicle-verification";
 import { isPureElectricFuel } from "@/lib/vehicle-fuel";
+import { profileEditLocalMobile } from "@/lib/connect-profile-edit";
+import { normalizeStoredConnectMobile } from "@/lib/country-codes";
 
 type EmployeeProfileRow = {
   id: string;
@@ -62,6 +64,7 @@ type EmployeeProfileRow = {
   dl_back_path?: string | null;
   profile_completion_status: string | null;
   profile_return_remarks?: string | null;
+  profile_edit_review_pending?: boolean | null;
   stations?: { station_code: string | null; station_name: string | null } | { station_code: string | null; station_name: string | null }[] | null;
   designations?: { code: string | null; name: string | null; profile_field_rules?: unknown } | { code: string | null; name: string | null; profile_field_rules?: unknown }[] | null;
 };
@@ -165,7 +168,7 @@ async function loadSessionAccounts() {
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin
     .from("connect_login_sessions")
-    .select("id, country_code, mobile_number, expires_at, revoked_at")
+    .select("id, country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
     .eq("session_hash", sessionHash)
     .maybeSingle();
   if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -174,28 +177,36 @@ async function loadSessionAccounts() {
     cookies().delete(connectSessionCookieName);
     throw new Error("Connect session expired. Please log in again.");
   }
-  return findConnectSessionAccounts(session.country_code, session.mobile_number);
+  const sessionMobile = normalizeStoredConnectMobile(
+    session.mobile_number,
+    session.country_code,
+    session.mobile_number_format
+  );
+  return {
+    accounts: await findConnectSessionAccounts(sessionMobile.countryCode, sessionMobile.mobile),
+    sessionMobile
+  };
 }
 
 async function requireEmployeeAccess(employeeId: string) {
-  const accounts = await loadSessionAccounts();
+  const { accounts, sessionMobile } = await loadSessionAccounts();
   const account = accounts.find((item) => item.profileType === "employee" && item.id === employeeId);
   if (!account) throw new Error("Employee profile is not available for this login.");
-  return account;
+  return { ...account, sessionMobile };
 }
 
 async function loadEmployee(employeeId: string, companyId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const result = await supabaseAdmin
     .from("employees")
-    .select("id, company_id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, is_handicapped, address, state, pincode, landmark, state_code, father_name, blood_group, bank_account_no, ifsc, statutory_applicability, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, emergency_contact_name, emergency_contact_number, emergency_contact_relation, profile_photo_path, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_completion_status, profile_return_remarks, stations (station_code, station_name), designations (code, name, profile_field_rules)")
+    .select("id, company_id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, is_handicapped, address, state, pincode, landmark, state_code, father_name, blood_group, bank_account_no, ifsc, statutory_applicability, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, emergency_contact_name, emergency_contact_number, emergency_contact_relation, profile_photo_path, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_completion_status, profile_return_remarks, profile_edit_review_pending, stations (station_code, station_name), designations (code, name, profile_field_rules)")
     .eq("id", employeeId)
     .eq("company_id", companyId)
     .maybeSingle();
   if (result.error && /pf_uan|esi_no|column/i.test(result.error.message)) {
     const fallbackResult = await supabaseAdmin
       .from("employees")
-      .select("id, company_id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, gender, date_of_birth, aadhaar_number, pan_number, address, state, pincode, landmark, state_code, father_name, blood_group, bank_account_no, ifsc, statutory_applicability, emergency_contact_name, emergency_contact_number, emergency_contact_relation, profile_photo_path, aadhaar_front_path, aadhaar_back_path, pan_upload_path, profile_completion_status, profile_return_remarks, stations (station_code, station_name), designations (code, name)")
+      .select("id, company_id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, gender, date_of_birth, aadhaar_number, pan_number, address, state, pincode, landmark, state_code, father_name, blood_group, bank_account_no, ifsc, statutory_applicability, emergency_contact_name, emergency_contact_number, emergency_contact_relation, profile_photo_path, aadhaar_front_path, aadhaar_back_path, pan_upload_path, profile_completion_status, profile_return_remarks, profile_edit_review_pending, stations (station_code, station_name), designations (code, name)")
       .eq("id", employeeId)
       .eq("company_id", companyId)
       .maybeSingle();
@@ -216,7 +227,10 @@ async function signedProfileUrl(path: string | null) {
   return result.data?.signedUrl ?? "";
 }
 
-async function serializeEmployee(row: EmployeeProfileRow) {
+async function serializeEmployee(
+  row: EmployeeProfileRow,
+  sessionMobile?: { mobile: string }
+) {
   const station = firstRelation(row.stations);
   const designation = firstRelation(row.designations);
   const fieldRules = (await loadWorkforceCategoryRules(
@@ -225,8 +239,12 @@ async function serializeEmployee(row: EmployeeProfileRow) {
     designation?.profile_field_rules,
     "employees"
   )).dropx_one;
+  const mobileCountryCode = row.mobile_country_code ?? "91";
+  const mobileNumber = profileEditLocalMobile(row.mobile, mobileCountryCode, sessionMobile?.mobile);
   return {
     id: row.id,
+    mobileCountryCode,
+    mobileNumber,
     readOnly: {
       employeeId: row.employee_code ?? "-",
       biometricId: row.biometric_id ?? "-",
@@ -235,7 +253,7 @@ async function serializeEmployee(row: EmployeeProfileRow) {
       location: station?.station_code ?? "-",
       designation: designation?.name ?? designation?.code ?? "-",
       dateOfJoin: formatDisplayDate(row.date_of_join),
-      mobile: `+${row.mobile_country_code ?? "91"} ${row.mobile}`
+      mobile: `+${mobileCountryCode} ${mobileNumber}`
     },
     editable: {
       gender: row.gender ?? "",
@@ -287,7 +305,8 @@ async function serializeEmployee(row: EmployeeProfileRow) {
     },
     profilePhotoUrl: await signedProfileUrl(row.profile_photo_path),
     status: row.profile_completion_status ?? "pending",
-    returnRemarks: row.profile_return_remarks ?? ""
+    returnRemarks: row.profile_return_remarks ?? "",
+    profileEditReviewPending: row.profile_edit_review_pending === true
   };
 }
 
@@ -297,7 +316,7 @@ export async function GET(request: Request) {
     const employeeId = url.searchParams.get("employeeId") ?? "";
     const account = await requireEmployeeAccess(employeeId);
     const employee = await loadEmployee(account.id, account.companyId);
-    return NextResponse.json({ ok: true, profile: await serializeEmployee(employee) });
+    return NextResponse.json({ ok: true, profile: await serializeEmployee(employee, account.sessionMobile) });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load profile.") }, { status: 400 });
   }
@@ -325,6 +344,9 @@ export async function POST(request: Request) {
     const account = await requireEmployeeAccess(employeeId);
     const currentEmployee = await loadEmployee(account.id, account.companyId);
     const currentStatus = String(currentEmployee.profile_completion_status ?? "pending").trim().toLowerCase();
+    if (currentEmployee.profile_edit_review_pending === true) {
+      throw new Error("Returned profile edits must be corrected with Edit profile and WhatsApp OTP.");
+    }
     if (!["pending", "returned"].includes(currentStatus)) {
       throw new Error("Profile cannot be edited after submission.");
     }
@@ -469,7 +491,7 @@ export async function POST(request: Request) {
       profileType: "employee",
       sourceKey: `${account.id}:${new Date().toISOString()}`
     });
-    return NextResponse.json({ ok: true, profile: await serializeEmployee(employee), notice: "Profile saved successfully." });
+    return NextResponse.json({ ok: true, profile: await serializeEmployee(employee, account.sessionMobile), notice: "Profile saved successfully." });
   } catch (error) {
     // The user only sees a friendly message; keep the real cause in the logs.
     console.error("[connect/profile] save failed", error);

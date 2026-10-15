@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { connectSessionCookieName, findConnectAccounts } from "@/lib/connect-auth";
+import { connectSessionCookieName, findConnectAccounts, normalizeStoredConnectMobile } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET() {
@@ -12,7 +12,7 @@ export async function GET() {
     const sessionHash = createHash("sha256").update(token).digest("hex");
     const sessionResult = await supabaseAdmin
       .from("connect_login_sessions")
-      .select("id, country_code, mobile_number, expires_at, revoked_at")
+      .select("id, country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
       .eq("session_hash", sessionHash)
       .maybeSingle();
     if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -22,7 +22,12 @@ export async function GET() {
       return NextResponse.json({ authenticated: false });
     }
     await supabaseAdmin.from("connect_login_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", session.id);
-    const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+    const sessionMobile = normalizeStoredConnectMobile(
+      session.mobile_number,
+      session.country_code,
+      session.mobile_number_format
+    );
+    const accounts = await findConnectAccounts(sessionMobile.countryCode, sessionMobile.mobile);
     if (!accounts.length) {
       await supabaseAdmin
         .from("connect_login_sessions")

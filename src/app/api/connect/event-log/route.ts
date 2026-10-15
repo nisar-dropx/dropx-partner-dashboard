@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { connectSessionCookieName, findConnectAccounts } from "@/lib/connect-auth";
+import { connectSessionCookieName, findConnectAccounts, normalizeStoredConnectMobile } from "@/lib/connect-auth";
 import { writeEventLog } from "@/lib/event-log";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin.from("connect_login_sessions")
-    .select("country_code, mobile_number, expires_at, revoked_at")
+    .select("country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
     .eq("session_hash", sessionHash).maybeSingle();
   const session = sessionResult.data;
   if (sessionResult.error || !session || session.revoked_at || new Date(session.expires_at).getTime() < Date.now()) {
@@ -20,7 +20,12 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const accountId = String(body.accountId ?? "");
   const profileType = String(body.profileType ?? "");
-  const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+  const sessionMobile = normalizeStoredConnectMobile(
+    session.mobile_number,
+    session.country_code,
+    session.mobile_number_format
+  );
+  const accounts = await findConnectAccounts(sessionMobile.countryCode, sessionMobile.mobile);
   const account = accounts.find((item) => item.id === accountId && item.profileType === profileType);
   if (!account) return NextResponse.json({ error: "Account not available" }, { status: 403 });
   const platform = body.platform === "dropx_one_android" ? "dropx_one_android" : "dropx_one_web";
@@ -34,7 +39,7 @@ export async function POST(request: Request) {
     actorType: profileType,
     actorAccountId: account.id,
     actorLabel: account.name,
-    actorIdentifier: `+${session.country_code} ${String(session.mobile_number).replace(session.country_code, "")}`,
+    actorIdentifier: `+${sessionMobile.countryCode} ${sessionMobile.localMobile}`,
     subjectType: profileType,
     subjectId: account.id,
     subjectCode: account.reference,

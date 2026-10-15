@@ -3,6 +3,7 @@ import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { connectSessionCookieName, findConnectSessionAccounts } from "@/lib/connect-auth";
+import { normalizeStoredConnectMobile } from "@/lib/country-codes";
 import { getConnectPreviewActor, previewNoStore } from "@/lib/connect-preview";
 import { connectPreviewCookieName } from "@/lib/connect-preview-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -15,7 +16,7 @@ export async function GET() {
     const sessionHash = createHash("sha256").update(token).digest("hex");
     const sessionResult = await supabaseAdmin
       .from("connect_login_sessions")
-      .select("id, country_code, mobile_number, expires_at, revoked_at")
+      .select("id, country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
       .eq("session_hash", sessionHash)
       .maybeSingle();
     if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -25,7 +26,12 @@ export async function GET() {
       return NextResponse.json({ authenticated: false });
     }
     if (!cookies().get(connectPreviewCookieName)?.value) await supabaseAdmin.from("connect_login_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", session.id);
-    const accounts = await findConnectSessionAccounts(session.country_code, session.mobile_number);
+    const sessionMobile = normalizeStoredConnectMobile(
+      session.mobile_number,
+      session.country_code,
+      session.mobile_number_format
+    );
+    const accounts = await findConnectSessionAccounts(sessionMobile.countryCode, sessionMobile.mobile);
     if (!accounts.length) {
       // A missing account must deny access, but it must not silently destroy a
       // valid 180-day device session. Workforce records can be momentarily
@@ -42,10 +48,8 @@ export async function GET() {
       canPreviewUsers: Boolean(actor?.companyIds.length),
       preview: Boolean(cookies().get(connectPreviewCookieName)?.value),
       accounts,
-      countryCode: session.country_code,
-      mobile: session.mobile_number.startsWith(session.country_code)
-        ? session.mobile_number.slice(session.country_code.length)
-        : session.mobile_number
+      countryCode: sessionMobile.countryCode,
+      mobile: sessionMobile.localMobile
     }, { headers: previewNoStore });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load session."), preview: Boolean(cookies().get(connectPreviewCookieName)?.value) }, { status: 500, headers: previewNoStore });

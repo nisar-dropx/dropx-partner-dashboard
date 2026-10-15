@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "crypto";
 import { cookies } from "next/headers";
-import { normalizeMobile } from "@/lib/connect-otp";
 import { todayInIndia } from "@/lib/india-date";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
@@ -14,6 +13,21 @@ import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 import { enforceAccessCutoffIfDueForWorker, readAccessCutoffForPreview } from "./access-cutoff";
 import { resolveConnectPreview } from "./connect-preview";
+import { connectMobileCountryFilter, normalizeStoredConnectMobile } from "@/lib/country-codes";
+
+export { normalizeConnectMobile } from "@/lib/country-codes";
+export {
+  activateConnectSession,
+  authenticateConnectPin,
+  ConnectCredentialError,
+  revokeIssuedConnectSession,
+  setConnectPinWithOtp,
+  type IssuedConnectSession
+} from "../../../../src/lib/connect-session-issuance";
+export {
+  sameConnectAccountIdentitySet,
+  type ConnectAccountIdentity
+} from "../../../../src/lib/connect-account-freshness";
 
 export type ConnectAccount = {
   id: string;
@@ -138,15 +152,6 @@ export function isMissingColumnError(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? "").toLowerCase();
   return (message.includes("column") || message.includes("relation")) &&
     (message.includes("does not exist") || message.includes("schema cache"));
-}
-
-export function normalizeConnectMobile(mobile: unknown, countryCode: unknown) {
-  const normalizedCountryCode = String(countryCode ?? "91").replace(/\D/g, "") || "91";
-  const normalizedMobile = normalizeMobile(mobile, normalizedCountryCode);
-  const localMobile = normalizedMobile.startsWith(normalizedCountryCode)
-    ? normalizedMobile.slice(normalizedCountryCode.length)
-    : normalizedMobile;
-  return { countryCode: normalizedCountryCode, mobile: normalizedMobile, localMobile };
 }
 
 function accountLabel(account: AccountRow, companyNameById: Map<string, string>) {
@@ -607,7 +612,12 @@ function resolveConnectPageAccess(
 const ACCOUNT_LOOKUP_SHARE_MS = 300;
 const recentAccountLookups = new Map<string, { startedAt: number; accounts: Promise<ConnectAccount[]> }>();
 
-export async function findConnectAccounts(countryCode: string, mobile: string) {
+export async function findConnectAccounts(
+  countryCode: string,
+  mobile: string,
+  options: { fresh?: boolean } = {}
+) {
+  if (options.fresh) return structuredClone(await loadConnectAccounts(countryCode, mobile));
   const key = `${countryCode}:${mobile}`;
   const recent = recentAccountLookups.get(key);
   if (recent && Date.now() - recent.startedAt < ACCOUNT_LOOKUP_SHARE_MS) {
@@ -632,6 +642,7 @@ export async function findConnectSessionAccounts(countryCode: string, mobile: st
 async function loadConnectAccounts(countryCode: string, mobile: string, readOnly = false): Promise<ConnectAccount[]> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
+  const mobileCountryFilter = connectMobileCountryFilter(countryCode);
   type ProfileMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null };
   type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; source_profile_type?: string | null; source_profile_id?: string | null; deleted_at?: string | null };
 
@@ -639,13 +650,13 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
     .from("profiles")
     .select("id, company_id, full_name, email, employee_id, role, is_active, mobile_country_code")
     .eq("is_active", true)
-    .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
+    .or(mobileCountryFilter)
     .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
   let employeesResult: MatchResult<EmployeeAccountRow> = await supabaseAdmin
     .from("employees")
     .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, profile_completion_status, profile_photo_path, is_active, mobile_country_code")
     .eq("is_active", true)
-    .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
+    .or(mobileCountryFilter)
     .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
 
   const nonEmployeeTypes: NonEmployeeProfileType[] = ["workforce", "contractor", "vendor", "worker"];
@@ -658,7 +669,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
     let query = supabaseAdmin!
       .from(table)
       .select(nonEmployeeSelect(profileType, true))
-      .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
+      .or(mobileCountryFilter)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
     if (!["workforce", "field_executive"].includes(profileType)) query = query.eq("is_active", true);
     let result = await query as unknown as MatchResult<NonEmployeeMatch>;
@@ -666,6 +677,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       return { data: [], error: null };
     }
     if (isMissingColumnError(result.error)) {
+      if (countryCode !== "91") return { data: [], error: null };
       let fallbackQuery = supabaseAdmin!
         .from(table)
         .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, is_active")
@@ -690,19 +702,23 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
     };
   });
 
-  if (isMissingColumnError(profilesResult.error) || isMissingColumnError(employeesResult.error)) {
-    [profilesResult, employeesResult] = await Promise.all([
-      supabaseAdmin
+  if (isMissingColumnError(profilesResult.error)) {
+    profilesResult = countryCode === "91"
+      ? await supabaseAdmin
         .from("profiles")
         .select("id, company_id, full_name, email, employee_id, role, is_active")
         .eq("is_active", true)
-        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
-      supabaseAdmin
+        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
+      : { data: [], error: null };
+  }
+  if (isMissingColumnError(employeesResult.error)) {
+    employeesResult = countryCode === "91"
+      ? await supabaseAdmin
         .from("employees")
         .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, is_active")
         .eq("is_active", true)
         .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
-    ]);
+      : { data: [], error: null };
   }
   if (profilesResult.error) throw new Error(profilesResult.error.message);
   if (employeesResult.error && !isMissingColumnError(employeesResult.error)) throw new Error(employeesResult.error.message);
@@ -1118,36 +1134,6 @@ export function verifySecretHash(value: string, storedHash: string) {
   return createHash("sha256").update(`${salt}:${value}`).digest("hex") === hash;
 }
 
-export async function createConnectSession({
-  countryCode,
-  mobile,
-  request
-}: {
-  countryCode: string;
-  mobile: string;
-  request: Request;
-}) {
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const token = randomUUID() + randomUUID();
-  const sessionHash = createHash("sha256").update(token).digest("hex");
-  const expiresAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
-  const insertResult = await supabaseAdmin.from("connect_login_sessions").insert({
-    country_code: countryCode,
-    mobile_number: mobile,
-    session_hash: sessionHash,
-    expires_at: expiresAt.toISOString(),
-    request_ip: requestIp(request),
-    user_agent: request.headers.get("user-agent")
-  });
-  if (insertResult.error) throw new Error(insertResult.error.message);
-  cookies().set(connectSessionCookieName, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: true,
-    path: "/",
-    expires: expiresAt
-  });
-}
 
 export async function requireConnectAccount(profileType: ConnectAccount["profileType"], accountId: string, options:{allowActivationOnly?:boolean}={}) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -1155,13 +1141,18 @@ export async function requireConnectAccount(profileType: ConnectAccount["profile
   if (!token) throw new Error("Connect session expired. Please log in again.");
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const { data: session, error } = await supabaseAdmin.from("connect_login_sessions")
-    .select("country_code, mobile_number, expires_at, revoked_at").eq("session_hash", sessionHash).maybeSingle();
+    .select("country_code, mobile_number, mobile_number_format, expires_at, revoked_at").eq("session_hash", sessionHash).maybeSingle();
   if (error) throw new Error(error.message);
   if (!session || session.revoked_at || new Date(session.expires_at).getTime() < Date.now()) {
     cookies().delete(connectSessionCookieName);
     throw new Error("Connect session expired. Please log in again.");
   }
-  const accounts = await findConnectSessionAccounts(session.country_code, session.mobile_number);
+  const sessionMobile = normalizeStoredConnectMobile(
+    session.mobile_number,
+    session.country_code,
+    session.mobile_number_format
+  );
+  const accounts = await findConnectSessionAccounts(sessionMobile.countryCode, sessionMobile.mobile);
   const canonicalProfileType = profileType === "field_executive" ? "workforce" : profileType;
   const account = accounts.find((item) => item.profileType === canonicalProfileType && item.id === accountId);
   if (!account) throw new Error("This account is not available for the current login.");

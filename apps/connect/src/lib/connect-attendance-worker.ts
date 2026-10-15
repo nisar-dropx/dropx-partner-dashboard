@@ -2,7 +2,8 @@ import "server-only";
 
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
-import { connectSessionCookieName, normalizeConnectMobile, requireConnectAccount } from "@/lib/connect-auth";
+import { connectSessionCookieName, requireConnectAccount } from "@/lib/connect-auth";
+import { normalizeStoredConnectMobile } from "@/lib/country-codes";
 import { connectPreviewCookieName } from "./connect-preview-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
@@ -33,7 +34,7 @@ async function activeConnectSession() {
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin
     .from("connect_login_sessions")
-    .select("id, country_code, mobile_number, expires_at, revoked_at")
+    .select("id, country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
     .eq("session_hash", sessionHash)
     .maybeSingle();
   if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -55,7 +56,11 @@ export async function resolveConnectAttendanceWorker({
 }): Promise<ConnectAttendanceWorker> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const session = await activeConnectSession();
-  const { countryCode, mobile, localMobile } = normalizeConnectMobile(session.mobile_number, session.country_code);
+  const { countryCode, mobile, localMobile } = normalizeStoredConnectMobile(
+    session.mobile_number,
+    session.country_code,
+    session.mobile_number_format
+  );
   if (!isWorkforceProfileType(profileType)) {
     throw new Error("Attendance is available for workforce accounts only.");
   }

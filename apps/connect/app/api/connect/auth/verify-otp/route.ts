@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
-import { findConnectAccounts } from "@/lib/connect-auth";
-import { normalizeMobile, verifyOtpHash } from "@/lib/connect-otp";
+import { findConnectAccounts, normalizeConnectMobile } from "@/lib/connect-auth";
+import { ConnectMobileValidationError } from "@/lib/country-codes";
+import { verifyOtpHash } from "@/lib/connect-otp";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function requestIp(request: Request) {
@@ -14,12 +15,8 @@ export async function POST(request: Request) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; otp?: unknown };
-    const countryCode = String(body.countryCode ?? "91").replace(/\D/g, "") || "91";
-    const mobile = normalizeMobile(body.mobile, countryCode);
+    const { countryCode, mobile } = normalizeConnectMobile(body.mobile, body.countryCode);
     const otp = String(body.otp ?? "").replace(/\D/g, "");
-    if (!mobile || mobile.length < 11) {
-      return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
-    }
     if (!/^\d{6}$/.test(otp)) {
       return NextResponse.json({ error: "Enter the 6 digit OTP." }, { status: 400 });
     }
@@ -91,6 +88,9 @@ export async function POST(request: Request) {
       accounts
     });
   } catch (error) {
+    if (error instanceof ConnectMobileValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json({ error: userFacingError(error, "Unable to verify OTP.") }, { status: 500 });
   }
 }

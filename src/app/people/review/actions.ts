@@ -40,6 +40,7 @@ export async function reviewPeopleProfile(formData: FormData) {
   const id = String(formData.get("id") ?? "").trim();
   const profileTypeValue = String(formData.get("profile_type") ?? "").trim();
   const action = String(formData.get("review_action") ?? "").trim().toLowerCase();
+  const reviewVersion = String(formData.get("review_version") ?? "").trim();
   const remarks = String(formData.get("return_remarks") ?? "").trim();
 
   try {
@@ -49,6 +50,7 @@ export async function reviewPeopleProfile(formData: FormData) {
       throw new Error("Workforce applicants must be reviewed through Workforce Lifecycle so agreement, provider ID and activation checks cannot be bypassed.");
     }
     if (!["approve", "return"].includes(action)) throw new Error("Choose a valid review action.");
+    if (!reviewVersion) throw new Error("Profile review version is unavailable. Refresh the review queue and try again.");
     if (action === "return" && !remarks) throw new Error("Return remarks are required.");
 
     const profileType = profileTypeValue as WorkforceProfileType;
@@ -69,16 +71,29 @@ export async function reviewPeopleProfile(formData: FormData) {
     const currentStatus = profileType === "employee"
       ? (current.data as { profile_completion_status?: unknown }).profile_completion_status
       : (current.data as { onboarding_status?: unknown }).onboarding_status;
-    if (String(currentStatus ?? "").toLowerCase() !== "under_review") {
+    const returnedProfileEdit = current.data.profile_edit_review_pending === true;
+    if (String(currentStatus ?? "").toLowerCase() !== "under_review" && !returnedProfileEdit) {
       throw new Error("Only profiles under review can be approved or returned.");
     }
+    const currentUpdatedAt = String(current.data.updated_at ?? "").trim();
+    if (!currentUpdatedAt) {
+      throw new Error("Profile review version is unavailable. Refresh the review queue and try again.");
+    }
+    if (currentUpdatedAt !== reviewVersion) {
+      throw new Error("Profile changed while you were reviewing it. Refresh the review queue and try again.");
+    }
+
+    const supportsProfileEditReview = Object.prototype.hasOwnProperty.call(
+      current.data,
+      "profile_edit_review_pending"
+    );
 
     const reviewedAt = new Date().toISOString();
     const approvesWorkforceIdentityException = action === "approve" &&
       profileType === "workforce" &&
       Boolean((current.data as { identity_exception_required?: unknown }).identity_exception_required);
     const workforceLifecycleUpdate = profileType === "workforce"
-      ? action === "approve"
+      ? action === "approve" || returnedProfileEdit
         ? { lifecycle_status: "active", is_active: true }
         : { lifecycle_status: "onboarding", is_active: false }
       : {};
@@ -88,6 +103,7 @@ export async function reviewPeopleProfile(formData: FormData) {
           ...workforceLifecycleUpdate,
           profile_return_remarks: null,
           profile_returned_at: null,
+          ...(supportsProfileEditReview ? { profile_edit_review_pending: false } : {}),
           ...(profileType === "employee" ? { profile_completed_at: reviewedAt } : {}),
           ...(approvesWorkforceIdentityException
             ? {
@@ -98,18 +114,33 @@ export async function reviewPeopleProfile(formData: FormData) {
           updated_at: reviewedAt
         }
       : {
-          [statusColumn]: "returned",
+          // A returned self-edit remains operationally active and stays in the
+          // independent review queue until an administrator approves it. The
+          // user can correct it only through the OTP-protected self-edit flow.
+          [statusColumn]: returnedProfileEdit ? "active" : "returned",
           ...workforceLifecycleUpdate,
           profile_return_remarks: remarks,
           profile_returned_at: reviewedAt,
+          ...(returnedProfileEdit ? { profile_edit_review_pending: true } : {}),
           updated_at: reviewedAt
         };
-    const result = await supabaseAdmin
+    let updateQuery = supabaseAdmin
       .from(table)
       .update(update)
       .eq("id", id)
-      .eq("company_id", companyId);
+      .eq("company_id", companyId)
+      .eq(statusColumn, currentStatus)
+      .eq("updated_at", reviewVersion);
+    if (supportsProfileEditReview) {
+      updateQuery = updateQuery.eq("profile_edit_review_pending", returnedProfileEdit);
+    }
+    const result = await updateQuery
+      .select("id")
+      .maybeSingle();
     if (result.error) throw new Error(result.error.message);
+    if (!result.data) {
+      throw new Error("Profile changed while you were reviewing it. Refresh the review queue and try again.");
+    }
     const orgPositionId = profileType === "employee"
       ? String((current.data as { org_position_id?: unknown }).org_position_id ?? "").trim()
       : "";
@@ -127,7 +158,7 @@ export async function reviewPeopleProfile(formData: FormData) {
     await createAppNotification({
       accountId: id,
       companyId,
-      data: action === "return" ? { remarks } : {},
+      data: action === "return" ? { remarks, profileEdit: returnedProfileEdit } : {},
       eventCode: action === "approve" ? "profile_approved" : "profile_returned",
       profileType,
       sourceKey: `${id}:${action}:${reviewedAt}`,
@@ -143,7 +174,9 @@ export async function reviewPeopleProfile(formData: FormData) {
     reviewRedirect({
       notice: action === "approve"
         ? `${profileLabel(profileType)} profile approved.`
-        : `${profileLabel(profileType)} profile returned for correction.`
+        : returnedProfileEdit
+          ? `${profileLabel(profileType)} profile changes returned for OTP-protected correction; approval is still pending.`
+          : `${profileLabel(profileType)} profile returned for correction.`
     });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
