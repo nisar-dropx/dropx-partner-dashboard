@@ -3,21 +3,22 @@ import {mappingAdmin as supabaseAdmin} from '@/lib/fleet/da-mapping-client';
 import {requireCompanyId} from '@/lib/company-scope';
 import {FleetReportError} from '@/lib/fleet/report-data';
 import {loadMapping,mappingScope,mappingStationScope} from '@/lib/fleet/da-mapping-server';
-import {riderKey,riderAvailableAt} from '@/lib/fleet/da-mapping';
+import {riderKey,riderAvailableAt,previousMappingDate} from '@/lib/fleet/da-mapping';
 import {istDate,validDate} from '@/lib/fleet/daily-report';
 import {withFleetSystemLog} from '@/lib/fleet/system-log';
 export const dynamic='force-dynamic';
 async function hasPendingMapping(auth:NonNullable<Awaited<ReturnType<typeof getAuthorization>>>){const scope=await mappingStationScope(auth);if(!scope.stations.length)return false;const r=await supabaseAdmin!.rpc('fleet_pending_da_days',{p_company:scope.companyId,p_stations:scope.stations.map(s=>s.code),p_limit:1});return !r.error&&Number(r.data?.totalPending)>0;}
 function fail(e:unknown){return Response.json({error:e instanceof FleetReportError?e.message:'Mapping could not be saved. Retry; your selection is still on screen.'},{status:e instanceof FleetReportError?e.status:500});}
 export async function GET(request:Request){
- try{const auth=await getAuthorization();if(!auth)return Response.json({error:'Login required.'},{status:401});const p=new URL(request.url).searchParams;if(p.get('eligibility')==='1'){const scope=await mappingScope(auth);return Response.json({available:scope.stations.length>0||await hasPendingMapping(auth)},{headers:{'Cache-Control':'private, no-store'}});}const date=p.get('date')||istDate();if(!validDate(date)||date>istDate())throw new FleetReportError('Choose today or a past date.',400);return Response.json(await loadMapping(auth,date,p.get('station')||'',p.get('registry')==='1'),{headers:{'Cache-Control':'private, no-store'}});}catch(e){return fail(e);}
+ try{const auth=await getAuthorization();if(!auth)return Response.json({error:'Login required.'},{status:401});const p=new URL(request.url).searchParams;if(p.get('eligibility')==='1'){const scope=await mappingScope(auth);return Response.json({available:scope.stations.length>0||await hasPendingMapping(auth)},{headers:{'Cache-Control':'private, no-store'}});}const registry=p.get('registry')==='1',date=p.get('date')||(registry?istDate():previousMappingDate(istDate()));if(!validDate(date)||date>(registry?istDate():previousMappingDate(istDate())))throw new FleetReportError('Choose yesterday or an earlier date. Today is not available for daily mapping.',400);return Response.json(await loadMapping(auth,date,p.get('station')||'',p.get('registry')==='1'),{headers:{'Cache-Control':'private, no-store'}});}catch(e){return fail(e);}
 }
 export const POST=withFleetSystemLog(async(request:Request)=>{
  try{
  const auth=await getAuthorization();if(!auth)return Response.json({error:'Login required.'},{status:401});
  if(request.headers.get('origin')&&request.headers.get('origin')!==new URL(request.url).origin)throw new FleetReportError('Invalid request origin.',403);
  const b=await request.json().catch(()=>null);if(!b||typeof b.station!=='string'||!validDate(b.date)||b.date>istDate())throw new FleetReportError('Choose a station and a valid date.',400);
- const d=await loadMapping(auth,b.date,b.station,b.action==='mapping.default',false),company=requireCompanyId(auth);
+ if(b.action==='mapping.confirm'&&b.date>=istDate())throw new FleetReportError('Choose yesterday or an earlier date.',400);
+ const d=await loadMapping(auth,b.date,b.station,b.action!=='mapping.confirm',false),company=requireCompanyId(auth);
  if(auth.readOnly)throw new FleetReportError('Daily mapping edit permission is required.',403);
  if(b.action==='mapping.alert-policy'){
   if(!d.canPolicy)throw new FleetReportError('Pending alert settings are managed in Fleet Masters.',403);
@@ -26,6 +27,11 @@ export const POST=withFleetSystemLog(async(request:Request)=>{
   if(!validDate(b.alertFrom)||b.alertFrom>istDate()||!first.data||b.alertFrom<first.data.effective_from)throw new FleetReportError('Choose a date within recorded mapping history and today.',400);
   const result=await supabaseAdmin!.from('fleet_control_settings').update({assignment_alert_from:b.alertFrom}).eq('company_id',company).select('company_id');
   if(result.error||!result.data?.length)throw new FleetReportError('Could not save pending alert settings.');return Response.json({ok:true});
+ }
+ if(b.action==='mapping.review-policy'){
+  if(!d.canPolicy||typeof b.autoDelivery!=='boolean')throw new FleetReportError('Fleet Masters edit permission and a valid review policy are required.',403);
+  const result=await supabaseAdmin!.from('fleet_control_settings').update({assignment_auto_delivery:b.autoDelivery}).eq('company_id',company).select('company_id');
+  if(result.error||!result.data?.length)throw new FleetReportError('Could not save review policy.');return Response.json({ok:true});
  }
  if(b.action==='mapping.policy'){
   if(!d.canPolicy)throw new FleetReportError('Default DA settings are managed in Fleet Masters.',403);
