@@ -80,7 +80,7 @@ test("the payout loader indexes high-cardinality shipment and attendance lookups
   const loader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
   assert.match(loader, /const payoutMappingsByProviderMember = indexMappingsByProviderMember/);
   assert.match(loader, /const shipmentRowsByMappingId = new Map/);
-  assert.match(loader, /const attendanceMappingsByWorkforceId = new Map/);
+  assert.match(loader, /const attendanceMappingsByWorkforceStation = new Map/);
   assert.match(loader, /const eligibleDailyByDate = new Map/);
   assert.doesNotMatch(loader, /const providerDailyRowsFor[\s\S]{0,500}?metricsResult\.data[\s\S]{0,100}?\.filter/);
 });

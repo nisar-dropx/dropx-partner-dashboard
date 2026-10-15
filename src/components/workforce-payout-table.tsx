@@ -165,6 +165,7 @@ function canDeductAdvanceFromPayout(row: WorkforcePayoutRow) {
 }
 function canManuallyEditPayout(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId && row.locationId && row.dropxId)
+    && row.mappingStatus !== "Payment setup conflict"
     && row.paymentSummary?.status !== "Payment Processing";
 }
 function publicationRefreshPending(row: WorkforcePayoutRow) {
@@ -189,6 +190,7 @@ function isPayoutProcessing(row: WorkforcePayoutRow) {
 }
 function canChangePayoutHold(row: WorkforcePayoutRow) {
   return Boolean(row.reviewSubjectId || workforcePayoutRowSourceIdentities(row).length)
+    && row.mappingStatus !== "Payment setup conflict"
     && !isPayoutProcessing(row);
 }
 
@@ -1123,7 +1125,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
               day.attendanceRange
             ] as const] : [])).values()];
             return [
-              <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" ? "payout-id-unmapped" : audience === "workforce" && row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
+              <tr key={row.id} className={row.mappingStatus === "ID not mapped" || row.mappingStatus === "Mapping conflict" || row.mappingStatus === "Payment setup conflict" ? "payout-id-unmapped" : audience === "workforce" && row.panAadhaarStatus === "NOT LINKED" ? "payout-pan-aadhaar-unlinked" : undefined}>
                 {showSelection ? <td className="payout-select-cell"><input aria-label={`Select ${row.dropxId || row.name} for payout actions`} checked={selected.has(row.id)} disabled={actionBusy || !selectableIds.has(row.id)} onChange={() => toggleSelected(row.id)} title={selectionTitle} type="checkbox" /></td> : null}
                 <td className="payout-sticky-id">{row.dropxId ? <><strong>{row.dropxId}</strong><small className="payout-dropx-status" title={activePaymentProfile || audience === "helpers" ? `DropX ID status: ${row.dropxStatus}` : `DropX ID status: ${row.dropxStatus}. Bank files include current Active profiles only.`}>{row.dropxStatus}</small></> : <span className="sr-only">No DropX ID mapped</span>}</td>
                 <td className="payout-sticky-worker"><strong>{row.name}</strong><small title={`${row.providerMemberName} · ${row.providerMemberId}`}>{row.providerMemberName} · {row.providerMemberId}</small></td>
@@ -1133,7 +1135,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                 <td className="work-days-cell">{row.paymentDetailsAvailable ? <><strong>{workDaysDisplay(row.workDays, row.workDaysSource)}</strong><small>{row.workDaysSource}</small></> : null}</td>
                 <td className="payout-money payout-gross-cell">{row.paymentDetailsAvailable ? <><strong>{money(row.grossPayment)}</strong><small className={row.deductions ? "negative" : undefined}>{row.deductions ? `- ${money(row.deductions)} deductions` : "No deductions"}</small></> : null}</td>
                 <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <><strong>{money(row.netAmount)}</strong>{row.paymentSummary ? <small className="payout-payment-balance" title={row.paymentSummary.eligibilityMessage ?? undefined}>{row.paymentSummary.processingAmount > 0 ? <span>Published location net {exactMoney(row.paymentSummary.currentNetAmount)}</span> : null}<span>Paid {exactMoney(row.paymentSummary.paidAmount)}</span>{row.paymentSummary.processingAmount > 0 ? <span>Processing {exactMoney(row.paymentSummary.processingAmount)}</span> : null}{refreshBeforeBankFile ? <span>Preliminary balance {exactMoney(preliminaryBankBalance)}</span> : paymentBalanceAvailable ? <span>Balance payable {exactMoney(row.paymentSummary.balancePayable)}</span> : <span>Balance payable —</span>}{canProcessPayments && audience === "workforce" && !activePaymentProfile ? <span className="negative">Bank file: Active profiles only</span> : refreshBeforeBankFile ? <span>Refresh before bank file · eligibility rechecked</span> : paymentEligibilityLabel ? <span className="negative">{paymentEligibilityLabel}</span> : null}{row.paymentSummary.overpaidAmount > 0 ? <span className="negative">Overpaid {exactMoney(row.paymentSummary.overpaidAmount)}</span> : null}</small> : null}</> : null}</td>
-                <td><div className="payout-status-stack">{reviewDays.length > 0 && <span className="status-pill warn">{reviewDays.length} low-delivery days</span>}<span className={`status-pill ${statusTone(displayStatus)}`}>{displayStatus}</span>{refreshBeforeBankFile && displayStatus !== "Publication refresh pending" ? <span className="status-pill warn">Publication refresh pending</span> : null}{audience === "workforce" && row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
+                <td><div className="payout-status-stack">{reviewDays.length > 0 && <span className="status-pill warn">{reviewDays.length} low-delivery days</span>}{row.mappingStatus === "Payment setup conflict" ? <span className="status-pill bad">Payment setup conflict</span> : null}<span className={`status-pill ${statusTone(displayStatus)}`}>{displayStatus}</span>{refreshBeforeBankFile && displayStatus !== "Publication refresh pending" ? <span className="status-pill warn">Publication refresh pending</span> : null}{audience === "workforce" && row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
                 <td className="payout-row-open-cell"><button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button></td>
               </tr>,
               expanded ? <tr className="payout-total-detail-row" key={`${row.id}-totals`}>

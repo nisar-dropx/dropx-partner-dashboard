@@ -29,6 +29,14 @@ import {
 import { normalizePaymentFieldCode, paymentComponentOrderMap, sortByPaymentFieldOrder } from "@/lib/payment-field-order";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { consolidateProviderPayoutSegments, type ProviderPayoutSegment } from "@/lib/provider-payout-consolidation";
+import {
+  providerAttendanceLocationKey,
+  providerAttendanceOwnerOn,
+  providerAttendanceRecordForStation,
+  providerAttendanceSetupSignature,
+  providerAttendanceWorkerDateKey,
+  type ProviderAttendanceOwnershipMapping
+} from "@/lib/provider-attendance-ownership";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import { allocateCombinedProductionThresholds } from "@/lib/workforce-production-threshold";
 import {
@@ -47,14 +55,11 @@ import {
   buildWorkforcePayoutInputMaps,
   aggregateAttendanceIssueAffectsPayoutPeriod,
   findWorkforcePayoutAttendancePeriod,
-  hasWorkforcePayoutAttendanceOverride,
-  overlayWorkforcePayoutAttendance,
   resolveWorkforceCustomProductionUnits,
   resolveWorkforcePaymentFieldRate
 } from "@/lib/workforce-payout-input-calculation";
 import { groupPayoutItemsBySubjectLocation, payoutSubjectLocationKey } from "@/lib/workforce-payout-location-groups";
 import {
-  aggregateResolvedShipmentDeliveriesByWorkforceDay,
   mappingsForAuthorizedWorkforce,
   normalizePayoutIdentity,
   resolveShipmentPayoutMapping,
@@ -310,7 +315,7 @@ export async function loadWorkforcePayoutRows(
     const jobs = attendanceIdentityGroups.flatMap((group) => chunkedValues(group.ids, 100)
       .map((ids) => ({ column: group.column, ids })));
     const results = await mapWithConcurrency(jobs, 4, async (job) => readAllRows(admin.from("attendance_daily")
-          .select("id,workforce_id,employee_id,contractor_id,field_executive_id,punch_date,status,in_time,out_time,work_minutes")
+          .select("id,workforce_id,employee_id,contractor_id,field_executive_id,location_id,station_code,punch_date,status,in_time,out_time,work_minutes")
           .eq("company_id", companyId)
           .in(job.column, job.ids)
           .gte("punch_date", workforcePaymentMonthStart(fromDate))
@@ -383,14 +388,24 @@ export async function loadWorkforcePayoutRows(
     }
     return values;
   };
-  let attendanceByWorkerDate = new Map<string, any>();
+  const stationIdByCode = new Map(allLocations.map((location: any) => [
+    normalizePayoutIdentity(location.station_code),
+    String(location.id)
+  ]));
+  const attendanceByWorkerStationDate = new Map<string, any>();
+  const unlocatedAttendanceByWorkerDate = new Map<string, any>();
   for (const row of attendanceResult.data ?? []) {
     const sourceId = row.workforce_id || row.employee_id || row.contractor_id || row.field_executive_id;
     const canonicalWorkforceId = workerBySource.get(sourceId)?.id;
     if (!canonicalWorkforceId) continue;
-    const key = `${canonicalWorkforceId}|${row.punch_date}`;
-    const current = attendanceByWorkerDate.get(key);
-    attendanceByWorkerDate.set(key, preferredDirectPayAttendance(current, row));
+    const stationId = String(row.location_id ?? "").trim()
+      || stationIdByCode.get(normalizePayoutIdentity(row.station_code))
+      || "";
+    const target = stationId ? attendanceByWorkerStationDate : unlocatedAttendanceByWorkerDate;
+    const key = stationId
+      ? providerAttendanceLocationKey(canonicalWorkforceId, stationId, row.punch_date)
+      : providerAttendanceWorkerDateKey(canonicalWorkforceId, row.punch_date);
+    target.set(key, preferredDirectPayAttendance(target.get(key), row));
   }
   const attendanceCaptureHistory = (attendanceCaptureResult.data ?? []) as WorkforceAttendanceCaptureSetting[];
   const stationCodeById = new Map(locations.map((location: any) => [String(location.id), String(location.station_code ?? "").trim().toUpperCase()]));
@@ -478,26 +493,54 @@ export async function loadWorkforcePayoutRows(
       else thresholdShipmentRowsByMappingId.set(match.id, [row]);
     }
   }
-  const authorizedShipmentDeliveriesByWorkerDate = aggregateResolvedShipmentDeliveriesByWorkforceDay(
+  const aggregateShipmentDeliveriesByWorkerStationDate = (
+    rows: any[],
+    resolutionByRow: Map<any, ReturnType<typeof resolveShipmentPayoutMapping>>
+  ) => {
+    const totals = new Map<string, number>();
+    for (const row of rows) {
+      const resolution = resolutionByRow.get(row);
+      const stationId = stationIdByCode.get(normalizePayoutIdentity(row.station_code)) ?? "";
+      const date = String(row.work_date ?? "");
+      if (resolution?.kind !== "mapped" || !resolution.workforceId || !stationId || !date) continue;
+      const key = providerAttendanceLocationKey(resolution.workforceId, stationId, date);
+      totals.set(key, (totals.get(key) ?? 0) + Math.max(0, Number(row.total_delivery ?? 0) || 0));
+    }
+    return totals;
+  };
+  const authorizedShipmentDeliveriesByWorkerStationDate = aggregateShipmentDeliveriesByWorkerStationDate(
     metricsResult.data ?? [],
-    (row) => shipmentResolutionByRow.get(row)
+    shipmentResolutionByRow
   );
-  const attendanceShipmentDeliveriesByWorkerDate = aggregateResolvedShipmentDeliveriesByWorkforceDay(
+  const attendanceShipmentDeliveriesByWorkerStationDate = aggregateShipmentDeliveriesByWorkerStationDate(
     thresholdMetricRows,
-    (row) => thresholdShipmentResolutionByRow.get(row)
+    thresholdShipmentResolutionByRow
   );
-  for (const worker of canonicalWorkers) {
-    const cursor = new Date(`${workforcePaymentMonthStart(fromDate)}T00:00:00Z`);
-    const lastDate = new Date(`${toDate}T00:00:00Z`);
-    for (; cursor <= lastDate; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
-      const date = cursor.toISOString().slice(0, 10);
-      const capture = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
-      if (capture.capture_method !== "shipment_data") continue;
-      const key = `${worker.id}|${date}`;
-      attendanceByWorkerDate.set(key, shipmentAttendanceRecord(date, attendanceShipmentDeliveriesByWorkerDate.get(key) ?? 0, capture));
+  for (const [key, deliveries] of attendanceShipmentDeliveriesByWorkerStationDate) {
+    const date = key.slice(-10);
+    const capture = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
+    if (capture.capture_method === "shipment_data") {
+      attendanceByWorkerStationDate.set(key, shipmentAttendanceRecord(date, deliveries, capture));
     }
   }
-  attendanceByWorkerDate = new Map(overlayWorkforcePayoutAttendance(attendanceByWorkerDate, payoutInputMaps.attendanceByWorkforceDate));
+  const attendanceOverrideLocationKeys = new Set<string>();
+  const attendanceOverrideWorkerDateKeys = new Set<string>();
+  for (const [workerDateKey, override] of payoutInputMaps.attendanceByWorkforceDate) {
+    const stationId = String(override.station_id ?? "").trim();
+    const target = stationId ? attendanceByWorkerStationDate : unlocatedAttendanceByWorkerDate;
+    const key = stationId
+      ? providerAttendanceLocationKey(override.workforce_id, stationId, override.work_date)
+      : workerDateKey;
+    const current = target.get(key);
+    target.set(key, {
+      ...(current ?? {}),
+      punch_date: override.work_date,
+      status: override.attendance_status,
+      work_minutes: override.work_minutes === null ? current?.work_minutes ?? null : override.work_minutes
+    });
+    if (stationId) attendanceOverrideLocationKeys.add(key);
+    else attendanceOverrideWorkerDateKeys.add(workerDateKey);
+  }
   const aggregateAttendancePeriodKey = (period: { id?: string | null; workforce_id: string; station_id: string; attendance_basis: string; effective_from: string; effective_to: string }) =>
     String(period.id ?? `${period.workforce_id}|${period.station_id}|${period.attendance_basis}|${period.effective_from}|${period.effective_to}`);
   const aggregateAttendanceIssueByPeriod = new Map<string, string>();
@@ -521,14 +564,25 @@ export async function loadWorkforcePayoutRows(
       }
     } as const;
   };
+  let unlocatedAttendanceOwnerStationOn = (_workforceId: string, _date: string) => "";
+  const attendanceForDate = (workforceId: string, stationId: string, date: string) => providerAttendanceRecordForStation({
+    located: attendanceByWorkerStationDate,
+    unlocated: unlocatedAttendanceByWorkerDate,
+    workforceId,
+    stationId,
+    date,
+    unlocatedOwnerStationId: unlocatedAttendanceOwnerStationOn(workforceId, date)
+  });
   const attendanceUnitForDate = (workforceId: string, stationId: string, date: string, sourceKey?: string) => {
     const aggregate = aggregateAttendanceForDate(workforceId, stationId, date, sourceKey);
     if (aggregate?.period.attendance_basis === "days") return aggregate.input.quantity;
-    return directPayAttendanceUnit(attendanceByWorkerDate.get(`${workforceId}|${date}`));
+    return directPayAttendanceUnit(attendanceForDate(workforceId, stationId, date));
   };
   const hasImportedAttendanceForDate = (workforceId: string, stationId: string, date: string, sourceKey?: string) =>
     Boolean(aggregateAttendanceForDate(workforceId, stationId, date, sourceKey))
-    || hasWorkforcePayoutAttendanceOverride(payoutInputMaps, workforceId, date);
+    || attendanceOverrideLocationKeys.has(providerAttendanceLocationKey(workforceId, stationId, date))
+    || (unlocatedAttendanceOwnerStationOn(workforceId, date) === stationId
+      && attendanceOverrideWorkerDateKeys.has(providerAttendanceWorkerDateKey(workforceId, date)));
   const paymentPolicyHistory = (paymentPolicyResult.data ?? []) as WorkforcePaymentPolicy[];
   const dateRangeCache = new Map<string, string[]>();
   const dateRange = (from: string, to: string) => {
@@ -629,15 +683,6 @@ export async function loadWorkforcePayoutRows(
     if (existing) existing.push(mapping);
     else allMappingsByWorkforceId.set(workforceId, [mapping]);
   }
-  const attendanceMappingsByWorkforceId = new Map<string, any[]>();
-  for (const [workforceId, workerMappings] of allMappingsByWorkforceId) {
-    attendanceMappingsByWorkforceId.set(
-      workforceId,
-      workerMappings
-        .filter((mapping) => attendanceComponentsFor(mapping).length > 0)
-        .sort((left, right) => String(right.effective_from).localeCompare(String(left.effective_from)) || String(right.id).localeCompare(String(left.id)))
-    );
-  }
   const directAllocationsByWorkforceId = new Map<string, any[]>();
   for (const allocation of allDirectAllocations) {
     const workforceId = String(allocation.workforce_id ?? "");
@@ -654,31 +699,79 @@ export async function loadWorkforcePayoutRows(
     if (existing) existing.push(allocation);
     else activeDirectAllocationsByWorkforceId.set(workforceId, [allocation]);
   }
-  const attendanceSetupSignature = (mapping: any) => JSON.stringify(attendanceComponentsFor(mapping)
-    .map((component) => {
-      const code = String(component.component_code ?? "").trim().toUpperCase();
-      const rawRate = Object.entries(mapping.payment_values ?? {}).find(([key]) => key.trim().toUpperCase() === code)?.[1] ?? null;
-      return [code, component.pay_schedule, component.calculation_type, component.calculation_source, rawRate];
-    })
-    .sort((left, right) => String(left[0]).localeCompare(String(right[0]))));
-  let providerAttendanceConflict = false;
-  const attendanceOwnerByWorkerDate = new Map<string, string>();
-  const attendanceOwnerOn = (workforceId: string, date: string) => {
-    const cacheKey = `${workforceId}|${date}`;
-    if (attendanceOwnerByWorkerDate.has(cacheKey)) return attendanceOwnerByWorkerDate.get(cacheKey) ?? "";
-    const candidates = (attendanceMappingsByWorkforceId.get(workforceId) ?? []).filter((candidate: any) => {
-      return String(candidate.effective_from) <= date
-        && (!candidate.effective_to || String(candidate.effective_to) >= date)
+  const attendanceOwnershipMappings: ProviderAttendanceOwnershipMapping[] = allMappings.flatMap((mapping: any) => {
+    const workforceId = mappingWorkforceId(mapping);
+    const stationId = String(mapping.station_id ?? "");
+    const components = attendanceComponentsFor(mapping);
+    if (!workforceId || !stationId || !components.length) return [];
+    const configuredValues = normalizedPaymentValues(mapping.payment_values);
+    return [{
+      id: String(mapping.id),
+      workforceId,
+      stationId,
+      effectiveFrom: String(mapping.effective_from),
+      effectiveTo: mapping.effective_to ? String(mapping.effective_to) : null,
+      setupSignature: providerAttendanceSetupSignature(components.map((component) => {
+        const code = normalizePaymentFieldCode(component.component_code);
+        return {
+          code,
+          paySchedule: component.pay_schedule,
+          calculationType: component.calculation_type,
+          calculationSource: component.calculation_source,
+          rate: configuredValues.get(code) ?? null
+        };
+      }))
+    }];
+  });
+  const attendanceMappingsByWorkforceStation = new Map<string, ProviderAttendanceOwnershipMapping[]>();
+  const attendanceMappingsByWorkforceId = new Map<string, ProviderAttendanceOwnershipMapping[]>();
+  for (const mapping of attendanceOwnershipMappings) {
+    const key = payoutSubjectLocationKey(mapping.workforceId, mapping.stationId);
+    attendanceMappingsByWorkforceStation.set(key, [...(attendanceMappingsByWorkforceStation.get(key) ?? []), mapping]);
+    attendanceMappingsByWorkforceId.set(mapping.workforceId, [...(attendanceMappingsByWorkforceId.get(mapping.workforceId) ?? []), mapping]);
+  }
+  const attendanceOwnerByWorkerStationDate = new Map<string, string>();
+  const providerAttendanceConflictDates = new Set<string>();
+  const attendanceOwnerOn = (workforceId: string, stationId: string, date: string) => {
+    const identityKey = payoutSubjectLocationKey(workforceId, stationId);
+    const cacheKey = `${identityKey}|${date}`;
+    if (attendanceOwnerByWorkerStationDate.has(cacheKey)) return attendanceOwnerByWorkerStationDate.get(cacheKey) ?? "";
+    const ownership = providerAttendanceOwnerOn(
+      attendanceMappingsByWorkforceStation.get(identityKey) ?? [],
+      workforceId,
+      stationId,
+      date
+    );
+    if (ownership.conflict) providerAttendanceConflictDates.add(cacheKey);
+    attendanceOwnerByWorkerStationDate.set(cacheKey, ownership.ownerId);
+    return ownership.ownerId;
+  };
+  const hasProviderAttendanceConflict = (workforceId: string, stationId: string, dates: string[]) =>
+    dates.some((date) => {
+      attendanceOwnerOn(workforceId, stationId, date);
+      return providerAttendanceConflictDates.has(`${payoutSubjectLocationKey(workforceId, stationId)}|${date}`);
     });
-    if (!candidates.length) {
-      attendanceOwnerByWorkerDate.set(cacheKey, "");
-      return "";
+  const unlocatedAttendanceStationCache = new Map<string, string>();
+  unlocatedAttendanceOwnerStationOn = (workforceId: string, date: string) => {
+    const cacheKey = providerAttendanceWorkerDateKey(workforceId, date);
+    if (unlocatedAttendanceStationCache.has(cacheKey)) return unlocatedAttendanceStationCache.get(cacheKey) ?? "";
+    const stationIds = new Set((attendanceMappingsByWorkforceId.get(workforceId) ?? [])
+      .filter((mapping) => mapping.effectiveFrom <= date
+        && (!mapping.effectiveTo || mapping.effectiveTo >= date))
+      .map((mapping) => mapping.stationId));
+    for (const allocation of directAllocationsByWorkforceId.get(workforceId) ?? []) {
+      const snapshot = Array.isArray(allocation.payment_components)
+        ? allocation.payment_components.filter((component: unknown): component is DirectPayComponent => Boolean(component && typeof component === "object"))
+        : [];
+      const components = snapshot.length ? snapshot : componentsByMethod.get(String(allocation.payment_method_id)) ?? [];
+      if (allocationActiveOn(allocation, date)
+        && components.some((component: DirectPayComponent) => component.component_type !== "production" && component.calculation_source === "attendance_eligibility")) {
+        stationIds.add(String(allocation.station_id));
+      }
     }
-    const latest = candidates.filter((candidate: any) => String(candidate.effective_from) === String(candidates[0].effective_from));
-    if (new Set(latest.map(attendanceSetupSignature)).size > 1) providerAttendanceConflict = true;
-    const ownerId = String(latest[0].id);
-    attendanceOwnerByWorkerDate.set(cacheKey, ownerId);
-    return ownerId;
+    const stationId = stationIds.size === 1 ? [...stationIds][0] : "";
+    unlocatedAttendanceStationCache.set(cacheKey, stationId);
+    return stationId;
   };
   type AggregateAttendanceSource = {
     key: string;
@@ -986,8 +1079,9 @@ export async function loadWorkforcePayoutRows(
       requiresMonthlyDayHistory
     );
     const attendanceDates = attendanceComponents.length && worker?.id && activeFrom <= activeTo
-      ? dateRange(activeFrom, activeTo).filter((date) => attendanceOwnerOn(worker.id, date) === String(mapping.id))
+      ? dateRange(activeFrom, activeTo).filter((date) => attendanceOwnerOn(String(worker.id), String(mapping.station_id), date) === String(mapping.id))
       : [];
+    const paymentSetupConflict = hasProviderAttendanceConflict(String(worker.id), String(mapping.station_id), activeDates);
     const attendanceDateSet = new Set(attendanceDates);
     const dates = [...new Set([...activeDates, ...eligibleDailyByDate.keys()])];
     let missingAttendanceConfiguration = false;
@@ -1047,7 +1141,6 @@ export async function loadWorkforcePayoutRows(
           sortOrder: rule.sortOrder
         };
       });
-      const workerDateKey = `${worker?.id}|${date}`;
       const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
       const aggregateAttendance = aggregateAttendanceForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey);
       const ownedAttendanceComponents = attendanceDateSet.has(date) || aggregateAttendance ? attendanceComponents : [];
@@ -1056,7 +1149,7 @@ export async function loadWorkforcePayoutRows(
         paymentValuesForDate(mapping.payment_values, ownedAttendanceComponents, String(worker.id), String(mapping.station_id), date),
         ownedAttendanceComponents,
         date,
-        attendanceByWorkerDate.get(workerDateKey),
+        attendanceForDate(String(worker.id), String(mapping.station_id), date),
         {
           policyHistory: paymentPolicyHistory,
           cumulativeAttendanceUnitsBefore: cumulativeDirectPayUnitsBefore(
@@ -1064,7 +1157,7 @@ export async function loadWorkforcePayoutRows(
             [String(mapping.effective_from), String(worker?.date_of_join ?? mapping.effective_from)].sort().at(-1)!,
             (candidateDate) => {
               const sourceAggregate = aggregateAttendanceForDate(String(worker.id), String(mapping.station_id), candidateDate, attendanceSourceKey);
-              return sourceAggregate || attendanceOwnerOn(String(worker.id), candidateDate) === String(mapping.id)
+              return sourceAggregate || attendanceOwnerOn(String(worker.id), String(mapping.station_id), candidateDate) === String(mapping.id)
                 ? attendanceUnitForDate(String(worker.id), String(mapping.station_id), candidateDate, attendanceSourceKey)
                 : 0;
             }
@@ -1093,8 +1186,8 @@ export async function loadWorkforcePayoutRows(
         lines,
         baseAmount,
         workDayUnits,
-        deliveryReview: workDayUnits > 0 || (authorizedShipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0) > 0
-          ? shipmentAttendanceReview(authorizedShipmentDeliveriesByWorkerDate.get(`${worker.id}|${date}`) ?? 0, captureSetting) ?? undefined : undefined,
+        deliveryReview: workDayUnits > 0 || (authorizedShipmentDeliveriesByWorkerStationDate.get(providerAttendanceLocationKey(worker.id, mapping.station_id, date)) ?? 0) > 0
+          ? shipmentAttendanceReview(authorizedShipmentDeliveriesByWorkerStationDate.get(providerAttendanceLocationKey(worker.id, mapping.station_id, date)) ?? 0, captureSetting) ?? undefined : undefined,
         routeFuel: routeFuel??undefined,
         attendanceSource: aggregateAttendance?.period.attendance_basis === "days"
           && !aggregateAttendance.issue
@@ -1120,7 +1213,7 @@ export async function loadWorkforcePayoutRows(
     const { workDays, source: workDaysSource } = summarizeWorkDays(activeDates.map((date) => {
       const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
       const aggregateAttendance = aggregateAttendanceForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey);
-      const importedDayAttendance = hasWorkforcePayoutAttendanceOverride(payoutInputMaps, String(worker.id), date)
+      const importedDayAttendance = hasImportedAttendanceForDate(String(worker.id), String(mapping.station_id), date, attendanceSourceKey)
         || aggregateAttendance?.period.attendance_basis === "days";
       return {
         date,
@@ -1139,22 +1232,23 @@ export async function loadWorkforcePayoutRows(
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
     const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
     const additions = 0; const grossPayment = baseAmount + additions;
-    const status = missingRouteDistance ? "Route distance pending" : missingAttendanceConfiguration || missingThresholdConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
+    const status = paymentSetupConflict ? "Configuration incomplete" : missingRouteDistance ? "Route distance pending" : missingAttendanceConfiguration || missingThresholdConfiguration ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
     return [{
       workforceId: String(worker.id),
       categoryCode,
       panNumber: worker?.pan_number ?? panBySource.get(sourceId) ?? null,
       paymentSetupKey: providerPaymentSetupKey(mapping),
-      row: { id: mapping.id, reviewSubjectType: "workforce", reviewSubjectId: String(worker.id), dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: provider?.name ?? "-", paymentSourceIdentity: { stationId: String(mapping.station_id), providerIdentity: String(provider?.name ?? provider?.code ?? ""), providerMemberId: String(mapping.provider_member_id ?? "") }, model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: "Mapped", paymentDetailsAvailable: true, workDays, workDaysSource, history: [], paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions: 0, deductionBreakdown: [], panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment, status } satisfies WorkforcePayoutRow
+      row: { id: mapping.id, reviewSubjectType: "workforce", reviewSubjectId: String(worker.id), dropxId: worker.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: provider?.name ?? "-", paymentSourceIdentity: { stationId: String(mapping.station_id), providerIdentity: String(provider?.name ?? provider?.code ?? ""), providerMemberId: String(mapping.provider_member_id ?? "") }, model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: paymentMethodName, mappingStatus: paymentSetupConflict ? "Payment setup conflict" : "Mapped", paymentDetailsAvailable: !paymentSetupConflict, workDays, workDaysSource, history: [], paymentMethodBreakdown, production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions: 0, deductionBreakdown: [], panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment, status } satisfies WorkforcePayoutRow
     }];
   });
-  if (providerAttendanceConflict) return { rows: [] as WorkforcePayoutRow[], error: "Conflicting provider attendance payment setups exist for the same workforce date. Resolve the duplicate rate cards before calculating payroll." };
   const consolidatedProvider = consolidateProviderPayoutSegments(providerSegments);
   if (consolidatedProvider.conflicts.length) return { rows: [] as WorkforcePayoutRow[], error: "Overlapping provider payment methods exist for the same workforce date. Correct the effective dates before calculating payroll." };
   const payoutDeductionContextByRowId = new Map<string, DeductionWorkerContext>();
   const providerRows: WorkforcePayoutRow[] = consolidatedProvider.rows.map(({ workforceId, categoryCode, panNumber, row }) => {
     const deductionContext = { categoryCode, panNumber } satisfies DeductionWorkerContext;
-    const deductionBreakdown = calculateAutomaticDeductionLines(row.grossPayment, deductionHeads, deductionContext);
+    const deductionBreakdown = row.mappingStatus === "Payment setup conflict"
+      ? []
+      : calculateAutomaticDeductionLines(row.grossPayment, deductionHeads, deductionContext);
     const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
     const payoutRow = {
       ...row,
@@ -1279,17 +1373,16 @@ export async function loadWorkforcePayoutRows(
         requiresMonthlyDayHistory
       );
       return activeFrom <= activeTo ? dateRange(activeFrom, activeTo).filter((date) => allocationActiveOn(allocation, date)).map((date) => {
-        const workerDateKey = `${workforceId}|${date}`;
         const captureSetting = workforceAttendanceCaptureSettingForDate(attendanceCaptureHistory, date);
         const aggregateAttendance = aggregateAttendanceForDate(workforceId, String(allocation.station_id), date, attendanceSourceKey);
         const hasImportedAttendance = hasImportedAttendanceForDate(workforceId, String(allocation.station_id), date, attendanceSourceKey);
-        const hasImportedDayAttendance = hasWorkforcePayoutAttendanceOverride(payoutInputMaps, workforceId, date)
+        const hasImportedDayAttendance = hasImportedAttendance
           || aggregateAttendance?.period.attendance_basis === "days";
         const calculation = directPayForDay(
           paymentValuesForDate(allocation.payment_values, components, workforceId, String(allocation.station_id), date),
           components,
           date,
-          attendanceByWorkerDate.get(workerDateKey),
+          attendanceForDate(workforceId, String(allocation.station_id), date),
           {
             policyHistory: paymentPolicyHistory,
             cumulativeAttendanceUnitsBefore: cumulativeDirectPayUnitsBefore(
@@ -1481,6 +1574,9 @@ export async function loadWorkforcePayoutRows(
     manualDeductions: WorkforcePayoutDeductionValue[],
     includeAutomaticDeductions = true
   ) => {
+    // A setup conflict has no authoritative rate card. Do not let adjustment
+    // inputs turn the diagnostic row into a payable payout.
+    if (row.mappingStatus === "Payment setup conflict") return row;
     const workforceId = String(row.reviewSubjectId ?? "");
     const additionalPaymentBreakdown = workforceAdditionalPaymentLines(row.baseAmount, additionalFields, values);
     const additions = workforceAdditionalPaymentTotal(additionalPaymentBreakdown);
