@@ -44,6 +44,15 @@ function formatDateTime(value: string) {
   return new Date(value).toLocaleString("en-IN", { timeZone: TZ, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+/** The exact invocation time from Amazon, e.g. "Tue, 13 Oct 2026, 06:42 pm". */
+function formatFullDateTime(value: string) {
+  return new Date(value).toLocaleString("en-IN", { timeZone: TZ, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString("en-IN", { timeZone: TZ, day: "numeric", month: "short", year: "numeric" });
+}
+
 function formatTime(value: string) {
   return new Date(value).toLocaleTimeString("en-IN", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
 }
@@ -168,7 +177,7 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
       row.name,
       TYPE_LABEL[type],
       row.activity.error ? `${STATUS_LABEL[row.status]}: ${row.activity.error}` : STATUS_LABEL[row.status],
-      row.activity.lastAt ? formatDateTime(row.activity.lastAt) : "",
+      row.activity.lastAt ? `${formatFullDateTime(row.activity.lastAt)} (${relative(row.activity.lastAt, now)})` : "",
       row.activity.invocations[0]?.operator ?? "",
       `${row.daysScrubbed}/7`,
       row.activity.invocations.map((item) => `${formatDateTime(item.at)} · ${item.operator ?? "Unknown"}`).join(" | ")
@@ -285,15 +294,15 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
                       <td>
                         <span className={`edd-severity ${STATUS_CLASS[row.status]}`} title={row.activity.error ?? undefined}>{STATUS_LABEL[row.status]}</span>
                         {row.status === "missed" && row.gapDays ? (
-                          <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>{row.gapDays} day{row.gapDays === 1 ? "" : "s"} since last scrub</small>
+                          <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>{row.gapDays} day{row.gapDays === 1 ? "" : "s"} since last scrub{row.activity.lastAt ? ` · ${formatDate(row.activity.lastAt)}` : ""}</small>
                         ) : null}
                         {row.activity.error ? <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>{row.activity.error}</small> : null}
                       </td>
                       <td>
                         {row.activity.lastAt ? (
                           <>
-                            {formatDateTime(row.activity.lastAt)}
-                            <small style={{ display: "block", color: "var(--muted)" }}>{relative(row.activity.lastAt, now)}</small>
+                            <strong>{relative(row.activity.lastAt, now)}</strong>
+                            <small style={{ display: "block", color: "var(--muted)" }}>{formatFullDateTime(row.activity.lastAt)}</small>
                           </>
                         ) : <span className="subtle">—</span>}
                       </td>
@@ -316,12 +325,12 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
         </div>
       </section>
 
-      {openRow ? <ScrubHistoryModal row={openRow} type={type} days={days} today={today} onClose={() => setOpenStation(null)} /> : null}
+      {openRow ? <ScrubHistoryModal row={openRow} type={type} days={days} today={today} now={now} onClose={() => setOpenStation(null)} /> : null}
     </>
   );
 }
 
-function ScrubHistoryModal({ row, type, days, today, onClose }: { row: Row; type: ScrubType; days: string[]; today: string; onClose: () => void }) {
+function ScrubHistoryModal({ row, type, days, today, now, onClose }: { row: Row; type: ScrubType; days: string[]; today: string; now: Date; onClose: () => void }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -376,7 +385,7 @@ function ScrubHistoryModal({ row, type, days, today, onClose }: { row: Row; type
                     <tr key={`${key}-${item.at}-${index}`}>
                       <td>{index === 0 ? formatDay(key, today) : ""}</td>
                       <td>{index === 0 ? <span className="edd-severity good">Scrubbed{items.length > 1 ? ` ×${items.length}` : ""}</span> : null}</td>
-                      <td>{formatTime(item.at)}</td>
+                      <td>{formatTime(item.at)} <small style={{ color: "var(--muted)" }}>· {relative(item.at, now)}</small></td>
                       <td>{item.operator ?? <span className="subtle">Unknown</span>}</td>
                     </tr>
                   ));
