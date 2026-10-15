@@ -80,6 +80,7 @@ test('payment plans save atomically, preserve payroll locks and reject concurren
  await db.exec(await migration('20261012220000_provider_mapping_registered_location_exception.sql'));
  await db.exec(await migration('20261013150000_provider_mapping_historical_registered_location_periods_final.sql'));
  await db.exec(await migration('20261013190000_provider_mapping_payment_schedule.sql'));
+ await db.exec(await migration('20261015133000_provider_mapping_contiguous_payment_coverage.sql'));
  const id=n=>'20000000-0000-4000-8000-'+String(n).padStart(12,'0');
  const company=id(1),worker=id(2),station=id(3),provider=id(4),actor=id(5),method=id(6);
  await db.query('insert into workforce(id,company_id,location_id) values($1,$2,$3)',[worker,company,station]);
