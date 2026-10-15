@@ -543,6 +543,8 @@ test("matches controlled provider-report spelling variants without weakening glo
   assert.equal(providerFirstNamesMatch("R Kumar / DROP / 1005", "R KUMAR"), true);
   assert.equal(providerFirstNamesMatch("Thaha mohammad B / SPVAN-DROP / 206139406", "MOHAMMED THAHA"), true);
   assert.equal(providerFirstNamesMatch("Suresh Chandran / DROP / 1011", "CHANDRAN"), true);
+  assert.equal(providerFirstNamesMatch("Muzammil M/SPVAN_DROP/207739487", "MUZAMMIL M K"), true);
+  assert.equal(providerFirstNamesMatch("MUZAMMIL M K", "Muzammil M/SPVAN_DROP/207739487"), true);
   assert.equal(providerFirstNamesMatch("Rajesh Sharma / DROP / 1003", "Ramesh Varma"), false);
   assert.equal(providerFirstNamesMatch("Bhuwneshwar", "Bhuwaneswar"), false);
 });
@@ -558,6 +560,9 @@ test("rejects provider mappings supported only by an initial or a common name to
   assert.equal(providerFirstNamesMatch("R Kumar / DROP / 1008", "RITESH KUMAR"), false);
   assert.equal(providerFirstNamesMatch("Mohammed A / DROP / 1009", "MOHAMMED ABDUL"), false);
   assert.equal(providerFirstNamesMatch("M Kumar / DROP / 1010", "MANOJ KUMAR"), false);
+  assert.equal(providerFirstNamesMatch("M K / DROP / 1016", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Muzamil M / DROP / 1017", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Mohammed M / DROP / 1018", "MOHAMMED M K"), false);
 });
 
 test("recognizes scientific provider IDs without fabricating missing digits", () => {

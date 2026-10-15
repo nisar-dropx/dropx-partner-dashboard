@@ -58,6 +58,7 @@ test("one distinctive name part authorizes a multi-part provider-name match", ()
   ), true);
   assert.equal(providerFirstNamesMatch("Suresh Chandran / DROP / 1", "CHANDRAN"), true);
   assert.equal(providerFirstNamesMatch("Rithesh Kumar / DROP / 2", "RITESH SINGH"), true);
+  assert.equal(providerFirstNamesMatch("Muzammil M/SPVAN_DROP/207739487", "MUZAMMIL M K"), true);
 });
 
 test("common names and initials never provide the single matching name part", () => {
@@ -71,6 +72,9 @@ test("common names and initials never provide the single matching name part", ()
   assert.equal(providerFirstNamesMatch("B / DROP / 2", "BASHEER"), false);
   assert.equal(providerFirstNamesMatch("R KUMAR / DROP / 3", "RITESH KUMAR"), false);
   assert.equal(providerFirstNamesMatch("Bhuwneshwar", "Bhuwaneswar"), false);
+  assert.equal(providerFirstNamesMatch("M K / DROP / 4", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Muzamil M / DROP / 5", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Mohammed M / DROP / 6", "MOHAMMED M K"), false);
 });
 
 test("a verified registered-location mapping permits only Keep all at a second location", () => {

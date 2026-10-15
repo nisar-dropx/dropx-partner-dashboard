@@ -808,9 +808,12 @@ function hasMeaningfulProviderNameEvidence(providerTokens: string[], dropxTokens
   const dropxSubstantiveTokens = dropxTokens.filter((token) => token.length > 1);
   if (!providerSubstantiveTokens.length || !dropxSubstantiveTokens.length) return false;
 
-  // The relaxed rule is only for a multi-part name. Two unrelated one-word
-  // names must not become a match merely because they are similar.
-  const hasMultipleNameParts = providerSubstantiveTokens.length > 1 || dropxSubstantiveTokens.length > 1;
+  // The relaxed rule is only for a name supplied with multiple parts. Count
+  // initials here so that an exact uncommon token can establish identity for
+  // names such as "Muzammil M" and "Muzammil M K". Initials remain excluded
+  // from the meaningful evidence below, and fuzzy evidence still requires two
+  // substantive tokens on both sides.
+  const hasMultipleNameParts = providerTokens.length > 1 || dropxTokens.length > 1;
   if (!hasMultipleNameParts) return false;
 
   const providerMeaningfulTokens = meaningfulProviderNameTokens(providerTokens);
