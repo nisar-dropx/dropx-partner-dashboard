@@ -35,8 +35,7 @@ function daysBetween(fromKey: string, toKey: string) {
 }
 
 function statusOf(activity: ScrubTypeActivity, today: string): Status {
-  if (activity.error) return "unavailable";
-  if (!activity.lastAt) return "none";
+  if (!activity.lastAt) return activity.error ? "unavailable" : "none";
   return dayKey(activity.lastAt) === today ? "done" : "missed";
 }
 
@@ -84,6 +83,7 @@ type Row = {
   status: Status;
   daysScrubbed: number;
   gapDays: number | null;
+  fetchedAt: string | null;
 };
 
 export function ScrubReportView({ stationNames, initialType }: { stationNames: Record<string, string>; initialType: ScrubType }) {
@@ -91,6 +91,7 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
   const [data, setData] = useState<StationScrubActivity[] | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -98,10 +99,10 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
   const [now, setNow] = useState(() => new Date());
 
   const load = useCallback(async (refresh: boolean) => {
-    setLoading(true);
+    (refresh ? setFetching : setLoading)(true);
     setError(null);
     try {
-      const response = await fetch(`/api/ops-pulse/edd/scrub${refresh ? "?refresh=1" : ""}`, { headers: { Accept: "application/json" }, cache: "no-store" });
+      const response = await fetch("/api/ops-pulse/edd/scrub", { method: refresh ? "POST" : "GET", headers: { Accept: "application/json" }, cache: "no-store" });
       const raw = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(raw.error ?? `Request failed (${response.status}).`));
       setData(Array.isArray(raw.stations) ? raw.stations : []);
@@ -110,7 +111,7 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load scrub activity.");
     } finally {
-      setLoading(false);
+      (refresh ? setFetching : setLoading)(false);
     }
   }, []);
 
@@ -147,7 +148,8 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
         activity,
         status,
         daysScrubbed: scrubbedDays.size,
-        gapDays: activity.lastAt ? daysBetween(dayKey(activity.lastAt), today) : null
+        gapDays: activity.lastAt ? daysBetween(dayKey(activity.lastAt), today) : null,
+        fetchedAt: station.fetchedAt
       };
     });
   }, [data, type, today, days, stationNames]);
@@ -171,16 +173,17 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
   }, [rows, filter, search]);
 
   function exportCsv() {
-    const header = ["Station", "Station name", "Scrub type", "Status", "Last scrub (IST)", "Last operator", "Days scrubbed (last 7)", "All invocations (IST · operator)"];
+    const header = ["Station", "Station name", "Scrub type", "Status", "Last scrub (IST)", "Last operator", "Days scrubbed (last 7)", "All invocations (IST · operator)", "Fetched from Amazon (IST)"];
     const lines = visibleRows.map((row) => [
       row.stationCode,
       row.name,
       TYPE_LABEL[type],
-      row.activity.error ? `${STATUS_LABEL[row.status]}: ${row.activity.error}` : STATUS_LABEL[row.status],
+      row.activity.error ? `${STATUS_LABEL[row.status]} (fetch error: ${row.activity.error})` : STATUS_LABEL[row.status],
       row.activity.lastAt ? `${formatFullDateTime(row.activity.lastAt)} (${relative(row.activity.lastAt, now)})` : "",
       row.activity.invocations[0]?.operator ?? "",
       `${row.daysScrubbed}/7`,
-      row.activity.invocations.map((item) => `${formatDateTime(item.at)} · ${item.operator ?? "Unknown"}`).join(" | ")
+      row.activity.invocations.map((item) => `${formatDateTime(item.at)} · ${item.operator ?? "Unknown"}`).join(" | "),
+      row.fetchedAt ? formatDateTime(row.fetchedAt) : ""
     ].map(csvCell).join(","));
     const blob = new Blob([`﻿${[header.map(csvCell).join(","), ...lines].join("\r\n")}`], { type: "text/csv;charset=utf-8" });
     const link = document.createElement("a");
@@ -191,12 +194,17 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
   }
 
   const notDone = counts.none + counts.missed;
+  // The oldest station fetch is what the whole report can vouch for.
+  const lastFetched = useMemo(() => {
+    const times = (data ?? []).map((row) => row.fetchedAt).filter((value): value is string => Boolean(value)).sort();
+    return times[0] ?? null;
+  }, [data]);
   const openRow = openStation ? rows.find((row) => row.stationCode === openStation) ?? null : null;
   const cards: Array<{ key: Filter; label: string; value: number; note: string; tone: string }> = [
     { key: "notDone", label: "Not scrubbed today", value: notDone, note: `${counts.none} with no scrub in 7 days`, tone: "overdue" },
     { key: "done", label: "Scrubbed today", value: counts.done, note: `of ${rows.length} stations`, tone: "future" },
     { key: "none", label: "No scrub in 7 days", value: counts.none, note: "nothing in Amazon's 7-day log", tone: "dueToday" },
-    { key: "unavailable", label: "Unavailable", value: counts.unavailable, note: "Amazon did not answer", tone: "unknown" }
+    { key: "unavailable", label: "Unavailable", value: counts.unavailable, note: "not fetched, or Amazon did not answer", tone: "unknown" }
   ];
 
   return (
@@ -211,12 +219,14 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
             ))}
           </div>
           <div className="panel-head-actions">
-            <span className="subtle">{fetchedAt ? `Updated ${formatDateTime(fetchedAt)}` : ""}</span>
+            <span className="subtle" title="Fetched automatically every morning at 9:10 am IST">
+              {lastFetched ? `Fetched from Amazon ${formatDateTime(lastFetched)} (${relative(lastFetched, now)})` : data ? "Not fetched yet" : ""} · Daily 9:10 am
+            </span>
             <button type="button" className="button secondary" onClick={exportCsv} disabled={!visibleRows.length} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Download size={16} /> Export CSV
             </button>
-            <button type="button" className="button secondary" onClick={() => void load(true)} disabled={loading} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              {loading ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />} {loading ? "Loading…" : "Refresh"}
+            <button type="button" className="button" onClick={() => void load(true)} disabled={loading || fetching} title="Ask Amazon now for every station you can see" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {fetching ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />} {fetching ? "Fetching from Amazon…" : "Fetch now"}
             </button>
           </div>
         </div>
@@ -296,7 +306,11 @@ export function ScrubReportView({ stationNames, initialType }: { stationNames: R
                         {row.status === "missed" && row.gapDays ? (
                           <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>{row.gapDays} day{row.gapDays === 1 ? "" : "s"} since last scrub{row.activity.lastAt ? ` · ${formatDate(row.activity.lastAt)}` : ""}</small>
                         ) : null}
-                        {row.activity.error ? <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>{row.activity.error}</small> : null}
+                        {row.activity.error ? (
+                          <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>
+                            {row.activity.lastAt ? `Last fetch failed, showing the saved result: ${row.activity.error}` : row.activity.error}
+                          </small>
+                        ) : null}
                       </td>
                       <td>
                         {row.activity.lastAt ? (
@@ -358,14 +372,18 @@ function ScrubHistoryModal({ row, type, days, today, now, onClose }: { row: Row;
             <h3>{row.stationCode} · {TYPE_LABEL[type]}</h3>
             <p className="subtle">
               {row.name ? `${row.name} · ` : ""}Last 7 days (IST)
-              {row.activity.error ? "" : ` · ${7 - missed} of 7 days scrubbed${missed ? `, ${missed} missed` : ""}`}
+              {row.status === "unavailable" ? "" : ` · ${7 - missed} of 7 days scrubbed${missed ? `, ${missed} missed` : ""}`}
+              {row.fetchedAt ? ` · fetched ${formatDateTime(row.fetchedAt)}` : ""}
             </p>
           </div>
         </div>
         <div className="panel-body">
           {row.activity.error ? (
-            <p className="subtle" style={{ color: "var(--red)" }}>Amazon did not return scrub activity for this station: {row.activity.error}</p>
-          ) : (
+            <p className="subtle" style={{ color: "var(--red)", marginBottom: 12 }}>
+              {row.activity.lastAt ? `The last fetch failed (${row.activity.error}). Showing the saved result.` : `No scrub activity for this station yet: ${row.activity.error}`}
+            </p>
+          ) : null}
+          {row.activity.error && !row.activity.lastAt ? null : (
             <table className="edd-table">
               <thead><tr><th>Day</th><th>Status</th><th>Invoked at</th><th>Operator</th></tr></thead>
               <tbody>

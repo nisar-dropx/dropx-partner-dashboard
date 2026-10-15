@@ -955,6 +955,8 @@ export type ScrubTypeActivity = {
 
 export type StationScrubActivity = {
   stationCode: string;
+  /** When Amazon was last asked for this station; null before the first fetch. */
+  fetchedAt: string | null;
   inStation: ScrubTypeActivity;
   onRoad: ScrubTypeActivity;
 };
@@ -977,7 +979,11 @@ function normalizeScrubType(raw: unknown): ScrubTypeActivity {
   };
 }
 
-/** Live In-Station and On-Road scrub invocations (last 7 days) for the given stations. */
+/**
+ * In-Station and On-Road scrub invocations (last 7 days) for the given stations.
+ * Reads the worker's saved report (morning sweep or last manual fetch); `refresh`
+ * asks Amazon now and saves the result for everyone.
+ */
 export async function fetchScrubNetwork(stations: string[], options: { refresh?: boolean } = {}): Promise<{ fetchedAt: string; stations: StationScrubActivity[] }> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
@@ -985,14 +991,13 @@ export async function fetchScrubNetwork(stations: string[], options: { refresh?:
   }
   // An empty list would mean "every station" to the worker.
   if (!stations.length) return { fetchedAt: new Date().toISOString(), stations: [] };
-  const url = new URL(`${baseUrl}/api/admin/executive/edd/scrub/network`);
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/scrub/network${options.refresh ? "/refresh" : ""}`);
   url.searchParams.set("stations", stations.join(","));
-  if (options.refresh) url.searchParams.set("refresh", "1");
   const response = await fetch(url.toString(), {
-    method: "GET",
+    method: options.refresh ? "POST" : "GET",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(55000)
+    signal: AbortSignal.timeout(options.refresh ? 55000 : 15000)
   });
   const raw = await readJson(response);
   if (!response.ok) {
@@ -1005,6 +1010,7 @@ export async function fetchScrubNetwork(stations: string[], options: { refresh?:
         const entry = (row ?? {}) as Record<string, unknown>;
         return {
           stationCode: String(entry.stationCode ?? "").toUpperCase(),
+          fetchedAt: typeof entry.fetchedAt === "string" && !Number.isNaN(Date.parse(entry.fetchedAt)) ? entry.fetchedAt : null,
           inStation: normalizeScrubType(entry.inStation),
           onRoad: normalizeScrubType(entry.onRoad)
         };
