@@ -33,6 +33,7 @@ export function validAuditRecipientRule(rule: unknown) {
 /** The recipient picker uses active Operations accounts with Audit access. */
 export async function loadAuditNotificationUsers(
   companyId: string,
+  pageCode = "station_audits",
 ): Promise<AuditNotificationUser[]> {
   if (!supabaseAdmin) throw new Error("Database service unavailable.");
   const db = supabaseAdmin;
@@ -70,7 +71,7 @@ export async function loadAuditNotificationUsers(
       .from("app_pages")
       .select("id")
       .eq("company_id", companyId)
-      .eq("code", "station_audits")
+      .eq("code", pageCode)
       .eq("is_active", true),
   ]);
   for (const r of [profiles, memberships, roles, pages])
@@ -136,10 +137,11 @@ export async function resolveStationAuditRecipients(
   >,
   toRules: string[],
   ccRules: string[],
+  pageCode = "station_audits",
 ) {
   if (!supabaseAdmin) throw new Error("Database service unavailable.");
   const rules = [...toRules, ...ccRules];
-  const users = await loadAuditNotificationUsers(companyId);
+  const users = await loadAuditNotificationUsers(companyId, pageCode);
   const scoped = users.filter(
     (u) => u.allLocations || u.stationIds.includes(station.id),
   );

@@ -44,7 +44,8 @@ export async function cpsScope(auth: AuthorizationContext, params: CpsParams, gr
     topology = (result.data ?? []) as Topology[];
   }
   const byId = new Map(topology.map(l => [l.id, l]));
-  const all = permitted.map(l => {
+  const exactScope = params.scope === undefined ? null : new Set(selectedCpsStations(params.scope));
+  const all = permitted.filter(l => exactScope === null || exactScope.has(l.station_code)).map(l => {
     const is_xpt = locationModelName(l).toLowerCase() === "xpt";
     const parentId = byId.get(l.id)?.parent_station_id;
     return { ...l, is_xpt, parent_station_code: is_xpt && parentId ? byId.get(parentId)?.station_code || "" : "" };

@@ -5,7 +5,7 @@ import {supabaseAdmin} from '@/lib/supabase-admin';
 import {readAllRows} from '@/lib/supabase-pagination';
 import {loadCodLocations,locationModelName,todayKolkata} from './cod';
 import {loadCpsSnapshot} from './cps-snapshot';
-import {cpsPeriod,type CpsParams} from './cps';
+import {cpsPeriod,selectedCpsStations,type CpsParams} from './cps';
 import {contractDaily,effectiveOn,roundMoney,type CostContract,type NowVolume} from '@/lib/finance/now';
 export async function darkStoreScope(a:AuthorizationContext){
  const companyId=requireCompanyId(a);if(!supabaseAdmin)throw Error('Data is temporarily unavailable.');
@@ -14,6 +14,8 @@ export async function darkStoreScope(a:AuthorizationContext){
 }
 export async function loadCpu(a:AuthorizationContext,params:CpsParams){
  const c=await darkStoreScope(a),period=cpsPeriod(params,todayKolkata());
+ const scope=params.scope===undefined?null:new Set(selectedCpsStations(params.scope));
+ c.locations=c.locations.filter(l=>scope===null||scope.has(l.station_code));
  const selected=c.locations.filter(l=>!params.station||l.station_code===params.station);
  if(params.station&&!selected.length)throw Error('This store is outside your authorized access.');
  if(!selected.length)return {period,locations:c.locations,rows:[]};
@@ -31,7 +33,9 @@ export async function loadCpu(a:AuthorizationContext,params:CpsParams){
   for(const contract of contracts.filter(x=>x.station_code===l.station_code))for(const date of dates){const amount=contractDaily(contract,date);if(amount)lines.push({date,head:contract.label,source:'Finance contract',amount});}
   let units=0,missing=false;for(const date of dates){const volume=v.data?.find(x=>x.station_code===l.station_code&&x.month.slice(0,7)===date.slice(0,7));if(!volume)missing=true;else units+=Number(volume.units)/Number(volume.through_date.slice(8));}
   const groups=Object.values(lines.reduce<Record<string,{head:string;amount:number;lines:typeof lines}>>((acc,x)=>{const row=acc[x.head]??={head:x.head,amount:0,lines:[]};row.amount+=x.amount;row.lines.push(x);return acc;},{}));
-  const cost=roundMoney(lines.reduce((s,x)=>s+x.amount,0)),unitCount=missing?null:units;
-  return {code:l.station_code,name:l.station_name,city:l.city,category:m.data?.find(r=>r.kind==='now_store'&&r.data.station_code===l.station_code&&effectiveOn(r.data,period.to))?.data.category||'Not mapped',units:unitCount,cpu:unitCount&&unitCount>0?cost/unitCount:null,cost,days:dates.size,through:[...dates].sort().at(-1)||null,groups:groups.map(g=>({...g,amount:roundMoney(g.amount),cpu:unitCount&&unitCount>0?g.amount/unitCount:null})),notes:[...(missing?['Monthly unit count is not entered.']:[]),...(!contracts.some(x=>x.station_code===l.station_code)?['Confirm outsourced contracts in Finance Master.']:[])]};
+  const cost=roundMoney(lines.reduce((s,x)=>s+x.amount,0)),unitCount=missing||!dates.size?null:units;
+  const costIssues=(snapshot.gaps??[]).filter(g=>g.station_code===l.station_code&&[...dates].some(date=>g.first_date<=date&&g.last_date>=date)).length;
+  const provisional=!dates.size || costIssues>0 || days.some(d=>d.utr_configured===false || Number(d.cost_gaps??0)>0);
+  return {code:l.station_code,name:l.station_name,city:l.city,category:m.data?.find(r=>r.kind==='now_store'&&r.data.station_code===l.station_code&&effectiveOn(r.data,period.to))?.data.category||'Not mapped',units:unitCount,provisional,costIssues,cpu:unitCount&&unitCount>0?cost/unitCount:null,cost,days:dates.size,through:[...dates].sort().at(-1)||null,groups:groups.map(g=>({...g,amount:roundMoney(g.amount),cpu:unitCount&&unitCount>0?g.amount/unitCount:null})),notes:[...(provisional?['Cost sources are incomplete; this CPU is provisional.']:[]),...(missing?['Monthly unit count is not entered.']:[]),...(!contracts.some(x=>x.station_code===l.station_code)?['Confirm outsourced contracts in Finance Master.']:[])]};
  });return {period,locations:c.locations,rows};
 }
