@@ -119,5 +119,5 @@ export const loadDistanceRegister = unstable_cache(
     });
   },
   ["ops-capacity-distance-v2"],
-  { revalidate: 60 },
+  { revalidate: 60, tags: ["ops-capacity-distance"] },
 );
