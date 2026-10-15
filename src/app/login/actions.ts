@@ -53,8 +53,9 @@ export async function signInWithGoogle(formData: FormData) {
   const requestHeaders = headers();
   const origin = authOriginFromHeaders(requestHeaders);
   const supabase = createServerSupabaseClient(undefined, origin === "https://ops.dropxlogistics.com" ? false : undefined);
-  if (!supabase) redirect("/login?error=Authentication%20is%20not%20configured");
   const nextPath = safeNextPath(formData.get("next"));
+  const loginError = (message: string) => `/login?${new URLSearchParams({ error: message, ...(nextPath ? { next: nextPath } : {}) })}`;
+  if (!supabase) redirect(loginError("Authentication is not configured"));
   // Supabase already allowlists the dashboard callback. Use it for the Ops
   // subdomain as well; auth cookies are scoped to .dropxlogistics.com, and the
   // dashboard middleware hands /ops-pulse back to the dedicated Ops app.
@@ -63,6 +64,11 @@ export async function signInWithGoogle(formData: FormData) {
     : origin;
   const callbackUrl = new URL("/auth/callback", callbackOrigin);
   if (origin === "https://ops.dropxlogistics.com") {
+    // The Dashboard callback hands the session back here. Keep the destination
+    // on the Ops host so that shared callback needs no cross-product change.
+    cookies().set("dropx_ops_auth_next", nextPath || "/", {
+      httpOnly: true, sameSite: "lax", secure: true, path: "/", maxAge: 10 * 60
+    });
     cookies().set("dropx_ops_auth_return", "1", {
       domain: ".dropxlogistics.com",
       httpOnly: true,
@@ -86,11 +92,11 @@ export async function signInWithGoogle(formData: FormData) {
   });
 
   if (error || !data.url) {
-    redirect(`/login?error=${encodeURIComponent(error?.message ?? "Unable to start Google login")}`);
+    redirect(loginError(error?.message ?? "Unable to start Google login"));
   }
 
   const unreachable = await authUnreachableMessage();
-  if (unreachable) redirect(`/login?error=${encodeURIComponent(unreachable)}`);
+  if (unreachable) redirect(loginError(unreachable));
 
   redirect(data.url);
 }

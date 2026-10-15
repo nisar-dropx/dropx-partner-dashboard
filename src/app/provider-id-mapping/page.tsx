@@ -1,3 +1,4 @@
+import { providerMappingEntryFilters } from "@/lib/provider-mapping-navigation";
 import { cookies } from "next/headers";
 import { dashboardDateInputValue } from "@/lib/date-format";
 import Link from "next/link";
@@ -26,7 +27,7 @@ function flash() {
   try { return raw ? JSON.parse(raw) as { error?: string; notice?: string } : {}; } catch { return {}; }
 }
 
-export default async function ProviderIdMappingPage({searchParams}: {searchParams?: {q?:string;station?:string}}) {
+export default async function ProviderIdMappingPage({searchParams}: {searchParams?: {q?:string;station?:string;month?:string;mapping?:string}}) {
   const pageCode = currentProviderMappingPageCode();
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
@@ -199,6 +200,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     lookupEntries.push({ key: `provider:${providerMemberKey(row.stationId,row.providerMemberId)}`, stationId: row.stationId, stationLabel: row.stationLabel, workforceId: "", dropxId: "", fullName: "", providerMemberId: row.providerMemberId, providerMemberName: row.providerMemberName, profileLocationLabel: "", history: [] });
   }
   const shipmentMonths = [...new Set(providerMembers.filter((member) => stationByCode.has(member.stationCode.toUpperCase())).flatMap((member) => member.shipmentMonths))];
+  const entryFilters = providerMappingEntryFilters(searchParams, dashboardDateInputValue());
   const requestedStation = String(searchParams?.station ?? "").trim();
   const initialStationId = stations.find((station) => station.id === requestedStation || String(station.station_code ?? "").trim().toUpperCase() === requestedStation.toUpperCase())?.id ?? "";
 
@@ -208,6 +210,6 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet lookupEntries={lookupEntries} initialOutboundMonth={dashboardDateInputValue().slice(0, 7)} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet lookupEntries={lookupEntries} initialOutboundMonth={entryFilters.month} initialMappingStatus={entryFilters.mapping} shipmentMonths={shipmentMonths} initialQuery={searchParams?.q} initialStationId={initialStationId} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }
