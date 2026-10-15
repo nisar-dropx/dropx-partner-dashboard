@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   providerFirstLocationIsAllowed,
+  providerFirstLocationNeedsDates,
   providerFirstLocationRemap,
   providerFirstMappingPeriodContains,
   providerFirstMappingReferenceForRow,
@@ -57,6 +58,7 @@ test("one distinctive name part authorizes a multi-part provider-name match", ()
   ), true);
   assert.equal(providerFirstNamesMatch("Suresh Chandran / DROP / 1", "CHANDRAN"), true);
   assert.equal(providerFirstNamesMatch("Rithesh Kumar / DROP / 2", "RITESH SINGH"), true);
+  assert.equal(providerFirstNamesMatch("Muzammil M/SPVAN_DROP/207739487", "MUZAMMIL M K"), true);
 });
 
 test("common names and initials never provide the single matching name part", () => {
@@ -70,6 +72,9 @@ test("common names and initials never provide the single matching name part", ()
   assert.equal(providerFirstNamesMatch("B / DROP / 2", "BASHEER"), false);
   assert.equal(providerFirstNamesMatch("R KUMAR / DROP / 3", "RITESH KUMAR"), false);
   assert.equal(providerFirstNamesMatch("Bhuwneshwar", "Bhuwaneswar"), false);
+  assert.equal(providerFirstNamesMatch("M K / DROP / 4", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Muzamil M / DROP / 5", "MUZAMMIL M K"), false);
+  assert.equal(providerFirstNamesMatch("Mohammed M / DROP / 6", "MOHAMMED M K"), false);
 });
 
 test("a verified registered-location mapping permits only Keep all at a second location", () => {
@@ -119,6 +124,7 @@ test("a closed registered-location mapping permits only fully contained bounded 
   assert.equal(providerFirstLocationIsAllowed(narrowerSeptember, historicalWorker), true);
   assert.deepEqual(providerFirstLocationRemap(exactSeptember, historicalWorker), {
     kind: "location",
+    allowKeepAll: true,
     allowMove: false,
     mappingId: "mapping-history",
     providerMemberId: "2000074247130",
@@ -141,6 +147,54 @@ test("a closed registered-location mapping permits only fully contained bounded 
     assert.equal(providerFirstLocationIsAllowed(outsideAnchor, historicalWorker), false);
     assert.equal(providerFirstLocationRemap(outsideAnchor, historicalWorker), null);
   }
+});
+
+test("location validation waits for a start date when an exact registered mapping exists", () => {
+  const registeredMapping = {
+    mappingId: "mapping-history",
+    stationId: "station-a",
+    locationLabel: "KGQC",
+    providerId: "provider-1",
+    mappedProviderMemberId: "2000074247130",
+    paymentMethodId: "method-1",
+    paymentValues: {},
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: "",
+    effectiveFrom: "2026-09-01",
+    effectiveTo: "2026-09-30",
+    status: "closed"
+  };
+  const historicalWorker = {
+    ...baseWorker,
+    mappingId: "",
+    paymentMethodId: "",
+    mappedProviderMemberId: "",
+    effectiveFrom: "",
+    effectiveTo: "",
+    registeredLocationMappings: [registeredMapping]
+  };
+  const awaitingStartDate = {
+    ...secondLocationRow,
+    mappingId: "",
+    effectiveFrom: "",
+    effectiveTo: ""
+  };
+
+  assert.equal(providerFirstLocationNeedsDates(awaitingStartDate, baseWorker), true);
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, baseWorker), false);
+  assert.equal(providerFirstLocationRemap(awaitingStartDate, baseWorker), null);
+  assert.equal(providerFirstLocationNeedsDates(awaitingStartDate, historicalWorker), true);
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, historicalWorker), false);
+  assert.equal(providerFirstLocationRemap(awaitingStartDate, historicalWorker), null);
+  assert.equal(providerFirstLocationIsAllowed({
+    ...awaitingStartDate,
+    effectiveFrom: "2026-10-01",
+    effectiveTo: "2026-10-31"
+  }, historicalWorker), false);
+  assert.equal(providerFirstLocationIsAllowed(awaitingStartDate, {
+    ...historicalWorker,
+    registeredLocationMappings: [{ ...registeredMapping, mappedProviderMemberId: "another-member" }]
+  }), false);
 });
 
 test("the exact closed mapping remains the edit target when it is reopened at the same location", () => {
@@ -472,7 +526,7 @@ test("the location exception fails closed without exact registered-location iden
   }), false);
 });
 
-test("a mapping may still be moved back to the profile's registered location", () => {
+test("a mapping may be moved or kept when restoring the profile's registered location", () => {
   const registeredLocationRow = {
     ...secondLocationRow,
     stationId: "station-a",
@@ -484,5 +538,7 @@ test("a mapping may still be moved back to the profile's registered location", (
     locationLabel: "KGQE"
   };
   assert.equal(providerFirstLocationIsAllowed(registeredLocationRow, driftedWorker), true);
-  assert.notEqual(providerFirstLocationRemap(registeredLocationRow, driftedWorker)?.allowMove, false);
+  const remap = providerFirstLocationRemap(registeredLocationRow, driftedWorker);
+  assert.equal(remap?.allowMove, true);
+  assert.equal(remap?.allowKeepAll, true);
 });

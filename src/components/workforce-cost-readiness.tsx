@@ -10,7 +10,7 @@ export async function WorkforceCostReadiness({auth}:{auth:AuthorizationContext})
   const company=requireCompanyId(auth),today=todayKolkata();
   const [workers,designations,maps,allocations]=await Promise.all([
     supabaseAdmin.from('workforce').select('id,location_id,designation_id,designation').eq('company_id',company).eq('is_active',true).is('deleted_at',null).limit(1000),
-    supabaseAdmin.from('designations').select('id,code,name,is_field_operations,provider_mapping_required').eq('company_id',company).eq('is_active',true).limit(1000),
+    supabaseAdmin.from('designations').select('id,code,name,provider_mapping_required').eq('company_id',company).eq('is_active',true).limit(1000),
     supabaseAdmin.from('field_executive_provider_mappings').select('workforce_id,provider_member_id,payment_method_id,payment_values,effective_from,effective_to,delivery_rate,guarantee_amount').eq('company_id',company).in('status',['active','closed']).lte('effective_from',today).limit(1000),
     supabaseAdmin.from('workforce_payment_allocations').select('workforce_id,payment_method_id,payment_values,effective_from,effective_to').eq('company_id',company).in('status',['active','closed']).lte('effective_from',today).limit(1000),
   ]);
@@ -20,7 +20,7 @@ export async function WorkforceCostReadiness({auth}:{auth:AuthorizationContext})
     .map(value=>[String(value??'').trim().toLowerCase(),row] as const)));
   const scoped=(workers.data??[]).filter(w=>{
     const policy=policyById.get(String(w.designation_id??''))??policyByName.get(String(w.designation??'').trim().toLowerCase());
-    return policy?.is_field_operations && (auth.hasAllLocationAccess || auth.locationScopeIds.includes(w.location_id));
+    return Boolean(policy) && (auth.hasAllLocationAccess || auth.locationScopeIds.includes(w.location_id));
   });
   let unlinked=0,unpriced=0,directUnpriced=0;
   for(const w of scoped){const active=(maps.data??[]).filter(m=>m.workforce_id===w.id && (!m.effective_to||m.effective_to>=today));

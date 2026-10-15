@@ -14,6 +14,7 @@ import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provi
 import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
 import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import {
+  buildProviderFirstWorkerSelectionIndex,
   filterProviderFirstRowIndexes,
   providerMappingMonthOptions,
   isScientificProviderMemberId,
@@ -200,6 +201,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       ? `Mapped: ${worker.locationLabel} · Profile: ${worker.profileLocationLabel ?? "No location"}`
       : worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
   })), [workerRows]);
+  const workerSelectionIndex = useMemo(
+    () => buildProviderFirstWorkerSelectionIndex(workerRows, rows),
+    [workerRows, rows]
+  );
   const stations = useMemo(() => Array.from(new Map(rows.map((row) => [row.stationId, row.stationLabel])).entries()), [rows]);
   const dirtyRows = useMemo(() => rows.map((row, index) => {
     const thresholdConfig = row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig ?? null;
@@ -236,6 +241,15 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   }), [baselineRows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
+  const selectableWorkerOptionsByIndex = useMemo(() => new Map(paginatedIndexes.map((index) => {
+    const row = rows[index];
+    return [index, workerOptions.filter((option) => providerFirstWorkerIsSelectable(
+      row,
+      workerById.get(option.value)!,
+      rows,
+      workerSelectionIndex
+    ))] as const;
+  })), [paginatedIndexes, rows, workerOptions, workerById, workerSelectionIndex]);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<"xlsx" | "csv">("xlsx");
   const [exportFilters, setExportFilters] = useState<ExportFilters>(emptyExportFilters);
@@ -329,12 +343,16 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     if (Object.prototype.hasOwnProperty.call(change, "paymentMethodId")) {
       setPaymentTemplateSources(current => { const next = { ...current }; delete next[index]; return next; });
     }
+    // Confirmations are effective-period snapshots. Any edited field must be
+    // validated again before Move or Keep all can be submitted.
+    setReplacementConfirmation(null);
     setSaveNotice(null);
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   }
 
   function updateEffectivePeriod(index: number, change: Pick<ProviderFirstMappingRow, "effectiveFrom"> | Pick<ProviderFirstMappingRow, "effectiveTo">) {
     setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
+    setReplacementConfirmation(null);
     setSaveNotice(null);
     setRows((current) => current.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
@@ -948,6 +966,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const locationNeedsDates = providerFirstLocationNeedsDates(row, selectedWorker);
         const locationMismatch = Boolean(selectedWorker && !locationNeedsDates && !providerFirstLocationIsAllowed(row, selectedWorker));
         const profileLocationDrift = Boolean(selectedWorker?.profileStationId && selectedWorker.profileStationId !== selectedWorker.stationId);
+        const priorMappingLocations = [...new Set(row.history.map((entry) => entry.locationLabel).filter(Boolean))];
         const selectedPaymentMethod = paymentMethodById.get(row.paymentMethodId);
         const productionThresholdConfig = row.productionThresholdConfig ?? selectedPaymentMethod?.productionThresholdConfig ?? null;
         const rowPaymentOptions = selectedPaymentMethod?.isActive === false
@@ -966,7 +985,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions.filter(option => providerFirstWorkerIsSelectable(row, workerById.get(option.value)!, rows))} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>
@@ -976,9 +995,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             </label> : null}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">{!baselineRows[index].workforceId && !row.paymentMethodId ? "Choose the payment method, rates and start date. Previous payment details are in History. " : ""}Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</p></div>
             {copiedPayment ? <div className="mapping-period-help" role="status"><strong>Previous payment details loaded.</strong> Method and rates copied from {paymentMethodById.get(copiedPayment.paymentMethodId)?.name ?? "previous payment method"} · {copiedPayment.locationLabel} · {copiedPayment.effectiveFrom} to {copiedPayment.effectiveTo || "Ongoing"}. Review the rates and choose dates for this assignment before saving. Previous dates were not copied.</div> : previousPayment ? <div className="mapping-period-help">Previous payment details are available from {previousPayment.effectiveFrom} to {previousPayment.effectiveTo || "Ongoing"}. Use them below to copy the method and rates; enter dates for this assignment.</div> : null}
+            {!row.mappingId && priorMappingLocations.length ? <div className="mapping-period-help"><strong>Existing mapping history:</strong> {priorMappingLocations.join(", ")}. This {row.stationLabel} row is not mapped; save its own effective-dated mapping before using this location&apos;s activity for payout.</div> : null}
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
-            {locationNeedsDates ? <div className="mapping-period-help" role="status">Registered at {selectedWorker?.profileLocationLabel}. This provider ID already has a mapping there. Enter the effective dates to validate the additional {row.stationLabel} assignment. Location is checked from the Workforce record, not the prefix of the DropX ID.</div> : null}
-            {locationRemap ? <div className="mapping-period-help">{locationRemap.allowMove === false ? `Additional location: ${locationRemap.newLocationLabel}. Use Keep all when saving to preserve the existing ${locationRemap.existingLocationLabel} mapping.` : `Location change: ${locationRemap.existingLocationLabel} → ${locationRemap.newLocationLabel}.`} Save this location mapping before adding payment periods.</div> : null}
+            {locationNeedsDates ? <div className="mapping-period-help" role="status">{row.stationId === selectedWorker?.profileStationId ? `Currently mapped at ${selectedWorker.locationLabel}. Enter Effective from to validate the move to the registered location ${selectedWorker.profileLocationLabel}.` : `Registered at ${selectedWorker?.profileLocationLabel}. This provider ID already has a mapping there. Enter the effective dates to validate the additional ${row.stationLabel} assignment.`} Location is checked from the Workforce record, not the prefix of the DropX ID.</div> : null}
+            {locationRemap ? <div className="mapping-period-help">{locationRemap.allowMove === false ? `Additional location: ${locationRemap.newLocationLabel} from ${locationRemap.effectiveFrom}. Use Keep all when saving to preserve the existing ${locationRemap.existingLocationLabel} mapping for this period.` : `Location change: ${locationRemap.existingLocationLabel} → ${locationRemap.newLocationLabel} from ${locationRemap.effectiveFrom}. The earlier location remains unchanged before this date.`} Save this location mapping before adding payment periods.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
@@ -997,7 +1017,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       const active = replacementConfirmation.replacements[replacementConfirmation.cursor];
       return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setReplacementConfirmation(null); }}>
         <section aria-labelledby="provider-replacement-title" aria-modal="true" className="modal-panel confirmation-dialog" role="alertdialog">
-          <div className="modal-head"><div><h2 id="provider-replacement-title">{active.replacement.kind === "location" ? "Move mapping to new location?" : "Replace existing mapping?"}</h2></div></div>
+          <div className="modal-head"><div><h2 id="provider-replacement-title">{active.replacement.kind === "location" ? "Choose location mapping action" : "Replace existing mapping?"}</h2></div></div>
           <div className="confirmation-body"><p style={{ whiteSpace: "pre-line" }}>{providerFirstMappingReplacementMessage(active.replacement)}</p></div>
           <div className="form-actions modal-actions confirmation-actions">
             <button className="button secondary" disabled={isSaving} onClick={() => setReplacementConfirmation(null)} type="button">Cancel</button>

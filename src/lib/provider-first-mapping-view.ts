@@ -67,6 +67,11 @@ export type ProviderFirstMappingRowView = {
 
 export type MappingStationTopology = { id: string; parent_station_id?: string | null; provider_id?: string | null; modelCode: string };
 
+export type ProviderFirstWorkerSelectionIndex = {
+  occupiedIdentityKeysByWorkerId: ReadonlyMap<string, ReadonlySet<string>>;
+  draftIdentityKeysByWorkerId: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
 /** Only the configured XPT/parent family shares associates; names/codes are not relationships. */
 export function providerMappingStationFamily(stationId: string, stations: MappingStationTopology[]) {
   const station = stations.find((item) => item.id === stationId);
@@ -85,11 +90,62 @@ export function providerMappingStationFamily(stationId: string, stations: Mappin
  * validated after selection so every account-authorized associate remains
  * searchable, including the registered-location exception workflow.
  */
-export function providerFirstWorkerIsSelectable(row: ProviderFirstMappingRowView, worker: ProviderFirstWorkerView, drafts: ProviderFirstMappingRowView[] = []) {
+function providerFirstSelectionIdentity(providerId: string, providerMemberId: string) {
+  return `${providerId}\u0000${providerMemberKey("", providerMemberId)}`;
+}
+
+/**
+ * Builds the assignment-conflict evidence once for a worksheet render. Without
+ * this index every visible row scans every worker and then every draft row,
+ * which makes typing in the worksheet search quadratic on large companies.
+ */
+export function buildProviderFirstWorkerSelectionIndex(
+  workers: ProviderFirstWorkerView[],
+  drafts: ProviderFirstMappingRowView[],
+  today = mappingLookupToday()
+): ProviderFirstWorkerSelectionIndex {
+  const occupiedIdentityKeysByWorkerId = new Map<string, Set<string>>();
+  for (const worker of workers) {
+    const occupied = [
+      ...currentWorkerMappings(worker),
+      ...(worker.mappingHistory ?? []).filter((item) => item.status === "closed" && item.effectiveTo >= today)
+    ];
+    occupiedIdentityKeysByWorkerId.set(worker.id, new Set(occupied.map((item) => (
+      providerFirstSelectionIdentity(item.providerId, item.mappedProviderMemberId)
+    ))));
+  }
+
+  const draftIdentityKeysByWorkerId = new Map<string, Set<string>>();
+  for (const draft of drafts) {
+    if (!draft.workforceId) continue;
+    const identities = draftIdentityKeysByWorkerId.get(draft.workforceId) ?? new Set<string>();
+    identities.add(providerFirstSelectionIdentity(draft.providerId, draft.providerMemberId));
+    draftIdentityKeysByWorkerId.set(draft.workforceId, identities);
+  }
+  return { occupiedIdentityKeysByWorkerId, draftIdentityKeysByWorkerId };
+}
+
+export function providerFirstWorkerIsSelectable(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView,
+  drafts: ProviderFirstMappingRowView[] = [],
+  selectionIndex?: ProviderFirstWorkerSelectionIndex
+) {
   if (row.workforceId === worker.id) return true;
   if (worker.hasRestrictedMapping) return false;
-  const identityMatches = (providerId: string, memberId: string) => providerId === row.providerId
-    && providerMemberKey("", memberId) === providerMemberKey("", row.providerMemberId);
+  const targetIdentityKey = providerFirstSelectionIdentity(row.providerId, row.providerMemberId);
+  if (selectionIndex) {
+    const occupiedIdentities = selectionIndex.occupiedIdentityKeysByWorkerId.get(worker.id);
+    if (occupiedIdentities
+      && (occupiedIdentities.size > 1 || (occupiedIdentities.size === 1 && !occupiedIdentities.has(targetIdentityKey)))) return false;
+    const draftIdentities = selectionIndex.draftIdentityKeysByWorkerId.get(worker.id);
+    if (draftIdentities
+      && (draftIdentities.size > 1 || (draftIdentities.size === 1 && !draftIdentities.has(targetIdentityKey)))) return false;
+    return true;
+  }
+  const identityMatches = (providerId: string, memberId: string) => (
+    providerFirstSelectionIdentity(providerId, memberId) === targetIdentityKey
+  );
   const occupied = [...currentWorkerMappings(worker), ...(worker.mappingHistory ?? []).filter(item => item.status === "closed" && item.effectiveTo >= mappingLookupToday())];
   if (occupied.some((item) => !identityMatches(item.providerId, item.mappedProviderMemberId))) return false;
   if (drafts.some((item) => item !== row && item.workforceId === worker.id
@@ -133,19 +189,31 @@ export function providerFirstLocationRemap(
   const reference = providerFirstMappingReferenceForRow(row, worker);
   if (!worker
     || !reference
+    || !isIsoCalendarDate(row.effectiveFrom)
     || !row.workforceId
     || row.workforceId !== worker.id
     || !reference.mappingId
     || (row.mappingId && row.mappingId !== reference.mappingId)
     || reference.stationId === row.stationId
+    // A future mapping is valid evidence when its own start date is being
+    // edited at the same location, but it can never be the source of an
+    // earlier cross-location move. Relocation starts at Effective from; the
+    // source mapping must already exist on that date.
+    || reference.effectiveFrom > row.effectiveFrom
     || reference.providerId !== row.providerId
     || !sameProviderMember(reference.mappedProviderMemberId, row.providerMemberId)
     || !providerFirstLocationIsAllowed(row, worker)) {
     return null;
   }
+  const movesToRegisteredLocation = row.stationId === String(worker.profileStationId ?? "").trim();
   return {
     kind: "location",
-    ...(row.stationId === String(worker.profileStationId ?? "").trim() ? {} : { allowMove: false }),
+    // The same owner can either move the mapping or keep both locations when
+    // restoring the registered-location mapping. The database records the
+    // concurrent period explicitly, without changing the older mapping ID or
+    // its effective-date history.
+    allowKeepAll: true,
+    allowMove: movesToRegisteredLocation,
     mappingId: reference.mappingId,
     providerMemberId: row.providerMemberId,
     providerMemberName: row.providerMemberName,
@@ -274,6 +342,47 @@ function mappingPeriodContainsRow(
   );
 }
 
+/**
+ * Select the exact current mapping that exists on a relocation's start date.
+ * More than one location may be open after Keep all, so input/query order must
+ * never decide which mapping Move will close. The latest mapping that already
+ * exists on the requested date is the deterministic source. If every mapping
+ * starts later, retain the earliest future mapping only as UI evidence; the
+ * relocation guard will prevent using it before its own effective date.
+ */
+function currentMappingForRelocation(
+  mappings: ProviderFirstRegisteredMappingView[],
+  row: Pick<ProviderFirstMappingRowView, "effectiveFrom" | "effectiveTo">
+) {
+  const requestedFrom = String(row.effectiveFrom ?? "").trim();
+  const candidates = [...mappings].sort((left, right) =>
+    right.effectiveFrom.localeCompare(left.effectiveFrom)
+      || right.mappingId.localeCompare(left.mappingId)
+  );
+  if (!isIsoCalendarDate(requestedFrom)) return candidates[0];
+  const effective = candidates.find((mapping) =>
+    isIsoCalendarDate(mapping.effectiveFrom) && mapping.effectiveFrom <= requestedFrom
+  );
+  if (effective) return effective;
+  const futureCandidates = candidates.sort((left, right) =>
+    left.effectiveFrom.localeCompare(right.effectiveFrom)
+      || left.mappingId.localeCompare(right.mappingId)
+  );
+  // A bounded earlier row is a new historical interval only when it ends
+  // before every later scheduled mapping. If a future mapping starts inside
+  // the requested interval, keep it as the overlapping edit reference.
+  const requestedTo = String(row.effectiveTo ?? "").trim();
+  if (isIsoCalendarDate(requestedTo)) {
+    return futureCandidates.find((mapping) =>
+      isIsoCalendarDate(mapping.effectiveFrom) && mapping.effectiveFrom <= requestedTo
+    );
+  }
+  // For an open-ended relocation, retain the earliest future mapping only as
+  // conflict evidence so the effective-date guard can explain why it cannot be
+  // moved yet.
+  return futureCandidates[0];
+}
+
 /** A previous rate card is a user-selected template, never a new assignment's dates or edit ID. */
 export function providerFirstPaymentTemplateForRow(row: ProviderFirstMappingRowView, worker: ProviderFirstWorkerView | undefined) {
   if (!worker || worker.id !== row.workforceId) return undefined;
@@ -346,9 +455,13 @@ export function providerFirstMappingReferenceForRow(
   if (conflictingCurrent) return conflictingCurrent;
 
   // Moving a matching active mapping back to the profile's registered station
-  // remains the ordinary correction path.
+  // remains the ordinary correction path. Do not reuse a future mapping as the
+  // edit ID for an earlier bounded period; that period is a new historical row.
   if (row.stationId === registeredStationId) {
-    return currentMappings.find((mapping) => mappingIdentityMatchesRow(mapping, row));
+    return currentMappingForRelocation(
+      currentMappings.filter((mapping) => mappingIdentityMatchesRow(mapping, row)),
+      row
+    );
   }
   return undefined;
 }
@@ -393,8 +506,11 @@ export function providerFirstLocationNeedsDates(
   worker: ProviderFirstWorkerView | undefined
 ) {
   if (!worker || worker.id !== row.workforceId || row.effectiveFrom
-    || !worker.profileStationId || row.stationId === worker.profileStationId) return false;
-  return registeredWorkerMappings(worker).some((mapping) =>
+    || !worker.profileStationId) return false;
+  const anchors = row.stationId === worker.profileStationId
+    ? currentWorkerMappings(worker).filter((mapping) => mapping.stationId !== row.stationId)
+    : registeredWorkerMappings(worker);
+  return anchors.some((mapping) =>
     Boolean(mapping.mappingId) && mappingIdentityMatchesRow(mapping, row)
   );
 }
@@ -436,7 +552,15 @@ export function providerFirstLocationIsAllowed(
     const historicalMatch = registeredWorkerMappings(worker).some((mapping) =>
       mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
     );
-    return historicalMatch || !currentMappings.length || currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row));
+    if (historicalMatch || !currentMappings.length) return true;
+    if (!currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row))) return false;
+    // Editing a mapping already at the destination may change its own start
+    // date. A cross-location relocation is different: its source must have
+    // started by the requested move date, otherwise that future location is
+    // being used outside its effective period.
+    return currentMappings.some((mapping) => mapping.stationId === row.stationId)
+      || currentMappings.some((mapping) => isIsoCalendarDate(row.effectiveFrom)
+        && mapping.effectiveFrom <= row.effectiveFrom);
   }
   return registeredWorkerMappings(worker).some((mapping) =>
     Boolean(mapping.mappingId)
@@ -448,10 +572,16 @@ export function providerFirstLocationIsAllowed(
 
 export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
   if (replacement.kind === "location") {
+    const starts = replacement.effectiveFrom
+      ? ` from ${replacement.effectiveFrom}`
+      : "";
     if (replacement.allowMove === false) {
-      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at its registered location ${replacement.existingLocationLabel ?? "the current location"}.\nUse Keep all to add ${replacement.newLocationLabel ?? "the selected location"} for the same DropX ID while preserving the verified registered-location mapping.`;
+      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at its registered location ${replacement.existingLocationLabel ?? "the current location"}.\nUse Keep all to add ${replacement.newLocationLabel ?? "the selected location"}${starts} for the same DropX ID while preserving the verified registered-location mapping for that period.`;
     }
-    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nMove it to ${replacement.newLocationLabel ?? "the selected location"}, or keep both location mappings for the same DropX ID?\nMoving ends the old location on the preceding day. Keep all preserves both locations.`;
+    if (replacement.allowKeepAll === false) {
+      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the previous location"}.\nMove it to the profile's registered location ${replacement.newLocationLabel ?? "the selected location"}${starts}. The old location remains unchanged before this date and ends on the preceding day; its earlier mapping and payout history remain preserved.`;
+    }
+    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nFrom ${replacement.effectiveFrom ?? "the selected effective date"}, move it to ${replacement.newLocationLabel ?? "the selected location"}, or keep both location mappings for the same DropX ID?\nMove leaves the old location unchanged before this date and ends it on the preceding day. Keep all preserves both locations from this date.`;
   }
   return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}.\nDo you want to replace this mapping?`;
 }
@@ -596,6 +726,15 @@ export function providerMemberKey(stationId: string, providerMemberId: string) {
   return `${String(stationId ?? "").trim()}|${String(providerMemberId ?? "").trim().toUpperCase()}`;
 }
 
+/**
+ * Groups the same provider-owned identity across stations. Use this for audit
+ * and payment-allocation history only: an actual provider mapping remains
+ * station-specific and must continue to use providerMemberKey.
+ */
+export function providerMemberIdentityKey(providerId: string, providerMemberId: string) {
+  return `${String(providerId ?? "").trim().toLowerCase()}|${String(providerMemberId ?? "").trim().toUpperCase()}`;
+}
+
 function sameProviderMember(left: string, right: string) {
   return String(left ?? "").trim().toUpperCase() === String(right ?? "").trim().toUpperCase();
 }
@@ -669,9 +808,12 @@ function hasMeaningfulProviderNameEvidence(providerTokens: string[], dropxTokens
   const dropxSubstantiveTokens = dropxTokens.filter((token) => token.length > 1);
   if (!providerSubstantiveTokens.length || !dropxSubstantiveTokens.length) return false;
 
-  // The relaxed rule is only for a multi-part name. Two unrelated one-word
-  // names must not become a match merely because they are similar.
-  const hasMultipleNameParts = providerSubstantiveTokens.length > 1 || dropxSubstantiveTokens.length > 1;
+  // The relaxed rule is only for a name supplied with multiple parts. Count
+  // initials here so that an exact uncommon token can establish identity for
+  // names such as "Muzammil M" and "Muzammil M K". Initials remain excluded
+  // from the meaningful evidence below, and fuzzy evidence still requires two
+  // substantive tokens on both sides.
+  const hasMultipleNameParts = providerTokens.length > 1 || dropxTokens.length > 1;
   if (!hasMultipleNameParts) return false;
 
   const providerMeaningfulTokens = meaningfulProviderNameTokens(providerTokens);
@@ -725,6 +867,9 @@ export function providerFirstRowIssue(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(row.effectiveFrom)) return "Effective from is required.";
   if (row.effectiveTo && !/^\d{4}-\d{2}-\d{2}$/.test(row.effectiveTo)) return "Effective to is invalid.";
   if (row.effectiveTo && row.effectiveTo < row.effectiveFrom) return "Effective to cannot be before effective from.";
+  if (row.effectiveTo && providerFirstLocationRemap(row, worker)) {
+    return "Move or Keep all requires an ongoing mapping. Leave Effective to blank.";
+  }
 
   for (const component of method.components) {
     const raw = row.paymentValues[component.code]?.trim() ?? "";

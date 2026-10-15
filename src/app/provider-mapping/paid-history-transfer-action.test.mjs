@@ -81,7 +81,9 @@ test("bounded historical actions ignore only current mappings that start later",
   assert.match(replacementState, /const relevantProviderMappings = providerMappings\.filter\(activeMappingOverlapsRequestedPeriod\)/);
   assert.match(replacementState, /new Set\(relevantProviderMappings\.map\(canonicalOwner\)\)/);
   assert.match(replacementState, /relevantProviderMappings\.find\(\(mapping\) => mapping\.station_id === stationId\)/);
-  assert.match(replacementState, /submittedMapping \?\? relevantTargetMappings\[0\] \?\? relevantProviderMappings\[0\]/);
+  assert.match(replacementState, /const submittedMappingAtRequestedStart = submittedMapping/);
+  assert.match(replacementState, /submittedMappingAtRequestedStart\s*\?\? targetMappingsAtRequestedStart\[0\]\s*\?\? providerMappingsAtRequestedStart\[0\]/);
+  assert.doesNotMatch(replacementState, /\?\? relevantTargetMappings\[0\]/);
 });
 
 test("a submitted closed mapping is reused only for an exact same-owner identity and location edit", () => {
@@ -116,9 +118,22 @@ test("a submitted closed mapping is reused only for an exact same-owner identity
 });
 
 test("the final save guard uses the same fail-closed period overlap rule", () => {
+  assert.match(saveRow, /if \(!mappingId && !confirmedReplacementMappingId && !options\.keepExistingLocationMappingId\)/);
   assert.match(saveRow, /select\("id, station_id, effective_from"\)/);
   assert.match(saveRow, /\.eq\("status", "active"\)/);
   assert.match(saveRow, /existingCurrentMappings \?\? \[\]\)\.find\(\(mapping\) =>[\s\S]*?currentProviderMappingOverlapsRequestedPeriod\(mapping\.effective_from, effectiveFrom, effectiveTo \?\? ""\)/);
+});
+
+test("a confirmed replacement reaches the atomic replacement RPC instead of the duplicate-active preflight", () => {
+  const duplicateActiveGuard = saveRow.slice(
+    saveRow.indexOf("if (!mappingId && !confirmedReplacementMappingId && !options.keepExistingLocationMappingId)"),
+    saveRow.indexOf("const dropxName", saveRow.indexOf("if (!mappingId && !confirmedReplacementMappingId && !options.keepExistingLocationMappingId)"))
+  );
+
+  assert.match(saveRow, /replacementMappingId && replacementMappingId !== confirmedReplacementMappingId/);
+  assert.match(actions, /confirmedReplacementMappingId: replacementState\.locationRemap\?\.mappingId \?\? replacementState\.ownerReplacement\?\.mappingId \?\? null/);
+  assert.match(duplicateActiveGuard, /An active mapping already exists/);
+  assert.match(saveRow, /replacementMappingId\s*\?[\s\S]*?rpc\("workforce_replace_joining_mapping"/);
 });
 
 test("the inline response reloads the exact period that was saved", () => {

@@ -343,11 +343,9 @@ export default async function DesignationsPage({
                       </td>
                       <td>{designation.is_field_operations ? <span className="mini-tag">Included</span> : <span className="subtle">-</span>}</td>
                       <td>
-                        {!designation.is_field_operations
-                          ? <span className="subtle">Not applicable</span>
-                          : designation.provider_mapping_required
-                            ? <span className="mini-tag">Required</span>
-                            : <span className="subtle">Not required</span>}
+                        {designation.provider_mapping_required
+                          ? <span className="mini-tag">Required</span>
+                          : <span className="subtle">Direct Pay</span>}
                       </td>
                       <td><StatusPill status={designation.is_active ? "Active" : "Inactive"} /></td>
                       {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/master/designations?edit=${designation.id}`} scroll={false}>Edit</PendingLink></td> : null}

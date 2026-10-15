@@ -18,5 +18,5 @@ export function currentProviderMappingPageCode(): ProviderMappingPageCode {
 
 export function canEditProviderMappings(authorization: AuthorizationContext) {
   const pageCode = currentProviderMappingPageCode();
-  return hasPermission(authorization, pageCode, "add") || hasPermission(authorization, pageCode, "edit");
+  return hasPermission(authorization, pageCode, "edit");
 }

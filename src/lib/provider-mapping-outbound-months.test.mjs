@@ -55,21 +55,49 @@ test('database months retain full history, exclude non-outbound counts, and enfo
         ('00000000-0000-0000-0000-000000000010','A','MEMBER','Latest name','2026-09-30',now(),'Amazon',0,10),
         ('00000000-0000-0000-0000-000000000010','A','return-only','Return','2026-08-01',now(),'Amazon',0,8),
         ('00000000-0000-0000-0000-000000000010','A','other-client','Other','2026-07-01',now(),'Other',99,0),
+        ('00000000-0000-0000-0000-000000000010','A','null-date','Null date',null,now(),'Amazon',1,0),
+        ('00000000-0000-0000-0000-000000000010','A','NULL-DATE','Older dated identity','2026-06-01',now() - interval '1 day','Amazon',1,0),
         ('00000000-0000-0000-0000-000000000010','B','MEMBER','Elsewhere','2026-06-01',now(),'Amazon',7,0),
         ('00000000-0000-0000-0000-000000000020','A','private','Other company','2025-01-01',now(),'Amazon',7,0);`);
     await db.exec(await readFile(new URL('../../supabase/migrations/20261007143958_provider_mapping_outbound_months.sql', import.meta.url), 'utf8'));
     const call = async (scope) => (await db.query('select ops_cps_mapping_members($1, $2::uuid[]) as members', ['00000000-0000-0000-0000-000000000010', scope])).rows[0].members;
+    const expectedScopedMembers = await call(['00000000-0000-0000-0000-000000000001']);
+    const expectedAllMembers = await call(null);
+    await db.exec(await readFile(new URL('../../supabase/migrations/20261015121500_provider_mapping_page_load_perf.sql', import.meta.url), 'utf8'));
     const members = await call(['00000000-0000-0000-0000-000000000001']);
-    assert.equal(members.length, 3);
+    assert.deepEqual(members, expectedScopedMembers, 'The optimized query must preserve every source field and month');
+    assert.equal(members.length, 4);
     const member = members.find((m) => m.provider_employee_id === 'MEMBER');
     assert.equal(member.provider_employee_name, 'Latest name');
     assert.deepEqual(member.outbound_months, ['2026-10', '2026-09']);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'return-only').outbound_months, []);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'return-only').shipment_months, ['2026-08']);
     assert.deepEqual(members.find((m) => m.provider_employee_id === 'other-client').shipment_months, []);
+    const nullDate = members.find((m) => m.provider_employee_id === 'null-date');
+    assert.equal(nullDate.provider_employee_name, 'Null date');
+    assert.equal(nullDate.work_date, null, 'Identity fields and work date must come from the same latest row');
     assert.deepEqual(await call([]), []);
-    assert.equal((await call(null)).length, 4);
+    assert.deepEqual(await call(null), expectedAllMembers, 'The all-location response must remain byte-for-byte equivalent');
+    assert.equal(expectedAllMembers.length, 5);
     const grants = (await db.query("select has_function_privilege('anon','ops_cps_mapping_members(uuid,uuid[])','EXECUTE') as anon, has_function_privilege('authenticated','ops_cps_mapping_members(uuid,uuid[])','EXECUTE') as authenticated, has_function_privilege('service_role','ops_cps_mapping_members(uuid,uuid[])','EXECUTE') as service")).rows[0];
     assert.deepEqual(grants, { anon: false, authenticated: false, service: true });
   } finally { await db.close(); }
+});
+
+test('mapping-member query uses one scoped grouped pass and a supporting index', async () => {
+  const migration = await readFile(new URL('../../supabase/migrations/20261015121500_provider_mapping_page_load_perf.sql', import.meta.url), 'utf8');
+  const functionStart = migration.indexOf('create or replace function public.ops_cps_mapping_members');
+  const functionEnd = migration.indexOf('revoke all on function public.ops_cps_mapping_members', functionStart);
+  const functionSql = migration.slice(functionStart, functionEnd);
+
+  assert.match(migration, /create index if not exists cps_shipment_daily_mapping_members_idx/);
+  assert.match(migration, /company_id,[\s\S]*station_code,[\s\S]*upper\(btrim\(provider_employee_id\)\)[\s\S]*work_date desc,[\s\S]*updated_at desc/);
+  assert.doesNotMatch(functionSql, /scoped as materialized/i);
+  assert.equal((functionSql.match(/from public\.cps_shipment_daily/g) ?? []).length, 1, 'Daily shipment history should be consumed once');
+  assert.match(functionSql, /where shipment\.company_id = p_company/);
+  assert.match(functionSql, /p_station_ids is null or station\.id = any\(p_station_ids\)/);
+  assert.match(functionSql, /partition by shipment\.station_code, upper\(trim\(shipment\.provider_employee_id\)\)/);
+  assert.match(functionSql, /group by ranked\.station_code, ranked\.member_key/);
+  assert.match(migration, /revoke all on function public\.ops_cps_mapping_members\(uuid, uuid\[\]\) from public, anon, authenticated/);
+  assert.match(migration, /grant execute on function public\.ops_cps_mapping_members\(uuid, uuid\[\]\) to service_role/);
 });

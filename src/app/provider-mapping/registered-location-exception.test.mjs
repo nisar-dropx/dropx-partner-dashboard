@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import {
   providerFirstLocationIsAllowed,
   providerFirstLocationRemap
 } from "../../lib/provider-first-mapping-view.ts";
+
+async function latestWorkforceSaveMappingDefinition() {
+  const migrationsUrl = new URL("../../../supabase/migrations/", import.meta.url);
+  const migrations = (await readdir(migrationsUrl)).filter((name) => name.endsWith(".sql")).sort();
+  let definition = "";
+  for (const migration of migrations) {
+    const source = await readFile(new URL(migration, migrationsUrl), "utf8");
+    const start = source.lastIndexOf("create or replace function public.workforce_save_mapping(");
+    if (start < 0) continue;
+    const match = source.slice(start).match(/^create or replace function public\.workforce_save_mapping\([\s\S]*?\$function\$;/);
+    assert.ok(match, `${migration} must contain a complete workforce_save_mapping definition`);
+    definition = match[0];
+  }
+  assert.ok(definition, "a workforce_save_mapping definition must exist");
+  return definition;
+}
 
 const worker = {
   id: "worker-1",
@@ -51,6 +67,7 @@ test("allows a second location only from the exact mapping at the profile regist
   assert.equal(providerFirstLocationIsAllowed(secondLocation, worker), true);
   assert.deepEqual(providerFirstLocationRemap(secondLocation, worker), {
     kind: "location",
+    allowKeepAll: true,
     allowMove: false,
     mappingId: "mapping-a",
     providerMemberId: "member-1",
@@ -129,6 +146,10 @@ test("server selects a same-owner historical registered anchor that contains the
   assert.match(actions, /registeredMappingResult/);
   assert.match(actions, /effective_from, effective_to, status/);
   assert.match(actions, /registeredMappings\.find/);
+  assert.match(actions, /currentProviderMappingStartedByRequestedDate/);
+  assert.match(actions, /targetMappingsAtRequestedStart/);
+  assert.match(actions, /providerMappingsAtRequestedStart/);
+  assert.match(actions, /submittedMapping[\s\S]*?targetMappingsAtRequestedStart\[0\][\s\S]*?providerMappingsAtRequestedStart\[0\]/);
   assert.match(actions, /String\(mapping\.station_id \?\? ""\) === registeredStationId/);
   assert.match(actions, /mapping\.provider_id === providerId/);
   assert.match(actions, /providerMemberIdentity\(mapping\.provider_member_id\) === normalizedMemberId/);
@@ -137,6 +158,16 @@ test("server selects a same-owner historical registered anchor that contains the
   assert.match(actions, /mapping\.status === "closed" && Boolean\(mapping\.effective_to\)/);
   assert.match(actions, /!relevantProviderMappings\.length && !relevantTargetMappings\.length && !registeredLocationMapping/);
   assert.match(actions, /\.\.\.\(registeredLocationMapping \? \[registeredLocationMapping\] : \[\]\)/);
+  assert.match(actions, /allowKeepAll: changeKind === "location"/);
+  assert.doesNotMatch(
+    actions,
+    /changeKind === "location" && !needsRegisteredLocationException && replacementAction === "keep"[\s\S]*?throw new Error/
+  );
+  assert.match(
+    actions,
+    /changeKind === "location" && needsRegisteredLocationException && replacementAction === "move"[\s\S]*?throw new Error/
+  );
+  assert.match(actions, /workforce_keep_joining_mapping_at_registered_location/);
   assert.match(actions, /Keep all is required for an additional location/);
 });
 
@@ -150,7 +181,7 @@ test("server and database repeat the registered-location proof for current and h
   assert.match(actions, /registeredLocationMapping = registeredMappings\.find/);
   assert.match(actions, /needsRegisteredLocationException && !registeredLocationMapping/);
   assert.match(actions, /Keep all is required for an additional location/);
-  assert.match(actions, /if \(!mappingId && !options\.keepExistingLocationMappingId\)/);
+  assert.match(actions, /if \(!mappingId && !confirmedReplacementMappingId && !options\.keepExistingLocationMappingId\)/);
   assert.match(migration, /anchor\.station_id = registered_station/);
   assert.match(migration, /mapping\.status = 'active'/);
   assert.match(migration, /mapping\.effective_to is null/);
@@ -218,6 +249,14 @@ test("server and database repeat the registered-location proof for current and h
       payment_values jsonb default '{}'::jsonb,
       production_threshold_config jsonb,
       pay_type text,
+      delivery_rate numeric,
+      pickup_rate numeric,
+      mfn_rate numeric,
+      mfn_return_rate numeric,
+      guarantee_amount numeric,
+      guarantee_schedule text,
+      fuel_rate numeric,
+      reason text,
       status text not null default 'active',
       created_by uuid,
       created_at timestamptz default now(),
@@ -350,7 +389,7 @@ test("server and database repeat the registered-location proof for current and h
         'provider_id', '${provider}',
         'station_id', '${stationD}',
         'provider_member_id', ' MEMBER-1 ',
-        'effective_from', '2026-09-15',
+        'effective_from', '2026-10-01',
         'effective_to', null,
         'payment_method_id', '${paymentMethod}',
         'payment_values', '{}'::jsonb,
@@ -367,6 +406,59 @@ test("server and database repeat the registered-location proof for current and h
       and status = 'active' and effective_to is null;
   `);
   assert.equal(kept.rows[0].count, 1);
+
+  // Editing one valid Keep-all location must ignore the overlapping
+  // registered-location anchor for the same canonical provider identity. A
+  // genuinely different provider member for the same DropX ID remains an
+  // invalid overlap.
+  await db.exec(await latestWorkforceSaveMappingDefinition());
+  const keptMapping = await db.query(`
+    select id
+    from public.field_executive_provider_mappings
+    where workforce_id = '${workerA}' and station_id = '${stationD}'
+      and status = 'active' and effective_to is null;
+  `);
+  const keptMappingId = keptMapping.rows[0].id;
+  const saveKeptMapping = (memberId) => db.exec(`
+    select public.workforce_save_mapping(
+      '${company}', '${actor}', '${workerA}', '${keptMappingId}', 'DX-A',
+      jsonb_build_object(
+        'provider_id', '${provider}',
+        'station_id', '${stationD}',
+        'provider_member_id', '${memberId}',
+        'effective_from', '2026-09-01',
+        'effective_to', null,
+        'payment_method_id', '${paymentMethod}',
+        'payment_values', jsonb_build_object('DELIVERY', 11),
+        'status', 'active'
+      ),
+      null::uuid[]
+    );
+  `);
+  await saveKeptMapping(" member-1 ");
+  const editedKeepAll = await db.query(`
+    select effective_from::text as effective_from, payment_values
+    from public.field_executive_provider_mappings
+    where id = '${keptMappingId}';
+  `);
+  assert.deepEqual(editedKeepAll.rows, [{ effective_from: "2026-09-01", payment_values: { DELIVERY: 11 } }]);
+  await assert.rejects(
+    saveKeptMapping("MEMBER-DIFFERENT"),
+    /This DropX ID already has an overlapping provider mapping/
+  );
+  await db.exec(`
+    insert into public.field_executive_provider_mappings(
+      company_id,workforce_id,provider_id,station_id,provider_member_id,
+      effective_from,effective_to,payment_method_id,status
+    ) values (
+      '${company}','${workerA}','${provider}','${stationD}','MEMBER-1',
+      '2026-09-20','2026-09-25','${paymentMethod}','closed'
+    );
+  `);
+  await assert.rejects(
+    saveKeptMapping("MEMBER-1"),
+    /Provider ID already has an overlapping mapping/
+  );
 
   // A closed registered-location mapping can anchor Keep all only when its
   // inclusive dates cover the complete bounded destination period.

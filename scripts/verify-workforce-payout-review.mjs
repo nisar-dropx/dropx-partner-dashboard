@@ -45,14 +45,16 @@ assert.doesNotMatch(
   /dependencyBefore\.hash\s*!==\s*expectedDependencyHash|dependencyAfter\.hash\s*!==\s*expectedDependencyHash/,
   "Unrelated company-wide revision churn must not reject rows whose signed calculation hash is unchanged."
 );
-assert.match(routeSource, /if \(!authorization\.hasAllLocationAccess\)/);
-assert.match(pageSource, /canPublishNotifications=\{authorization\.hasAllLocationAccess\}/);
+assert.match(routeSource, /const allowedLocationScope = authorization\.hasAllLocationAccess/);
+assert.match(routeSource, /normalized\.some\(\(item\) => !allowedLocationIds\.has/);
+assert.match(routeSource, /p_locations: allowedLocationScope/);
+assert.match(pageSource, /canPublishNotifications=\{canEdit\}/);
 assert.match(
   pageSource,
   /status === "sent" \|\| status === "superseded" \|\| status === "disabled"[\s\S]*\? "Payment published"/,
   "App-only publications must render as published instead of falling back to Under Review."
 );
-assert.match(tableSource, /Send Notification requires all-location access/);
+assert.doesNotMatch(tableSource, /Send Notification requires all-location access/);
 assert.match(reviewActionSource, /workforce_decide_payout_dispute/);
 assert.match(reviewActionSource, /\["resolved", "rejected"\]/);
 assert.match(reviewDeskSource, />\s*Reject\s*</);

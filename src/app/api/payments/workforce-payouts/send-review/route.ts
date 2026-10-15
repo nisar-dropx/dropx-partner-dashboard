@@ -443,6 +443,15 @@ export async function POST(request: Request) {
     if (normalized.some((item) => !item.subject_type || !UUID.test(item.subject_id) || !item.location_id || !UUID.test(item.location_id))) {
       return responseError("One or more selected payouts cannot be submitted.", 400);
     }
+    const allowedLocationScope = authorization.hasAllLocationAccess
+      ? null
+      : [...new Set(authorization.locationScopeIds
+        .map((locationId) => String(locationId).trim().toLowerCase())
+        .filter((locationId) => UUID.test(locationId)))];
+    const allowedLocationIds = allowedLocationScope ? new Set(allowedLocationScope) : null;
+    if (allowedLocationIds && normalized.some((item) => !allowedLocationIds.has(String(item.location_id).toLowerCase()))) {
+      return responseError("One or more selected payouts are outside your location scope.", 403);
+    }
     const uniqueSelections = new Set(normalized.map((item) => `${item.subject_id.toLowerCase()}|${item.location_id!.toLowerCase()}`));
     if (uniqueSelections.size !== normalized.length) {
       return responseError("The same Workforce payout location was selected more than once.", 400);
@@ -458,9 +467,6 @@ export async function POST(request: Request) {
     }
 
     if (subjectTypes.has("helper")) {
-      if (!authorization.hasAllLocationAccess) {
-        return responseError("Send Notification requires all-location access so every payout row for the Helper can be published together.", 403);
-      }
       if (!completeCalendarMonth(periodStart, periodEnd)) {
         return responseError("Send Notification is available only for one complete calendar month.", 400);
       }
@@ -664,7 +670,7 @@ export async function POST(request: Request) {
             notification_primary: notificationPrimary.get(item.subject_id) === item.location_id
           };
         }),
-        p_locations: null,
+        p_locations: allowedLocationScope,
         p_review_until: reviewUntil,
         p_notify_at: new Date().toISOString(),
         p_notification_config_id: notification.config.id,
@@ -725,10 +731,6 @@ export async function POST(request: Request) {
         whatsappNotifications: whatsappPublicationIds.length,
         status: "Notification queued"
       }, { headers: noStore });
-    }
-
-    if (!authorization.hasAllLocationAccess) {
-      return responseError("Send Notification requires all-location access so every payout row for the DropX ID can be published and frozen together.", 403);
     }
 
     if (!completeCalendarMonth(periodStart, periodEnd)) {
@@ -872,7 +874,7 @@ export async function POST(request: Request) {
         p_period_start: periodStart,
         p_period_end: periodEnd,
         p_items: publicationItems,
-        p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds,
+        p_locations: allowedLocationScope,
         p_expected_dependency_hash: expectedDependencyHash,
         p_review_until: reviewUntil,
         p_notify_at: new Date().toISOString(),

@@ -6,13 +6,19 @@ import {
   type DirectPaymentAllocationRow
 } from "@/components/direct-payment-allocation-worksheet";
 import { PageHead } from "@/components/page-head";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { canEditProviderMappings, currentProviderMappingPageCode } from "@/lib/provider-mapping-access";
+import { isDashboardPaymentSettingsDirectPayEntry } from "@/lib/provider-mapping-host";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory } from "@/lib/payment-allocation-history";
+import {
+  directPaymentProfileIsEditable,
+  directPaymentProfileIsVisible,
+  directPaymentProfileStatus
+} from "@/lib/direct-payment-profile-visibility";
 import {
   directPaymentMethodEligible,
   type DirectPaymentComponent,
@@ -28,6 +34,10 @@ type PersonRow = {
   designation_id: string | null;
   designation: string | null;
   date_of_join: string | null;
+  onboarding_status: string | null;
+  lifecycle_status?: string | null;
+  is_active: boolean | null;
+  deleted_at?: string | null;
 };
 type AllocationRow = {
   id: string;
@@ -100,14 +110,13 @@ export default async function DirectPaymentAllocationsPage({
 }) {
   const audience = searchParams.audience === "helpers" ? "helpers" : "workforce";
   const pageCode = currentProviderMappingPageCode();
-  const paymentSettingsEntry = audience === "helpers" && searchParams.source === "payment-settings";
+  const paymentSettingsEntry = isDashboardPaymentSettingsDirectPayEntry(pageCode, audience, searchParams.source);
   const accessPageCode = paymentSettingsEntry ? "payment_settings" : pageCode;
   const authorization = await requirePagePermission(accessPageCode, "access");
   const companyId = requireCompanyId(authorization);
-  const permission = authorization.permissions[accessPageCode];
   const canEdit = paymentSettingsEntry
-    ? Boolean(permission?.canEdit)
-    : Boolean(permission?.canAdd || permission?.canEdit);
+    ? hasPermission(authorization, "payment_settings", "edit")
+    : canEditProviderMappings(authorization);
   const flash = loadFlash();
 
   if (!supabaseAdmin) {
@@ -122,7 +131,6 @@ export default async function DirectPaymentAllocationsPage({
       .select("id, code, name")
       .eq("company_id", companyId)
       .eq("is_active", true)
-      .eq("is_field_operations", true)
       .eq("provider_mapping_required", false)
       .order("code"),
     supabaseAdmin.from("stations")
@@ -145,24 +153,22 @@ export default async function DirectPaymentAllocationsPage({
   if (!loadError && (audience === "helpers" || designations.length)) {
     const personResult = audience === "helpers"
       ? await readAllRows(supabaseAdmin.from("helpers")
-        .select("id, dropx_id, full_name, location_id, designation, date_of_join")
+        .select("id, dropx_id, full_name, location_id, designation, date_of_join, onboarding_status, is_active")
         .eq("company_id", companyId)
-        .eq("is_active", true)
-        .eq("onboarding_status", "active")
         .order("dropx_id")
         .order("id"))
       : await readAllRows(supabaseAdmin.from("workforce")
-        .select("id, dropx_id, full_name, location_id, designation_id, designation, date_of_join")
+        .select("id, dropx_id, full_name, location_id, designation_id, designation, date_of_join, onboarding_status, lifecycle_status, is_active, deleted_at")
         .eq("company_id", companyId)
-        .eq("is_active", true)
         .is("deleted_at", null)
         .order("dropx_id")
         .order("id"));
     loadError = personResult.error;
-    people = ((personResult.data ?? []) as PersonRow[]).filter((person) => audience === "helpers" || Boolean(
-      designationById.get(String(person.designation_id ?? ""))
-      ?? designationByName.get(String(person.designation ?? "").trim().toLowerCase())
-    ));
+    people = ((personResult.data ?? []) as PersonRow[]).filter((person) => directPaymentProfileIsVisible(person, audience)
+      && (audience === "helpers" || Boolean(
+        designationById.get(String(person.designation_id ?? ""))
+        ?? designationByName.get(String(person.designation ?? "").trim().toLowerCase())
+      )));
   }
 
   const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
@@ -227,6 +233,8 @@ export default async function DirectPaymentAllocationsPage({
       personId: person.id,
       dropxId: person.dropx_id || "Not assigned",
       fullName: person.full_name,
+      profileStatus: directPaymentProfileStatus(person, audience),
+      profileEditable: directPaymentProfileIsEditable(person, audience),
       stationLabel: stationById.get(person.location_id ?? "") ?? "Location unavailable",
       designationLabel: audience === "helpers"
         ? person.designation || "Designation unavailable"
@@ -277,7 +285,7 @@ export default async function DirectPaymentAllocationsPage({
       eyebrow={paymentSettingsEntry ? "Workforce & Helper Payment" : "Provider-independent pay"}
       subtitle={audience === "helpers"
         ? "Assign attendance, workday or fixed-amount payment methods to Helpers. This setup is provider-independent and does not grant access to ID mapping."
-        : "Assign attendance, workday or fixed-amount payment methods to Field Operations designations that do not require provider mapping."}
+        : "Assign attendance, workday or fixed-amount payment methods to active designations that do not require provider mapping. Field Operations is configured independently."}
       title={paymentSettingsEntry ? "Helper Payment Setup" : "Direct pay allocations"}
     />
     {!paymentSettingsEntry ? <>
