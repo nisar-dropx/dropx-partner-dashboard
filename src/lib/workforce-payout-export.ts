@@ -211,7 +211,8 @@ export function buildWorkforcePayoutExportTable(rows: WorkforcePayoutExportRow[]
     });
     const deductionValues: ExportValue[] = deductions.map((column) => blankPayments
       ? ""
-      : row.deductionBreakdown.find((item) => item.code === column.code)?.amount ?? 0);
+      // Several lines can share a code (one per Ops loss case), so the column is their total.
+      : Math.round(row.deductionBreakdown.filter((item) => item.code === column.code).reduce((sum, item) => sum + Number(item.amount || 0), 0) * 100) / 100);
     const additionalValues: ExportValue[] = additionalPayments.flatMap((column): ExportValue[] => {
       if (blankPayments) return column.calculationType === "manual_amount" ? [""] : ["", "", ""];
       const item = (row.additionalPaymentBreakdown ?? []).find((value) => (value.fieldId || value.code) === (column.fieldId || column.code));

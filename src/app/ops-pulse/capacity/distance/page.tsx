@@ -3,6 +3,7 @@ import { PageHead } from "@/components/page-head";
 import { CapacityWorkspaceTabs } from "@/components/capacity-workspace-tabs";
 import { AttendanceMultiSelect } from "@/components/attendance-multi-select";
 import { CapacityDistanceTable } from "@/components/capacity-distance-table";
+import { CapacityDistanceSync } from "@/components/capacity-distance-sync";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations, todayKolkata } from "@/lib/ops-pulse/cod";
@@ -45,16 +46,23 @@ export default async function DistancePage({
     statuses = values(searchParams.status),
     methods = values(searchParams.method),
     q = one(searchParams.q) || "";
-  let period = { from: todayKolkata().slice(0, 8) + "01", to: todayKolkata() },
+  // Distance settles only after the work day closes, so open on the last settled day.
+  const today = todayKolkata(),
+    yesterday = new Date(Date.parse(today + "T00:00:00Z") - 86400000)
+      .toISOString()
+      .slice(0, 10),
+    requestedFrom = one(searchParams.from),
+    defaultTo = requestedFrom && requestedFrom > yesterday ? today : yesterday;
+  let period = { from: defaultTo.slice(0, 8) + "01", to: defaultTo },
     error = scope.error
       ? "Station access could not be loaded. Please retry."
       : "";
   let rows: Awaited<ReturnType<typeof loadDistanceRegister>> = [];
   try {
     period = distancePeriod(
-      one(searchParams.from),
-      one(searchParams.to),
-      todayKolkata(),
+      requestedFrom,
+      one(searchParams.to) || defaultTo,
+      today,
     );
     if (!error)
       rows = await loadDistanceRegister(
@@ -170,6 +178,12 @@ export default async function DistancePage({
             Reset
           </a>
         </form>
+        <CapacityDistanceSync
+          stations={stations.map((s) => ({ id: s.id, code: s.station_code }))}
+          defaultDate={yesterday}
+          minDate={new Date(Date.parse(today + "T00:00:00Z") - 35 * 86400000).toISOString().slice(0, 10)}
+          maxDate={yesterday}
+        />
         {error ? (
           <div className={styles.error} role="alert">
             {error}
@@ -183,7 +197,7 @@ export default async function DistancePage({
         )}
         <p className={styles.note}>
           Amazon EDSP &amp; XPT · associates mapped for kilometre-based fuel ·
-          up to 31 days per view. Saved results refresh within a minute; maps
+          up to 31 days per view. Distances sync every morning at 5:00 IST; maps
           load when opened. Pending distance is never counted as zero.
         </p>
       </div>

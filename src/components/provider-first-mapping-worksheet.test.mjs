@@ -412,7 +412,7 @@ test('current month uses IST at month and year boundaries and is passed by the s
   assert.match(page, /const today = dashboardDateInputValue\(\)/);
   assert.equal(page.match(/dashboardDateInputValue\(\)/g)?.length, 1, 'The request should compute the India business date once');
   assert.match(page, /mapping\.effective_to! >= today/);
-  assert.match(page, /initialOutboundMonth=\{today\.slice\(0, 7\)\}/);
+  assert.match(page, /providerMappingEntryFilters\(searchParams, today\)/);
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.match(pkg.scripts['test:provider-mapping-period'], /provider-first-mapping-worksheet\.test\.mjs/);
   assert.match(pkg.scripts.build, /test:provider-mapping-period/);
@@ -437,4 +437,19 @@ test('dropdown offers every authorized associate across locations and lookup ref
  await ui.save();
  assert.equal(ui.one(n=>n.type==='MappingLookup').props.entries[0].dropxId,worker.dropxId);
  assert.equal(ui.one(n=>n.type==='MappingLookup').props.entries[0].history[0].id,'saved-1');
+});
+
+test('CPS entry shows a historical matching provider even if it is mapped now',()=>{
+ const mapped={...row,workforceId:worker.id,dropxId:worker.dropxId,dropxName:worker.fullName,mappingId:'saved',outboundMonths:['2026-09']};
+ const ui=worksheet({mappings:[mapped,{...row,providerMemberId:'unrelated',outboundMonths:['2026-09']}],initialQuery:row.providerMemberId,initialStationId:row.stationId,initialOutboundMonth:'2026-09',initialMappingStatus:'all'});
+ assert.deepEqual(ui.filter('Outbound month').selected,['2026-09']);
+ assert.deepEqual(ui.filter('Mapping').selected,[]);
+ assert.deepEqual(ui.filter('Location').selected,[row.stationId]);
+ assert.equal(ui.cards().length,1);
+ assert.equal(ui.select('provider_first_worker_0').value,worker.id);
+});
+test('multi-month CPS entry can show the matching ID across outbound months',()=>{
+ const ui=worksheet({mappings:[{...row,outboundMonths:['2026-08']}],initialOutboundMonth:'',initialMappingStatus:'all',initialQuery:row.providerMemberId});
+ assert.deepEqual(ui.filter('Outbound month').selected,[]);
+ assert.equal(ui.cards().length,1);
 });

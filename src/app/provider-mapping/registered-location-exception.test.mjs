@@ -327,6 +327,10 @@ test("server and database repeat the registered-location proof for current and h
   `);
   await db.exec(migration);
   await db.exec(historicalPeriodMigration);
+  // This fixture exercises the deferred integrity guard independently of the
+  // payment writer; use the latest coverage definitions for all old cases too.
+  const coverageMigration = await readFile(new URL("../../../supabase/migrations/20261015133000_provider_mapping_contiguous_payment_coverage.sql", import.meta.url), "utf8");
+  await db.exec(coverageMigration.slice(0, coverageMigration.indexOf("-- Keep clean installations")) + "commit;");
 
   await db.exec(`
     insert into public.field_executive_provider_mappings(

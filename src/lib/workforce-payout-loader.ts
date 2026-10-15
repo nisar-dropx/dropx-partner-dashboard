@@ -53,6 +53,12 @@ import {
   type WorkforcePayoutDeductionValue
 } from "@/lib/workforce-deduction-overlay";
 import {
+  applyWorkforceLossRecoveries,
+  isMissingLossRecoveryFunction,
+  workforceLossRecoveryMonth,
+  type WorkforceLossRecoveryLine
+} from "@/lib/workforce-loss-recovery";
+import {
   buildWorkforcePayoutInputMaps,
   aggregateAttendanceIssueAffectsPayoutPeriod,
   findWorkforcePayoutAttendancePeriod,
@@ -99,6 +105,8 @@ function workforceDesignation(worker: any) {
 
 export type WorkforcePayoutLoadScope = {
   workforceIds?: readonly string[];
+  /** Ops loss recoveries (Team Ops → Losses) due in this month. Off when measuring salary capacity for a new plan. */
+  includeLossRecoveries?: boolean;
 };
 
 export async function loadWorkforcePayoutRows(
@@ -1710,6 +1718,14 @@ export async function loadWorkforcePayoutRows(
       rowsWithPayoutValues.push(payoutValueRow);
       applied.add(identityKey);
     }
+  }
+  const lossPeriod = workforceLossRecoveryMonth(fromDate, toDate);
+  if (lossPeriod && scope.includeLossRecoveries !== false) {
+    const due = await supabaseAdmin.rpc("nl_loss_recovery_due", { p_company: companyId, p_salary_month: lossPeriod, p_target: "workforce" });
+    if (due.error && !isMissingLossRecoveryFunction(due.error)) {
+      return { rows: [] as WorkforcePayoutRow[], error: `Ops loss recoveries could not be loaded: ${due.error.message}` };
+    }
+    applyWorkforceLossRecoveries(rowsWithPayoutValues, (due.error ? [] : due.data ?? []) as WorkforceLossRecoveryLine[]);
   }
   return {
     rows: scopeEnabled

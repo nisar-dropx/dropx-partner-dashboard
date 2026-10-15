@@ -126,7 +126,7 @@ export default async function CpsPage({
                   <a href="https://fleet.dropxlogistics.com/fleet-control?section=masters&master=vehicle_master">
                     Vehicle master
                   </a>
-                  <a href="https://dashboard.dropxlogistics.com/provider-id-mapping">
+                  <a href="/provider-id-mapping">
                     DA payment mappings
                   </a>
                 </div>

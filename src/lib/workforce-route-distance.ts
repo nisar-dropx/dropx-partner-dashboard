@@ -12,6 +12,8 @@ export function kilometreRate(mapping:any):number|null {
   if(!entry || entry[1]===null || entry[1]==='')return null;
   const n=Number(entry[1]);return Number.isFinite(n)&&n>0?n:null;
 }
+// Distance is synced only after the day closes; today has no stored row yet.
+const kolkataToday=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
 export function routeFuelForDay(context:RouteDistanceContext,input:{workforceId:string;stationId:string;mappingId:string;date:string;rate:number;hasActivity:boolean}):DailyRouteFuel|null {
   if(!context.enabledFrom || input.date<context.enabledFrom)return null;
   const rows=context.rows.filter(r=>r.workforce_id===input.workforceId&&r.station_id===input.stationId&&r.work_date===input.date);
@@ -26,10 +28,10 @@ export function routeFuelForDay(context:RouteDistanceContext,input:{workforceId:
   const value=imported?Number(imported.units):ready?Number(row.distance_km):null;
   if(value!==null&&(!Number.isFinite(value)||value<0))throw new Error('Invalid kilometre units. Contact Workforce.');
   const number=(v:unknown)=>v===null||v===undefined?null:Number(v);
-  return {date:input.date,stationId:input.stationId,mappingId:input.mappingId,status:ready?'ready':'pending',reason:ready?null:row?.mapping_id&&row.mapping_id!==input.mappingId?'mapping_changed':row?.reason??'route_not_received',km:value,rate,amount:value===null?null:Math.round(value*rate*100)/100,departureKm:imported?null:number(row?.departure_km),deliveryKm:imported?null:number(row?.delivery_km),returnKm:imported?null:number(row?.return_km),updatedAt:row?.calculated_at??null,source:imported?'manual':'calculated',routeId:!imported&&ready?row.id:null};
+  return {date:input.date,stationId:input.stationId,mappingId:input.mappingId,status:ready?'ready':'pending',reason:ready?null:row?.mapping_id&&row.mapping_id!==input.mappingId?'mapping_changed':row?.reason??(input.date>=kolkataToday()?'day_in_progress':'route_not_received'),km:value,rate,amount:value===null?null:Math.round(value*rate*100)/100,departureKm:imported?null:number(row?.departure_km),deliveryKm:imported?null:number(row?.delivery_km),returnKm:imported?null:number(row?.return_km),updatedAt:row?.calculated_at??null,source:imported?'manual':'calculated',routeId:!imported&&ready?row.id:null};
 }
 export function routePendingLabel(reason:string|null) {
-  const labels:Record<string,string>={amazon_identity_missing:'Amazon driver link needed',station_location_missing:'Station location needed',service_area_missing:'Amazon service area needed',source_unavailable:'Waiting for Amazon route sync',road_routing_unavailable:'Road calculation is retrying',route_in_progress:'Route is still in progress',day_in_progress:'Distance settles after the work day closes',route_not_received:'Waiting for delivery route',route_needs_review:'Route needs a distance check',mapping_changed:'Refreshing after a mapping change',itinerary_incomplete:'Waiting for the complete route',scan_location_missing:'Delivery scan location is missing',scan_date_mismatch:'Delivery scan dates need checking',identity_mismatch:'Amazon driver identity needs checking',conflicting_scan:'Conflicting delivery scans'};
+  const labels:Record<string,string>={amazon_identity_missing:'Amazon driver link needed',station_location_missing:'Station location needed',service_area_missing:'Amazon service area needed',source_unavailable:'Waiting for Amazon route sync',road_routing_unavailable:'Road calculation is retrying',route_in_progress:'Route is still in progress',day_in_progress:'Distance settles after the work day closes',route_not_received:'Waiting for delivery route',route_needs_review:'Route needs a distance check',mapping_changed:'Refreshing after a mapping change',itinerary_incomplete:'Waiting for the complete route',scan_location_missing:'Too many delivery scans have no location',scan_date_mismatch:'Delivery scan dates need checking',identity_mismatch:'Amazon driver identity needs checking',conflicting_scan:'Conflicting delivery scans'};
   return labels[reason??'']??'Distance is pending';
 }
 export function rateCardUnit(field:any,code:string,schedule?:string|null) {

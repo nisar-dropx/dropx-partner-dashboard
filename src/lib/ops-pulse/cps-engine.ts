@@ -1,3 +1,4 @@
+import { providerMappingHref } from "../provider-mapping-navigation";
 import { summarizeDaDetails, type CpsDaDay, type CpsRate } from "./cps-details";
 import { isKilometreField, kilometreRate, routeFuelForDay, routePendingLabel, type RouteDistanceContext } from '../workforce-route-distance';
 import type { CpsSnapshot, CpsLine, CpsHead, CpsCostInput, CpsStaffCost, CpsPeoplePolicy } from './cps';
@@ -347,7 +348,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     const seen=gapDates.get(k)??new Set<string>();seen.add(date);gapDates.set(k,seen);
     if(existing) {existing.days=seen.size;existing.first_date=existing.first_date<date?existing.first_date:date;existing.last_date=existing.last_date>date?existing.last_date:date;existing.deliveries+=deliveries;existing.known_cost+=cost;return;}
     gaps.set(k,{key:k,kind,station_code:station,provider_id:id,dropx_id:dropx,name,first_date:date,last_date:date,days:1,deliveries,known_cost:cost,owner,
-      href:owner==='Workforce attendance' ? `https://dashboard.dropxlogistics.com/attendance` : owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `https://dashboard.dropxlogistics.com/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : `https://dashboard.dropxlogistics.com/provider-id-mapping?q=${encodeURIComponent(dropx || id)}&station=${encodeURIComponent(station)}`});
+      href:owner==='Workforce attendance' ? `https://dashboard.dropxlogistics.com/attendance` : owner==='People / Finance' ? '/cps?view=inputs' : owner==='Operations uploads' ? 'https://dashboard.dropxlogistics.com/imports' : owner==='Workforce direct pay' ? `/provider-mapping/direct-pay?q=${encodeURIComponent(dropx)}` : providerMappingHref({providerId:id,dropxId:dropx,station,firstDate:date,lastDate:date})});
   }
   const add=(station:string,date:string,head:CpsHead,sub:string,amount:number,source:string) => {
     if(selected.has(station) && amount!==0) lines.push({station_code:station,work_date:date,head,sub_head:sub,amount,source});
@@ -827,6 +828,14 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
   const privateEmployees=facts.employees.filter(e=>!['DA','DCD','ODCD','WM','PTDA','DR'].includes(e.designation));
   const privateCodes=new Set(privateEmployees.map(e=>e.employee_code).filter(Boolean));
   const privateWorkerIds=new Set(facts.workforce.filter(w=>w.source_profile_type==='employee'&&privateEmployees.some(e=>e.id===w.source_profile_id)).map(w=>w.id));
-  for(const g of gaps.values()) if(privateCodes.has(g.dropx_id)) {g.name='';g.dropx_id='';g.provider_id='';}
+  for(const g of gaps.values()) {
+    if(privateCodes.has(g.dropx_id)) {g.name='';g.dropx_id='';g.provider_id='';}
+    // Rebuild after aggregating dates, including cached gaps from older releases.
+    if(/^(?:https:\/\/dashboard\.dropxlogistics\.com)?\/provider-id-mapping(?:\?|$)/.test(g.href)) {
+      g.href=providerMappingHref({providerId:g.provider_id,dropxId:g.dropx_id,station:g.station_code,firstDate:g.first_date,lastDate:g.last_date});
+    } else if(g.href.startsWith('https://dashboard.dropxlogistics.com/provider-mapping/direct-pay')) {
+      g.href=g.href.replace('https://dashboard.dropxlogistics.com','');
+    }
+  }
   return {...base,da_details:summarizeDaDetails(detailDays.filter(d=>selected.has(d.station_code)&&!privateCodes.has(d.dropx_id)&&!privateWorkerIds.has(d.worker_id))),allocation_notices:[...allocationNotices],staff:[...staff.values()].sort((a,b)=>b.amount-a.amount),daily,breakup:lines,associates:associates.filter(r=>selected.has(r.station_code)&&!privateCodes.has(r.dropx_emp_code)).map(r=>({...r,mfn:0,mfn_return:0,total_activity:Math.max(0,num(r.total_activity)-num(r.mfn)-num(r.mfn_return))})),gaps:[...gaps.values()].sort((a,b)=>b.deliveries-a.deliveries||a.first_date.localeCompare(b.first_date)),people:[...people.values()].filter(p=>selected.has(p.station_code)&&!privateCodes.has(p.dropx_id)&&!privateWorkerIds.has(p.id)).sort((a,b)=>b.salary-a.salary)};
 }

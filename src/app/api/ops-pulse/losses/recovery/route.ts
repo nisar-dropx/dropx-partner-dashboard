@@ -34,9 +34,21 @@ export async function GET(request: Request) {
     const url = new URL(request.url),
       month = url.searchParams.get("month") || "",
       key = url.searchParams.get("case") || "";
-    const { auth, scope, station, settings, caseKey, amount } =
+    const { auth, scope, station, settings, caseKey, amount, report, finalSeenAt } =
       await recoveryContext(month, key, false);
-    const [people, history] = await Promise.all([
+    // The salary month payroll deducts a plan saved now in, from the same rule the database applies.
+    const salaryMonth = async (timing: "current_month" | "next_month") => {
+      const r = await supabaseAdmin!.rpc("nl_recovery_deduction_month", {
+        p_report: report,
+        p_case_month: month,
+        p_assigned_at: new Date().toISOString(),
+        p_final_seen_at: finalSeenAt,
+        p_timing: timing,
+        p_cutoff_day: Number(settings?.recovery_policy?.payroll_cutoff_day) || 7,
+      });
+      return r.error ? deductionMonth(timing) : (r.data as string | null);
+    };
+    const [people, history, currentMonth, nextMonth] = await Promise.all([
       loadRecoveryPayables(
         auth,
         scope.company,
@@ -55,6 +67,8 @@ export async function GET(request: Request) {
           .eq("case_key", caseKey)
           .order("created_at", { ascending: false }),
       ),
+      salaryMonth("current_month"),
+      salaryMonth("next_month"),
     ]);
     if (history.error)
       throw Error("Recovery people and history could not be loaded.");
@@ -62,9 +76,11 @@ export async function GET(request: Request) {
       case_key: caseKey,
       amount,
       deduction_months: {
-        current_month: deductionMonth("current_month"),
-        next_month: deductionMonth("next_month"),
+        current_month: currentMonth,
+        next_month: nextMonth,
       },
+      // SLP is deducted only once its Final file is in; the month above is provisional until then.
+      awaiting_final: report === "slp" && !finalSeenAt,
       people,
       history: history.data ?? [],
     });

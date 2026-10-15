@@ -374,7 +374,7 @@ export async function middleware(request: NextRequest) {
           needsClaimVerification = true;
         } else {
           const loginUrl = new URL("/login", request.url);
-          loginUrl.searchParams.set("next", request.nextUrl.pathname);
+          loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
           return NextResponse.redirect(loginUrl);
         }
       }
@@ -398,7 +398,7 @@ export async function middleware(request: NextRequest) {
       if (!data.user) {
         if (isTransientAuthFailure(error)) return unavailableSessionResponse();
         const loginUrl = new URL("/login", request.url);
-        loginUrl.searchParams.set("next", request.nextUrl.pathname);
+        loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
         return NextResponse.redirect(loginUrl);
       }
     } catch (error) {
