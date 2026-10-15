@@ -14,6 +14,7 @@ import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provi
 import { paymentAllocationHistoryRates, uniquePaymentAllocationHistory } from "@/lib/payment-allocation-history";
 import { buildProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
 import {
+  buildProviderFirstWorkerSelectionIndex,
   filterProviderFirstRowIndexes,
   providerMappingMonthOptions,
   isScientificProviderMemberId,
@@ -199,6 +200,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       ? `Mapped: ${worker.locationLabel} · Profile: ${worker.profileLocationLabel ?? "No location"}`
       : worker.locationLabel}${worker.onboardingStatus ? ` · ${worker.onboardingStatus}` : ""}`
   })), [workerRows]);
+  const workerSelectionIndex = useMemo(
+    () => buildProviderFirstWorkerSelectionIndex(workerRows, rows),
+    [workerRows, rows]
+  );
   const stations = useMemo(() => Array.from(new Map(rows.map((row) => [row.stationId, row.stationLabel])).entries()), [rows]);
   const dirtyRows = useMemo(() => rows.map((row, index) => {
     const thresholdConfig = row.productionThresholdConfig ?? paymentMethodById.get(row.paymentMethodId)?.productionThresholdConfig ?? null;
@@ -235,6 +240,15 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   }), [baselineRows, workerById, paymentMethodById, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const pageWindow = providerFirstPageWindow(visibleIndexes.length, currentPage, pageSize);
   const paginatedIndexes = useMemo(() => visibleIndexes.slice(pageWindow.fromIndex, pageWindow.toIndex), [visibleIndexes, pageWindow.fromIndex, pageWindow.toIndex]);
+  const selectableWorkerOptionsByIndex = useMemo(() => new Map(paginatedIndexes.map((index) => {
+    const row = rows[index];
+    return [index, workerOptions.filter((option) => providerFirstWorkerIsSelectable(
+      row,
+      workerById.get(option.value)!,
+      rows,
+      workerSelectionIndex
+    ))] as const;
+  })), [paginatedIndexes, rows, workerOptions, workerById, workerSelectionIndex]);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<"xlsx" | "csv">("xlsx");
   const [exportFilters, setExportFilters] = useState<ExportFilters>(emptyExportFilters);
@@ -966,7 +980,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions.filter(option => providerFirstWorkerIsSelectable(row, workerById.get(option.value)!, rows))} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect disabled={!canEditRow} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEditRow || !row.workforceId} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>

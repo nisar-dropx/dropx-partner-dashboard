@@ -254,12 +254,40 @@ test('selection does not shrink the last page or jump to another page', () => {
   assert.equal(ui.select('provider_first_worker_50').value, worker.id);
 });
 
+test('large worksheets render only the current page', () => {
+  const ui = worksheet({
+    mappings: Array.from({ length: 1103 }, (_, index) => ({
+      ...row,
+      providerMemberId: String(12345678901 + index)
+    }))
+  });
+  assert.equal(ui.cards().length, 50);
+  assert.equal(ui.all(node => node.type === 'SearchableSelect' && String(node.props.name).startsWith('provider_first_worker_')).length, 50);
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'provider-first-filter-summary')), /1103/);
+});
+
+test('worksheet search defers filtering and keeps worker-option scans out of row rendering', () => {
+  const source = readFileSync(new URL('./provider-first-mapping-worksheet.tsx', import.meta.url), 'utf8');
+  const renderedRows = source.slice(source.indexOf('<div className="mapping-rows provider-first-rows">'), source.indexOf('<div className="mapping-pagination">'));
+
+  assert.match(source, /const deferredQuery = useDeferredValue\(query\)/);
+  assert.match(source, /const workerSelectionIndex = useMemo\(/);
+  assert.match(source, /const selectableWorkerOptionsByIndex = useMemo\(/);
+  assert.match(renderedRows, /options=\{selectableWorkerOptionsByIndex\.get\(index\) \?\? \[\]\}/);
+  assert.doesNotMatch(renderedRows, /workerOptions\.filter\(/);
+  assert.match(renderedRows, /maxOptions=\{50\}/);
+  assert.doesNotMatch(source, /maxOptions=\{5000\}/);
+});
+
 test('current month uses IST at month and year boundaries and is passed by the server', () => {
   assert.equal(dashboardDateInputValue(new Date('2026-09-30T18:29:59Z')).slice(0, 7), '2026-09');
   assert.equal(dashboardDateInputValue(new Date('2026-09-30T18:30:00Z')).slice(0, 7), '2026-10');
   assert.equal(dashboardDateInputValue(new Date('2026-12-31T18:30:00Z')).slice(0, 7), '2027-01');
   const page = readFileSync(new URL('../app/provider-id-mapping/page.tsx', import.meta.url), 'utf8');
-  assert.match(page, /initialOutboundMonth=\{dashboardDateInputValue\(\)\.slice\(0, 7\)\}/);
+  assert.match(page, /const today = dashboardDateInputValue\(\)/);
+  assert.equal(page.match(/dashboardDateInputValue\(\)/g)?.length, 1, 'The request should compute the India business date once');
+  assert.match(page, /mapping\.effective_to! >= today/);
+  assert.match(page, /initialOutboundMonth=\{today\.slice\(0, 7\)\}/);
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.match(pkg.scripts['test:provider-mapping-period'], /provider-first-mapping-worksheet\.test\.mjs/);
   assert.match(pkg.scripts.build, /test:provider-mapping-period/);

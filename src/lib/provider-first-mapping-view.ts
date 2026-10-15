@@ -67,6 +67,11 @@ export type ProviderFirstMappingRowView = {
 
 export type MappingStationTopology = { id: string; parent_station_id?: string | null; provider_id?: string | null; modelCode: string };
 
+export type ProviderFirstWorkerSelectionIndex = {
+  occupiedIdentityKeysByWorkerId: ReadonlyMap<string, ReadonlySet<string>>;
+  draftIdentityKeysByWorkerId: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
 /** Only the configured XPT/parent family shares associates; names/codes are not relationships. */
 export function providerMappingStationFamily(stationId: string, stations: MappingStationTopology[]) {
   const station = stations.find((item) => item.id === stationId);
@@ -85,11 +90,62 @@ export function providerMappingStationFamily(stationId: string, stations: Mappin
  * validated after selection so every account-authorized associate remains
  * searchable, including the registered-location exception workflow.
  */
-export function providerFirstWorkerIsSelectable(row: ProviderFirstMappingRowView, worker: ProviderFirstWorkerView, drafts: ProviderFirstMappingRowView[] = []) {
+function providerFirstSelectionIdentity(providerId: string, providerMemberId: string) {
+  return `${providerId}\u0000${providerMemberKey("", providerMemberId)}`;
+}
+
+/**
+ * Builds the assignment-conflict evidence once for a worksheet render. Without
+ * this index every visible row scans every worker and then every draft row,
+ * which makes typing in the worksheet search quadratic on large companies.
+ */
+export function buildProviderFirstWorkerSelectionIndex(
+  workers: ProviderFirstWorkerView[],
+  drafts: ProviderFirstMappingRowView[],
+  today = mappingLookupToday()
+): ProviderFirstWorkerSelectionIndex {
+  const occupiedIdentityKeysByWorkerId = new Map<string, Set<string>>();
+  for (const worker of workers) {
+    const occupied = [
+      ...currentWorkerMappings(worker),
+      ...(worker.mappingHistory ?? []).filter((item) => item.status === "closed" && item.effectiveTo >= today)
+    ];
+    occupiedIdentityKeysByWorkerId.set(worker.id, new Set(occupied.map((item) => (
+      providerFirstSelectionIdentity(item.providerId, item.mappedProviderMemberId)
+    ))));
+  }
+
+  const draftIdentityKeysByWorkerId = new Map<string, Set<string>>();
+  for (const draft of drafts) {
+    if (!draft.workforceId) continue;
+    const identities = draftIdentityKeysByWorkerId.get(draft.workforceId) ?? new Set<string>();
+    identities.add(providerFirstSelectionIdentity(draft.providerId, draft.providerMemberId));
+    draftIdentityKeysByWorkerId.set(draft.workforceId, identities);
+  }
+  return { occupiedIdentityKeysByWorkerId, draftIdentityKeysByWorkerId };
+}
+
+export function providerFirstWorkerIsSelectable(
+  row: ProviderFirstMappingRowView,
+  worker: ProviderFirstWorkerView,
+  drafts: ProviderFirstMappingRowView[] = [],
+  selectionIndex?: ProviderFirstWorkerSelectionIndex
+) {
   if (row.workforceId === worker.id) return true;
   if (worker.hasRestrictedMapping) return false;
-  const identityMatches = (providerId: string, memberId: string) => providerId === row.providerId
-    && providerMemberKey("", memberId) === providerMemberKey("", row.providerMemberId);
+  const targetIdentityKey = providerFirstSelectionIdentity(row.providerId, row.providerMemberId);
+  if (selectionIndex) {
+    const occupiedIdentities = selectionIndex.occupiedIdentityKeysByWorkerId.get(worker.id);
+    if (occupiedIdentities
+      && (occupiedIdentities.size > 1 || (occupiedIdentities.size === 1 && !occupiedIdentities.has(targetIdentityKey)))) return false;
+    const draftIdentities = selectionIndex.draftIdentityKeysByWorkerId.get(worker.id);
+    if (draftIdentities
+      && (draftIdentities.size > 1 || (draftIdentities.size === 1 && !draftIdentities.has(targetIdentityKey)))) return false;
+    return true;
+  }
+  const identityMatches = (providerId: string, memberId: string) => (
+    providerFirstSelectionIdentity(providerId, memberId) === targetIdentityKey
+  );
   const occupied = [...currentWorkerMappings(worker), ...(worker.mappingHistory ?? []).filter(item => item.status === "closed" && item.effectiveTo >= mappingLookupToday())];
   if (occupied.some((item) => !identityMatches(item.providerId, item.mappedProviderMemberId))) return false;
   if (drafts.some((item) => item !== row && item.workforceId === worker.id

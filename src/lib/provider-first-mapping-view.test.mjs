@@ -4,6 +4,7 @@ import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import * as XLSX from "xlsx";
 import {
+  buildProviderFirstWorkerSelectionIndex,
   canonicalizeProviderFirstMembers,
   filterProviderFirstRowIndexes,
   isScientificProviderMemberId,
@@ -247,6 +248,60 @@ test("offers an exact second-location candidate when its registered-location map
   };
 
   assert.equal(providerFirstWorkerIsSelectable(secondLocationRow, worker, [secondLocationRow]), true);
+});
+
+test("indexed worker selection preserves conflict rules without rescanning every draft", () => {
+  const unmappedRow = {
+    ...row,
+    workforceId: "",
+    dropxId: "",
+    dropxName: "",
+    mappingId: ""
+  };
+  const available = {
+    ...worker,
+    id: "available",
+    mappingId: "",
+    providerId: "",
+    mappedProviderMemberId: "",
+    currentMappings: [],
+    mappingHistory: []
+  };
+  const occupied = {
+    ...available,
+    id: "occupied",
+    currentMappings: [{
+      mappingId: "other-mapping",
+      stationId: "station-1",
+      locationLabel: "KOZA",
+      providerId: "provider-2",
+      mappedProviderMemberId: "member-2",
+      paymentMethodId: method.id,
+      paymentValues: {},
+      productionThresholdConfig: null,
+      productionThresholdMinimumUnits: "",
+      effectiveFrom: "2026-09-01",
+      effectiveTo: "",
+      status: "active"
+    }]
+  };
+  const conflictingDraft = {
+    ...unmappedRow,
+    providerId: "provider-3",
+    providerMemberId: "member-3",
+    workforceId: available.id
+  };
+  const drafts = [unmappedRow, conflictingDraft];
+  const workers = [available, occupied, { ...available, id: "restricted", hasRestrictedMapping: true }];
+  const selectionIndex = buildProviderFirstWorkerSelectionIndex(workers, drafts, "2026-10-15");
+
+  for (const candidate of workers) {
+    assert.equal(
+      providerFirstWorkerIsSelectable(unmappedRow, candidate, drafts, selectionIndex),
+      providerFirstWorkerIsSelectable(unmappedRow, candidate, drafts),
+      `indexed selection should match legacy rules for ${candidate.id}`
+    );
+  }
 });
 
 test("uses the effective mapping station when the Workforce profile already moved", () => {

@@ -11,6 +11,8 @@ const authorization = read("src/lib/authorization.ts");
 const access = read("src/lib/provider-mapping-access.ts");
 const hostAccess = read("src/lib/provider-mapping-host.ts");
 const canonicalPage = read("src/app/provider-id-mapping/page.tsx");
+const canonicalWorksheet = read("src/components/provider-first-mapping-worksheet.tsx");
+const canonicalView = read("src/lib/provider-first-mapping-view.ts");
 const legacyProviderFirstPage = read("src/app/provider-mapping/provider-first/page.tsx");
 const directPayPage = read("src/app/provider-mapping/direct-pay/page.tsx");
 const actions = read("src/app/provider-mapping/actions.ts");
@@ -26,6 +28,10 @@ const legacyProviderMappingRedirect = middleware.match(/if \(isLegacyProviderMap
 const workforceRegisterPosition = navigation.indexOf('{ code: "delivery_associates", label: "Workforce Register"');
 const idMappingPosition = navigation.indexOf('{ code: "ops_provider_mapping", label: "ID Mapping"');
 const workforcePayoutPosition = navigation.indexOf('{ code: "ops_workforce_payouts", label: "Workforce Payouts"');
+const worksheetRowRender = canonicalWorksheet.slice(
+  canonicalWorksheet.indexOf('<div className="mapping-rows provider-first-rows">'),
+  canonicalWorksheet.indexOf('<div className="mapping-pagination">')
+);
 
 const checks = [
   [middleware.includes('path === "/provider-id-mapping"') && middleware.includes("providerMappingPageCodeForHost(host)"), "Middleware must allow the canonical provider ID mapping route only on recognized Dashboard and Ops hosts."],
@@ -42,6 +48,14 @@ const checks = [
   [accessSurface.indexOf('headers().get("host")') < accessSurface.indexOf('headers().get("x-forwarded-host")'), "Authorization role and location scope must prefer the same Host value used by middleware."],
   [hostAccess.includes('host === "ops.dropxlogistics.com"') && hostAccess.includes('host === "dashboard.dropxlogistics.com"') && hostAccess.includes("return null"), "Provider mapping must use isolated permissions on recognized Dashboard and Ops hosts and deny other surfaces."],
   [canonicalPage.includes("currentProviderMappingPageCode()") && canonicalPage.includes('requirePagePermission(pageCode, "access")') && canonicalPage.includes("canEditProviderMappings(authorization)") && canonicalPage.includes("pageCode={pageCode}"), "The canonical provider-first page must enforce host-specific access and derive editing from the server permission helper."],
+  [canonicalPage.includes("<ProviderFirstMappingWorksheet")
+    && canonicalWorksheet.includes("const deferredQuery = useDeferredValue(query)")
+    && canonicalWorksheet.includes("const selectableWorkerOptionsByIndex = useMemo(")
+    && canonicalView.includes("buildProviderFirstWorkerSelectionIndex")
+    && worksheetRowRender.includes("selectableWorkerOptionsByIndex.get(index) ?? []")
+    && !worksheetRowRender.includes("workerOptions.filter(")
+    && canonicalWorksheet.includes("maxOptions={50}")
+    && !canonicalWorksheet.includes("maxOptions={5000}"), "Dashboard and Ops must share the responsive canonical worksheet: deferred search, indexed candidate checks, bounded dropdown results, and no full worker scan during row rendering."],
   [legacyProviderFirstPage.includes('redirect("/provider-id-mapping")') && !legacyProviderFirstPage.includes("currentProviderMappingPageCode"), "The legacy provider-first route must stay redirect-only so its build entry does not retain the heavy mapping graph."],
   [canonicalPage.includes('href="/provider-id-mapping"') && directPayPage.includes('href="/provider-id-mapping"') && !canonicalPage.includes("Existing worksheet") && !directPayPage.includes("Existing worksheet") && !canonicalPage.includes('/provider-mapping/provider-first') && !directPayPage.includes('/provider-mapping/provider-first'), "Both mapping views must use the canonical URL and omit the legacy Existing worksheet tab and route."],
   [directPayPage.includes("currentProviderMappingPageCode()")
