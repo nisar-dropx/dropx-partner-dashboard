@@ -106,9 +106,20 @@ test('rate changes preserve continuous registered-location coverage across the c
  await db.exec(fix.slice(fix.indexOf('do $save_writer$'),fix.indexOf('-- Do not overwrite unrelated deployed protections')));
  await assert.rejects(call(plan),/registered-location mapping must cover/);
  assert.deepEqual(await state(),before,'failed plans must roll back all rate changes and audit events');
- await db.exec(await migration('20261015133000_provider_mapping_contiguous_payment_coverage.sql'));
- // Migration is safe to re-run and must retain the protected writer.
- await db.exec(await migration('20261015133000_provider_mapping_contiguous_payment_coverage.sql'));
+ const contiguousMigration=await migration('20261015133000_provider_mapping_contiguous_payment_coverage.sql');
+ const laterKeepMigration=await migration('20261015150000_provider_mapping_keep_registered_location.sql');
+ const finalCoverageMigration=await migration('20261016100000_provider_mapping_contiguous_coverage_final.sql');
+ await db.exec(contiguousMigration);
+ await db.exec(laterKeepMigration);
+ await assert.rejects(call(plan),/registered-location mapping must cover/,
+   'the later Keep-all migration reproduces the single-row coverage regression');
+ assert.match(finalCoverageMigration,/create or replace function public\.workforce_provider_mapping_period_covered/i);
+ assert.match(finalCoverageMigration,/create or replace function public\.workforce_assert_provider_mapping_registered_location/i);
+ assert.doesNotMatch(finalCoverageMigration,/workforce_save_mapping|workforce_keep_joining_mapping|workforce_save_mapping_schedule/,
+   'the final migration must not duplicate unrelated mapping writers');
+ await db.exec(finalCoverageMigration);
+ // The final migration is safe to re-run after every historical writer.
+ await db.exec(finalCoverageMigration);
  const result=await call(plan);
  assert.equal(result.rows[0].records.length,2);
  assert.equal(result.rows[0].records[1].payment_method_id,id(25));
