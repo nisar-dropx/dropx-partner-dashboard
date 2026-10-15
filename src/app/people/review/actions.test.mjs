@@ -16,6 +16,10 @@ function loadReviewAction(currentProfile, verificationRows = [], options = {}) {
         if (operation === "update") updateFilters.push([column, value]);
         return chain;
       },
+      is(column, value) {
+        if (operation === "update") updateFilters.push([column, value]);
+        return chain;
+      },
       maybeSingle() {
         if (operation === "update") {
           return Promise.resolve({
@@ -226,6 +230,22 @@ test("returning a Workforce profile never approves its existing-person exception
   assert.equal(result.notifications[0]?.eventCode, "profile_returned");
 });
 
+test("returning an onboarding review clears a stale profile-edit flag without activating the profile", async () => {
+  const result = await submitReview({
+    identity_exception_required: false,
+    lifecycle_status: "onboarding",
+    is_active: false,
+    profile_edit_review_pending: true
+  }, "return");
+
+  assert.equal(result.updatePayload.onboarding_status, "returned");
+  assert.equal(result.updatePayload.lifecycle_status, "onboarding");
+  assert.equal(result.updatePayload.is_active, false);
+  assert.equal(result.updatePayload.profile_edit_review_pending, false);
+  assert.equal(result.notifications[0]?.data.profileEdit, false);
+  assert.ok(result.updateFilters.some(([column, value]) => column === "profile_edit_review_pending" && value === true));
+});
+
 test("returning a self-edit keeps the active profile in the independent review queue", async () => {
   const result = await submitReview(
     {
@@ -233,6 +253,8 @@ test("returning a self-edit keeps the active profile in the independent review q
       onboarding_status: "active",
       lifecycle_status: "active",
       is_active: true,
+      deleted_at: null,
+      deactivated_at: null,
       profile_edit_review_pending: true
     },
     "return"
@@ -244,7 +266,46 @@ test("returning a self-edit keeps the active profile in the independent review q
   assert.equal(result.updatePayload.profile_edit_review_pending, true);
   assert.equal(result.updatePayload.profile_return_remarks, "Correct the submitted documents.");
   assert.equal(result.notifications[0]?.data.profileEdit, true);
+  assert.ok(result.updateFilters.some(([column, value]) => column === "profile_edit_review_pending" && value === true));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "is_active" && value === true));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "lifecycle_status" && value === "active"));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "deleted_at" && value === null));
+  assert.ok(result.updateFilters.some(([column, value]) => column === "deactivated_at" && value === null));
 });
+
+for (const [condition, profile] of [
+  ["inactive", { lifecycle_status: "inactive", is_active: false }],
+  ["outside the active lifecycle", { lifecycle_status: "exited", is_active: true }],
+  ["deleted", { lifecycle_status: "active", is_active: true, deleted_at: "2026-10-15T07:00:00.000Z" }],
+  ["deactivated", { lifecycle_status: "active", is_active: true, deactivated_at: "2026-10-15T07:00:00.000Z" }]
+]) {
+  test(`a stale self-edit flag cannot reactivate a Workforce profile that is ${condition}`, async () => {
+    const harness = loadReviewAction({
+      id: "workforce-id",
+      location_id: "station-id",
+      onboarding_status: "active",
+      profile_edit_review_pending: true,
+      updated_at: "2026-10-15T08:00:00.000Z",
+      deleted_at: null,
+      deactivated_at: null,
+      ...profile
+    });
+
+    await assert.rejects(
+      harness.reviewPeopleProfile(reviewForm("return")),
+      (error) => {
+        const digest = String(error?.digest ?? "");
+        return digest.startsWith("NEXT_REDIRECT;/people/review?error=") &&
+          digest.includes("Only+profiles+under+review+can+be+approved+or+returned");
+      }
+    );
+
+    const result = harness.result();
+    assert.equal(result.updatePayload, null);
+    assert.deepEqual(result.notifications, []);
+    assert.deepEqual(result.revalidated, []);
+  });
+}
 
 for (const action of ["approve", "return"]) {
   test(`stale ${action} is rejected before review side effects`, async () => {

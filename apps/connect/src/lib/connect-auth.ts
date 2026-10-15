@@ -14,6 +14,7 @@ import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./
 import { enforceAccessCutoffIfDueForWorker, readAccessCutoffForPreview } from "./access-cutoff";
 import { resolveConnectPreview } from "./connect-preview";
 import { connectMobileCountryFilter, normalizeStoredConnectMobile } from "@/lib/country-codes";
+import { eligibleConnectWorkforceAccount } from "../../../../src/lib/connect-account-freshness";
 
 export { normalizeConnectMobile } from "@/lib/country-codes";
 export {
@@ -169,7 +170,7 @@ const nonEmployeeBaseSelect = "id,company_id,full_name,email,dropx_id,biometric_
 function nonEmployeeSelect(profileType: NonEmployeeProfileType, includeMobile = false) {
   const mobileColumns = includeMobile ? ",mobile,mobile_country_code" : "";
   if (profileType === "workforce") {
-    return `${nonEmployeeBaseSelect}${mobileColumns},designation_id,source_profile_type,source_profile_id,deleted_at`;
+    return `${nonEmployeeBaseSelect}${mobileColumns},designation_id,source_profile_type,source_profile_id,deleted_at,deactivated_at`;
   }
   if (profileType === "contractor") {
     return `${nonEmployeeBaseSelect}${mobileColumns},deleted_at`;
@@ -514,13 +515,12 @@ type WorkforceRegisterRow = {
   source_profile_type?: string | null;
   source_profile_id?: string | null;
   deleted_at?: string | null;
+  deactivated_at?: string | null;
   is_active?: boolean | null;
 };
 
 function isActiveWorkforceRegisterRow(row: WorkforceRegisterRow) {
-  return !["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) &&
-    String(row.lifecycle_status ?? "").toLowerCase() !== "exited" &&
-    !row.deleted_at;
+  return eligibleConnectWorkforceAccount(row);
 }
 
 async function signedProfilePhotoUrl(path?: string | null) {
@@ -644,7 +644,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
   const mobileCountryFilter = connectMobileCountryFilter(countryCode);
   type ProfileMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null };
-  type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; source_profile_type?: string | null; source_profile_id?: string | null; deleted_at?: string | null };
+  type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; source_profile_type?: string | null; source_profile_id?: string | null; deleted_at?: string | null; deactivated_at?: string | null; is_active?: boolean | null };
 
   let profilesResult: MatchResult<ProfileMatch> = await supabaseAdmin
     .from("profiles")
@@ -680,7 +680,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       if (countryCode !== "91") return { data: [], error: null };
       let fallbackQuery = supabaseAdmin!
         .from(table)
-        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, is_active")
+        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, designation_id, source_profile_type, source_profile_id, deleted_at, deactivated_at")
         .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
       if (!["workforce", "field_executive"].includes(profileType)) fallbackQuery = fallbackQuery.eq("is_active", true);
       result = await fallbackQuery;
@@ -694,11 +694,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
     if (!["workforce", "field_executive"].includes(nonEmployeeTypes[index])) return result;
     return {
       ...result,
-      data: (result.data ?? []).filter((row) =>
-        !["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) &&
-        String(row.lifecycle_status ?? "").toLowerCase() !== "exited" &&
-        !row.deleted_at
-      )
+      data: (result.data ?? []).filter(eligibleConnectWorkforceAccount)
     };
   });
 

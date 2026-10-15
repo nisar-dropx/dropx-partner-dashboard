@@ -3,8 +3,10 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import ts from 'typescript';
+import * as countryCodes from './country-codes.ts';
 import * as profiles from './workforce-profiles.ts';
 import { peopleDocumentsAvailable, requiredDropxOnePageCodes } from './dropx-one-pages.ts';
+import * as accountFreshness from '../../../../src/lib/connect-account-freshness.ts';
 
 const realRequire = createRequire(import.meta.url);
 const mobile = '8086403828';
@@ -52,9 +54,12 @@ function fixture({ beta = false, pilotError = null, workforce = [normal('ordinar
   const mocks={
     'crypto':realRequire('node:crypto'), 'next/headers':{cookies:()=>({get:()=>null})},
     '@/lib/connect-otp':{normalizeMobile: v=>String(v)},
+    '@/lib/country-codes':countryCodes,
     '@/lib/india-date':{todayInIndia:()=> '2026-10-07'},
     '@/lib/supabase-admin':{supabaseAdmin:db}, '@/lib/workforce-profiles':profiles,
     '@/lib/dropx-one-pages':{peopleDocumentsAvailable,requiredDropxOnePageCodes},
+    '../../../../src/lib/connect-session-issuance':{},
+    '../../../../src/lib/connect-account-freshness':accountFreshness,
     './connect-wfh-access':{connectWfhEligible:()=>false,loadConnectWfhPolicies:async()=>new Map()},
     './connect-business-trip-access':{connectBusinessTripEligible:()=>false,loadConnectBusinessTripPolicies:async()=>new Map()},
     './connect-preview':{resolveConnectPreview:async()=>null},
@@ -104,4 +109,22 @@ test('normal pending registration retains its normal status without becoming bet
   const f=fixture({workforce:[{...normal('ordinary'),onboarding_status:'pending'}]});
   const [account]=await f.findConnectAccounts('91',mobile);
   canonical(account);assert.equal(account.status,'Pending');
+});
+test('deactivated and terminal workforce identities cannot sign in through a stale active onboarding status',async()=>{
+  const workforce=[
+    normal('active'),
+    {...normal('flagged-inactive'),is_active:false},
+    {...normal('manual-inactive'),is_active:false,lifecycle_status:'inactive'},
+    {...normal('deactivated'),deactivated_at:'2026-10-07T00:00:00Z'},
+    {...normal('deleted'),deleted_at:'2026-10-07T00:00:00Z'},
+    {...normal('offboarded'),lifecycle_status:'offboarded'}
+  ];
+  const rows=await fixture({workforce}).findConnectAccounts('91',mobile);
+  assert.deepEqual(rows.map(row=>row.id),['active']);
+});
+test('pending, under-review, returned and approved onboarding identities retain setup access',async()=>{
+  const statuses=['pending','under_review','returned','approved'];
+  const workforce=statuses.map(status=>({...normal(status),onboarding_status:status,lifecycle_status:'onboarding',is_active:false}));
+  const rows=await fixture({workforce}).findConnectAccounts('91',mobile);
+  assert.deepEqual(rows.map(row=>row.id).sort(),statuses.sort());
 });

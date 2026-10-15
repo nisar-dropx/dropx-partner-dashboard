@@ -20,7 +20,10 @@ import {
   normalizeStoredConnectMobile as normalizeRootStoredConnectMobile,
   normalizeSupportedCountryCode as normalizeRootSupportedCountryCode
 } from "../../../../src/lib/country-codes.ts";
-import { sameConnectAccountIdentitySet } from "../../../../src/lib/connect-account-freshness.ts";
+import {
+  eligibleConnectWorkforceAccount,
+  sameConnectAccountIdentitySet
+} from "../../../../src/lib/connect-account-freshness.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -136,6 +139,61 @@ test("Connect account freshness compares identity sets, not presentation fields 
   ]), false);
 });
 
+test("Connect Workforce account eligibility preserves onboarding without reopening inactive identities", () => {
+  assert.equal(eligibleConnectWorkforceAccount({
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true
+  }), true);
+  assert.equal(eligibleConnectWorkforceAccount({
+    onboarding_status: "active",
+    lifecycle_status: "onboarding",
+    is_active: true
+  }), true);
+  assert.equal(eligibleConnectWorkforceAccount({
+    onboarding_status: "active",
+    lifecycle_status: "settlement_pending",
+    is_active: true
+  }), true);
+
+  for (const onboarding_status of ["pending", "under_review", "returned", "approved"]) {
+    assert.equal(eligibleConnectWorkforceAccount({
+      onboarding_status,
+      lifecycle_status: "onboarding",
+      is_active: false
+    }), true, onboarding_status);
+  }
+
+  for (const row of [
+    { onboarding_status: "active", lifecycle_status: "active", is_active: false },
+    { onboarding_status: "active", lifecycle_status: "inactive", is_active: false },
+    { onboarding_status: "active", lifecycle_status: "active", is_active: true, deleted_at: "2026-10-01" },
+    { onboarding_status: "active", lifecycle_status: "active", is_active: true, deactivated_at: "2026-10-01" },
+    { onboarding_status: "rejected", lifecycle_status: "onboarding", is_active: false },
+    { onboarding_status: "cancelled", lifecycle_status: "onboarding", is_active: false }
+  ]) {
+    assert.equal(eligibleConnectWorkforceAccount(row), false, JSON.stringify(row));
+  }
+
+  for (const lifecycle_status of [
+    "closed",
+    "deactivated",
+    "exited",
+    "inactive",
+    "offboarded",
+    "resigned",
+    "settled",
+    "suspended",
+    "terminated"
+  ]) {
+    assert.equal(eligibleConnectWorkforceAccount({
+      onboarding_status: "active",
+      lifecycle_status,
+      is_active: true
+    }), false, lifecycle_status);
+  }
+});
+
 test("every Connect login endpoint uses the shared input normalizer", async () => {
   const authRoot = resolve(here, "../../app/api/connect/auth");
   const routeNames = ["start", "verify-pin", "set-pin", "send-otp", "verify-otp"];
@@ -150,6 +208,8 @@ test("every Connect login endpoint uses the shared input normalizer", async () =
   assert.match(sessionSource, /normalizeStoredConnectMobile\([\s\S]*?session\.mobile_number_format/);
   const authSource = await readFile(resolve(here, "connect-auth.ts"), "utf8");
   assert.match(authSource, /from "\.\.\/\.\.\/\.\.\/\.\.\/src\/lib\/connect-session-issuance"/);
+  assert.match(authSource, /eligibleConnectWorkforceAccount/);
+  assert.match(authSource, /deleted_at,deactivated_at/);
   assert.match(authSource, /connectMobileCountryFilter\(countryCode\)/);
   assert.match(authSource, /countryCode !== "91"/);
 });
@@ -175,6 +235,8 @@ test("root and Connect login surfaces enforce the same mobile contract", async (
   const rootAuthSource = await readFile(resolve(here, "../../../../src/lib/connect-auth.ts"), "utf8");
   assert.match(rootAuthSource, /from "@\/lib\/country-codes"/);
   assert.match(rootAuthSource, /from "@\/lib\/connect-session-issuance"/);
+  assert.match(rootAuthSource, /eligibleConnectWorkforceAccount/);
+  assert.match(rootAuthSource, /deleted_at, deactivated_at/);
   assert.match(rootAuthSource, /connectMobileCountryFilter\(countryCode\)/);
   assert.match(rootAuthSource, /countryCode === "91"/);
 });

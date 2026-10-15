@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { connectMobileCountryFilter } from "@/lib/country-codes";
+import { eligibleConnectWorkforceAccount } from "@/lib/connect-account-freshness";
 
 export {
   normalizeConnectMobile,
@@ -90,7 +91,7 @@ export async function findConnectAccounts(
   const mobileCountryFilter = connectMobileCountryFilter(countryCode);
   let [profilesResult, executivesResult]: [
     MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null }>,
-    MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; profile_photo_path?: string | null }>
+    MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; is_active?: boolean | null; deleted_at?: string | null; deactivated_at?: string | null }>
   ] = await Promise.all([
     supabaseAdmin
       .from("profiles")
@@ -100,7 +101,7 @@ export async function findConnectAccounts(
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
     supabaseAdmin
       .from("workforce")
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, profile_photo_path, is_active, mobile_country_code")
+      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, deleted_at, deactivated_at, mobile_country_code")
       .or(mobileCountryFilter)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
   ]);
@@ -117,7 +118,7 @@ export async function findConnectAccounts(
     executivesResult = countryCode === "91"
       ? await supabaseAdmin
         .from("workforce")
-        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, is_active")
+        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, deleted_at, deactivated_at")
         .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
       : { data: [], error: null };
   }
@@ -125,7 +126,7 @@ export async function findConnectAccounts(
   if (executivesResult.error) throw new Error(executivesResult.error.message);
   executivesResult = {
     ...executivesResult,
-    data: (executivesResult.data ?? []).filter((row) => !["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()))
+    data: (executivesResult.data ?? []).filter(eligibleConnectWorkforceAccount)
   };
 
   const accounts: AccountRow[] = [

@@ -144,7 +144,8 @@ async function loadReviewProfiles(
   const attachmentColumns = attachmentFields.map((field) => field.key).join(", ");
   const employeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
   const workforceSelect = `id, dropx_id, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
-  const nonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
+  const nonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
+  const editableNonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
   const nonEmployeeTypes = workforceProfileTypes.filter(
     (profileType): profileType is Exclude<WorkforceProfileType, "employee" | "workforce" | "field_executive"> =>
       profileType !== "employee" && profileType !== "workforce" && profileType !== "field_executive"
@@ -165,13 +166,18 @@ async function loadReviewProfiles(
       .or("onboarding_status.eq.under_review,profile_edit_review_pending.eq.true")
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true })),
-    ...nonEmployeeTypes.map((profileType) => readAllRows(admin
-      .from(nonEmployeeProfileConfigs[profileType].table)
-      .select(nonEmployeeSelect)
-      .eq("company_id", companyId)
-      .or("onboarding_status.eq.under_review,profile_edit_review_pending.eq.true")
-      .order("updated_at", { ascending: false })
-      .order("id", { ascending: true })))
+    ...nonEmployeeTypes.map((profileType) => {
+      const supportsProfileEditReview = profileType === "contractor" || profileType === "vendor";
+      const query = admin
+        .from(nonEmployeeProfileConfigs[profileType].table)
+        .select(supportsProfileEditReview ? editableNonEmployeeSelect : nonEmployeeSelect)
+        .eq("company_id", companyId);
+      return readAllRows((supportsProfileEditReview
+        ? query.or("onboarding_status.eq.under_review,profile_edit_review_pending.eq.true")
+        : query.eq("onboarding_status", "under_review"))
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: true }));
+    })
   ];
   const profileResults = await Promise.all(profileQueries);
 

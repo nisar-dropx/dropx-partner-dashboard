@@ -68,11 +68,20 @@ export async function reviewPeopleProfile(formData: FormData) {
         !authorization.locationScopeIds.includes(String(current.data.location_id ?? ""))) {
       throw new Error("You do not have access to this profile location.");
     }
-    const currentStatus = profileType === "employee"
+    const rawCurrentStatus = profileType === "employee"
       ? (current.data as { profile_completion_status?: unknown }).profile_completion_status
       : (current.data as { onboarding_status?: unknown }).onboarding_status;
-    const returnedProfileEdit = current.data.profile_edit_review_pending === true;
-    if (String(currentStatus ?? "").toLowerCase() !== "under_review" && !returnedProfileEdit) {
+    const currentStatus = String(rawCurrentStatus ?? "").trim().toLowerCase();
+    const profileEditFlag = current.data.profile_edit_review_pending === true;
+    const operationalProfileEditReview = profileEditFlag &&
+      currentStatus === "active" &&
+      current.data.is_active === true &&
+      current.data.deleted_at == null &&
+      current.data.deactivated_at == null &&
+      (profileType !== "workforce" ||
+        String(current.data.lifecycle_status ?? "").trim().toLowerCase() === "active");
+    const returnedProfileEdit = operationalProfileEditReview;
+    if (currentStatus !== "under_review" && !operationalProfileEditReview) {
       throw new Error("Only profiles under review can be approved or returned.");
     }
     const currentUpdatedAt = String(current.data.updated_at ?? "").trim();
@@ -121,7 +130,7 @@ export async function reviewPeopleProfile(formData: FormData) {
           ...workforceLifecycleUpdate,
           profile_return_remarks: remarks,
           profile_returned_at: reviewedAt,
-          ...(returnedProfileEdit ? { profile_edit_review_pending: true } : {}),
+          ...(supportsProfileEditReview ? { profile_edit_review_pending: returnedProfileEdit } : {}),
           updated_at: reviewedAt
         };
     let updateQuery = supabaseAdmin
@@ -129,10 +138,29 @@ export async function reviewPeopleProfile(formData: FormData) {
       .update(update)
       .eq("id", id)
       .eq("company_id", companyId)
-      .eq(statusColumn, currentStatus)
+      .eq(statusColumn, rawCurrentStatus)
       .eq("updated_at", reviewVersion);
     if (supportsProfileEditReview) {
-      updateQuery = updateQuery.eq("profile_edit_review_pending", returnedProfileEdit);
+      // Compare the value read from storage even when a stale flag is not an
+      // operational self-edit. That prevents this decision from clearing or
+      // preserving a flag that changed after the review modal was opened.
+      updateQuery = updateQuery.eq("profile_edit_review_pending", profileEditFlag);
+    }
+    if (operationalProfileEditReview) {
+      updateQuery = updateQuery.eq("is_active", true);
+      if (profileType === "workforce") {
+        updateQuery = updateQuery
+          .eq("lifecycle_status", "active")
+          .is("deleted_at", null)
+          .is("deactivated_at", null);
+      } else {
+        if (Object.prototype.hasOwnProperty.call(current.data, "deleted_at")) {
+          updateQuery = updateQuery.is("deleted_at", null);
+        }
+        if (Object.prototype.hasOwnProperty.call(current.data, "deactivated_at")) {
+          updateQuery = updateQuery.is("deactivated_at", null);
+        }
+      }
     }
     const result = await updateQuery
       .select("id")

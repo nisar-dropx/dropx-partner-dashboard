@@ -10,8 +10,19 @@ test("profile review loads all under-review profile rows with explicit range pag
   assert.match(page, /\.order\("id", \{ ascending: true \}\)/);
   assert.match(page, /const profileResults = await Promise\.all\(profileQueries\)/);
   assert.equal(
-    (page.match(/\.or\("(?:profile_completion_status|onboarding_status)\.eq\.under_review,profile_edit_review_pending\.eq\.true"\)/g) ?? []).length,
-    3
+    (page.match(/\.or\("profile_completion_status\.eq\.under_review,profile_edit_review_pending\.eq\.true"\)/g) ?? []).length,
+    1
+  );
+  assert.equal(
+    (page.match(/\.or\("onboarding_status\.eq\.under_review,profile_edit_review_pending\.eq\.true"\)/g) ?? []).length,
+    2
+  );
+  assert.match(page, /const supportsProfileEditReview = profileType === "contractor" \|\| profileType === "vendor"/);
+  assert.match(page, /supportsProfileEditReview \? editableNonEmployeeSelect : nonEmployeeSelect/);
+  assert.match(page, /: query\.eq\("onboarding_status", "under_review"\)/);
+  assert.doesNotMatch(
+    page,
+    /const nonEmployeeSelect = `[^`]*profile_edit_review_pending/
   );
 });
 
