@@ -101,7 +101,8 @@ assert.equal(await targetV2(),undefined);
 // Sync hardening: unchanged/preserved/frozen writes skip the payroll lock; a busy lock defers.
 await db.exec(`update field_executive_provider_mappings set effective_to=null where id='${m}';delete from workforce_route_distances;delete from revisions;
 create table locks(n int);create or replace function lock_workforce_payment_allocation_company(uuid) returns void language sql as 'insert into public.locks values(1)';`);
-await db.exec(fs.readFileSync('supabase/migrations/20261015120000_route_distance_sync_hardening.sql','utf8'));
+const hardening=fs.readFileSync('supabase/migrations/20261015120000_route_distance_sync_hardening.sql','utf8');
+await db.exec(hardening);await db.exec(hardening); // safe to re-run
 const locks=async()=>Number((await db.query('select count(*) n from locks')).rows[0].n);
 const stored=async()=>(await db.query('select * from workforce_route_distances')).rows[0];
 const v6={...row,transporter_id:'A111111',calculation_version:'amazon-gps-first-v6'};

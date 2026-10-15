@@ -45,16 +45,23 @@ export default async function DistancePage({
     statuses = values(searchParams.status),
     methods = values(searchParams.method),
     q = one(searchParams.q) || "";
-  let period = { from: todayKolkata().slice(0, 8) + "01", to: todayKolkata() },
+  // Distance settles only after the work day closes, so open on the last settled day.
+  const today = todayKolkata(),
+    yesterday = new Date(Date.parse(today + "T00:00:00Z") - 86400000)
+      .toISOString()
+      .slice(0, 10),
+    requestedFrom = one(searchParams.from),
+    defaultTo = requestedFrom && requestedFrom > yesterday ? today : yesterday;
+  let period = { from: defaultTo.slice(0, 8) + "01", to: defaultTo },
     error = scope.error
       ? "Station access could not be loaded. Please retry."
       : "";
   let rows: Awaited<ReturnType<typeof loadDistanceRegister>> = [];
   try {
     period = distancePeriod(
-      one(searchParams.from),
-      one(searchParams.to),
-      todayKolkata(),
+      requestedFrom,
+      one(searchParams.to) || defaultTo,
+      today,
     );
     if (!error)
       rows = await loadDistanceRegister(

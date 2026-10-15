@@ -4,11 +4,12 @@
 -- 2. Identity is resolved once per write, outside the lock (was twice inside).
 -- 3. The lock wait is capped; a busy payroll makes the sync retry later
 --    instead of queueing behind it.
+-- Safe to re-run (if-not-exists table/indexes, create-or-replace function).
 -- 4. A small service-only run log lets the hourly worker visit only the
 --    station-days that can still change.
 begin;
 
-create table public.workforce_route_distance_sync_runs (
+create table if not exists public.workforce_route_distance_sync_runs (
   company_id uuid not null references public.companies(id),
   station_id uuid not null references public.stations(id),
   work_date date not null,
@@ -22,8 +23,8 @@ create table public.workforce_route_distance_sync_runs (
   unchanged integer not null default 0,
   primary key (company_id,station_id,work_date)
 );
-create index workforce_route_distance_sync_runs_day on public.workforce_route_distance_sync_runs(company_id,work_date);
-create index workforce_route_distance_sync_runs_station_fk on public.workforce_route_distance_sync_runs(station_id);
+create index if not exists workforce_route_distance_sync_runs_day on public.workforce_route_distance_sync_runs(company_id,work_date);
+create index if not exists workforce_route_distance_sync_runs_station_fk on public.workforce_route_distance_sync_runs(station_id);
 alter table public.workforce_route_distance_sync_runs enable row level security;
 revoke all on public.workforce_route_distance_sync_runs from public,anon,authenticated,service_role;
 grant select,insert,update on public.workforce_route_distance_sync_runs to service_role;
