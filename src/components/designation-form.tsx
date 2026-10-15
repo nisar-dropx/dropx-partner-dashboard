@@ -472,15 +472,10 @@ export function DesignationForm({
   );
   const [isFieldOperations, setIsFieldOperations] = useState(Boolean(initial?.is_field_operations));
   const [providerMappingRequired, setProviderMappingRequired] = useState(
-    Boolean(initial?.is_field_operations && initial?.provider_mapping_required)
+    Boolean(initial?.provider_mapping_required)
   );
   const selectedPages = (initial?.app_page_access ?? defaultAppPageAccess)
     .filter((page) => appPageOptions.some((option) => option.value === page));
-
-  function updateFieldOperations(checked: boolean) {
-    setIsFieldOperations(checked);
-    setProviderMappingRequired(checked);
-  }
 
   return (
     <form action={action} className="designation-form">
@@ -513,30 +508,25 @@ export function DesignationForm({
             checked={isFieldOperations}
             className="matrix-checkbox"
             name="is_field_operations"
-            onChange={(event) => updateFieldOperations(event.target.checked)}
+            onChange={(event) => setIsFieldOperations(event.target.checked)}
             type="checkbox"
           />
           <span>
             <strong>Field Operations</strong>
-            <small>Include people with this designation in workforce payment setup.</small>
+            <small>Classify this designation for Field Operations workflows. Direct Pay eligibility is configured separately.</small>
           </span>
         </label>
         <label className="check-row designation-field-operations">
           <input
-            checked={isFieldOperations && providerMappingRequired}
+            checked={providerMappingRequired}
             className="matrix-checkbox"
-            disabled={!isFieldOperations}
             name="provider_mapping_required"
             onChange={(event) => setProviderMappingRequired(event.target.checked)}
             type="checkbox"
           />
           <span>
             <strong>Require provider ID mapping</strong>
-            <small>
-              {isFieldOperations
-                ? "Turn this off for direct-pay roles such as van drivers."
-                : "Enable Field Operations to configure this requirement."}
-            </small>
+            <small>Turn this off to use Direct Pay allocations. This setting is independent of Field Operations.</small>
           </span>
         </label>
         {initial ? (

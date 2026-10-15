@@ -11,6 +11,8 @@ const authorization = read("src/lib/authorization.ts");
 const access = read("src/lib/provider-mapping-access.ts");
 const hostAccess = read("src/lib/provider-mapping-host.ts");
 const canonicalPage = read("src/app/provider-id-mapping/page.tsx");
+const canonicalWorksheet = read("src/components/provider-first-mapping-worksheet.tsx");
+const canonicalView = read("src/lib/provider-first-mapping-view.ts");
 const legacyProviderFirstPage = read("src/app/provider-mapping/provider-first/page.tsx");
 const directPayPage = read("src/app/provider-mapping/direct-pay/page.tsx");
 const actions = read("src/app/provider-mapping/actions.ts");
@@ -19,6 +21,7 @@ const lookupApi = read("src/app/api/provider-mapping/member-lookup/route.ts");
 const migration = read("supabase/migrations/20261003123618_ops_provider_mapping_access.sql");
 const locationRemapMigration = read("supabase/migrations/20261005124958_provider_mapping_drift_and_period_corrections.sql");
 const multiLocationMigration = read("supabase/migrations/20261009173118_workforce_provider_mapping_multi_location.sql");
+const registeredLocationKeepMigration = read("supabase/migrations/20261015150000_provider_mapping_keep_registered_location.sql");
 
 const opsCodes = accessSurface.match(/export const opsAccessPageCodes = \[([\s\S]*?)\] as const;/)?.[1] ?? "";
 const legacyProviderMappingPredicate = middleware.match(/const isLegacyProviderMappingIndex = ([^;]+);/)?.[1]?.trim() ?? "";
@@ -26,6 +29,10 @@ const legacyProviderMappingRedirect = middleware.match(/if \(isLegacyProviderMap
 const workforceRegisterPosition = navigation.indexOf('{ code: "delivery_associates", label: "Workforce Register"');
 const idMappingPosition = navigation.indexOf('{ code: "ops_provider_mapping", label: "ID Mapping"');
 const workforcePayoutPosition = navigation.indexOf('{ code: "ops_workforce_payouts", label: "Workforce Payouts"');
+const worksheetRowRender = canonicalWorksheet.slice(
+  canonicalWorksheet.indexOf('<div className="mapping-rows provider-first-rows">'),
+  canonicalWorksheet.indexOf('<div className="mapping-pagination">')
+);
 
 const checks = [
   [middleware.includes('path === "/provider-id-mapping"') && middleware.includes("providerMappingPageCodeForHost(host)"), "Middleware must allow the canonical provider ID mapping route only on recognized Dashboard and Ops hosts."],
@@ -41,18 +48,40 @@ const checks = [
   [access.includes('headers().get("host")') && access.includes("providerMappingPageCodeForCurrentHost") && !access.includes("x-forwarded-host"), "Provider mapping permission selection must use the same trusted Host value as middleware."],
   [accessSurface.indexOf('headers().get("host")') < accessSurface.indexOf('headers().get("x-forwarded-host")'), "Authorization role and location scope must prefer the same Host value used by middleware."],
   [hostAccess.includes('host === "ops.dropxlogistics.com"') && hostAccess.includes('host === "dashboard.dropxlogistics.com"') && hostAccess.includes("return null"), "Provider mapping must use isolated permissions on recognized Dashboard and Ops hosts and deny other surfaces."],
-  [canonicalPage.includes("currentProviderMappingPageCode()") && canonicalPage.includes('requirePagePermission(pageCode, "access")') && canonicalPage.includes("pageCode={pageCode}"), "The canonical provider-first page must enforce the host-specific permission without changing its UI."],
+  [canonicalPage.includes("currentProviderMappingPageCode()") && canonicalPage.includes('requirePagePermission(pageCode, "access")') && canonicalPage.includes("canEditProviderMappings(authorization)") && canonicalPage.includes("pageCode={pageCode}"), "The canonical provider-first page must enforce host-specific access and derive editing from the server permission helper."],
+  [canonicalPage.includes("<ProviderFirstMappingWorksheet")
+    && canonicalWorksheet.includes("const deferredQuery = useDeferredValue(query)")
+    && canonicalWorksheet.includes("const selectableWorkerOptionsByIndex = useMemo(")
+    && canonicalView.includes("buildProviderFirstWorkerSelectionIndex")
+    && worksheetRowRender.includes("selectableWorkerOptionsByIndex.get(index) ?? []")
+    && !worksheetRowRender.includes("workerOptions.filter(")
+    && canonicalWorksheet.includes("maxOptions={50}")
+    && !canonicalWorksheet.includes("maxOptions={5000}"), "Dashboard and Ops must share the responsive canonical worksheet: deferred search, indexed candidate checks, bounded dropdown results, and no full worker scan during row rendering."],
   [legacyProviderFirstPage.includes('redirect("/provider-id-mapping")') && !legacyProviderFirstPage.includes("currentProviderMappingPageCode"), "The legacy provider-first route must stay redirect-only so its build entry does not retain the heavy mapping graph."],
   [canonicalPage.includes('href="/provider-id-mapping"') && directPayPage.includes('href="/provider-id-mapping"') && !canonicalPage.includes("Existing worksheet") && !directPayPage.includes("Existing worksheet") && !canonicalPage.includes('/provider-mapping/provider-first') && !directPayPage.includes('/provider-mapping/provider-first'), "Both mapping views must use the canonical URL and omit the legacy Existing worksheet tab and route."],
   [directPayPage.includes("currentProviderMappingPageCode()")
+    && directPayPage.includes("isDashboardPaymentSettingsDirectPayEntry(pageCode, audience, searchParams.source)")
     && directPayPage.includes('accessPageCode = paymentSettingsEntry ? "payment_settings" : pageCode')
     && directPayPage.includes('requirePagePermission(accessPageCode, "access")')
     && directPayPage.includes("pageCode={accessPageCode}"), "Direct-pay must keep host-specific provider-mapping access while allowing the explicit Helper payment-settings entry."],
-  [actions.includes("canEditProviderMappings(authorization)") && directPayActions.includes("canEditProviderMappings(authorization)"), "All mapping writes must enforce the host-specific Add/Edit grant."],
+  [access.includes('return hasPermission(authorization, pageCode, "edit");')
+    && !access.includes('hasPermission(authorization, pageCode, "add")')
+    && actions.includes("canEditProviderMappings(authorization)")
+    && directPayActions.includes("canEditProviderMappings(authorization)"), "All mapping writes must require the host-specific Edit grant; Add-only and read-only users must not mutate mappings."],
+  [hostAccess.includes("isDashboardPaymentSettingsDirectPayEntry")
+    && directPayActions.includes("isDashboardPaymentSettingsDirectPayEntry(")
+    && directPayActions.includes("const pageCode = currentProviderMappingPageCode()"), "The payment-settings Helper entry must be limited to Dashboard and must not bypass the Ops ID Mapping permission."],
   [lookupApi.includes("providerMappingPageCodeForCurrentHost()") && lookupApi.includes("authorization.locationScopeIds") && lookupApi.includes('.in("station_code", stationCodes)'), "The member lookup API must enforce the recognized host, Ops grant, and assigned-location scope."],
   [canonicalPage.includes("authorization.locationScopeIds") && actions.includes("assertProviderFirstRowScope") && actions.includes('select("id, location_id")') && actions.includes("locationRemapFromStationId") && actions.includes('sourceType !== "workforce"'), "Provider mapping reads and writes must remain scoped to assigned locations and canonical workforce records."],
   [actions.includes('select("id, effective_from, effective_to, station_id') && actions.includes("existing.station_id") && actions.includes("workerMapping.station_id"), "Bulk, legacy, and provider-first updates must reject existing mappings outside the assigned-location scope."],
   [actions.includes("providerFirstReplacementState") && actions.includes("expectedReplacementId === existingMapping.id") && actions.includes("existing provider mapping is outside your allocated locations") && actions.includes("workforce_replace_joining_mapping") && actions.includes("workforce_keep_joining_mapping") && actions.includes('replacementAction === "keep"'), "Provider-first replacements must confirm the exact active mapping, preserve location scope, and use an audited Move or Keep all transaction."],
+  [actions.includes('allowKeepAll: changeKind === "location"')
+    && actions.includes('"workforce_keep_joining_mapping_at_registered_location"')
+    && registeredLocationKeepMigration.includes("'keep_direction', 'registered_anchor_added'")
+    && registeredLocationKeepMigration.includes("'concurrent_from', greatest(")
+    && !registeredLocationKeepMigration.includes("update public.field_executive_provider_mappings")
+    && registeredLocationKeepMigration.includes("from public, anon, authenticated")
+    && registeredLocationKeepMigration.includes("to service_role"), "Dashboard and Ops must both offer reverse Keep all through the audited service-only transaction without rewriting existing mapping IDs or periods."],
   [actions.includes('rpc("workforce_active_provider_member_mappings"') && actions.includes("providerMemberIdentity(currentMapping.provider_member_id)") && !actions.includes('.eq("provider_member_id", providerMemberId)') && multiLocationMigration.includes("upper(btrim(mapping.provider_member_id))") && multiLocationMigration.includes("upper(btrim(p_provider_member_id))"), "Keep all and clear must resolve Provider Member IDs with the same trim- and case-insensitive identity used by the database constraints."],
   [multiLocationMigration.includes("workforce_provider_member_owner_guard") && multiLocationMigration.includes("All simultaneous location mappings for a Provider ID must use the same DropX ID") && multiLocationMigration.includes("workforce_clear_joining_mapping") && multiLocationMigration.includes("from public, anon, authenticated") && multiLocationMigration.includes("to service_role"), "Keep all and clear must enforce one canonical DropX owner at the database boundary, preserve history, and remain service-role only."],
   [locationRemapMigration.includes("workforce_rebase_payment_policy_location") && locationRemapMigration.includes("provider_mapping_location_moved") && locationRemapMigration.includes("target.id <> old_mapping.id") && locationRemapMigration.includes("person.location_id is distinct from new_station_id") && locationRemapMigration.includes("from public, anon, authenticated") && locationRemapMigration.includes("to service_role"), "Location remaps must preserve policy history, support a profile already at the destination, audit the move, exclude only the confirmed old mapping, and remain service-role only."],

@@ -97,6 +97,131 @@ test('selecting a legacy-ID parent-station associate asks for dates instead of a
   ui.render();
   assert.match(JSON.stringify(ui.all(n=>n.props?.className==='mapping-period-help')),/Keep all.*JUGD/);
 });
+
+test('a same-owner move to the registered location offers and submits both Keep all and Move mapping', async () => {
+  const currentMapping = {
+    mappingId: 'sbpd-map',
+    stationId: 'station-2',
+    locationLabel: 'SBPD',
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: '',
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '',
+    status: 'active'
+  };
+  const relocatingWorker = {
+    ...worker,
+    stationId: currentMapping.stationId,
+    locationLabel: currentMapping.locationLabel,
+    profileStationId: row.stationId,
+    profileLocationLabel: 'KDJE - Barbil',
+    mappingId: currentMapping.mappingId,
+    paymentMethodId: currentMapping.paymentMethodId,
+    paymentValues: currentMapping.paymentValues,
+    effectiveFrom: currentMapping.effectiveFrom,
+    mappedProviderMemberId: currentMapping.mappedProviderMemberId,
+    currentMappings: [currentMapping],
+    mappingHistory: [currentMapping]
+  };
+
+  for (const choice of ['Keep all', 'Move mapping']) {
+    let submitted;
+    const ui = worksheet({
+      mappings: [{ ...row, stationLabel: 'KDJE - Barbil' }],
+      workers: [relocatingWorker]
+    }, async data => {
+      submitted = data;
+      return saved(data);
+    });
+
+    completeDraft(ui);
+    await ui.save();
+    assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /Choose location mapping action/);
+    assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /From 2026-10-03/);
+    assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /old location unchanged before this date/);
+    assert.equal(ui.one(node => node.type === 'button' && node.props.children === 'Keep all').props.disabled, false);
+    assert.equal(ui.one(node => node.type === 'button' && node.props.children === 'Move mapping').props.disabled, false);
+
+    ui.one(node => node.type === 'button' && node.props.children === choice).props.onClick();
+    await new Promise(setImmediate);
+    ui.render();
+    assert.equal(submitted.get('rows[0][replace_mapping_id]'), currentMapping.mappingId);
+    assert.equal(submitted.get('rows[0][replacement_confirmed]'), 'yes');
+    assert.equal(submitted.get('rows[0][replacement_action]'), choice === 'Keep all' ? 'keep' : 'move');
+  }
+});
+
+test('relocation choices recompute from Effective from and never use a future source period', async () => {
+  const futureSource = {
+    mappingId: 'source-from-october-15',
+    stationId: 'station-2',
+    locationLabel: 'SBPD',
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: '',
+    effectiveFrom: '2026-10-15',
+    effectiveTo: '',
+    status: 'active'
+  };
+  const ui = worksheet({
+    mappings: [{ ...row, stationLabel: 'KDJE - Barbil' }],
+    workers: [{ ...worker, stationId: futureSource.stationId, locationLabel: futureSource.locationLabel,
+      profileStationId: row.stationId, profileLocationLabel: 'KDJE - Barbil', mappingId: futureSource.mappingId,
+      paymentMethodId: method.id, paymentValues: futureSource.paymentValues, effectiveFrom: futureSource.effectiveFrom,
+      mappedProviderMemberId: row.providerMemberId, currentMappings: [futureSource], mappingHistory: [futureSource] }]
+  });
+
+  ui.change('provider_first_worker_0', worker.id);
+  assert.match(JSON.stringify(ui.all(node => node.props?.role === 'status')), /Enter Effective from.*registered location KDJE - Barbil/);
+  ui.change('provider_first_payment_method_0', method.id);
+  ui.one(node => node.type === 'input' && node.props.type === 'number').props.onChange({ target: { value: '15' } });
+  ui.render();
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-10-15' } });
+  ui.render();
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'mapping-period-help')), /Location change: SBPD → KDJE - Barbil from 2026-10-15/);
+  await ui.save();
+  assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /From 2026-10-15/);
+
+  ui.one(node => node.type === 'button' && node.props.children === 'Cancel').props.onClick();
+  ui.render();
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-10-01' } });
+  ui.render();
+  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
+  assert.doesNotMatch(JSON.stringify(ui.all(node => node.props?.className === 'mapping-period-help')), /Location change:/);
+  await ui.save();
+  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'mapping-row-error')), /Location mismatch/);
+});
+
+test('read-only provider mapping cannot open either relocation action', async () => {
+  let submitted = false;
+  const currentMapping = {
+    mappingId: 'sbpd-map', stationId: 'station-2', locationLabel: 'SBPD', providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId, paymentMethodId: method.id, paymentValues: { DELIVERY: '15' },
+    productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '2026-10-01', effectiveTo: '', status: 'active'
+  };
+  const ui = worksheet({
+    canEdit: false,
+    mappings: [{ ...row, stationLabel: 'KDJE - Barbil' }],
+    workers: [{ ...worker, stationId: 'station-2', locationLabel: 'SBPD', profileStationId: row.stationId,
+      profileLocationLabel: 'KDJE - Barbil', mappingId: currentMapping.mappingId, paymentMethodId: method.id,
+      paymentValues: currentMapping.paymentValues, effectiveFrom: currentMapping.effectiveFrom,
+      mappedProviderMemberId: row.providerMemberId, currentMappings: [currentMapping], mappingHistory: [currentMapping] }]
+  }, async () => { submitted = true; return { ok: true, message: 'Unexpected write', savedRows: [] }; });
+
+  assert.equal(ui.select('provider_first_worker_0').disabled, true);
+  assert.equal(ui.one(node => node.type === 'button' && node.props.className?.includes('mapping-save-all')).props.disabled, true);
+  await ui.save();
+  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
+  assert.equal(submitted, false);
+});
 function saved(data) {
   const value = key => data.get(`rows[0][${key}]`);
   return { ok: true, message: 'Mapping saved.', savedRows: [{ clientKey: value('client_key'), workforceId: value('id'), mappingId: 'saved-1', paymentMethodId: value('payment_method_id'), paymentValues: JSON.parse(value('payment_values_json')), productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: value('effective_from'), effectiveTo: value('effective_to') }] };
@@ -254,12 +379,40 @@ test('selection does not shrink the last page or jump to another page', () => {
   assert.equal(ui.select('provider_first_worker_50').value, worker.id);
 });
 
+test('large worksheets render only the current page', () => {
+  const ui = worksheet({
+    mappings: Array.from({ length: 1103 }, (_, index) => ({
+      ...row,
+      providerMemberId: String(12345678901 + index)
+    }))
+  });
+  assert.equal(ui.cards().length, 50);
+  assert.equal(ui.all(node => node.type === 'SearchableSelect' && String(node.props.name).startsWith('provider_first_worker_')).length, 50);
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'provider-first-filter-summary')), /1103/);
+});
+
+test('worksheet search defers filtering and keeps worker-option scans out of row rendering', () => {
+  const source = readFileSync(new URL('./provider-first-mapping-worksheet.tsx', import.meta.url), 'utf8');
+  const renderedRows = source.slice(source.indexOf('<div className="mapping-rows provider-first-rows">'), source.indexOf('<div className="mapping-pagination">'));
+
+  assert.match(source, /const deferredQuery = useDeferredValue\(query\)/);
+  assert.match(source, /const workerSelectionIndex = useMemo\(/);
+  assert.match(source, /const selectableWorkerOptionsByIndex = useMemo\(/);
+  assert.match(renderedRows, /options=\{selectableWorkerOptionsByIndex\.get\(index\) \?\? \[\]\}/);
+  assert.doesNotMatch(renderedRows, /workerOptions\.filter\(/);
+  assert.match(renderedRows, /maxOptions=\{50\}/);
+  assert.doesNotMatch(source, /maxOptions=\{5000\}/);
+});
+
 test('current month uses IST at month and year boundaries and is passed by the server', () => {
   assert.equal(dashboardDateInputValue(new Date('2026-09-30T18:29:59Z')).slice(0, 7), '2026-09');
   assert.equal(dashboardDateInputValue(new Date('2026-09-30T18:30:00Z')).slice(0, 7), '2026-10');
   assert.equal(dashboardDateInputValue(new Date('2026-12-31T18:30:00Z')).slice(0, 7), '2027-01');
   const page = readFileSync(new URL('../app/provider-id-mapping/page.tsx', import.meta.url), 'utf8');
-  assert.match(page, /providerMappingEntryFilters\(searchParams, dashboardDateInputValue\(\)\)/);
+  assert.match(page, /const today = dashboardDateInputValue\(\)/);
+  assert.equal(page.match(/dashboardDateInputValue\(\)/g)?.length, 1, 'The request should compute the India business date once');
+  assert.match(page, /mapping\.effective_to! >= today/);
+  assert.match(page, /providerMappingEntryFilters\(searchParams, today\)/);
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.match(pkg.scripts['test:provider-mapping-period'], /provider-first-mapping-worksheet\.test\.mjs/);
   assert.match(pkg.scripts.build, /test:provider-mapping-period/);

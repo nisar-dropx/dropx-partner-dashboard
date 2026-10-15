@@ -140,6 +140,8 @@ test("People Review explicitly approves a required existing-person exception whe
   const result = await submitReview({ identity_exception_required: true });
 
   assert.equal(result.updatePayload.onboarding_status, "active");
+  assert.equal(result.updatePayload.lifecycle_status, "active");
+  assert.equal(result.updatePayload.is_active, true);
   assert.match(result.updatePayload.identity_exception_approved_at, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(result.updatePayload.identity_exception_approved_by, "reviewer-user");
   assert.equal(result.notifications[0]?.eventCode, "profile_approved");
@@ -150,6 +152,8 @@ test("People Review does not stamp an identity exception when none is required",
   const result = await submitReview({ identity_exception_required: false });
 
   assert.equal(result.updatePayload.onboarding_status, "active");
+  assert.equal(result.updatePayload.lifecycle_status, "active");
+  assert.equal(result.updatePayload.is_active, true);
   assert.equal("identity_exception_approved_at" in result.updatePayload, false);
   assert.equal("identity_exception_approved_by" in result.updatePayload, false);
 });
@@ -158,6 +162,8 @@ test("returning a Workforce profile never approves its existing-person exception
   const result = await submitReview({ identity_exception_required: true }, "return");
 
   assert.equal(result.updatePayload.onboarding_status, "returned");
+  assert.equal(result.updatePayload.lifecycle_status, "onboarding");
+  assert.equal(result.updatePayload.is_active, false);
   assert.equal("identity_exception_approved_at" in result.updatePayload, false);
   assert.equal("identity_exception_approved_by" in result.updatePayload, false);
   assert.equal(result.notifications[0]?.eventCode, "profile_returned");

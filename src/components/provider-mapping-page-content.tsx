@@ -265,7 +265,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
       const existing = latestMappingByWorkerKey.has(`workforce:${worker.id}`);
       const designation = designationById.get(String(worker.designation_id ?? ""))
         ?? designationByName.get(String(worker.designation ?? "").trim().toLowerCase());
-      return (existing || worker.is_active && designation?.is_field_operations && designation.provider_mapping_required !== false)
+      return (existing || worker.is_active && Boolean(designation && designation.provider_mapping_required !== false))
         && isAllocatedLocation(worker.location_id);
     })
     .map((worker) => ({

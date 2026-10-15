@@ -56,6 +56,24 @@ function currentProviderMappingOverlapsRequestedPeriod(
   return currentEffectiveFrom <= requestedEffectiveTo;
 }
 
+/**
+ * A same-owner Move closes the mapping that exists on Effective from. Keep-all
+ * can leave other scheduled mappings untouched, but query order must never
+ * cause a later mapping to become the Move source when an earlier valid source
+ * exists.
+ */
+function currentProviderMappingStartedByRequestedDate(
+  mappingEffectiveFrom: unknown,
+  requestedEffectiveFrom: string
+) {
+  const currentEffectiveFrom = String(mappingEffectiveFrom ?? "");
+  if (!validProviderMappingDate(requestedEffectiveFrom)
+    || !validProviderMappingDate(currentEffectiveFrom)) {
+    return true;
+  }
+  return currentEffectiveFrom <= requestedEffectiveFrom;
+}
+
 function mappingRedirect(params: { error?: string; notice?: string }) {
   cookies().set("dropx_provider_mapping_flash", JSON.stringify(params), {
     httpOnly: true,
@@ -187,7 +205,7 @@ type ProviderFirstPaymentTransferDecision = {
   paymentFingerprint: string;
 };
 
-async function resolveFieldOperationsDesignationPolicy(
+async function resolveProviderMappingDesignationPolicy(
   companyId: string,
   worker: WorkforceDesignationReference
 ) {
@@ -196,8 +214,7 @@ async function resolveFieldOperationsDesignationPolicy(
     .from("designations")
     .select("id, code, name, provider_mapping_required")
     .eq("company_id", companyId)
-    .eq("is_active", true)
-    .eq("is_field_operations", true);
+    .eq("is_active", true);
   if (error) throw new Error(error.message);
 
   const designationText = String(worker.designation ?? "").trim().toLowerCase();
@@ -302,10 +319,10 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
 
     const dropxIds = Array.from(new Set(uploadRows.map((row) => row.dropxId).filter(Boolean)));
     const [{ data: employees, error: employeeError }, { data: contractors, error: contractorError }, { data: executives, error: executiveError }, { data: designations, error: designationError }, { data: paymentMethods, error: paymentMethodsError }] = await Promise.all([
-      supabaseAdmin.from("employees").select("id, employee_code, full_name, location_id, date_of_join, designations!inner(is_field_operations,provider_mapping_required)").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).eq("designations.is_field_operations", true).eq("designations.provider_mapping_required", true).in("employee_code", dropxIds),
+      supabaseAdmin.from("employees").select("id, employee_code, full_name, location_id, date_of_join, designations!inner(is_field_operations,provider_mapping_required)").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).eq("designations.provider_mapping_required", true).in("employee_code", dropxIds),
       supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, designation_id, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
-      supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true).eq("provider_mapping_required", true),
+      supabaseAdmin.from("designations").select("id, code, name").eq("company_id", companyId).eq("is_active", true).eq("provider_mapping_required", true),
       supabaseAdmin.from("payment_methods").select("id, code, production_threshold_config, payment_method_components(component_code, label, payment_fields(calculation_source, calculation_type))").eq("company_id", companyId).eq("is_active", true)
     ]);
     if (employeeError) throw new Error(employeeError.message);
@@ -322,18 +339,18 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     }]));
     const allPaymentFieldCodes = new Set(Array.from(paymentMethodByCode.values()).flatMap((method) => method.components.map((component) => normalizedHeader(component.component_code))));
 
-    const fieldOperationsDesignations = new Set((designations ?? []).flatMap((row) => [row.code, row.name]).map((value) => String(value ?? "").trim().toLowerCase()));
-    const fieldOperationsDesignationIds = new Set((designations ?? []).map((row) => String(row.id)));
+    const providerMappingDesignations = new Set((designations ?? []).flatMap((row) => [row.code, row.name]).map((value) => String(value ?? "").trim().toLowerCase()));
+    const providerMappingDesignationIds = new Set((designations ?? []).map((row) => String(row.id)));
 
     const workers = new Map<string, BulkWorker>();
     (employees ?? []).forEach((row) => workers.set(String(row.employee_code ?? "").toUpperCase(), {
       id: row.id, sourceType: "employee", dropxId: String(row.employee_code ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
     }));
-    (contractors ?? []).filter((row) => fieldOperationsDesignations.has(String(row.designation ?? "").trim().toLowerCase())).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
+    (contractors ?? []).filter((row) => providerMappingDesignations.has(String(row.designation ?? "").trim().toLowerCase())).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
       id: row.id, sourceType: "contractor", dropxId: String(row.dropx_id ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
     }));
-    (executives ?? []).filter((row) => fieldOperationsDesignationIds.has(String(row.designation_id ?? ""))
-      || fieldOperationsDesignations.has(String(row.designation ?? "").trim().toLowerCase())).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
+    (executives ?? []).filter((row) => providerMappingDesignationIds.has(String(row.designation_id ?? ""))
+      || providerMappingDesignations.has(String(row.designation ?? "").trim().toLowerCase())).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
       id: row.id, sourceType: "workforce", dropxId: String(row.dropx_id ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
     }));
 
@@ -575,6 +592,7 @@ async function saveExecutiveMappingRow(
     allowWorkforceLocationRemap?: boolean;
     allowWorkforceLocationDriftEdit?: boolean;
     keepExistingLocationMappingId?: string | null;
+    confirmedReplacementMappingId?: string | null;
     paymentTransferDecision?: ProviderFirstPaymentTransferDecision | null;
   } = {}
 ) {
@@ -654,12 +672,24 @@ async function saveExecutiveMappingRow(
         || (keepAnchor.status === "closed" && Boolean(keepAnchor.effective_to))
       )
     );
+    const destinationIsRegisteredLocation = Boolean(
+      canonicalWorker
+      && stationId === canonicalWorker.location_id
+    );
+    const keepDirectionIsValid = Boolean(
+      keepAnchor
+      && canonicalWorker
+      && keepAnchor.station_id !== stationId
+      && (
+        keepAnchor.station_id === canonicalWorker.location_id
+        || destinationIsRegisteredLocation
+      )
+    );
     const exactKeepAnchor = Boolean(
       keepAnchor
       && canonicalWorker
       && anchorMatchesCanonicalOwner
-      && keepAnchor.station_id === canonicalWorker.location_id
-      && keepAnchor.station_id !== stationId
+      && keepDirectionIsValid
       && keepAnchor.provider_id === submittedProviderId
       && providerMemberIdentity(keepAnchor.provider_member_id) === providerMemberIdentity(providerMemberId)
       && keepAnchor.payment_method_id === paymentMethodId
@@ -722,7 +752,6 @@ async function saveExecutiveMappingRow(
         .eq("company_id", companyId)
         .eq("is_active", true)
         .is("deleted_at", null)
-        .eq("designations.is_field_operations", true)
         .maybeSingle()
       : sourceType === "contractor"
         ? supabaseAdmin
@@ -761,7 +790,7 @@ async function saveExecutiveMappingRow(
       .maybeSingle();
   if (canonicalWorkerResult.error) throw new Error(canonicalWorkerResult.error.message);
   const worker = legacyWorker ?? canonicalWorkerResult.data;
-  if (!worker) throw new Error(`Row ${index + 1}: Field Operations worker was not found for this company.`);
+  if (!worker) throw new Error(`Row ${index + 1}: Provider-mapped worker was not found for this company.`);
   const workerLocationId = String((worker as { location_id?: string | null }).location_id ?? "");
   if (allowedLocationIds && (!workerLocationId || !allowedLocationIds.has(workerLocationId))) {
     throw new Error(`Row ${index + 1}: The worker's current location is not allocated to your account.`);
@@ -778,7 +807,15 @@ async function saveExecutiveMappingRow(
   if (submittedProviderId && submittedProviderId !== providerId) {
     throw new Error(`Row ${index + 1}: Provider does not match the selected location. Refresh the page and try again.`);
   }
-  if (!mappingId && !options.keepExistingLocationMappingId) {
+  // Provider-first replacement state validates the exact confirmed mapping
+  // before this save path runs, and the replacement RPC verifies it again
+  // under a lock. Never let an untrusted submitted ID bypass this preflight.
+  const confirmedReplacementMappingId = options.confirmedReplacementMappingId ?? null;
+  if (replacementMappingId && replacementMappingId !== confirmedReplacementMappingId
+    && !options.keepExistingLocationMappingId) {
+    throw new Error(`Row ${index + 1}: Mapping replacement confirmation is invalid. Reload the page and try again.`);
+  }
+  if (!mappingId && !confirmedReplacementMappingId && !options.keepExistingLocationMappingId) {
     const workerColumn = sourceType === "workforce" ? "workforce_id"
       : sourceType === "employee" ? "employee_id"
         : sourceType === "contractor" ? "contractor_id"
@@ -824,20 +861,19 @@ async function saveExecutiveMappingRow(
   let providerMappingRequired = firstRelation((worker as { designations?: { provider_mapping_required?: boolean | null } | Array<{ provider_mapping_required?: boolean | null }> | null }).designations)?.provider_mapping_required !== false;
   if (sourceType === "contractor") {
     const contractorDesignation = String((worker as { designation?: string | null }).designation ?? "").trim().toLowerCase();
-    const { data: fieldOperationsDesignations } = await supabaseAdmin
+    const { data: providerMappingDesignations } = await supabaseAdmin
       .from("designations")
       .select("code, name, provider_mapping_required")
       .eq("company_id", companyId)
-      .eq("is_active", true)
-      .eq("is_field_operations", true);
-    const matchedDesignation = (fieldOperationsDesignations ?? []).find((designation) =>
+      .eq("is_active", true);
+    const matchedDesignation = (providerMappingDesignations ?? []).find((designation) =>
       [designation.code, designation.name].some((value) => String(value ?? "").trim().toLowerCase() === contractorDesignation)
     );
-    if (!matchedDesignation) throw new Error(`Row ${index + 1}: Contractor designation is not enabled for Field Operations.`);
+    if (!matchedDesignation) throw new Error(`Row ${index + 1}: Contractor designation is not active for provider mapping.`);
     providerMappingRequired = matchedDesignation.provider_mapping_required !== false;
   } else if (sourceType === "workforce" || sourceType === "field_executive") {
-    const matchedDesignation = await resolveFieldOperationsDesignationPolicy(companyId, worker as WorkforceDesignationReference);
-    if (!matchedDesignation) throw new Error(`Row ${index + 1}: Workforce designation is not enabled for Field Operations.`);
+    const matchedDesignation = await resolveProviderMappingDesignationPolicy(companyId, worker as WorkforceDesignationReference);
+    if (!matchedDesignation) throw new Error(`Row ${index + 1}: Workforce designation is not active for provider mapping.`);
     providerMappingRequired = matchedDesignation.provider_mapping_required !== false;
   }
   if (!providerMappingRequired && !mappingId) {
@@ -956,17 +992,24 @@ async function saveExecutiveMappingRow(
     if (closureError && !options.prepareScheduleOnly) throw new Error(`Row ${index + 1}: ${closureError}`);
     if (options.prepareScheduleOnly) return mappingPayload;
 
+    const keepAtRegisteredLocation = Boolean(options.keepExistingLocationMappingId)
+      && stationId === workerLocationId;
     const { error } = options.keepExistingLocationMappingId
-      ? await supabaseAdmin.rpc("workforce_keep_joining_mapping", {
-        p_company: companyId,
-        p_actor: createdBy,
-        p_workforce: id,
-        p_expected_existing_mapping: options.keepExistingLocationMappingId,
-        p_dropx: dropxId,
-        p_payload: mappingPayload,
-        p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
-        p_actor_name: "Dashboard mapping reviewer"
-      })
+      ? await supabaseAdmin.rpc(
+        keepAtRegisteredLocation
+          ? "workforce_keep_joining_mapping_at_registered_location"
+          : "workforce_keep_joining_mapping",
+        {
+          p_company: companyId,
+          p_actor: createdBy,
+          p_workforce: id,
+          p_expected_existing_mapping: options.keepExistingLocationMappingId,
+          p_dropx: dropxId,
+          p_payload: mappingPayload,
+          p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
+          p_actor_name: "Dashboard mapping reviewer"
+        }
+      )
       : replacementMappingId
         ? options.paymentTransferDecision
           ? await supabaseAdmin.rpc("workforce_replace_joining_mapping_with_payment_decision", {
@@ -1358,6 +1401,15 @@ async function providerFirstReplacementState({
     );
   const relevantTargetMappings = targetMappings.filter(activeMappingOverlapsRequestedPeriod);
   const relevantProviderMappings = providerMappings.filter(activeMappingOverlapsRequestedPeriod);
+  const mappingStartOrder = (left: ProviderFirstActiveMapping, right: ProviderFirstActiveMapping) =>
+    String(right.effective_from ?? "").localeCompare(String(left.effective_from ?? ""))
+      || String(right.id).localeCompare(String(left.id));
+  const targetMappingsAtRequestedStart = relevantTargetMappings
+    .filter((mapping) => currentProviderMappingStartedByRequestedDate(mapping.effective_from, requestedEffectiveFrom))
+    .sort(mappingStartOrder);
+  const providerMappingsAtRequestedStart = relevantProviderMappings
+    .filter((mapping) => currentProviderMappingStartedByRequestedDate(mapping.effective_from, requestedEffectiveFrom))
+    .sort(mappingStartOrder);
 
   if (relevantTargetMappings.some((mapping) => allowedLocationIds && (!mapping.station_id || !allowedLocationIds.has(mapping.station_id)))) {
     throw new Error(`Row ${index + 1}: One of the destination's active mappings is outside your allocated locations.`);
@@ -1427,6 +1479,10 @@ async function providerFirstReplacementState({
     ? [...relevantTargetMappings, ...relevantProviderMappings, ...(submittedClosedMapping ? [submittedClosedMapping] : []), ...(registeredLocationMapping ? [registeredLocationMapping] : [])]
       .find((mapping) => mapping.id === submittedMappingId) ?? null
     : null;
+  const submittedMappingAtRequestedStart = submittedMapping
+    && currentProviderMappingStartedByRequestedDate(submittedMapping.effective_from, requestedEffectiveFrom)
+    ? submittedMapping
+    : null;
   if (submittedMappingId && !submittedMapping) {
     throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
   }
@@ -1467,11 +1523,15 @@ async function providerFirstReplacementState({
     throw new Error(`Row ${index + 1}: This Provider ID is retained at multiple locations for another DropX ID and cannot be replaced here.`);
   }
   const existingMapping = providerOwner && providerOwner !== workforceId
-    ? relevantProviderMappings[0]
+    ? providerMappingsAtRequestedStart[0]
     : needsRegisteredLocationException
       ? registeredLocationMapping
-      : submittedMapping ?? relevantTargetMappings[0] ?? relevantProviderMappings[0];
-  if (!existingMapping) throw new Error(`Row ${index + 1}: The existing mapping could not be identified.`);
+      : submittedMappingAtRequestedStart
+        ?? targetMappingsAtRequestedStart[0]
+        ?? providerMappingsAtRequestedStart[0];
+  if (!existingMapping) {
+    throw new Error(`Row ${index + 1}: No existing mapping is effective on the selected start date.`);
+  }
   if (allowedLocationIds && (!existingMapping.station_id || !allowedLocationIds.has(existingMapping.station_id))) {
     throw new Error(`Row ${index + 1}: The existing provider mapping is outside your allocated locations.`);
   }
@@ -1511,6 +1571,9 @@ async function providerFirstReplacementState({
   }
   const replacement = {
     kind: changeKind,
+    // Same-owner location changes always retain the explicit Keep-all choice.
+    // When the destination is the registered location, the database records
+    // the exact concurrent period without rewriting the older mapping.
     allowKeepAll: changeKind === "location",
     allowMove: changeKind !== "location" || !needsRegisteredLocationException,
     clientKey,
@@ -1744,6 +1807,7 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
         allowWorkforceLocationRemap: Boolean(replacementState.locationRemap || replacementState.keepAll),
         allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit,
         keepExistingLocationMappingId: replacementState.keepAll?.mappingId ?? null,
+        confirmedReplacementMappingId: replacementState.locationRemap?.mappingId ?? replacementState.ownerReplacement?.mappingId ?? null,
         paymentTransferDecision: paymentTransferState.decision
       });
       savedRows += 1;
@@ -1915,6 +1979,7 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         allowWorkforceLocationRemap: Boolean(replacementState.locationRemap || replacementState.keepAll),
         allowWorkforceLocationDriftEdit: replacementState.currentMappingLocationDriftEdit,
         keepExistingLocationMappingId: replacementState.keepAll?.mappingId ?? null,
+        confirmedReplacementMappingId: replacementState.locationRemap?.mappingId ?? replacementState.ownerReplacement?.mappingId ?? null,
         paymentTransferDecision: paymentTransferState.decision
       });
 
@@ -2073,8 +2138,8 @@ export async function saveProviderFirstMapping(formData: FormData) {
     if (((memberMappings ?? []) as Array<{ workforce_id: string | null }>).some((mapping) => mapping.workforce_id !== workforceId)) {
       throw new Error("This Provider Member ID is already actively linked to another workforce record.");
     }
-    const designation = await resolveFieldOperationsDesignationPolicy(companyId, worker);
-    if (!designation) throw new Error("The selected workforce designation is not enabled for Field Operations.");
+    const designation = await resolveProviderMappingDesignationPolicy(companyId, worker);
+    if (!designation) throw new Error("The selected workforce designation is not active for provider mapping.");
     if (designation.provider_mapping_required === false && !workerMapping) {
       throw new Error("This designation uses Direct pay allocations and does not require a new provider ID mapping.");
     }

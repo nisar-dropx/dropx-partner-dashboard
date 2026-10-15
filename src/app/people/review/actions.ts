@@ -77,9 +77,15 @@ export async function reviewPeopleProfile(formData: FormData) {
     const approvesWorkforceIdentityException = action === "approve" &&
       profileType === "workforce" &&
       Boolean((current.data as { identity_exception_required?: unknown }).identity_exception_required);
+    const workforceLifecycleUpdate = profileType === "workforce"
+      ? action === "approve"
+        ? { lifecycle_status: "active", is_active: true }
+        : { lifecycle_status: "onboarding", is_active: false }
+      : {};
     const update = action === "approve"
       ? {
           [statusColumn]: "active",
+          ...workforceLifecycleUpdate,
           profile_return_remarks: null,
           profile_returned_at: null,
           ...(profileType === "employee" ? { profile_completed_at: reviewedAt } : {}),
@@ -93,6 +99,7 @@ export async function reviewPeopleProfile(formData: FormData) {
         }
       : {
           [statusColumn]: "returned",
+          ...workforceLifecycleUpdate,
           profile_return_remarks: remarks,
           profile_returned_at: reviewedAt,
           updated_at: reviewedAt
