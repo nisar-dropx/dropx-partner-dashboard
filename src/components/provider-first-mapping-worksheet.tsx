@@ -342,12 +342,16 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     if (Object.prototype.hasOwnProperty.call(change, "paymentMethodId")) {
       setPaymentTemplateSources(current => { const next = { ...current }; delete next[index]; return next; });
     }
+    // Confirmations are effective-period snapshots. Any edited field must be
+    // validated again before Move or Keep all can be submitted.
+    setReplacementConfirmation(null);
     setSaveNotice(null);
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   }
 
   function updateEffectivePeriod(index: number, change: Pick<ProviderFirstMappingRow, "effectiveFrom"> | Pick<ProviderFirstMappingRow, "effectiveTo">) {
     setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
+    setReplacementConfirmation(null);
     setSaveNotice(null);
     setRows((current) => current.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
@@ -992,8 +996,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             {copiedPayment ? <div className="mapping-period-help" role="status"><strong>Previous payment details loaded.</strong> Method and rates copied from {paymentMethodById.get(copiedPayment.paymentMethodId)?.name ?? "previous payment method"} · {copiedPayment.locationLabel} · {copiedPayment.effectiveFrom} to {copiedPayment.effectiveTo || "Ongoing"}. Review the rates and choose dates for this assignment before saving. Previous dates were not copied.</div> : previousPayment ? <div className="mapping-period-help">Previous payment details are available from {previousPayment.effectiveFrom} to {previousPayment.effectiveTo || "Ongoing"}. Use them below to copy the method and rates; enter dates for this assignment.</div> : null}
             {!row.mappingId && priorMappingLocations.length ? <div className="mapping-period-help"><strong>Existing mapping history:</strong> {priorMappingLocations.join(", ")}. This {row.stationLabel} row is not mapped; save its own effective-dated mapping before using this location&apos;s activity for payout.</div> : null}
             {row.workforceId && !providerFirstNamesMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
-            {locationNeedsDates ? <div className="mapping-period-help" role="status">Registered at {selectedWorker?.profileLocationLabel}. This provider ID already has a mapping there. Enter the effective dates to validate the additional {row.stationLabel} assignment. Location is checked from the Workforce record, not the prefix of the DropX ID.</div> : null}
-            {locationRemap ? <div className="mapping-period-help">{locationRemap.allowMove === false ? `Additional location: ${locationRemap.newLocationLabel}. Use Keep all when saving to preserve the existing ${locationRemap.existingLocationLabel} mapping.` : `Location change: ${locationRemap.existingLocationLabel} → ${locationRemap.newLocationLabel}.`} Save this location mapping before adding payment periods.</div> : null}
+            {locationNeedsDates ? <div className="mapping-period-help" role="status">{row.stationId === selectedWorker?.profileStationId ? `Currently mapped at ${selectedWorker.locationLabel}. Enter Effective from to validate the move to the registered location ${selectedWorker.profileLocationLabel}.` : `Registered at ${selectedWorker?.profileLocationLabel}. This provider ID already has a mapping there. Enter the effective dates to validate the additional ${row.stationLabel} assignment.`} Location is checked from the Workforce record, not the prefix of the DropX ID.</div> : null}
+            {locationRemap ? <div className="mapping-period-help">{locationRemap.allowMove === false ? `Additional location: ${locationRemap.newLocationLabel} from ${locationRemap.effectiveFrom}. Use Keep all when saving to preserve the existing ${locationRemap.existingLocationLabel} mapping for this period.` : `Location change: ${locationRemap.existingLocationLabel} → ${locationRemap.newLocationLabel} from ${locationRemap.effectiveFrom}. The earlier location remains unchanged before this date.`} Save this location mapping before adding payment periods.</div> : null}
             {profileLocationDrift && !locationRemap ? <div className="mapping-period-help">Mapping location: {selectedWorker?.locationLabel}. Workforce current location: {selectedWorker?.profileLocationLabel}. Saving rates here will not move the Workforce profile; use its current-location provider row to move this mapping.</div> : null}
             {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}

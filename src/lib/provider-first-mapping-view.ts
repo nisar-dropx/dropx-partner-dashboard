@@ -195,6 +195,11 @@ export function providerFirstLocationRemap(
     || !reference.mappingId
     || (row.mappingId && row.mappingId !== reference.mappingId)
     || reference.stationId === row.stationId
+    // A future mapping is valid evidence when its own start date is being
+    // edited at the same location, but it can never be the source of an
+    // earlier cross-location move. Relocation starts at Effective from; the
+    // source mapping must already exist on that date.
+    || reference.effectiveFrom > row.effectiveFrom
     || reference.providerId !== row.providerId
     || !sameProviderMember(reference.mappedProviderMemberId, row.providerMemberId)
     || !providerFirstLocationIsAllowed(row, worker)) {
@@ -338,25 +343,44 @@ function mappingPeriodContainsRow(
 }
 
 /**
- * Current mappings are open-ended. A bounded historical row overlaps one only
- * when the current mapping starts on or before the requested end date. Keep
- * invalid and open-ended drafts attached to the current mapping so the normal
- * row validation can report incomplete dates without changing edit identity.
+ * Select the exact current mapping that exists on a relocation's start date.
+ * More than one location may be open after Keep all, so input/query order must
+ * never decide which mapping Move will close. The latest mapping that already
+ * exists on the requested date is the deterministic source. If every mapping
+ * starts later, retain the earliest future mapping only as UI evidence; the
+ * relocation guard will prevent using it before its own effective date.
  */
-function currentMappingOverlapsRow(
-  mapping: Pick<ProviderFirstRegisteredMappingView, "effectiveFrom">,
+function currentMappingForRelocation(
+  mappings: ProviderFirstRegisteredMappingView[],
   row: Pick<ProviderFirstMappingRowView, "effectiveFrom" | "effectiveTo">
 ) {
-  const mappingFrom = String(mapping.effectiveFrom ?? "").trim();
   const requestedFrom = String(row.effectiveFrom ?? "").trim();
+  const candidates = [...mappings].sort((left, right) =>
+    right.effectiveFrom.localeCompare(left.effectiveFrom)
+      || right.mappingId.localeCompare(left.mappingId)
+  );
+  if (!isIsoCalendarDate(requestedFrom)) return candidates[0];
+  const effective = candidates.find((mapping) =>
+    isIsoCalendarDate(mapping.effectiveFrom) && mapping.effectiveFrom <= requestedFrom
+  );
+  if (effective) return effective;
+  const futureCandidates = candidates.sort((left, right) =>
+    left.effectiveFrom.localeCompare(right.effectiveFrom)
+      || left.mappingId.localeCompare(right.mappingId)
+  );
+  // A bounded earlier row is a new historical interval only when it ends
+  // before every later scheduled mapping. If a future mapping starts inside
+  // the requested interval, keep it as the overlapping edit reference.
   const requestedTo = String(row.effectiveTo ?? "").trim();
-  if (!isIsoCalendarDate(mappingFrom)
-    || !isIsoCalendarDate(requestedFrom)
-    || !isIsoCalendarDate(requestedTo)
-    || requestedFrom > requestedTo) {
-    return true;
+  if (isIsoCalendarDate(requestedTo)) {
+    return futureCandidates.find((mapping) =>
+      isIsoCalendarDate(mapping.effectiveFrom) && mapping.effectiveFrom <= requestedTo
+    );
   }
-  return mappingFrom <= requestedTo;
+  // For an open-ended relocation, retain the earliest future mapping only as
+  // conflict evidence so the effective-date guard can explain why it cannot be
+  // moved yet.
+  return futureCandidates[0];
 }
 
 /** A previous rate card is a user-selected template, never a new assignment's dates or edit ID. */
@@ -434,9 +458,9 @@ export function providerFirstMappingReferenceForRow(
   // remains the ordinary correction path. Do not reuse a future mapping as the
   // edit ID for an earlier bounded period; that period is a new historical row.
   if (row.stationId === registeredStationId) {
-    return currentMappings.find((mapping) =>
-      mappingIdentityMatchesRow(mapping, row)
-        && currentMappingOverlapsRow(mapping, row)
+    return currentMappingForRelocation(
+      currentMappings.filter((mapping) => mappingIdentityMatchesRow(mapping, row)),
+      row
     );
   }
   return undefined;
@@ -482,8 +506,11 @@ export function providerFirstLocationNeedsDates(
   worker: ProviderFirstWorkerView | undefined
 ) {
   if (!worker || worker.id !== row.workforceId || row.effectiveFrom
-    || !worker.profileStationId || row.stationId === worker.profileStationId) return false;
-  return registeredWorkerMappings(worker).some((mapping) =>
+    || !worker.profileStationId) return false;
+  const anchors = row.stationId === worker.profileStationId
+    ? currentWorkerMappings(worker).filter((mapping) => mapping.stationId !== row.stationId)
+    : registeredWorkerMappings(worker);
+  return anchors.some((mapping) =>
     Boolean(mapping.mappingId) && mappingIdentityMatchesRow(mapping, row)
   );
 }
@@ -525,7 +552,15 @@ export function providerFirstLocationIsAllowed(
     const historicalMatch = registeredWorkerMappings(worker).some((mapping) =>
       mappingIdentityMatchesRow(mapping, row) && mappingPeriodContainsRow(mapping, row)
     );
-    return historicalMatch || !currentMappings.length || currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row));
+    if (historicalMatch || !currentMappings.length) return true;
+    if (!currentMappings.every((mapping) => mappingIdentityMatchesRow(mapping, row))) return false;
+    // Editing a mapping already at the destination may change its own start
+    // date. A cross-location relocation is different: its source must have
+    // started by the requested move date, otherwise that future location is
+    // being used outside its effective period.
+    return currentMappings.some((mapping) => mapping.stationId === row.stationId)
+      || currentMappings.some((mapping) => isIsoCalendarDate(row.effectiveFrom)
+        && mapping.effectiveFrom <= row.effectiveFrom);
   }
   return registeredWorkerMappings(worker).some((mapping) =>
     Boolean(mapping.mappingId)
@@ -537,13 +572,16 @@ export function providerFirstLocationIsAllowed(
 
 export function providerFirstMappingReplacementMessage(replacement: ProviderFirstMappingReplacement) {
   if (replacement.kind === "location") {
+    const starts = replacement.effectiveFrom
+      ? ` from ${replacement.effectiveFrom}`
+      : "";
     if (replacement.allowMove === false) {
-      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at its registered location ${replacement.existingLocationLabel ?? "the current location"}.\nUse Keep all to add ${replacement.newLocationLabel ?? "the selected location"} for the same DropX ID while preserving the verified registered-location mapping.`;
+      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at its registered location ${replacement.existingLocationLabel ?? "the current location"}.\nUse Keep all to add ${replacement.newLocationLabel ?? "the selected location"}${starts} for the same DropX ID while preserving the verified registered-location mapping for that period.`;
     }
     if (replacement.allowKeepAll === false) {
-      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the previous location"}.\nMove it to the profile's registered location ${replacement.newLocationLabel ?? "the selected location"}. Moving ends the old location on the preceding day and preserves its earlier mapping and payout history.`;
+      return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the previous location"}.\nMove it to the profile's registered location ${replacement.newLocationLabel ?? "the selected location"}${starts}. The old location remains unchanged before this date and ends on the preceding day; its earlier mapping and payout history remain preserved.`;
     }
-    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nMove it to ${replacement.newLocationLabel ?? "the selected location"}, or keep both location mappings for the same DropX ID?\nMoving ends the old location on the preceding day. Keep all preserves both locations.`;
+    return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} is currently mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName} at ${replacement.existingLocationLabel ?? "the current location"}.\nFrom ${replacement.effectiveFrom ?? "the selected effective date"}, move it to ${replacement.newLocationLabel ?? "the selected location"}, or keep both location mappings for the same DropX ID?\nMove leaves the old location unchanged before this date and ends it on the preceding day. Keep all preserves both locations from this date.`;
   }
   return `Provider ID ${replacement.providerMemberId} - ${replacement.providerMemberName} already mapped to ${replacement.existingDropxId} - ${replacement.existingDropxName}.\nDo you want to replace this mapping?`;
 }
@@ -826,6 +864,9 @@ export function providerFirstRowIssue(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(row.effectiveFrom)) return "Effective from is required.";
   if (row.effectiveTo && !/^\d{4}-\d{2}-\d{2}$/.test(row.effectiveTo)) return "Effective to is invalid.";
   if (row.effectiveTo && row.effectiveTo < row.effectiveFrom) return "Effective to cannot be before effective from.";
+  if (row.effectiveTo && providerFirstLocationRemap(row, worker)) {
+    return "Move or Keep all requires an ongoing mapping. Leave Effective to blank.";
+  }
 
   for (const component of method.components) {
     const raw = row.paymentValues[component.code]?.trim() ?? "";

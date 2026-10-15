@@ -81,7 +81,9 @@ test("bounded historical actions ignore only current mappings that start later",
   assert.match(replacementState, /const relevantProviderMappings = providerMappings\.filter\(activeMappingOverlapsRequestedPeriod\)/);
   assert.match(replacementState, /new Set\(relevantProviderMappings\.map\(canonicalOwner\)\)/);
   assert.match(replacementState, /relevantProviderMappings\.find\(\(mapping\) => mapping\.station_id === stationId\)/);
-  assert.match(replacementState, /submittedMapping \?\? relevantTargetMappings\[0\] \?\? relevantProviderMappings\[0\]/);
+  assert.match(replacementState, /const submittedMappingAtRequestedStart = submittedMapping/);
+  assert.match(replacementState, /submittedMappingAtRequestedStart\s*\?\? targetMappingsAtRequestedStart\[0\]\s*\?\? providerMappingsAtRequestedStart\[0\]/);
+  assert.doesNotMatch(replacementState, /\?\? relevantTargetMappings\[0\]/);
 });
 
 test("a submitted closed mapping is reused only for an exact same-owner identity and location edit", () => {

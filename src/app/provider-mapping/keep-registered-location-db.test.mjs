@@ -291,6 +291,31 @@ test("reverse Keep all rejects stale identity, member and destination confirmati
   }
 });
 
+test("reverse Keep all rejects an origin mapping that ended before the requested effective date", async () => {
+  const db = await database();
+  await seed(db);
+  await db.exec(`
+    alter table public.field_executive_provider_mappings
+      disable trigger field_executive_provider_mappings_03_registered_location_guard;
+    update public.field_executive_provider_mappings
+    set effective_to = '2026-09-30', status = 'closed'
+    where id = '${expectedMapping}';
+    alter table public.field_executive_provider_mappings
+      enable trigger field_executive_provider_mappings_03_registered_location_guard;
+  `);
+
+  const before = await currentRows(db);
+  await assert.rejects(
+    keepAtRegisteredLocation({ db }),
+    /additional-location mapping changed after confirmation/i
+  );
+  assert.deepEqual(await currentRows(db), before);
+  assert.equal(
+    (await db.query(`select count(*)::integer as count from public.workforce_joining_events;`)).rows[0].count,
+    0
+  );
+});
+
 test("reverse Keep all fails closed when any retained location is outside the reviewer's scope", async () => {
   const db = await database();
   await seed(db);

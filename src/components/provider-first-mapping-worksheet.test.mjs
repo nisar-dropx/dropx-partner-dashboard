@@ -141,6 +141,8 @@ test('a same-owner move to the registered location offers and submits both Keep 
     completeDraft(ui);
     await ui.save();
     assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /Choose location mapping action/);
+    assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /From 2026-10-03/);
+    assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /old location unchanged before this date/);
     assert.equal(ui.one(node => node.type === 'button' && node.props.children === 'Keep all').props.disabled, false);
     assert.equal(ui.one(node => node.type === 'button' && node.props.children === 'Move mapping').props.disabled, false);
 
@@ -151,6 +153,51 @@ test('a same-owner move to the registered location offers and submits both Keep 
     assert.equal(submitted.get('rows[0][replacement_confirmed]'), 'yes');
     assert.equal(submitted.get('rows[0][replacement_action]'), choice === 'Keep all' ? 'keep' : 'move');
   }
+});
+
+test('relocation choices recompute from Effective from and never use a future source period', async () => {
+  const futureSource = {
+    mappingId: 'source-from-october-15',
+    stationId: 'station-2',
+    locationLabel: 'SBPD',
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: '',
+    effectiveFrom: '2026-10-15',
+    effectiveTo: '',
+    status: 'active'
+  };
+  const ui = worksheet({
+    mappings: [{ ...row, stationLabel: 'KDJE - Barbil' }],
+    workers: [{ ...worker, stationId: futureSource.stationId, locationLabel: futureSource.locationLabel,
+      profileStationId: row.stationId, profileLocationLabel: 'KDJE - Barbil', mappingId: futureSource.mappingId,
+      paymentMethodId: method.id, paymentValues: futureSource.paymentValues, effectiveFrom: futureSource.effectiveFrom,
+      mappedProviderMemberId: row.providerMemberId, currentMappings: [futureSource], mappingHistory: [futureSource] }]
+  });
+
+  ui.change('provider_first_worker_0', worker.id);
+  assert.match(JSON.stringify(ui.all(node => node.props?.role === 'status')), /Enter Effective from.*registered location KDJE - Barbil/);
+  ui.change('provider_first_payment_method_0', method.id);
+  ui.one(node => node.type === 'input' && node.props.type === 'number').props.onChange({ target: { value: '15' } });
+  ui.render();
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-10-15' } });
+  ui.render();
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'mapping-period-help')), /Location change: SBPD → KDJE - Barbil from 2026-10-15/);
+  await ui.save();
+  assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /From 2026-10-15/);
+
+  ui.one(node => node.type === 'button' && node.props.children === 'Cancel').props.onClick();
+  ui.render();
+  ui.one(node => node.type === 'input' && node.props.type === 'date' && node.props.required).props.onChange({ target: { value: '2026-10-01' } });
+  ui.render();
+  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
+  assert.doesNotMatch(JSON.stringify(ui.all(node => node.props?.className === 'mapping-period-help')), /Location change:/);
+  await ui.save();
+  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
+  assert.match(JSON.stringify(ui.all(node => node.props?.className === 'mapping-row-error')), /Location mismatch/);
 });
 
 test('read-only provider mapping cannot open either relocation action', async () => {

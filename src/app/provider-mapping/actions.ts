@@ -56,6 +56,24 @@ function currentProviderMappingOverlapsRequestedPeriod(
   return currentEffectiveFrom <= requestedEffectiveTo;
 }
 
+/**
+ * A same-owner Move closes the mapping that exists on Effective from. Keep-all
+ * can leave other scheduled mappings untouched, but query order must never
+ * cause a later mapping to become the Move source when an earlier valid source
+ * exists.
+ */
+function currentProviderMappingStartedByRequestedDate(
+  mappingEffectiveFrom: unknown,
+  requestedEffectiveFrom: string
+) {
+  const currentEffectiveFrom = String(mappingEffectiveFrom ?? "");
+  if (!validProviderMappingDate(requestedEffectiveFrom)
+    || !validProviderMappingDate(currentEffectiveFrom)) {
+    return true;
+  }
+  return currentEffectiveFrom <= requestedEffectiveFrom;
+}
+
 function mappingRedirect(params: { error?: string; notice?: string }) {
   cookies().set("dropx_provider_mapping_flash", JSON.stringify(params), {
     httpOnly: true,
@@ -1383,6 +1401,15 @@ async function providerFirstReplacementState({
     );
   const relevantTargetMappings = targetMappings.filter(activeMappingOverlapsRequestedPeriod);
   const relevantProviderMappings = providerMappings.filter(activeMappingOverlapsRequestedPeriod);
+  const mappingStartOrder = (left: ProviderFirstActiveMapping, right: ProviderFirstActiveMapping) =>
+    String(right.effective_from ?? "").localeCompare(String(left.effective_from ?? ""))
+      || String(right.id).localeCompare(String(left.id));
+  const targetMappingsAtRequestedStart = relevantTargetMappings
+    .filter((mapping) => currentProviderMappingStartedByRequestedDate(mapping.effective_from, requestedEffectiveFrom))
+    .sort(mappingStartOrder);
+  const providerMappingsAtRequestedStart = relevantProviderMappings
+    .filter((mapping) => currentProviderMappingStartedByRequestedDate(mapping.effective_from, requestedEffectiveFrom))
+    .sort(mappingStartOrder);
 
   if (relevantTargetMappings.some((mapping) => allowedLocationIds && (!mapping.station_id || !allowedLocationIds.has(mapping.station_id)))) {
     throw new Error(`Row ${index + 1}: One of the destination's active mappings is outside your allocated locations.`);
@@ -1452,6 +1479,10 @@ async function providerFirstReplacementState({
     ? [...relevantTargetMappings, ...relevantProviderMappings, ...(submittedClosedMapping ? [submittedClosedMapping] : []), ...(registeredLocationMapping ? [registeredLocationMapping] : [])]
       .find((mapping) => mapping.id === submittedMappingId) ?? null
     : null;
+  const submittedMappingAtRequestedStart = submittedMapping
+    && currentProviderMappingStartedByRequestedDate(submittedMapping.effective_from, requestedEffectiveFrom)
+    ? submittedMapping
+    : null;
   if (submittedMappingId && !submittedMapping) {
     throw new Error(`Row ${index + 1}: The active mapping changed. Reload the page and try again.`);
   }
@@ -1492,11 +1523,15 @@ async function providerFirstReplacementState({
     throw new Error(`Row ${index + 1}: This Provider ID is retained at multiple locations for another DropX ID and cannot be replaced here.`);
   }
   const existingMapping = providerOwner && providerOwner !== workforceId
-    ? relevantProviderMappings[0]
+    ? providerMappingsAtRequestedStart[0]
     : needsRegisteredLocationException
       ? registeredLocationMapping
-      : submittedMapping ?? relevantTargetMappings[0] ?? relevantProviderMappings[0];
-  if (!existingMapping) throw new Error(`Row ${index + 1}: The existing mapping could not be identified.`);
+      : submittedMappingAtRequestedStart
+        ?? targetMappingsAtRequestedStart[0]
+        ?? providerMappingsAtRequestedStart[0];
+  if (!existingMapping) {
+    throw new Error(`Row ${index + 1}: No existing mapping is effective on the selected start date.`);
+  }
   if (allowedLocationIds && (!existingMapping.station_id || !allowedLocationIds.has(existingMapping.station_id))) {
     throw new Error(`Row ${index + 1}: The existing provider mapping is outside your allocated locations.`);
   }

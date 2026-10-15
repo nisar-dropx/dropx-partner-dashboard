@@ -146,6 +146,10 @@ test("server selects a same-owner historical registered anchor that contains the
   assert.match(actions, /registeredMappingResult/);
   assert.match(actions, /effective_from, effective_to, status/);
   assert.match(actions, /registeredMappings\.find/);
+  assert.match(actions, /currentProviderMappingStartedByRequestedDate/);
+  assert.match(actions, /targetMappingsAtRequestedStart/);
+  assert.match(actions, /providerMappingsAtRequestedStart/);
+  assert.match(actions, /submittedMapping[\s\S]*?targetMappingsAtRequestedStart\[0\][\s\S]*?providerMappingsAtRequestedStart\[0\]/);
   assert.match(actions, /String\(mapping\.station_id \?\? ""\) === registeredStationId/);
   assert.match(actions, /mapping\.provider_id === providerId/);
   assert.match(actions, /providerMemberIdentity\(mapping\.provider_member_id\) === normalizedMemberId/);
