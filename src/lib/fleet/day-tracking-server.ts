@@ -23,10 +23,14 @@ export async function loadDayTracking(auth:AuthorizationContext,from:string,to:s
  const ids=[...new Set(items.map(a=>a.provider_employee_id).filter((v):v is string=>Boolean(v)))];
  const shipments=ids.length?await readAllRows(supabaseAdmin!.from('cps_shipment_daily').select('id,station_code,work_date,provider_employee_id,total_delivery').eq('company_id',scope.companyId).in('station_code',[...new Set(items.map(a=>a.station_code))]).in('provider_employee_id',ids).gte('work_date',from).lte('work_date',to).order('id')):{data:[],error:null};
  const matched=matchAssignmentDeliveries(items,shipments.error?[]:shipments.data??[]);
+ // Automatic defaults remain explicitly identified and can be corrected in daily mapping.
+ const review=await supabaseAdmin!.rpc('fleet_da_day_review',{p_company:scope.companyId,p_stations:[...new Set(report.vehicles.map(v=>v.station_code))],p_from:from,p_to:to});
+ for(const row of review.data??[]){if(row.review_status!=='automatic'||!plates.includes(row.snapshot?.vehicle_no))continue;matched.push({id:`automatic:${row.vehicle_id}:${row.work_date}`,vehicle_no:row.snapshot.vehicle_no,station_code:row.station_code,work_date:row.work_date,provider_employee_id:row.provider_employee_id,workforce_id:null,name:row.name,purpose:'delivery',source:'automatic_default',remarks:'Dated default with deliveries in the completed Amazon report',delivered:Number(row.delivered)});}
+
  const gpsMap=new Map((gps.data??[]).map(g=>[`${g.vehicle_no}|${g.movement_date}`,g]));
  const assignmentMap=new Map<string,DayAssignment[]>();for(const a of matched){const key=`${a.vehicle_no}|${a.work_date}`;assignmentMap.set(key,[...(assignmentMap.get(key)??[]),a]);}
  const fuelMap=new Map<string,NonNullable<typeof fuel.data>>();for(const f of fuel.data??[]){const key=`${f.vehicle_no}|${f.transaction_date}`;fuelMap.set(key,[...(fuelMap.get(key)??[]),f]);}
- return {from,to,generatedAt:report.generatedAt,canAssign:canAssignDay(auth),assignmentWarning:shipments.error?'Package feed is temporarily unavailable. Assignments remain visible.':undefined,rows:report.rows.map(r=>{
+ return {from,to,generatedAt:report.generatedAt,canAssign:canAssignDay(auth),assignmentWarning:review.error?'Automatic DA matches are temporarily unavailable. Saved assignments remain visible.':shipments.error?'Package feed is temporarily unavailable. Assignments remain visible.':undefined,rows:report.rows.map(r=>{
   const key=`${r.vehicle_no}|${r.date}`,g=gpsMap.get(key),a=assignmentMap.get(key)??[],f=trackingFuel(fuelMap.get(key)??[]);
   const usable=g&&(g.point_count??0)>=2;
   return {...r,locationCheck:g?.journey_location_check??null,litres:/^(diesel|petrol)$/i.test(r.fuel_type)?f.litres:null,estimatedLitres:f.estimatedLitres,fuelQuantityMissing:f.missing,movingMinutes:usable?g.moving_minutes:null,idleMinutes:usable?g.idle_minutes:null,stoppedMinutes:usable?g.stopped_minutes:null,stopUnknownMinutes:usable?g.stop_unknown_minutes:null,unknownMinutes:usable?g.unknown_minutes:null,firstMovingAt:usable?g.first_moving_at:null,lastMovingAt:usable?g.last_moving_at:null,maxSpeed:usable?g.max_speed:null,assignments:a,delivered:assignmentPackageTotal(a)};

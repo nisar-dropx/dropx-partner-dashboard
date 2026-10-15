@@ -54,7 +54,8 @@ const route=compile('src/app/api/fleet/da-mapping/route.ts',{
  '@/lib/fleet/da-mapping-server':{loadMapping:async(a,date,station)=>{if(station!=='MAPPED')throw new E('Station is outside your scope.',403);return{canEdit:true,canDefaults:false,options:[{id:'A1',name:'Fixture'}],vehicles:[{id:'v',station_code:station}],assignments:[],confirmations:[],defaults:[],warning:'Counts temporarily unavailable'};}},
  '@/lib/fleet/da-mapping':model,'@/lib/fleet/daily-report':{istDate:()=> '2026-10-07',validDate:d=>/^2026-10-0[1-7]$/.test(d)},'@/lib/fleet/system-log':{withFleetSystemLog:f=>f}
 });
-const post=(station='MAPPED',extra={})=>route.POST(new Request('https://fleet.dropxlogistics.com/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json',origin:'https://fleet.dropxlogistics.com'},body:JSON.stringify({action:'mapping.confirm',station,date:'2026-10-07',rows:[{vehicleId:'v',ids:['A1'],expectedIds:[]}],...extra})}));
+const post=(station='MAPPED',extra={})=>route.POST(new Request('https://fleet.dropxlogistics.com/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json',origin:'https://fleet.dropxlogistics.com'},body:JSON.stringify({action:'mapping.confirm',station,date:'2026-10-06',rows:[{vehicleId:'v',ids:['A1'],expectedIds:[]}],...extra})}));
+assert.equal((await post('MAPPED',{date:'2026-10-07'})).status,400,'Today is not editable');
 assert.equal((await post('OTHER')).status,403);assert.equal(called,0);
 auth.readOnly=true;assert.equal((await post()).status,403);assert.equal(called,0);auth.readOnly=false;
 assert.equal((await post('MAPPED',{rows:[{vehicleId:'not-permitted',ids:['A1'],expectedIds:[]}]})).status,403);
@@ -99,7 +100,7 @@ const fixtureTables={
 const queries=[];
 function fixtureQuery(table){let rows=[...(fixtureTables[table]||[])];const q={select(){return q},eq(){return q},gte(){return q},lte(){return q},gt(){return q},order(){return q},in(col,values){queries.push({table,col,values});rows=rows.filter(r=>values.includes(r[col]));return q},maybeSingle:async()=>({data:rows[0]??null,error:null}),then(resolve){return Promise.resolve({data:rows,error:null}).then(resolve)}};return q;}
 const scoped=compile('src/lib/fleet/da-mapping-server.ts',{
- '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>peopleFixture},'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{from:fixtureQuery}},'@/lib/supabase-pagination':{readAllRows:async q=>await q},
+ '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>peopleFixture},'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{from:fixtureQuery,rpc:async()=>({data:[],error:null})}},'@/lib/supabase-pagination':{readAllRows:async q=>await q},
  '@/lib/authorization':{hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/access-surface':{currentAdminAccessSurface:()=> 'fleet'},'./report-data':{FleetReportError:E},'./vehicle-sources-server':{loadVehicleSources:async()=>({sources:[]})},'./daily-report':{istDate:()=> '2026-10-07'},'./da-mapping':model
 });
 const manager={userId:actor,isMasterOwner:false,hasAllLocationAccess:false,locationScopeIds:['s1','s2']};
@@ -111,7 +112,7 @@ let allSaved;
 const bulkApi=compile('src/app/api/fleet/da-mapping/route.ts',{
  '@/lib/authorization':{getAuthorization:async()=>manager},'@/lib/fleet/da-mapping-client':{mappingAdmin:{rpc:async(name,args)=>{allSaved=args.p_rows;return{data:args.p_rows.length}}}},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/fleet/report-data':{FleetReportError:E},'@/lib/fleet/da-mapping-server':{loadMapping:async()=>({...all,canEdit:true})},'@/lib/fleet/da-mapping':model,'@/lib/fleet/daily-report':{istDate:()=> '2026-10-07',validDate:()=>true},'@/lib/fleet/system-log':{withFleetSystemLog:f=>f}
 });
-const bulk=rows=>bulkApi.POST(new Request('https://fleet.example/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'mapping.confirm',station:'*',date:'2026-10-07',rows})}));
+const bulk=rows=>bulkApi.POST(new Request('https://fleet.example/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'mapping.confirm',station:'*',date:'2026-10-06',rows})}));
 assert.equal((await bulk([{vehicleId:'vb',ids:['A1'],expectedIds:[]}])).status,409,'A rider from another station cannot be assigned through All stations');
 assert.equal(allSaved,undefined);
 assert.equal((await bulk([{vehicleId:'va',ids:['A1'],expectedIds:[]},{vehicleId:'vb',ids:['B1'],expectedIds:[]}])).status,200);
