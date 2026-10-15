@@ -11,6 +11,7 @@ import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, normalizeWorkforc
 import { buildAllPeopleSheetPatch } from "@/lib/all-people-sheet";
 import type { AllPeopleExportKey } from "@/lib/all-people-export";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
+import { canonicalWorkforceStatusEditPatch } from "@/lib/canonical-workforce-status";
 import { saveProfileVerification } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { WorkforceProfileType } from "@/lib/workforce-profiles";
@@ -179,8 +180,12 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
     }
     if ("email" in payload && !payload.email) return failure("Email is required while this employee has a portal position.");
   }
-  if (source.categoryCode === "workforce" && existing.deleted_at && payload.is_active === true) {
-    return failure("Archived workforce profiles cannot be reactivated from the sheet.");
+  if (source.categoryCode === "workforce" && "is_active" in payload) {
+    try {
+      Object.assign(payload, canonicalWorkforceStatusEditPatch(payload.is_active === true, existing));
+    } catch (error) {
+      return failure(error instanceof Error ? error.message : "Workforce status could not be updated.");
+    }
   }
 
   for (const [column, value] of Object.entries(payload)) if (sameValue(existing[column], value)) delete payload[column];
