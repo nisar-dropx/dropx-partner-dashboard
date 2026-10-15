@@ -217,6 +217,8 @@ function DistanceDetail({
         ) : (
           <p className={styles.detailMeta}>
             {distanceMethods[row.method] || row.method} · {row.scans} scans
+            {row.method === "scan_roads" ? " (estimate: shortest roads, no complete GPS trail)" : ""}
+            {row.skippedScans ? ` · ${row.skippedScans} without location left out` : ""}
             {row.updatedAt
               ? ` · Updated ${new Date(row.updatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST`
               : ""}

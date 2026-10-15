@@ -34,6 +34,8 @@ export type DistanceEntry = {
   routeId: string | null;
   method: string;
   scans: number;
+  /** Scans without a location left out of an estimate (shorter, never longer). */
+  skippedScans: number;
 };
 export const distanceMethods: Record<string, string> = {
   amazon_gps: "Amazon GPS",
@@ -253,6 +255,7 @@ export function buildDistanceEntries(input: {
               ? "manual"
               : detail?.route_method || "scan_roads",
         scans: Number(detail?.scan_count || 0),
+        skippedScans: fuel.status === "ready" && fuel.source !== "manual" ? Number(detail?.skipped_scans || 0) : 0,
       };
       if (rows.has(key)) {
         entry.status = "pending";

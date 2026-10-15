@@ -85,7 +85,7 @@ export const loadDistanceRegister = unstable_cache(
           db
             .from("workforce_route_distances")
             .select(
-              "id,transporter_id,scan_count,route_method:route_geometry->>method",
+              "id,transporter_id,scan_count,route_method:route_geometry->>method,skipped_scans:route_geometry->>skippedScans",
             )
             .eq("company_id", companyId)
             .in("workforce_id", chunk)
@@ -118,6 +118,6 @@ export const loadDistanceRegister = unstable_cache(
       to,
     });
   },
-  ["ops-capacity-distance-v1"],
+  ["ops-capacity-distance-v2"],
   { revalidate: 60 },
 );
