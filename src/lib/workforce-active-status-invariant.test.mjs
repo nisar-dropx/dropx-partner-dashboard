@@ -11,6 +11,10 @@ const evidenceRepairMigrationUrl = new URL(
   "../../supabase/migrations/20261015190000_workforce_registration_evidence_repair.sql",
   import.meta.url
 );
+const defaultFieldRepairMigrationUrl = new URL(
+  "../../supabase/migrations/20261015212000_workforce_default_field_registration_repair.sql",
+  import.meta.url
+);
 
 async function fixture() {
   const db = new PGlite();
@@ -115,6 +119,7 @@ async function fixture() {
   `);
   await db.exec(await readFile(independenceMigrationUrl, "utf8"));
   await db.exec(await readFile(evidenceRepairMigrationUrl, "utf8"));
+  await db.exec(await readFile(defaultFieldRepairMigrationUrl, "utf8"));
   return db;
 }
 
@@ -143,7 +148,8 @@ test("repair restores approval-managed canonical and mirrored profiles without s
   });
   for (const id of [
     "mirrored-contractor-unsubmitted",
-    "mirrored-contractor-later-update"
+    "mirrored-contractor-later-update",
+    "submitted-profile-field"
   ]) {
     assert.equal(byId.get(id)?.onboarding_status, "pending", `${id} must return to Pending`);
     assert.equal(byId.get(id)?.lifecycle_status, "onboarding", `${id} must return to onboarding`);
@@ -152,7 +158,6 @@ test("repair restores approval-managed canonical and mirrored profiles without s
   for (const id of [
     "legacy-no-request",
     "submitted-notification",
-    "submitted-profile-field",
     "submitted-event",
     "mirrored-contractor-submitted",
     "ordinary-active"
@@ -170,7 +175,8 @@ test("repair restores approval-managed canonical and mirrored profiles without s
   assert.deepEqual(repairEvents.rows.map((row) => row.workforce_id).sort(), [
     "bulk-unsubmitted",
     "mirrored-contractor-later-update",
-    "mirrored-contractor-unsubmitted"
+    "mirrored-contractor-unsubmitted",
+    "submitted-profile-field"
   ]);
   assert.ok(repairEvents.rows.every((row) => row.event_code === "registration_status_repaired"));
   assert.ok(repairEvents.rows.every((row) => row.previous_status === "active"));
@@ -197,6 +203,7 @@ test("evidence repair is idempotent for canonical and mirrored profiles", async 
   t.after(() => db.close());
 
   await db.exec(await readFile(evidenceRepairMigrationUrl, "utf8"));
+  await db.exec(await readFile(defaultFieldRepairMigrationUrl, "utf8"));
 
   const repairs = await db.query(`
     select workforce_id, count(*)::integer as repair_count
@@ -208,7 +215,8 @@ test("evidence repair is idempotent for canonical and mirrored profiles", async 
   assert.deepEqual(repairs.rows, [
     { workforce_id: "bulk-unsubmitted", repair_count: 1 },
     { workforce_id: "mirrored-contractor-later-update", repair_count: 1 },
-    { workforce_id: "mirrored-contractor-unsubmitted", repair_count: 1 }
+    { workforce_id: "mirrored-contractor-unsubmitted", repair_count: 1 },
+    { workforce_id: "submitted-profile-field", repair_count: 1 }
   ]);
 });
 
@@ -260,4 +268,33 @@ test("database keeps enabled and nonterminal registration states independent", a
     from public.workforce where id = 'ordinary-active'
   `);
   assert.deepEqual(terminal.rows[0], { lifecycle_status: "settled", is_active: false });
+});
+
+test("database refuses approval-managed Active status without registration evidence", async (t) => {
+  const db = await fixture();
+  t.after(() => db.close());
+
+  await assert.rejects(
+    db.exec(`insert into public.workforce (
+      id, onboarding_status, lifecycle_status, is_active, approval_required
+    ) values ('invalid-active-without-submission', 'active', 'active', true, true)`),
+    /Active Workforce registration requires completed registration evidence/
+  );
+
+  await db.exec(`insert into public.workforce (
+    id, onboarding_status, lifecycle_status, is_active, approval_required,
+    onboarding_submitted_at
+  ) values (
+    'active-with-submission', 'active', 'active', true, true,
+    timestamptz '2026-10-15 12:00:00+00'
+  )`);
+  const active = await db.query(`
+    select onboarding_status, lifecycle_status, is_active
+    from public.workforce where id = 'active-with-submission'
+  `);
+  assert.deepEqual(active.rows[0], {
+    onboarding_status: "active",
+    lifecycle_status: "active",
+    is_active: true
+  });
 });
