@@ -97,6 +97,84 @@ test('selecting a legacy-ID parent-station associate asks for dates instead of a
   ui.render();
   assert.match(JSON.stringify(ui.all(n=>n.props?.className==='mapping-period-help')),/Keep all.*JUGD/);
 });
+
+test('a same-owner move to the registered location offers and submits both Keep all and Move mapping', async () => {
+  const currentMapping = {
+    mappingId: 'sbpd-map',
+    stationId: 'station-2',
+    locationLabel: 'SBPD',
+    providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId,
+    paymentMethodId: method.id,
+    paymentValues: { DELIVERY: '15' },
+    productionThresholdConfig: null,
+    productionThresholdMinimumUnits: '',
+    effectiveFrom: '2026-10-01',
+    effectiveTo: '',
+    status: 'active'
+  };
+  const relocatingWorker = {
+    ...worker,
+    stationId: currentMapping.stationId,
+    locationLabel: currentMapping.locationLabel,
+    profileStationId: row.stationId,
+    profileLocationLabel: 'KDJE - Barbil',
+    mappingId: currentMapping.mappingId,
+    paymentMethodId: currentMapping.paymentMethodId,
+    paymentValues: currentMapping.paymentValues,
+    effectiveFrom: currentMapping.effectiveFrom,
+    mappedProviderMemberId: currentMapping.mappedProviderMemberId,
+    currentMappings: [currentMapping],
+    mappingHistory: [currentMapping]
+  };
+
+  for (const choice of ['Keep all', 'Move mapping']) {
+    let submitted;
+    const ui = worksheet({
+      mappings: [{ ...row, stationLabel: 'KDJE - Barbil' }],
+      workers: [relocatingWorker]
+    }, async data => {
+      submitted = data;
+      return saved(data);
+    });
+
+    completeDraft(ui);
+    await ui.save();
+    assert.match(JSON.stringify(ui.all(node => node.props?.role === 'alertdialog')), /Choose location mapping action/);
+    assert.equal(ui.one(node => node.type === 'button' && node.props.children === 'Keep all').props.disabled, false);
+    assert.equal(ui.one(node => node.type === 'button' && node.props.children === 'Move mapping').props.disabled, false);
+
+    ui.one(node => node.type === 'button' && node.props.children === choice).props.onClick();
+    await new Promise(setImmediate);
+    ui.render();
+    assert.equal(submitted.get('rows[0][replace_mapping_id]'), currentMapping.mappingId);
+    assert.equal(submitted.get('rows[0][replacement_confirmed]'), 'yes');
+    assert.equal(submitted.get('rows[0][replacement_action]'), choice === 'Keep all' ? 'keep' : 'move');
+  }
+});
+
+test('read-only provider mapping cannot open either relocation action', async () => {
+  let submitted = false;
+  const currentMapping = {
+    mappingId: 'sbpd-map', stationId: 'station-2', locationLabel: 'SBPD', providerId: row.providerId,
+    mappedProviderMemberId: row.providerMemberId, paymentMethodId: method.id, paymentValues: { DELIVERY: '15' },
+    productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '2026-10-01', effectiveTo: '', status: 'active'
+  };
+  const ui = worksheet({
+    canEdit: false,
+    mappings: [{ ...row, stationLabel: 'KDJE - Barbil' }],
+    workers: [{ ...worker, stationId: 'station-2', locationLabel: 'SBPD', profileStationId: row.stationId,
+      profileLocationLabel: 'KDJE - Barbil', mappingId: currentMapping.mappingId, paymentMethodId: method.id,
+      paymentValues: currentMapping.paymentValues, effectiveFrom: currentMapping.effectiveFrom,
+      mappedProviderMemberId: row.providerMemberId, currentMappings: [currentMapping], mappingHistory: [currentMapping] }]
+  }, async () => { submitted = true; return { ok: true, message: 'Unexpected write', savedRows: [] }; });
+
+  assert.equal(ui.select('provider_first_worker_0').disabled, true);
+  assert.equal(ui.one(node => node.type === 'button' && node.props.className?.includes('mapping-save-all')).props.disabled, true);
+  await ui.save();
+  assert.equal(ui.all(node => node.props?.role === 'alertdialog').length, 0);
+  assert.equal(submitted, false);
+});
 function saved(data) {
   const value = key => data.get(`rows[0][${key}]`);
   return { ok: true, message: 'Mapping saved.', savedRows: [{ clientKey: value('client_key'), workforceId: value('id'), mappingId: 'saved-1', paymentMethodId: value('payment_method_id'), paymentValues: JSON.parse(value('payment_values_json')), productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: value('effective_from'), effectiveTo: value('effective_to') }] };

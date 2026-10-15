@@ -522,7 +522,7 @@ test("the location exception fails closed without exact registered-location iden
   }), false);
 });
 
-test("a mapping may still be moved back to the profile's registered location", () => {
+test("a mapping may be moved or kept when restoring the profile's registered location", () => {
   const registeredLocationRow = {
     ...secondLocationRow,
     stationId: "station-a",
@@ -534,5 +534,7 @@ test("a mapping may still be moved back to the profile's registered location", (
     locationLabel: "KGQE"
   };
   assert.equal(providerFirstLocationIsAllowed(registeredLocationRow, driftedWorker), true);
-  assert.notEqual(providerFirstLocationRemap(registeredLocationRow, driftedWorker)?.allowMove, false);
+  const remap = providerFirstLocationRemap(registeredLocationRow, driftedWorker);
+  assert.equal(remap?.allowMove, true);
+  assert.equal(remap?.allowKeepAll, true);
 });

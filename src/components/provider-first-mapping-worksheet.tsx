@@ -1012,7 +1012,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       const active = replacementConfirmation.replacements[replacementConfirmation.cursor];
       return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setReplacementConfirmation(null); }}>
         <section aria-labelledby="provider-replacement-title" aria-modal="true" className="modal-panel confirmation-dialog" role="alertdialog">
-          <div className="modal-head"><div><h2 id="provider-replacement-title">{active.replacement.kind === "location" ? "Move mapping to new location?" : "Replace existing mapping?"}</h2></div></div>
+          <div className="modal-head"><div><h2 id="provider-replacement-title">{active.replacement.kind === "location" ? "Choose location mapping action" : "Replace existing mapping?"}</h2></div></div>
           <div className="confirmation-body"><p style={{ whiteSpace: "pre-line" }}>{providerFirstMappingReplacementMessage(active.replacement)}</p></div>
           <div className="form-actions modal-actions confirmation-actions">
             <button className="button secondary" disabled={isSaving} onClick={() => setReplacementConfirmation(null)} type="button">Cancel</button>

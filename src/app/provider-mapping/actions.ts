@@ -654,12 +654,24 @@ async function saveExecutiveMappingRow(
         || (keepAnchor.status === "closed" && Boolean(keepAnchor.effective_to))
       )
     );
+    const destinationIsRegisteredLocation = Boolean(
+      canonicalWorker
+      && stationId === canonicalWorker.location_id
+    );
+    const keepDirectionIsValid = Boolean(
+      keepAnchor
+      && canonicalWorker
+      && keepAnchor.station_id !== stationId
+      && (
+        keepAnchor.station_id === canonicalWorker.location_id
+        || destinationIsRegisteredLocation
+      )
+    );
     const exactKeepAnchor = Boolean(
       keepAnchor
       && canonicalWorker
       && anchorMatchesCanonicalOwner
-      && keepAnchor.station_id === canonicalWorker.location_id
-      && keepAnchor.station_id !== stationId
+      && keepDirectionIsValid
       && keepAnchor.provider_id === submittedProviderId
       && providerMemberIdentity(keepAnchor.provider_member_id) === providerMemberIdentity(providerMemberId)
       && keepAnchor.payment_method_id === paymentMethodId
@@ -962,17 +974,24 @@ async function saveExecutiveMappingRow(
     if (closureError && !options.prepareScheduleOnly) throw new Error(`Row ${index + 1}: ${closureError}`);
     if (options.prepareScheduleOnly) return mappingPayload;
 
+    const keepAtRegisteredLocation = Boolean(options.keepExistingLocationMappingId)
+      && stationId === workerLocationId;
     const { error } = options.keepExistingLocationMappingId
-      ? await supabaseAdmin.rpc("workforce_keep_joining_mapping", {
-        p_company: companyId,
-        p_actor: createdBy,
-        p_workforce: id,
-        p_expected_existing_mapping: options.keepExistingLocationMappingId,
-        p_dropx: dropxId,
-        p_payload: mappingPayload,
-        p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
-        p_actor_name: "Dashboard mapping reviewer"
-      })
+      ? await supabaseAdmin.rpc(
+        keepAtRegisteredLocation
+          ? "workforce_keep_joining_mapping_at_registered_location"
+          : "workforce_keep_joining_mapping",
+        {
+          p_company: companyId,
+          p_actor: createdBy,
+          p_workforce: id,
+          p_expected_existing_mapping: options.keepExistingLocationMappingId,
+          p_dropx: dropxId,
+          p_payload: mappingPayload,
+          p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
+          p_actor_name: "Dashboard mapping reviewer"
+        }
+      )
       : replacementMappingId
         ? options.paymentTransferDecision
           ? await supabaseAdmin.rpc("workforce_replace_joining_mapping_with_payment_decision", {
@@ -1517,10 +1536,10 @@ async function providerFirstReplacementState({
   }
   const replacement = {
     kind: changeKind,
-    // Keep all is only valid when an existing mapping at the registered
-    // location anchors a second location. When the destination itself is the
-    // profile's registered location, this is a correction and must Move.
-    allowKeepAll: changeKind === "location" && needsRegisteredLocationException,
+    // Same-owner location changes always retain the explicit Keep-all choice.
+    // When the destination is the registered location, the database records
+    // the exact concurrent period without rewriting the older mapping.
+    allowKeepAll: changeKind === "location",
     allowMove: changeKind !== "location" || !needsRegisteredLocationException,
     clientKey,
     mappingId: existingMapping.id,
@@ -1535,9 +1554,6 @@ async function providerFirstReplacementState({
   if (expectedReplacementId === existingMapping.id) {
     if (changeKind === "owner" && replacementAction === "keep") {
       throw new Error(`Row ${index + 1}: Keep all is available only when the same DropX ID works at multiple locations.`);
-    }
-    if (changeKind === "location" && !needsRegisteredLocationException && replacementAction === "keep") {
-      throw new Error(`Row ${index + 1}: Move mapping is required when correcting the Provider ID to the DropX profile's registered location.`);
     }
     if (changeKind === "location" && needsRegisteredLocationException && replacementAction === "move") {
       throw new Error(`Row ${index + 1}: Keep all is required for an additional location so the verified registered-location mapping remains preserved for that period.`);

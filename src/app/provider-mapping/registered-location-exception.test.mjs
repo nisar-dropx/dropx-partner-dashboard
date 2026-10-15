@@ -154,7 +154,8 @@ test("server selects a same-owner historical registered anchor that contains the
   assert.match(actions, /mapping\.status === "closed" && Boolean\(mapping\.effective_to\)/);
   assert.match(actions, /!relevantProviderMappings\.length && !relevantTargetMappings\.length && !registeredLocationMapping/);
   assert.match(actions, /\.\.\.\(registeredLocationMapping \? \[registeredLocationMapping\] : \[\]\)/);
-  assert.match(
+  assert.match(actions, /allowKeepAll: changeKind === "location"/);
+  assert.doesNotMatch(
     actions,
     /changeKind === "location" && !needsRegisteredLocationException && replacementAction === "keep"[\s\S]*?throw new Error/
   );
@@ -162,6 +163,7 @@ test("server selects a same-owner historical registered anchor that contains the
     actions,
     /changeKind === "location" && needsRegisteredLocationException && replacementAction === "move"[\s\S]*?throw new Error/
   );
+  assert.match(actions, /workforce_keep_joining_mapping_at_registered_location/);
   assert.match(actions, /Keep all is required for an additional location/);
 });
 

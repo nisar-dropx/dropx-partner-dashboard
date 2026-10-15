@@ -304,7 +304,7 @@ test("indexed worker selection preserves conflict rules without rescanning every
   }
 });
 
-test("uses the effective mapping station when the Workforce profile already moved", () => {
+test("uses the effective mapping station and keeps both relocation choices when the Workforce profile already moved", () => {
   const driftedWorker = {
     ...worker,
     stationId: "station-1",
@@ -322,7 +322,7 @@ test("uses the effective mapping station when the Workforce profile already move
     }, driftedWorker),
     {
       kind: "location",
-      allowKeepAll: false,
+      allowKeepAll: true,
       allowMove: true,
       mappingId: "mapping-1",
       providerMemberId: "member-1",
@@ -340,12 +340,11 @@ test("uses the effective mapping station when the Workforce profile already move
     stationLabel: "JUGF",
     effectiveFrom: "2026-10-04"
   }, driftedWorker);
-  assert.equal(moveToProfile?.allowKeepAll, false);
-  assert.equal(
-    providerFirstMappingReplacementMessage(moveToProfile),
-    "Provider ID member-1 - Asha Devi is currently mapped to DROPX1 - Asha Devi at JUGD.\nMove it to the profile's registered location JUGF. Moving ends the old location on the preceding day and preserves its earlier mapping and payout history."
-  );
-  assert.doesNotMatch(providerFirstMappingReplacementMessage(moveToProfile), /Keep all|keep both/i);
+  assert.equal(moveToProfile?.allowKeepAll, true);
+  assert.equal(moveToProfile?.allowMove, true);
+  assert.match(providerFirstMappingReplacementMessage(moveToProfile), /Move it to JUGF/);
+  assert.match(providerFirstMappingReplacementMessage(moveToProfile), /keep both location mappings/i);
+  assert.match(providerFirstMappingReplacementMessage(moveToProfile), /Keep all preserves both locations/);
 });
 
 test("does not reuse a future current mapping for an earlier bounded period", () => {
@@ -669,7 +668,7 @@ test("provider-first renders only the selected page and saves without navigation
   assert.match(component, /production_threshold_minimum_units/);
   assert.match(component, /mappingId: mappingReference\?\.mappingId \?\? ""/);
   assert.match(component, /Replace existing mapping\?/);
-  assert.match(component, /Move mapping to new location\?/);
+  assert.match(component, /Choose location mapping action/);
   assert.match(component, />Keep all<\/button>/);
   assert.match(component, /\[clear_mapping\]/);
   assert.match(component, /Replace mapping/);

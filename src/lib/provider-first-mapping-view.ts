@@ -203,7 +203,11 @@ export function providerFirstLocationRemap(
   const movesToRegisteredLocation = row.stationId === String(worker.profileStationId ?? "").trim();
   return {
     kind: "location",
-    allowKeepAll: !movesToRegisteredLocation,
+    // The same owner can either move the mapping or keep both locations when
+    // restoring the registered-location mapping. The database records the
+    // concurrent period explicitly, without changing the older mapping ID or
+    // its effective-date history.
+    allowKeepAll: true,
     allowMove: movesToRegisteredLocation,
     mappingId: reference.mappingId,
     providerMemberId: row.providerMemberId,
