@@ -34,6 +34,7 @@ test("Now policy tolerates relationship arrays and canonical model aliases", () 
 
 test("onboarding status takes precedence over the activation flag", () => {
   assert.equal(workforceProfileStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: false }), "Pending");
+  assert.equal(workforceProfileStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: true }), "Pending");
   assert.equal(workforceProfileStatus({ onboarding_status: "under_review", is_active: false }), "Under Review");
   assert.equal(workforceProfileStatus({ onboarding_status: "returned", is_active: false }), "Returned");
   assert.equal(workforceProfileStatus({ onboarding_status: "active", is_active: true }), "Active");

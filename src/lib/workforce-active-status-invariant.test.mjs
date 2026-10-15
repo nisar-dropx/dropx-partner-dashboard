@@ -3,8 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 
-const migrationUrl = new URL(
+const independenceMigrationUrl = new URL(
   "../../supabase/migrations/20261015183000_workforce_registration_status_independence.sql",
+  import.meta.url
+);
+const evidenceRepairMigrationUrl = new URL(
+  "../../supabase/migrations/20261015190000_workforce_registration_evidence_repair.sql",
   import.meta.url
 );
 
@@ -16,6 +20,7 @@ async function fixture() {
       company_id text not null default 'company',
       source_profile_type text not null default 'canonical',
       source_profile_id text,
+      migration_state text not null default 'canonical',
       onboarding_status text,
       lifecycle_status text,
       is_active boolean not null default false,
@@ -71,6 +76,28 @@ async function fixture() {
       ('approved', 'approved', 'onboarding', true, true, false),
       ('ordinary-active', 'active', 'active', true, false, false);
 
+    insert into public.workforce (
+      id, source_profile_type, source_profile_id, migration_state,
+      onboarding_status, lifecycle_status, is_active,
+      approval_required, is_handicapped
+    ) values
+      (
+        'mirrored-contractor-unsubmitted', 'contractor', 'contractor-unsubmitted', 'mirrored',
+        'active', 'active', true, true, null
+      ),
+      (
+        'mirrored-contractor-submitted', 'contractor', 'contractor-submitted', 'mirrored',
+        'active', 'active', true, true, null
+      ),
+      (
+        'mirrored-contractor-later-update', 'contractor', 'contractor-later-update', 'mirrored',
+        'active', 'active', true, true, null
+      );
+
+    update public.workforce
+    set updated_at = timestamptz '2026-10-15 09:11:26.5+00'
+    where id in ('mirrored-contractor-unsubmitted', 'mirrored-contractor-submitted');
+
     insert into public.workforce_onboarding_events (
       company_id, workforce_id, event_code, to_status, source_portal
     ) values
@@ -82,12 +109,16 @@ async function fixture() {
       ('company', 'submitted-event', 'candidate_submitted', 'active', 'connect');
     insert into public.mob_app_notifications (recipient_account_id, event_code)
       values ('submitted-notification', 'profile_submitted');
+    insert into public.mob_app_notifications (
+      recipient_profile_type, recipient_account_id, event_code
+    ) values ('contractor', 'contractor-submitted', 'profile_submitted');
   `);
-  await db.exec(await readFile(migrationUrl, "utf8"));
+  await db.exec(await readFile(independenceMigrationUrl, "utf8"));
+  await db.exec(await readFile(evidenceRepairMigrationUrl, "utf8"));
   return db;
 }
 
-test("repair restores only evidence-backed unsubmitted bulk profiles", async (t) => {
+test("repair restores approval-managed canonical and mirrored profiles without submission evidence", async (t) => {
   const db = await fixture();
   t.after(() => db.close());
 
@@ -111,10 +142,19 @@ test("repair restores only evidence-backed unsubmitted bulk profiles", async (t)
     is_active: true
   });
   for (const id of [
+    "mirrored-contractor-unsubmitted",
+    "mirrored-contractor-later-update"
+  ]) {
+    assert.equal(byId.get(id)?.onboarding_status, "pending", `${id} must return to Pending`);
+    assert.equal(byId.get(id)?.lifecycle_status, "onboarding", `${id} must return to onboarding`);
+    assert.equal(byId.get(id)?.is_active, true, `${id} must remain operationally enabled`);
+  }
+  for (const id of [
+    "legacy-no-request",
     "submitted-notification",
     "submitted-profile-field",
     "submitted-event",
-    "legacy-no-request",
+    "mirrored-contractor-submitted",
     "ordinary-active"
   ]) {
     assert.equal(byId.get(id)?.onboarding_status, "active", `${id} must remain Active`);
@@ -127,11 +167,49 @@ test("repair restores only evidence-backed unsubmitted bulk profiles", async (t)
     from public.workforce_onboarding_events
     where event_code = 'registration_status_repaired'
   `);
-  assert.deepEqual(repairEvents.rows, [{
-    workforce_id: "bulk-unsubmitted",
-    event_code: "registration_status_repaired",
-    previous_status: "active"
-  }]);
+  assert.deepEqual(repairEvents.rows.map((row) => row.workforce_id).sort(), [
+    "bulk-unsubmitted",
+    "mirrored-contractor-later-update",
+    "mirrored-contractor-unsubmitted"
+  ]);
+  assert.ok(repairEvents.rows.every((row) => row.event_code === "registration_status_repaired"));
+  assert.ok(repairEvents.rows.every((row) => row.previous_status === "active"));
+
+  const evidenceRepairAudit = await db.query(`
+    select
+      workforce_id,
+      metadata ->> 'source_profile_type' as source_profile_type,
+      (metadata ->> 'previous_is_active')::boolean as previous_is_active
+    from public.workforce_onboarding_events
+    where event_code = 'registration_status_repaired'
+      and metadata ->> 'repair_migration' =
+        '20261015190000_workforce_registration_evidence_repair'
+    order by workforce_id
+  `);
+  assert.deepEqual(evidenceRepairAudit.rows, [
+    { workforce_id: "mirrored-contractor-later-update", source_profile_type: "contractor", previous_is_active: true },
+    { workforce_id: "mirrored-contractor-unsubmitted", source_profile_type: "contractor", previous_is_active: true }
+  ]);
+});
+
+test("evidence repair is idempotent for canonical and mirrored profiles", async (t) => {
+  const db = await fixture();
+  t.after(() => db.close());
+
+  await db.exec(await readFile(evidenceRepairMigrationUrl, "utf8"));
+
+  const repairs = await db.query(`
+    select workforce_id, count(*)::integer as repair_count
+    from public.workforce_onboarding_events
+    where event_code = 'registration_status_repaired'
+    group by workforce_id
+    order by workforce_id
+  `);
+  assert.deepEqual(repairs.rows, [
+    { workforce_id: "bulk-unsubmitted", repair_count: 1 },
+    { workforce_id: "mirrored-contractor-later-update", repair_count: 1 },
+    { workforce_id: "mirrored-contractor-unsubmitted", repair_count: 1 }
+  ]);
 });
 
 test("database keeps enabled and nonterminal registration states independent", async (t) => {

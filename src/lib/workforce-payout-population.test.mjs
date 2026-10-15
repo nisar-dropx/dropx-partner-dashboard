@@ -175,6 +175,7 @@ test("shipment attendance threshold is stable when deliveries span visible and h
 test("DropX status exposes onboarding, lifecycle and inactive states", () => {
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "pending", lifecycle_status: "", is_active: false }), "Pending");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: false }), "Pending");
+  assert.equal(workforcePayoutDropxStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: true }), "Pending");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "active", lifecycle_status: "onboarding", is_active: true }), "Active");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "returned", lifecycle_status: "", is_active: false }), "Returned");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "active", lifecycle_status: "settlement_pending", is_active: true }), "Settlement Pending");
