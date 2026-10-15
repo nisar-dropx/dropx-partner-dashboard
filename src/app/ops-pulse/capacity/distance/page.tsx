@@ -3,6 +3,7 @@ import { PageHead } from "@/components/page-head";
 import { CapacityWorkspaceTabs } from "@/components/capacity-workspace-tabs";
 import { AttendanceMultiSelect } from "@/components/attendance-multi-select";
 import { CapacityDistanceTable } from "@/components/capacity-distance-table";
+import { CapacityDistanceSync } from "@/components/capacity-distance-sync";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations, todayKolkata } from "@/lib/ops-pulse/cod";
@@ -177,6 +178,12 @@ export default async function DistancePage({
             Reset
           </a>
         </form>
+        <CapacityDistanceSync
+          stations={stations.map((s) => ({ id: s.id, code: s.station_code }))}
+          defaultDate={yesterday}
+          minDate={new Date(Date.parse(today + "T00:00:00Z") - 35 * 86400000).toISOString().slice(0, 10)}
+          maxDate={yesterday}
+        />
         {error ? (
           <div className={styles.error} role="alert">
             {error}
@@ -190,7 +197,7 @@ export default async function DistancePage({
         )}
         <p className={styles.note}>
           Amazon EDSP &amp; XPT · associates mapped for kilometre-based fuel ·
-          up to 31 days per view. Saved results refresh within a minute; maps
+          up to 31 days per view. Distances sync every morning at 5:00 IST; maps
           load when opened. Pending distance is never counted as zero.
         </p>
       </div>
