@@ -69,5 +69,7 @@ export async function recoveryContext(
     settings: settings.data,
     caseKey: row.data.case_key,
     amount: row.data.amount,
+    report: (row.data.report === "slp" ? "slp" : "nl") as "nl" | "slp",
+    finalSeenAt: (row.data.final_seen_at ?? null) as string | null,
   };
 }

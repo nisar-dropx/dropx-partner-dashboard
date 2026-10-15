@@ -82,6 +82,12 @@ export async function POST(request: Request) {
         !Number.isInteger(policy.attachment_max_mb) ||
         policy.attachment_max_mb < 1 ||
         policy.attachment_max_mb > 20 ||
+        (policy.payroll_cutoff_day !== undefined &&
+          (!Number.isInteger(policy.payroll_cutoff_day) ||
+            policy.payroll_cutoff_day < 1 ||
+            policy.payroll_cutoff_day > 28)) ||
+        (policy.payroll_start_month !== undefined &&
+          !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(policy.payroll_start_month))) ||
         [
           "people_run_statuses",
           "people_calculation_statuses",

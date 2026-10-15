@@ -63,7 +63,7 @@ export async function loadRecoveryPayables(
           db
             .from("hr_payroll_run_people")
             .select(
-              "worker_id,net_pay,adjusted_net_pay,is_adjusted,calculation_status,hr_payroll_runs!inner(status,period_start,period_end,updated_at)",
+              "worker_id,net_pay,adjusted_net_pay,is_adjusted,calculation_status,hr_payroll_runs!inner(status,period_start,period_end,updated_at),hr_payroll_run_items(code,amount)",
             )
             .eq("company_id", company)
             .eq("worker_type", "employee")
@@ -88,6 +88,7 @@ export async function loadRecoveryPayables(
       "Employee eligibility or payable salary could not be verified.",
     );
   // Calculate the same company-wide DA pay used by Dashboard, but return only the scoped station directory.
+  // Capacity is pay before Ops loss recoveries: every plan for this month is subtracted as "reserved" below.
   const payouts =
     workforceIds.length && policy.salary_cap_enabled
       ? await loadWorkforcePayoutRows(
@@ -95,6 +96,7 @@ export async function loadRecoveryPayables(
           { ...auth, hasAllLocationAccess: true },
           start,
           end,
+          { includeLossRecoveries: false },
         )
       : { rows: [], error: null };
   // A payout-source issue blocks employee deductions, but never blocks a re-dispute.
@@ -139,13 +141,19 @@ export async function loadRecoveryPayables(
           employeePay.calculation_status,
         )
       ) {
+        const adjusted =
+          employeePay.is_adjusted && employeePay.adjusted_net_pay != null;
+        // Add back Ops loss recoveries payroll already deducted; they are counted again as reserved below.
+        const opsLoss = adjusted
+          ? 0
+          : (employeePay.hr_payroll_run_items || [])
+              .filter((item: any) => item.code === "OPS_LOSS_RECOVERY")
+              .reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
         payable = Math.max(
           0,
-          Number(
-            employeePay.is_adjusted && employeePay.adjusted_net_pay != null
-              ? employeePay.adjusted_net_pay
-              : employeePay.net_pay,
-          ),
+          Math.round(
+            (Number(adjusted ? employeePay.adjusted_net_pay : employeePay.net_pay) + opsLoss) * 100,
+          ) / 100,
         );
         source = `People payroll · ${employeePay.calculation_status}`;
       }

@@ -42,6 +42,10 @@ export type RecoveryPolicy = {
   attachment_max_count: number;
   attachment_max_mb: number;
   cctv_public_confirmation: boolean;
+  /** Settled before this day of the month → the previous month's salary (default 7). */
+  payroll_cutoff_day?: number;
+  /** First salary month that carries Ops loss recoveries (YYYY-MM). */
+  payroll_start_month?: string;
 };
 export type RecoveryAttachment = { id: string; file_name: string };
 export type RecoveryDetails = {
@@ -134,7 +138,8 @@ export function recoveryNeedsReview(row: NlCase) {
     !!row.recovery &&
     !row.recovery.is_deleted &&
     (Number(row.recovery.source_amount) !== Number(row.amount) ||
-      row.recovery.source_status !== row.source_status)
+      // SLP Initial → Final at the same amount is the settled loss the plan already covers.
+      (row.report !== "slp" && row.recovery.source_status !== row.source_status))
   );
 }
 export function recoveryCsv(value: unknown) {
