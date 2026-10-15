@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { assetVersion } from "./asset-version.ts";
 
 const module = { exports: {} };
 const code = ts.transpileModule(readFileSync(new URL("./assets.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 new Function("require", "exports", "module", code)((name) => {
+  if (name === "./asset-version") return { assetVersion };
   assert.equal(name, "server-only");
   return {};
 }, module.exports, module);
