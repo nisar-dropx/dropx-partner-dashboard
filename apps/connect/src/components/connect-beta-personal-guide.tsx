@@ -13,6 +13,7 @@ export function BetaPersonalGuide({step,language,context,compact=false}:{step:Fl
  if(step==='signin')return credential(c.email,context.email);
  if(step==='about'||step==='bgc')return <aside className={styles.currentAddress}><MapPin size={20}/><p>{c.address}</p></aside>;
  if(step==='learning')return <section className={styles.personalGuide}>{credential(c.driver,context.driverId)}{context.driverId?credential(c.password,context.learningPassword):null}{!compact?<ol>{betaNextStepsCopy[language].learningSteps.map(s=><li key={s}>{s}</li>)}</ol>:null}</section>;
+ if(step==='uan'&&context.uanVerified)return <p className={styles.uanSms}>{betaNextStepsCopy[language].verifiedBody}</p>;
  if(step==='uan')return compact?<h3>{c.uan}</h3>:<BetaUanOptions language={language} assistedUrl={context.uanAssistedUrl} submitUrl={context.uanSubmitUrl}/>;
  return null;
 }

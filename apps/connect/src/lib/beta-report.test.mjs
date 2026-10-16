@@ -20,8 +20,20 @@ test('download verifies candidate before requesting PDF; unauthorized accounts n
  const original=global.fetch;process.env.WORKFORCE_AMAZON_WORKER_URL='https://worker.example';process.env.WORKFORCE_AMAZON_WORKER_KEY='test';
  try{
   for(const options of [{foreign:true},{source:'http://127.0.0.1/private'},{authError:true},{}]){
-   const f=fixture(options);global.fetch=f.fetch;const r=await f.GET({});assert.equal(r.status,options.authError?403:options.foreign||options.source?503:200);assert.equal(f.calls(),options.authError?0:options.foreign||options.source?1:2);
+   const f=fixture(options);global.fetch=f.fetch;const r=await f.GET({nextUrl:new URL('https://one.test/api/connect/beta-idfy-report')});assert.equal(r.status,options.authError?403:options.foreign||options.source?503:200);assert.equal(f.calls(),options.authError?0:options.foreign||options.source?1:2);
    if(r.status===200){assert.match(r.headers.get('content-disposition'),/attachment/);assert.match(r.headers.get('cache-control'),/private, no-store/);}
+  }
+ }finally{global.fetch=original;delete process.env.WORKFORCE_AMAZON_WORKER_URL;delete process.env.WORKFORCE_AMAZON_WORKER_KEY;}
+});
+
+test('browser PDF fallback uses the same private identity checks and returns inline PDF',async()=>{
+ const original=global.fetch;process.env.WORKFORCE_AMAZON_WORKER_URL='https://worker.example';process.env.WORKFORCE_AMAZON_WORKER_KEY='test';
+ try{
+  for(const denied of [false,true]){
+   const f=fixture({authError:denied});global.fetch=f.fetch;
+   const response=await f.GET({nextUrl:new URL('https://one.test/api/connect/beta-idfy-report?view=inline')});
+   assert.equal(response.status,denied?403:200);
+   if(!denied){assert.match(response.headers.get('content-disposition'),/^inline;/);assert.equal(response.headers.get('content-type'),'application/pdf');assert.equal(await response.text(),'%PDF-example');}
   }
  }finally{global.fetch=original;delete process.env.WORKFORCE_AMAZON_WORKER_URL;delete process.env.WORKFORCE_AMAZON_WORKER_KEY;}
 });
