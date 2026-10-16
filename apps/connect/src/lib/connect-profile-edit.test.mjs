@@ -13,6 +13,7 @@ import {
   profileEditVerificationKeys,
   verifyProfileEditOtpHmac
 } from "./connect-profile-edit.ts";
+import { normalizeConnectMobile } from "./country-codes.ts";
 
 test("profile edit accepts only supported account types and mutable camelCase fields", () => {
   assert.equal(canonicalProfileEditType("field_executive"), "workforce");
@@ -166,10 +167,23 @@ test("profile-edit identity checks bind name matching to the immutable server pr
   );
   assert.match(
     verificationRoute,
-    /const profileEdit = payload\.profileEdit === true;[\s\S]*?const registeredName = profileEdit\s*\? account\.fullName\s*:\s*compact\(payload\.fullName\) \|\| account\.fullName/
+    /const profileEdit = payload\.profileEdit === true;[\s\S]*?const profileEditAccount = profileEdit[\s\S]*?resolveProfileEditAccount\(accountId, profileType\)[\s\S]*?const account = profileEditAccount \?\? await resolveAccount\(accountId, profileType\);[\s\S]*?const registeredName = profileEditAccount\s*\? profileEditAccount\.fullName\s*:\s*compact\(payload\.fullName\) \|\| account\.fullName/
+  );
+  assert.match(verificationRoute, /resolveProfileEditAccount[\s\S]*?profileStatus !== "active" \|\| row\.is_active !== true/);
+  assert.doesNotMatch(verificationRoute, /mobile_number_format|normalizeStoredConnectMobile/);
+  assert.match(
+    verificationRoute,
+    /function resolveAccount[\s\S]*?normalizeConnectMobile\(\s*session\.mobile_number,\s*session\.country_code\s*\)/
   );
   assert.match(verificationRoute, /connect_profile_edit_verifications"\)\.upsert\(\{[\s\S]*?request_id: null/);
-  assert.doesNotMatch(verificationRoute, /saveVerifiedIfsc|Bank verification succeeded but IFSC could not be saved/);
+  assert.match(
+    verificationRoute,
+    /async function saveVerifiedIfsc[\s\S]*?Bank verification succeeded but IFSC could not be saved/
+  );
+  assert.match(
+    verificationRoute,
+    /if \(verified && !profileEdit\) await saveVerifiedIfsc\(profileType, accountId, ifscCode\);[\s\S]*?return respond\(result\);/
+  );
 
   const editRoute = fs.readFileSync(
     new URL("../../app/api/connect/profile-edit/route.ts", import.meta.url),
@@ -204,7 +218,7 @@ test("profile-edit identity checks bind name matching to the immutable server pr
   );
   assert.match(rootAuth, /normalizeStoredConnectMobile[\s\S]*?from "@\/lib\/country-codes"/);
   assert.match(rootCountries, /export function normalizeStoredConnectMobile\([\s\S]*?storageFormat === "canonical"/);
-  assert.match(verificationRoute, /mobile_number_format[\s\S]*?normalizeStoredConnectMobile\([\s\S]*?session\.mobile_number_format/);
+  assert.doesNotMatch(verificationRoute, /mobile_number_format|normalizeStoredConnectMobile/);
 });
 
 test("completed profiles cannot mutate the profile photo outside the OTP edit boundary", () => {
@@ -224,18 +238,71 @@ test("completed profiles cannot mutate the profile photo outside the OTP edit bo
   assert.match(profileApp, /!readOnly && !account\.activationOnly && !editing \? <VerifiedProfilePhotoUpdate/);
 });
 
-test("profile serializers use the authenticated canonical session to disambiguate international mobiles", () => {
+test("registration profile routes stay independent from profile-edit migration columns", () => {
   for (const routeUrl of [
     "../../app/api/connect/profile/route.ts",
     "../../app/api/connect/field-executive-profile/route.ts"
   ]) {
     const route = fs.readFileSync(new URL(routeUrl, import.meta.url), "utf8");
-    assert.match(route, /normalizeStoredConnectMobile\([\s\S]*?session\.mobile_number_format/);
-    assert.match(route, /profileEditLocalMobile\(row\.mobile, mobileCountryCode, sessionMobile\?\.mobile\)/);
+    assert.doesNotMatch(route, /profile_edit_review_pending|profileEditReviewPending/);
+    assert.doesNotMatch(route, /mobile_number_format|normalizeStoredConnectMobile|profileEditLocalMobile/);
+    assert.match(route, /\.select\("id, country_code, mobile_number, expires_at, revoked_at"\)/);
+    assert.match(route, /if \(!\["pending", "returned"\]\.includes\(currentStatus\)\)/);
   }
 });
 
-test("all Connect session writers use credential-bound RPCs that mark canonical mobiles", () => {
+test("registration draft, validation, and submit paths stay independent from self-service edit", () => {
+  const profileApp = fs.readFileSync(
+    new URL("../components/connect-profile-app.tsx", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(
+    profileApp,
+    /const registrationDraft = isolatedPilot \|\| !statusReadOnly\(next\.status\) \? draft : null;[\s\S]*?if \(registrationDraft\) \{[\s\S]*?draftEditableValues\(registrationDraft\.data\)/
+  );
+  assert.doesNotMatch(profileApp, /const registrationDraft = statusReadOnly\(next\.status\) \? null : draft/);
+  assert.match(profileApp, /function registrationFieldError\(\)[\s\S]*?function profileEditFieldError\(\)[\s\S]*?function registrationSubmissionError\(\)[\s\S]*?function profileEditSubmissionError\(\)/);
+  assert.match(profileApp, /function profileEditFieldError\(\)[\s\S]*?if \(!changed\(valueKey\)\) continue;/);
+  assert.match(
+    profileApp,
+    /if \(editing\) \{[\s\S]*?profileEditSubmissionError\(\)[\s\S]*?startProfileEdit\(\)[\s\S]*?return;[\s\S]*?registrationSubmissionError\(\)/
+  );
+  assert.match(
+    profileApp,
+    /async function submitProfile\(\)[\s\S]*?const validationError = registrationSubmissionError\(\)/
+  );
+  assert.match(profileApp, /\.\.\.\(profileEdit \? \{ profileEdit: true \} : \{\}\)/);
+  assert.doesNotMatch(profileApp, /profileEdit: editing/);
+});
+
+test("edit mode bootstraps a fresh server snapshot instead of reusing registration state", () => {
+  const profileApp = fs.readFileSync(
+    new URL("../components/connect-profile-app.tsx", import.meta.url),
+    "utf8"
+  );
+  const editRoute = fs.readFileSync(
+    new URL("../../app/api/connect/profile-edit/route.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(
+    profileApp,
+    /async function beginProfileEdit\(\)[\s\S]*?fetch\(`\/api\/connect\/profile-edit\?\$\{params\}`,[\s\S]*?cache: "no-store"/
+  );
+  assert.match(profileApp, /setValues\(nextValues\)[\s\S]*?setEditOriginalValues\(\{ \.\.\.nextValues \}\)/);
+  assert.match(profileApp, /setVerifications\(\{\}\)[\s\S]*?setVerificationErrors\(\{\}\)/);
+  assert.match(profileApp, /editViewSnapshotRef\.current = \{[\s\S]*?verifications: \{ \.\.\.verifications \}[\s\S]*?function cancelProfileEdit\(\)[\s\S]*?setVerifications\(snapshot\.verifications\)/);
+  assert.match(profileApp, /onClick=\{\(\) => void beginProfileEdit\(\)\}/);
+  assert.doesNotMatch(profileApp, /setEditOriginalValues\(\{ \.\.\.values \}\)/);
+  assert.match(editRoute, /export async function GET\(request: Request\)/);
+  assert.match(editRoute, /values: profileEditBootstrapValues\(profile, profileType\)/);
+  assert.match(editRoute, /mobileCountryCode,[\s\S]*?mobileNumber/);
+  assert.doesNotMatch(editRoute, /mobile_number_format/);
+  assert.match(editRoute, /normalizeProfileEditMobile\(value, countryCode\)/);
+});
+
+test("credential-bound session writers remain additive to the existing session schema", () => {
   const issuance = fs.readFileSync(
     new URL("../../../../src/lib/connect-session-issuance.ts", import.meta.url),
     "utf8"
@@ -258,9 +325,12 @@ test("all Connect session writers use credential-bound RPCs that mark canonical 
     "utf8"
   );
   assert.equal(
-    (sql.match(/p_session_id, p_country_code, p_mobile_number, 'canonical', p_session_hash/g) ?? []).length,
+    (sql.match(/p_session_id, p_country_code, p_mobile_number, p_session_hash/g) ?? []).length,
     2
   );
+  assert.doesNotMatch(sql, /mobile_number_format/);
+  assert.match(issuance, /missingCredentialRpc[\s\S]*?authenticatePinLegacy/);
+  assert.match(issuance, /missingCredentialRpc[\s\S]*?setPinWithOtpLegacy/);
 
   for (const routeUrl of [
     "../../app/api/connect/auth/verify-pin/route.ts",
@@ -284,47 +354,28 @@ test("all Connect session writers use credential-bound RPCs that mark canonical 
     "../../../../src/app/api/connect/attendance/route.ts",
     "../../../../src/app/api/connect/advances/route.ts",
     "../../../../src/app/api/connect/auth/session/route.ts",
-    "../../../../src/app/api/connect/event-log/route.ts",
-    "../../../../src/app/api/connect/verification/route.ts"
+    "../../../../src/app/api/connect/event-log/route.ts"
   ]) {
     const reader = fs.readFileSync(new URL(readerUrl, import.meta.url), "utf8");
-    assert.match(reader, /\.select\("[^"]*mobile_number_format[^"]*"\)/);
-    assert.match(
-      reader,
-      /normalizeStoredConnectMobile\(\s*session\.mobile_number,\s*session\.country_code,\s*session\.mobile_number_format\s*\)/
-    );
+    assert.doesNotMatch(reader, /mobile_number_format|normalizeStoredConnectMobile/);
   }
 });
 
-test("returned profile edits remain visible and can only use the OTP edit flow", () => {
-  for (const routeUrl of [
-    "../../app/api/connect/profile/route.ts",
-    "../../app/api/connect/field-executive-profile/route.ts"
-  ]) {
-    const route = fs.readFileSync(new URL(routeUrl, import.meta.url), "utf8");
-    assert.match(
-      route,
-      /const fallbackResult = await supabaseAdmin[\s\S]*?\.select\("[^"]*profile_return_remarks, profile_edit_review_pending,[^"]*"\)[\s\S]*?\.maybeSingle\(\)/
-    );
-    assert.match(route, /profileEditReviewPending: row\.profile_edit_review_pending === true/);
-    assert.match(
-      route,
-      /if \(current(?:Employee|Executive)\.profile_edit_review_pending === true\) \{[\s\S]*?Returned profile edits must be corrected with Edit profile and WhatsApp OTP\./
-    );
-  }
-
+test("self-service edit is available only for active profiles", () => {
+  const editRoute = fs.readFileSync(
+    new URL("../../app/api/connect/profile-edit/route.ts", import.meta.url),
+    "utf8"
+  );
   const profileApp = fs.readFileSync(
     new URL("../components/connect-profile-app.tsx", import.meta.url),
     "utf8"
   );
-  assert.match(
-    profileApp,
-    /const returnedSelfEdit = String\(profile\?\.status \?\? ""\)\.trim\(\)\.toLowerCase\(\) === "under_review"[\s\S]*?profile\?\.profileEditReviewPending === true[\s\S]*?Boolean\(profile\?\.returnRemarks\?\.trim\(\)\)/
-  );
-  assert.match(
-    profileApp,
-    /const canEditProfile =[\s\S]*?=== "active" \|\| returnedSelfEdit/
-  );
+  assert.match(editRoute, /status !== "active" \|\| row\.is_active !== true \|\| row\.deleted_at/);
+  assert.match(editRoute, /Profile editing is available only for an active profile\./);
+  assert.doesNotMatch(editRoute, /returnedSelfEdit|active or returned self-edit/);
+  assert.match(profileApp, /const canEditProfile =[\s\S]*?profile\?\.status[\s\S]*?=== "active"/);
+  assert.doesNotMatch(profileApp, /=== "active" \|\| returnedSelfEdit/);
+  assert.doesNotMatch(profileApp, /profileEditReviewPending|returnedSelfEdit/);
 });
 
 test("mobile-change completion preserves a success message across forced reauthentication", () => {
@@ -349,6 +400,36 @@ test("OTP verification cannot consume a code replaced by a concurrent resend", (
   );
   const otpHashCas = /\.eq\(isCurrent \? "current_otp_hmac" : "new_otp_hmac", hmac\)/g;
   assert.equal(route.match(otpHashCas)?.length, 2);
+});
+
+test("mobile-move locks cover legacy local and canonical international auth keys", () => {
+  const sql = fs.readFileSync(
+    new URL("../../../../supabase/migrations/20261015220000_connect_profile_edit_otp.sql", import.meta.url),
+    "utf8"
+  );
+  const lockLoop = sql.match(/for phone_lock_key in([\s\S]*?)loop/)?.[1] ?? "";
+  assert.match(lockLoop, /current_mobile_country_code \|\| ':' \|\| edit_request\.current_mobile_number/);
+  assert.match(lockLoop, /current_mobile_country_code \|\| ':' \|\| regexp_replace\(edit_request\.current_mobile_value/);
+  assert.match(lockLoop, /current_mobile_number[\s\S]*?char_length\(edit_request\.current_mobile_country_code\) \+ 1/);
+  assert.match(lockLoop, /new_mobile_country_code \|\| ':' \|\| edit_request\.new_mobile_number/);
+  assert.match(lockLoop, /new_mobile_country_code \|\| ':' \|\| edit_request\.new_mobile_value/);
+  assert.match(lockLoop, /new_mobile_number[\s\S]*?char_length\(edit_request\.new_mobile_country_code\) \+ 1/);
+  assert.match(lockLoop, /select distinct pg_catalog\.hashtextextended\(phone_key, 0\)[\s\S]*?order by 1/);
+
+  const singapore = normalizeConnectMobile("91234567", "65");
+  assert.deepEqual(singapore, {
+    countryCode: "65",
+    mobile: "91234567",
+    localMobile: "91234567"
+  });
+  const canonical = `${singapore.countryCode}${singapore.localMobile}`;
+  const lockedKeys = new Set([
+    `${singapore.countryCode}:${singapore.mobile}`,
+    `${singapore.countryCode}:${canonical}`,
+    `${singapore.countryCode}:${canonical.slice(singapore.countryCode.length)}`
+  ]);
+  assert.equal(lockedKeys.has("65:91234567"), true, "legacy auth can lock the local Singapore key");
+  assert.equal(lockedKeys.has("65:6591234567"), true, "profile edit also locks the canonical Singapore key");
 });
 
 test("profile edit migration deploys over the supported production schema boundary", async () => {
@@ -448,20 +529,19 @@ test("profile edit migration deploys over the supported production schema bounda
       '2026-10-15T00:00:00Z'
     );
     insert into connect_login_sessions(
-      id, country_code, mobile_number, mobile_number_format, session_hash,
-      expires_at, revoked_at
+      id, country_code, mobile_number, session_hash, expires_at, revoked_at
     ) values
       (
         '00000000-0000-0000-0000-000000000003', '91', '919876543210',
-        'canonical', 'current-session', now() + interval '1 day', null
+        'current-session', now() + interval '1 day', null
       ),
       (
         '00000000-0000-0000-0000-000000000004', '65', '91234567',
-        'legacy', 'stale-target-session', now() + interval '1 day', null
+        'stale-target-session', now() + interval '1 day', null
       ),
       (
         '00000000-0000-0000-0000-000000000030', '91', '919876543210',
-        'canonical', 'other-source-session', now() + interval '1 day', null
+        'other-source-session', now() + interval '1 day', null
       );
     insert into connect_user_pins(
       id, country_code, mobile_number, pin_hash, attempt_count,
@@ -560,16 +640,15 @@ test("profile edit migration deploys over the supported production schema bounda
         '2026-10-15T03:00:00Z'
       );
     insert into connect_login_sessions(
-      id, country_code, mobile_number, mobile_number_format, session_hash,
-      expires_at, revoked_at
+      id, country_code, mobile_number, session_hash, expires_at, revoked_at
     ) values
       (
         '00000000-0000-0000-0000-000000000021', '91', '918888888888',
-        'canonical', 'parallel-reservation-session', now() + interval '1 day', null
+        'parallel-reservation-session', now() + interval '1 day', null
       ),
       (
         '00000000-0000-0000-0000-000000000024', '91', '917777777777',
-        'canonical', 'rejected-reservation-session', now() + interval '1 day', null
+        'rejected-reservation-session', now() + interval '1 day', null
       );
   `);
 
@@ -826,15 +905,15 @@ test("profile edit migration deploys over the supported production schema bounda
         where id = '00000000-0000-0000-0000-000000000019') as superseded_otp_status,
       (select reset_required from connect_user_pins
         where country_code = '44' and mobile_number = '447700900123') as pin_reset,
-      (select mobile_number_format from connect_login_sessions
-        where id = '00000000-0000-0000-0000-000000000018') as session_format
+      exists(select 1 from connect_login_sessions
+        where id = '00000000-0000-0000-0000-000000000018') as session_created
   `);
   assert.deepEqual(positiveCredentialState.rows[0], {
     otp_status: "verified",
     otp_used: true,
     superseded_otp_status: "cancelled",
     pin_reset: false,
-    session_format: "canonical"
+    session_created: true
   });
 
   await db.exec(`
@@ -848,11 +927,10 @@ test("profile edit migration deploys over the supported production schema bounda
       '2026-10-15T01:00:00Z'
     );
     insert into connect_login_sessions(
-      id, country_code, mobile_number, mobile_number_format, session_hash,
-      expires_at, revoked_at
+      id, country_code, mobile_number, session_hash, expires_at, revoked_at
     ) values (
       '00000000-0000-0000-0000-000000000008', '91', '919999999999',
-      'canonical', 'review-session', now() + interval '1 day', null
+      'review-session', now() + interval '1 day', null
     );
     insert into connect_profile_edit_requests(
       id, company_id, account_id, profile_type, login_session_id,
@@ -941,11 +1019,10 @@ test("profile edit migration deploys over the supported production schema bounda
       'Old legacy address', 'active', true, '2026-10-15T04:00:00Z'
     );
     insert into connect_login_sessions(
-      id, country_code, mobile_number, mobile_number_format, session_hash,
-      expires_at, revoked_at
+      id, country_code, mobile_number, session_hash, expires_at, revoked_at
     ) values (
       '00000000-0000-0000-0000-000000000035', '91', '916666666666',
-      'canonical', 'legacy-blank-session', now() + interval '1 day', null
+      'legacy-blank-session', now() + interval '1 day', null
     );
     insert into connect_profile_edit_requests(
       id, company_id, account_id, profile_type, login_session_id,

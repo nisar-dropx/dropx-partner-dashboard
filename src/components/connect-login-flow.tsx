@@ -217,16 +217,16 @@ export function ConnectLoginFlow() {
             Mobile number
             <input
               inputMode="tel"
-              maxLength={14}
+              maxLength={15}
               name="mobile"
-              onChange={(event) => setMobile(event.target.value.replace(/\D/g, "").slice(0, 14))}
+              onChange={(event) => setMobile(event.target.value.replace(/\D/g, "").slice(0, 15))}
               placeholder="Enter registered mobile number"
               required
               type="tel"
               value={mobile}
             />
           </label>
-          <button className="connect-primary" disabled={pending || mobile.length < 6 || mobile.length > 14} type="submit">
+          <button className="connect-primary" disabled={pending || mobile.length < 6} type="submit">
             {pending ? "Checking..." : "Continue"}
           </button>
         </form>

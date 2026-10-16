@@ -4,42 +4,59 @@ import test from "node:test";
 
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-test("profile review loads all under-review profile rows with explicit range paging", () => {
-  assert.match(page, /readAllRows\(admin/);
-  assert.match(page, /\.order\("updated_at", \{ ascending: false \}\)/);
-  assert.match(page, /\.order\("id", \{ ascending: true \}\)/);
-  assert.match(page, /const profileResults = await Promise\.all\(profileQueries\)/);
-  assert.equal(
-    (page.match(/\.or\("profile_completion_status\.eq\.under_review,profile_edit_review_pending\.eq\.true"\)/g) ?? []).length,
-    1
+test("ordinary registration queue retains the origin/main status-only queries", () => {
+  const ordinaryQueue = page.slice(
+    page.indexOf("const employeeSelect"),
+    page.indexOf("// Self-edit reviews are additive")
   );
-  assert.equal(
-    (page.match(/\.or\("onboarding_status\.eq\.under_review,profile_edit_review_pending\.eq\.true"\)/g) ?? []).length,
-    2
-  );
-  assert.match(page, /const supportsProfileEditReview = profileType === "contractor" \|\| profileType === "vendor"/);
-  assert.match(page, /supportsProfileEditReview \? editableNonEmployeeSelect : nonEmployeeSelect/);
-  assert.match(page, /: query\.eq\("onboarding_status", "under_review"\)/);
+
+  assert.match(ordinaryQueue, /\.eq\("profile_completion_status", "under_review"\)/);
+  assert.equal((ordinaryQueue.match(/\.eq\("onboarding_status", "under_review"\)/g) ?? []).length, 2);
+  assert.doesNotMatch(ordinaryQueue, /profile_edit_review_pending/);
+  assert.doesNotMatch(ordinaryQueue, /connect_profile_edit_audit/);
+  assert.match(ordinaryQueue, /const profileResults = await Promise\.all\(profileQueries\)/);
+  assert.match(ordinaryQueue, /profileEditReviewPending: false/);
+});
+
+test("self-edit review rows are loaded additively and never include helpers", () => {
+  assert.match(page, /async function readOptionalRows\(query: unknown\)/);
+  assert.match(page, /catch \{\s+return \[\] as Array<Record<string, unknown>>/);
+  assert.match(page, /const profileEditTypes: WorkforceProfileType\[\] = \["employee", "workforce", "contractor", "vendor"\]/);
+  assert.match(page, /\.eq\("profile_edit_review_pending", true\)/);
+  assert.match(page, /\.eq\("profile_completion_status", "active"\)/);
+  assert.match(page, /\.eq\("onboarding_status", "active"\)/);
+  assert.match(page, /\.eq\("is_active", true\)/);
   assert.doesNotMatch(
-    page,
-    /const nonEmployeeSelect = `[^`]*profile_edit_review_pending/
+    page.slice(page.indexOf("const profileEditTypes"), page.indexOf("const profileIdsByType")),
+    /"worker"|helpers/
   );
 });
 
-test("profile review reasons are scoped to current account IDs in bounded batches", () => {
+test("profile-edit audit enrichment is optional and cannot fail the ordinary queue", () => {
+  const auditSection = page.slice(
+    page.indexOf("const latestProfileEditFields"),
+    page.indexOf("const issuesByProfile")
+  );
+  assert.match(auditSection, /readOptionalRows\(admin/);
+  assert.match(auditSection, /from\("connect_profile_edit_audit"\)/);
+  assert.doesNotMatch(auditSection, /return \{ profiles: \[\] as ReviewProfile\[\], error:/);
+  assert.match(page, /kind: "profile_edit"/);
+  assert.match(page, /"Profile details changed"/);
+});
+
+test("review reasons remain scoped to current account IDs in bounded batches", () => {
   assert.match(page, /profileReviewIdBatches\(profileIds\)/);
   assert.match(page, /\.eq\("profile_type", profileType\)/);
   assert.match(page, /\.in\("account_id", accountIds\)/);
   assert.match(page, /for \(const \[profileType, profileIds\] of profileIdsByType\)/);
   assert.match(page, /for \(const row of verificationRows\)/);
-  assert.match(page, /from\("connect_profile_edit_audit"\)/);
-  assert.match(page, /profile\.profileEditReviewPending/);
-  assert.match(page, /kind: "profile_edit"/);
 });
 
-test("profile review decisions are bound to the version rendered in the modal", () => {
-  assert.equal((page.match(/name="review_version"/g) ?? []).length, 2);
-  assert.match(page, /value=\{selected\.updatedAt \?\? ""\}/);
+test("only self-edit forms use the isolated action and optimistic version", () => {
+  assert.match(page, /import \{ reviewPeopleProfile, reviewProfileEdit \} from "\.\/actions"/);
+  assert.match(page, /const selectedReviewAction = selected\?\.profileEditReviewPending \? reviewProfileEdit : reviewPeopleProfile/);
+  assert.equal((page.match(/action=\{selectedReviewAction\}/g) ?? []).length, 2);
+  assert.equal((page.match(/selected\.profileEditReviewPending\s+\? <input name="review_version"/g) ?? []).length, 2);
 });
 
 test("profile review renders a dynamic 50-profile page without dropping filtered results", () => {

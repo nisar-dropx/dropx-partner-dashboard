@@ -13,7 +13,6 @@ import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 import { enforceAccessCutoffIfDueForWorker, readAccessCutoffForPreview } from "./access-cutoff";
 import { resolveConnectPreview } from "./connect-preview";
-import { connectMobileCountryFilter, normalizeStoredConnectMobile } from "@/lib/country-codes";
 import { eligibleConnectWorkforceAccount } from "../../../../src/lib/connect-account-freshness";
 
 export { normalizeConnectMobile } from "@/lib/country-codes";
@@ -642,7 +641,6 @@ export async function findConnectSessionAccounts(countryCode: string, mobile: st
 async function loadConnectAccounts(countryCode: string, mobile: string, readOnly = false): Promise<ConnectAccount[]> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
-  const mobileCountryFilter = connectMobileCountryFilter(countryCode);
   type ProfileMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null };
   type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; source_profile_type?: string | null; source_profile_id?: string | null; deleted_at?: string | null; deactivated_at?: string | null; is_active?: boolean | null };
 
@@ -650,13 +648,13 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
     .from("profiles")
     .select("id, company_id, full_name, email, employee_id, role, is_active, mobile_country_code")
     .eq("is_active", true)
-    .or(mobileCountryFilter)
+    .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
     .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
   let employeesResult: MatchResult<EmployeeAccountRow> = await supabaseAdmin
     .from("employees")
     .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, profile_completion_status, profile_photo_path, is_active, mobile_country_code")
     .eq("is_active", true)
-    .or(mobileCountryFilter)
+    .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
     .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
 
   const nonEmployeeTypes: NonEmployeeProfileType[] = ["workforce", "contractor", "vendor", "worker"];
@@ -669,7 +667,7 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
     let query = supabaseAdmin!
       .from(table)
       .select(nonEmployeeSelect(profileType, true))
-      .or(mobileCountryFilter)
+      .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
     if (!["workforce", "field_executive"].includes(profileType)) query = query.eq("is_active", true);
     let result = await query as unknown as MatchResult<NonEmployeeMatch>;
@@ -677,7 +675,6 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
       return { data: [], error: null };
     }
     if (isMissingColumnError(result.error)) {
-      if (countryCode !== "91") return { data: [], error: null };
       let fallbackQuery = supabaseAdmin!
         .from(table)
         .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, designation_id, source_profile_type, source_profile_id, deleted_at, deactivated_at")
@@ -699,22 +696,18 @@ async function loadConnectAccounts(countryCode: string, mobile: string, readOnly
   });
 
   if (isMissingColumnError(profilesResult.error)) {
-    profilesResult = countryCode === "91"
-      ? await supabaseAdmin
+    profilesResult = await supabaseAdmin
         .from("profiles")
         .select("id, company_id, full_name, email, employee_id, role, is_active")
         .eq("is_active", true)
-        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
-      : { data: [], error: null };
+        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
   }
   if (isMissingColumnError(employeesResult.error)) {
-    employeesResult = countryCode === "91"
-      ? await supabaseAdmin
+    employeesResult = await supabaseAdmin
         .from("employees")
         .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, is_active")
         .eq("is_active", true)
-        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
-      : { data: [], error: null };
+        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
   }
   if (profilesResult.error) throw new Error(profilesResult.error.message);
   if (employeesResult.error && !isMissingColumnError(employeesResult.error)) throw new Error(employeesResult.error.message);
@@ -1137,18 +1130,13 @@ export async function requireConnectAccount(profileType: ConnectAccount["profile
   if (!token) throw new Error("Connect session expired. Please log in again.");
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const { data: session, error } = await supabaseAdmin.from("connect_login_sessions")
-    .select("country_code, mobile_number, mobile_number_format, expires_at, revoked_at").eq("session_hash", sessionHash).maybeSingle();
+    .select("country_code, mobile_number, expires_at, revoked_at").eq("session_hash", sessionHash).maybeSingle();
   if (error) throw new Error(error.message);
   if (!session || session.revoked_at || new Date(session.expires_at).getTime() < Date.now()) {
     cookies().delete(connectSessionCookieName);
     throw new Error("Connect session expired. Please log in again.");
   }
-  const sessionMobile = normalizeStoredConnectMobile(
-    session.mobile_number,
-    session.country_code,
-    session.mobile_number_format
-  );
-  const accounts = await findConnectSessionAccounts(sessionMobile.countryCode, sessionMobile.mobile);
+  const accounts = await findConnectSessionAccounts(session.country_code, session.mobile_number);
   const canonicalProfileType = profileType === "field_executive" ? "workforce" : profileType;
   const account = accounts.find((item) => item.profileType === canonicalProfileType && item.id === accountId);
   if (!account) throw new Error("This account is not available for the current login.");

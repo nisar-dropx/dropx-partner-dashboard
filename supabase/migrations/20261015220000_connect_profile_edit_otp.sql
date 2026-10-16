@@ -4,14 +4,6 @@
 
 create extension if not exists pgcrypto;
 
--- Existing Connect sessions were written by the legacy normalizer, which kept
--- short international subscriber numbers as local digits. New sessions write
--- canonical E.164 digits. The marker removes an otherwise-unsolvable ambiguity
--- when a local subscriber itself begins with its country code.
-alter table public.connect_login_sessions
-  add column if not exists mobile_number_format text not null default 'legacy'
-  check (mobile_number_format in ('legacy', 'canonical'));
-
 -- Older installations exposed these fields through compatibility fallbacks in
 -- the profile GET routes. The atomic updater must be compilable and executable
 -- against those installations too, so bring only the already-supported shared
@@ -563,13 +555,8 @@ begin
     for update;
     if profile_before is null then raise exception 'Employee profile was not found.'; end if;
     if lower(coalesce(profile_before->>'profile_completion_status', '')) <> 'active'
-       and not (
-         lower(coalesce(profile_before->>'profile_completion_status', '')) = 'under_review'
-         and coalesce((profile_before->>'profile_edit_review_pending')::boolean, false)
-         and nullif(btrim(coalesce(profile_before->>'profile_return_remarks', '')), '') is not null
-       )
        or coalesce((profile_before->>'is_active')::boolean, true) is not true then
-      raise exception 'Only an active or returned self-edit profile can be edited.';
+      raise exception 'Only an active profile can be edited.';
     end if;
   else
     target_table := case edit_request.profile_type
@@ -585,14 +572,9 @@ begin
     ) into profile_before using edit_request.account_id, edit_request.company_id;
     if profile_before is null then raise exception 'Workforce profile was not found.'; end if;
     if lower(coalesce(profile_before->>'onboarding_status', '')) <> 'active'
-       and not (
-         lower(coalesce(profile_before->>'onboarding_status', '')) = 'under_review'
-         and coalesce((profile_before->>'profile_edit_review_pending')::boolean, false)
-         and nullif(btrim(coalesce(profile_before->>'profile_return_remarks', '')), '') is not null
-       )
        or coalesce((profile_before->>'is_active')::boolean, true) is not true
        or profile_before->>'deleted_at' is not null then
-      raise exception 'Only an active or returned self-edit profile can be edited.';
+      raise exception 'Only an active profile can be edited.';
     end if;
   end if;
 
@@ -611,15 +593,30 @@ begin
     -- self-service move to an occupied number would therefore grant the other
     -- holder access to this profile. Serialize the final check with other edits
     -- and require an administrator for that exceptional move.
-    -- Credential issuance locks one canonical phone key. Lock both sides of a
-    -- move in deterministic key order so neither old- nor new-number login can
-    -- race the collision check, profile update, or credential retirement.
+    -- Legacy Connect authentication keys credentials by the normalized value
+    -- supplied by the login route. India-style 10-digit subscribers normalize
+    -- to country-prefixed digits, while shorter supported international
+    -- subscribers (for example an 8-digit Singapore number) remain local.
+    -- Lock both representations for both sides of a move, in deterministic
+    -- hash order, so neither form can race the collision check, profile update,
+    -- or credential retirement.
     for phone_lock_key in
       select distinct pg_catalog.hashtextextended(phone_key, 0)
       from unnest(array[
         edit_request.current_mobile_country_code || ':' || edit_request.current_mobile_number,
-        edit_request.new_mobile_country_code || ':' || edit_request.new_mobile_number
+        edit_request.current_mobile_country_code || ':' || regexp_replace(edit_request.current_mobile_value, '[^0-9]', '', 'g'),
+        edit_request.current_mobile_country_code || ':' || substring(
+          edit_request.current_mobile_number
+          from char_length(edit_request.current_mobile_country_code) + 1
+        ),
+        edit_request.new_mobile_country_code || ':' || edit_request.new_mobile_number,
+        edit_request.new_mobile_country_code || ':' || edit_request.new_mobile_value,
+        edit_request.new_mobile_country_code || ':' || substring(
+          edit_request.new_mobile_number
+          from char_length(edit_request.new_mobile_country_code) + 1
+        )
       ]) as phone(phone_key)
+      where nullif(split_part(phone_key, ':', 2), '') is not null
       order by 1
     loop
       perform pg_catalog.pg_advisory_xact_lock(phone_lock_key);
@@ -1309,10 +1306,10 @@ begin
   where id = pin_record.id;
 
   insert into public.connect_login_sessions (
-    id, country_code, mobile_number, mobile_number_format, session_hash,
+    id, country_code, mobile_number, session_hash,
     expires_at, request_ip, user_agent
   ) values (
-    p_session_id, p_country_code, p_mobile_number, 'canonical', p_session_hash,
+    p_session_id, p_country_code, p_mobile_number, p_session_hash,
     p_expires_at, p_request_ip, p_user_agent
   );
 
@@ -1442,10 +1439,10 @@ begin
     updated_at = now();
 
   insert into public.connect_login_sessions (
-    id, country_code, mobile_number, mobile_number_format, session_hash,
+    id, country_code, mobile_number, session_hash,
     expires_at, request_ip, user_agent
   ) values (
-    p_session_id, p_country_code, p_mobile_number, 'canonical', p_session_hash,
+    p_session_id, p_country_code, p_mobile_number, p_session_hash,
     p_expires_at, p_request_ip, p_user_agent
   );
 

@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { connectSessionCookieName, normalizeStoredConnectMobile } from "@/lib/connect-auth";
+import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { matchNames } from "@/lib/name-match";
 import { verifyPanWithFallback } from "@/lib/pan-verification";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
@@ -15,6 +15,14 @@ const IDSPAY_BASE_URL = "https://javabackend.idspay.in/api/v1/prod";
 export const maxDuration = 30;
 
 type VerificationKind = "pan" | "pan_aadhaar" | "dl" | "vehicle" | "bank" | "pf_uan";
+
+const profileEditVerificationTypes = new Set([
+  "employee",
+  "workforce",
+  "field_executive",
+  "contractor",
+  "vendor"
+]);
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -154,7 +162,7 @@ async function activeSession() {
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin
     .from("connect_login_sessions")
-    .select("id, country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
+    .select("id, country_code, mobile_number, expires_at, revoked_at")
     .eq("session_hash", sessionHash)
     .maybeSingle();
   if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -169,15 +177,16 @@ async function resolveAccount(accountId: string, profileType: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const session = await activeSession();
   if (!isWorkforceProfileType(profileType)) throw new Error("Invalid profile type.");
-  const { countryCode, mobile, localMobile } = normalizeStoredConnectMobile(
+  const { countryCode, mobile, localMobile } = normalizeConnectMobile(
     session.mobile_number,
-    session.country_code,
-    session.mobile_number_format
+    session.country_code
   );
   const table = workforceTable(profileType);
   const result = await supabaseAdmin
     .from(table)
-    .select(profileType === "employee" ? "id, company_id, employee_code, full_name, mobile, mobile_country_code, updated_at" : "id, company_id, dropx_id, full_name, mobile, mobile_country_code, updated_at")
+    .select(profileType === "employee"
+      ? "id, company_id, employee_code, full_name, mobile, mobile_country_code"
+      : "id, company_id, dropx_id, full_name, mobile, mobile_country_code")
     .eq("id", accountId)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
@@ -193,11 +202,56 @@ async function resolveAccount(accountId: string, profileType: string) {
     : compact((row as { dropx_id?: unknown }).dropx_id);
   return {
     companyId: row.company_id as string,
+    fullName: compact(row.full_name),
+    accountCode,
+    actorLabel: compact(row.full_name) || `${countryCode}${mobile}`
+  };
+}
+
+async function resolveProfileEditAccount(accountId: string, profileType: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const session = await activeSession();
+  if (!isWorkforceProfileType(profileType) || !profileEditVerificationTypes.has(profileType)) {
+    throw new Error("This profile type cannot use profile edit verification.");
+  }
+  // Session values retain the legacy Connect normalization contract. Strict
+  // country/mobile validation is reserved for a newly submitted edit value.
+  const { countryCode, mobile, localMobile } = normalizeConnectMobile(
+    session.mobile_number,
+    session.country_code
+  );
+  const table = workforceTable(profileType);
+  const result = await supabaseAdmin
+    .from(table)
+    .select(profileType === "employee"
+      ? "id, company_id, employee_code, full_name, mobile, mobile_country_code, updated_at, profile_completion_status, is_active"
+      : "id, company_id, dropx_id, full_name, mobile, mobile_country_code, updated_at, onboarding_status, is_active")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  const row = result.data;
+  if (!row) throw new Error("Account not found.");
+  const rowMobile = onlyDigits(row.mobile);
+  const rowCountryCode = onlyDigits(row.mobile_country_code || countryCode) || countryCode;
+  if (rowCountryCode !== countryCode || (rowMobile !== mobile && rowMobile !== localMobile)) {
+    throw new Error("This verification is not available for the signed-in account.");
+  }
+  const profileStatus = profileType === "employee"
+    ? text((row as { profile_completion_status?: unknown }).profile_completion_status).toLowerCase()
+    : text((row as { onboarding_status?: unknown }).onboarding_status).toLowerCase();
+  if (profileStatus !== "active" || row.is_active !== true) {
+    throw new Error("Profile edit verification is available only for an active profile.");
+  }
+  const accountCode = profileType === "employee"
+    ? compact((row as { employee_code?: unknown }).employee_code)
+    : compact((row as { dropx_id?: unknown }).dropx_id);
+  return {
+    companyId: row.company_id as string,
     sessionId: session.id as string,
     fullName: compact(row.full_name),
     profileUpdatedAt: text(row.updated_at),
     accountCode,
-    actorLabel: compact(row.full_name) || mobile
+    actorLabel: compact(row.full_name) || `${countryCode}${mobile}`
   };
 }
 
@@ -234,6 +288,20 @@ async function idspayCredentials(companyId: string) {
 
 function verifiedResponse(result: Record<string, unknown>) {
   return ok(result);
+}
+
+// Registration historically persists the provider-confirmed IFSC immediately.
+// Keep that side effect on the registration path only: profile editing stages
+// the result and commits every changed value atomically after WhatsApp OTP.
+async function saveVerifiedIfsc(profileType: string, accountId: string, ifscCode: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const table = workforceTable(profileType as Parameters<typeof workforceTable>[0]);
+  const values = profileType === "employee" ? { ifsc: ifscCode } : { ifsc_code: ifscCode };
+  const { error } = await supabaseAdmin
+    .from(table)
+    .update(values as never)
+    .eq("id", accountId);
+  if (error) throw new Error(`Bank verification succeeded but IFSC could not be saved: ${error.message}`);
 }
 
 export async function GET(request: NextRequest) {
@@ -289,14 +357,17 @@ export async function POST(request: NextRequest) {
     const accountId = text(payload.accountId);
     const profileType = text(payload.profileType);
     if (!accountId) throw new Error("Account is required.");
-    const account = await resolveAccount(accountId, profileType);
-    const credentials = await idspayCredentials(account.companyId);
     const profileEdit = payload.profileEdit === true;
+    const profileEditAccount = profileEdit
+      ? await resolveProfileEditAccount(accountId, profileType)
+      : null;
+    const account = profileEditAccount ?? await resolveAccount(accountId, profileType);
+    const credentials = await idspayCredentials(account.companyId);
     // A profile-edit caller cannot choose the identity name used by PAN, DL,
     // bank, or PF matching. The immutable server-side profile name is the only
     // authority for these checks.
-    const registeredName = profileEdit
-      ? account.fullName
+    const registeredName = profileEditAccount
+      ? profileEditAccount.fullName
       : compact(payload.fullName) || account.fullName;
     const userAgent = request.headers.get("user-agent")?.toLowerCase() ?? "";
     const auditContext = {
@@ -314,9 +385,9 @@ export async function POST(request: NextRequest) {
       verificationKind: kind
     };
     const respond = async (result: Record<string, unknown>) => {
-      if (profileEdit) {
+      if (profileEditAccount) {
         if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-        if (!account.profileUpdatedAt) throw new Error("Profile version is unavailable. Reload the profile and try again.");
+        if (!profileEditAccount.profileUpdatedAt) throw new Error("Profile version is unavailable. Reload the profile and try again.");
         const inputKeyValue = text(result.inputKey);
         if (inputKeyValue) {
           const stage = await supabaseAdmin.from("connect_profile_edit_verifications").upsert({
@@ -326,9 +397,9 @@ export async function POST(request: NextRequest) {
             company_id: account.companyId,
             account_id: accountId,
             profile_type: profileType === "field_executive" ? "workforce" : profileType,
-            login_session_id: account.sessionId,
-            profile_updated_at: account.profileUpdatedAt,
-            identity_name_hash: identityNameHash(account.fullName),
+            login_session_id: profileEditAccount.sessionId,
+            profile_updated_at: profileEditAccount.profileUpdatedAt,
+            identity_name_hash: identityNameHash(profileEditAccount.fullName),
             kind,
             input_key: inputKeyValue,
             verified: result.verified === true,
@@ -538,6 +609,7 @@ export async function POST(request: NextRequest) {
           ? text(body?.message) || "Bank account checked."
           : "Bank account could not be checked automatically. Check the account number and IFSC. If they are correct, continue."
       };
+      if (verified && !profileEdit) await saveVerifiedIfsc(profileType, accountId, ifscCode);
       return respond(result);
     }
 

@@ -17,6 +17,9 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; otp?: unknown };
     const { countryCode, mobile } = normalizeConnectMobile(body.mobile, body.countryCode);
     const otp = String(body.otp ?? "").replace(/\D/g, "");
+    if (!mobile || mobile.length < 11) {
+      return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
+    }
     if (!/^\d{6}$/.test(otp)) {
       return NextResponse.json({ error: "Enter the 6 digit OTP." }, { status: 400 });
     }

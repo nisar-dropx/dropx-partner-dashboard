@@ -48,8 +48,28 @@ function result(countryCode: string, localMobile: string) {
   return { countryCode, localMobile, mobile };
 }
 
-/** Normalize user input: the selected code plus a local subscriber number. */
+/**
+ * Preserve the existing Connect sign-in contract. Registration and login have
+ * historically accepted both a local 10-digit number and a digit-only
+ * country-prefixed number. Profile editing deliberately uses the stricter
+ * normalizer below instead of changing this shared behavior.
+ */
 export function normalizeConnectMobile(mobileValue: unknown, countryCodeValue: unknown) {
+  const countryCode = String(countryCodeValue ?? "91").replace(/\D/g, "") || "91";
+  const digits = String(mobileValue ?? "").replace(/\D/g, "");
+  const mobile = digits.startsWith(countryCode) && digits.length > 10
+    ? digits
+    : digits.length === 10
+      ? `${countryCode}${digits}`
+      : digits;
+  const localMobile = mobile.startsWith(countryCode)
+    ? mobile.slice(countryCode.length)
+    : mobile;
+  return { countryCode, mobile, localMobile };
+}
+
+/** Strict country-aware normalization used only by self-service profile edit. */
+export function normalizeProfileEditMobile(mobileValue: unknown, countryCodeValue: unknown) {
   const countryCode = normalizeSupportedCountryCode(countryCodeValue);
   const { raw, digits } = phoneDigits(mobileValue);
   if (raw.startsWith("+")) {
@@ -58,9 +78,7 @@ export function normalizeConnectMobile(mobileValue: unknown, countryCodeValue: u
     }
     return result(countryCode, digits.slice(countryCode.length));
   }
-
-  const canonical = digits.startsWith(countryCode) && countryCode.length + digits.length > 15;
-  return result(countryCode, canonical ? digits.slice(countryCode.length) : digits);
+  return result(countryCode, digits);
 }
 
 /** Normalize a trusted canonical E.164 session value. */

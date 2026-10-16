@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     const { countryCode, mobile } = normalizeConnectMobile(body.mobile, body.countryCode);
     const otp = String(body.otp ?? "").replace(/\D/g, "");
     const pin = String(body.pin ?? "").replace(/\D/g, "");
+    if (!mobile || mobile.length < 7) return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
     if (!/^\d{6}$/.test(otp)) return NextResponse.json({ error: "Enter the 6 digit OTP." }, { status: 400 });
     if (!/^\d{6}$/.test(pin)) return NextResponse.json({ error: "Create a 6 digit PIN." }, { status: 400 });
 

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { isManagingPartnerDesignation } from "@/lib/approval-designation-labels";
 import { isAdvanceEligible } from "@/lib/advance-eligibility";
-import { connectSessionCookieName, normalizeStoredConnectMobile } from "@/lib/connect-auth";
+import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { createAppNotification } from "@/lib/app-notifications";
 import { openPayAdvanceOnExpenseChain } from "@/lib/payment-advance-approval";
 import { sendPaymentAdvanceRequestNotification, sendPaymentAdvanceWithdrawalNotification } from "@/lib/payment-advance-email-notifications";
@@ -63,7 +63,7 @@ async function resolveAccount(accountId: string, profileType: string) {
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin
     .from("connect_login_sessions")
-    .select("country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
+    .select("country_code, mobile_number, expires_at, revoked_at")
     .eq("session_hash", sessionHash)
     .maybeSingle();
   if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -72,11 +72,7 @@ async function resolveAccount(accountId: string, profileType: string) {
     throw new Error("Login expired.");
   }
 
-  const normalized = normalizeStoredConnectMobile(
-    session.mobile_number,
-    session.country_code,
-    session.mobile_number_format
-  );
+  const normalized = normalizeConnectMobile(session.mobile_number, session.country_code);
   const resolvedType = profileType as WorkforceProfileType;
   const table = workforceTable(resolvedType);
   const codeColumn = resolvedType === "employee" ? "employee_code" : "dropx_id";

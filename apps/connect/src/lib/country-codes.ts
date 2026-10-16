@@ -48,8 +48,28 @@ function result(countryCode: string, localMobile: string) {
   return { countryCode, localMobile, mobile };
 }
 
-/** Normalize user input: the selected code plus a local subscriber number. */
+/**
+ * Preserve the existing Connect sign-in contract. Registration and login have
+ * historically accepted both a local 10-digit number and a digit-only
+ * country-prefixed number. Profile editing deliberately uses the stricter
+ * normalizer below instead of changing this shared behavior.
+ */
 export function normalizeConnectMobile(mobileValue: unknown, countryCodeValue: unknown) {
+  const countryCode = String(countryCodeValue ?? "91").replace(/\D/g, "") || "91";
+  const digits = String(mobileValue ?? "").replace(/\D/g, "");
+  const mobile = digits.startsWith(countryCode) && digits.length > 10
+    ? digits
+    : digits.length === 10
+      ? `${countryCode}${digits}`
+      : digits;
+  const localMobile = mobile.startsWith(countryCode)
+    ? mobile.slice(countryCode.length)
+    : mobile;
+  return { countryCode, mobile, localMobile };
+}
+
+/** Strict country-aware normalization used only by self-service profile edit. */
+export function normalizeProfileEditMobile(mobileValue: unknown, countryCodeValue: unknown) {
   const countryCode = normalizeSupportedCountryCode(countryCodeValue);
   const { raw, digits } = phoneDigits(mobileValue);
   if (raw.startsWith("+")) {
@@ -58,13 +78,7 @@ export function normalizeConnectMobile(mobileValue: unknown, countryCodeValue: u
     }
     return result(countryCode, digits.slice(countryCode.length));
   }
-
-  // A digit-only E.164 value is canonical only when treating it as local would
-  // exceed E.164's 15-digit ceiling. Shorter values are intentionally treated
-  // as the selected country's local subscriber number because they are
-  // otherwise ambiguous (for example, a Singapore local beginning with 65).
-  const canonical = digits.startsWith(countryCode) && countryCode.length + digits.length > 15;
-  return result(countryCode, canonical ? digits.slice(countryCode.length) : digits);
+  return result(countryCode, digits);
 }
 
 /** Normalize a trusted stored session value, which is expected to be E.164. */

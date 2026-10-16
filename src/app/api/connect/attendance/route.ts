@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { connectSessionCookieName, normalizeStoredConnectMobile } from "@/lib/connect-auth";
+import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { loadAttendanceReportRows } from "@/lib/biometric/attendance";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
@@ -56,7 +56,7 @@ async function activeSession() {
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin
     .from("connect_login_sessions")
-    .select("id, country_code, mobile_number, mobile_number_format, expires_at, revoked_at")
+    .select("id, country_code, mobile_number, expires_at, revoked_at")
     .eq("session_hash", sessionHash)
     .maybeSingle();
   if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -76,11 +76,7 @@ async function resolveWorker({
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const session = await activeSession();
-  const { countryCode, mobile, localMobile } = normalizeStoredConnectMobile(
-    session.mobile_number,
-    session.country_code,
-    session.mobile_number_format
-  );
+  const { countryCode, mobile, localMobile } = normalizeConnectMobile(session.mobile_number, session.country_code);
   if (isWorkforceProfileType(profileType)) {
     const resolvedProfileType = profileType as WorkforceProfileType;
     const table = workforceTable(resolvedProfileType);

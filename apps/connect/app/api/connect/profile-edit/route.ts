@@ -14,6 +14,7 @@ import {
   createProfileEditOtpHmac,
   maskProfileEditMobile,
   normalizeProfileEditPayload,
+  profileEditLocalMobile,
   profileEditMobileHash,
   profileEditOtpSecret,
   verifyProfileEditOtpHmac,
@@ -29,7 +30,7 @@ import { loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { profileFieldRuleCategory, type NonEmployeeProfileType } from "@/lib/workforce-profiles";
 import {
   ConnectMobileValidationError,
-  normalizeConnectMobile,
+  normalizeProfileEditMobile,
   normalizeStoredConnectMobile,
   normalizeSupportedCountryCode
 } from "@/lib/country-codes";
@@ -47,7 +48,6 @@ type ActiveSession = {
   id: string;
   country_code: string;
   mobile_number: string;
-  mobile_number_format: string;
   expires_at: string;
   revoked_at: string | null;
 };
@@ -88,8 +88,6 @@ type ProfileRow = Record<string, unknown> & {
   full_name: string | null;
   mobile_country_code: string | null;
   mobile: string;
-  profile_edit_review_pending?: boolean | null;
-  profile_return_remarks?: string | null;
 };
 
 class ProfileEditError extends Error {
@@ -105,7 +103,7 @@ function editTable(profileType: ProfileEditProfileType) {
 }
 
 const employeeSelect = [
-  "id", "company_id", "full_name", "mobile_country_code", "mobile", "profile_completion_status", "profile_edit_review_pending", "profile_return_remarks", "is_active", "updated_at", "designation_id",
+  "id", "company_id", "full_name", "mobile_country_code", "mobile", "profile_completion_status", "is_active", "updated_at", "designation_id",
   "gender", "date_of_birth", "aadhaar_number", "pan_number", "eshram_uan", "is_handicapped",
   "address", "state", "pincode", "landmark", "state_code", "father_name", "blood_group",
   "bank_account_no", "ifsc", "pf_uan", "pf_account_no", "esi_no", "driving_license_no",
@@ -115,7 +113,7 @@ const employeeSelect = [
 ].join(",");
 
 const nonEmployeeBaseSelect = [
-  "id", "company_id", "full_name", "mobile_country_code", "mobile", "onboarding_status", "profile_edit_review_pending", "profile_return_remarks", "is_active", "deleted_at", "updated_at", "designation",
+  "id", "company_id", "full_name", "mobile_country_code", "mobile", "onboarding_status", "is_active", "deleted_at", "updated_at", "designation",
   "gender", "date_of_birth", "aadhaar_number", "pan_number", "eshram_uan", "is_handicapped",
   "address", "postal_pin", "landmark", "state_code", "father_name", "blood_group",
   "bank_account_no", "ifsc_code", "pf_uan", "pf_account_no", "esi_no", "driving_license_no",
@@ -164,9 +162,50 @@ function currentPayloadValues(row: ProfileRow, profileType: ProfileEditProfileTy
   };
 }
 
-function parseSessionMobile(value: unknown, countryCode: unknown, storageFormat: unknown) {
+function displayDate(value: unknown) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : text;
+}
+
+function profileEditBootstrapValues(
+  row: ProfileRow,
+  profileType: ProfileEditProfileType
+): Record<string, string | boolean | null> {
+  return {
+    gender: String(row.gender ?? ""),
+    dateOfBirth: displayDate(row.date_of_birth),
+    aadhaarNumber: String(row.aadhaar_number ?? ""),
+    panNumber: String(row.pan_number ?? ""),
+    eshramUan: String(row.eshram_uan ?? ""),
+    isHandicapped: typeof row.is_handicapped === "boolean" ? row.is_handicapped : null,
+    address: String(row.address ?? ""),
+    ...(profileType === "employee" ? { state: String(row.state ?? "") } : {}),
+    pincode: String(profileType === "employee" ? row.pincode ?? "" : row.postal_pin ?? ""),
+    landmark: String(row.landmark ?? ""),
+    stateCode: String(row.state_code ?? ""),
+    fatherName: String(row.father_name ?? ""),
+    bloodGroup: String(row.blood_group ?? ""),
+    bankAccountNo: String(row.bank_account_no ?? ""),
+    ifsc: String(profileType === "employee" ? row.ifsc ?? "" : row.ifsc_code ?? ""),
+    pfUan: String(row.pf_uan ?? ""),
+    pfAccountNo: String(row.pf_account_no ?? ""),
+    esiNo: String(row.esi_no ?? ""),
+    drivingLicenseNo: String(row.driving_license_no ?? ""),
+    drivingLicenseExpiry: displayDate(row.driving_license_exp_date),
+    vehicleRegistrationNo: String(row.vehicle_reg_no ?? ""),
+    registrationExpiry: displayDate(row.vehicle_reg_exp_date),
+    insuranceExpiry: displayDate(row.vehicle_insurance_exp_date),
+    pollutionExpiry: displayDate(row.vehicle_pollution_exp_date),
+    emergencyContactName: String(row.emergency_contact_name ?? ""),
+    emergencyContactNumber: String(row.emergency_contact_number ?? ""),
+    emergencyContactRelation: String(row.emergency_contact_relation ?? "")
+  };
+}
+
+function parseSessionMobile(value: unknown, countryCode: unknown) {
   try {
-    return normalizeStoredConnectMobile(value, countryCode, storageFormat);
+    return normalizeStoredConnectMobile(value, countryCode, null);
   } catch (error) {
     if (error instanceof ConnectMobileValidationError) throw new ProfileEditError(error.message);
     throw error;
@@ -175,7 +214,7 @@ function parseSessionMobile(value: unknown, countryCode: unknown, storageFormat:
 
 function parseSubmittedMobile(value: unknown, countryCode: unknown) {
   try {
-    return normalizeConnectMobile(value, countryCode);
+    return normalizeProfileEditMobile(value, countryCode);
   } catch (error) {
     if (error instanceof ConnectMobileValidationError) throw new ProfileEditError(error.message);
     throw error;
@@ -197,7 +236,7 @@ async function activeSession() {
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const result = await supabaseAdmin
     .from("connect_login_sessions")
-    .select("id,country_code,mobile_number,mobile_number_format,expires_at,revoked_at")
+    .select("id,country_code,mobile_number,expires_at,revoked_at")
     .eq("session_hash", sessionHash)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
@@ -216,8 +255,7 @@ async function authenticatedAccount(
 ) {
   const sessionMobile = parseSessionMobile(
     session.mobile_number,
-    session.country_code,
-    session.mobile_number_format
+    session.country_code
   );
   const accounts = await findConnectAccounts(sessionMobile.countryCode, sessionMobile.mobile);
   const account = accounts.find((candidate) =>
@@ -243,14 +281,58 @@ async function loadProfile(account: ConnectAccount, profileType: ProfileEditProf
   if (!row) throw new ProfileEditError("Profile was not found.", 404);
   const status = String(
     profileType === "employee" ? row.profile_completion_status : row.onboarding_status
-  ).toLowerCase();
-  const returnedSelfEdit = status === "under_review" &&
-    row.profile_edit_review_pending === true &&
-    Boolean(String(row.profile_return_remarks ?? "").trim());
-  if ((status !== "active" && !returnedSelfEdit) || row.is_active === false || row.deleted_at) {
-    throw new ProfileEditError("Only an active or returned self-edit profile can be edited.", 409);
+  ).trim().toLowerCase();
+  if (status !== "active" || row.is_active !== true || row.deleted_at) {
+    throw new ProfileEditError("Profile editing is available only for an active profile.", 409);
   }
   return row;
+}
+
+function authenticatedProfileMobile(profile: ProfileRow, session: ActiveSession) {
+  const sessionMobile = parseSessionMobile(session.mobile_number, session.country_code);
+  let profileCountryCode: string;
+  try {
+    profileCountryCode = normalizeSupportedCountryCode(profile.mobile_country_code ?? "91");
+  } catch (error) {
+    if (error instanceof ConnectMobileValidationError) throw new ProfileEditError(error.message, 409);
+    throw error;
+  }
+  const profileMobileDigits = String(profile.mobile ?? "").replace(/\D/g, "");
+  if (
+    profileCountryCode !== sessionMobile.countryCode ||
+    (profileMobileDigits !== sessionMobile.mobile && profileMobileDigits !== sessionMobile.localMobile)
+  ) {
+    throw new ProfileEditError("The current login no longer matches this profile. Sign in again.", 409);
+  }
+  return {
+    sessionMobile,
+    mobileCountryCode: profileCountryCode,
+    mobileNumber: profileEditLocalMobile(profile.mobile, profileCountryCode, sessionMobile.mobile)
+  };
+}
+
+export async function GET(request: Request) {
+  try {
+    const session = await activeSession();
+    const url = new URL(request.url);
+    const accountId = String(url.searchParams.get("accountId") ?? "").trim();
+    const profileType = canonicalProfileEditType(url.searchParams.get("profileType"));
+    if (!accountId || !profileType) throw new ProfileEditError("A supported profile is required.");
+    const account = await authenticatedAccount(session, accountId, profileType);
+    const profile = await loadProfile(account, profileType);
+    const { mobileCountryCode, mobileNumber } = authenticatedProfileMobile(profile, session);
+    return NextResponse.json({
+      values: profileEditBootstrapValues(profile, profileType),
+      mobileCountryCode,
+      mobileNumber
+    });
+  } catch (error) {
+    const status = error instanceof ProfileEditError ? error.status : 500;
+    if (!(error instanceof ProfileEditError)) console.error("[connect/profile-edit] bootstrap failed", error);
+    return NextResponse.json({
+      error: error instanceof ProfileEditError ? error.message : "Unable to load profile details. Please try again."
+    }, { status });
+  }
 }
 
 async function loadEditFieldRules(
@@ -563,31 +645,13 @@ async function start(request: Request, body: Record<string, unknown>, session: A
   if (!profile.updated_at) {
     throw new ProfileEditError("This profile cannot be edited until its update timestamp is repaired.", 409);
   }
-  const sessionMobile = parseSessionMobile(
-    session.mobile_number,
-    session.country_code,
-    session.mobile_number_format
-  );
-  let profileCountryCode: string;
-  try {
-    profileCountryCode = normalizeSupportedCountryCode(profile.mobile_country_code ?? "91");
-  } catch (error) {
-    if (error instanceof ConnectMobileValidationError) throw new ProfileEditError(error.message, 409);
-    throw error;
-  }
-  const profileMobileDigits = String(profile.mobile ?? "").replace(/\D/g, "");
-  if (
-    profileCountryCode !== sessionMobile.countryCode ||
-    (profileMobileDigits !== sessionMobile.mobile && profileMobileDigits !== sessionMobile.localMobile)
-  ) {
-    throw new ProfileEditError("The current login no longer matches this profile. Sign in again.", 409);
-  }
+  const { sessionMobile, mobileCountryCode, mobileNumber } = authenticatedProfileMobile(profile, session);
   // The authenticated session is the authoritative current OTP destination.
   // Profile tables legitimately contain either local or digit-only E.164 values.
   const currentMobile = sessionMobile;
   const targetMobile = parseSubmittedMobile(
-    body.mobileNumber ?? currentMobile.localMobile,
-    body.mobileCountryCode ?? profile.mobile_country_code ?? "91"
+    body.mobileNumber ?? mobileNumber,
+    body.mobileCountryCode ?? mobileCountryCode
   );
   const mobileChanged = currentMobile.mobile !== targetMobile.mobile;
   const currentValues = currentPayloadValues(profile, profileType);

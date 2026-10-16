@@ -23,6 +23,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; pin?: unknown };
     const { countryCode, mobile } = normalizeConnectMobile(body.mobile, body.countryCode);
     const pin = String(body.pin ?? "").replace(/\D/g, "");
+    if (!mobile || mobile.length < 7) return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
     if (!/^\d{6}$/.test(pin)) return NextResponse.json({ error: "Enter your 6 digit PIN." }, { status: 400 });
 
     const accounts = await findConnectAccounts(countryCode, mobile);

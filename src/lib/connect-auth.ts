@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { connectMobileCountryFilter } from "@/lib/country-codes";
 import { eligibleConnectWorkforceAccount } from "@/lib/connect-account-freshness";
 
 export {
@@ -88,7 +87,6 @@ export async function findConnectAccounts(
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
-  const mobileCountryFilter = connectMobileCountryFilter(countryCode);
   let [profilesResult, executivesResult]: [
     MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null }>,
     MatchResult<{ id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; is_active?: boolean | null; deleted_at?: string | null; deactivated_at?: string | null }>
@@ -97,30 +95,26 @@ export async function findConnectAccounts(
       .from("profiles")
       .select("id, company_id, full_name, email, employee_id, role, is_active, mobile_country_code")
       .eq("is_active", true)
-      .or(mobileCountryFilter)
+      .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
     supabaseAdmin
       .from("workforce")
       .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, deleted_at, deactivated_at, mobile_country_code")
-      .or(mobileCountryFilter)
+      .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
   ]);
   if (isMissingColumnError(profilesResult.error)) {
-    profilesResult = countryCode === "91"
-      ? await supabaseAdmin
+    profilesResult = await supabaseAdmin
         .from("profiles")
         .select("id, company_id, full_name, email, employee_id, role, is_active")
         .eq("is_active", true)
-        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
-      : { data: [], error: null };
+        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
   }
   if (isMissingColumnError(executivesResult.error)) {
-    executivesResult = countryCode === "91"
-      ? await supabaseAdmin
+    executivesResult = await supabaseAdmin
         .from("workforce")
         .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, deleted_at, deactivated_at")
-        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
-      : { data: [], error: null };
+        .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
   }
   if (profilesResult.error) throw new Error(profilesResult.error.message);
   if (executivesResult.error) throw new Error(executivesResult.error.message);

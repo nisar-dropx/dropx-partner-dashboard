@@ -9,6 +9,9 @@ export async function POST(request: Request) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown };
     const { countryCode, mobile } = normalizeConnectMobile(body.mobile, body.countryCode);
+    if (!mobile || mobile.length < 7) {
+      return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
+    }
     const accounts = await findConnectAccounts(countryCode, mobile);
     if (!accounts.length) {
       return NextResponse.json({

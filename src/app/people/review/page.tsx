@@ -15,7 +15,7 @@ import {
   type WorkforceProfileType,
   workforceProfileTypes
 } from "@/lib/workforce-profiles";
-import { reviewPeopleProfile } from "./actions";
+import { reviewPeopleProfile, reviewProfileEdit } from "./actions";
 
 type ReviewIssue = {
   account_id: string;
@@ -131,6 +131,15 @@ function reviewKey(profileType: WorkforceProfileType, id: string) {
   return `${profileType}:${id}`;
 }
 
+async function readOptionalRows(query: unknown) {
+  try {
+    const result = await readAllRows(query);
+    return result.error ? [] : (result.data ?? []) as Array<Record<string, unknown>>;
+  } catch {
+    return [] as Array<Record<string, unknown>>;
+  }
+}
+
 async function loadReviewProfiles(
   companyId: string,
   locationScopeIds: string[],
@@ -142,10 +151,9 @@ async function loadReviewProfiles(
   const admin = supabaseAdmin;
 
   const attachmentColumns = attachmentFields.map((field) => field.key).join(", ");
-  const employeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
-  const workforceSelect = `id, dropx_id, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
+  const employeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
+  const workforceSelect = `id, dropx_id, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
   const nonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
-  const editableNonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
   const nonEmployeeTypes = workforceProfileTypes.filter(
     (profileType): profileType is Exclude<WorkforceProfileType, "employee" | "workforce" | "field_executive"> =>
       profileType !== "employee" && profileType !== "workforce" && profileType !== "field_executive"
@@ -156,28 +164,23 @@ async function loadReviewProfiles(
       .from("employees")
       .select(employeeSelect)
       .eq("company_id", companyId)
-      .or("profile_completion_status.eq.under_review,profile_edit_review_pending.eq.true")
+      .eq("profile_completion_status", "under_review")
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true })),
     readAllRows(admin
       .from("workforce")
       .select(workforceSelect)
       .eq("company_id", companyId)
-      .or("onboarding_status.eq.under_review,profile_edit_review_pending.eq.true")
+      .eq("onboarding_status", "under_review")
       .order("updated_at", { ascending: false })
       .order("id", { ascending: true })),
-    ...nonEmployeeTypes.map((profileType) => {
-      const supportsProfileEditReview = profileType === "contractor" || profileType === "vendor";
-      const query = admin
+    ...nonEmployeeTypes.map((profileType) => readAllRows(admin
         .from(nonEmployeeProfileConfigs[profileType].table)
-        .select(supportsProfileEditReview ? editableNonEmployeeSelect : nonEmployeeSelect)
-        .eq("company_id", companyId);
-      return readAllRows((supportsProfileEditReview
-        ? query.or("onboarding_status.eq.under_review,profile_edit_review_pending.eq.true")
-        : query.eq("onboarding_status", "under_review"))
+        .select(nonEmployeeSelect)
+        .eq("company_id", companyId)
+        .eq("onboarding_status", "under_review")
         .order("updated_at", { ascending: false })
-        .order("id", { ascending: true }));
-    })
+        .order("id", { ascending: true })))
   ];
   const profileResults = await Promise.all(profileQueries);
 
@@ -205,7 +208,7 @@ async function loadReviewProfiles(
         location: text(station?.station_code) || "-",
         designation: text(designation) || "-",
         updatedAt: text(raw.updated_at) || null,
-        profileEditReviewPending: raw.profile_edit_review_pending === true,
+        profileEditReviewPending: false,
         values: {
           pan_number: text(raw.pan_number),
           aadhaar_number: text(raw.aadhaar_number),
@@ -223,38 +226,129 @@ async function loadReviewProfiles(
     }
   });
 
+  // Self-edit reviews are additive and intentionally fail open. A rollout
+  // without the new flag column must never hide the established onboarding
+  // review queue above.
+  const profileEditEmployeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
+  const profileEditWorkforceSelect = `id, dropx_id, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
+  const profileEditNonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, profile_edit_review_pending, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
+  const profileEditTypes: WorkforceProfileType[] = ["employee", "workforce", "contractor", "vendor"];
+  const profileEditResults = await Promise.all([
+    readOptionalRows(admin
+      .from("employees")
+      .select(profileEditEmployeeSelect)
+      .eq("company_id", companyId)
+      .eq("profile_completion_status", "active")
+      .eq("profile_edit_review_pending", true)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true })),
+    readOptionalRows(admin
+      .from("workforce")
+      .select(profileEditWorkforceSelect)
+      .eq("company_id", companyId)
+      .eq("onboarding_status", "active")
+      .eq("profile_edit_review_pending", true)
+      .eq("is_active", true)
+      .eq("lifecycle_status", "active")
+      .is("deleted_at", null)
+      .is("deactivated_at", null)
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true })),
+    ...(["contractor", "vendor"] as const).map((profileType) => readOptionalRows(admin
+      .from(nonEmployeeProfileConfigs[profileType].table)
+      .select(profileEditNonEmployeeSelect)
+      .eq("company_id", companyId)
+      .eq("onboarding_status", "active")
+      .eq("profile_edit_review_pending", true)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: true })))
+  ]);
+  const knownProfileKeys = new Set(profiles.map((profile) => reviewKey(profile.profileType, profile.id)));
+  profileEditResults.forEach((rows, index) => {
+    const profileType = profileEditTypes[index];
+    for (const raw of rows) {
+      const id = text(raw.id);
+      const key = reviewKey(profileType, id);
+      if (!id || knownProfileKeys.has(key)) continue;
+      const locationId = text(raw.location_id) || null;
+      if (!hasAllLocationAccess && (!locationId || !locationScopeIds.includes(locationId))) continue;
+      const station = firstRelation(raw.stations as { station_code?: string } | Array<{ station_code?: string }> | null);
+      const designation = profileType === "employee" || profileType === "workforce"
+        ? firstRelation(raw.designations as { name?: string } | Array<{ name?: string }> | null)?.name
+        : raw.designation;
+      profiles.push({
+        id,
+        profileType,
+        dropxId: text(raw.employee_code ?? raw.dropx_id) || "-",
+        biometricId: text(raw.biometric_id) || "-",
+        fullName: text(raw.full_name) || "Unnamed profile",
+        locationId,
+        location: text(station?.station_code) || "-",
+        designation: text(designation) || "-",
+        updatedAt: text(raw.updated_at) || null,
+        profileEditReviewPending: true,
+        values: {
+          pan_number: text(raw.pan_number),
+          aadhaar_number: text(raw.aadhaar_number),
+          driving_license_no: text(raw.driving_license_no),
+          pf_uan: text(raw.pf_uan),
+          bank_account_no: text(raw.bank_account_no),
+          ifsc: text(raw.ifsc ?? raw.ifsc_code),
+          vehicle_reg_no: text(raw.vehicle_reg_no)
+        },
+        attachmentPaths: attachmentFields
+          .map((field) => ({ field: field.key, label: field.label, path: text(raw[field.key]) }))
+          .filter((file) => Boolean(file.path)),
+        issues: []
+      });
+      knownProfileKeys.add(key);
+    }
+  });
+
   const profileIdsByType = new Map<WorkforceProfileType, string[]>();
   for (const profile of profiles) {
     profileIdsByType.set(profile.profileType, [...(profileIdsByType.get(profile.profileType) ?? []), profile.id]);
   }
 
   const verificationRows: ReviewIssue[] = [];
-  const latestProfileEditFields = new Map<string, string[]>();
   for (const [profileType, profileIds] of profileIdsByType) {
     for (const accountIds of profileReviewIdBatches(profileIds)) {
-      const [verificationResult, editAuditResult] = await Promise.all([
-        readAllRows(admin
-          .from("connect_profile_verifications")
-          .select("account_id, profile_type, kind, manual_review, block_submit, display_name, message, updated_at")
-          .eq("company_id", companyId)
-          .eq("manual_review", true)
-          .eq("profile_type", profileType)
-          .in("account_id", accountIds)
-          .order("account_id", { ascending: true })
-          .order("kind", { ascending: true })),
-        readAllRows(admin
-          .from("connect_profile_edit_audit")
-          .select("account_id, profile_type, changed_fields, created_at")
-          .eq("company_id", companyId)
-          .eq("event_code", "committed")
-          .eq("profile_type", profileType)
-          .in("account_id", accountIds)
-          .order("created_at", { ascending: false }))
-      ]);
-      if (verificationResult.error) return { profiles: [] as ReviewProfile[], error: verificationResult.error.message };
-      if (editAuditResult.error) return { profiles: [] as ReviewProfile[], error: editAuditResult.error.message };
-      verificationRows.push(...(verificationResult.data ?? []) as ReviewIssue[]);
-      for (const row of (editAuditResult.data ?? []) as Array<Record<string, unknown>>) {
+      const result = await readAllRows(admin
+        .from("connect_profile_verifications")
+        .select("account_id, profile_type, kind, manual_review, block_submit, display_name, message, updated_at")
+        .eq("company_id", companyId)
+        .eq("manual_review", true)
+        .eq("profile_type", profileType)
+        .in("account_id", accountIds)
+        .order("account_id", { ascending: true })
+        .order("kind", { ascending: true }));
+      if (result.error) return { profiles: [] as ReviewProfile[], error: result.error.message };
+      verificationRows.push(...(result.data ?? []) as ReviewIssue[]);
+    }
+  }
+
+  const latestProfileEditFields = new Map<string, string[]>();
+  const profileEditIdsByType = new Map<WorkforceProfileType, string[]>();
+  for (const profile of profiles) {
+    if (!profile.profileEditReviewPending) continue;
+    profileEditIdsByType.set(
+      profile.profileType,
+      [...(profileEditIdsByType.get(profile.profileType) ?? []), profile.id]
+    );
+  }
+  for (const [profileType, profileIds] of profileEditIdsByType) {
+    for (const accountIds of profileReviewIdBatches(profileIds)) {
+      const auditRows = await readOptionalRows(admin
+        .from("connect_profile_edit_audit")
+        .select("account_id, profile_type, changed_fields, created_at")
+        .eq("company_id", companyId)
+        .eq("event_code", "committed")
+        .eq("profile_type", profileType)
+        .in("account_id", accountIds)
+        .order("created_at", { ascending: false }));
+      for (const row of auditRows) {
         const key = reviewKey(profileType, text(row.account_id));
         if (latestProfileEditFields.has(key)) continue;
         latestProfileEditFields.set(
@@ -347,6 +441,7 @@ export default async function PeopleReviewPage({
   };
   const selected = profiles.find((profile) => reviewKey(profile.profileType, profile.id) === searchParams?.review) ?? null;
   const selectedAttachments = selected?.attachmentPaths ?? [];
+  const selectedReviewAction = selected?.profileEditReviewPending ? reviewProfileEdit : reviewPeopleProfile;
 
   return (
     <AppShell active="Under Review" pageCode="people_review">
@@ -585,35 +680,45 @@ export default async function PeopleReviewPage({
                   <div className="profile-review-options">
                     <div className="profile-review-option profile-review-option-approve">
                       <div>
-                        <h4>Approve profile</h4>
-                        <p>Activate this profile after confirming the review exceptions are acceptable.</p>
+                        <h4>{selected.profileEditReviewPending ? "Approve profile changes" : "Approve profile"}</h4>
+                        <p>{selected.profileEditReviewPending
+                          ? "Accept these changes and close the review while keeping the profile active."
+                          : "Activate this profile after confirming the review exceptions are acceptable."}</p>
                       </div>
-                      <form action={reviewPeopleProfile} className="profile-review-approve">
+                      <form action={selectedReviewAction} className="profile-review-approve">
                         <input name="id" type="hidden" value={selected.id} />
                         <input name="profile_type" type="hidden" value={selected.profileType} />
-                        <input name="review_version" type="hidden" value={selected.updatedAt ?? ""} />
+                        {selected.profileEditReviewPending
+                          ? <input name="review_version" type="hidden" value={selected.updatedAt ?? ""} />
+                          : null}
                         <input name="review_action" type="hidden" value="approve" />
                         <SubmitButton
                           className="button profile-review-approve-button"
-                          confirmDescription="This profile will become active."
-                          confirmMessage="Approve this profile?"
-                          confirmSubmitText="Approve profile"
-                          confirmTitle="Approve profile"
+                          confirmDescription={selected.profileEditReviewPending
+                            ? "The profile will remain active and these changes will be accepted."
+                            : "This profile will become active."}
+                          confirmMessage={selected.profileEditReviewPending ? "Approve these profile changes?" : "Approve this profile?"}
+                          confirmSubmitText={selected.profileEditReviewPending ? "Approve changes" : "Approve profile"}
+                          confirmTitle={selected.profileEditReviewPending ? "Approve profile changes" : "Approve profile"}
                           pendingText="Approving"
                         >
-                          Approve profile
+                          {selected.profileEditReviewPending ? "Approve changes" : "Approve profile"}
                         </SubmitButton>
                       </form>
                     </div>
                     <div className="profile-review-option profile-review-option-return">
                       <div>
-                        <h4>Return for correction</h4>
-                        <p>The person can edit and resubmit the returned profile in DropX One.</p>
+                        <h4>{selected.profileEditReviewPending ? "Return profile changes" : "Return for correction"}</h4>
+                        <p>{selected.profileEditReviewPending
+                          ? "The profile stays active while the person corrects and resubmits through OTP-protected editing."
+                          : "The person can edit and resubmit the returned profile in DropX One."}</p>
                       </div>
-                      <form action={reviewPeopleProfile} className="profile-review-return">
+                      <form action={selectedReviewAction} className="profile-review-return">
                         <input name="id" type="hidden" value={selected.id} />
                         <input name="profile_type" type="hidden" value={selected.profileType} />
-                        <input name="review_version" type="hidden" value={selected.updatedAt ?? ""} />
+                        {selected.profileEditReviewPending
+                          ? <input name="review_version" type="hidden" value={selected.updatedAt ?? ""} />
+                          : null}
                         <input name="review_action" type="hidden" value="return" />
                         <label>
                           Return remarks <strong>*</strong>
@@ -622,13 +727,15 @@ export default async function PeopleReviewPage({
                         <div className="profile-review-return-actions">
                           <SubmitButton
                             className="button profile-review-return-button"
-                            confirmDescription="The profile will reopen in DropX One with these remarks."
-                            confirmMessage="Return this profile for correction?"
-                            confirmSubmitText="Return profile"
-                            confirmTitle="Return profile"
+                            confirmDescription={selected.profileEditReviewPending
+                              ? "The profile will remain active and these changes will stay pending."
+                              : "The profile will reopen in DropX One with these remarks."}
+                            confirmMessage={selected.profileEditReviewPending ? "Return these profile changes?" : "Return this profile for correction?"}
+                            confirmSubmitText={selected.profileEditReviewPending ? "Return changes" : "Return profile"}
+                            confirmTitle={selected.profileEditReviewPending ? "Return profile changes" : "Return profile"}
                             pendingText="Returning"
                           >
-                            Return profile
+                            {selected.profileEditReviewPending ? "Return changes" : "Return profile"}
                           </SubmitButton>
                         </div>
                       </form>

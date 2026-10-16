@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { createOtpSecretHash, clampOtpExpiryMinutes, generateOtp } from "@/lib/connect-otp";
-import {
-  connectMobileCountryFilter,
-  ConnectMobileValidationError,
-  normalizeConnectMobile
-} from "@/lib/country-codes";
+import { ConnectMobileValidationError, normalizeConnectMobile } from "@/lib/country-codes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { extractWhatsAppTemplateVariables, type WhatsAppTemplateComponent } from "@/lib/whatsapp-template";
 
@@ -74,54 +70,50 @@ export async function POST(request: Request) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; purpose?: unknown };
     const { countryCode, mobile: to, localMobile } = normalizeConnectMobile(body.mobile, body.countryCode);
-    const mobileCountryFilter = connectMobileCountryFilter(countryCode);
     const purpose = String(body.purpose ?? "connect_login") === "connect_pin_reset" ? "connect_pin_reset" : "connect_login";
+    if (!to || to.length < 11) {
+      return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
+    }
     let [profileMatches, executiveMatches, employeeMatches]: [AccountMatchResult, AccountMatchResult, AccountMatchResult] = await Promise.all([
       supabaseAdmin
         .from("profiles")
         .select("id, company_id, is_active, mobile_country_code")
         .eq("is_active", true)
-        .or(mobileCountryFilter)
+        .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
         .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
       supabaseAdmin
         .from("workforce")
         .select("id, company_id, is_active, mobile_country_code")
         .eq("is_active", true)
-        .or(mobileCountryFilter)
+        .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
         .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
       supabaseAdmin
         .from("employees")
         .select("id, company_id, is_active, mobile_country_code")
         .eq("is_active", true)
-        .or(mobileCountryFilter)
+        .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
         .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
     ]);
     if (isMissingColumnError(profileMatches.error)) {
-      profileMatches = countryCode === "91"
-        ? await supabaseAdmin
+      profileMatches = await supabaseAdmin
           .from("profiles")
           .select("id, company_id, is_active")
           .eq("is_active", true)
-          .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
-        : { data: [], error: null };
+          .or(`mobile.eq.${to},mobile.eq.${localMobile}`);
     }
     if (isMissingColumnError(executiveMatches.error)) {
-      executiveMatches = countryCode === "91"
-        ? await supabaseAdmin
+      executiveMatches = await supabaseAdmin
           .from("workforce")
           .select("id, company_id, is_active")
           .eq("is_active", true)
-          .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
-        : { data: [], error: null };
+          .or(`mobile.eq.${to},mobile.eq.${localMobile}`);
     }
     if (isMissingColumnError(employeeMatches.error)) {
-      employeeMatches = countryCode === "91"
-        ? await supabaseAdmin
+      employeeMatches = await supabaseAdmin
           .from("employees")
           .select("id, company_id, is_active")
           .eq("is_active", true)
-          .or(`mobile.eq.${to},mobile.eq.${localMobile}`)
-        : { data: [], error: null };
+          .or(`mobile.eq.${to},mobile.eq.${localMobile}`);
     }
     if (profileMatches.error) throw new Error(profileMatches.error.message);
     if (executiveMatches.error) throw new Error(executiveMatches.error.message);

@@ -50,7 +50,6 @@ type Profile = {
   profilePhotoUrl?: string;
   status: string;
   returnRemarks?: string;
-  profileEditReviewPending?: boolean;
   agreement?: {
     id: string;
     code: string;
@@ -72,6 +71,20 @@ type ProfileEditOtpState = {
   busy: boolean;
   error: string;
   message: string;
+};
+
+type ProfileEditBootstrap = {
+  values: Record<string, string | boolean | null>;
+  mobileCountryCode: string;
+  mobileNumber: string;
+};
+
+type ProfileEditViewSnapshot = {
+  values: Record<string, string>;
+  verifications: Record<string, Verification>;
+  verificationErrors: Record<string, string>;
+  pfAnswer: string;
+  esiAnswer: string;
 };
 
 const emptyProfileEditOtp: ProfileEditOtpState = {
@@ -384,10 +397,12 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   const [agreementGatePassed, setAgreementGatePassed] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   const [editOriginalValues, setEditOriginalValues] = useState<Record<string, string>>({});
   const [editOtp, setEditOtp] = useState<ProfileEditOtpState>(emptyProfileEditOtp);
   const [chosenUploads, setChosenUploads] = useState<Record<string, { fileName: string; previewUrl: string | null }>>({});
   const chosenUploadsRef = useRef(chosenUploads);
+  const editViewSnapshotRef = useRef<ProfileEditViewSnapshot | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => () => {
@@ -426,7 +441,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       })
     ]).then(([nextProfile, checks, draft]) => {
       const next = nextProfile as Profile;
-      const registrationDraft = statusReadOnly(next.status) ? null : draft;
+      // Completed ordinary profiles are sourced from their profile record, never
+      // from an older registration draft. The isolated pilot stores its submitted
+      // values in the draft record, so that view must continue to hydrate from it.
+      const registrationDraft = isolatedPilot || !statusReadOnly(next.status) ? draft : null;
       const uploads = { ...next.uploads };
       const uploadUrls = { ...next.uploadUrls };
       if (registrationDraft) {
@@ -444,14 +462,16 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       const draftChecks = registrationDraft?.verificationResults?.length ? registrationDraft.verificationResults : null;
       setProfile({ ...next, uploads, uploadUrls });
       setEditing(false);
+      setEditLoading(false);
       setEditOriginalValues({});
+      editViewSnapshotRef.current = null;
       setEditOtp(emptyProfileEditOtp);
       const agreementAlreadyAccepted = Boolean(next.agreement?.acceptedAt);
       setAgreementAccepted(agreementAlreadyAccepted);
       setAgreementGatePassed(agreementAlreadyAccepted);
       setValues(editable);
-      setPfAnswer(registrationDraft?.data?.has_pf_uan ?? (editable["pfUan"] ? "yes" : statusReadOnly(next.status) ? "no" : ""));
-      setEsiAnswer(registrationDraft?.data?.has_esi_no ?? (editable["esiNo"] ? "yes" : statusReadOnly(next.status) ? "no" : ""));
+      setPfAnswer(registrationDraft?.data?.has_pf_uan ?? (editable.pfUan ? "yes" : ""));
+      setEsiAnswer(registrationDraft?.data?.has_esi_no ?? (editable.esiNo ? "yes" : ""));
       setVerifications(isolatedPilot ? {} : Object.fromEntries((draftChecks ?? checks.verifications ?? []).map((item: Verification) => [item.kind, item])));
       if (registrationDraft) setNotice("Draft restored.");
       if (next.profilePhotoUrl) onPhoto?.(next.profilePhotoUrl);
@@ -464,12 +484,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   }, [executive, profile]);
   const required = useMemo(() => new Set(profile?.fieldRules?.required ?? []), [profile]);
   const completed = statusReadOnly(profile?.status) && !editing;
-  const returnedSelfEdit = String(profile?.status ?? "").trim().toLowerCase() === "under_review" &&
-    profile?.profileEditReviewPending === true &&
-    Boolean(profile?.returnRemarks?.trim());
   const canEditProfile = !readOnly && !isolatedPilot &&
     ["employee", "workforce", "field_executive", "contractor", "vendor"].includes(account.profileType) &&
-    (String(profile?.status ?? "").trim().toLowerCase() === "active" || returnedSelfEdit);
+    String(profile?.status ?? "").trim().toLowerCase() === "active";
 
   const set = (key: string, value: string, clear: string[] = []) => {
     setValues((current) => ({
@@ -504,7 +521,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
   const verified = (kind: string) => currentCheck(kind)?.verified === true;
   const attempted = (kind: string) => Boolean(currentCheck(kind));
 
-  async function requestVerification(kind: string) {
+  async function requestVerification(kind: string, profileEdit = false) {
     const body = {
       kind,
       accountId: account.id,
@@ -518,7 +535,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       drivingLicenseNo: values.drivingLicenseNo,
       dateOfBirth: values.dateOfBirth,
       vehicleRegNo: values.vehicleRegistrationNo,
-      profileEdit: editing
+      ...(profileEdit ? { profileEdit: true } : {})
     };
     const response = await fetch("/api/connect/verification", {
       method: "POST",
@@ -564,7 +581,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
           return next;
         });
       }
-      await requestVerification(kind);
+      await requestVerification(kind, editing);
     } catch (reason) {
       const message = userFacingError(reason, "Verification could not be completed. Please try again.");
       setVerificationErrors((current) => ({ ...current, [kind]: message }));
@@ -573,7 +590,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     }
   }
 
-  function submissionError() {
+  function registrationFieldError() {
     const dateOfBirthError = enabled.has("date_of_birth")
       ? minimumAgeError(values.dateOfBirth)
       : null;
@@ -587,14 +604,69 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       if (value && !rule.pattern.test(value)) return rule.message;
     }
 
-    if (editing) {
-      if (!countryCodeOptions.some((option) => option.code === values.mobileCountryCode)) return "Select a supported mobile country code.";
-      if (!/^\d{6,14}$/.test(values.mobileNumber || "")) return "Enter a 6 to 14 digit mobile number.";
+    return "";
+  }
+
+  function profileEditFieldError() {
+    const changed = (key: string) => (values[key] || "") !== (editOriginalValues[key] || "");
+    if (enabled.has("date_of_birth") && changed("dateOfBirth")) {
+      const dateOfBirthError = minimumAgeError(values.dateOfBirth);
+      if (dateOfBirthError) return dateOfBirthError;
     }
 
-    // An optional field left blank has nothing to verify, so it must not block submission.
+    for (const [field, rule] of Object.entries(profileInputRules)) {
+      if (!enabled.has(field)) continue;
+      if (field === "pf_uan" && pfAnswer !== "yes") continue;
+      const valueKey = fieldValueKeys[field] ?? field.replace(/_([a-z])/g, (_, character) => character.toUpperCase());
+      if (!changed(valueKey)) continue;
+      const value = values[valueKey] ?? "";
+      if (value && !rule.pattern.test(value)) return rule.message;
+    }
+
+    return "";
+  }
+
+  function registrationSubmissionError() {
+    const fieldError = registrationFieldError();
+    if (fieldError) return fieldError;
+
+    // Keep registration verification rules independent from self-service edit.
+    // Optional blank fields have nothing to verify and do not block submission.
     const applies = (field: string, value: string | undefined) => enabled.has(field) && (required.has(field) || Boolean(value?.trim()));
-    const changed = (...keys: string[]) => !editing || keys.some((key) => (values[key] || "") !== (editOriginalValues[key] || ""));
+    const mandatory: Array<[string, string]> = [
+      ...(applies("pan_number", values.panNumber) ? [["pan", "PAN"] as [string, string]] : []),
+      ...(applies("pan_number", values.panNumber) && applies("aadhaar_number", values.aadhaarNumber) ? [["pan_aadhaar", "Aadhaar number"] as [string, string]] : []),
+      ...(applies("bank_account_no", values.bankAccountNo) && applies("ifsc", values.ifsc) ? [["bank", "Bank account"] as [string, string]] : []),
+      ...(pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? [["pf_uan", "PF UAN"] as [string, string]] : []),
+      ...(applies("driving_license_no", values.drivingLicenseNo) ? [["dl", "Driving license no"] as [string, string]] : []),
+      ...(applies("vehicle_reg_no", values.vehicleRegistrationNo) ? [["vehicle", "Vehicle reg no"] as [string, string]] : [])
+    ];
+    const pending = isolatedPilot ? [] : mandatory.filter(([kind]) => !attempted(kind)).map(([, label]) => label);
+    if (pending.length) {
+      return `Tap Verify for ${pending.join(", ")} before submitting.`;
+    }
+
+    const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
+      .map((kind) => currentCheck(kind))
+      .find((item) => item?.blockSubmit);
+    if (!isolatedPilot && blockedCheck) {
+      return blockedCheck.message || "A required identity verification did not match.";
+    }
+    if (profile?.agreement && !agreementAccepted) {
+      return `Accept ${profile.agreement.title} before submitting registration.`;
+    }
+    return "";
+  }
+
+  function profileEditSubmissionError() {
+    const fieldError = profileEditFieldError();
+    if (fieldError) return fieldError;
+
+    if (!countryCodeOptions.some((option) => option.code === values.mobileCountryCode)) return "Select a supported mobile country code.";
+    if (!/^\d{6,14}$/.test(values.mobileNumber || "")) return "Enter a 6 to 14 digit mobile number.";
+
+    const applies = (field: string, value: string | undefined) => enabled.has(field) && (required.has(field) || Boolean(value?.trim()));
+    const changed = (...keys: string[]) => keys.some((key) => (values[key] || "") !== (editOriginalValues[key] || ""));
     const mandatory: Array<[string, string]> = [
       ...(changed("panNumber") && applies("pan_number", values.panNumber) ? [["pan", "PAN"] as [string, string]] : []),
       ...(changed("panNumber", "aadhaarNumber") && applies("pan_number", values.panNumber) && applies("aadhaar_number", values.aadhaarNumber) ? [["pan_aadhaar", "Aadhaar number"] as [string, string]] : []),
@@ -610,14 +682,11 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
 
     const requiredKinds = new Set(mandatory.map(([kind]) => kind));
     const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
-      .filter((kind) => !editing || requiredKinds.has(kind))
+      .filter((kind) => requiredKinds.has(kind))
       .map((kind) => currentCheck(kind))
       .find((item) => item?.blockSubmit);
     if (!isolatedPilot && blockedCheck) {
       return blockedCheck.message || "A required identity verification did not match.";
-    }
-    if (!editing && profile?.agreement && !agreementAccepted) {
-      return `Accept ${profile.agreement.title} before submitting registration.`;
     }
     return "";
   }
@@ -626,16 +695,22 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     event.preventDefault();
     setError("");
     setNotice("");
-    const validationError = submissionError();
-    if (validationError) {
-      setError(validationError);
+    if (editing) {
+      const editError = profileEditSubmissionError();
+      if (editError) {
+        setError(editError);
+        return;
+      }
+      void startProfileEdit();
       return;
     }
-    if (editing) {
-      void startProfileEdit();
-    } else {
-      setConfirmationOpen(true);
+
+    const registrationError = registrationSubmissionError();
+    if (registrationError) {
+      setError(registrationError);
+      return;
     }
+    setConfirmationOpen(true);
   }
 
   function editablePayload() {
@@ -654,6 +729,76 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     return Object.fromEntries(fields
       .filter(([field]) => enabled.has(field))
       .map(([, key]) => [key, values[key] || ""]));
+  }
+
+  async function beginProfileEdit() {
+    if (editing || editLoading || saving) return;
+    setEditLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      const params = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
+      const response = await fetch(`/api/connect/profile-edit?${params}`, { cache: "no-store" });
+      const payload = await response.json() as Partial<ProfileEditBootstrap> & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Unable to load current profile details.");
+      if (!payload.values || typeof payload.values !== "object" || Array.isArray(payload.values)) {
+        throw new Error("Current profile details are unavailable. Reload and try again.");
+      }
+
+      const editValues = Object.fromEntries(Object.entries(payload.values).map(([key, value]) => [
+        key,
+        value === null || value === undefined ? "" : String(value)
+      ])) as Record<string, string>;
+      const nextValues: Record<string, string> = {
+        ...editValues,
+        mobileCountryCode: String(payload.mobileCountryCode || "91"),
+        mobileNumber: String(payload.mobileNumber || "")
+      };
+      editViewSnapshotRef.current = {
+        values: { ...values },
+        verifications: { ...verifications },
+        verificationErrors: { ...verificationErrors },
+        pfAnswer,
+        esiAnswer
+      };
+      setValues(nextValues);
+      setEditOriginalValues({ ...nextValues });
+      setPfAnswer(nextValues.pfUan ? "yes" : "no");
+      setEsiAnswer(nextValues.esiNo ? "yes" : "no");
+      // Registration drafts and their verification snapshots must never seed a
+      // self-service edit. Changed identity fields obtain fresh checks in edit mode.
+      setVerifications({});
+      setVerificationErrors({});
+      setEditOtp(emptyProfileEditOtp);
+      setConfirmationOpen(false);
+      setEditing(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (reason) {
+      setError(userFacingError(reason, "Unable to load current profile details. Please try again."));
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  function cancelProfileEdit() {
+    const snapshot = editViewSnapshotRef.current;
+    if (snapshot) {
+      setValues(snapshot.values);
+      setVerifications(snapshot.verifications);
+      setVerificationErrors(snapshot.verificationErrors);
+      setPfAnswer(snapshot.pfAnswer);
+      setEsiAnswer(snapshot.esiAnswer);
+    } else {
+      setValues({ ...editOriginalValues });
+      setPfAnswer(editOriginalValues.pfUan ? "yes" : "no");
+      setEsiAnswer(editOriginalValues.esiNo ? "yes" : "no");
+    }
+    editViewSnapshotRef.current = null;
+    setEditOriginalValues({});
+    setEditOtp(emptyProfileEditOtp);
+    setEditing(false);
+    setError("");
+    setNotice("");
   }
 
   async function startProfileEdit() {
@@ -780,7 +925,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
 
   async function submitProfile() {
     if (!formRef.current || saving) return;
-    const validationError = submissionError();
+    const validationError = registrationSubmissionError();
     if (validationError) {
       setError(validationError);
       setConfirmationOpen(false);
@@ -979,16 +1124,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     return <div className="dx-profile-view">
       {notice ? <div className="dx-alert success">{notice}</div> : null}
       {error ? <div className="dx-alert error">{error}</div> : null}
-      {profile.returnRemarks ? <div className="dx-alert error"><strong>Profile changes returned for correction</strong><br />{profile.returnRemarks}</div> : null}
       <div className="dx-profile-hero">
         <small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i>
-        {canEditProfile ? <button className="dx-profile-edit-button" onClick={() => {
-          setEditOriginalValues({ ...values });
-          setEditing(true);
-          setError("");
-          setNotice("");
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }} type="button"><Pencil />Edit profile</button> : null}
+        {canEditProfile ? <button className="dx-profile-edit-button" disabled={editLoading} onClick={() => void beginProfileEdit()} type="button"><Pencil />{editLoading ? "Loading..." : "Edit profile"}</button> : null}
       </div>
       {sections.map((section, sectionIndex) => <section className={sectionIndex === 0 ? "primary" : ""} key={section.name}>
         {sectionIndex ? <h2>{section.name}</h2> : null}
@@ -1110,9 +1248,9 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
       setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
       onPhoto?.(url);
     }} /> : null}
-    {profile.returnRemarks ? (
+    {!editing && profile.returnRemarks && profile.status.trim().toLowerCase() === "returned" ? (
       <aside className="dx-return-notice">
-        <strong>{editing ? "Profile changes returned for correction" : "Profile returned for correction"}</strong>
+        <strong>Profile returned for correction</strong>
         <p>{profile.returnRemarks}</p>
       </aside>
     ) : null}
@@ -1228,17 +1366,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted, readOnly = fa
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
     <div className="dx-form-actions">
-      {editing ? <button className="dx-draft-save" disabled={saving} onClick={() => {
-        setValues({ ...editOriginalValues });
-        setPfAnswer(editOriginalValues.pfUan ? "yes" : "no");
-        setEsiAnswer(editOriginalValues.esiNo ? "yes" : "no");
-        setEditing(false);
-        setError("");
-        setNotice("");
-      }} type="button">Cancel</button> : <button className="dx-draft-save" disabled={saving || draftSaving} onClick={saveDraft} type="button">
+      {editing ? <button className="dx-draft-save" disabled={saving || Boolean(running)} onClick={cancelProfileEdit} type="button">Cancel</button> : <button className="dx-draft-save" disabled={saving || draftSaving} onClick={saveDraft} type="button">
         {draftSaving ? "Saving draft..." : "Save draft"}
       </button>}
-      <button className="dx-save" disabled={saving || draftSaving} type="submit">{saving ? (editing ? "Sending OTP..." : "Submitting...") : (editing ? "Verify & save" : "Submit")}</button>
+      <button className="dx-save" disabled={saving || draftSaving || (editing && Boolean(running))} type="submit">{saving ? (editing ? "Sending OTP..." : "Submitting...") : (editing ? "Verify & save" : "Submit")}</button>
     </div>
     {!editing && confirmationOpen ? (
       <div className="dx-submit-confirmation-backdrop" role="presentation">

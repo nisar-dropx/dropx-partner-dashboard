@@ -10,6 +10,7 @@ import {
   countryCodeOptions,
   normalizeCanonicalConnectMobile,
   normalizeConnectMobile,
+  normalizeProfileEditMobile,
   normalizeStoredConnectMobile,
   normalizeSupportedCountryCode
 } from "./country-codes.ts";
@@ -17,6 +18,7 @@ import {
   connectMobileCountryFilter as rootConnectMobileCountryFilter,
   countryCodeOptions as rootCountryCodeOptions,
   normalizeConnectMobile as normalizeRootConnectMobile,
+  normalizeProfileEditMobile as normalizeRootProfileEditMobile,
   normalizeStoredConnectMobile as normalizeRootStoredConnectMobile,
   normalizeSupportedCountryCode as normalizeRootSupportedCountryCode
 } from "../../../../src/lib/country-codes.ts";
@@ -44,7 +46,7 @@ test("country lookup treats legacy null country codes as India only", () => {
   assert.equal(rootConnectMobileCountryFilter("65"), connectMobileCountryFilter("65"));
 });
 
-test("selected country code and 6-14 digit local subscriber normalize consistently", () => {
+test("Connect login keeps its legacy mobile normalization contract", () => {
   assert.deepEqual(normalizeConnectMobile("9876543210", "91"), {
     countryCode: "91",
     localMobile: "9876543210",
@@ -53,33 +55,40 @@ test("selected country code and 6-14 digit local subscriber normalize consistent
   assert.deepEqual(normalizeConnectMobile("9123 4567", "65"), {
     countryCode: "65",
     localMobile: "91234567",
-    mobile: "6591234567"
+    mobile: "91234567"
   });
   assert.deepEqual(normalizeConnectMobile("50-123-4567", "+971"), {
     countryCode: "971",
     localMobile: "501234567",
-    mobile: "971501234567"
+    mobile: "501234567"
+  });
+  assert.deepEqual(normalizeConnectMobile("919876543210", "91"), {
+    countryCode: "91",
+    localMobile: "9876543210",
+    mobile: "919876543210"
   });
 });
 
-test("explicit and unambiguous canonical E.164 inputs remain accepted", () => {
-  assert.deepEqual(normalizeConnectMobile("+65 9123 4567", "65"), {
+test("self-service profile edit uses strict country-aware mobile validation", () => {
+  assert.deepEqual(normalizeProfileEditMobile("9123 4567", "65"), {
     countryCode: "65",
     localMobile: "91234567",
     mobile: "6591234567"
   });
-  assert.deepEqual(normalizeConnectMobile("9715012345678", "971"), {
-    countryCode: "971",
-    localMobile: "5012345678",
-    mobile: "9715012345678"
-  });
-  // Without a leading + this can also be a local subscriber beginning in 65,
-  // so selected-code + local input wins instead of silently removing digits.
-  assert.deepEqual(normalizeConnectMobile("6591234567", "65"), {
+  assert.deepEqual(normalizeProfileEditMobile("+65 9123 4567", "65"), {
     countryCode: "65",
-    localMobile: "6591234567",
-    mobile: "656591234567"
+    localMobile: "91234567",
+    mobile: "6591234567"
   });
+  for (const [mobile, countryCode] of [
+    ["12345", "65"],
+    ["123456789012345", "65"],
+    ["91abc123", "91"],
+    ["+971501234567", "65"],
+    ["12345678901234", "971"]
+  ]) {
+    assert.throws(() => normalizeProfileEditMobile(mobile, countryCode), ConnectMobileValidationError);
+  }
 });
 
 test("trusted stored sessions accept canonical and legacy local mobile values", () => {
@@ -103,18 +112,6 @@ test("trusted stored sessions accept canonical and legacy local mobile values", 
     localMobile: "91234567",
     mobile: "6591234567"
   });
-});
-
-test("invalid mobile shapes and lengths are rejected", () => {
-  for (const [mobile, countryCode] of [
-    ["12345", "65"],
-    ["123456789012345", "65"],
-    ["91abc123", "91"],
-    ["+971501234567", "65"],
-    ["12345678901234", "971"]
-  ]) {
-    assert.throws(() => normalizeConnectMobile(mobile, countryCode), ConnectMobileValidationError);
-  }
 });
 
 test("Connect account freshness compares identity sets, not presentation fields or order", () => {
@@ -194,24 +191,25 @@ test("Connect Workforce account eligibility preserves onboarding without reopeni
   }
 });
 
-test("every Connect login endpoint uses the shared input normalizer", async () => {
+test("every Connect login endpoint preserves the shared legacy input contract", async () => {
   const authRoot = resolve(here, "../../app/api/connect/auth");
   const routeNames = ["start", "verify-pin", "set-pin", "send-otp", "verify-otp"];
   for (const routeName of routeNames) {
     const source = await readFile(resolve(authRoot, routeName, "route.ts"), "utf8");
     assert.match(source, /normalizeConnectMobile\(body\.mobile, body\.countryCode\)/, routeName);
-    assert.match(source, /ConnectMobileValidationError/, routeName);
     assert.doesNotMatch(source, /\bnormalizeMobile\s*\(/, routeName);
+    assert.match(source, /Enter a valid mobile number\./, routeName);
   }
 
   const sessionSource = await readFile(resolve(authRoot, "session", "route.ts"), "utf8");
-  assert.match(sessionSource, /normalizeStoredConnectMobile\([\s\S]*?session\.mobile_number_format/);
+  assert.match(sessionSource, /findConnectSessionAccounts\(session\.country_code, session\.mobile_number\)/);
+  assert.doesNotMatch(sessionSource, /mobile_number_format|normalizeStoredConnectMobile/);
   const authSource = await readFile(resolve(here, "connect-auth.ts"), "utf8");
   assert.match(authSource, /from "\.\.\/\.\.\/\.\.\/\.\.\/src\/lib\/connect-session-issuance"/);
   assert.match(authSource, /eligibleConnectWorkforceAccount/);
   assert.match(authSource, /deleted_at,deactivated_at/);
-  assert.match(authSource, /connectMobileCountryFilter\(countryCode\)/);
-  assert.match(authSource, /countryCode !== "91"/);
+  assert.match(authSource, /mobile_country_code\.eq\.\$\{countryCode\},mobile_country_code\.is\.null/);
+  assert.doesNotMatch(authSource, /connectMobileCountryFilter\(countryCode\)|countryCode !== "91"/);
 });
 
 test("root and Connect login surfaces enforce the same mobile contract", async () => {
@@ -219,6 +217,7 @@ test("root and Connect login surfaces enforce the same mobile contract", async (
   assert.equal(normalizeRootSupportedCountryCode("+65"), "65");
   assert.throws(() => normalizeRootSupportedCountryCode("92"));
   assert.deepEqual(normalizeRootConnectMobile("6591234567", "65"), normalizeConnectMobile("6591234567", "65"));
+  assert.deepEqual(normalizeRootProfileEditMobile("91234567", "65"), normalizeProfileEditMobile("91234567", "65"));
   assert.deepEqual(
     normalizeRootStoredConnectMobile("6591234567", "65", "canonical"),
     normalizeStoredConnectMobile("6591234567", "65", "canonical")
@@ -228,8 +227,8 @@ test("root and Connect login surfaces enforce the same mobile contract", async (
   for (const routeName of ["start", "verify-pin", "set-pin", "send-otp", "verify-otp"]) {
     const source = await readFile(resolve(rootAuthRoot, routeName, "route.ts"), "utf8");
     assert.match(source, /normalizeConnectMobile\(body\.mobile, body\.countryCode\)/, routeName);
-    assert.match(source, /ConnectMobileValidationError/, routeName);
     assert.doesNotMatch(source, /\bnormalizeMobile\s*\(/, routeName);
+    assert.match(source, /Enter a valid mobile number\./, routeName);
   }
 
   const rootAuthSource = await readFile(resolve(here, "../../../../src/lib/connect-auth.ts"), "utf8");
@@ -237,8 +236,8 @@ test("root and Connect login surfaces enforce the same mobile contract", async (
   assert.match(rootAuthSource, /from "@\/lib\/connect-session-issuance"/);
   assert.match(rootAuthSource, /eligibleConnectWorkforceAccount/);
   assert.match(rootAuthSource, /deleted_at, deactivated_at/);
-  assert.match(rootAuthSource, /connectMobileCountryFilter\(countryCode\)/);
-  assert.match(rootAuthSource, /countryCode === "91"/);
+  assert.match(rootAuthSource, /mobile_country_code\.eq\.\$\{countryCode\},mobile_country_code\.is\.null/);
+  assert.doesNotMatch(rootAuthSource, /connectMobileCountryFilter\(countryCode\)|countryCode === "91"/);
 });
 
 test("credential routes revalidate account identity before activating a session", async () => {
@@ -285,25 +284,16 @@ test("credential routes revalidate account identity before activating a session"
   assert.match(deviceBindingSource, /\.delete\(\)[\s\S]*?\.in\("id", mutation\.createdBindingIds\)/);
 });
 
-test("root OTP account discovery never treats legacy null country codes as non-India", async () => {
+test("root OTP account discovery preserves legacy null-country matching", async () => {
   const rootAuthRoot = resolve(here, "../../../../src/app/api/connect/auth");
   for (const [routeName, expectedAccountQueries] of [["send-otp", 3], ["verify-otp", 2]]) {
     const source = await readFile(resolve(rootAuthRoot, routeName, "route.ts"), "utf8");
-    assert.match(source, /connectMobileCountryFilter/);
-    assert.match(source, /const mobileCountryFilter = connectMobileCountryFilter\(countryCode\)/);
+    assert.doesNotMatch(source, /connectMobileCountryFilter/);
     assert.equal(
-      (source.match(/\.or\(mobileCountryFilter\)/g) ?? []).length,
+      (source.match(/mobile_country_code\.eq\.\$\{countryCode\},mobile_country_code\.is\.null/g) ?? []).length,
       expectedAccountQueries,
-      `${routeName} must scope every account query by the selected country`
+      `${routeName} must preserve every existing account query`
     );
-    assert.equal(
-      (source.match(/countryCode === "91"/g) ?? []).length,
-      expectedAccountQueries,
-      `${routeName} must permit each legacy no-country fallback only for India`
-    );
-    assert.doesNotMatch(
-      source,
-      /mobile_country_code\.eq\.\$\{countryCode\},mobile_country_code\.is\.null/
-    );
+    assert.doesNotMatch(source, /countryCode === "91"/);
   }
 });
