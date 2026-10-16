@@ -1,3 +1,4 @@
+import {betaUanProgress} from './beta-uan.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {betaLearning,betaTaskComplete,betaInboxActions,verifiedBetaSnapshot,verificationState} from './beta-verification.ts';
@@ -62,12 +63,12 @@ test('beta inbox stays usable before migration; messages never masquerade as BGC
  const db={from(table){let rows=[...(tables[table]??[])],single=false;const q={
   select(columns){assert.ok(!columns.includes('action_urls'),'Must tolerate the pre-migration inbox schema');return q},
   eq(key,value){rows=rows.filter(row=>row[key]===value);return q},is(key,value){rows=rows.filter(row=>(row[key]??null)===value);return q},
-  order(){return q},limit(){return q},maybeSingle(){single=true;return q},
+  or(){return q},order(){return q},limit(){return q},maybeSingle(){single=true;return q},
   then(resolve,reject){return Promise.resolve({data:single?rows[0]??null:rows,error:table.startsWith('workforce_beta_verification_')?{code:'PGRST205'}:null}).then(resolve,reject)}
  };return q;}};
  const mocks={
   'next/server':{NextResponse:{json:(body,options)=>Response.json(body,options)}},
-  '@/lib/beta-verification':verification,'@/lib/beta-journey':{betaJourney},'@/lib/onboarding-action-url':actionUrls,
+  '@/lib/beta-uan':{betaUanProgress},'@/lib/beta-verification':verification,'@/lib/beta-journey':{betaJourney},'@/lib/onboarding-action-url':actionUrls,
   '@/lib/beta-exit-notice':{},'@/lib/amazon-pilot':{},'@/lib/partner-onboarding':{},'@/lib/workforce-joining':{},
   '@/lib/connect-auth':{requireConnectAccount:async()=>({id:'beta',companyId:'company',workspace:'workforce',activationOnly:true,onboardingBeta:true,activationStage:'amazon_email_pilot:sent'})},
   '@/lib/supabase-admin':{supabaseAdmin:db}

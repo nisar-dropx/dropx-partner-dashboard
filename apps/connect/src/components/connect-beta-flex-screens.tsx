@@ -47,7 +47,7 @@ export function ConnectBetaFlexScreens({ step, language, title, context = {} }: 
         <img src={src} alt={alt} loading="lazy" decoding="async"/>
         <span><Expand size={16}/>{copy.enlarge}</span>
       </button>
-      <div className={styles.exampleNotes}><BetaPersonalGuide step={step} language={language} context={context} compact/>{pointers()}<p className={styles.exampleNotice}>{copy.note}</p></div>
+      <div className={styles.exampleNotes}>{pointers()}<p className={styles.exampleNotice}>{copy.note}</p></div>
     </div>
     <dialog ref={dialog} className={styles.screenDialog} aria-labelledby={dialogTitleId} aria-describedby={noteId} onClose={close} onClick={event => { if (event.target === dialog.current) close(); }}>
       <header><div><small>{copy.screen}</small><h3 id={dialogTitleId}>{title}</h3></div><button type="button" aria-label={copy.close} onClick={close}><X size={22}/></button></header>
