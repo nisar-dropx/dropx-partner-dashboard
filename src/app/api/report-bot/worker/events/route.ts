@@ -50,7 +50,10 @@ export async function POST(request: Request) {
       }
       const me = raw.me && typeof raw.me === "object" ? raw.me as { id?: unknown; name?: unknown } : null;
       const number = typeof me?.id === "string" ? me.id.split("@")[0].split(":")[0] : null;
+      // A hosted worker announces its own https address, so nobody has to copy it into the portal.
+      const publicUrl = typeof raw.public_url === "string" && /^https:\/\/[A-Za-z0-9.-]+(:\d+)?\/?$/.test(raw.public_url) ? raw.public_url.replace(/\/+$/, "") : null;
       const result = await db.from("report_bot_settings").update({
+        ...(publicUrl ? { worker_url: publicUrl } : {}),
         connection_state: state,
         connected_number: state === "open" ? number : state === "logged_out" ? null : settings.connected_number,
         connected_name: state === "open" ? text(me?.name, 80) : state === "logged_out" ? null : settings.connected_name,
@@ -114,6 +117,7 @@ export async function POST(request: Request) {
       message_at: new Date(Math.min(timestampMs, Date.now())).toISOString(),
       media_ref: mediaRef,
       media_mime: text(media?.mime, 100),
+      wa_message_record: typeof raw.message_record === "string" && raw.message_record.length <= 100_000 ? raw.message_record : null,
       media_size: Number.isInteger(media?.size) ? media!.size as number : null
     }, { onConflict: "group_id,wa_message_id", ignoreDuplicates: true });
     if (inserted.error) return NextResponse.json({ error: "Could not save message" }, { status: 500 });

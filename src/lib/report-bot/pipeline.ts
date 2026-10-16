@@ -31,7 +31,7 @@ type RequestRow = {
 type SubmissionRow = {
   id: string; company_id: string; group_id: string; request_id: string | null; report_type_id: string | null; wa_message_id: string;
   sender_jid: string | null; sender_name: string | null; caption: string | null; message_at: string; media_ref: string | null;
-  media_mime: string | null; attempts: number;
+  media_mime: string | null; wa_message_record: string | null; attempts: number;
 };
 type OutboxRow = {
   id: string; company_id: string; group_id: string; kind: string; body: string; quoted_message_id: string | null; quoted_participant: string | null;
@@ -250,7 +250,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         must(await db.from("report_bot_submissions").update({ status: "skipped", status_reason: "No report was scheduled for this group that day.", locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Skip submission");
         continue;
       }
-      const image = await fetchReportImage(settings, submission.media_ref);
+      const image = await fetchReportImage(settings, submission.media_ref, submission.wa_message_record);
       const mime = sniffImageType(image);
       if (!mime) throw new AiError("The stored image could not be read.", false);
       const analysis = await analyseReportImage(settings, {

@@ -25,7 +25,7 @@ export type WorkerGroup = { id: string; subject: string; size: number; announce:
 
 function workerBaseUrl(settings: ReportBotSettings) {
   const raw = settings.worker_url?.trim();
-  if (!raw) throw new WorkerError("Worker URL is not set. Add it under Report Bot → Connection.", 0, false, true);
+  if (!raw) throw new WorkerError("The worker isn't connected yet. Start it from Settings → Report Bot setup.", 0, false, true);
   let url: URL;
   try {
     url = new URL(raw);
@@ -40,7 +40,7 @@ function workerBaseUrl(settings: ReportBotSettings) {
 }
 
 export async function workerRequest<T>(settings: ReportBotSettings, path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
-  if (!settings.worker_token) throw new WorkerError("Worker token is not generated yet.", 0, false, true);
+  if (!settings.worker_token) throw new WorkerError("No worker token yet. Open Settings → Report Bot setup once to create it.", 0, false, true);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 15000);
   try {
@@ -75,14 +75,20 @@ export async function workerRequest<T>(settings: ReportBotSettings, path: string
   }
 }
 
-export async function workerMedia(settings: ReportBotSettings, ref: string) {
-  if (!settings.worker_token) throw new WorkerError("Worker token is not generated yet.", 0, false, true);
+/**
+ * Image bytes from the worker. `record` is the saved WhatsApp message, which lets a
+ * freshly restarted worker (empty cache) download the image from WhatsApp again.
+ */
+export async function workerMedia(settings: ReportBotSettings, ref: string, record: string | null) {
+  if (!settings.worker_token) throw new WorkerError("No worker token yet. Open Settings → Report Bot setup once to create it.", 0, false, true);
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(ref)) throw new WorkerError("Invalid media reference.", 400, false);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await fetch(`${workerBaseUrl(settings)}/media/${ref}`, {
-      headers: { authorization: `Bearer ${settings.worker_token}` },
+    const response = await fetch(`${workerBaseUrl(settings)}/media`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${settings.worker_token}`, "content-type": "application/json" },
+      body: JSON.stringify({ ref, record }),
       cache: "no-store",
       signal: controller.signal
     });

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
+const statelessWorker = await readFile(new URL("../../../supabase/migrations/20261016140000_report_bot_stateless_worker.sql", import.meta.url), "utf8");
 const noImageStorage = await readFile(new URL("../../../supabase/migrations/20261016120000_report_bot_no_image_storage.sql", import.meta.url), "utf8");
 const geminiDefault = await readFile(new URL("../../../supabase/migrations/20261016100000_report_bot_gemini_default.sql", import.meta.url), "utf8");
 const COMPANY_A = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -18,8 +19,31 @@ async function setup() {
   await db.exec(migration);
   await db.exec(geminiDefault);
   await db.exec(noImageStorage);
+  await db.exec(statelessWorker);
   return db;
 }
+
+test("the WhatsApp login store is per company, private to the server, and message records are bounded", async () => {
+  const db = await setup();
+  try {
+    await db.query("insert into public.report_bot_wa_auth (company_id, key, value) values ($1, 'creds', '{}'), ($2, 'creds', '{}')", [COMPANY_A, COMPANY_B]);
+    await assert.rejects(db.query("insert into public.report_bot_wa_auth (company_id, key, value) values ($1, 'creds', '{}')", [COMPANY_A]), /duplicate key/);
+    const upsert = await db.query("insert into public.report_bot_wa_auth (company_id, key, value) values ($1, 'creds', '{\"v\":2}') on conflict (company_id, key) do update set value = excluded.value returning value", [COMPANY_A]);
+    assert.equal(upsert.rows[0].value, '{"v":2}');
+    for (const role of ["anon", "authenticated"]) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(db.query("select * from public.report_bot_wa_auth"), /permission denied/);
+      await db.exec("reset role");
+    }
+    const groupId = await seedGroup(db, COMPANY_A, "120363000000000001@g.us");
+    await assert.rejects(
+      db.query("insert into public.report_bot_submissions (company_id, group_id, wa_message_id, message_at, media_ref, wa_message_record) values ($1, $2, 'BIG', now(), 'ref12345678', repeat('x', 100001))", [COMPANY_A, groupId]),
+      /check constraint/
+    );
+  } finally {
+    await db.close();
+  }
+});
 
 test("existing rows on the old untouched default move to free Gemini; deliberate choices stay", async () => {
   const db = new PGlite();

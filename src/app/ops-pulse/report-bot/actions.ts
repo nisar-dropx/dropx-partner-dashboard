@@ -23,6 +23,10 @@ type Flash = { error?: string; notice?: string; token?: string };
 
 function finish(tab: string, flash: Flash): never {
   cookies().set(FLASH_COOKIE, JSON.stringify(flash), { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+  // Connection and settings live on the setup page (Settings → Report Bot setup).
+  if (tab === "worker") redirect("/report-bot/setup#worker");
+  if (tab === "connection") redirect("/report-bot/setup#whatsapp");
+  if (tab === "settings") redirect("/report-bot/setup");
   redirect(`/report-bot?tab=${TABS.has(tab) ? tab : "today"}`);
 }
 
@@ -135,7 +139,7 @@ export async function saveBotSettings(form: FormData) {
       updated_by: authorization.userId,
       updated_at: new Date().toISOString()
     };
-    if (mode === "live" && (!previous.worker_url || !previous.worker_token)) throw new Error("Connect the worker under Connection before switching to Live.");
+    if (mode === "live" && (!previous.worker_url || !previous.worker_token)) throw new Error("Start the worker (step 1 of Report Bot setup) before switching to Live.");
     check(await reportBotDb().from("report_bot_settings").update(update).eq("company_id", companyId), "Save settings");
     // A settings fix (key, model, worker) is the only thing blocked images wait for.
     check(await reportBotDb().from("report_bot_submissions").update({ status: "queued", next_attempt_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -151,7 +155,7 @@ export async function saveBotSettings(form: FormData) {
 }
 
 export async function saveWorkerUrl(form: FormData) {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("worker", async ({ companyId }) => {
     const raw = field(form, "worker_url").replace(/\/+$/, "");
     let url: URL;
     try {
@@ -167,7 +171,7 @@ export async function saveWorkerUrl(form: FormData) {
 }
 
 export async function rotateWorkerToken() {
-  await mutate("connection", async ({ companyId }) => {
+  await mutate("worker", async ({ companyId }) => {
     await loadReportBotSettings(companyId);
     const token = generateWorkerToken();
     check(await reportBotDb().from("report_bot_settings").update({
