@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "accounting-html-worker",
+  "account_id": "ab2dba58727809ae8bf0a21edb5fe7b8",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "browser": { "binding": "BROWSER" },
+  "durable_objects": { "bindings": [{ "name": "ACCOUNTING", "class_name": "AccountingSession" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AccountingSession"] }],
+  "vars": {
+    "COMPANY_ID": "43866344-b550-4e8a-9a2d-9d23f3d8a997",
+    "COCLOUD_URL": "https://app.cocloud.in/",
+    "TALLY_HTML_HOST": "cloud718.cocloud.in"
+  },
+  "observability": { "enabled": true },
+  "limits": { "cpu_ms": 60000 }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "dropx-accounting-html-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "dev": "wrangler dev --port 8787",
+    "check": "wrangler deploy --dry-run --outdir dist",
+    "format:check": "prettier --check src test",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
+    "fast-xml-parser": "5.11.2"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10",
+    "wrangler": "4.151.1"
+  }
+}
