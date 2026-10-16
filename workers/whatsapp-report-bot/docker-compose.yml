@@ -7,6 +7,7 @@ services:
       WORKER_TOKEN: "${WORKER_TOKEN}"
       DEVICE_NAME: "${DEVICE_NAME:-DropX Report Bot}"
       MEDIA_TTL_HOURS: "${MEDIA_TTL_HOURS:-48}"
+      MESSAGE_TTL_DAYS: "${MESSAGE_TTL_DAYS:-30}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
       # Holds the WhatsApp session. Losing it means linking the number again.

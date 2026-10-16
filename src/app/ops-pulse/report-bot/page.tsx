@@ -9,7 +9,7 @@ import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { canSeeGroup, REPORT_BOT_PAGE } from "@/lib/report-bot/access";
-import { formatClock, localClock, type AnalysisCheck } from "@/lib/report-bot/logic";
+import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from "@/lib/report-bot/logic";
 import { aiKeyConfigured, aiKeyName, aiProviderLabel, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import {
   approveFeedback,
@@ -52,7 +52,7 @@ type ScheduleRow = {
 type SubmissionRow = {
   id: string; group_id: string; sender_name: string | null; sender_jid: string | null; caption: string | null; message_at: string;
   status: string; status_reason: string | null; verdict: string | null; confidence: number | null; feedback_text: string | null;
-  storage_path: string | null; ai_result: { checks?: AnalysisCheck[]; extracted_summary?: string } | null; report_type_id: string | null;
+  media_ref: string | null; ai_result: { checks?: AnalysisCheck[]; extracted_summary?: string; extracted_fields?: ExtractedField[] } | null; report_type_id: string | null;
 };
 
 function readFlash() {
@@ -248,7 +248,7 @@ function SubmissionTable({ rows, groupName, reportName, timeZone, title }: { row
                 <td>{row.report_type_id ? reportName.get(row.report_type_id) ?? "-" : "-"}</td>
                 <td><Status value={row.status} />{row.status_reason ? <div className="subtle" style={{ maxWidth: 280 }}>{row.status_reason}</div> : null}</td>
                 <td>{row.verdict ? `${row.verdict.replace("_", " ")}${row.confidence !== null ? ` · ${Math.round(Number(row.confidence) * 100)}%` : ""}` : "-"}</td>
-                <td>{row.storage_path ? <a href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">Open</a> : "-"}</td>
+                <td>{row.media_ref ? <a href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">Open</a> : "-"}</td>
               </tr>
             )) : <tr><td className="empty-cell" colSpan={7}>No images yet.</td></tr>}
           </tbody>
@@ -283,10 +283,18 @@ async function ReviewTab({ companyId, groupIds, groupName, reportName, settings,
                   <StatusPill status={row.verdict === "pass" ? "Looks good" : row.verdict === "fail" ? "Failed checks" : "Needs review"} />
                   {row.confidence !== null ? <span className="subtle">{Math.round(Number(row.confidence) * 100)}% confident</span> : null}
                   {row.report_type_id ? <span className="subtle">{reportName.get(row.report_type_id)}</span> : null}
-                  {row.storage_path ? <a href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">Open image</a> : null}
+                  {row.media_ref ? <a href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">Open image</a> : null}
                 </div>
                 {row.caption ? <p className="subtle">Caption: {row.caption}</p> : null}
                 {row.ai_result?.extracted_summary ? <p>{row.ai_result.extracted_summary}</p> : null}
+                {row.ai_result?.extracted_fields?.length ? (
+                  <dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 12px", margin: 0 }}>
+                    {row.ai_result.extracted_fields.map((item, index) => [
+                      <dt key={`l${index}`} className="subtle">{item.label}</dt>,
+                      <dd key={`v${index}`} style={{ margin: 0 }}><strong>{item.value}</strong></dd>
+                    ])}
+                  </dl>
+                ) : null}
                 {row.ai_result?.checks?.length ? (
                   <ul className="subtle-list">
                     {row.ai_result.checks.map((item, index) => <li key={index}><strong>{item.status.toUpperCase()}</strong> · {item.rule}{item.note ? ` - ${item.note}` : ""}</li>)}
@@ -320,7 +328,7 @@ async function ReviewTab({ companyId, groupIds, groupName, reportName, settings,
                   <td>{groupName.get(row.group_id) ?? "-"}</td>
                   <td>{sender(row)}</td>
                   <td><Status value={row.status} /><div className="subtle" style={{ maxWidth: 360 }}>{row.status_reason}</div></td>
-                  <td>{row.storage_path ? <a href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">Open</a> : "-"}</td>
+                  <td>{row.media_ref ? <a href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">Open</a> : "-"}</td>
                   {canEdit ? (
                     <td style={{ display: "flex", gap: 6 }}>
                       <form action={reanalyseSubmission}><input type="hidden" name="id" value={row.id} /><button className="button secondary" type="submit">Retry</button></form>

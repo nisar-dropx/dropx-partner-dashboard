@@ -1,7 +1,6 @@
 import "server-only";
-import { randomUUID } from "crypto";
-import sharp from "sharp";
 import { AI_TIMEOUT_MS, AiError, analyseReportImage, type CandidateReport } from "@/lib/report-bot/ai";
+import { fetchReportImage } from "@/lib/report-bot/image";
 import {
   composeFeedback,
   decideDelivery,
@@ -17,8 +16,8 @@ import {
   sniffImageType,
   type LocalClock
 } from "@/lib/report-bot/logic";
-import { REPORT_BOT_MEDIA_BUCKET, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
-import { workerMedia, workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
+import { reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
+import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 
 type GroupRow = { id: string; company_id: string; wa_group_id: string; group_name: string | null; location_id: string | null; is_enabled: boolean; bot_in_group: boolean };
 type ScheduleRow = {
@@ -32,7 +31,7 @@ type RequestRow = {
 type SubmissionRow = {
   id: string; company_id: string; group_id: string; request_id: string | null; report_type_id: string | null; wa_message_id: string;
   sender_jid: string | null; sender_name: string | null; caption: string | null; message_at: string; media_ref: string | null;
-  media_mime: string | null; storage_bucket: string | null; storage_path: string | null; attempts: number;
+  media_mime: string | null; attempts: number;
 };
 type OutboxRow = {
   id: string; company_id: string; group_id: string; kind: string; body: string; quoted_message_id: string | null; quoted_participant: string | null;
@@ -41,7 +40,6 @@ type OutboxRow = {
 
 const MAX_SUBMISSION_ATTEMPTS = 4;
 const MAX_OUTBOX_ATTEMPTS = 5;
-const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
 function nowIso(offsetSeconds = 0) {
   return new Date(Date.now() + offsetSeconds * 1000).toISOString();
@@ -173,35 +171,6 @@ export async function markOverdue(settings: ReportBotSettings, clock: LocalClock
   }
 }
 
-async function storeSubmissionImage(settings: ReportBotSettings, submission: SubmissionRow) {
-  if (submission.storage_path) {
-    const stored = await reportBotDb().storage.from(submission.storage_bucket ?? REPORT_BOT_MEDIA_BUCKET).download(submission.storage_path);
-    if (stored.error || !stored.data) throw new Error(`Stored image could not be read: ${stored.error?.message ?? "missing"}`);
-    return new Uint8Array(await stored.data.arrayBuffer());
-  }
-  if (!submission.media_ref) throw new AiError("This message has no image attached.", false);
-  const original = await workerMedia(settings, submission.media_ref);
-  if (original.byteLength > MAX_IMAGE_BYTES) throw new AiError("The image is larger than 12 MB.", false);
-  let normalized: Uint8Array;
-  try {
-    // Normalise orientation, size and format; AI providers cap image size and reject HEIC.
-    normalized = new Uint8Array(await sharp(Buffer.from(original), { failOn: "error" })
-      .rotate()
-      .resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 85 })
-      .toBuffer());
-  } catch {
-    throw new AiError("The file is not a readable image (JPG, PNG or WEBP).", false);
-  }
-  const path = `${submission.company_id}/report-bot/${submission.id}/${randomUUID()}.jpg`;
-  const upload = await reportBotDb().storage.from(REPORT_BOT_MEDIA_BUCKET).upload(path, normalized, { contentType: "image/jpeg", upsert: false });
-  if (upload.error) throw new Error(`Image upload failed: ${upload.error.message}`);
-  must(await reportBotDb().from("report_bot_submissions").update({
-    storage_bucket: REPORT_BOT_MEDIA_BUCKET, storage_path: path, media_mime: "image/jpeg", updated_at: nowIso()
-  }).eq("id", submission.id), "Save image path");
-  return normalized;
-}
-
 async function candidatesForSubmission(settings: ReportBotSettings, submission: SubmissionRow, businessDate: string) {
   const db = reportBotDb();
   // "missed" is included: an image posted before midnight but analysed after the
@@ -281,7 +250,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         must(await db.from("report_bot_submissions").update({ status: "skipped", status_reason: "No report was scheduled for this group that day.", locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Skip submission");
         continue;
       }
-      const image = await storeSubmissionImage(settings, submission);
+      const image = await fetchReportImage(settings, submission.media_ref);
       const mime = sniffImageType(image);
       if (!mime) throw new AiError("The stored image could not be read.", false);
       const analysis = await analyseReportImage(settings, {

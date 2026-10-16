@@ -78,6 +78,15 @@ test("AI output is validated and never trusted blindly", () => {
   const meme = parseAnalysis({ is_report: false, matched_report_type_id: candidates[0], verdict: "pass", confidence: 0.99, checks: [], extracted_summary: "", feedback: "nice" }, candidates);
   assert.equal(meme.verdict, "not_report");
   assert.equal(meme.matched_report_type_id, null);
+  // Extracted values are kept as bounded text; junk and empty entries are dropped, and a non-report keeps none.
+  const fields = parseAnalysis({
+    is_report: true, matched_report_type_id: candidates[0], verdict: "pass", confidence: 0.9, checks: [], extracted_summary: "", feedback: "ok",
+    extracted_fields: [{ label: "Deposit date", value: "15-10-2026" }, { label: "Amount", value: "₹12,400" }, { label: "", value: "x" }, "junk", ...Array(30).fill({ label: "n", value: "1" })]
+  }, candidates).extracted_fields;
+  assert.deepEqual(fields.slice(0, 2), [{ label: "Deposit date", value: "15-10-2026" }, { label: "Amount", value: "₹12,400" }]);
+  assert.ok(fields.length <= 20);
+  assert.deepEqual(meme.extracted_fields, []);
+  assert.deepEqual(parseAnalysis({ is_report: true, matched_report_type_id: null, verdict: "pass", confidence: 1, checks: [], extracted_summary: "", feedback: "ok" }, [candidates[0]]).extracted_fields, [], "a model that omits the field still parses");
   assert.throws(() => parseAnalysis("not json", candidates));
   assert.throws(() => parseAnalysis({ verdict: "great" }, candidates), /unknown verdict/);
   assert.throws(() => parseAnalysis([], candidates), /JSON object/);

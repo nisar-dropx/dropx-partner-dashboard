@@ -6,6 +6,7 @@ import path from "node:path";
 import pino from "pino";
 import {
   Browsers,
+  BufferJSON,
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
@@ -39,7 +40,10 @@ const MEDIA_DIR = path.join(DATA_DIR, "media");
 const EVENTS_DIR = path.join(DATA_DIR, "events");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const SENT_FILE = path.join(DATA_DIR, "sent-refs.json");
+// Image bytes are a short cache. The small message record is kept longer so the
+// image can be downloaded from WhatsApp again when someone opens it later.
 const MEDIA_TTL_HOURS = Math.max(Number(process.env.MEDIA_TTL_HOURS || 48), 1);
+const MESSAGE_TTL_DAYS = Math.max(Number(process.env.MESSAGE_TTL_DAYS || 30), 1);
 const MAX_MEDIA_BYTES = Math.max(Number(process.env.MAX_MEDIA_BYTES || 12 * 1024 * 1024), 1024 * 1024);
 // Matches the portal's cut-off for accepting a message as a new submission.
 const MAX_MESSAGE_AGE_SECONDS = 6 * 60 * 60;
@@ -180,6 +184,7 @@ async function forwardMessage(msg) {
   const ref = newRef();
   await writeFile(path.join(MEDIA_DIR, `${ref}.bin`), buffer);
   await writeFile(path.join(MEDIA_DIR, `${ref}.meta`), JSON.stringify({ mime: media.mime, size: buffer.length }));
+  await writeFile(path.join(MEDIA_DIR, `${ref}.msg`), JSON.stringify(msg, BufferJSON.replacer));
   await queue.push({
     type: "message",
     group_id: groupId,
@@ -397,10 +402,22 @@ async function handle(req, res) {
   const media = url.pathname.match(/^\/media\/([A-Za-z0-9_-]+)$/);
   if (req.method === "GET" && media && MEDIA_REF.test(media[1])) {
     const file = path.join(MEDIA_DIR, `${media[1]}.bin`);
-    const info = await stat(file).catch(() => null);
-    if (!info) return json(res, 404, { error: "Media not found or expired." });
     const meta = await readJson(path.join(MEDIA_DIR, `${media[1]}.meta`), {});
-    const bytes = await readFile(file);
+    let bytes = (await stat(file).catch(() => null)) ? await readFile(file) : null;
+    if (!bytes) {
+      // Cache expired: download it from WhatsApp again using the saved message record.
+      const raw = await readFile(path.join(MEDIA_DIR, `${media[1]}.msg`), "utf8").catch(() => null);
+      if (!raw) return json(res, 404, { error: "This image is older than the worker keeps (MESSAGE_TTL_DAYS)." });
+      if (!session.sock || session.state !== "open") return json(res, 503, { error: "WhatsApp is not connected, so the image cannot be fetched right now." });
+      try {
+        bytes = await downloadMediaMessage(JSON.parse(raw, BufferJSON.reviver), "buffer", {}, { logger: baileysLogger, reuploadRequest: session.sock.updateMediaMessage });
+      } catch (error) {
+        logger.warn({ err: error, ref: media[1] }, "re-download from WhatsApp failed");
+        return json(res, 404, { error: "WhatsApp no longer has this image (deleted or expired on the sender's phone)." });
+      }
+      if (!bytes?.length) return json(res, 404, { error: "WhatsApp returned an empty image." });
+      await writeFile(file, bytes).catch(() => {});
+    }
     res.writeHead(200, { "content-type": typeof meta.mime === "string" ? meta.mime : "application/octet-stream", "content-length": bytes.length, "cache-control": "no-store" });
     return res.end(bytes);
   }
@@ -478,7 +495,13 @@ async function main() {
   server.listen(PORT, () => logger.info({ port: PORT }, "report bot worker listening"));
   deliverLoop();
   configLoop();
-  setInterval(() => pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000).catch(() => {}), 3600 * 1000);
+  const prune = () => Promise.all([
+    pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000, Date.now(), ".bin"),
+    pruneOlderThan(MEDIA_DIR, MESSAGE_TTL_DAYS * 86400 * 1000, Date.now(), ".msg"),
+    pruneOlderThan(MEDIA_DIR, MESSAGE_TTL_DAYS * 86400 * 1000, Date.now(), ".meta")
+  ]).catch(() => {});
+  setInterval(prune, 3600 * 1000);
+  prune();
   if (await hasSavedSession()) await startSocket({ method: "qr" });
 
   const shutdown = () => {

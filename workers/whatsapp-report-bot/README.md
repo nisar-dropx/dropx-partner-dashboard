@@ -18,7 +18,10 @@ WhatsApp groups ⇄ worker (this) ──events──▶ ops portal /api/report-b
 - Only groups enabled in the portal are read. Private chats are never read or forwarded.
 - Only images (photos, or image files sent as documents) are forwarded. Text, voice and video are ignored.
 - The worker only sends to enabled groups, and only while the portal is in **Live** mode.
-- Images are kept for `MEDIA_TTL_HOURS` (48 h) so the portal can fetch them, then deleted.
+- The portal never stores images, only the text it extracts. This worker keeps the image bytes for
+  `MEDIA_TTL_HOURS` (48 h) as a cache, and a small message record for `MESSAGE_TTL_DAYS` (30 days) so a
+  reviewer opening an older report gets it re-downloaded from WhatsApp. That works while WhatsApp still
+  has the media; after that the image is gone but its extracted values remain in the portal.
 
 ## Deploy (Docker host with a domain)
 

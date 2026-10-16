@@ -5,6 +5,7 @@ export type Verdict = "pass" | "fail" | "needs_review" | "not_report";
 export type CheckStatus = "pass" | "fail" | "unclear";
 
 export type AnalysisCheck = { rule: string; status: CheckStatus; note: string };
+export type ExtractedField = { label: string; value: string };
 export type Analysis = {
   is_report: boolean;
   matched_report_type_id: string | null;
@@ -12,6 +13,8 @@ export type Analysis = {
   confidence: number;
   checks: AnalysisCheck[];
   extracted_summary: string;
+  /** Key values read from the image. Kept as text so the image itself never needs storing. */
+  extracted_fields: ExtractedField[];
   feedback: string;
 };
 
@@ -126,7 +129,7 @@ export function analysisJsonSchema() {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["is_report", "matched_report_type_id", "verdict", "confidence", "checks", "extracted_summary", "feedback"],
+    required: ["is_report", "matched_report_type_id", "verdict", "confidence", "checks", "extracted_summary", "extracted_fields", "feedback"],
     properties: {
       is_report: { type: "boolean", description: "True only when the image is one of the candidate report types." },
       matched_report_type_id: { anyOf: [{ type: "string" }, { type: "null" }], description: "id of the matching candidate report type, or null." },
@@ -146,6 +149,16 @@ export function analysisJsonSchema() {
         }
       },
       extracted_summary: { type: "string", description: "What the image shows, in one or two short sentences." },
+      extracted_fields: {
+        type: "array",
+        description: "Key values visible in the image that the rules refer to (dates, amounts, codes, counts, station), exactly as shown. Empty when not a report.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["label", "value"],
+          properties: { label: { type: "string" }, value: { type: "string" } }
+        }
+      },
       feedback: { type: "string", description: "Short message to the person who posted the image." }
     }
   };
@@ -193,6 +206,14 @@ export function parseAnalysis(raw: unknown, candidateIds: string[]): Analysis {
     confidence,
     checks,
     extracted_summary: truncateText(String(record.extracted_summary ?? ""), 600),
+    // Bounded so a chatty model can't bloat the database row.
+    extracted_fields: isReport ? (Array.isArray(record.extracted_fields) ? record.extracted_fields : []).slice(0, 20).flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const field = entry as Record<string, unknown>;
+      const label = truncateText(String(field.label ?? ""), 60);
+      const value = truncateText(String(field.value ?? ""), 200);
+      return label && value ? [{ label, value }] : [];
+    }) : [],
     feedback: truncateText(String(record.feedback ?? ""), 2000)
   };
 }

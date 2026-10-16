@@ -77,7 +77,10 @@ test("media pruning removes only expired files", async () => {
     await writeFile(path.join(directory, "new.bin"), "x");
     const old = new Date(Date.now() - 3 * 3600 * 1000);
     await utimes(path.join(directory, "old.bin"), old, old);
-    assert.equal(await pruneOlderThan(directory, 2 * 3600 * 1000), 1);
+    await writeFile(path.join(directory, "old.msg"), "x");
+    await utimes(path.join(directory, "old.msg"), old, old);
+    assert.equal(await pruneOlderThan(directory, 2 * 3600 * 1000, Date.now(), ".bin"), 1, "only image bytes expire on the short cache");
+    assert.equal(await pruneOlderThan(directory, 2 * 3600 * 1000, Date.now(), ".msg"), 1, "message records expire on their own schedule");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

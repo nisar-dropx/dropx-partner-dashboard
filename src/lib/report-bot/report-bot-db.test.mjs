@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
+const noImageStorage = await readFile(new URL("../../../supabase/migrations/20261016120000_report_bot_no_image_storage.sql", import.meta.url), "utf8");
 const geminiDefault = await readFile(new URL("../../../supabase/migrations/20261016100000_report_bot_gemini_default.sql", import.meta.url), "utf8");
 const COMPANY_A = "aaaaaaaa-0000-0000-0000-000000000001";
 const COMPANY_B = "bbbbbbbb-0000-0000-0000-000000000002";
@@ -16,6 +17,7 @@ async function setup() {
   `);
   await db.exec(migration);
   await db.exec(geminiDefault);
+  await db.exec(noImageStorage);
   return db;
 }
 
@@ -71,6 +73,8 @@ test("migration applies, enforces shape and keeps tables away from browser roles
 
     await seedSubmission(db, COMPANY_A, groupId, "MSG-1");
     await assert.rejects(seedSubmission(db, COMPANY_A, groupId, "MSG-1"), /duplicate key/, "a redelivered WhatsApp message is stored once");
+    const columns = (await db.query("select column_name from information_schema.columns where table_name = 'report_bot_submissions'")).rows.map((row) => row.column_name);
+    assert.ok(!columns.includes("storage_path") && !columns.includes("storage_bucket"), "no image storage columns remain");
 
     for (const role of ["anon", "authenticated"]) {
       await db.exec(`set role ${role}`);

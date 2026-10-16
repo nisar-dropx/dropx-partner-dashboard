@@ -1,25 +1,35 @@
 import { NextResponse } from "next/server";
 import { canSeeGroup, reportBotApiAuthorization } from "@/lib/report-bot/access";
-import { reportBotDb } from "@/lib/report-bot/settings";
+import { AiError } from "@/lib/report-bot/ai";
+import { fetchReportImage } from "@/lib/report-bot/image";
+import { loadReportBotSettings, reportBotDb } from "@/lib/report-bot/settings";
+import { WorkerError } from "@/lib/report-bot/worker-client";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
-/** Short-lived signed link to a stored report image, after the same scope check as the page. */
+/** Shows a report image fetched live from WhatsApp (via the worker); the portal never stores it. */
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
   const authorization = await reportBotApiAuthorization("access");
   if (!authorization) return NextResponse.json({ error: "Access denied" }, { status: 403 });
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const db = reportBotDb();
-  const submission = await db.from("report_bot_submissions")
-    .select("storage_bucket,storage_path, group:report_bot_groups(location_id)")
+  const submission = await reportBotDb().from("report_bot_submissions")
+    .select("media_ref, group:report_bot_groups(location_id)")
     .eq("company_id", authorization.companyId!)
     .eq("id", params.id)
     .maybeSingle();
-  const row = submission.data as { storage_bucket: string | null; storage_path: string | null; group: { location_id: string | null } | null } | null;
-  if (!row?.storage_path || !row.storage_bucket || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) {
+  const row = submission.data as { media_ref: string | null; group: { location_id: string | null } | null } | null;
+  if (!row?.media_ref || !canSeeGroup(authorization, { location_id: row.group?.location_id ?? null })) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  const signed = await db.storage.from(row.storage_bucket).createSignedUrl(row.storage_path, 120);
-  if (signed.error || !signed.data?.signedUrl) return NextResponse.json({ error: "Image unavailable" }, { status: 502 });
-  return NextResponse.redirect(signed.data.signedUrl, { status: 302, headers: { "cache-control": "private, no-store" } });
+  try {
+    const image = await fetchReportImage(await loadReportBotSettings(authorization.companyId!), row.media_ref);
+    return new NextResponse(Buffer.from(image), {
+      headers: { "content-type": "image/jpeg", "cache-control": "private, no-store", "x-content-type-options": "nosniff" }
+    });
+  } catch (error) {
+    const message = error instanceof WorkerError || error instanceof AiError ? error.message : "Image unavailable.";
+    const status = error instanceof WorkerError && error.unavailable ? 503 : 404;
+    return new NextResponse(message, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  }
 }

@@ -128,10 +128,11 @@ export async function writeJsonAtomic(file, value) {
   await rename(temp, file);
 }
 
-/** Deletes files in `directory` older than `maxAgeMs`; returns how many. */
-export async function pruneOlderThan(directory, maxAgeMs, now = Date.now()) {
+/** Deletes files in `directory` older than `maxAgeMs` (optionally only names ending in `suffix`); returns how many. */
+export async function pruneOlderThan(directory, maxAgeMs, now = Date.now(), suffix = "") {
   let removed = 0;
   for (const name of await readdir(directory).catch(() => [])) {
+    if (suffix && !name.endsWith(suffix)) continue;
     const file = path.join(directory, name);
     const info = await stat(file).catch(() => null);
     if (info?.isFile() && now - info.mtimeMs > maxAgeMs) {

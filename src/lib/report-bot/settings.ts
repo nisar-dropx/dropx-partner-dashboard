@@ -36,8 +36,6 @@ export type ReportBotSettings = {
   updated_at: string;
 };
 
-export const REPORT_BOT_MEDIA_BUCKET = "ops-pulse-documents";
-
 export function reportBotDb() {
   if (!supabaseAdmin) throw new Error("Report Bot is unavailable: the database service key is not configured.");
   return supabaseAdmin;
