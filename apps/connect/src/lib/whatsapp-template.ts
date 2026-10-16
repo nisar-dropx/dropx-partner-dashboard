@@ -51,6 +51,42 @@ export function extractWhatsAppTemplateVariables(components: WhatsAppTemplateCom
   return variables;
 }
 
+function mappedTemplateValue(source: string | undefined, values: Record<string, string>) {
+  if (!source) return "";
+  return values[source] ?? source;
+}
+
+export function buildConnectOtpTemplateComponents(
+  components: WhatsAppTemplateComponent[],
+  mappings: Record<string, string>,
+  values: Record<string, string>
+) {
+  const variables = extractWhatsAppTemplateVariables(components);
+  const messageComponents: Array<Record<string, unknown>> = [];
+  for (const componentType of ["header", "body"] as const) {
+    const componentVariables = variables
+      .filter((variable) => variable.component === componentType)
+      .sort((first, second) => first.position - second.position);
+    if (!componentVariables.length) continue;
+    messageComponents.push({
+      type: componentType,
+      parameters: componentVariables.map((variable) => ({
+        type: "text",
+        text: mappedTemplateValue(mappings[variable.key], values)
+      }))
+    });
+  }
+  for (const variable of variables.filter((item) => item.component === "button")) {
+    messageComponents.push({
+      type: "button",
+      sub_type: "url",
+      index: String(variable.buttonIndex ?? 0),
+      parameters: [{ type: "text", text: mappedTemplateValue(mappings[variable.key], values) }]
+    });
+  }
+  return messageComponents;
+}
+
 export function getWhatsAppTemplateHeaderMediaType(components: WhatsAppTemplateComponent[]): WhatsAppTemplateHeaderMediaType | null {
   const header = components.find((component) => component.type?.toUpperCase() === "HEADER");
   const format = header?.format?.toUpperCase();

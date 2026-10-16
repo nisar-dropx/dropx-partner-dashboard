@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GENERIC_TECHNICAL_ERROR, userFacingError } from "./user-facing-error.ts";
+import { GENERIC_TECHNICAL_ERROR, readJsonResponse, userFacingError } from "./user-facing-error.ts";
 
 test("keeps clear business guidance", () => {
   assert.equal(userFacingError("Select a regularization reason."), "Select a regularization reason.");
@@ -20,4 +20,25 @@ test("hides raw WebAuthn/DOMException messages", () => {
     "NotAllowedError"
   );
   assert.equal(userFacingError(domError, fallback), fallback);
+});
+
+test("JSON response reader preserves business errors and hides non-JSON server failures", async () => {
+  await assert.rejects(
+    readJsonResponse(
+      Response.json({ error: "ESI number is required when ESI is selected." }, { status: 400 }),
+      "Unable to save profile changes."
+    ),
+    { message: "ESI number is required when ESI is selected." }
+  );
+
+  await assert.rejects(
+    readJsonResponse(
+      new Response("<!doctype html><title>Internal Server Error</title>", {
+        status: 500,
+        headers: { "content-type": "text/html" }
+      }),
+      "Unable to save profile changes."
+    ),
+    { message: "Unable to save profile changes." }
+  );
 });

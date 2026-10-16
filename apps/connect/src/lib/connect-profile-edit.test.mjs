@@ -7,6 +7,7 @@ import {
   changedProfileEditPayload,
   createProfileEditOtpHmac,
   maskProfileEditMobile,
+  missingChangedRequiredProfileField,
   normalizeProfileEditPayload,
   profileEditLocalMobile,
   profileEditMobileHash,
@@ -14,6 +15,11 @@ import {
   verifyProfileEditOtpHmac
 } from "./connect-profile-edit.ts";
 import { normalizeConnectMobile } from "./country-codes.ts";
+import {
+  matchingProfileVerification,
+  profileEditVerificationPlan,
+  profileVerificationExpiryPatch
+} from "./profile-verification-state.ts";
 
 test("profile edit accepts only supported account types and mutable camelCase fields", () => {
   assert.equal(canonicalProfileEditType("field_executive"), "workforce");
@@ -55,6 +61,205 @@ test("changed payload excludes semantically unchanged values and preserves expli
     address: "Old address",
     is_handicapped: false
   }), { address: null });
+});
+
+test("profile edit requiredness applies only to changed fields and honors statutory exemptions", () => {
+  assert.equal(missingChangedRequiredProfileField({
+    payload: { emergency_contact_name: "Updated contact" },
+    finalValues: { emergency_contact_name: "Updated contact", esi_no: null },
+    requiredFields: ["emergency_contact_name", "esi_no"]
+  }), null, "an unrelated legacy blank must not block the edit");
+
+  assert.equal(missingChangedRequiredProfileField({
+    payload: { emergency_contact_name: null },
+    finalValues: { emergency_contact_name: null },
+    requiredFields: ["emergency_contact_name"]
+  }), "emergency_contact_name", "clearing a changed required field must still block");
+
+  assert.equal(missingChangedRequiredProfileField({
+    payload: { esi_no: null },
+    finalValues: { esi_no: null },
+    requiredFields: ["esi_no"],
+    exemptFields: ["esi_no"]
+  }), null, "registration-style ESI No selection permits an empty ESI number");
+});
+
+test("profile edit verification tags follow the exact current input and restore on revert", () => {
+  const baseline = { inputKey: "ABCDE1234F", verified: true, source: "baseline" };
+  const fresh = { inputKey: "ZZZZZ9999Z", verified: true, source: "fresh" };
+
+  assert.equal(matchingProfileVerification({
+    inputKey: "ABCDE1234F", editing: true, baseline
+  }), baseline);
+  assert.equal(matchingProfileVerification({
+    inputKey: "ZZZZZ9999Z", editing: true, baseline
+  }), undefined);
+  assert.equal(matchingProfileVerification({
+    inputKey: "ZZZZZ9999Z", editing: true, fresh, baseline
+  }), fresh);
+  assert.equal(matchingProfileVerification({
+    inputKey: "ABCDE1234F", editing: true, fresh, baseline
+  }), baseline);
+  assert.equal(matchingProfileVerification({
+    inputKey: "ABCDE1234F", editing: false, baseline
+  }), undefined, "registration must not consume the edit-only baseline");
+});
+
+test("profile edit verification plan includes saved hidden counterpart values", () => {
+  const base = {
+    panNumber: "ABCDE1234F",
+    aadhaarNumber: "123456789012",
+    bankAccountNo: "12345678",
+    ifsc: "ABCD0123456",
+    drivingLicenseNo: "KL0120200012345",
+    dateOfBirth: "1990-01-01",
+    vehicleRegistrationNo: "KL01AA1234",
+    pfUan: ""
+  };
+
+  const panChanged = profileEditVerificationPlan({
+    originalValues: base,
+    values: { ...base, panNumber: "ZZZZZ9999Z" }
+  });
+  assert.deepEqual(panChanged.requirements.map(({ kind }) => kind), ["pan", "pan_aadhaar"]);
+  assert.equal(panChanged.panAadhaarDependency, true);
+  assert.equal(panChanged.panChanged, true);
+
+  const aadhaarChanged = profileEditVerificationPlan({
+    originalValues: base,
+    values: { ...base, aadhaarNumber: "999999999999" }
+  });
+  assert.deepEqual(aadhaarChanged.requirements.map(({ kind }) => kind), ["pan_aadhaar"]);
+  assert.equal(aadhaarChanged.panChanged, false, "an unchanged hidden PAN must not require a new PAN check");
+
+  const bankChanged = profileEditVerificationPlan({
+    originalValues: base,
+    values: { ...base, bankAccountNo: "87654321" }
+  });
+  assert.deepEqual(bankChanged.requirements.map(({ kind }) => kind), ["bank"]);
+  assert.equal(bankChanged.bankDependency, true);
+
+  const dobChanged = profileEditVerificationPlan({
+    originalValues: base,
+    values: { ...base, dateOfBirth: "1991-02-02" }
+  });
+  assert.deepEqual(dobChanged.requirements.map(({ kind }) => kind), ["dl"]);
+  assert.equal(dobChanged.drivingLicenseDependency, true);
+
+  const normalizedPanChange = profileEditVerificationPlan({
+    originalValues: { ...base, panNumber: "abcde1234f" },
+    values: base
+  });
+  assert.deepEqual(normalizedPanChange.requirements.map(({ kind }) => kind), ["pan", "pan_aadhaar"],
+    "a raw-value edit still needs a fresh request-bound check when its normalized key is unchanged");
+});
+
+test("profile edit verification plan rejects incomplete final verification pairs before OTP", () => {
+  assert.equal(profileEditVerificationPlan({
+    originalValues: { panNumber: "ABCDE1234F", aadhaarNumber: "" },
+    values: { panNumber: "", aadhaarNumber: "123456789012" }
+  }).error, "PAN is required when an Aadhaar number is provided.");
+
+  assert.equal(profileEditVerificationPlan({
+    originalValues: { bankAccountNo: "12345678", ifsc: "ABCD0123456" },
+    values: { bankAccountNo: "87654321", ifsc: "" }
+  }).error, "Bank account number and IFSC must be provided together.");
+
+  assert.equal(profileEditVerificationPlan({
+    originalValues: { drivingLicenseNo: "KL0120200012345", dateOfBirth: "1990-01-01" },
+    values: { drivingLicenseNo: "KL0120200099999", dateOfBirth: "" }
+  }).error, "Date of birth is required to verify the driving licence.");
+});
+
+test("profile edit exposes verification actions for hidden dependencies without changing registration sequencing", () => {
+  const profileApp = fs.readFileSync(
+    new URL("../components/connect-profile-app.tsx", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(profileApp, /showHiddenPanAadhaarCheck[\s\S]*?label="PAN–Aadhaar link"/);
+  assert.match(profileApp, /showHiddenBankCheck[\s\S]*?label="Bank account check"/);
+  assert.match(profileApp, /showHiddenDrivingLicenseCheck[\s\S]*?label="Driving licence check"/);
+  assert.match(profileApp, /showHiddenBankCheck = enabled\.has\("bank_account_no"\)[\s\S]*?Boolean\(currentCheck\("bank"\)\)/,
+    "an unchanged saved bank check stays visible when IFSC is hidden");
+  assert.match(profileApp, /function editablePayload\(\)[\s\S]*?enabled\.has\(field\)/,
+    "hidden counterpart values must remain outside the submitted edit payload");
+  assert.match(profileApp, /function registrationSubmissionError\(\)[\s\S]*?const applies =/,
+    "registration keeps its existing enabled-field verification policy");
+  assert.match(profileApp, /const panPrerequisiteMissing = \(!editing \|\| editVerificationPlan\.panChanged\)/,
+    "an unchanged saved PAN must not gate Aadhaar-only edits");
+  assert.match(profileApp, /const actionCheck = \(kind: string\) => editing && requiredEditKinds\.has\(kind\)[\s\S]*?freshCheck\(kind\)[\s\S]*?: currentCheck\(kind\)/,
+    "changed verification-bound fields must use a fresh edit check, not a saved display tag");
+});
+
+test("profile edit restores derived expiries only for an exact verification or identifier revert", () => {
+  const originalValues = {
+    drivingLicenseExpiry: "2030-01-02",
+    registrationExpiry: "2040-03-04",
+    insuranceExpiry: "2031-05-06",
+    pollutionExpiry: "2027-07-08"
+  };
+  const baselineDl = { inputKey: "DL-OLD|1990-01-01", expiryDate: "2030-01-02" };
+  const freshDl = { inputKey: "DL-NEW|1990-01-01", expiryDate: "2035-09-10" };
+
+  assert.deepEqual(profileVerificationExpiryPatch({
+    kind: "dl",
+    inputKey: "DL-NEW|1990-01-01",
+    originalInputKey: "DL-OLD|1990-01-01",
+    editing: true,
+    fresh: freshDl,
+    baseline: baselineDl,
+    originalValues
+  }), { drivingLicenseExpiry: "2035-09-10" });
+  assert.deepEqual(profileVerificationExpiryPatch({
+    kind: "dl",
+    inputKey: "DL-UNVERIFIED|1990-01-01",
+    originalInputKey: "DL-OLD|1990-01-01",
+    editing: true,
+    fresh: freshDl,
+    baseline: baselineDl,
+    originalValues
+  }), { drivingLicenseExpiry: "" });
+  assert.deepEqual(profileVerificationExpiryPatch({
+    kind: "dl",
+    inputKey: "DL-OLD|1990-01-01",
+    originalInputKey: "DL-OLD|1990-01-01",
+    editing: true,
+    fresh: freshDl,
+    baseline: baselineDl,
+    originalValues
+  }), { drivingLicenseExpiry: "2030-01-02" });
+
+  const freshVehicle = {
+    inputKey: "KL01NEW1234",
+    registrationExpiryDate: "2045-01-01",
+    insuranceExpiryDate: "2035-02-02",
+    pollutionExpiryDate: "2030-03-03"
+  };
+  assert.deepEqual(profileVerificationExpiryPatch({
+    kind: "vehicle",
+    inputKey: "KL01NEW1234",
+    originalInputKey: "KL01OLD1234",
+    editing: true,
+    fresh: freshVehicle,
+    originalValues
+  }), {
+    registrationExpiry: "2045-01-01",
+    insuranceExpiry: "2035-02-02",
+    pollutionExpiry: "2030-03-03"
+  });
+  assert.deepEqual(profileVerificationExpiryPatch({
+    kind: "vehicle",
+    inputKey: "KL01OLD1234",
+    originalInputKey: "KL01OLD1234",
+    editing: true,
+    fresh: freshVehicle,
+    originalValues
+  }), {
+    registrationExpiry: "2040-03-04",
+    insuranceExpiry: "2031-05-06",
+    pollutionExpiry: "2027-07-08"
+  }, "reverting works even when no baseline verification was loaded");
 });
 
 test("OTP and mobile hashes are secret, request, and leg bound", () => {
@@ -158,6 +363,19 @@ test("atomic migration preserves the critical session, staging, CAS, and redacti
   assert.match(sql, /payload = '\{\}'::jsonb,[\s\S]*?before_values = '\{\}'::jsonb/);
   const editTypeConstraint = "profile_type text not null check (profile_type in ('employee', 'workforce', 'contractor', 'vendor'))";
   assert.equal(sql.split(editTypeConstraint).length - 1, 2);
+});
+
+test("profile edit database guards apply legacy identity rules only when those fields change", () => {
+  const sql = fs.readFileSync(
+    new URL("../../../../supabase/migrations/20261016225523_connect_profile_edit_changed_identity_guards.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /new_dob_guard[\s\S]*?edit_request\.payload \? 'date_of_birth'/);
+  assert.match(sql, /new_pan_aadhaar_guard[\s\S]*?edit_request\.payload \? 'pan_number' or edit_request\.payload \? 'aadhaar_number'/);
+  assert.match(sql, /new_bank_guard[\s\S]*?edit_request\.payload \? 'bank_account_no' or edit_request\.payload \? 'ifsc'/);
+  assert.match(sql, /position\(new_dob_guard in function_definition\) > 0[\s\S]*?position\(new_pan_aadhaar_guard in function_definition\) > 0[\s\S]*?position\(new_bank_guard in function_definition\) > 0[\s\S]*?return;/);
+  assert.equal((sql.match(/function_definition := replace/g) ?? []).length, 3);
+  assert.match(sql, /raise exception 'connect_commit_profile_edit identity guards do not match the expected prior definition'/);
 });
 
 test("profile-edit identity checks bind name matching to the immutable server profile", () => {
@@ -288,18 +506,35 @@ test("edit mode bootstraps a fresh server snapshot instead of reusing registrati
 
   assert.match(
     profileApp,
-    /async function beginProfileEdit\(\)[\s\S]*?fetch\(`\/api\/connect\/profile-edit\?\$\{params\}`,[\s\S]*?cache: "no-store"/
+    /async function beginProfileEdit\(\)[\s\S]*?Promise\.all\(\[[\s\S]*?fetch\(`\/api\/connect\/profile-edit\?\$\{params\}`,[\s\S]*?cache: "no-store"[\s\S]*?fetch\(`\/api\/connect\/verification\?\$\{verificationParams\}`,[\s\S]*?cache: "no-store"/
   );
+  assert.match(profileApp, /fetch\(`\/api\/connect\/verification\?\$\{verificationParams\}`,[\s\S]*?\.catch\(\(\) => \(\{ verifications: \[\] as Verification\[\] \}\)\)/);
   assert.match(profileApp, /setValues\(nextValues\)[\s\S]*?setEditOriginalValues\(\{ \.\.\.nextValues \}\)/);
-  assert.match(profileApp, /setVerifications\(\{\}\)[\s\S]*?setVerificationErrors\(\{\}\)/);
+  assert.match(profileApp, /setEditSourceUpdatedAt\(String\(payload\.sourceUpdatedAt \|\| ""\)\)/);
+  assert.match(profileApp, /setEditBaselineVerifications\(Object\.fromEntries\([\s\S]*?checks\.verifications[\s\S]*?setVerifications\(\{\}\)[\s\S]*?setVerificationErrors\(\{\}\)/);
+  assert.match(profileApp, /matchingProfileVerification\(\{[\s\S]*?fresh: verifications\[kind\],[\s\S]*?baseline: editBaselineVerifications\[kind\]/);
+  assert.match(profileApp, /verified \? <span className="dx-verified-tag"><BadgeCheck aria-hidden="true" \/>Verified<\/span>/);
   assert.match(profileApp, /editViewSnapshotRef\.current = \{[\s\S]*?verifications: \{ \.\.\.verifications \}[\s\S]*?function cancelProfileEdit\(\)[\s\S]*?setVerifications\(snapshot\.verifications\)/);
+  assert.match(profileApp, /function cancelProfileEdit\(\)[\s\S]*?setEditBaselineVerifications\(\{\}\)/);
+  assert.match(profileApp, /function editablePayload\(\)[\s\S]*?enabled\.has\(field\) && \(values\[key\] \?\? ""\) !== \(editOriginalValues\[key\] \?\? ""\)/);
+  assert.match(profileApp, /const nativeFieldRequired =[\s\S]*?!editing \|\| editValueChanged\(valueKey\)/);
+  assert.match(profileApp, /sourceUpdatedAt: editSourceUpdatedAt/);
+  assert.match(profileApp, /if \(!response \|\| response\.status >= 500\) setVerifications\(\{\}\)/);
   assert.match(profileApp, /onClick=\{\(\) => void beginProfileEdit\(\)\}/);
   assert.doesNotMatch(profileApp, /setEditOriginalValues\(\{ \.\.\.values \}\)/);
   assert.match(editRoute, /export async function GET\(request: Request\)/);
   assert.match(editRoute, /values: profileEditBootstrapValues\(profile, profileType\)/);
-  assert.match(editRoute, /mobileCountryCode,[\s\S]*?mobileNumber/);
+  assert.match(editRoute, /mobileCountryCode,[\s\S]*?mobileNumber,[\s\S]*?sourceUpdatedAt: String\(profile\.updated_at\)/);
+  assert.match(editRoute, /const sourceUpdatedAt = String\(body\.sourceUpdatedAt[\s\S]*?sourceUpdatedAt !== String\(profile\.updated_at\)/);
   assert.doesNotMatch(editRoute, /mobile_number_format/);
   assert.match(editRoute, /normalizeProfileEditMobile\(value, countryCode\)/);
+  assert.match(editRoute, /if \(action === "start"\) return await start\(request, body, session\)/);
+  assert.match(editRoute, /if \(action === "verify"\) return await verify\(body, session\)/);
+  assert.match(editRoute, /if \(action === "resend"\) return await resend\(body, session\)/);
+  assert.match(editRoute, /if \(action === "commit"\) return await commit\(body, session\)/);
+  assert.match(editRoute, /missingChangedRequiredProfileField\(\{[\s\S]*?payload,[\s\S]*?requiredFields: rules\.required/);
+  assert.match(editRoute, /hasPfUan === "no" \? \["pf_uan"\]/);
+  assert.match(editRoute, /hasEsiNo === "no" \? \["esi_no"\]/);
 });
 
 test("credential-bound session writers remain additive to the existing session schema", () => {
@@ -538,6 +773,12 @@ test("profile edit migration deploys over the supported production schema bounda
     // ship its extension control file, while gen_random_uuid itself is built in.
     .replace("create extension if not exists pgcrypto;", "");
   await db.exec(sql);
+  const changedIdentityGuards = fs.readFileSync(
+    new URL("../../../../supabase/migrations/20261016225523_connect_profile_edit_changed_identity_guards.sql", import.meta.url),
+    "utf8"
+  );
+  await db.exec(changedIdentityGuards);
+  await db.exec(changedIdentityGuards);
   const functions = await db.query(`
     select proname from pg_proc
     where proname in (
@@ -1050,13 +1291,14 @@ test("profile edit migration deploys over the supported production schema bounda
 
   await db.exec(`
     insert into employees(
-      id, company_id, full_name, mobile_country_code, mobile, aadhaar_number,
-      pan_number, bank_account_no, ifsc, address, profile_completion_status,
+      id, company_id, full_name, mobile_country_code, mobile, date_of_birth,
+      aadhaar_number, pan_number, bank_account_no, ifsc, address, profile_completion_status,
       is_active, updated_at
     ) values (
       '00000000-0000-0000-0000-000000000034',
       '00000000-0000-0000-0000-000000000001',
-      'Legacy Blank User', '91', '6666666666', '   ', null, ' ', null,
+      'Legacy Blank User', '91', '6666666666', current_date - interval '17 years',
+      '123456789012', null, '12345678', null,
       'Old legacy address', 'active', true, '2026-10-15T04:00:00Z'
     );
     insert into connect_login_sessions(
@@ -1104,15 +1346,20 @@ test("profile edit retention is authenticated and scheduled", () => {
     new URL("../../../../src/app/api/cron/connect-profile-edit-retention/route.ts", import.meta.url),
     "utf8"
   );
-  const vercel = JSON.parse(fs.readFileSync(
-    new URL("../../../../vercel.json", import.meta.url),
-    "utf8"
-  ));
   assert.match(route, /process\.env\.CRON_SECRET/);
   assert.match(route, /authorization[\s\S]*?Bearer \$\{secret\}/);
   assert.match(route, /connect_redact_expired_profile_edits/);
-  assert.deepEqual(
-    vercel.crons.find((cron) => cron.path === "/api/cron/connect-profile-edit-retention"),
-    { path: "/api/cron/connect-profile-edit-retention", schedule: "17 * * * *" }
-  );
+  // Vercel replaces the repository-level config with a project-scoped config
+  // while building this monorepo app. Keep the source-config assertion in
+  // developer/CI worktrees, where the tracked root config is authoritative.
+  if (process.env.VERCEL !== "1") {
+    const vercel = JSON.parse(fs.readFileSync(
+      new URL("../../../../vercel.json", import.meta.url),
+      "utf8"
+    ));
+    assert.deepEqual(
+      vercel.crons.find((cron) => cron.path === "/api/cron/connect-profile-edit-retention"),
+      { path: "/api/cron/connect-profile-edit-retention", schedule: "17 * * * *" }
+    );
+  }
 });
