@@ -5,7 +5,9 @@ import {
   decideDelivery,
   dueReminderSteps,
   extractJsonText,
+  formatChecks,
   isGroupJid,
+  mentionFor,
   localClock,
   normalizeDays,
   normalizeTimeList,
@@ -110,6 +112,27 @@ test("feedback message uses the configured layout and length limit", () => {
   assert.ok(text.startsWith("*EOD* · Ravi\nFIX\nDate"));
   assert.ok(text.length <= 40 && text.endsWith("…"));
   assert.equal(truncateText("short", 10), "short");
+});
+
+test("replies tag the sender and carry the review itself", () => {
+  assert.deepEqual(mentionFor("919876543210:4@s.whatsapp.net"), { text: "@919876543210", jid: "919876543210@s.whatsapp.net" });
+  assert.deepEqual(mentionFor("123456789012345@lid"), { text: "@123456789012345", jid: "123456789012345@lid" });
+  assert.equal(mentionFor(null), null);
+  assert.equal(mentionFor("120363000000000001@g.us"), null, "a group is never mentioned");
+
+  const checks = [
+    { rule: "Date is today", status: "fail", note: "shows 14-10-2026" },
+    { rule: "Station code visible", status: "pass", note: "" },
+    { rule: "Liability is zero", status: "unclear", note: "cropped" }
+  ];
+  assert.equal(formatChecks(checks), "❌ Date is today — shows 14-10-2026\n❓ Liability is zero — cropped", "passed rules are left out");
+  assert.equal(formatChecks([{ rule: "x", status: "pass", note: "" }]), "");
+
+  const settings = { feedback_template: "{sender} *{report}*\n{verdict_label}\n{feedback}\n{checks}", label_pass: "✅ Looks good", label_fail: "❌ Needs correction", label_review: "🔎", max_feedback_chars: 700 };
+  const fail = composeFeedback(settings, { verdict: "fail", feedback: "Please resend today's screenshot.", report: "EOD", sender: "@919876543210", group: "g", date: "15-10-2026", checks });
+  assert.equal(fail, "@919876543210 *EOD*\n❌ Needs correction\nPlease resend today's screenshot.\n❌ Date is today — shows 14-10-2026\n❓ Liability is zero — cropped");
+  const pass = composeFeedback(settings, { verdict: "pass", feedback: "All good, thanks.", report: "EOD", sender: "@919876543210", group: "g", date: "15-10-2026", checks: [] });
+  assert.equal(pass, "@919876543210 *EOD*\n✅ Looks good\nAll good, thanks.", "no trailing blank line when nothing failed");
 });
 
 test("JSON is recovered from fenced or chatty model replies", () => {

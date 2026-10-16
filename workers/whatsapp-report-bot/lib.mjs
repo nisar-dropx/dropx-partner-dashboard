@@ -143,6 +143,98 @@ export async function pruneOlderThan(directory, maxAgeMs, now = Date.now(), suff
   return removed;
 }
 
+const CONTENT_TYPES = [
+  ["conversation", "text"],
+  ["extendedTextMessage", "text"],
+  ["imageMessage", "image"],
+  ["videoMessage", "video"],
+  ["documentMessage", "document"],
+  ["audioMessage", "audio"],
+  ["stickerMessage", "sticker"],
+  ["locationMessage", "location"],
+  ["contactMessage", "contact"],
+  ["pollCreationMessage", "poll"],
+  ["pollCreationMessageV3", "poll"]
+];
+
+/** What a (normalised) message is, for the chat view. null for reactions, edits and protocol noise. */
+export function chatContent(content) {
+  if (!content || typeof content !== "object") return null;
+  const match = CONTENT_TYPES.find(([key]) => content[key] !== undefined && content[key] !== null);
+  if (!match) return null;
+  const [key, type] = match;
+  const node = content[key];
+  const text = typeof node === "string"
+    ? node
+    : node?.text ?? node?.caption ?? (type === "document" ? node?.fileName : null) ?? (type === "poll" ? node?.name : null) ?? null;
+  const context = typeof node === "object" ? node?.contextInfo ?? null : null;
+  return { type, text: text ? String(text).slice(0, 4000) : null, context };
+}
+
+function quotedSummary(context, normalize) {
+  if (!context?.stanzaId) return null;
+  const quoted = context.quotedMessage ? chatContent(normalize ? normalize(context.quotedMessage) : context.quotedMessage) : null;
+  return { id: context.stanzaId, from: context.participant ?? null, type: quoted?.type ?? "text", text: quoted?.text?.slice(0, 300) ?? null };
+}
+
+/**
+ * One chat-view entry from a WhatsApp message. `normalize` unwraps ephemeral/view-once
+ * wrappers (Baileys' normalizeMessageContent); injectable so this stays testable.
+ */
+export function chatEntry(msg, { normalize, isBot }) {
+  const content = chatContent(normalize ? normalize(msg?.message) : msg?.message);
+  if (!content || !msg?.key?.id) return null;
+  const mentions = Array.isArray(content.context?.mentionedJid) ? content.context.mentionedJid.filter((jid) => typeof jid === "string").slice(0, 20) : [];
+  return {
+    id: msg.key.id,
+    from: msg.key.fromMe ? null : msg.key.participant || msg.participant || null,
+    name: msg.pushName || null,
+    from_me: Boolean(msg.key.fromMe),
+    bot: Boolean(isBot?.(msg.key.id)),
+    ts: messageSeconds(msg.messageTimestamp),
+    type: content.type,
+    text: content.text,
+    quoted: quotedSummary(content.context, normalize),
+    mentions
+  };
+}
+
+/** Recent messages per group, newest last, bounded; in memory only (never written to disk). */
+export class ChatLog {
+  constructor(perGroup = 300) {
+    this.perGroup = perGroup;
+    this.groups = new Map();
+    this.names = new Map();
+    this.startedAt = Math.floor(Date.now() / 1000);
+  }
+  add(groupId, entry) {
+    if (!entry) return;
+    const list = this.groups.get(groupId) ?? [];
+    const existing = list.findIndex((item) => item.id === entry.id);
+    if (existing >= 0) list[existing] = { ...list[existing], ...entry, bot: list[existing].bot || entry.bot };
+    else list.push(entry);
+    list.sort((a, b) => a.ts - b.ts);
+    while (list.length > this.perGroup) list.shift();
+    this.groups.set(groupId, list);
+    if (entry.from && entry.name) this.names.set(entry.from, entry.name);
+  }
+  markBot(groupId, id) {
+    const item = (this.groups.get(groupId) ?? []).find((entry) => entry.id === id);
+    if (item) item.bot = true;
+  }
+  list(groupId, after = 0) {
+    return (this.groups.get(groupId) ?? []).filter((entry) => entry.ts > after);
+  }
+  forget(keepGroupIds) {
+    for (const id of [...this.groups.keys()]) if (!keepGroupIds.includes(id)) this.groups.delete(id);
+  }
+}
+
+/** Mentions the portal asked for: real member JIDs only, a handful at most. */
+export function cleanMentions(value) {
+  return Array.isArray(value) ? value.filter((jid) => typeof jid === "string" && /^\d{5,20}@(s\.whatsapp\.net|lid)$/.test(jid)).slice(0, 10) : [];
+}
+
 export function normalizeConfig(body) {
   const mode = ["off", "listen", "live"].includes(body?.mode) ? body.mode : "off";
   const groups = Array.isArray(body?.groups) ? body.groups.filter((id) => typeof id === "string" && GROUP_JID.test(id)).slice(0, 500) : [];

@@ -8,6 +8,7 @@ import {
   dueReminderSteps,
   formatClock,
   localClock,
+  mentionFor,
   parseClockTime,
   randomDelaySeconds,
   renderTemplate,
@@ -271,9 +272,11 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         verdict: analysis.verdict,
         feedback: analysis.feedback,
         report: reportType?.name ?? "Report",
-        sender: senderLabel(submission.sender_name, submission.sender_jid),
+        // Tag the sender (@mention) so WhatsApp shows their name and notifies them.
+        sender: mentionFor(submission.sender_jid)?.text ?? senderLabel(submission.sender_name, submission.sender_jid),
         group: group.group_name ?? "",
-        date: displayDate(businessDate)
+        date: displayDate(businessDate),
+        checks: analysis.checks
       });
       const status = decision === "silent" ? "ignored" : decision === "auto_send" ? "queued_to_send" : "awaiting_approval";
       must(await db.from("report_bot_submissions").update({
@@ -310,8 +313,20 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
 /** Feedback older than this is no longer useful in a busy group chat. */
 const FEEDBACK_STALE_HOURS = 12;
 
-export async function queueFeedback(settings: ReportBotSettings, submission: Pick<SubmissionRow, "id" | "company_id" | "group_id" | "wa_message_id" | "sender_jid">, body: string, userId: string | null) {
-  const delay = randomDelaySeconds(settings.reply_delay_min_seconds, settings.reply_delay_max_seconds);
+/**
+ * `immediate`: a person just approved it, so there is no reason to wait. Automatic
+ * replies get the short configured delay so they don't land the same second.
+ */
+export async function queueFeedback(
+  settings: ReportBotSettings,
+  submission: Pick<SubmissionRow, "id" | "company_id" | "group_id" | "wa_message_id" | "sender_jid">,
+  body: string,
+  userId: string | null,
+  options: { immediate?: boolean } = {}
+) {
+  const delay = options.immediate ? 0 : randomDelaySeconds(settings.reply_delay_min_seconds, settings.reply_delay_max_seconds);
+  // Only mention the sender if the reply still contains their @tag (a reviewer may have edited it out).
+  const mention = mentionFor(submission.sender_jid);
   const result = await reportBotDb().from("report_bot_outbox").upsert({
     company_id: submission.company_id,
     group_id: submission.group_id,
@@ -320,9 +335,7 @@ export async function queueFeedback(settings: ReportBotSettings, submission: Pic
     body,
     quoted_message_id: submission.wa_message_id,
     quoted_participant: submission.sender_jid,
-    // Quoting the image already notifies its sender; an @mention would need the
-    // number written into the text to display correctly.
-    mentions: [],
+    mentions: mention && body.includes(mention.text) ? [mention.jid] : [],
     submission_id: submission.id,
     not_before: nowIso(delay),
     stale_after: nowIso(delay + FEEDBACK_STALE_HOURS * 3600),
@@ -331,6 +344,9 @@ export async function queueFeedback(settings: ReportBotSettings, submission: Pic
   if (result.error) throw new Error(`Queue feedback: ${result.error.message}`);
 }
 
+/** How long the sender waits for a message about to fall due (reply delay, group gap). */
+const SHORT_WAIT_MS = 15_000;
+
 /** Sends due outbox items through the worker, one group message at a time. */
 export async function flushOutbox(settings: ReportBotSettings, deadline: number) {
   const db = reportBotDb();
@@ -338,7 +354,17 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
   while (Date.now() < deadline - 20_000) {
     const claimed = must(await db.rpc("report_bot_claim_outbox", { p_company_id: settings.company_id, p_limit: 1, p_lease_seconds: 60 }), "Claim outbox") as OutboxRow[];
     const item = claimed[0];
-    if (!item) break;
+    if (!item) {
+      // A reply due in a few seconds is sent now rather than on next minute's run.
+      const next = await db.from("report_bot_outbox").select("not_before").eq("company_id", settings.company_id).eq("status", "pending")
+        .order("not_before", { ascending: true }).limit(1).maybeSingle();
+      const waitMs = next.data ? new Date(next.data.not_before).getTime() - Date.now() + 250 : Infinity;
+      if (waitMs > 0 && waitMs <= SHORT_WAIT_MS && Date.now() + waitMs < deadline - 20_000) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      break;
+    }
     const release = (fields: Record<string, unknown>) => db.from("report_bot_outbox").update({ ...fields, locked_until: null, updated_at: nowIso() }).eq("id", item.id);
     if (item.stale_after && new Date(item.stale_after).getTime() < Date.now()) {
       await release({ status: "cancelled", status_reason: "Too late to send; skipped so the group does not get a stale reminder." });
@@ -420,7 +446,9 @@ export async function runReportBotCycle(settings: ReportBotSettings, deadline: n
   summary.requests = await syncDailyRequests(settings, clock);
   if (settings.mode === "live") summary.reminders = await queueReminders(settings, clock);
   else await markOverdue(settings, clock);
+  // Send what's already due before the (slow) AI checks, so replies never wait behind them.
+  if (settings.mode === "live") summary.sent = await flushOutbox(settings, Math.min(deadline, Date.now() + 60_000));
   summary.analysed = await processSubmissions(settings, deadline);
-  if (settings.mode === "live") summary.sent = await flushOutbox(settings, deadline);
+  if (settings.mode === "live") summary.sent += await flushOutbox(settings, deadline);
   return summary;
 }
