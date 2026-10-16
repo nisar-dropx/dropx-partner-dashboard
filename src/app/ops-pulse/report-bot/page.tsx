@@ -19,7 +19,9 @@ import {
   XCircle
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { ActionButton, ReportThumb } from "@/components/report-bot-controls";
+import { ActionButton } from "@/components/report-bot-controls";
+import { GroupPicker } from "@/components/report-bot-group-picker";
+import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-viewer";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
@@ -30,16 +32,21 @@ import {
   approveFeedback,
   reanalyseSubmission,
   rejectFeedback,
+  removeGroup,
+  saveGroupSelection,
   saveReportType,
   saveSchedule,
+  sendAllWaiting,
+  setAutoReply,
   setRequestStatus,
-  syncGroups,
   updateGroup
 } from "./actions";
 import s from "./report-bot.module.css";
-import { Badge, Card, Empty, Field, FlashMessage, loadSetupSteps, SETUP_HREF, StatusBadge, Toggle, VERDICT, when, sender, workerIsOnline, type Tone } from "./ui";
+import { Badge, Card, Empty, Field, FlashMessage, loadSetupSteps, ReportBotNav, SETUP_HREF, StatusBadge, Toggle, VERDICT, when, sender, workerIsOnline, type Tone } from "./ui";
 
 export const dynamic = "force-dynamic";
+// "Approve and send" posts straight away inside the action, which needs more than the default time.
+export const maxDuration = 60;
 
 const TABS = [
   { key: "today", label: "Today", icon: CalendarCheck },
@@ -78,6 +85,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   // Old links to the moved tabs land on the setup page instead of a blank tab.
   const requested = searchParams?.tab;
   if (requested === "connection" || requested === "settings") redirect(SETUP_HREF);
+  if (requested === "chats") redirect("/report-bot/chats");
   const tab: Tab = TABS.find((entry) => entry.key === requested)?.key ?? "today";
   const db = reportBotDb();
 
@@ -166,15 +174,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
 
         <FlashMessage />
 
-        <nav className={s.tabs} aria-label="Report Bot sections">
-          {TABS.map(({ key, label, icon: Icon }) => (
-            <Link key={key} href={tabHref(key)} className={`${s.tab} ${tab === key ? s.tabActive : ""}`} aria-current={tab === key ? "page" : undefined}>
-              <Icon size={16} aria-hidden />{label}
-              {key === "review" && (waitingCount.count ?? 0) > 0 ? <span className={s.count} aria-label={`${waitingCount.count} waiting`}>{waitingCount.count}</span> : null}
-              {key === "review" && (attentionCount.count ?? 0) > 0 ? <span className={`${s.count} ${s.countMuted}`} aria-label={`${attentionCount.count} need attention`}>{attentionCount.count}</span> : null}
-            </Link>
-          ))}
-        </nav>
+        <ReportBotNav active={tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
 
         {tab === "today" ? await TodayTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
         {tab === "review" ? await ReviewTab({ companyId, groupIds, lookup, settings, canEdit }) : null}
@@ -272,7 +272,7 @@ function SubmissionTable({ rows, lookup, timeZone, title, emptyText }: { rows: S
                     <td>{row.report_type_id ? lookup.reportName.get(row.report_type_id) ?? "—" : "—"}</td>
                     <td><StatusBadge value={row.status} />{row.status_reason ? <span className={s.cellSub}>{row.status_reason}</span> : null}</td>
                     <td>{verdict ? <Badge tone={verdict[1]}>{verdict[0]}</Badge> : "—"}</td>
-                    <td>{row.media_ref ? <a className={`${s.button} ${s.small} ${s.ghost}`} href={`/api/report-bot/image/${row.id}`} target="_blank" rel="noreferrer">View</a> : null}</td>
+                    <td>{row.media_ref ? <ViewImageButton submissionId={row.id} title={`Photo from ${sender(row)}`} className={`${s.button} ${s.small} ${s.ghost}`}>View</ViewImageButton> : null}</td>
                   </tr>
                 );
               })}
@@ -308,13 +308,39 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
   ]) : [{ data: [] }, { data: [] }, { data: [] }];
   const waitingRows = (waiting.data ?? []) as SubmissionRow[];
   const attentionRows = (attention.data ?? []) as SubmissionRow[];
+  const auto = settings.approval_mode === "auto";
   return (
     <>
+      {canEdit ? (
+        <section className={s.card}>
+          <div className={s.reviewBar}>
+            <div>
+              <strong>Auto-reply is {auto ? "on" : "off"}</strong>
+              <div className={s.hint}>
+                {auto
+                  ? `Confident results (${Math.round(settings.auto_send_min_confidence * 100)}%+, no unclear rule) are posted without a click. Unclear photos still wait below.`
+                  : "Every reply waits here for you to approve."}
+              </div>
+            </div>
+            <div className={s.formActions}>
+              {waitingRows.some((row) => row.feedback_text?.trim()) ? (
+                <form action={sendAllWaiting}>
+                  <ActionButton className={s.button} confirm={`Post the AI's reply for all ${waitingRows.length} waiting photos?`}><Send size={15} aria-hidden />Send all waiting</ActionButton>
+                </form>
+              ) : null}
+              <form action={setAutoReply}>
+                <input type="hidden" name="auto" value={auto ? "off" : "on"} />
+                <ActionButton className={`${s.button} ${auto ? "" : s.primary}`}><Sparkles size={15} aria-hidden />{auto ? "Turn auto-reply off" : "Turn auto-reply on"}</ActionButton>
+              </form>
+            </div>
+          </div>
+        </section>
+      ) : null}
       <Card
         title="Waiting for review"
         icon={<Inbox size={18} aria-hidden />}
         description={settings.mode === "live"
-          ? "Compare the AI's reading with the photo, adjust the reply if needed, and approve. It's posted as a reply to the photo after a short delay."
+          ? "Compare the AI's reading with the photo, adjust the reply if needed, and approve. It's posted in the group within seconds."
           : "The bot is not Live, so approved replies wait and go out once you switch to Live (within 12 hours)."}
         action={waitingRows.length ? <span className={s.count}>{waitingRows.length}</span> : null}
       >
@@ -325,7 +351,7 @@ async function ReviewTab({ companyId, groupIds, lookup, settings, canEdit }: { c
               const confidence = row.confidence === null ? null : Math.round(Number(row.confidence) * 100);
               return (
                 <article key={row.id} className={s.reviewCard}>
-                  <ReportThumb src={`/api/report-bot/image/${row.id}`} alt={`Report photo from ${sender(row)}`} className={s.thumb} missingClassName={s.thumbMissing} />
+                  <ReportThumb submissionId={row.id} alt={`Report photo from ${sender(row)}`} className={s.thumb} missingClassName={s.thumbMissing} />
                   <div className={s.reviewMain}>
                     <div className={s.reviewMeta}>
                       <strong>{lookup.groupName.get(row.group_id) ?? "Group"}</strong>
@@ -415,44 +441,55 @@ async function GroupsTab({ authorization, groups, canEdit }: { authorization: Au
   } catch (error) {
     storeError = error instanceof Error ? error.message : "Stores could not be loaded.";
   }
-  const enabled = groups.filter((group) => group.is_enabled).length;
+  // Only groups ticked in the picker are on the bot and shown here.
+  const active = groups.filter((group) => group.is_enabled);
   return (
     <Card
       title="WhatsApp groups"
       icon={<Users size={18} aria-hidden />}
-      description="Groups the linked number belongs to. Turn on only the report groups: the bot ignores every other chat and never reads private messages."
-      action={canEdit ? <form action={syncGroups}><ActionButton className={`${s.button} ${s.primary}`}><RefreshCw size={15} aria-hidden />Refresh from WhatsApp</ActionButton></form> : null}
+      description="The report groups the bot listens to. Add or remove them from the list of groups the linked number is in; the bot ignores every other chat and never reads private messages."
+      action={canEdit ? <GroupPicker action={saveGroupSelection} disabled={!authorization.hasAllLocationAccess} /> : null}
       flush
     >
       {storeError ? <div className={s.cardBody}><p className={s.hint} role="alert">{storeError}</p></div> : null}
-      {groups.length ? (
+      {active.length ? (
         <div className={s.groupList}>
-          <div className={s.cardBody} style={{ paddingBottom: 0 }}><span className={s.hint}>{enabled} of {groups.length} groups turned on</span></div>
-          {groups.map((group) => (
-            <form key={group.id} action={updateGroup} className={s.groupRow}>
-              <input type="hidden" name="group_id" value={group.id} />
-              <div>
-                <div className={s.groupName}>{group.group_name ?? "Unnamed group"}</div>
-                <div className={s.groupMeta}>
-                  {group.participant_count ? <span>{group.participant_count} members</span> : null}
-                  {group.bot_in_group ? null : <Badge tone="bad">Bot number not in group</Badge>}
-                  {group.is_enabled ? <Badge tone="good">Listening</Badge> : null}
+          {active.map((group) => (
+            <div key={group.id} className={s.groupRow}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+                <span className={s.avatar} aria-hidden>{(group.group_name ?? "G").slice(0, 1).toUpperCase()}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div className={s.groupName}>{group.group_name ?? "Unnamed group"}</div>
+                  <div className={s.groupMeta}>
+                    {group.participant_count ? <span>{group.participant_count} members</span> : null}
+                    {group.bot_in_group ? <Badge tone="good">Listening</Badge> : <Badge tone="bad">Bot number not in group</Badge>}
+                    <Link href={`/report-bot/chats?group=${group.id}`}>Open chat</Link>
+                  </div>
                 </div>
               </div>
-              <Field label="Store">
-                <select className={s.select} name="location_id" defaultValue={group.location_id ?? ""} disabled={!canEdit}>
-                  <option value="">{authorization.hasAllLocationAccess ? "No store linked" : "Choose a store"}</option>
-                  {stores.map((store) => <option key={store.id} value={store.id}>{store.station_code}{store.station_name ? ` · ${store.station_name}` : ""}</option>)}
-                </select>
-              </Field>
-              <Toggle name="is_enabled" label="Listen" defaultChecked={group.is_enabled} disabled={!canEdit} />
-              {canEdit ? <ActionButton className={`${s.button} ${s.small}`}>Save</ActionButton> : <span />}
-            </form>
+              <form action={updateGroup} className={s.inlineForm}>
+                <input type="hidden" name="group_id" value={group.id} />
+                <Field label="Store">
+                  <select className={s.select} name="location_id" defaultValue={group.location_id ?? ""} disabled={!canEdit}>
+                    <option value="">{authorization.hasAllLocationAccess ? "No store linked" : "Choose a store"}</option>
+                    {stores.map((store) => <option key={store.id} value={store.id}>{store.station_code}{store.station_name ? ` · ${store.station_name}` : ""}</option>)}
+                  </select>
+                </Field>
+                {canEdit ? <ActionButton className={`${s.button} ${s.small}`}>Save</ActionButton> : null}
+              </form>
+              {canEdit ? (
+                <form action={removeGroup}>
+                  <input type="hidden" name="group_id" value={group.id} />
+                  <ActionButton className={`${s.button} ${s.small} ${s.danger}`} confirm={`Remove "${group.group_name ?? "this group"}" from the bot? It stops listening and posting there; history is kept.`}>Remove</ActionButton>
+                </form>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : (
-        <Empty icon={<Users size={28} aria-hidden />} title="No groups yet">
-          <Link href={`${SETUP_HREF}#whatsapp`}>Link WhatsApp</Link> first, then press Refresh from WhatsApp.
+        <Empty icon={<Users size={28} aria-hidden />} title="No groups on the bot yet">
+          {canEdit ? <>Press <strong>Add or remove groups</strong> and tick the report groups.</> : "An editor adds the report groups here."}
+          {" "}The WhatsApp number must be <Link href={`${SETUP_HREF}#whatsapp`}>linked</Link> first.
         </Empty>
       )}
     </Card>
@@ -487,7 +524,8 @@ function ScheduleForm({ schedule, groups, reportTypes }: { schedule?: ScheduleRo
       <Field label="Group">
         <select className={s.select} name="group_id" defaultValue={schedule?.group_id ?? ""} required>
           <option value="">Choose a group</option>
-          {groups.map((group) => <option key={group.id} value={group.id}>{group.group_name ?? "Unnamed group"}{group.is_enabled ? "" : " (not listening)"}</option>)}
+          {/* Only groups on the bot, plus a removed group this schedule still points at. */}
+          {groups.filter((group) => group.is_enabled || group.id === schedule?.group_id).map((group) => <option key={group.id} value={group.id}>{group.group_name ?? "Unnamed group"}{group.is_enabled ? "" : " (removed from the bot)"}</option>)}
         </select>
       </Field>
       <Field label="Report">

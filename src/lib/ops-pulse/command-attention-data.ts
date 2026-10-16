@@ -17,17 +17,17 @@ import type { CodLocationRow } from './cod';
 import { isManager as isStoreAuditManager } from './store-audits/model';
 import { attentionOrder, auditAttention, storeAuditAttention, codAttention, documentAttention, type AttentionDocument, type AttentionItem } from './command-attention';
 
-export async function loadCommandAttention(a:AuthorizationContext,locations:CodLocationRow[],today:string,mode:string,now=Date.now()) {
+export function startCommandAttention(a:AuthorizationContext,locations:CodLocationRow[],today:string,mode:string,now=Date.now()) {
   const company=requireCompanyId(a),yesterday=addAuditDays(today,-1);
   const selected=locations.filter(l=>!l.is_ho&&!l.hide_from_location_list&&(a.hasAllLocationAccess||a.locationScopeIds.includes(l.id)));
-  const ids=selected.map(l=>l.id),codes=selected.map(l=>l.station_code),items:AttentionItem[]=[];
+  const ids=selected.map(l=>l.id),codes=selected.map(l=>l.station_code);
   const has=(p:string)=>hasPermission(a,p,'access');
-  async function check(enabled:boolean,key:string,title:string,href:string,work:()=>Promise<Omit<AttentionItem,'key'|'title'|'href'>&{href?:string}>) {
-    if(!enabled)return;
-    try{items.push({key,title,href,...await work()});}
-    catch{items.push({key,title,href,value:'Unavailable',detail:'Could not check this source. Open the workspace to retry.',action:'Check source',tone:'unknown'});}
+  async function check(enabled:boolean,key:string,title:string,href:string,work:()=>Promise<Omit<AttentionItem,'key'|'title'|'href'>&{href?:string}>):Promise<AttentionItem[]> {
+    if(!enabled)return [];
+    try{return [{key,title,href,...await work()}];}
+    catch{return [{key,title,href,value:'Unavailable',detail:'Could not check this source. Open the workspace to retry.',action:'Check source',tone:'unknown'}];}
   }
-  await Promise.all([
+  return [
     check(mode!=='amazon_now'&&has('station_audits')&&ids.length>0,'audits','Audits','/ops-pulse/audits',async()=>{
       if(!supabaseAdmin)throw Error('Unavailable');
       const master=await loadStationAuditMaster(company);
@@ -66,13 +66,15 @@ export async function loadCommandAttention(a:AuthorizationContext,locations:CodL
       if(r.error||!r.data||!Number.isFinite(r.data.totalPending)||!Number.isFinite(r.data.overdue))throw Error('Unavailable');
       return{value:`${r.data.totalPending} vehicle-days`,count:r.data.totalPending,detail:`${r.data.overdue} overdue · ${r.data.totalPending-r.data.overdue} today · daily assignment confirmations`,action:'Complete mappings',tone:r.data.overdue?'urgent':r.data.totalPending?'action':'clear'};
     }),
-    (async()=>{
+    (async():Promise<AttentionItem[]>=>{
+      const items:AttentionItem[]=[];
       const canReport=canAccessDailyCodPending(a);
-      if(mode==='amazon_now'||!ids.length||(!canReport&&!has('cod_submission')))return;
+      if(mode==='amazon_now'||!ids.length||(!canReport&&!has('cod_submission')))return [];
       // Check the latest completed upload deadline, not today's not-yet-due slips.
       const date=now>=Date.parse(today+'T20:30:00+05:30')?today:yesterday;
       try{if(!supabaseAdmin)throw Error('Unavailable');items.push(...codAttention(await loadCodPendingReport(supabaseAdmin,company,ids,false,date),date,canReport));}
       catch{items.push({key:'cod',title:'COD slips & CMS',value:'Unavailable',detail:'Could not check daily updates.',action:'Open COD workspace',href:canReport?`/ops-pulse/cod/pending?date=${date}`:`/ops-pulse/cod/submission?deposit_date=${date}`,tone:'unknown'});}
+      return items;
     })(),
     check(mode==='amazon_edsp'&&has('capacity_overview')&&ids.length>0,'capacity','Delivery capacity',`/ops-pulse/capacity?stations=${encodeURIComponent(codes.join(','))}&date=${yesterday}`,async()=>{
       const data=await loadCapacitySnapshot({companyId:company,locations:selected,reportingDate:yesterday});
@@ -91,12 +93,18 @@ export async function loadCommandAttention(a:AuthorizationContext,locations:CodL
       const s=documentAttention((docs.data??[]) as AttentionDocument[],roles.data??[],ids,a.roleId,a.hasAllLocationAccess||a.isMasterOwner,today);
       return{value:`${s.expired+s.soon} renewals`,detail:`${s.expired} expired · ${s.soon} due within 30 days · location documents only`,action:'Review documents',tone:s.expired?'urgent':s.soon?'action':'clear'};
     }),
-    (async()=>{
-      if(!has('payment_approvals')&&!has('ops_rostering'))return;
+    (async():Promise<AttentionItem[]>=>{
+      const items:AttentionItem[]=[];
+      if(!has('payment_approvals')&&!has('ops_rostering'))return [];
       const data=await loadDsApprovals(a);
       if(has('payment_approvals'))items.push({key:'payments',title:'Your payment approvals',href:'/payments/approvals',value:data.payment===null?'Unavailable':`${data.payment.count} pending`,detail:'Assigned to you · across authorized LM + DS locations',action:'Open approval inbox',tone:data.payment===null?'unknown':data.payment.count?'action':'clear'});
       if(has('ops_rostering'))items.push({key:'rosters',title:'Your roster approvals',href:'/rostering?view=approvals',value:data.rosterCount===null?'Unavailable':`${data.rosterCount} plans pending`,detail:'Unique plans assigned to you · across authorized LM + DS locations',action:'Review plans',tone:data.rosterCount===null?'unknown':data.rosterCount?'action':'clear'});
+      return items;
     })()
-  ]);
-  return attentionOrder(items);
+  ];
+}
+
+// Keep the complete loader for consumers that need one finished snapshot.
+export async function loadCommandAttention(...args:Parameters<typeof startCommandAttention>) {
+  return attentionOrder((await Promise.all(startCommandAttention(...args))).flat());
 }

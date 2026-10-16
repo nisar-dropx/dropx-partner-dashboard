@@ -11,8 +11,10 @@ import {
   recoveryNeedsReview,
   recoveryCsv,
   allocationError,
+  installmentSchedule,
   monthLabel,
   type RecoveryDetails,
+  type RecoveryPlan,
 } from "@/lib/ops-pulse/nl-loss-policy";
 import styles from "./nl-loss.module.css";
 const money = (n: number) =>
@@ -21,6 +23,23 @@ const money = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(n);
+function addMonths(month: string, n: number) {
+  const d = new Date(`${month}-01T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 7);
+}
+const shortMonth = (month: string) =>
+  new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-IN", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+function planSummary(r: Recovery) {
+  if (r.recovery_mode !== "installments") return "Full debit";
+  return r.installment_basis === "months"
+    ? `Recurring debit · ${Number(r.installment_value)} months`
+    : `Recurring debit · ${money(Number(r.installment_value))} a month`;
+}
 type History = {
   id: string;
   actor_name: string;
@@ -75,6 +94,9 @@ export function NlLossCases({
       "Recoverable value",
       "Recovery outcome",
       "Deduction month",
+      "Recovery method",
+      "Monthly amount",
+      "Instalments",
       "Re-dispute reason",
       "Detailing",
       "CCTV link",
@@ -97,6 +119,9 @@ export function NlLossCases({
         c.amount,
         r?.outcome_label || "Pending update",
         r?.deduction_month,
+        r ? planSummary(r) : "",
+        p?.monthly_amount ?? p?.amount,
+        p?.installments?.length || (p ? 1 : ""),
         r?.recovery_details?.reason,
         r?.recovery_details?.details,
         r?.recovery_details?.cctv_url,
@@ -267,6 +292,20 @@ function RecoveryForm({
           : "custom",
     ),
     [remarks, setRemarks] = useState(old?.remarks || "");
+  const [plan, setPlan] = useState<RecoveryPlan>({
+    mode: old?.recovery_mode || "full",
+    basis: old?.installment_basis || "months",
+    value:
+      old?.installment_value != null
+        ? String(Number(old.installment_value))
+        : "3",
+    cap_override: !!old?.cap_override,
+    cap_override_reason: old?.cap_override_reason || "",
+  });
+  const policy = settings?.recovery_policy;
+  const capEnabled = !!policy?.salary_cap_enabled;
+  const capPercent = Number(policy?.salary_cap_percent) || 100;
+  const maxInstallments = Number(policy?.max_installments) || 24;
   const [details, setDetails] = useState<RecoveryDetails>(
     old?.recovery_details || {},
   );
@@ -367,9 +406,14 @@ function RecoveryForm({
           row.amount,
           splits,
           people,
-          settings?.recovery_policy.salary_cap_enabled,
+          capEnabled,
+          plan,
+          maxInstallments,
+          capPercent,
         )
       : "";
+  const limitOf = (p: RecoveryPerson) =>
+    plan.cap_override ? p.override_limit : p.recovery_limit;
   const reasonError =
     option?.dispute_fields_enabled &&
     ((option.reason_required && (details.reason || "").trim().length < 5) ||
@@ -441,6 +485,15 @@ function RecoveryForm({
           outcome,
           split_mode: option?.allocation_required ? mode : "none",
           allocations: option?.allocation_required ? splits : [],
+          plan: option?.allocation_required
+            ? plan.mode === "installments"
+              ? plan
+              : {
+                  mode: "full",
+                  cap_override: plan.cap_override,
+                  cap_override_reason: plan.cap_override_reason,
+                }
+            : { mode: "full" },
           remarks,
           recovery_details: option?.dispute_fields_enabled ? details : {},
         }),
@@ -661,11 +714,85 @@ function RecoveryForm({
                     />
                   </label>
                 </div>
+                <div
+                  className={styles.methods}
+                  role="radiogroup"
+                  aria-label="Recovery method"
+                >
+                  <label className={styles.method}>
+                    <input
+                      type="radio"
+                      name={`method-${row.case_key}`}
+                      checked={plan.mode === "full"}
+                      onChange={() => setPlan({ ...plan, mode: "full" })}
+                    />
+                    <strong>Full debit</strong>
+                    <small>Each person&apos;s whole share in one salary.</small>
+                  </label>
+                  <label className={styles.method}>
+                    <input
+                      type="radio"
+                      name={`method-${row.case_key}`}
+                      checked={plan.mode === "installments"}
+                      onChange={() =>
+                        setPlan({ ...plan, mode: "installments" })
+                      }
+                    />
+                    <strong>Recurring debit</strong>
+                    <small>
+                      Spread across salaries, one instalment each payroll.
+                    </small>
+                  </label>
+                </div>
+                {plan.mode === "installments" ? (
+                  <div className={styles.planRow}>
+                    <label>
+                      Instalments by
+                      <select
+                        value={plan.basis}
+                        onChange={(e) =>
+                          setPlan({
+                            ...plan,
+                            basis: e.target.value as RecoveryPlan["basis"],
+                            value: e.target.value === "months" ? "3" : "",
+                          })
+                        }
+                      >
+                        <option value="months">Number of months</option>
+                        <option value="amount">Fixed amount per month</option>
+                      </select>
+                    </label>
+                    <label>
+                      {plan.basis === "months"
+                        ? `Months (2–${maxInstallments})`
+                        : "Amount per month (₹)"}
+                      <input
+                        type="number"
+                        inputMode={
+                          plan.basis === "months" ? "numeric" : "decimal"
+                        }
+                        min={plan.basis === "months" ? 2 : 1}
+                        max={
+                          plan.basis === "months" ? maxInstallments : undefined
+                        }
+                        step={plan.basis === "months" ? 1 : 0.01}
+                        value={plan.value}
+                        onChange={(e) =>
+                          setPlan({ ...plan, value: e.target.value })
+                        }
+                        placeholder={plan.basis === "months" ? "3" : "500"}
+                      />
+                    </label>
+                  </div>
+                ) : null}
                 <p className={styles.hint}>
                   Eligible station DAs, People staff and mapped managers, using
                   the rules in Master.
-                  {settings?.recovery_policy.salary_cap_enabled
-                    ? " Each employee is limited to their available previous-month salary payable."
+                  {capEnabled
+                    ? ` Loss recoveries take at most ${capPercent}% of a person's take-home in one month; a recurring debit counts one instalment.`
+                    : ""}
+                  {plan.mode === "installments"
+                    ? " A missed month moves the remaining instalments on. If a person exits, the balance is recovered in their final settlement."
                     : ""}
                 </p>
                 <div className={styles.people}>
@@ -676,8 +803,8 @@ function RecoveryForm({
                           type="checkbox"
                           disabled={
                             !selected.includes(p.ref) &&
-                            settings?.recovery_policy.salary_cap_enabled &&
-                            (p.recovery_limit == null || p.recovery_limit <= 0)
+                            capEnabled &&
+                            (limitOf(p) == null || Number(limitOf(p)) <= 0)
                           }
                           checked={selected.includes(p.ref)}
                           onChange={(e) =>
@@ -694,18 +821,31 @@ function RecoveryForm({
                             {p.employee_code} · {p.designation}
                             {!p.is_active ? " · Inactive / left" : ""}
                           </small>
-                          {settings?.recovery_policy.salary_cap_enabled ? (
+                          {capEnabled ? (
                             <small
                               className={
                                 p.recovery_limit == null
                                   ? styles.pending
-                                  : undefined
+                                  : styles.payFacts
                               }
                             >
                               {p.recovery_limit == null
                                 ? "Salary payable unavailable · review payroll / mapping"
-                                : `Available recovery limit ${money(p.recovery_limit)} · ${p.salary_month ? monthLabel(p.salary_month) : ""}`}
+                                : `${p.salary_month ? monthLabel(p.salary_month) : "Last month"}: take-home ${money(p.salary_payable ?? 0)}${p.salary_gross != null ? ` · gross ${money(p.salary_gross)}` : ""} · monthly limit ${money(limitOf(p) ?? 0)}${p.reserved ? ` (after ${money(p.reserved)} other recoveries)` : ""}`}
                             </small>
+                          ) : null}
+                          {selected.includes(p.ref) &&
+                          plan.mode === "installments" ? (
+                            <SchedulePreview
+                              amount={
+                                splits.find((s) => s.employee_ref === p.ref)
+                                  ?.amount || 0
+                              }
+                              plan={plan}
+                              maxInstallments={maxInstallments}
+                              firstMonth={deductionPeriod || ""}
+                              label={`Schedule for ${p.employee_code}`}
+                            />
                           ) : null}
                         </span>
                       </label>
@@ -717,8 +857,8 @@ function RecoveryForm({
                             type="number"
                             min="0.01"
                             max={
-                              settings?.recovery_policy.salary_cap_enabled
-                                ? (p.recovery_limit ?? 0)
+                              capEnabled && plan.mode === "full"
+                                ? (limitOf(p) ?? 0)
                                 : undefined
                             }
                             step="0.01"
@@ -752,6 +892,38 @@ function RecoveryForm({
                   <p role="alert" className={styles.error}>
                     {validation}
                   </p>
+                ) : null}
+                {capEnabled ? (
+                  <div className={styles.override}>
+                    <label className={styles.check}>
+                      <input
+                        type="checkbox"
+                        checked={!!plan.cap_override}
+                        onChange={(e) =>
+                          setPlan({ ...plan, cap_override: e.target.checked })
+                        }
+                      />
+                      Recover beyond the {capPercent}% salary cap (up to the
+                      whole take-home)
+                    </label>
+                    {plan.cap_override ? (
+                      <label>
+                        Reason for the override (required, kept in history)
+                        <textarea
+                          rows={2}
+                          maxLength={500}
+                          value={plan.cap_override_reason}
+                          onChange={(e) =>
+                            setPlan({
+                              ...plan,
+                              cap_override_reason: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. Approved by the Ops Head on 16 Oct; the person agreed in writing."
+                        />
+                      </label>
+                    ) : null}
+                  </div>
                 ) : null}
                 <div className={styles.splitTotal}>
                   <span>{selected.length} people selected</span>
@@ -950,7 +1122,19 @@ function RecoveryForm({
                 })}
               </small>
               {h.after_value.deduction_month ? (
-                <p>Salary month: {monthLabel(h.after_value.deduction_month)}</p>
+                <p>
+                  {h.after_value.recovery_mode === "installments"
+                    ? "First salary month"
+                    : "Salary month"}
+                  : {monthLabel(h.after_value.deduction_month)} ·{" "}
+                  {planSummary(h.after_value)}
+                </p>
+              ) : null}
+              {h.after_value.cap_override ? (
+                <p>
+                  <strong>Salary cap override:</strong>{" "}
+                  {h.after_value.cap_override_reason}
+                </p>
               ) : null}
               <p>{h.after_value.remarks}</p>
               {h.after_value.recovery_details?.reason ? (
@@ -984,6 +1168,9 @@ function RecoveryForm({
               {h.after_value.allocations.map((p) => (
                 <span key={p.ref}>
                   {p.full_name} ({p.employee_code}) — {money(p.amount)}
+                  {p.installments?.length
+                    ? ` · ${p.installments.length} × ${money(p.monthly_amount ?? p.installments[0].amount)}`
+                    : ""}
                   <br />
                 </span>
               ))}
@@ -992,5 +1179,42 @@ function RecoveryForm({
         </details>
       ) : null}
     </div>
+  );
+}
+function SchedulePreview({
+  amount,
+  plan,
+  maxInstallments,
+  firstMonth,
+  label,
+}: {
+  amount: number;
+  plan: RecoveryPlan;
+  maxInstallments: number;
+  firstMonth: string;
+  label: string;
+}) {
+  const schedule = installmentSchedule(amount, plan, maxInstallments).schedule;
+  if (!schedule.length) return null;
+  const last = schedule[schedule.length - 1];
+  return (
+    <span className={styles.schedule} aria-label={label}>
+      {schedule.length <= 6 ? (
+        schedule.map((value, i) => (
+          <span key={i}>
+            {firstMonth ? shortMonth(addMonths(firstMonth, i)) : `#${i + 1}`} ·{" "}
+            {money(value)}
+          </span>
+        ))
+      ) : (
+        <span>
+          {schedule.length} × {money(schedule[0])}
+          {last !== schedule[0] ? ` (last ${money(last)})` : ""}
+          {firstMonth
+            ? ` · ${shortMonth(firstMonth)} → ${shortMonth(addMonths(firstMonth, schedule.length - 1))}`
+            : ""}
+        </span>
+      )}
+    </span>
   );
 }

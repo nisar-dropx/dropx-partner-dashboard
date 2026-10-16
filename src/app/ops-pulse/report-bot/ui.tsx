@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, ChevronRight, Circle } from "lucide-react";
+import { AlertTriangle, CalendarCheck, CheckCircle2, ChevronRight, Circle, FileText, Inbox, MessageCircle, Users } from "lucide-react";
 import { CopyButton } from "@/components/report-bot-controls";
 import { aiKeyConfigured, aiKeyName, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import s from "./report-bot.module.css";
@@ -141,6 +141,30 @@ export async function loadSetupSteps(settings: ReportBotSettings): Promise<Setup
     { done: aiKeyConfigured(settings.ai_provider), text: `Add ${aiKeyName(settings.ai_provider)} in Vercel`, href: `${SETUP_HREF}#ai` },
     { done: settings.mode !== "off", text: "Switch the bot to Listen only", href: `${SETUP_HREF}#mode` }
   ];
+}
+
+const NAV = [
+  { key: "today", label: "Today", icon: CalendarCheck, href: "/report-bot?tab=today" },
+  { key: "review", label: "Review", icon: Inbox, href: "/report-bot?tab=review" },
+  { key: "groups", label: "Groups", icon: Users, href: "/report-bot?tab=groups" },
+  { key: "reports", label: "Reports & schedules", icon: FileText, href: "/report-bot?tab=reports" },
+  { key: "chats", label: "Chats", icon: MessageCircle, href: "/report-bot/chats" }
+] as const;
+export type NavKey = (typeof NAV)[number]["key"];
+
+/** Report Bot's tab bar, shared by the main page and the Chats page. */
+export function ReportBotNav({ active, waiting = 0, attention = 0 }: { active: NavKey; waiting?: number; attention?: number }) {
+  return (
+    <nav className={s.tabs} aria-label="Report Bot sections">
+      {NAV.map(({ key, label, icon: Icon, href }) => (
+        <Link key={key} href={href} className={`${s.tab} ${active === key ? s.tabActive : ""}`} aria-current={active === key ? "page" : undefined}>
+          <Icon size={16} aria-hidden />{label}
+          {key === "review" && waiting > 0 ? <span className={s.count} aria-label={`${waiting} waiting`}>{waiting}</span> : null}
+          {key === "review" && attention > 0 ? <span className={`${s.count} ${s.countMuted}`} aria-label={`${attention} need attention`}>{attention}</span> : null}
+        </Link>
+      ))}
+    </nav>
+  );
 }
 
 export function SetupChecklist({ steps }: { steps: SetupStep[] }) {

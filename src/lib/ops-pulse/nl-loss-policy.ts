@@ -25,7 +25,15 @@ export type RecoveryPerson = {
   salary_month?: string;
   salary_payable?: number | null;
   recovery_limit?: number | null;
+  /** Monthly room when a cap override is recorded: the whole take-home less other recoveries. */
+  override_limit?: number | null;
+  salary_gross?: number | null;
+  /** Monthly amount other plans already take from this person's salary month. */
+  reserved?: number;
   salary_source?: string;
+  /** Saved plan lines only. */
+  monthly_amount?: number;
+  installments?: { n: number; amount: number }[];
 };
 export type RecoveryPolicy = {
   active_only: boolean;
@@ -46,6 +54,8 @@ export type RecoveryPolicy = {
   payroll_cutoff_day?: number;
   /** First salary month that carries Ops loss recoveries (YYYY-MM). */
   payroll_start_month?: string;
+  /** Most instalments a recurring debit may have (default 24). */
+  max_installments?: number;
 };
 export type RecoveryAttachment = { id: string; file_name: string };
 export type RecoveryDetails = {
@@ -64,7 +74,21 @@ export type LossSettings = {
   history_months: number;
   updated_at: string;
 };
+export type RecoveryMode = "full" | "installments";
+export type InstallmentBasis = "months" | "amount";
+export type RecoveryPlan = {
+  mode: RecoveryMode;
+  basis?: InstallmentBasis;
+  value?: string;
+  cap_override?: boolean;
+  cap_override_reason?: string;
+};
 export type Recovery = {
+  recovery_mode?: RecoveryMode;
+  installment_basis?: InstallmentBasis | null;
+  installment_value?: number | null;
+  cap_override?: boolean;
+  cap_override_reason?: string | null;
   recovery_details: RecoveryDetails;
   deduction_timing: DeductionTiming;
   deduction_month: string | null;
@@ -175,11 +199,50 @@ export function deductionMonth(timing: DeductionTiming, now = new Date()) {
     .toISOString()
     .slice(0, 7);
 }
+/**
+ * A person's recovery schedule in rupees, the same rule save_nl_recovery applies: equal months with the
+ * remainder paise on the first instalments, or a fixed monthly amount with a smaller last instalment.
+ */
+export function installmentSchedule(
+  amount: number,
+  plan: Pick<RecoveryPlan, "mode" | "basis" | "value">,
+  maxInstallments = 24,
+): { schedule: number[]; error: string } {
+  const total = Math.round(amount * 100);
+  if (!Number.isSafeInteger(total) || total <= 0) return { schedule: [], error: "" };
+  if (plan.mode !== "installments") return { schedule: [total / 100], error: "" };
+  const max = Math.min(60, Math.max(2, Math.trunc(maxInstallments) || 24));
+  const raw = String(plan.value ?? "").trim();
+  if (plan.basis !== "months" && plan.basis !== "amount")
+    return { schedule: [], error: "Choose instalments by number of months or by amount per month." };
+  if (!/^\d+(\.\d{1,2})?$/.test(raw))
+    return { schedule: [], error: plan.basis === "months" ? "Enter the number of months." : "Enter the monthly amount." };
+  const value = Number(raw);
+  if (plan.basis === "months") {
+    if (!Number.isInteger(value) || value < 2 || value > max)
+      return { schedule: [], error: `Instalments must be between 2 and ${max} months.` };
+    if (total < value * 100)
+      return { schedule: [], error: `The share is too small for ${value} instalments.` };
+    const per = Math.floor(total / value), rem = total % value;
+    return { schedule: Array.from({ length: value }, (_, i) => (per + (i < rem ? 1 : 0)) / 100), error: "" };
+  }
+  const per = Math.round(value * 100);
+  if (per < 100) return { schedule: [], error: "The monthly amount must be at least ₹1." };
+  if (per >= total) return { schedule: [], error: "The monthly amount covers the whole share. Use Full debit instead." };
+  const count = Math.ceil(total / per);
+  if (count > max)
+    return { schedule: [], error: `At ₹${value.toLocaleString("en-IN")} a month this needs ${count} instalments; the maximum is ${max}.` };
+  return { schedule: Array.from({ length: count }, (_, i) => Math.min(per, total - i * per) / 100), error: "" };
+}
+
 export function allocationError(
   amount: number,
   splits: { employee_ref: string; amount: number }[],
   people: RecoveryPerson[],
   capEnabled = false,
+  plan: RecoveryPlan = { mode: "full" },
+  maxInstallments = 24,
+  capPercent = 100,
 ) {
   if (!splits.length)
     return "Select the employees responsible for the full amount.";
@@ -204,16 +267,26 @@ export function allocationError(
     Math.round(amount * 100)
   )
     return "Allocate the full loss amount. Partial recovery is not allowed.";
-  if (capEnabled) {
-    for (const split of splits) {
-      const person = people.find((p) => p.ref === split.employee_ref)!;
-      if (person.recovery_limit == null)
+  const override = !!plan.cap_override;
+  if (override) {
+    const reason = String(plan.cap_override_reason ?? "").trim();
+    if (reason.length < 10 || reason.length > 500)
+      return "Give a reason for recovering beyond the salary cap (10–500 characters).";
+  }
+  for (const split of splits) {
+    const person = people.find((p) => p.ref === split.employee_ref)!;
+    const { schedule, error } = installmentSchedule(split.amount, plan, maxInstallments);
+    if (error) return `${person.employee_code}: ${error}`;
+    const monthly = Math.round((schedule[0] ?? 0) * 100);
+    if (capEnabled) {
+      const limit = override ? person.override_limit : person.recovery_limit;
+      if (limit == null)
         return `Salary payable is unavailable for ${person.employee_code}. Complete payroll or payout mapping first.`;
-      if (
-        Math.round(split.amount * 100) > Math.round(person.recovery_limit * 100)
-      )
-        return `Recovery exceeds salary payable for ${person.employee_code}. Limit: ₹${person.recovery_limit.toLocaleString("en-IN")}. Reallocate the balance; partial recovery is not allowed.`;
+      if (monthly > Math.round(limit * 100))
+        return `The monthly recovery of ₹${(monthly / 100).toLocaleString("en-IN")} for ${person.employee_code} is more than the ${override ? "take-home" : `${capPercent}%`} salary limit of ₹${limit.toLocaleString("en-IN")}. ${override ? "Spread it over more instalments." : "Spread it over more instalments, or record a cap override."}`;
     }
+    if (person.salary_gross != null && monthly > Math.round(person.salary_gross * 100))
+      return `The monthly recovery for ${person.employee_code} is more than their gross pay of ₹${person.salary_gross.toLocaleString("en-IN")}.`;
   }
   return "";
 }

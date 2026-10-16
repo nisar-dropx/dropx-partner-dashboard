@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migration = await readFile(new URL("../../../supabase/migrations/20261015190000_report_bot.sql", import.meta.url), "utf8");
+const fasterReplies = await readFile(new URL("../../../supabase/migrations/20261016160000_report_bot_faster_replies.sql", import.meta.url), "utf8");
 const statelessWorker = await readFile(new URL("../../../supabase/migrations/20261016140000_report_bot_stateless_worker.sql", import.meta.url), "utf8");
 const noImageStorage = await readFile(new URL("../../../supabase/migrations/20261016120000_report_bot_no_image_storage.sql", import.meta.url), "utf8");
 const geminiDefault = await readFile(new URL("../../../supabase/migrations/20261016100000_report_bot_gemini_default.sql", import.meta.url), "utf8");
@@ -20,8 +21,26 @@ async function setup() {
   await db.exec(geminiDefault);
   await db.exec(noImageStorage);
   await db.exec(statelessWorker);
+  await db.exec(fasterReplies);
   return db;
 }
+
+test("faster reply defaults apply to untouched rows only, and the reply layout gains @mention and checks", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec("create role anon; create role authenticated; create role service_role; create table public.stations (id uuid primary key, company_id uuid);");
+    await db.exec(migration);
+    await db.query("insert into public.report_bot_settings (company_id) values ($1)", [COMPANY_A]);
+    await db.query("insert into public.report_bot_settings (company_id, reply_delay_min_seconds, reply_delay_max_seconds, group_min_gap_seconds, feedback_template) values ($1, 5, 60, 45, 'custom {feedback}')", [COMPANY_B]);
+    await db.exec(fasterReplies);
+    const rows = (await db.query("select reply_delay_min_seconds as lo, reply_delay_max_seconds as hi, group_min_gap_seconds as gap, feedback_template as t from public.report_bot_settings order by company_id")).rows;
+    assert.deepEqual([rows[0].lo, rows[0].hi, rows[0].gap], [3, 10, 10]);
+    assert.ok(rows[0].t.includes("{checks}") && rows[0].t.startsWith("{sender}"));
+    assert.deepEqual([rows[1].lo, rows[1].hi, rows[1].gap, rows[1].t], [5, 60, 45, "custom {feedback}"], "deliberate settings are kept");
+  } finally {
+    await db.close();
+  }
+});
 
 test("the WhatsApp login store is per company, private to the server, and message records are bounded", async () => {
   const db = await setup();

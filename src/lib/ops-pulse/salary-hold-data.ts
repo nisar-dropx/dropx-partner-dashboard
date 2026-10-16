@@ -4,6 +4,14 @@ import { hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadPeopleDesignations } from "@/lib/people-designation";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+import {
+  approverActions,
+  holdApprovers,
+  requesterActions,
+  type SalaryHoldAction,
+  type SalaryHoldStatus,
+} from "./salary-hold-policy";
 
 function indiaToday() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -21,31 +29,6 @@ export type SalaryHoldWorker = {
   designationName: string | null;
   workerType: "employee" | "contractor";
   workerId: string;
-};
-
-export type SalaryHoldRecord = {
-  id: string;
-  workerType: "employee" | "contractor";
-  workerId: string;
-  workerDisplayName: string;
-  holdType: "amount" | "days";
-  amount: number | null;
-  days: number | null;
-  reason: string;
-  status: "pending" | "applied" | "cancel_requested" | "cancelled";
-  requestedAt: string;
-  cancelRequestedAt: string | null;
-  cancelRequestNote: string | null;
-  cancellationNote: string | null;
-  appliedAt: string | null;
-  appliedAmount: number | null;
-};
-
-export type SalaryHoldWorkspace = {
-  checkedAt: string;
-  designationTierCleared: boolean;
-  eligibleWorkers: SalaryHoldWorker[];
-  holds: SalaryHoldRecord[];
 };
 
 /**
@@ -162,29 +145,190 @@ export async function loadDirectReportsForSalaryHold(companyId: string, managerU
   return { reports, error: null };
 }
 
-type RawHold = {
+export type SalaryHoldEvent = { action: string; toStatus: string; actorName: string | null; note: string | null; createdAt: string };
+
+export type SalaryHoldRecord = {
   id: string;
-  worker_type: "employee" | "contractor";
-  worker_id: string;
-  hold_type: "amount" | "days";
+  version: number;
+  workerType: "employee" | "contractor";
+  workerId: string;
+  workerName: string;
+  workerCode: string | null;
+  stationCode: string | null;
+  holdType: "amount" | "days";
   amount: number | null;
   days: number | null;
   reason: string;
-  status: "pending" | "applied" | "cancel_requested" | "cancelled";
-  requested_at: string;
-  cancel_requested_at: string | null;
-  cancel_request_note: string | null;
-  cancellation_note: string | null;
-  applied_at: string | null;
-  applied_amount: number | null;
+  status: SalaryHoldStatus;
+  requestedAt: string;
+  requestedByName: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  cancelRequestNote: string | null;
+  appliedAmount: number | null;
+  appliedAt: string | null;
+  releaseRequestNote: string | null;
+  releasedByName: string | null;
+  releasedAt: string | null;
+  releaseAmount: number | null;
+  paidBack: boolean;
+  approverNames: string[];
+  approverLevel: "cluster_manager" | "aom" | "none";
+  /** What the viewer may do now. */
+  actions: SalaryHoldAction[];
+  history: SalaryHoldEvent[];
 };
 
+export type SalaryHoldWorkspace = {
+  checkedAt: string;
+  viewerId: string;
+  designationTierCleared: boolean;
+  eligibleWorkers: SalaryHoldWorker[];
+  /** Holds the viewer raised. */
+  holds: SalaryHoldRecord[];
+  /** Open requests the viewer decides as the station's cluster manager. */
+  approvals: SalaryHoldRecord[];
+  /** Holds the viewer approved, rejected or released in the last 60 days. */
+  decided: SalaryHoldRecord[];
+};
+
+const HOLD_COLUMNS =
+  "id,version,worker_type,worker_id,location_id,hold_type,amount,days,reason,status,requested_at,requested_by_user_id,requested_by_name,decided_by,decided_by_name,decided_at,decision_note,cancel_requested_by_user_id,cancel_request_note,applied_at,applied_amount,release_requested_by,release_request_note,released_by,released_by_name,released_at,release_amount,release_run_id";
+
+type RawHold = {
+  id: string; version: number; worker_type: "employee" | "contractor"; worker_id: string; location_id: string | null;
+  hold_type: "amount" | "days"; amount: number | null; days: number | null; reason: string; status: SalaryHoldStatus;
+  requested_at: string; requested_by_user_id: string | null; requested_by_name: string | null;
+  decided_by: string | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null;
+  cancel_requested_by_user_id: string | null; cancel_request_note: string | null;
+  applied_at: string | null; applied_amount: number | null;
+  release_requested_by: string | null; release_request_note: string | null;
+  released_by: string | null; released_by_name: string | null; released_at: string | null; release_amount: number | null; release_run_id: string | null;
+};
+type NamedRow = { id: string; full_name: string | null; employee_code?: string | null; dropx_id?: string | null };
+type LocatedRow = { id: string; location_id: string | null };
+
+/** People records linked to a login. */
+async function personIdsForUser(companyId: string, userId: string) {
+  const result = await supabaseAdmin!.from("hr_user_person_links").select("person_id").eq("company_id", companyId).eq("user_id", userId).eq("status", "active");
+  if (result.error) throw new Error("Your People profile could not be resolved.");
+  return new Set((result.data ?? []).map((row) => row.person_id as string).filter(Boolean));
+}
+
+/** The station of a worker, used to route a new hold to that station's cluster manager. */
+export async function workerLocation(companyId: string, workerType: "employee" | "contractor", workerId: string) {
+  const result = await supabaseAdmin!.from(workerType === "employee" ? "employees" : "contractors").select("location_id").eq("company_id", companyId).eq("id", workerId).maybeSingle();
+  if (result.error) throw new Error("The person's station could not be resolved.");
+  return (result.data?.location_id as string | null) ?? null;
+}
+
+/** Each hold's station (saved when raised; older holds fall back to the person's current station). */
+async function holdLocations(companyId: string, holds: RawHold[]) {
+  const byHold = new Map<string, string | null>();
+  const missing = holds.filter((h) => !h.location_id);
+  const employeeIds = [...new Set(missing.filter((h) => h.worker_type === "employee").map((h) => h.worker_id))];
+  const contractorIds = [...new Set(missing.filter((h) => h.worker_type === "contractor").map((h) => h.worker_id))];
+  const [employees, contractors] = await Promise.all([
+    employeeIds.length ? supabaseAdmin!.from("employees").select("id,location_id").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [] as LocatedRow[], error: null }),
+    contractorIds.length ? supabaseAdmin!.from("contractors").select("id,location_id").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [] as LocatedRow[], error: null }),
+  ]);
+  if (employees.error || contractors.error) throw new Error("Salary hold stations could not be resolved.");
+  const loc = new Map<string, string | null>([
+    ...((employees.data ?? []) as LocatedRow[]).map((r) => [`employee:${r.id}`, r.location_id] as [string, string | null]),
+    ...((contractors.data ?? []) as LocatedRow[]).map((r) => [`contractor:${r.id}`, r.location_id] as [string, string | null]),
+  ]);
+  for (const h of holds) byHold.set(h.id, h.location_id ?? loc.get(`${h.worker_type}:${h.worker_id}`) ?? null);
+  return byHold;
+}
+
+async function describeHolds(companyId: string, viewerId: string, viewerPeople: Set<string>, rows: RawHold[]) {
+  if (!rows.length) return [] as SalaryHoldRecord[];
+  const locations = await holdLocations(companyId, rows);
+  const locationIds = [...new Set([...locations.values()].filter(Boolean) as string[])];
+  const employeeIds = [...new Set(rows.filter((h) => h.worker_type === "employee").map((h) => h.worker_id))];
+  const contractorIds = [...new Set(rows.filter((h) => h.worker_type === "contractor").map((h) => h.worker_id))];
+  const [hierarchy, employees, contractors, stations, events] = await Promise.all([
+    loadPeopleOperationalHierarchy(companyId, locationIds),
+    employeeIds.length ? supabaseAdmin!.from("employees").select("id,employee_code,full_name").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [] as NamedRow[], error: null }),
+    contractorIds.length ? supabaseAdmin!.from("contractors").select("id,dropx_id,full_name").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [] as NamedRow[], error: null }),
+    locationIds.length ? supabaseAdmin!.from("stations").select("id,station_code").eq("company_id", companyId).in("id", locationIds) : Promise.resolve({ data: [] as Array<{ id: string; station_code: string }>, error: null }),
+    supabaseAdmin!.from("ops_salary_hold_events").select("hold_id,action,to_status,actor_name,note,created_at").eq("company_id", companyId).in("hold_id", rows.map((r) => r.id)).order("created_at"),
+  ]);
+  if (hierarchy.error) throw new Error("Cluster managers could not be resolved from People. Please retry.");
+  if (employees.error || contractors.error || stations.error || events.error) throw new Error("Salary hold details could not be loaded.");
+  const people = new Map<string, { name: string; code: string | null }>([
+    ...((employees.data ?? []) as NamedRow[]).map((r) => [`employee:${r.id}`, { name: r.full_name ?? "Unknown", code: r.employee_code ?? null }] as [string, { name: string; code: string | null }]),
+    ...((contractors.data ?? []) as NamedRow[]).map((r) => [`contractor:${r.id}`, { name: r.full_name ?? "Unknown", code: r.dropx_id ?? null }] as [string, { name: string; code: string | null }]),
+  ]);
+  const stationCode = new Map(((stations.data ?? []) as Array<{ id: string; station_code: string }>).map((r) => [r.id, r.station_code]));
+  const history = new Map<string, SalaryHoldEvent[]>();
+  for (const e of (events.data ?? []) as Array<{ hold_id: string; action: string; to_status: string; actor_name: string | null; note: string | null; created_at: string }>) {
+    const list = history.get(e.hold_id) ?? [];
+    list.push({ action: e.action, toStatus: e.to_status, actorName: e.actor_name, note: e.note, createdAt: e.created_at });
+    history.set(e.hold_id, list);
+  }
+  return rows.map((h) => {
+    const location = locations.get(h.id) ?? null;
+    const approvers = holdApprovers(location ? hierarchy.byLocation.get(location) : undefined);
+    const isApprover = approvers.personIds.some((id) => viewerPeople.has(id));
+    const person = people.get(`${h.worker_type}:${h.worker_id}`);
+    const mine = h.requested_by_user_id === viewerId;
+    const actions = [
+      ...(mine ? requesterActions(h.status) : []),
+      ...approverActions(
+        { status: h.status, requestedBy: h.requested_by_user_id, cancelRequestedBy: h.cancel_requested_by_user_id, releaseRequestedBy: h.release_requested_by },
+        viewerId,
+        isApprover,
+      ),
+    ];
+    const record: SalaryHoldRecord = {
+      id: h.id,
+      version: h.version,
+      workerType: h.worker_type,
+      workerId: h.worker_id,
+      workerName: person?.name ?? "Former team member",
+      workerCode: person?.code ?? null,
+      stationCode: location ? stationCode.get(location) ?? null : null,
+      holdType: h.hold_type,
+      amount: h.amount == null ? null : Number(h.amount),
+      days: h.days == null ? null : Number(h.days),
+      reason: h.reason,
+      status: h.status,
+      requestedAt: h.requested_at,
+      requestedByName: h.requested_by_name,
+      decidedByName: h.decided_by_name,
+      decidedAt: h.decided_at,
+      decisionNote: h.decision_note,
+      cancelRequestNote: h.cancel_request_note,
+      appliedAmount: h.applied_amount == null ? null : Number(h.applied_amount),
+      appliedAt: h.applied_at,
+      releaseRequestNote: h.release_request_note,
+      releasedByName: h.released_by_name,
+      releasedAt: h.released_at,
+      releaseAmount: h.release_amount == null ? null : Number(h.release_amount),
+      paidBack: !!h.release_run_id,
+      approverNames: approvers.names,
+      approverLevel: approvers.level,
+      actions: [...new Set(actions)],
+      history: history.get(h.id) ?? [],
+    };
+    return record;
+  });
+}
+
+/** The hold as this user sees it now, with the actions they may take. Re-checked on every change; never trusted from the client. */
+export async function loadHoldForViewer(companyId: string, viewerId: string, holdId: string) {
+  if (!supabaseAdmin) throw new Error("Salary hold service unavailable.");
+  const result = await supabaseAdmin.from("ops_salary_holds").select(HOLD_COLUMNS).eq("company_id", companyId).eq("id", holdId).maybeSingle();
+  if (result.error || !result.data) throw new Error("Salary hold could not be found.");
+  const [record] = await describeHolds(companyId, viewerId, await personIdsForUser(companyId, viewerId), [result.data as unknown as RawHold]);
+  return record;
+}
+
 /**
- * Loads the salary-hold workspace for the logged-in manager: whether they
- * clear the station-floor-tier gate (Senior Store Manager and above only -
- * see isStationFloorRosterDesignation), their current direct reports as
- * eligible hold targets, and every hold they have personally requested (any
- * status) for their own visibility/accountability.
+ * The salary hold desk for the signed-in user: holds they raised (Senior Store Manager and above, for
+ * direct reports), open requests they decide as a station's cluster manager, and their recent decisions.
  */
 export async function loadSalaryHoldWorkspace(auth: AuthorizationContext): Promise<SalaryHoldWorkspace> {
   if (!hasPermission(auth, "ops_salary_hold", "access")) throw new Error("Salary hold access is required.");
@@ -199,39 +343,40 @@ export async function loadSalaryHoldWorkspace(auth: AuthorizationContext): Promi
     code: viewerDesignation?.code ?? null
   });
 
-  if (!designationTierCleared) {
-    return { checkedAt, designationTierCleared: false, eligibleWorkers: [], holds: [] };
+  const since = new Date(Date.now() - 60 * 86400000).toISOString();
+  const [reportsResult, viewerPeople, mine, open, decided] = await Promise.all([
+    designationTierCleared ? loadDirectReportsForSalaryHold(companyId, auth.userId) : Promise.resolve({ reports: [] as SalaryHoldWorker[], error: null }),
+    personIdsForUser(companyId, auth.userId),
+    supabaseAdmin.from("ops_salary_holds").select(HOLD_COLUMNS).eq("company_id", companyId).eq("requested_by_user_id", auth.userId).order("requested_at", { ascending: false }).limit(200),
+    supabaseAdmin.from("ops_salary_holds").select(HOLD_COLUMNS).eq("company_id", companyId).in("status", ["awaiting_approval", "cancel_requested", "release_requested"]).order("requested_at").limit(500),
+    supabaseAdmin.from("ops_salary_holds").select(HOLD_COLUMNS).eq("company_id", companyId).or(`decided_by.eq.${auth.userId},released_by.eq.${auth.userId}`).gte("updated_at", since).order("updated_at", { ascending: false }).limit(50),
+  ]);
+  if (reportsResult.error) throw new Error("Your reporting team could not be resolved. Please contact HR.");
+  const failed = [mine.error, open.error, decided.error].find(Boolean);
+  if (failed) {
+    throw new Error(/column|does not exist|schema cache/i.test(failed.message)
+      ? "Salary hold approvals are not available until the latest database update is applied."
+      : "Salary holds could not be loaded.");
   }
-
-  const { reports, error: reportsError } = await loadDirectReportsForSalaryHold(companyId, auth.userId);
-  if (reportsError) throw new Error("Your reporting team could not be resolved. Please contact HR.");
-
-  const holdsResult = await supabaseAdmin
-    .from("ops_salary_holds")
-    .select("id,worker_type,worker_id,hold_type,amount,days,reason,status,requested_at,cancel_requested_at,cancel_request_note,cancellation_note,applied_at,applied_amount")
-    .eq("company_id", companyId)
-    .eq("requested_by_user_id", auth.userId)
-    .order("requested_at", { ascending: false });
-  if (holdsResult.error) throw new Error("Previously placed salary holds could not be loaded.");
-
-  const nameByWorker = new Map(reports.map((r) => [`${r.workerType}:${r.workerId}`, r.displayName]));
-  const holds: SalaryHoldRecord[] = ((holdsResult.data ?? []) as RawHold[]).map((row) => ({
-    id: row.id,
-    workerType: row.worker_type,
-    workerId: row.worker_id,
-    workerDisplayName: nameByWorker.get(`${row.worker_type}:${row.worker_id}`) ?? "Former direct report",
-    holdType: row.hold_type,
-    amount: row.amount,
-    days: row.days,
-    reason: row.reason,
-    status: row.status,
-    requestedAt: row.requested_at,
-    cancelRequestedAt: row.cancel_requested_at,
-    cancelRequestNote: row.cancel_request_note,
-    cancellationNote: row.cancellation_note,
-    appliedAt: row.applied_at,
-    appliedAmount: row.applied_amount
-  }));
-
-  return { checkedAt, designationTierCleared: true, eligibleWorkers: reports, holds };
+  const mineRows = (mine.data ?? []) as unknown as RawHold[];
+  const openRows = ((open.data ?? []) as unknown as RawHold[]).filter((h) => h.requested_by_user_id !== auth.userId);
+  const decidedRows = ((decided.data ?? []) as unknown as RawHold[]).filter((h) => h.requested_by_user_id !== auth.userId);
+  const unique = [...new Map([...mineRows, ...openRows, ...decidedRows].map((h) => [h.id, h])).values()];
+  const described = await describeHolds(companyId, auth.userId, viewerPeople, unique);
+  const mineIds = new Set(mineRows.map((h) => h.id));
+  const openIds = new Set(openRows.map((h) => h.id));
+  const decidedIds = new Set(decidedRows.map((h) => h.id));
+  // Open requests become approvals only at stations where the viewer is the cluster manager.
+  const decisions = new Set(["approve", "reject", "approve_cancel", "reject_cancel", "approve_release", "reject_release"]);
+  const approvals = described.filter((h) => openIds.has(h.id) && h.actions.some((a) => decisions.has(a)));
+  const approvalIds = new Set(approvals.map((h) => h.id));
+  return {
+    checkedAt,
+    viewerId: auth.userId,
+    designationTierCleared,
+    eligibleWorkers: reportsResult.reports,
+    holds: described.filter((h) => mineIds.has(h.id)),
+    approvals,
+    decided: described.filter((h) => decidedIds.has(h.id) && !approvalIds.has(h.id)),
+  };
 }

@@ -3,7 +3,40 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bearerMatches, classifyContent, EventQueue, Lru, messageSeconds, normalizeConfig, pruneOlderThan, validateSend } from "./lib.mjs";
+import { bearerMatches, chatContent, chatEntry, ChatLog, classifyContent, cleanMentions, EventQueue, Lru, messageSeconds, normalizeConfig, pruneOlderThan, validateSend } from "./lib.mjs";
+
+test("chat view: text, captions, replies and mentions are read; reactions and protocol noise are skipped", () => {
+  assert.deepEqual(chatContent({ conversation: "Hi team" }), { type: "text", text: "Hi team", context: null });
+  assert.equal(chatContent({ imageMessage: { caption: "EOD" } }).type, "image");
+  assert.equal(chatContent({ reactionMessage: { text: "👍" } }), null);
+  assert.equal(chatContent({ protocolMessage: {} }), null);
+  const entry = chatEntry({
+    key: { id: "M1", remoteJid: "120363000000000001@g.us", participant: "919876543210@s.whatsapp.net", fromMe: false },
+    pushName: "Ravi",
+    messageTimestamp: 1760000000,
+    message: { extendedTextMessage: { text: "@919800000000 done", contextInfo: { stanzaId: "IMG1", participant: "919800000000@s.whatsapp.net", quotedMessage: { imageMessage: { caption: "EOD" } }, mentionedJid: ["919800000000@s.whatsapp.net"] } } }
+  }, { normalize: (message) => message, isBot: () => false });
+  assert.deepEqual(entry.quoted, { id: "IMG1", from: "919800000000@s.whatsapp.net", type: "image", text: "EOD" });
+  assert.deepEqual(entry.mentions, ["919800000000@s.whatsapp.net"]);
+  assert.equal(entry.name, "Ravi");
+});
+
+test("chat log is bounded, ordered, de-duplicated and forgets groups that were turned off", () => {
+  const log = new ChatLog(3);
+  const group = "120363000000000001@g.us";
+  for (const [id, ts] of [["a", 5], ["b", 1], ["c", 3], ["d", 7]]) log.add(group, { id, ts, from: "1@s.whatsapp.net", name: "N" });
+  assert.deepEqual(log.list(group).map((entry) => entry.id), ["c", "a", "d"], "oldest dropped, sorted by time");
+  log.add(group, { id: "a", ts: 5, text: "edited" });
+  assert.equal(log.list(group).length, 3);
+  assert.deepEqual(log.list(group, 4).map((entry) => entry.id), ["a", "d"]);
+  log.forget([]);
+  assert.deepEqual(log.list(group), []);
+});
+
+test("mentions sent to WhatsApp are limited to real member ids", () => {
+  assert.deepEqual(cleanMentions(["919876543210@s.whatsapp.net", "123456@lid", "x@g.us", 5, "evil"]), ["919876543210@s.whatsapp.net", "123456@lid"]);
+  assert.deepEqual(cleanMentions(null), []);
+});
 
 const GROUP = "120363000000000001@g.us";
 

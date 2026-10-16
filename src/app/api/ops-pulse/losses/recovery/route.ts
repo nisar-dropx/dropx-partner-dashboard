@@ -146,6 +146,29 @@ export async function POST(request: Request) {
       );
     if (JSON.stringify(body.recovery_details || {}).length > 20000)
       return reply({ error: "Re-dispute details are too long." }, 400);
+    // Full or recurring debit; the database validates the schedule and the salary cap.
+    const rawPlan = body.plan && typeof body.plan === "object" ? body.plan : {};
+    const plan = {
+      mode: rawPlan.mode === "installments" ? "installments" : "full",
+      basis: rawPlan.basis === "months" || rawPlan.basis === "amount" ? rawPlan.basis : null,
+      value: rawPlan.value == null ? null : String(rawPlan.value).trim().slice(0, 20),
+      cap_override: rawPlan.cap_override === true,
+      cap_override_reason:
+        typeof rawPlan.cap_override_reason === "string" ? rawPlan.cap_override_reason.slice(0, 500) : null,
+    };
+    // Recovering beyond the salary cap is a Master-level decision, like the cap itself.
+    if (plan.cap_override && !hasPermission(auth, "ops_loss_master", "edit")) {
+      const saved = await supabaseAdmin!
+        .from("nl_loss_recoveries")
+        .select("cap_override,is_deleted")
+        .eq("company_id", scope.company)
+        .eq("month", body.month)
+        .eq("case_key", caseKey)
+        .maybeSingle();
+      // Keeping an override someone with access already recorded is allowed; adding one is not.
+      if (!saved.data?.cap_override || saved.data.is_deleted)
+        return reply({ error: "Only people with Loss Recovery Master edit access can recover beyond the salary cap." }, 403);
+    }
     const result = await supabaseAdmin!.rpc("save_nl_recovery", {
       p_company: scope.company,
       p_month: body.month,
@@ -158,6 +181,7 @@ export async function POST(request: Request) {
       p_actor: auth.userId,
       p_name: auth.fullName || auth.email || "OpsPulse user",
       p_details: body.recovery_details || {},
+      p_plan: plan,
     });
     if (result.error)
       return reply(

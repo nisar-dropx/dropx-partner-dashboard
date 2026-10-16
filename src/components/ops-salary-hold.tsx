@@ -1,283 +1,218 @@
 "use client";
 import { useState, useTransition } from "react";
-import { placeSalaryHold, requestSalaryHoldCancellation } from "@/app/ops-pulse/attendance/salary-hold/actions";
+import { actOnSalaryHold, placeSalaryHold } from "@/app/ops-pulse/attendance/salary-hold/actions";
 import type { SalaryHoldRecord, SalaryHoldWorkspace } from "@/lib/ops-pulse/salary-hold-data";
+import { ACTION_COPY, HOLD_STATUS, noteError, validateRaise, type SalaryHoldAction } from "@/lib/ops-pulse/salary-hold-policy";
+import styles from "./ops-salary-hold.module.css";
 
-const statusPillClass = (status: string) => {
-  if (status === "applied") return "status-pill good";
-  if (status === "cancelled") return "status-pill bad";
-  if (status === "cancel_requested") return "status-pill warn";
-  return "status-pill";
+const money = (n: number | null | undefined) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(n) || 0);
+const when = (value: string | null) =>
+  value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+const EVENT_LABEL: Record<string, string> = {
+  raised: "Raised", approve: "Approved", reject: "Rejected", withdraw: "Withdrawn", request_cancel: "Cancellation requested",
+  approve_cancel: "Cancellation approved", reject_cancel: "Cancellation declined", applied: "Withheld in payroll",
+  request_release: "Release requested", approve_release: "Release approved", reject_release: "Release declined", paid_back: "Paid back",
 };
 
-const dateTimeLabel = (value: string | null) =>
-  value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—";
-
-function HoldRow({ hold, onActed }: { hold: SalaryHoldRecord; onActed: () => void }) {
+function HoldCard({ hold, onDone }: { hold: SalaryHoldRecord; onDone: (message: string) => void }) {
+  const [action, setAction] = useState<SalaryHoldAction | null>(null);
   const [note, setNote] = useState("");
-  const [busy, startTransition] = useTransition();
   const [error, setError] = useState("");
-  const [requesting, setRequesting] = useState(false);
-
-  function submitCancelRequest() {
+  const [busy, start] = useTransition();
+  const meta = HOLD_STATUS[hold.status];
+  const shown = hold.holdType === "amount" ? money(hold.amount) : `${hold.days} day${hold.days === 1 ? "" : "s"}`;
+  function submit() {
+    if (!action) return;
+    const invalid = noteError(action, note);
+    if (invalid) return setError(invalid);
+    const form = new FormData();
+    form.set("holdId", hold.id);
+    form.set("action", action);
+    form.set("version", String(hold.version));
+    form.set("note", note.trim());
     setError("");
-    const formData = new FormData();
-    formData.set("holdId", hold.id);
-    formData.set("note", note.trim());
-    startTransition(async () => {
-      const result = await requestSalaryHoldCancellation(formData);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-      onActed();
+    start(async () => {
+      const result = await actOnSalaryHold(form);
+      if (!result.ok) return setError(result.message);
+      setAction(null);
+      setNote("");
+      onDone(result.message);
     });
   }
-
   return (
-    <div className="osh-hold-row">
-      <div className="osh-hold-head">
+    <article className={styles.hold}>
+      <div className={styles.holdHead}>
         <div>
-          <strong>{hold.workerDisplayName}</strong>
-          <span className={statusPillClass(hold.status)}>{hold.status.replace(/_/g, " ")}</span>
+          <strong>{hold.workerName}</strong>
+          <small>
+            {[hold.workerCode, hold.stationCode, hold.workerType === "contractor" ? "Contractor" : "Employee"].filter(Boolean).join(" · ")}
+          </small>
         </div>
-        <small>{dateTimeLabel(hold.requestedAt)}</small>
+        <div>
+          <div className={styles.amount}>{shown}</div>
+          <span className={`${styles.pill} ${styles[`tone_${meta.tone}`]}`}>{meta.label}</span>
+        </div>
       </div>
-      <p className="osh-hold-detail">
-        {hold.holdType === "amount" ? `Amount hold: ₹${hold.amount ?? 0}` : `Days hold: ${hold.days ?? 0} day(s)`}
-      </p>
-      <p className="osh-hold-detail">Reason: {hold.reason}</p>
-      {hold.status === "cancel_requested" && (
-        <p className="osh-hold-detail">Cancellation requested{hold.cancelRequestNote ? ` — ${hold.cancelRequestNote}` : ""}, awaiting HR decision.</p>
-      )}
-      {hold.status === "applied" && (
-        <p className="osh-hold-detail">Applied{hold.appliedAmount != null ? ` — ₹${hold.appliedAmount}` : ""} on {dateTimeLabel(hold.appliedAt)}.</p>
-      )}
-      {hold.status === "cancelled" && hold.cancellationNote && (
-        <p className="osh-hold-detail">HR note: {hold.cancellationNote}</p>
-      )}
-      {hold.status === "pending" && !requesting && (
-        <button type="button" className="button secondary" onClick={() => setRequesting(true)}>
-          Request cancellation
-        </button>
-      )}
-      {hold.status === "pending" && requesting && (
-        <div className="osh-cancel-form">
-          <textarea
-            className="field"
-            placeholder="Optional note for HR about why this hold should be cancelled"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            disabled={busy}
-            rows={2}
-          />
-          <div className="osh-hold-buttons">
-            <button type="button" className="button secondary" disabled={busy} onClick={submitCancelRequest}>
-              {busy ? "Submitting…" : "Submit cancellation request"}
-            </button>
-            <button type="button" className="button secondary" disabled={busy} onClick={() => setRequesting(false)}>
-              Back
-            </button>
+      <p className={styles.reason}>{hold.reason}</p>
+      <div className={styles.facts}>
+        <span>Raised by <b>{hold.requestedByName || "—"}</b> · {when(hold.requestedAt)}</span>
+        {hold.decidedByName ? <span>Decided by <b>{hold.decidedByName}</b> · {when(hold.decidedAt)}</span> : null}
+        {hold.appliedAmount != null ? <span>Withheld <b>{money(hold.appliedAmount)}</b></span> : null}
+        {hold.status === "released" ? <span>{hold.paidBack ? "Paid back" : "Pays back in the next payroll"} <b>{money(hold.releaseAmount)}</b></span> : null}
+      </div>
+      {["awaiting_approval", "cancel_requested", "release_requested"].includes(hold.status) ? (
+        <p className={styles.next}>
+          {meta.next}
+          {hold.approverNames.length ? ` · ${hold.approverNames.join(", ")}${hold.approverLevel === "aom" ? " (AOM, no cluster manager mapped)" : ""}` : " · No cluster manager is mapped to this station in People. Ask HR to map one."}
+        </p>
+      ) : null}
+      {hold.actions.length ? (
+        action ? (
+          <div className={styles.decide}>
+            <strong>{ACTION_COPY[action].label}</strong>
+            <p className={styles.hint}>{ACTION_COPY[action].confirm}</p>
+            <textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} placeholder={ACTION_COPY[action].noteRequired ? "Reason (required)" : "Note (optional)"} aria-label="Note" />
+            {error ? <p className={styles.error} role="alert">{error}</p> : null}
+            <div className={styles.actions}>
+              <button className={styles[ACTION_COPY[action].tone]} disabled={busy} onClick={submit}>{busy ? "Saving…" : `Confirm · ${ACTION_COPY[action].label}`}</button>
+              <button className={styles.secondary} disabled={busy} onClick={() => { setAction(null); setError(""); }}>Back</button>
+            </div>
           </div>
-          {error && <p className="ooc-gate-error" role="alert">{error}</p>}
-        </div>
-      )}
-    </div>
+        ) : (
+          <div className={styles.actions}>
+            {hold.actions.map((a) => (
+              <button key={a} className={styles[ACTION_COPY[a].tone]} onClick={() => setAction(a)}>{ACTION_COPY[a].label}</button>
+            ))}
+          </div>
+        )
+      ) : null}
+      {hold.history.length ? (
+        <details>
+          <summary className={styles.hint}>History · {hold.history.length}</summary>
+          <ol className={styles.timeline}>
+            {hold.history.map((e, i) => (
+              <li key={i}>
+                <b>{EVENT_LABEL[e.action] ?? e.action}</b>{e.actorName ? ` by ${e.actorName}` : ""}<time>{when(e.createdAt)}</time>
+                {e.note ? <div>{e.note}</div> : null}
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
+    </article>
   );
 }
 
-function PlaceHoldForm({ workspace, onPlaced }: { workspace: SalaryHoldWorkspace; onPlaced: () => void }) {
+function RaiseForm({ workspace, onDone }: { workspace: SalaryHoldWorkspace; onDone: (message: string) => void }) {
   const [workerKey, setWorkerKey] = useState("");
   const [holdType, setHoldType] = useState<"amount" | "days">("amount");
   const [amount, setAmount] = useState("");
   const [days, setDays] = useState("");
   const [reason, setReason] = useState("");
-  const [busy, startTransition] = useTransition();
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  function submit() {
-    setError("");
-    setSuccess("");
+  const [busy, start] = useTransition();
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
     const worker = workspace.eligibleWorkers.find((w) => `${w.workerType}:${w.workerId}` === workerKey);
-    if (!worker) {
-      setError("Select a worker to place a hold on.");
-      return;
-    }
-    const formData = new FormData();
-    formData.set("workerType", worker.workerType);
-    formData.set("workerId", worker.workerId);
-    formData.set("holdType", holdType);
-    formData.set("amount", amount);
-    formData.set("days", days);
-    formData.set("reason", reason);
-    startTransition(async () => {
-      const result = await placeSalaryHold(formData);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-      setSuccess(result.message);
-      setWorkerKey("");
-      setAmount("");
-      setDays("");
-      setReason("");
-      onPlaced();
+    if (!worker) return setError("Select a direct report.");
+    const invalid = validateRaise({ holdType, amount, days, reason });
+    if (invalid) return setError(invalid);
+    const form = new FormData();
+    form.set("workerType", worker.workerType);
+    form.set("workerId", worker.workerId);
+    form.set("holdType", holdType);
+    form.set("amount", amount);
+    form.set("days", days);
+    form.set("reason", reason);
+    setError("");
+    start(async () => {
+      const result = await placeSalaryHold(form);
+      if (!result.ok) return setError(result.message);
+      setWorkerKey(""); setAmount(""); setDays(""); setReason("");
+      onDone(result.message);
     });
   }
-
+  if (!workspace.designationTierCleared)
+    return <section className={styles.card}><h2>Raise a salary hold</h2><p className={styles.hint}>Only Senior Store Manager and above can raise a salary hold for a direct report.</p></section>;
   return (
-    <section className="panel osh-form">
-      <h2>Place a salary hold</h2>
-      {workspace.eligibleWorkers.length === 0 && (
-        <p className="osh-hold-detail">You have no direct reports currently on record to place a hold on.</p>
-      )}
-      {workspace.eligibleWorkers.length > 0 && (
-        <div className="osh-fields">
-          <label className="osh-label">
-            Worker
-            <select className="field" value={workerKey} onChange={(e) => setWorkerKey(e.target.value)} disabled={busy}>
-              <option value="">Select a direct report…</option>
-              {workspace.eligibleWorkers.map((w) => (
-                <option key={`${w.workerType}:${w.workerId}`} value={`${w.workerType}:${w.workerId}`}>
-                  {w.displayName} {w.designationName ? `(${w.designationName})` : ""}
-                </option>
-              ))}
+    <form className={styles.card} onSubmit={submit}>
+      <h2>Raise a salary hold</h2>
+      <p className={styles.hint}>The station&apos;s cluster manager approves it before payroll withholds anything.</p>
+      {!workspace.eligibleWorkers.length ? <p className={styles.hint}>You have no direct reports on record in People.</p> : (
+        <>
+          <label>Direct report
+            <select value={workerKey} onChange={(e) => setWorkerKey(e.target.value)} disabled={busy}>
+              <option value="">Select…</option>
+              {workspace.eligibleWorkers.map((w) => <option key={`${w.workerType}:${w.workerId}`} value={`${w.workerType}:${w.workerId}`}>{w.displayName}{w.designationName ? ` · ${w.designationName}` : ""}</option>)}
             </select>
           </label>
-
-          <div className="osh-toggle">
-            <button
-              type="button"
-              className={holdType === "amount" ? "osh-toggle-btn osh-toggle-btn-active" : "osh-toggle-btn"}
-              onClick={() => setHoldType("amount")}
-              disabled={busy}
-            >
-              Amount
-            </button>
-            <button
-              type="button"
-              className={holdType === "days" ? "osh-toggle-btn osh-toggle-btn-active" : "osh-toggle-btn"}
-              onClick={() => setHoldType("days")}
-              disabled={busy}
-            >
-              Days
-            </button>
+          <div className={styles.toggle} role="group" aria-label="Hold type">
+            <button type="button" aria-pressed={holdType === "amount"} onClick={() => setHoldType("amount")}>Amount</button>
+            <button type="button" aria-pressed={holdType === "days"} onClick={() => setHoldType("days")}>Days of salary</button>
           </div>
-
-          {holdType === "amount" ? (
-            <label className="osh-label">
-              Amount to hold (₹)
-              <input
-                className="field"
-                type="number"
-                min="0"
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                disabled={busy}
-              />
-            </label>
-          ) : (
-            <label className="osh-label">
-              Number of days to hold
-              <input
-                className="field"
-                type="number"
-                min="0"
-                step="1"
-                value={days}
-                onChange={(e) => setDays(e.target.value)}
-                disabled={busy}
-              />
-            </label>
-          )}
-
-          <label className="osh-label">
-            Reason
-            <textarea
-              className="field"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              disabled={busy}
-              rows={3}
-              placeholder="Explain why this hold is being placed"
-            />
-          </label>
-
-          <button type="button" className="button" disabled={busy} onClick={submit}>
-            {busy ? "Placing…" : "Place hold"}
-          </button>
-          {error && <p className="ooc-gate-error" role="alert">{error}</p>}
-          {success && <p className="osh-success">{success}</p>}
-        </div>
+          {holdType === "amount"
+            ? <label>Amount to hold (₹)<input type="number" min="0.01" step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} /></label>
+            : <label>Days to hold<input type="number" min="0.5" max="31" step="0.5" value={days} onChange={(e) => setDays(e.target.value)} disabled={busy} /><span className={styles.hint}>Converted at that month&apos;s day rate in payroll.</span></label>}
+          <label>Reason<textarea rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} placeholder="What happened and why salary should be held" /></label>
+          {error ? <p className={styles.error} role="alert">{error}</p> : null}
+          <button className={styles.primary} disabled={busy}>{busy ? "Raising…" : "Raise for approval"}</button>
+        </>
       )}
-    </section>
+    </form>
   );
 }
 
 export function OpsSalaryHold({ initial }: { initial: SalaryHoldWorkspace }) {
   const [data, setData] = useState(initial);
-  const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<"approvals" | "mine" | "decided">(initial.approvals.length ? "approvals" : "mine");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
-  async function refresh() {
-    setRefreshing(true);
+  async function refresh(note = "") {
+    setMessage(note);
     setError("");
     try {
       const response = await fetch("/api/ops-pulse/salary-hold", { cache: "no-store" });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Salary hold workspace could not be refreshed.");
+      if (!response.ok) throw new Error(result.error || "Salary holds could not be refreshed.");
       setData(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Salary hold workspace could not be refreshed.");
-    } finally {
-      setRefreshing(false);
+      setError(e instanceof Error ? e.message : "Salary holds could not be refreshed.");
     }
   }
-
-  if (!data.designationTierCleared) {
-    return (
-      <div className="ooc">
-        <section className="panel ooc-intro">
-          <div>
-            <span className="ooc-eyebrow">TEAM OPS · SALARY HOLD</span>
-            <h1>Salary Hold</h1>
+  const lists = { approvals: data.approvals, mine: data.holds, decided: data.decided };
+  const empty = {
+    approvals: "Nothing waits for your decision. Requests from stations where you are the cluster manager appear here.",
+    mine: "You have not raised any salary holds.",
+    decided: "No decisions in the last 60 days.",
+  };
+  return (
+    <div className={styles.desk}>
+      <header className={styles.header}>
+        <div>
+          <span className={styles.eyebrow}>TEAM OPS · PEOPLE</span>
+          <h1>Salary Hold</h1>
+          <p>Raise a hold with a reason; the station&apos;s cluster manager approves it before payroll withholds anything, and approves its release the same way. Every step is recorded.</p>
+        </div>
+        <div className={styles.flow} aria-label="Workflow">
+          <span>Raised</span><i>→</i><span>CM approves</span><i>→</i><span>Withheld</span><i>→</i><span>Release approved</span><i>→</i><span>Paid back</span>
+        </div>
+      </header>
+      {message ? <p className={styles.success} role="status">{message}</p> : null}
+      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      <div className={styles.grid}>
+        <RaiseForm workspace={data} onDone={(m) => { setTab("mine"); void refresh(m); }} />
+        <section className={styles.list}>
+          <div className={styles.tabs} role="tablist">
+            {([["approvals", "For my approval"], ["mine", "Raised by me"], ["decided", "Decided by me"]] as const).map(([key, label]) => (
+              <button key={key} role="tab" className={styles.tab} aria-selected={tab === key} onClick={() => setTab(key)}>
+                {label}<span className={styles.count}>{lists[key].length}</span>
+              </button>
+            ))}
           </div>
-        </section>
-        <section className="panel">
-          <p role="alert">
-            You do not have the required designation tier to place salary holds. Only Senior Store Manager and above
-            can place a salary hold; Station Manager, Store Manager and Team Lead cannot.
-          </p>
+          {lists[tab].length ? lists[tab].map((h) => <HoldCard key={h.id} hold={h} onDone={(m) => void refresh(m)} />) : <p className={styles.empty}>{empty[tab]}</p>}
         </section>
       </div>
-    );
-  }
-
-  return (
-    <div className="ooc">
-      <section className="panel ooc-intro">
-        <div>
-          <span className="ooc-eyebrow">TEAM OPS · SALARY HOLD</span>
-          <h1>Salary Hold</h1>
-          <p>Place a standing salary hold on a direct report, or request HR to cancel a hold you previously placed.</p>
-        </div>
-        <button className="button secondary" disabled={refreshing} onClick={refresh}>
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
-      </section>
-      {error && <p className="ooc-gate-error" role="alert">{error}</p>}
-
-      <PlaceHoldForm workspace={data} onPlaced={refresh} />
-
-      <section className="panel">
-        <h2>Holds you have placed</h2>
-        {data.holds.length === 0 && <p className="ooc-empty">You have not placed any salary holds yet.</p>}
-        {data.holds.map((hold) => (
-          <HoldRow key={hold.id} hold={hold} onActed={refresh} />
-        ))}
-      </section>
     </div>
   );
 }

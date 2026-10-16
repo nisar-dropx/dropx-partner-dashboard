@@ -24,6 +24,9 @@ import {
   classifyContent,
   EventQueue,
   GROUP_JID,
+  ChatLog,
+  chatEntry,
+  cleanMentions,
   Lru,
   MEDIA_REF,
   messageSeconds,
@@ -75,6 +78,8 @@ if (!/^https?:\/\//.test(PORTAL_URL)) {
 
 const queue = new EventQueue(EVENTS_DIR);
 const messageCache = new Lru(500); // recent group messages, for quoting replies
+// Live chat view for the portal: recent messages of enabled groups, memory only.
+const chatLog = new ChatLog(300);
 const botMessageIds = new Lru(2000); // ids the bot itself sent, never forwarded back
 let sentRefs = new Lru(1000); // client_ref -> result, so a retried /send never posts twice
 let config = normalizeConfig(null);
@@ -332,6 +337,10 @@ async function startSocket({ method, phone = null }) {
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     for (const msg of messages ?? []) {
+      const groupId = msg?.key?.remoteJid;
+      if (groupId && config.groups.includes(groupId)) {
+        chatLog.add(groupId, chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) }));
+      }
       try {
         await forwardMessage(msg);
       } catch (error) {
@@ -379,10 +388,19 @@ async function sendToGroup(body) {
     : undefined;
   await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
-  const sent = await session.sock.sendMessage(body.to, { text: body.text }, quoted ? { quoted } : {});
+  const mentions = cleanMentions(body.mentions);
+  const sent = await session.sock.sendMessage(body.to, { text: body.text, ...(mentions.length ? { mentions } : {}) }, quoted ? { quoted } : {});
   await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
   const result = { id: sent?.key?.id ?? null };
-  if (result.id) botMessageIds.set(result.id, true);
+  if (result.id) {
+    botMessageIds.set(result.id, true);
+    const quotedEntry = quotedId ? chatLog.list(body.to).find((entry) => entry.id === quotedId) : null;
+    chatLog.add(body.to, {
+      id: result.id, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: "text", text: body.text,
+      quoted: quotedId ? { id: quotedId, from: body.quoted?.participant ?? null, type: quotedEntry?.type ?? "image", text: quotedEntry?.text ?? null } : null,
+      mentions
+    });
+  }
   sentRefs.set(body.client_ref, result);
   await writeJsonAtomic(SENT_FILE, sentRefs.entries()).catch(() => {});
   return result;
@@ -445,12 +463,26 @@ async function handle(req, res) {
     setState("logged_out", null);
     return json(res, 200, { ok: true });
   }
+  if (req.method === "GET" && url.pathname === "/chats") {
+    const group = url.searchParams.get("group") ?? "";
+    if (!GROUP_JID.test(group) || !config.groups.includes(group)) return json(res, 404, { error: "This group is not enabled in the portal." });
+    const after = Number(url.searchParams.get("after") || 0);
+    return json(res, 200, {
+      messages: chatLog.list(group, Number.isFinite(after) ? after : 0),
+      names: Object.fromEntries(chatLog.names),
+      since: chatLog.startedAt,
+      connected: session.state === "open",
+      subject: session.groups.get(group)?.subject ?? null,
+      size: session.groups.get(group)?.size ?? null
+    });
+  }
   if (req.method === "GET" && url.pathname === "/groups") {
     if (session.state !== "open") return json(res, 503, { error: "WhatsApp is not connected." });
     return json(res, 200, { groups: await refreshGroups() });
   }
   if (req.method === "POST" && url.pathname === "/config") {
     config = normalizeConfig(await readBody(req));
+    chatLog.forget(config.groups); // a group turned off in the portal stops being visible at once
     await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
     return json(res, 200, { ok: true, groups: config.groups.length });
   }
@@ -513,6 +545,7 @@ async function configLoop() {
     const response = await portalFetch("/api/report-bot/worker/config");
     if (response.ok) {
       config = normalizeConfig(await response.json());
+      chatLog.forget(config.groups);
       await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
     } else {
       logger.warn({ status: response.status }, response.status === 401 ? "the portal rejected WORKER_TOKEN; copy it again from Report Bot setup" : "config refresh failed");
