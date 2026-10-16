@@ -32,3 +32,9 @@ test('compact integration edits do not clear legacy deadlines hidden from the fo
 });
 
 test('rule can be saved before CMS starts without fabricating pickup timing',()=>{const p=parsePickupFields(form({cms_agency:'',pickup_rule:'Next Day',pickup_window_start:'',pickup_window_end:'',next_day_preparation_from:'16:00'}));assert.equal(p.pickup_configured,true);assert.equal(p.pickup_rule,'Next Day');assert.equal(p.pickup_window_start,null);assert.equal(pickupPolicy(p),null);assert.throws(()=>parsePickupFields(form({pickup_window_start:''})));});
+
+test('remittance tolerance accepts ₹0 and paise, preserves omission, rejects invalid form values',()=>{
+ assert.equal(parsePickupFields(form()).remittance_variance_tolerance,undefined);
+ for(const value of ['0','1.25','5','999999.99']) assert.equal(parsePickupFields(form({remittance_variance_tolerance:value})).remittance_variance_tolerance,Number(value));
+ for(const value of ['','-1','NaN','Infinity','1.234','1000000']) assert.throws(()=>parsePickupFields(form({remittance_variance_tolerance:value})),/variance tolerance/);
+});

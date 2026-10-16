@@ -26,6 +26,7 @@ export default async function CodStatusPage() {
         return { id:row.id,code:row.station_code,name:row.station_name || '',model:firstRelation(row.location_models)?.code || '',region:row.region || row.state || '',...codStatusOwner(row),teamUnavailable,
           leads:team.filter(person=>person.locationId===row.id && isStationLead(person)).map(({name,role,phone})=>({name,role,phone})),
           pickup:pickupPolicy(setting),pickupBasis:setting?.pickup_window_basis,cmsContact:codCmsContact(setting),ageFlagDays:setting?.recon_age_flag_days ?? pickupDefaults.recon_age_flag_days,
+          remittanceTolerance:setting?.remittance_variance_tolerance ?? pickupDefaults.remittance_variance_tolerance,
           maxAgeMinutes:setting?.cod_status_max_age_minutes ?? pickupDefaults.cod_status_max_age_minutes,reconDueTime:setting ? setting.driver_recon_due_time?.slice(0,5) || null : pickupDefaults.driver_recon_due_time };
       })} />
     </>;

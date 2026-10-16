@@ -72,3 +72,14 @@ test('contact edits preserve estimated provenance; changing a window makes it a 
  await s.act('updateCodMaster',{...basic,id:row.id,updated_at:row.updated_at,pickup_window_end:'19:00'});
  assert.equal(row.pickup_window_basis,null);
 });
+
+test('master persists station-specific remittance tolerance and rejects bad/stale overrides',async()=>{
+ const s=system();await s.act('createCodMaster',basic);const row=s.records.cod_station_settings[0];
+ assert.equal(row.remittance_variance_tolerance,5);
+ await s.act('updateCodMaster',{...basic,id:row.id,updated_at:row.updated_at,remittance_variance_tolerance:'1.25'});
+ assert.equal(row.remittance_variance_tolerance,1.25);
+ assert.match((await s.act('updateCodMaster',{...basic,id:row.id,updated_at:row.updated_at,remittance_variance_tolerance:'-5'})).error,/variance tolerance/);
+ assert.equal(row.remittance_variance_tolerance,1.25);
+ assert.match((await s.act('updateCodMaster',{...basic,id:row.id,updated_at:'old',remittance_variance_tolerance:0})).error,/Someone changed/);
+ assert.equal(row.remittance_variance_tolerance,1.25);
+});

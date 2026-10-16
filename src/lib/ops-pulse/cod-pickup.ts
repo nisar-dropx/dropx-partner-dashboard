@@ -1,9 +1,10 @@
+import { defaultRemittanceTolerance, maxRemittanceTolerance, validRemittanceTolerance } from './cod-remittance-variance.ts';
 /** Station policy is persisted in COD Pickup Master; pickup hours never infer the policy. */
 export const pickupRules = ['Same Day-Complete', 'Same Day-Partial', 'Next Day'] as const;
 export type PickupRule = typeof pickupRules[number];
 export type PickupPolicy = { rule: PickupRule; start: string; end: string; preparationFrom?: string | null };
 /** Defaults agreed for new stations; saved station overrides always take precedence. */
-export const pickupDefaults = { driver_recon_due_time: '21:00', next_day_preparation_from: '16:00', recon_age_flag_days: 1, cod_status_max_age_minutes: 15 } as const;
+export const pickupDefaults = { driver_recon_due_time: '21:00', next_day_preparation_from: '16:00', recon_age_flag_days: 1, cod_status_max_age_minutes: 15, remittance_variance_tolerance: defaultRemittanceTolerance } as const;
 export const pickupDescriptions: Record<PickupRule, string> = {
   'Same Day-Complete': 'Full cash for the collection day is expected in the same-day pickup.',
   'Same Day-Partial': 'Cash available at pickup is deposited; later collections carry forward to the next pickup.',
@@ -26,12 +27,15 @@ export function parsePickupFields(form: FormData) {
     if (!Number.isInteger(n) || n<1 || n>max) throw new Error(`Enter a valid ${key==='recon_age_flag_days'?'ageing flag threshold (1–365 days)':'status validity (1–60 minutes)'}.`);
     return {[key]:n};
   };
+  const toleranceText=text('remittance_variance_tolerance'), tolerance=Number(toleranceText);
+  if (form.has('remittance_variance_tolerance') && (!/^\d+(?:\.\d{1,2})?$/.test(toleranceText) || !validRemittanceTolerance(tolerance))) throw new Error(`Enter a remittance variance tolerance from ₹0 to ₹${maxRemittanceTolerance}, with up to two decimal places.`);
+  const toleranceSettings=form.has('remittance_variance_tolerance') ? {remittance_variance_tolerance:tolerance} : {};
   const alertSettings={...configurableInteger('recon_age_flag_days',365),...configurableInteger('cod_status_max_age_minutes',60)};
   const agency = text('cms_agency');
   if (agency.length > 120) throw new Error('CMS agency must be up to 120 characters.');
   const name = text('agent_name'), mobile = text('agent_mobile').replace(/[\s()-]/g, '');
   if (name.length > 160 || (mobile && !/^\+?[0-9]{10,15}$/.test(mobile))) throw new Error('Enter a valid agent name and mobile number, or leave the contact fields blank.');
-  return { ...alertSettings, cms_agency: agency, agent_name: name, agent_mobile: mobile, pickup_rule: rule as PickupRule,
+  return { ...alertSettings, ...toleranceSettings, cms_agency: agency, agent_name: name, agent_mobile: mobile, pickup_rule: rule as PickupRule,
     ...(form.has('driver_recon_due_time') ? {driver_recon_due_time: reconDue || null} : {}),
     cod_deposit_day: rule === 'Next Day' ? 'Next Day' : 'Same Day', pickup_time: start ? `${start}–${end}` : null,
     pickup_window_start: start || null, pickup_window_end: end || null, next_day_preparation_from: rule === 'Next Day' ? preparationFrom : null, pickup_configured: true };
