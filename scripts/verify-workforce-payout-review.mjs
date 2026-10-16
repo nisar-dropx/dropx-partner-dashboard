@@ -55,10 +55,14 @@ assert.match(
   "App-only publications must render as published instead of falling back to Under Review."
 );
 assert.doesNotMatch(tableSource, /Send Notification requires all-location access/);
-assert.match(reviewActionSource, /workforce_decide_payout_dispute/);
+assert.match(reviewActionSource, /rpc\("workforce_dispute_step"/);
+assert.match(reviewActionSource, /\["propose", "approve", "send_back"\]/);
+assert.match(reviewActionSource, /p_step: step/);
 assert.match(reviewActionSource, /\["resolved", "rejected"\]/);
-assert.match(reviewDeskSource, />\s*Reject\s*</);
-assert.match(reviewDeskSource, />\s*Resolve\s*</);
+assert.match(reviewDeskSource, />\s*Propose reject\s*</);
+assert.match(reviewDeskSource, />\s*Propose resolve\s*</);
+assert.match(reviewDeskSource, /name="step" value="approve"/);
+assert.match(reviewDeskSource, /name="step" value="send_back"/);
 assert.doesNotMatch(reviewDeskSource, /Under review \/ reply|Save response|Correct a legacy payroll payout/);
 assert.equal(existsSync(opsDisputePage), false, "Ops Pulse must not expose the payout-dispute desk.");
 assert.equal(existsSync(opsDisputeActions), false, "Ops Pulse must not expose payout-dispute actions.");
