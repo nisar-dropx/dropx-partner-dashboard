@@ -18,9 +18,17 @@ test('readiness alone does not invent biometric attendance',()=>{
  assert.equal(betaMilestones(input).find(s=>s.id==='attendance').status,'in_progress');
  assert.equal(betaMilestones({...input,latestAttendance:{inTime:'09:00',outTime:'18:00'}}).find(s=>s.id==='attendance').status,'complete');
 });
-test('training completion and first delivery stay independent',()=>{
- assert.equal(betaMilestones({...profile,learning:{status:'complete'}}).find(s=>s.id==='activation').status,'in_progress');
+test('beta LM training completes without requiring a first delivery',()=>{
+ assert.equal(betaMilestones({...profile,learning:{status:'complete'}}).find(s=>s.id==='activation').status,'complete');
  assert.equal(betaMilestones({...profile,learning:{status:'complete'},stage:'delivery_started'}).find(s=>s.id==='activation').status,'complete');
 });
 
-test('a historical UAN message cannot override confirmed Amazon account setup',()=>{const steps=betaMilestones({isolatedBeta:true,stage:'invited',accountSetupConfirmed:true,inboxActions:[{kind:'uan'}]});assert.equal(steps.find(s=>s.id==='account').status,'complete');});
+test('a historical UAN message cannot override confirmed Amazon account setup',()=>{const steps=betaMilestones({isolatedBeta:true,stage:'invited',accountSetupConfirmed:true,inboxActions:[{kind:'uan'}]});assert.equal(steps.find(s=>s.id==='setup').status,'complete');});
+
+test('separate milestones apply only to isolated beta accounts',()=>{
+ assert.equal(betaMilestones({...profile,isolatedBeta:false}).length,6);
+ const beta=betaMilestones({...profile,uan:{status:'verified'}});
+ assert.equal(beta.length,7);assert.equal(beta.find(s=>s.id==='account').status,'complete');
+ assert.equal(beta.find(s=>s.id==='setup').status,'in_progress');
+ assert.equal(beta.find(s=>s.status==='action').id,'activation');
+});

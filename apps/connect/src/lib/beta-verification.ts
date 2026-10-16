@@ -54,7 +54,7 @@ export function betaTaskComplete(snapshot:BetaSnapshot|null,name:string):boolean
  return matches.length===1&&verificationState(matches[0].status)==='complete';
 }
 
-/** Each source advances only the task it confirms; an email is never completion. */
+/** These milestones require portal evidence. UAN email confirmations are handled separately. */
 export function betaSourceProgress(snapshot:BetaSnapshot|null) {
  const accepted=betaTaskComplete(snapshot,'Accept Invitation');
  const tasks=Array.isArray(snapshot?.amazon_tasks)?snapshot.amazon_tasks:[];
