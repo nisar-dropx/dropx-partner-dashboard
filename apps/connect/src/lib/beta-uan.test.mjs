@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {betaUanProgress} from './beta-uan.ts';
+import {betaUanProgress,loadBetaUanMail,retainBetaUanProgress} from './beta-uan.ts';
 import {betaMilestones} from './beta-onboarding-progress.ts';
 const mail={id:'confirmation',sender:'no-reply@logistics.amazon.in',subject:'Your UAN has been verified',preview:'Your Universal Account Number (UAN) has been successfully verified. Thank you for completing this requirement.',received_at:'2026-10-16T11:27:48Z'};
 const request={id:'request',sender:'operations@email.idfy.in',subject:'Action Required: Complete your e-Shram registration',preview:'Submit your UAN',received_at:'2026-10-11T03:00:00Z'};
@@ -36,6 +36,45 @@ test('IDfy request is actionable, while submission removes the repeat action',()
  assert.equal(betaMilestones({...input,uan:requested}).find(s=>s.id==='account').status,'action');
  assert.equal(betaMilestones({...input,uan:{status:'submitted'}}).find(s=>s.id==='account').status,'in_progress');
  assert.equal(betaMilestones({...input,uan:{status:'verified'},learning:{status:'action'}}).find(s=>s.status==='action'&&s.id==='activation').id,'activation');
+});
+
+test('missing email can use explicit dated UAN status, never BGC or account activation',()=>{
+ assert.equal(betaUanProgress({uan_status:'approved',lsc_observed_at:mail.received_at},[]).status,'verified');
+ assert.equal(betaUanProgress({uan_status:'submitted',idfy_observed_at:mail.received_at},[]).status,'submitted');
+ for(const snapshot of [{uan_status:'verified'},{bgc_status:'green',operational_status:'ACTIVE',driver_id:'A123',lsc_observed_at:mail.received_at},{uan_status:'pending',idfy_observed_at:mail.received_at}])assert.equal(betaUanProgress(snapshot,[]).status,'unknown');
+});
+test('submission receipts remain pending and ambiguous mail formats never verify',()=>{
+ const receipt={...request,subject:'UAN submission received',preview:'Your UAN has been received for review.'};
+ assert.equal(betaUanProgress(null,[receipt]).status,'submitted');
+ assert.equal(betaUanProgress(null,[{...mail,subject:'UAN status update',preview:'Your request is processed.'}]).status,'unknown');
+ const rejected={...mail,subject:'UAN verification failed'};
+ assert.equal(betaUanProgress(null,[mail,rejected]).status,'action_required');
+});
+test('an unavailable source retains the last known result, not a fabricated completion',()=>{
+ const verified=betaUanProgress(null,[mail]),unknown={...betaUanProgress(null,[]),syncDelayed:true};
+ assert.equal(retainBetaUanProgress(unknown,verified).status,'verified');
+ assert.equal(retainBetaUanProgress(unknown).status,'unknown');
+ assert.equal(retainBetaUanProgress({...unknown,status:'action_required'},verified).status,'action_required');
+ assert.equal(retainBetaUanProgress({...unknown,status:'submitted'},verified).status,'submitted');
+});
+
+function mailStore(rows,failRecent=false){
+ return {from(table){assert.equal(table,'workforce_amazon_email_pilot_messages');let selected=[...rows],limit=Infinity,recent=false;const q={
+  select(){return q},eq(k,v){selected=selected.filter(r=>r[k]===v);return q},order(){selected.sort((a,b)=>b.received_at.localeCompare(a.received_at));return q},
+  or(){recent=true;selected=selected.filter(r=>/uan|shram/i.test(r.subject));return q},
+  ilike(k,pattern){const prefix=pattern.replace(/%$/,'').toLowerCase();selected=selected.filter(r=>r[k].toLowerCase().startsWith(prefix));return q},
+  limit(n){limit=n;return q},then(resolve,reject){return Promise.resolve({data:recent&&failRecent?null:selected.slice(0,limit),error:recent&&failRecent?{code:'unavailable'}:null}).then(resolve,reject)}
+ };return q}};
+}
+test('old confirmation survives over 100 reminders and another candidate or company cannot contribute',async()=>{
+ const scoped=r=>({...r,company_id:'company',candidate_id:'candidate'});
+ const rows=[scoped(mail),...Array.from({length:120},(_,i)=>scoped({...request,id:'reminder-'+i,received_at:'2026-10-17T11:00:00Z'})),{...mail,company_id:'other',candidate_id:'candidate'},{...mail,company_id:'company',candidate_id:'other'}];
+ const result=await loadBetaUanMail(mailStore(rows),'company','candidate');
+ assert.equal(result.unavailable,false);assert.equal(betaUanProgress(null,result.messages).status,'verified');
+ assert.ok(result.messages.every(m=>m.company_id==='company'&&m.candidate_id==='candidate'));
+ assert.equal((await loadBetaUanMail(mailStore(rows),'company','new-account')).messages.length,0);
+ const partial=await loadBetaUanMail(mailStore(rows,true),'company','candidate');
+ assert.equal(partial.unavailable,true);assert.equal(betaUanProgress(null,partial.messages).status,'verified');
 });
 
 // Exercise the authenticated write boundary: it records only a candidate declaration.

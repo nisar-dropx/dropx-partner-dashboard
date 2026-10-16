@@ -23,7 +23,7 @@ const english = {
   "already": "Already submitted? Tell us below while verification is pending.",
   "saving": "Saving…",
   "saveError": "Could not save. Please try again.",
-  "you": "Your confirmation",
+  "you": "Reported by you · not verified",
   "source": "Source",
   "options": "Registration help",
   "setupTitle": "Amazon account setup",
@@ -39,7 +39,9 @@ const english = {
     "Sign in to LM Learning using the Driver ID and initial password below.",
     "Finish the assigned course, all lessons and assessments.",
     "Check back here for Amazon’s completion confirmation."
-  ]
+  ],
+  "delayed": "Some updates are delayed. Showing the latest available evidence; there is no need to repeat registration.",
+  "retry": "Check again"
 };
 export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
   "en": {
@@ -66,7 +68,7 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
     "already": "Already submitted? Tell us below while verification is pending.",
     "saving": "Saving…",
     "saveError": "Could not save. Please try again.",
-    "you": "Your confirmation",
+    "you": "Reported by you · not verified",
     "source": "Source",
     "options": "Registration help",
     "setupTitle": "Amazon account setup",
@@ -82,7 +84,9 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
       "Sign in to LM Learning using the Driver ID and initial password below.",
       "Finish the assigned course, all lessons and assessments.",
       "Check back here for Amazon’s completion confirmation."
-    ]
+    ],
+    "delayed": "Some updates are delayed. Showing the latest available evidence; there is no need to repeat registration.",
+    "retry": "Check again"
   },
   "ml": {
     "uanTitle": "e-Shram UAN",
@@ -108,7 +112,7 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
     "already": "സമർപ്പിച്ചോ? സ്ഥിരീകരണം വരുന്നതുവരെ താഴെ അറിയിക്കാം.",
     "saving": "സേവ് ചെയ്യുന്നു…",
     "saveError": "സേവ് ആയില്ല. വീണ്ടും ശ്രമിക്കുക.",
-    "you": "നിങ്ങളുടെ സ്ഥിരീകരണം",
+    "you": "നിങ്ങൾ അറിയിച്ചത് · സ്ഥിരീകരിച്ചിട്ടില്ല",
     "source": "വിവര ഉറവിടം",
     "options": "രജിസ്ട്രേഷൻ സഹായം",
     "setupTitle": "Amazon അക്കൗണ്ട് സജ്ജീകരണം",
@@ -124,7 +128,9 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
       "താഴെയുള്ള Driver ID-യും ആദ്യ പാസ്‌വേഡും ഉപയോഗിച്ച് LM Learning-ൽ പ്രവേശിക്കുക.",
       "നൽകിയ കോഴ്സിലെ എല്ലാ പാഠങ്ങളും പരീക്ഷകളും പൂർത്തിയാക്കുക.",
       "Amazon സ്ഥിരീകരണം ഇവിടെ പരിശോധിക്കാം."
-    ]
+    ],
+    "delayed": "ചില അപ്‌ഡേറ്റുകൾ വൈകുന്നു. ലഭ്യമായ ഏറ്റവും പുതിയ വിവരമാണ് കാണിക്കുന്നത്; വീണ്ടും രജിസ്റ്റർ ചെയ്യേണ്ടതില്ല.",
+    "retry": "വീണ്ടും പരിശോധിക്കുക"
   },
   "hi": {
     "uanTitle": "e-Shram UAN",
@@ -150,7 +156,7 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
     "already": "जमा कर दिया है? पुष्टि आने तक नीचे हमें बताएँ।",
     "saving": "सहेज रहे हैं…",
     "saveError": "सहेजा नहीं जा सका। फिर कोशिश करें।",
-    "you": "आपकी पुष्टि",
+    "you": "आपने बताया · अभी सत्यापित नहीं",
     "source": "स्रोत",
     "options": "पंजीकरण में मदद",
     "setupTitle": "Amazon खाता सेटअप",
@@ -166,7 +172,9 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
       "नीचे दिए Driver ID और शुरुआती पासवर्ड से LM Learning में लॉगिन करें।",
       "सौंपे गए कोर्स के सभी पाठ और आकलन पूरे करें।",
       "Amazon की पुष्टि यहाँ देखें।"
-    ]
+    ],
+    "delayed": "कुछ अपडेट में देरी है। उपलब्ध ताज़ा जानकारी दिखाई गई है; दोबारा पंजीकरण की ज़रूरत नहीं।",
+    "retry": "फिर जाँचें"
   },
   "te": {
     "uanTitle": "e-Shram UAN",
@@ -192,7 +200,7 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
     "already": "ఇప్పటికే సమర్పించారా? ధృవీకరణ వచ్చేలోపు క్రింద తెలపండి.",
     "saving": "సేవ్ అవుతోంది…",
     "saveError": "సేవ్ కాలేదు. మళ్లీ ప్రయత్నించండి.",
-    "you": "మీ నిర్ధారణ",
+    "you": "మీరు తెలిపినది · ఇంకా ధృవీకరించలేదు",
     "source": "మూలం",
     "options": "నమోదు సహాయం",
     "setupTitle": "Amazon ఖాతా సెటప్",
@@ -208,7 +216,9 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
       "క్రింద Driver ID, ప్రారంభ పాస్‌వర్డ్‌తో LM Learningలో లాగిన్ అవ్వండి.",
       "కేటాయించిన కోర్సులో అన్ని పాఠాలు, పరీక్షలు పూర్తి చేయండి.",
       "Amazon ధృవీకరణను ఇక్కడ చూడండి."
-    ]
+    ],
+    "delayed": "కొన్ని అప్‌డేట్‌లు ఆలస్యమవుతున్నాయి. అందుబాటులో ఉన్న తాజా సమాచారం చూపిస్తున్నాం; మళ్లీ నమోదు అవసరం లేదు.",
+    "retry": "మళ్లీ తనిఖీ చేయండి"
   },
   "ta": {
     "uanTitle": "e-Shram UAN",
@@ -234,7 +244,7 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
     "already": "சமர்ப்பித்துவிட்டீர்களா? உறுதிப்படுத்தும் வரை கீழே தெரிவிக்கவும்.",
     "saving": "சேமிக்கிறது…",
     "saveError": "சேமிக்கவில்லை. மீண்டும் முயலுங்கள்.",
-    "you": "உங்கள் உறுதி",
+    "you": "நீங்கள் தெரிவித்தது · இன்னும் சரிபார்க்கப்படவில்லை",
     "source": "ஆதாரம்",
     "options": "பதிவு உதவி",
     "setupTitle": "Amazon கணக்கு அமைப்பு",
@@ -250,7 +260,9 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
       "கீழுள்ள Driver ID, ஆரம்பக் கடவுச்சொல்லுடன் LM Learning-இல் உள்நுழையுங்கள்.",
       "ஒதுக்கப்பட்ட பாடத்தின் எல்லாப் பகுதிகளையும் மதிப்பீடுகளையும் முடிக்கவும்.",
       "Amazon உறுதிப்படுத்தலை இங்கே பார்க்கவும்."
-    ]
+    ],
+    "delayed": "சில புதுப்பிப்புகள் தாமதமாகின்றன. கிடைக்கும் சமீபத்திய தகவல் காட்டப்படுகிறது; மீண்டும் பதிவு செய்ய வேண்டியதில்லை.",
+    "retry": "மீண்டும் பார்க்கவும்"
   },
   "kn": {
     "uanTitle": "e-Shram UAN",
@@ -276,7 +288,7 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
     "already": "ಈಗಾಗಲೇ ಸಲ್ಲಿಸಿದ್ದೀರಾ? ದೃಢೀಕರಣ ಬರುವವರೆಗೆ ಕೆಳಗೆ ತಿಳಿಸಿ.",
     "saving": "ಉಳಿಸುತ್ತಿದೆ…",
     "saveError": "ಉಳಿಸಲಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
-    "you": "ನಿಮ್ಮ ದೃಢೀಕರಣ",
+    "you": "ನೀವು ತಿಳಿಸಿದ್ದು · ಇನ್ನೂ ದೃಢಪಟ್ಟಿಲ್ಲ",
     "source": "ಮೂಲ",
     "options": "ನೋಂದಣಿ ನೆರವು",
     "setupTitle": "Amazon ಖಾತೆ ಸಿದ್ಧತೆ",
@@ -292,7 +304,9 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
       "ಕೆಳಗಿನ Driver ID, ಆರಂಭಿಕ ಪಾಸ್‌ವರ್ಡ್ ಬಳಸಿ LM Learningಗೆ ಲಾಗಿನ್ ಮಾಡಿ.",
       "ನಿಯೋಜಿಸಿದ ಕೋರ್ಸ್‌ನ ಎಲ್ಲಾ ಪಾಠ, ಮೌಲ್ಯಮಾಪನ ಪೂರ್ಣಗೊಳಿಸಿ.",
       "Amazon ದೃಢೀಕರಣವನ್ನು ಇಲ್ಲಿ ನೋಡಿ."
-    ]
+    ],
+    "delayed": "ಕೆಲವು ನವೀಕರಣಗಳು ತಡವಾಗಿವೆ. ಲಭ್ಯವಿರುವ ಇತ್ತೀಚಿನ ಮಾಹಿತಿ ತೋರಿಸಲಾಗಿದೆ; ಮತ್ತೆ ನೋಂದಣಿ ಅಗತ್ಯವಿಲ್ಲ.",
+    "retry": "ಮತ್ತೆ ಪರಿಶೀಲಿಸಿ"
   },
   "or": {
     "uanTitle": "e-Shram UAN",
@@ -318,7 +332,7 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
     "already": "ଦାଖଲ କରିଛନ୍ତି କି? ନିଶ୍ଚିତକରଣ ଆସିବା ପର୍ଯ୍ୟନ୍ତ ତଳେ ଜଣାନ୍ତୁ।",
     "saving": "ସେଭ୍ ହେଉଛି…",
     "saveError": "ସେଭ୍ ହେଲାନି। ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।",
-    "you": "ଆପଣଙ୍କ ନିଶ୍ଚିତକରଣ",
+    "you": "ଆପଣ ଜଣାଇଛନ୍ତି · ଯାଞ୍ଚ ହୋଇନାହିଁ",
     "source": "ଉତ୍ସ",
     "options": "ପଞ୍ଜୀକରଣ ସାହାଯ୍ୟ",
     "setupTitle": "Amazon ଖାତା ସେଟଅପ୍",
@@ -334,6 +348,8 @@ export const betaNextStepsCopy:Record<GuidanceLanguage,typeof english> = {
       "ତଳେ ଥିବା Driver ID ଓ ପ୍ରାରମ୍ଭିକ ପାସୱାର୍ଡରେ LM Learning ଲଗଇନ୍ କରନ୍ତୁ।",
       "ଦିଆଯାଇଥିବା କୋର୍ସର ସବୁ ପାଠ ଓ ଆକଳନ ସାରନ୍ତୁ।",
       "Amazon ନିଶ୍ଚିତକରଣ ଏଠାରେ ଦେଖନ୍ତୁ।"
-    ]
+    ],
+    "delayed": "କିଛି ଅପଡେଟ୍ ବିଳମ୍ବ ହେଉଛି। ଉପଲବ୍ଧ ସଦ୍ୟତମ ସୂଚନା ଦେଖାଯାଉଛି; ପୁଣି ପଞ୍ଜୀକରଣ କରିବା ଦରକାର ନାହିଁ।",
+    "retry": "ପୁଣି ଯାଞ୍ଚ କରନ୍ତୁ"
   }
 };

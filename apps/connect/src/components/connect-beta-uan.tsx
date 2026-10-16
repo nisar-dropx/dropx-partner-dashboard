@@ -1,5 +1,5 @@
 "use client";
-import {CheckCircle2,Clock3,ExternalLink,Mail,ShieldCheck,UserRound,Headphones} from 'lucide-react';
+import {CheckCircle2,Clock3,ExternalLink,Mail,ShieldCheck,UserRound,Headphones,RefreshCw} from 'lucide-react';
 import {useState} from 'react';
 import type {GuidanceLanguage} from '../lib/beta-guidance';
 import type {BetaUanProgress} from '../lib/beta-uan';
@@ -29,8 +29,10 @@ export function ConnectBetaUan({language,progress,assistedUrl,submitUrl,inboxHre
  return <section lang={language} className={styles.uanPanel}>
   <div className={styles.uanStatus} data-complete={verified}>{verified?<CheckCircle2/>:<Clock3/>}<div><h2>{title}</h2><p>{body}</p></div></div>
   {progress?.source?<p className={styles.confirmationSource}><ShieldCheck size={15}/>{c.source}: {progress.source==='You'?c.you:progress.source}{progress.updatedAt?<time dateTime={progress.updatedAt}>{new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit',timeZone:'Asia/Kolkata'}).format(new Date(progress.updatedAt))}</time>:null}</p>:null}
-  {verified||submitted?<details className={styles.help}><summary>{c.options}</summary>{options}</details>:options}
+  {progress?.syncDelayed?<p role="status">{c.delayed}</p>:null}
+  {verified||submitted||progress?.syncDelayed?<details className={styles.help}><summary>{c.options}</summary>{options}</details>:options}
   <div className={styles.actions}>{!verified&&!submitted?<button type="button" disabled={saving} onClick={()=>void report()}>{saving?c.saving:c.reportedCta}</button>:null}<a href={inboxHref}><Mail size={16}/>{c.viewMail}</a></div>
+  {progress?.syncDelayed?<div className={styles.actions}><button type="button" onClick={onRefresh}><RefreshCw size={16}/>{c.retry}</button></div>:null}
   {error?<p role="alert">{error}</p>:null}
  </section>;
 }

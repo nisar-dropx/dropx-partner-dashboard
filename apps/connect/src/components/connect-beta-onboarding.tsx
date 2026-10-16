@@ -18,7 +18,7 @@ import { ConnectBetaFlexGuide, ConnectBetaFlexJourney } from "./connect-beta-fle
 import { BetaPersonalGuide } from "./connect-beta-personal-guide";
 import { ConnectBetaUan } from "./connect-beta-uan";
 import { betaNextStepsCopy } from "../lib/beta-next-steps-copy";
-import type { BetaUanProgress } from "../lib/beta-uan";
+import { retainBetaUanProgress, type BetaUanProgress } from "../lib/beta-uan";
 import guideStyles from "./connect-beta-flex-guide.module.css";
 import { betaFlexGuide, betaFlexGuideEnabled } from "../lib/beta-flex-guide";
 
@@ -76,7 +76,7 @@ export function ConnectBetaOnboarding({account,onRegister}:{account:AppAccount;o
   const latest=useRef<Data|null>(null);
   const screenRef=useRef<HTMLElement>(null);
   const navigate=(stage:Stage)=>{setView(stage);requestAnimationFrame(()=>{screenRef.current?.scrollIntoView({block:"start"});screenRef.current?.focus({preventScroll:true});});};
-  useEffect(()=>{let disposed=false;const controller=new AbortController();const timer=window.setTimeout(()=>controller.abort(),12000);const run=async()=>{setRefreshing(Boolean(latest.current));if(!latest.current)setLoading(true);try{const query=new URLSearchParams({accountId:account.id,profileType:account.profileType});const response=await fetch(`/api/connect/workforce-joining?${query}`,{cache:"no-store",signal:controller.signal});const payload=await response.json();if(!response.ok)throw new Error(payload.error||"Unable to load work setup.");if(!disposed){latest.current=payload;setData(payload);setError("");}}catch(reason){if(!disposed)setError(reason instanceof Error?reason.message:"Unable to load work setup.");}finally{window.clearTimeout(timer);if(!disposed){setLoading(false);setRefreshing(false);}}};void run();return()=>{disposed=true;controller.abort();window.clearTimeout(timer);};},[account.id,account.profileType,refresh]);
+  useEffect(()=>{let disposed=false;const controller=new AbortController();const timer=window.setTimeout(()=>controller.abort(),12000);const run=async()=>{setRefreshing(Boolean(latest.current));if(!latest.current)setLoading(true);try{const query=new URLSearchParams({accountId:account.id,profileType:account.profileType});const response=await fetch(`/api/connect/workforce-joining?${query}`,{cache:"no-store",signal:controller.signal});const payload=await response.json();if(!response.ok)throw new Error(payload.error||"Unable to load work setup.");if(!disposed){if(payload.uan)payload.uan=retainBetaUanProgress(payload.uan,latest.current?.uan);latest.current=payload;setData(payload);setError("");}}catch(reason){if(!disposed)setError(reason instanceof Error?reason.message:"Unable to load work setup.");}finally{window.clearTimeout(timer);if(!disposed){setLoading(false);setRefreshing(false);}}};void run();return()=>{disposed=true;controller.abort();window.clearTimeout(timer);};},[account.id,account.profileType,refresh]);
   useEffect(()=>{const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&navigator.onLine)setRefresh(value=>value+1);},30000);return()=>window.clearInterval(timer);},[]);
 
   const milestones=useMemo(()=>data?betaMilestones(data):[],[data]);
