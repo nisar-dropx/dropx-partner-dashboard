@@ -116,4 +116,14 @@ assert.equal((await report(['BBB'])).rows[0].delivered,null,'no-work does not at
 assert.equal((await db.query("select has_function_privilege('authenticated','fleet_da_delivery_report(uuid,text[],date,date,jsonb,integer,integer,text,text,text)','execute') ok")).rows[0].ok,false);
 assert.equal((await db.query("select has_table_privilege('anon','fleet_da_default_backfills','select') ok")).rows[0].ok,false);
 console.log('Historical delivery review: 0/4/5 threshold, manual precedence, source provenance, XPT, nullable evidence, scoped sorted pagination, no-work, backfill idempotency and isolation passed.');
+// Pending labels distinguish days from vehicles and retain reasons without clearing exceptions.
+const explanation=readFileSync('supabase/migrations/20261016190000_fleet_da_pending_explanation.sql','utf8');
+await db.exec(explanation);await db.exec(explanation);
+assert.equal((await pending()).totalPending,0);
+await db.exec(`update cps_shipment_daily set total_delivery=4 where provider_employee_id='REPLACEMENT';`);
+let details=await pending();assert.equal(details.totalPending,1);assert.equal(details.pendingVehicles,1);assert.equal(details.pendingReasons.belowMinimum,1);assert.equal(details.pendingReasons.missingId,0);assert.match(details.rows[0].vehicles[0].reason,/minimum 5/);
+await db.exec(`update fleet_day_assignments set is_active=false where vehicle_id='${v}';delete from fleet_da_default_periods where vehicle_id='${v}';delete from fleet_vehicle_day_confirmations where vehicle_id='${v}';`);
+details=await pending();assert.equal(details.pendingReasons.missingId,1);assert.equal(details.pendingReasons.belowMinimum,0);assert.equal(details.pendingVehicles,1);
+assert.equal((await db.query('select fleet_pending_da_days($1,$2,$3,$3) data',[c,['BBB'],clock.yesterday])).rows[0].data.totalPending,0,'pending explanation respects station scope');
+console.log('Pending explanation: distinct vehicles, missing ID, below threshold, reasons, scope and double application passed.');
 await db.close();
