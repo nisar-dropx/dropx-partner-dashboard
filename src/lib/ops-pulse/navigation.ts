@@ -28,12 +28,18 @@ const commonStart: NavItem[] = [
       { code: "capacity_hiring", label: "Hiring Review", href: "/capacity/hiring" }
     ]
   },
-  { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
-  { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register", icon: "+" },
-  { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping", icon: "<>" },
-  { code: "ops_workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts", icon: "₹" },
-  { code: "ops_workforce_advances", label: "Workforce Advance Register", href: "/payments/workforce-advances", icon: "₹" },
-  { code: "ops_rostering", label: "Rostering", href: "/rostering", icon: "S" }
+  {
+    code: "workforce",
+    label: "Workforce",
+    icon: "+",
+    children: [
+      { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register" },
+      { code: "ops_provider_mapping", label: "ID Mapping", href: "/provider-id-mapping" },
+      { code: "ops_workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
+      { code: "ops_workforce_advances", label: "Workforce Advance Register", href: "/payments/workforce-advances" },
+      { code: "ops_rostering", label: "Rostering", href: "/rostering" }
+    ]
+  }
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
@@ -135,6 +141,8 @@ function modelOperations(mode: OperatingMode): NavItem {
       label: "Operations",
       icon: "O",
       children: [
+        networkPlanning,
+        eddDashboard,
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
         { code: "station_audits", label: "Station Audits", href: "/audits" },
         { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=flipkart" },
@@ -147,6 +155,8 @@ function modelOperations(mode: OperatingMode): NavItem {
     label: "Operations",
     icon: "O",
     children: [
+      networkPlanning,
+      eddDashboard,
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
@@ -158,7 +168,8 @@ function modelOperations(mode: OperatingMode): NavItem {
   };
 }
 
-const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash", icon: "E" };
+const networkPlanning = { code: "service_network", label: "Network Planning", href: "/service-network" };
+const eddDashboard = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd/flash" };
 
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   if (mode === "amazon_now") return [
@@ -177,8 +188,14 @@ export function opsNavItemsForMode(mode: OperatingMode, authorization?: Authoriz
       {code:'master_models',label:'Operation Models',href:'/master/models'}
     ]},administration[2]
   ];
-  const mappingCode='fleet_da_mapping';
-  const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, {code:mappingCode,label:"Vehicle DA mapping",href:"/fleet/da-mapping",icon:"F"}, fleetNavItem, attendanceReports, reports, ...administration];
+  const opsFleet: NavItem = {
+    ...fleetNavItem,
+    children: [
+      {code:'fleet_da_mapping',label:'Vehicle DA mapping',href:'/fleet/da-mapping'},
+      ...(fleetNavItem.children ?? [])
+    ]
+  };
+  const items=[...commonStart, modelOperations(mode), businessDocuments, payments, cps, opsFleet, attendanceReports, reports, ...administration];
   return items.map(item=>item.children?{...item,children:item.children.filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))}:item);
 }
 

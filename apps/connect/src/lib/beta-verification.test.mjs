@@ -1,3 +1,4 @@
+import {betaUanProgress,loadBetaUanMail} from './beta-uan.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {betaLearning,betaTaskComplete,betaInboxActions,verifiedBetaSnapshot,verificationState} from './beta-verification.ts';
@@ -62,12 +63,12 @@ test('beta inbox stays usable before migration; messages never masquerade as BGC
  const db={from(table){let rows=[...(tables[table]??[])],single=false;const q={
   select(columns){assert.ok(!columns.includes('action_urls'),'Must tolerate the pre-migration inbox schema');return q},
   eq(key,value){rows=rows.filter(row=>row[key]===value);return q},is(key,value){rows=rows.filter(row=>(row[key]??null)===value);return q},
-  order(){return q},limit(){return q},maybeSingle(){single=true;return q},
+  ilike(){return q},or(){return q},order(){return q},limit(){return q},maybeSingle(){single=true;return q},
   then(resolve,reject){return Promise.resolve({data:single?rows[0]??null:rows,error:table.startsWith('workforce_beta_verification_')?{code:'PGRST205'}:null}).then(resolve,reject)}
  };return q;}};
  const mocks={
   'next/server':{NextResponse:{json:(body,options)=>Response.json(body,options)}},
-  '@/lib/beta-verification':verification,'@/lib/beta-journey':{betaJourney},'@/lib/onboarding-action-url':actionUrls,
+  '@/lib/beta-uan':{betaUanProgress,loadBetaUanMail},'@/lib/beta-verification':verification,'@/lib/beta-journey':{betaJourney},'@/lib/onboarding-action-url':actionUrls,
   '@/lib/beta-exit-notice':{},'@/lib/amazon-pilot':{},'@/lib/partner-onboarding':{},'@/lib/workforce-joining':{},
   '@/lib/connect-auth':{requireConnectAccount:async()=>({id:'beta',companyId:'company',workspace:'workforce',activationOnly:true,onboardingBeta:true,activationStage:'amazon_email_pilot:sent'})},
   '@/lib/supabase-admin':{supabaseAdmin:db}
@@ -80,3 +81,20 @@ test('beta inbox stays usable before migration; messages never masquerade as BGC
  assert.deepEqual(result.bgcChecks,[]);assert.equal(result.syncDelayed,true);assert.equal(result.isolatedBeta,true);
  assert.ok(!JSON.stringify(result).includes('PRIVATE EMAIL BODY'));
 });
+
+test('accepting an invitation does not mean Flex registration or BGC is complete',()=>{
+ const result=verification.betaSourceProgress({amazon_tasks:[{name:'Accept Invitation',status:'completed'}]});
+ assert.equal(result.invitationAccepted,true);assert.equal(result.amazonRegistrationConfirmed,false);assert.equal(result.videoVerificationComplete,false);
+});
+test('Amazon submission advances registration without claiming BGC or UAN clearance',()=>{
+ const result=verification.betaSourceProgress({amazon_tasks:[{name:'Background Check',status:'in_progress',subtasks:[{name:'Data Submitted',status:'completed'}]},{name:'Account Setup',status:'pending'}],checks:[{code:'address_current',label:'Current address',result:'In Progress'}]});
+ assert.equal(result.amazonRegistrationConfirmed,true);assert.equal(result.bgcSubmitted,true);assert.equal(result.accountSetupConfirmed,false);assert.equal(result.videoVerificationComplete,false);
+});
+test('only confirmed address checks retire the video action',()=>{
+ const checks=[{code:'address_current',label:'Current address',result:'Green'},{code:'court',label:'Court',result:'In Progress'}];
+ assert.equal(verification.betaSourceProgress({checks}).videoVerificationComplete,true);
+ assert.equal(verification.betaSourceProgress({checks:[...checks,{code:'address_permanent',label:'Permanent address',result:'Red'}]}).videoVerificationComplete,false);
+ assert.equal(verification.betaSourceProgress(null).videoVerificationComplete,false);
+});
+
+test('an unrequested permanent-address check does not repeat completed current-address verification',()=>{const checks=[{code:'address_current',label:'Current',result:'Green'},{code:'address_permanent',label:'Permanent',result:'Cannot Request For Verification'}];assert.equal(verification.betaSourceProgress({checks}).videoVerificationComplete,true);assert.equal(verification.betaChecks({checks})[1].notRequested,true);assert.equal(verification.betaChecks({checks})[1].status,'pending');});

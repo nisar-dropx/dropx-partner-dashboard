@@ -35,16 +35,19 @@ export async function GET(request:Request){try{
  if(enrolments.error)throw new Error('Unable to load your training.');
  const ids=(enrolments.data??[]).map(e=>e.id);
  if(!ids.length)return Response.json({enrolments:[],milestones:[],materials:[],attempts:[],reviews:[]},{headers});
- const [milestones,attempts,reviews]=await Promise.all([
+ const [milestones,attempts,reviews,written]=await Promise.all([
   db().from('hr_training_milestones').select('id,enrolment_id,title,description,milestone_kind,owner_type,required,due_on,status,scheduled_start,scheduled_end,meeting_mode,meeting_reference,trainer_name,completed_at,completion_rule,pass_percent,max_attempts,questions_snapshot,material_ids,effectiveness_rating,result,sort_order').eq('company_id',account.companyId).in('enrolment_id',ids).order('sort_order'),
   db().from('hr_training_assessment_attempts').select('id,milestone_id,attempt_number,percent,passed,assessed_at').eq('company_id',account.companyId).in('enrolment_id',ids).order('assessed_at',{ascending:false}),
-  db().from('hr_training_probation_reviews').select('id,enrolment_id,due_on,status,overall_rating,recommendation,decision_note,reviewed_at').eq('company_id',account.companyId).in('enrolment_id',ids)
+  db().from('hr_training_probation_reviews').select('id,enrolment_id,due_on,status,overall_rating,recommendation,decision_note,reviewed_at').eq('company_id',account.companyId).in('enrolment_id',ids),
+  db().from('hr_training_written_submissions').select('milestone_id').eq('company_id',account.companyId).in('enrolment_id',ids).eq('status','pending')
  ]);
  if(milestones.error||attempts.error||reviews.error)throw new Error('Unable to load your training details.');
+ // Written tests waiting for the trainer; quietly empty until the People update is applied.
+ const awaiting=new Set((written.error?[]:written.data??[]).map(row=>row.milestone_id as string));
  const materialIds=[...new Set((milestones.data??[]).flatMap(m=>m.material_ids as string[]))];
  const materials=materialIds.length?await db().from('hr_training_materials').select('id,title,kind').eq('company_id',account.companyId).in('id',materialIds):{data:[],error:null};
  if(materials.error)throw new Error('Unable to load materials.');
- return Response.json({enrolments:enrolments.data,milestones:(milestones.data??[]).map(({questions_snapshot,...m})=>({...m,questions:publicTrainingQuestions(questions_snapshot)})),materials:materials.data,attempts:attempts.data,reviews:reviews.data},{headers});
+ return Response.json({enrolments:enrolments.data,milestones:(milestones.data??[]).map(({questions_snapshot,...m})=>({...m,awaiting_marking:awaiting.has(m.id),questions:publicTrainingQuestions(questions_snapshot)})),materials:materials.data,attempts:attempts.data,reviews:reviews.data},{headers});
 }catch(e){return Response.json({error:e instanceof Error?e.message:'Unable to load training.'},{status:403,headers});}}
 export async function POST(request:Request){try{
  const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return Response.json({error:'Invalid request origin.'},{status:403,headers});
@@ -53,6 +56,12 @@ export async function POST(request:Request){try{
  if(body.action==='acknowledge'){
   const result=await db().rpc('hr_training_acknowledge',{p_company_id:account.companyId,p_milestone_id:milestone.id});if(result.error)throw new Error(result.error.message);
   return Response.json({notice:'Learning acknowledged.'},{headers});
+ }
+ if(body.action==='written'){
+  if(!body.answers||typeof body.answers!=='object'||Array.isArray(body.answers)||JSON.stringify(body.answers).length>60000)throw new Error('Answer the test questions.');
+  const result=await db().rpc('hr_training_submit_written',{p_company_id:account.companyId,p_milestone_id:milestone.id,p_answers:body.answers});
+  if(result.error)throw new Error(result.error.code==='P0001'?result.error.message:'Your answers could not be submitted.');
+  return Response.json({notice:'Answers sent to your trainer for marking.'},{headers});
  }
  if(body.action==='assessment'){
   if(!body.answers||typeof body.answers!=='object'||Array.isArray(body.answers)||JSON.stringify(body.answers).length>50000)throw new Error('Answer the test questions.');

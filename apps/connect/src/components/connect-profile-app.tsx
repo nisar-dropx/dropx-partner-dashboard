@@ -33,6 +33,7 @@ export type AppAccount = {
   providerMappingRequired?: boolean;
   activationOnly?: boolean;
   onboardingBeta?: boolean;
+  readOnlyPreview?: boolean;
   activationStage?: string | null;
 };
 

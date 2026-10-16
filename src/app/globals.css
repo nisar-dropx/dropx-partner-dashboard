@@ -23762,3 +23762,25 @@ td strong,
 .mapping-plan-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
 .mapping-plan-fields label { display:grid; align-content:start; gap:6px; font-size:12px; font-weight:600; }
 .provider-first-row .mapping-row-actions { flex-wrap:wrap; }
+
+/* Compact OpsPulse desktop shell; mobile keeps its larger touch controls. */
+@media (min-width: 1081px) {
+  .shell:has(> .sidebar .ops-brand-lockup) { grid-template-columns: 200px minmax(0, 1fr); }
+  .shell:has(> .sidebar .ops-brand-lockup) > .sidebar { padding: 10px 8px; gap: 8px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .brand { padding: 0 3px 9px; gap: 6px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .brand-logo { width: 60px; height: 32px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .ops-brand-lockup { padding-left: 6px; gap: 5px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .ops-brand-mark { width: 24px; height: 24px; flex-basis: 24px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .ops-brand-copy strong { font-size: 12px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .ops-brand-copy small { font-size: 5.5px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .sidebar > div:has(> [aria-label="Business workspace"]) { padding: 0; margin-bottom: 4px; }
+  .shell:has(> .sidebar .ops-brand-lockup) [aria-label="Business workspace"] button { min-height: 38px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .nav { gap: 2px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .nav-item { min-height: 32px; padding: 6px 8px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .nav-subitem { min-height: 30px; padding-block: 6px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .topbar { height: 44px; padding: 0 14px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .top-actions { gap: 10px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .owner-preview-switcher > button { min-height: 30px; font-size: 12px; padding: 0 9px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .ops-scope-menu > summary { padding: 6px 9px; }
+  .shell:has(> .sidebar .ops-brand-lockup) .content { padding: 12px 16px 26px; }
+}

@@ -1,4 +1,5 @@
-import { betaInboxActions, betaChecks, betaLearning, betaTaskComplete, verifiedBetaSnapshot, verificationState } from "@/lib/beta-verification";
+import { betaSourceProgress, betaInboxActions, betaChecks, betaLearning, verifiedBetaSnapshot } from "@/lib/beta-verification";
+import { betaUanProgress, loadBetaUanMail } from "@/lib/beta-uan";
 import { acknowledgedBetaExitNote } from "@/lib/beta-exit-notice";
 import { betaJourney } from "@/lib/beta-journey";
 import {pilotStatus,withLiveAmazonEvidence,type Pilot} from '@/lib/amazon-pilot';
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
       const candidate=await db.from("workforce_amazon_email_pilot_candidates").select("id,full_name,mobile,biometric_id,alias_email,inbox_status,status,last_message_at,updated_at,continuation_status,continuation_decided_at,stations(state)").eq("company_id",company).eq("id",account.id).is("closed_at",null).maybeSingle();
       if(candidate.error&&!['42P01','42703','PGRST205'].includes(candidate.error.code))throw new Error("Email-pilot status is unavailable.");
       if(!candidate.data)return NextResponse.json({available:false},{headers});
-      const [messages,invitation,attendance,registration,exitReasons,exitRequest,snapshot,cases,betaSettings]=await Promise.all([
+      const [messages,invitation,attendance,registration,exitReasons,exitRequest,snapshot,cases,betaSettings,uanMessages,uanSubmission]=await Promise.all([
         db.from("workforce_amazon_email_pilot_messages").select("*").eq("company_id",company).eq("candidate_id",candidate.data.id).order("received_at",{ascending:false}).limit(100),
         db.from("workforce_amazon_invitation_requests").select("status,external_reference,completed_at,error_code,error_message,updated_at").eq("company_id",company).eq("email_pilot_candidate_id",candidate.data.id).order("requested_at",{ascending:false}).limit(1).maybeSingle(),
         candidate.data.biometric_id?db.from("attendance_daily").select("punch_date,in_time,out_time,status,updated_at").eq("company_id",company).eq("enrolment_id",candidate.data.biometric_id).order("punch_date",{ascending:false}).limit(1).maybeSingle():Promise.resolve({data:null,error:null}),
@@ -55,11 +56,13 @@ export async function GET(request: NextRequest) {
         db.from("workforce_amazon_email_pilot_exit_requests").select("status,created_at,completed_at,error_message").eq("company_id",company).eq("candidate_id",candidate.data.id).order("created_at",{ascending:false}).limit(1).maybeSingle(),
         db.from("workforce_beta_verification_snapshots").select("*").eq("company_id",company).eq("candidate_id",candidate.data.id).maybeSingle(),
         db.from("workforce_beta_verification_cases").select("id,check_code,kind,label,reason,status,notified_at,failure_notified_at,response_at,response_note,mail_status,mail_sent_at,updated_at").eq("company_id",company).eq("candidate_id",candidate.data.id).order("created_at",{ascending:false}),
-        db.from("workforce_beta_verification_settings").select("learning_initial_password").eq("company_id",company).maybeSingle()
+        db.from("workforce_beta_verification_settings").select("learning_initial_password").eq("company_id",company).maybeSingle(),
+        loadBetaUanMail(db,company,candidate.data.id),
+        db.from("workforce_beta_verification_events").select("created_at").eq("company_id",company).eq("candidate_id",candidate.data.id).eq("event","uan_submission_reported").order("created_at",{ascending:false}).limit(1).maybeSingle()
       ]);
       const inboxMessages=messages.error?[]:messages.data??[];
       const amazonMessage=inboxMessages.find(item=>amazonInvitationUrl(item.action_url));
-      let inboxActions=betaInboxActions(inboxMessages);
+      let inboxActions=betaInboxActions([...inboxMessages,...uanMessages.messages]);
       const rawInvitationUrl=amazonInvitationUrl(amazonMessage?.action_url);
       const providerId=invitation.data?.external_reference??(rawInvitationUrl?new URL(rawInvitationUrl).searchParams.get("providerId"):null);
       const invitationReceived=Boolean(rawInvitationUrl||amazonMessage?.received_at);
@@ -68,7 +71,9 @@ export async function GET(request: NextRequest) {
       const offboardingRequested=candidate.data.continuation_status==="not_continuing";
       const live=verifiedBetaSnapshot(snapshot.error?null:snapshot.data,candidate.data.alias_email,providerId);
       const bgcChecks=betaChecks(live);
-      if(verificationState(live?.uan_status)==="complete")inboxActions=inboxActions.filter(action=>action.kind!=="uan");
+      const uan={...betaUanProgress(live,[...inboxMessages,...uanMessages.messages],uanSubmission.error?null:uanSubmission.data?.created_at),syncDelayed:Boolean(uanMessages.unavailable||uanSubmission.error||snapshot.error)};
+      const uanLinks=inboxActions.filter(action=>action.kind!=="verification");
+      if(uan.status==="verified")inboxActions=inboxActions.filter(action=>action.kind==="verification");
       const learning=betaLearning(live);
       const verificationCases=cases.error?[]:(cases.data??[]).filter(item=>item.status!=="resolved");
       const journey=betaJourney({continuationStatus:candidate.data.continuation_status,registrationStatus,invitationAvailable:Boolean(rawInvitationUrl),bgcAction:bgcChecks.some(item=>item.status==="action")});
@@ -79,8 +84,8 @@ export async function GET(request: NextRequest) {
         stage:journey.stage,stageLabel:journey.label,instruction:journey.instruction,
         registrationReady:journey.ready,
         reportUpdatedAt:live?.idfy_observed_at??null,reportDate:null,stale:Boolean(live?.idfy_observed_at&&Date.now()-Date.parse(live.idfy_observed_at)>24*3600000),syncDelayed:Boolean(snapshot.error||live?.sync_error||!live?.idfy_observed_at),
-        inboxActions,verificationCases,learning,learningPassword:betaSettings.data?.learning_initial_password??null,uanStatus:live?.uan_status??null,amazonRegistrationConfirmed:betaTaskComplete(live,"Accept Invitation"),accountSetupConfirmed:betaTaskComplete(live,"Account Setup"),verificationClosed:live?.operational_status==="OFFBOARDED"||verificationCases.some(item=>item.status==="offboarded"),amazonTasks:live?.amazon_tasks??[],bgcStatus:live?.bgc_status??null,idfyProfileId:live?.idfy_profile_id??null,operationalStatus:live?.operational_status??null,
-        driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
+        inboxActions,verificationCases,learning,learningPassword:betaSettings.data?.learning_initial_password??null,uanLinks,uan,uanStatus:uan.status,...betaSourceProgress(live),verificationClosed:live?.operational_status==="OFFBOARDED"||verificationCases.some(item=>item.status==="offboarded"),amazonTasks:live?.amazon_tasks??[],bgcStatus:live?.bgc_status??null,idfyProfileId:live?.idfy_profile_id??null,operationalStatus:live?.operational_status??null,
+        sourceStatus:{amazonUpdatedAt:live?.lsc_observed_at??null,idfyUpdatedAt:live?.idfy_observed_at??null,lastAttemptAt:snapshot.data?.updated_at??null,unavailable:Boolean(snapshot.error),delayed:Boolean(live?.sync_error||uan.syncDelayed)},driverId:live?.driver_id??null,biometricId:candidate.data.biometric_id,amazonAccountId:providerId,
         invitationEmail:candidate.data.alias_email,invitationStatus:invitationReceived?"received":invitation.data?.status??candidate.data.status,
         invitationUrl,invitationAvailable:Boolean(rawInvitationUrl),invitationReceivedAt:amazonMessage?.received_at??candidate.data.last_message_at,
         registrationRequired:!registrationSubmitted,registrationStatus,registrationUpdatedAt:registration.data?.updated_at??null,

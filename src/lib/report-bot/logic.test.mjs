@@ -33,7 +33,8 @@ test("time lists are validated, padded, sorted and de-duplicated", () => {
   assert.deepEqual(normalizeTimeList(""), []);
   assert.throws(() => normalizeTimeList("25:00"), /not a valid time/);
   assert.throws(() => normalizeTimeList("9am"), /not a valid time/);
-  assert.throws(() => normalizeTimeList("01:00 02:00 03:00 04:00 05:00 06:00 07:00"), /at most 6/);
+  const many = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`);
+  assert.equal(normalizeTimeList(many.join(", ")).length, 24, "no cap on how many reminder times");
   assert.equal(parseClockTime("23:59"), 1439);
   assert.equal(parseClockTime("24:00"), null);
   assert.deepEqual(normalizeDays(["1", "1", "7", "-1", "0", "x"]), [0, 1]);

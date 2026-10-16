@@ -4,7 +4,7 @@ import test from "node:test";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("Dashboard exposes a scoped proposal and second-reviewer payout-dispute flow", () => {
+test("Dashboard exposes the payout-dispute proposal and second-reviewer decision flow", () => {
   const page = read("../app/payments/disputes/page.tsx");
   const routeActions = read("../app/payments/disputes/actions.ts");
   const desk = read("../components/payout-review-desk.tsx");
@@ -20,12 +20,14 @@ test("Dashboard exposes a scoped proposal and second-reviewer payout-dispute flo
   assert.match(navigation, /code: "workforce_payout_disputes", label: "Disputes", href: "\/payments\/disputes"/);
   assert.match(desk, /hasPermission\(auth, "workforce_payout_disputes", "edit"\)/);
   assert.match(reviewActions, /requirePagePermission\("workforce_payout_disputes", "edit"\)/);
-  assert.match(reviewActions, /workforce_dispute_step/);
-  assert.match(reviewActions, /!\["propose", "approve", "send_back"\]\.includes\(step\)/);
-  assert.match(desk, /name="step" value="approve"/);
+  assert.match(reviewActions, /rpc\("workforce_dispute_step"/);
+  assert.match(reviewActions, /\["propose", "approve", "send_back"\]/);
+  assert.match(reviewActions, /p_step: step/);
   assert.match(reviewActions, /!\["resolved", "rejected"\]\.includes\(decision\)/);
   assert.match(desk, /name="decision" value="rejected"/);
   assert.match(desk, /name="decision" value="resolved"/);
+  assert.match(desk, /name="step" value="approve"/);
+  assert.match(desk, /name="step" value="send_back"/);
   assert.doesNotMatch(desk, /Under review \/ reply|Save response|Response<textarea/);
   assert.doesNotMatch(desk, /Legacy payroll corrections|Correct a legacy payroll payout|Published payouts & WhatsApp status/);
   assert.doesNotMatch(reviewActions, /retry_notice|workforce_propose_payout_correction|workforce_review_payout_correction/);
