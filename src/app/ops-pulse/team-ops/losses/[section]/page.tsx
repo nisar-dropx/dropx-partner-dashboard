@@ -15,6 +15,9 @@ import { NlLiveReport } from "@/components/nl-live-report";
 import { LossHeader } from "@/components/nl-loss-report";
 import { NlRecoveryLedger } from "@/components/nl-recovery-ledger";
 import { loadRecoveryLedger } from "@/lib/ops-pulse/nl-recovery-ledger";
+import { StationClaimsDesk } from "@/components/station-claims-desk";
+import { canRaiseClaims, loadStationClaims } from "@/lib/ops-pulse/station-claims";
+import { hasPermission } from "@/lib/authorization";
 import styles from "@/components/nl-loss.module.css";
 export const dynamic = "force-dynamic";
 
@@ -57,6 +60,7 @@ const tabs: LossTab[] = [
     label: s.label,
     href: `/team-ops/losses/${key}`,
   })),
+  { key: "claims", label: "Station Claims", href: "/team-ops/losses/claims" },
   { key: "ledger", label: "Recovery Ledger", href: "/team-ops/losses/ledger" },
 ];
 
@@ -67,6 +71,27 @@ export default async function LossesSectionPage({
   params: { section: string };
   searchParams?: NlFilters;
 }) {
+  if (params.section === "claims") {
+    const auth = await requirePagePermission("ops_losses", "access");
+    try {
+      const view = await loadStationClaims(auth);
+      const canEdit = !auth.readOnly && hasPermission(auth, "ops_losses", "edit");
+      return (
+        <main className={styles.workspace}>
+          <LossHeader eyebrow="Team Ops · Losses" title="Station loss claims" intro="Losses a station finds itself, approved by the cluster manager and recovered through the same payroll trail." tabs={tabs} active="claims" />
+          {view.ready ? (
+            <StationClaimsDesk claims={view.claims} cases={view.cases} outcomes={view.outcomes} settings={view.settings}
+              stations={view.stations.map((s) => ({ id: s.id, station_code: s.station_code }))}
+              canRaise={canRaiseClaims(auth)} canEdit={canEdit} canRecovered={canEdit && hasPermission(auth, "ops_loss_recovered", "edit")} />
+          ) : (
+            <p className={styles.notice}>Station claims become available once the station loss claims update is applied to the database.</p>
+          )}
+        </main>
+      );
+    } catch (e) {
+      return <section className="panel" style={{ padding: 24 }}><h1>Station loss claims</h1><p role="alert">{e instanceof Error ? e.message : "Station claims could not be loaded."}</p></section>;
+    }
+  }
   if (params.section === "ledger") {
     const auth = await requirePagePermission("ops_losses", "access");
     try {

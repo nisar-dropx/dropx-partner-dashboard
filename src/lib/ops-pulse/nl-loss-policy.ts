@@ -106,7 +106,7 @@ export type Recovery = {
 };
 export type NlCase = {
   /** "slp" cases come from Amazon’s SLP recovery files; they share the NL recovery ledger. */
-  report?: "nl" | "slp";
+  report?: "nl" | "slp" | "station";
   case_key: string;
   month: string;
   station_code: string;

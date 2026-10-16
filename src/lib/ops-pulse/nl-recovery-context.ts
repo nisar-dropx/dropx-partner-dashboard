@@ -55,7 +55,9 @@ export async function recoveryContext(
     !station ||
     !row.data?.source_present ||
     // SLP recovery files only list amounts Amazon is recovering.
-    (row.data.report !== "slp" &&
+    // Station claims are recoverable once their cluster manager approved them.
+    (row.data.report === "station" && row.data.source_status !== "Approved") ||
+    (row.data.report === "nl" &&
       !isRecoverable(
         row.data.source_status,
         settings.data?.recoverable_statuses ?? [],
@@ -69,7 +71,7 @@ export async function recoveryContext(
     settings: settings.data,
     caseKey: row.data.case_key,
     amount: row.data.amount,
-    report: (row.data.report === "slp" ? "slp" : "nl") as "nl" | "slp",
+    report: (row.data.report === "slp" ? "slp" : row.data.report === "station" ? "station" : "nl") as "nl" | "slp" | "station",
     finalSeenAt: (row.data.final_seen_at ?? null) as string | null,
   };
 }

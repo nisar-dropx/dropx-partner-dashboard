@@ -5,7 +5,7 @@ export type LedgerStatus = "scheduled" | "in_progress" | "recovered" | "needs_re
 export type LedgerLine = {
   month: string;
   case_key: string;
-  report: "nl" | "slp";
+  report: "nl" | "slp" | "station";
   station_code: string;
   employee_ref: string;
   employee_code: string | null;

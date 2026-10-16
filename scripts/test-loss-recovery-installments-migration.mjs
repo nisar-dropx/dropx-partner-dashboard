@@ -42,7 +42,7 @@ await db.exec(`insert into companies values('${C}','X'); insert into stations va
   ('${C}','nl','2026-09','I1','BLR1',1000,'Recoverable'),('${C}','nl','2026-09','I2','BLR1',1000,'Recoverable'),('${C}','nl','2026-09','F1','BLR1',200,'Recoverable'),
   ('${C}','nl','2026-09','CAP','BLR1',1200,'Recoverable'),('${C}','nl','2026-09','W1','BLR1',900,'Recoverable');`);
 // Each migration applied twice: both must be safe to re-run.
-for (const file of ["20261015130000_loss_recovery_payroll_deductions.sql", "20261016160000_loss_recovery_installments.sql"]) {
+for (const file of ["20261015130000_loss_recovery_payroll_deductions.sql", "20261016160000_loss_recovery_installments.sql", "20261016180000_station_loss_claims.sql"]) {
   const sql = readFileSync(`supabase/migrations/${file}`, "utf8");
   await db.exec(sql); await db.exec(sql);
 }
@@ -173,6 +173,37 @@ eq("Write-off amount is the outstanding only", (await one(`select amount::text a
 eq("Written-off line is never due again", keys(await due("hrms", "2026-11"), "I2"), []);
 await throws("Write-off cannot repeat", waive("I2", `employee:${E2}`, "Full and final settled again"), /already written off/);
 eq("Write-off is in the case history", Number((await one(`select count(*) n from nl_loss_recovery_events where case_key='I2' and after_value ? 'write_off'`)).n), 1);
+
+// --- Station loss claims: CM approval opens a Team Ops loss case that flows through the same recovery
+const CM = "00000000-0000-0000-0000-0000000000cc";
+const claim = async (ref, amount = 800) => (await one(`select * from station_claim_submit('${C}','${S}','blr1','${ref}',current_date-3,'cash_shortage',${amount},'Cash short at day close by 800','https://drive.example/x','DA One','${ACT}','Station Lead')`));
+const act = (id, action, version, actor, note = null, patch = {}) => `select * from station_claim_transition('${C}','${id}','${action}',${version},'${actor}','Someone',${note ? `'${note}'` : "null"},'${JSON.stringify(patch)}')`;
+const c1 = await claim("blr-cash-001");
+eq("Claim is submitted with an upper-case reference", [c1.status, c1.reference, c1.station_code], ["submitted", "BLR-CASH-001", "BLR1"]);
+await throws("Reference is unique", `select station_claim_submit('${C}','${S}','BLR1','BLR-CASH-001',current_date,'other',10,'Duplicate reference here','','','${ACT}','x')`, /already used/);
+await throws("Future incident refused", `select station_claim_submit('${C}','${S}','BLR1','FUT-1',current_date+1,'other',10,'Future incident here','','','${ACT}','x')`, /last 180 days/);
+await throws("Raiser cannot approve", act(c1.id, "approve", 1, ACT), /cluster manager must decide/);
+await throws("Return needs a reason", act(c1.id, "return", 1, CM), /at least 5/);
+await throws("Stale version refused", act(c1.id, "approve", 9, CM), /Someone else updated/);
+const r1 = await one(act(c1.id, "return", 1, CM, "Attach the cash book photo"));
+eq("Returned for information", r1.status, "returned");
+await throws("Only the raiser resubmits", act(c1.id, "resubmit", 2, CM, null, { amount: "750", description: "Corrected after recount" }), /Only the person who raised/);
+const s1 = await one(act(c1.id, "resubmit", 2, ACT, null, { amount: "750", description: "Corrected after recount", evidence_url: "https://drive.example/y" }));
+eq("Resubmitted with corrections", [s1.status, s1.amount], ["submitted", "750.00"]);
+const a1 = await one(act(c1.id, "approve", 3, CM));
+eq("Approved claim links to its loss case", [a1.status, a1.case_key, a1.case_month], ["approved", "station:BLR-CASH-001", a1.case_month]);
+const sc = await one(`select report,amount::text,source_status,nl_case_recoverable(company_id,report,source_status) ok from nl_loss_month_cases where case_key='station:BLR-CASH-001'`);
+eq("Station case is recoverable at the approved amount", sc, { report: "station", amount: "750.00", source_status: "Approved", ok: true });
+await throws("Approved claim cannot be decided again", act(c1.id, "reject", 4, CM, "Changed my mind"), /now approved/);
+await payables();
+await db.query(`select save_nl_recovery('${C}','${a1.case_month}','station:BLR-CASH-001',0,'deduct','custom','${JSON.stringify([{ employee_ref: `workforce:${W1}`, amount: "750" }])}','Recover station cash','${ACT}','Ops','{}','{"mode":"installments","basis":"months","value":"3"}')`);
+await db.exec(`update nl_loss_recoveries set deduction_month='2026-10' where case_key='station:BLR-CASH-001'`);
+eq("Station loss is due in the Workforce payout, instalment 1", (await due("workforce", "2026-10")).filter((r) => r.recovery_key.includes("station:BLR-CASH-001")).map((r) => [r.amount, r.label.startsWith("STATION loss")]), [["250.00", true]]);
+eq("NL cases still use Amazon's decision", (await one(`select nl_case_recoverable('${C}','nl','Not Recoverable') a, nl_case_recoverable('${C}','station','Pending') b`)), { a: false, b: false });
+const c2 = await claim("blr-cash-002");
+eq("Withdraw by raiser", (await one(act(c2.id, "withdraw", 1, ACT))).status, "withdrawn");
+eq("Claim history is complete", (await db.query(`select action from ops_station_loss_claim_events where claim_id='${c1.id}' order by created_at,id`)).rows.map((r) => r.action), ["raised", "return", "resubmit", "approve"]);
+await throws("Claim history cannot be edited", `update ops_station_loss_claim_events set note='x'`, /cannot be changed/);
 eq("Unknown target returns nothing", (await db.query(`select * from nl_loss_recovery_due('${C}','2026-11','other')`)).rows, []);
 eq("Bad month returns nothing", (await db.query(`select * from nl_loss_recovery_due('${C}','2026-13','hrms')`)).rows, []);
 console.log(fails ? `${fails} FAILED` : "ALL PASSED");
