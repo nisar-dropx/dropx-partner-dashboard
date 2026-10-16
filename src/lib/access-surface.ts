@@ -32,6 +32,7 @@ export const opsAccessPageCodes = [
   "ops_provider_mapping",
   "ops_rostering",
   "daily_submission",
+  "ops_report_bot",
   "cod",
   "cod_executive_reconciliation",
   "cod_submission",

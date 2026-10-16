@@ -117,7 +117,7 @@ const COPY = {
     valueHint: "From the EDSP SLP Final Recovery File",
     decision: "SLP Final file",
     footer:
-      "Initial and Final list the same case, so a plan saved on SLP Initial is the plan shown here. A changed amount is flagged for review.",
+      "SLP Initial is a report only, so employees are assigned here. A plan saved on Initial before that change is kept; a changed Final amount is flagged for review.",
   },
 } as const;
 

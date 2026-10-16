@@ -5,6 +5,7 @@ import {
   isPureElectricFuel,
   normalizeVehicleRegistration,
   trustedVehicleFuelFromAudits,
+  trustedVehicleFuelFromStoredVerification,
   vehicleFuelTypeForClient
 } from "./vehicle-fuel.ts";
 
@@ -75,4 +76,42 @@ test("incomplete, malformed, and provider-failed audits fail closed", () => {
   assert.equal(trustedVehicleFuelFromAudits([{ ...base, is_success: false, request_status: "completed", response_data: { status: { type: "success" }, data: { type: "Pure Ev" } } }], registration), "");
   assert.equal(trustedVehicleFuelFromAudits([{ ...base, is_success: true, request_status: "completed", response_data: { status: { type: "failed" }, data: { type: "Pure Ev" } } }], registration), "");
   assert.equal(trustedVehicleFuelFromAudits([{ ...base, is_success: true, request_status: "completed", response_data: null }], registration), "");
+});
+
+test("reads retained fuel only from an exact successful vehicle verification", () => {
+  const verification = {
+    verified: true,
+    input_key: "KL14AF6404",
+    details: {
+      kind: "vehicle",
+      verified: true,
+      inputKey: "KL14AF6404",
+      fuelType: "Pure Ev"
+    }
+  };
+
+  assert.equal(
+    trustedVehicleFuelFromStoredVerification(verification, "kl14af6404"),
+    "Pure Ev"
+  );
+});
+
+test("retained vehicle fuel fails closed when any trust binding differs", () => {
+  const verification = {
+    verified: true,
+    input_key: "KL14AF6404",
+    details: {
+      kind: "vehicle",
+      verified: true,
+      inputKey: "KL14AF6404",
+      fuelType: "Pure Ev"
+    }
+  };
+
+  assert.equal(trustedVehicleFuelFromStoredVerification({ ...verification, verified: false }, "KL14AF6404"), "");
+  assert.equal(trustedVehicleFuelFromStoredVerification({ ...verification, input_key: "KL14AF0000" }, "KL14AF6404"), "");
+  assert.equal(trustedVehicleFuelFromStoredVerification({ ...verification, details: { ...verification.details, kind: "dl" } }, "KL14AF6404"), "");
+  assert.equal(trustedVehicleFuelFromStoredVerification({ ...verification, details: { ...verification.details, verified: false } }, "KL14AF6404"), "");
+  assert.equal(trustedVehicleFuelFromStoredVerification({ ...verification, details: { ...verification.details, inputKey: "KL14AF0000" } }, "KL14AF6404"), "");
+  assert.equal(trustedVehicleFuelFromStoredVerification({ ...verification, details: { ...verification.details, fuelType: "" } }, "KL14AF6404"), "");
 });

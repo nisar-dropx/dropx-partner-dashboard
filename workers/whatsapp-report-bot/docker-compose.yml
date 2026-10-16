@@ -1,0 +1,29 @@
+# Optional: run on your own Docker host instead of Railway.
+services:
+  report-bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORTAL_URL: "${PORTAL_URL:-https://ops.dropxlogistics.com}"
+      WORKER_TOKEN: "${WORKER_TOKEN}"
+      WORKER_PUBLIC_URL: "https://${WORKER_DOMAIN}"
+      DEVICE_NAME: "${DEVICE_NAME:-DropX Report Bot}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    expose:
+      - "8090"
+
+  # HTTPS in front of the worker. Point WORKER_DOMAIN's DNS at this host first.
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${WORKER_DOMAIN} --to report-bot:8090
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      - report-bot
+
+volumes:
+  caddy_data:

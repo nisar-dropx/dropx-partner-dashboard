@@ -1,13 +1,25 @@
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
-import { createConnectSession, createSecretHash, findConnectAccounts, normalizeConnectMobile } from "@/lib/connect-auth";
-import { assertDeviceAllowed, bindDevice, DeviceBindingError } from "@/lib/connect-device-binding";
-import { verifyOtpHash } from "@/lib/connect-otp";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  activateConnectSession,
+  ConnectCredentialError,
+  findConnectAccounts,
+  normalizeConnectMobile,
+  revokeIssuedConnectSession,
+  sameConnectAccountIdentitySet,
+  setConnectPinWithOtp
+} from "@/lib/connect-auth";
+import { ConnectMobileValidationError } from "@/lib/country-codes";
+import {
+  assertDeviceAllowed,
+  bindDevice,
+  type DeviceBindingMutation,
+  DeviceBindingError,
+  rollbackCreatedDeviceBindings
+} from "@/lib/connect-device-binding";
 
 export async function POST(request: Request) {
   try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json().catch(() => ({})) as { mobile?: unknown; countryCode?: unknown; otp?: unknown; pin?: unknown };
     const { countryCode, mobile } = normalizeConnectMobile(body.mobile, body.countryCode);
     const otp = String(body.otp ?? "").replace(/\D/g, "");
@@ -15,34 +27,6 @@ export async function POST(request: Request) {
     if (!mobile || mobile.length < 7) return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
     if (!/^\d{6}$/.test(otp)) return NextResponse.json({ error: "Enter the 6 digit OTP." }, { status: 400 });
     if (!/^\d{6}$/.test(pin)) return NextResponse.json({ error: "Create a 6 digit PIN." }, { status: 400 });
-
-    const otpResult = await supabaseAdmin
-      .from("connect_whatsapp_otp_requests")
-      .select("id, otp_hash, expires_at, used_at, attempt_count, max_attempts, status")
-      .eq("country_code", countryCode)
-      .eq("mobile_number", mobile)
-      .eq("status", "pending")
-      .in("purpose", ["connect_login", "connect_pin_reset"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (otpResult.error) throw new Error(otpResult.error.message);
-    const otpRow = otpResult.data;
-    if (!otpRow) return NextResponse.json({ error: "OTP not found or already used. Please resend OTP." }, { status: 400 });
-    if (otpRow.used_at) return NextResponse.json({ error: "OTP already used. Please resend OTP." }, { status: 400 });
-    if (new Date(otpRow.expires_at).getTime() < Date.now()) {
-      await supabaseAdmin.from("connect_whatsapp_otp_requests").update({ status: "expired", updated_at: new Date().toISOString() }).eq("id", otpRow.id);
-      return NextResponse.json({ error: "OTP expired. Please resend OTP." }, { status: 400 });
-    }
-    if (otpRow.attempt_count >= otpRow.max_attempts) return NextResponse.json({ error: "Too many attempts. Please resend OTP." }, { status: 429 });
-
-    if (!verifyOtpHash(otp, otpRow.otp_hash)) {
-      await supabaseAdmin.from("connect_whatsapp_otp_requests").update({
-        attempt_count: otpRow.attempt_count + 1,
-        updated_at: new Date().toISOString()
-      }).eq("id", otpRow.id);
-      return NextResponse.json({ error: "Invalid OTP." }, { status: 400 });
-    }
 
     const accounts = await findConnectAccounts(countryCode, mobile);
     if (!accounts.length) {
@@ -52,29 +36,37 @@ export async function POST(request: Request) {
     }
 
     await assertDeviceAllowed(accounts, request);
-
-    await supabaseAdmin.from("connect_whatsapp_otp_requests").update({
-      status: "verified",
-      used_at: new Date().toISOString(),
-      attempt_count: otpRow.attempt_count + 1,
-      updated_at: new Date().toISOString()
-    }).eq("id", otpRow.id);
-
-    const upsertResult = await supabaseAdmin.from("connect_user_pins").upsert({
-      country_code: countryCode,
-      mobile_number: mobile,
-      pin_hash: createSecretHash(pin),
-      attempt_count: 0,
-      locked_until: null,
-      reset_required: false,
-      updated_at: new Date().toISOString()
-    }, { onConflict: "country_code,mobile_number" });
-    if (upsertResult.error) throw new Error(upsertResult.error.message);
-
-    await bindDevice({ accounts, countryCode, mobile, request });
-    await createConnectSession({ countryCode, mobile, request });
-    return NextResponse.json({ ok: true, accounts });
+    const session = await setConnectPinWithOtp({ countryCode, mobile, otp, pin, request });
+    let freshAccounts: typeof accounts;
+    let bindingMutation: DeviceBindingMutation | null = null;
+    try {
+      freshAccounts = await findConnectAccounts(countryCode, mobile, { fresh: true });
+      if (!freshAccounts.length || !sameConnectAccountIdentitySet(accounts, freshAccounts)) {
+        throw new ConnectCredentialError("Authentication state changed. Please try again.", 409);
+      }
+      bindingMutation = await bindDevice({ accounts: freshAccounts, countryCode, mobile, request });
+      const postBindAccounts = await findConnectAccounts(countryCode, mobile, { fresh: true });
+      if (!postBindAccounts.length || !sameConnectAccountIdentitySet(freshAccounts, postBindAccounts)) {
+        throw new ConnectCredentialError("Authentication state changed. Please try again.", 409);
+      }
+      freshAccounts = postBindAccounts;
+    } catch (error) {
+      try {
+        if (bindingMutation) await rollbackCreatedDeviceBindings(bindingMutation);
+      } finally {
+        await revokeIssuedConnectSession(session);
+      }
+      throw error;
+    }
+    activateConnectSession(session);
+    return NextResponse.json({ ok: true, accounts: freshAccounts });
   } catch (error) {
+    if (error instanceof ConnectMobileValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof ConnectCredentialError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof DeviceBindingError) {
       return NextResponse.json({ error: error.message, code: "device_bound" }, { status: 403 });
     }

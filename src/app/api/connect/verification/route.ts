@@ -16,12 +16,24 @@ export const maxDuration = 30;
 
 type VerificationKind = "pan" | "pan_aadhaar" | "dl" | "vehicle" | "bank" | "pf_uan";
 
+const profileEditVerificationTypes = new Set([
+  "employee",
+  "workforce",
+  "field_executive",
+  "contractor",
+  "vendor"
+]);
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
 function compact(value: unknown) {
   return text(value).replace(/\s+/g, " ");
+}
+
+function identityNameHash(value: unknown) {
+  return createHash("sha256").update(compact(value).toUpperCase()).digest("hex");
 }
 
 function onlyDigits(value: unknown) {
@@ -165,11 +177,16 @@ async function resolveAccount(accountId: string, profileType: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const session = await activeSession();
   if (!isWorkforceProfileType(profileType)) throw new Error("Invalid profile type.");
-  const { countryCode, mobile, localMobile } = normalizeConnectMobile(session.mobile_number, session.country_code);
+  const { countryCode, mobile, localMobile } = normalizeConnectMobile(
+    session.mobile_number,
+    session.country_code
+  );
   const table = workforceTable(profileType);
   const result = await supabaseAdmin
     .from(table)
-    .select(profileType === "employee" ? "id, company_id, employee_code, full_name, mobile, mobile_country_code" : "id, company_id, dropx_id, full_name, mobile, mobile_country_code")
+    .select(profileType === "employee"
+      ? "id, company_id, employee_code, full_name, mobile, mobile_country_code"
+      : "id, company_id, dropx_id, full_name, mobile, mobile_country_code")
     .eq("id", accountId)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
@@ -186,6 +203,53 @@ async function resolveAccount(accountId: string, profileType: string) {
   return {
     companyId: row.company_id as string,
     fullName: compact(row.full_name),
+    accountCode,
+    actorLabel: compact(row.full_name) || `${countryCode}${mobile}`
+  };
+}
+
+async function resolveProfileEditAccount(accountId: string, profileType: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const session = await activeSession();
+  if (!isWorkforceProfileType(profileType) || !profileEditVerificationTypes.has(profileType)) {
+    throw new Error("This profile type cannot use profile edit verification.");
+  }
+  // Session values retain the legacy Connect normalization contract. Strict
+  // country/mobile validation is reserved for a newly submitted edit value.
+  const { countryCode, mobile, localMobile } = normalizeConnectMobile(
+    session.mobile_number,
+    session.country_code
+  );
+  const table = workforceTable(profileType);
+  const result = await supabaseAdmin
+    .from(table)
+    .select(profileType === "employee"
+      ? "id, company_id, employee_code, full_name, mobile, mobile_country_code, updated_at, profile_completion_status, is_active"
+      : "id, company_id, dropx_id, full_name, mobile, mobile_country_code, updated_at, onboarding_status, is_active")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  const row = result.data;
+  if (!row) throw new Error("Account not found.");
+  const rowMobile = onlyDigits(row.mobile);
+  const rowCountryCode = onlyDigits(row.mobile_country_code || countryCode) || countryCode;
+  if (rowCountryCode !== countryCode || (rowMobile !== mobile && rowMobile !== localMobile)) {
+    throw new Error("This verification is not available for the signed-in account.");
+  }
+  const profileStatus = profileType === "employee"
+    ? text((row as { profile_completion_status?: unknown }).profile_completion_status).toLowerCase()
+    : text((row as { onboarding_status?: unknown }).onboarding_status).toLowerCase();
+  if (profileStatus !== "active" || row.is_active !== true) {
+    throw new Error("Profile edit verification is available only for an active profile.");
+  }
+  const accountCode = profileType === "employee"
+    ? compact((row as { employee_code?: unknown }).employee_code)
+    : compact((row as { dropx_id?: unknown }).dropx_id);
+  return {
+    companyId: row.company_id as string,
+    sessionId: session.id as string,
+    fullName: compact(row.full_name),
+    profileUpdatedAt: text(row.updated_at),
     accountCode,
     actorLabel: compact(row.full_name) || `${countryCode}${mobile}`
   };
@@ -226,6 +290,9 @@ function verifiedResponse(result: Record<string, unknown>) {
   return ok(result);
 }
 
+// Registration historically persists the provider-confirmed IFSC immediately.
+// Keep that side effect on the registration path only: profile editing stages
+// the result and commits every changed value atomically after WhatsApp OTP.
 async function saveVerifiedIfsc(profileType: string, accountId: string, ifscCode: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const table = workforceTable(profileType as Parameters<typeof workforceTable>[0]);
@@ -290,9 +357,18 @@ export async function POST(request: NextRequest) {
     const accountId = text(payload.accountId);
     const profileType = text(payload.profileType);
     if (!accountId) throw new Error("Account is required.");
-    const account = await resolveAccount(accountId, profileType);
+    const profileEdit = payload.profileEdit === true;
+    const profileEditAccount = profileEdit
+      ? await resolveProfileEditAccount(accountId, profileType)
+      : null;
+    const account = profileEditAccount ?? await resolveAccount(accountId, profileType);
     const credentials = await idspayCredentials(account.companyId);
-    const registeredName = compact(payload.fullName) || account.fullName;
+    // A profile-edit caller cannot choose the identity name used by PAN, DL,
+    // bank, or PF matching. The immutable server-side profile name is the only
+    // authority for these checks.
+    const registeredName = profileEditAccount
+      ? profileEditAccount.fullName
+      : compact(payload.fullName) || account.fullName;
     const userAgent = request.headers.get("user-agent")?.toLowerCase() ?? "";
     const auditContext = {
       accountCode: account.accountCode,
@@ -307,6 +383,39 @@ export async function POST(request: NextRequest) {
         ? "dropx_one_android"
         : "dropx_one_web",
       verificationKind: kind
+    };
+    const respond = async (result: Record<string, unknown>) => {
+      if (profileEditAccount) {
+        if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+        if (!profileEditAccount.profileUpdatedAt) throw new Error("Profile version is unavailable. Reload the profile and try again.");
+        const inputKeyValue = text(result.inputKey);
+        if (inputKeyValue) {
+          const stage = await supabaseAdmin.from("connect_profile_edit_verifications").upsert({
+            // A fresh provider check is not part of an earlier OTP request. The
+            // profile-edit start action claims this exact session-bound result.
+            request_id: null,
+            company_id: account.companyId,
+            account_id: accountId,
+            profile_type: profileType === "field_executive" ? "workforce" : profileType,
+            login_session_id: profileEditAccount.sessionId,
+            profile_updated_at: profileEditAccount.profileUpdatedAt,
+            identity_name_hash: identityNameHash(profileEditAccount.fullName),
+            kind,
+            input_key: inputKeyValue,
+            verified: result.verified === true,
+            manual_review: result.manualReview === true,
+            block_submit: result.blockSubmit === true,
+            display_name: text(result.name || result.accountName || result.ownerName),
+            message: text(result.message || result.warning),
+            details: { ...result, kind },
+            verified_at: result.verified === true ? new Date().toISOString() : null,
+            expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+            updated_at: new Date().toISOString()
+          }, { onConflict: "login_session_id,company_id,profile_type,account_id,kind" });
+          if (stage.error) throw new Error(stage.error.message);
+        }
+      }
+      return verifiedResponse(result);
     };
 
     if (kind === "pan") {
@@ -339,7 +448,7 @@ export async function POST(request: NextRequest) {
               : "PAN verification failed.",
         rawStatus
       };
-      return verifiedResponse(result);
+      return respond(result);
     }
 
     if (kind === "pan_aadhaar") {
@@ -373,7 +482,7 @@ export async function POST(request: NextRequest) {
         // the provider; submission handling supplies no extra wording.
         message: providerMessage
       };
-      return verifiedResponse(result);
+      return respond(result);
     }
 
     if (kind === "dl") {
@@ -388,7 +497,7 @@ export async function POST(request: NextRequest) {
       });
       const dlInputKey = inputKey([dlNumber, displayDob(payload.dateOfBirth)]);
       if (outcome === "bad_input") {
-        return verifiedResponse({
+        return respond({
           verified: false,
           manualReview: false,
           blockSubmit: true,
@@ -400,7 +509,7 @@ export async function POST(request: NextRequest) {
       // this number and date of birth. Neither proves the licence is wrong, so
       // the applicant continues and a person reviews the uploaded licence.
       if (outcome === "unavailable" || !body?.data?.details_of_driving_licence) {
-        return verifiedResponse({
+        return respond({
           verified: false,
           manualReview: true,
           blockSubmit: false,
@@ -439,7 +548,7 @@ export async function POST(request: NextRequest) {
                 ? "DL name mismatch."
                 : "DL verification failed."
       };
-      return verifiedResponse(result);
+      return respond(result);
     }
 
     if (kind === "vehicle") {
@@ -476,7 +585,7 @@ export async function POST(request: NextRequest) {
         insuranceExpiryDate: providerDate(data?.vehicle_insurance_upto ?? data?.insurance_upto),
         pollutionExpiryDate: isPureElectricFuel(providerFuelType) ? "" : providerDate(data?.pucc_upto)
       };
-      return verifiedResponse(result);
+      return respond(result);
     }
 
     if (kind === "bank") {
@@ -500,8 +609,8 @@ export async function POST(request: NextRequest) {
           ? text(body?.message) || "Bank account checked."
           : "Bank account could not be checked automatically. Check the account number and IFSC. If they are correct, continue."
       };
-      if (verified) await saveVerifiedIfsc(profileType, accountId, ifscCode);
-      return verifiedResponse(result);
+      if (verified && !profileEdit) await saveVerifiedIfsc(profileType, accountId, ifscCode);
+      return respond(result);
     }
 
     if (kind === "pf_uan") {
@@ -535,7 +644,7 @@ export async function POST(request: NextRequest) {
               : "PF UAN verification failed.",
         rawStatus: body?.status ?? null
       };
-      return verifiedResponse(result);
+      return respond(result);
     }
 
     throw new Error("Unsupported verification type.");

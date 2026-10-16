@@ -57,6 +57,7 @@ export const accessPages = [
   { code: "service_network", name: "Network Planning", sort_order: 92 },
   { code: "service_network_master", name: "Network Planning Master", sort_order: 93 },
   { code: "daily_submission", name: "Daily Submission", sort_order: 85 },
+  { code: "ops_report_bot", name: "Report Bot (WhatsApp)", sort_order: 85 },
   { code: "cod", name: "COD", sort_order: 86 },
   { code: "cod_executive_reconciliation", name: "Executive Reconciliation", sort_order: 87 },
   { code: "cod_submission", name: "COD Submission", sort_order: 88 },

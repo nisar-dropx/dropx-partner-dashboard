@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
 import { findConnectAccounts, normalizeConnectMobile } from "@/lib/connect-auth";
+import { ConnectMobileValidationError } from "@/lib/country-codes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function POST(request: Request) {
@@ -11,7 +12,6 @@ export async function POST(request: Request) {
     if (!mobile || mobile.length < 7) {
       return NextResponse.json({ error: "Enter a valid mobile number." }, { status: 400 });
     }
-
     const accounts = await findConnectAccounts(countryCode, mobile);
     if (!accounts.length) {
       return NextResponse.json({
@@ -33,6 +33,9 @@ export async function POST(request: Request) {
       accounts
     });
   } catch (error) {
+    if (error instanceof ConnectMobileValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json({ error: userFacingError(error, "Unable to check mobile number.") }, { status: 500 });
   }
 }

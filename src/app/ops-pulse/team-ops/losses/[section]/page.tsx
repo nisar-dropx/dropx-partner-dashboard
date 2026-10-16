@@ -30,7 +30,7 @@ const sections: Record<
     label: "SLP Initial",
     title: "SLP · Initial recovery",
     intro:
-      "Amazon's first recovery list for the period (EDSP SLP Initial Recovery File).",
+      "Amazon's first recovery list for the period (EDSP SLP Initial Recovery File). Report only — employees are assigned for recovery on SLP Final.",
   },
   "slp-final": {
     report: "slp_final",
@@ -89,15 +89,15 @@ export default async function LossesSectionPage({
         />
       );
     }
-    // Potential loss is a read-only report (no recovery ledger), so it always uses the plain listing.
-    if (section.report !== "potential_loss" && (await lossSchemaReady()))
+    // Potential loss and SLP Initial are read-only reports; SLP is assigned for recovery on SLP Final only.
+    if (section.report === "slp_final" && (await lossSchemaReady()))
       return (
         <NlLossReport
           view={await loadRecoveryView(auth, section.report, searchParams)}
           tabs={tabs}
         />
       );
-    // Read-only listing: potential loss always; SLP until the recovery ledger migration is applied.
+    // Read-only listing: potential loss and SLP Initial always; SLP Final until the recovery ledger migration is applied.
     return (
       <OpsLossReport
         title={section.title}

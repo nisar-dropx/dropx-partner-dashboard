@@ -27,6 +27,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/connect-profile-edit-retention",
+      "schedule": "17 * * * *"
+    },
+    {
       "path": "/api/cron/location-samples-retention",
       "schedule": "15 6 * * *"
     },
@@ -36,6 +40,10 @@
     },
     {
       "path": "/api/whatsapp/process-campaigns",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/report-bot",
       "schedule": "* * * * *"
     },
     {

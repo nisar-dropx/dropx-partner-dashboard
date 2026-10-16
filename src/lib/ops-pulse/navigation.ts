@@ -165,9 +165,10 @@ export function opsNavItemsForMode(mode: OperatingMode, authorization?: Authoriz
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
     {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
+    {code:'ops_report_bot',label:'Report Bot',href:'/report-bot',icon:'W'},
     businessDocuments,payments,
     {code:'cpu_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,
-    administration[0],
+    {...administration[0],children:[...(administration[0].children??[]),{code:'ops_report_bot',label:'Report Bot setup',href:'/report-bot/setup'}]},
     {code:'master_data',label:'Ops Masters',icon:'*',children:[
       {code:'cps_inputs',label:'CPU Master & units',href:'/cpu/master'},
       {code:'store_audit_master',label:'Audit Master',href:'/master/store-audits'},

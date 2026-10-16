@@ -150,3 +150,137 @@ export async function reviewPeopleProfile(formData: FormData) {
     reviewRedirect({ error: error instanceof Error ? error.message : "Unable to review profile." });
   }
 }
+
+const profileEditReviewTypes = new Set<WorkforceProfileType>([
+  "employee",
+  "workforce",
+  "contractor",
+  "vendor"
+]);
+
+export async function reviewProfileEdit(formData: FormData) {
+  const authorization = await requirePagePermission("people_review", "edit");
+  const companyId = requireCompanyId(authorization);
+  if (!supabaseAdmin) reviewRedirect({ error: "Supabase service role key is not configured." });
+
+  const id = String(formData.get("id") ?? "").trim();
+  const profileTypeValue = String(formData.get("profile_type") ?? "").trim();
+  const action = String(formData.get("review_action") ?? "").trim().toLowerCase();
+  const reviewVersion = String(formData.get("review_version") ?? "").trim();
+  const remarks = String(formData.get("return_remarks") ?? "").trim();
+
+  try {
+    if (!id) throw new Error("Profile is required.");
+    if (!isWorkforceProfileType(profileTypeValue) || !profileEditReviewTypes.has(profileTypeValue)) {
+      throw new Error("Choose a valid profile category.");
+    }
+    if (!["approve", "return"].includes(action)) throw new Error("Choose a valid review action.");
+    if (!reviewVersion) throw new Error("Profile review version is unavailable. Refresh the review queue and try again.");
+    if (action === "return" && !remarks) throw new Error("Return remarks are required.");
+
+    const profileType = profileTypeValue as WorkforceProfileType;
+    const table = workforceTable(profileType);
+    const statusColumn = profileType === "employee" ? "profile_completion_status" : "onboarding_status";
+    const current = await supabaseAdmin
+      .from(table)
+      .select("*")
+      .eq("id", id)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (current.error) throw new Error(current.error.message);
+    if (!current.data) throw new Error(`${profileLabel(profileType)} profile was not found.`);
+    if (!authorization.hasAllLocationAccess &&
+        !authorization.locationScopeIds.includes(String(current.data.location_id ?? ""))) {
+      throw new Error("You do not have access to this profile location.");
+    }
+
+    const currentStatus = profileType === "employee"
+      ? (current.data as { profile_completion_status?: unknown }).profile_completion_status
+      : (current.data as { onboarding_status?: unknown }).onboarding_status;
+    const operationalProfileEditReview =
+      String(currentStatus ?? "").trim().toLowerCase() === "active" &&
+      current.data.profile_edit_review_pending === true &&
+      current.data.is_active === true &&
+      current.data.deleted_at == null &&
+      current.data.deactivated_at == null &&
+      (profileType !== "workforce" ||
+        String(current.data.lifecycle_status ?? "").trim().toLowerCase() === "active");
+    if (!operationalProfileEditReview) {
+      throw new Error("Only active profiles with changes awaiting review can be reviewed here.");
+    }
+
+    const currentUpdatedAt = String(current.data.updated_at ?? "").trim();
+    if (!currentUpdatedAt || currentUpdatedAt !== reviewVersion) {
+      throw new Error("Profile changed while you were reviewing it. Refresh the review queue and try again.");
+    }
+
+    const reviewedAt = new Date().toISOString();
+    const update = action === "approve"
+      ? {
+          profile_edit_review_pending: false,
+          profile_return_remarks: null,
+          profile_returned_at: null,
+          updated_at: reviewedAt
+        }
+      : {
+          profile_edit_review_pending: true,
+          profile_return_remarks: remarks,
+          profile_returned_at: reviewedAt,
+          updated_at: reviewedAt
+        };
+    let updateQuery = supabaseAdmin
+      .from(table)
+      .update(update)
+      .eq("id", id)
+      .eq("company_id", companyId)
+      .eq(statusColumn, currentStatus)
+      .eq("profile_edit_review_pending", true)
+      .eq("is_active", true)
+      .eq("updated_at", reviewVersion);
+    if (profileType === "workforce") {
+      updateQuery = updateQuery
+        .eq("lifecycle_status", "active")
+        .is("deleted_at", null)
+        .is("deactivated_at", null);
+    } else {
+      if (Object.prototype.hasOwnProperty.call(current.data, "deleted_at")) {
+        updateQuery = updateQuery.is("deleted_at", null);
+      }
+      if (Object.prototype.hasOwnProperty.call(current.data, "deactivated_at")) {
+        updateQuery = updateQuery.is("deactivated_at", null);
+      }
+    }
+    const result = await updateQuery.select("id").maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data) {
+      throw new Error("Profile changed while you were reviewing it. Refresh the review queue and try again.");
+    }
+
+    if (action === "return") {
+      await createAppNotification({
+        accountId: id,
+        companyId,
+        data: { remarks, profileEdit: true },
+        eventCode: "profile_returned",
+        profileType,
+        sourceKey: `${id}:profile-edit:return:${reviewedAt}`,
+        variables: { remarks }
+      });
+    }
+
+    revalidatePath("/people/review");
+    revalidatePath(profileType === "employee"
+      ? "/employees"
+      : profileType === "workforce"
+        ? "/workforce"
+        : nonEmployeeProfileConfigs[profileType].route);
+    reviewRedirect({
+      notice: action === "approve"
+        ? `${profileLabel(profileType)} profile changes approved.`
+        : `${profileLabel(profileType)} profile changes returned for OTP-protected correction; approval is still pending.`
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    reviewRedirect({ error: error instanceof Error ? error.message : "Unable to review profile changes." });
+  }
+}
