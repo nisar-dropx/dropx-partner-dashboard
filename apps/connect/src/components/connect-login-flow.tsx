@@ -4,7 +4,7 @@ import Image from "next/image";
 import { ConnectPreviewSwitcher, exitConnectPreview } from "./connect-preview-switcher";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, MessageCircleMore, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
+import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Mail, Menu, MessageCircleMore, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import type { AttendanceFilter } from "../lib/attendance-summary";
@@ -27,6 +27,8 @@ import { ConnectMyRequests } from "./connect-my-requests";
 import { ConnectWorkforcePayments } from "./connect-workforce-payments";
 import { ConnectWorkforceWork } from "./connect-workforce-work";
 import { ConnectPeopleWorkspace } from "./connect-people-workspace";
+import { ConnectBetaInbox } from "./connect-beta-inbox";
+import { isIsolatedAmazonOtpAccount } from "../lib/beta-amazon-otp";
 import { ConnectBetaJourneyShell } from "./connect-beta-journey-shell";
 import { ConnectActivationStatus } from "./connect-activation-status";
 import { ConnectReferEarn } from "./connect-refer-earn";
@@ -39,9 +41,9 @@ import { connectAccountKey as accountKey, connectAccountRoute, resolveConnectRou
 import { connectApprovalSection } from "@/lib/connect-approval-links";
 import { leaveRouteState, readConnectSessionResponse, resolveApprovalAccess, type ReporteeCheck } from "@/lib/connect-navigation-state";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "activation" | "dashboard" | "profile" | "documents" | "salary" | "connect" | "approvals" | "requests" | "payments" | "work" | "advances" | "earnings" | "refer" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "activation" | "betaInbox" | "dashboard" | "profile" | "documents" | "salary" | "connect" | "approvals" | "requests" | "payments" | "work" | "advances" | "earnings" | "refer" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
 const routeForStep: Partial<Record<Step, string>> = {
-  accounts: "/accounts", activation: "/activation", dashboard: "/dashboard", profile: "/profile", documents: "/documents",
+  betaInbox: "/beta-inbox", accounts: "/accounts", activation: "/activation", dashboard: "/dashboard", profile: "/profile", documents: "/documents",
   connect: "/connect",
   salary: "/salary",
   approvals: "/approvals", requests: "/requests", payments: "/payments", work: "/work", advances: "/advances", earnings: "/earnings",
@@ -654,17 +656,18 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       if (pathname !== "/accounts") router.replace("/accounts");
       return;
     }
-    if (account.activationOnly && next !== "activation" && next !== "profile" && next !== "accounts") {
+    if (account.activationOnly && next !== "activation" && next !== "profile" && next !== "accounts" && !(next === "betaInbox" && isIsolatedAmazonOtpAccount(account))) {
       setStep("activation");
       if (pathname !== "/activation") router.replace(urlFor("activation"));
       return;
     }
-    if (!active(account) && next !== "profile" && next !== "settings" && !(account.activationOnly && next === "activation")) {
+    if (!active(account) && next !== "profile" && next !== "settings" && !(account.activationOnly && next === "activation") && !(next === "betaInbox" && isIsolatedAmazonOtpAccount(account))) {
       setStep("profile");
       if (pathname !== "/profile") router.replace(urlFor("profile"));
       return;
     }
     const permitted =
+      (next !== "betaInbox" || isIsolatedAmazonOtpAccount(account)) &&
       (next !== "dashboard" || allowed(account, "dashboard")) &&
       (next !== "attendance" || allowed(account, "attendance")) &&
       (next !== "roster" || allowed(account, "roster")) &&
@@ -728,7 +731,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   // `work` is a Workforce-only screen, but it still uses the same authenticated
   // shell. Omitting it here made a valid session render the sign-in artwork
   // (and no login controls) whenever a user opened Work schedule.
-  const loggedIn = ["accounts","activation","dashboard","profile","documents","salary","connect","approvals","requests","payments","work","advances","earnings","refer","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
+  const loggedIn = ["accounts","activation","betaInbox","dashboard","profile","documents","salary","connect","approvals","requests","payments","work","advances","earnings","refer","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
   useEffect(() => {
     if (!loggedIn || checking || canPreviewUsers) return;
     const controller = new AbortController();
@@ -739,6 +742,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     activation: "Work setup",
+    betaInbox: "Mail inbox",
     dashboard: "Today",
     profile: "My profile",
     documents: "Documents",
@@ -769,7 +773,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   </section></div>;
 
   const isolatedBetaJourney = Boolean(account?.onboardingBeta && account.activationStage?.startsWith("amazon_email_pilot:"));
-  return <div className={`dx-app ${loggedIn ? "logged-in" : ""}${loggedIn && isWorkforceWorkspace(account) ? " dx-workforce-ui" : ""}${isolatedBetaJourney && (step === "activation" || step === "profile") ? " dx-private-beta" : ""}`}>
+  return <div className={`dx-app ${loggedIn ? "logged-in" : ""}${loggedIn && isWorkforceWorkspace(account) ? " dx-workforce-ui" : ""}${isolatedBetaJourney && (step === "activation" || step === "profile" || step === "betaInbox") ? " dx-private-beta" : ""}`}>
     {loggedIn && account ? <aside className="dx-desktop-nav" aria-label="DropX One navigation">
       <div className="dx-desktop-brand">
         <Image alt="DropX" height={44} priority src="/dropx-logo.png" width={126} />
@@ -811,6 +815,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
           {peopleSelfService(account) && allowed(account, "documents") ? <button aria-current={step === "documents" ? "page" : undefined} className={step === "documents" ? "active" : ""} onClick={() => open("documents")}><Files />Documents</button> : null}
           {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target />Performance</button> : null}
         </>}
+        {isIsolatedAmazonOtpAccount(account) ? <button aria-current={step === "betaInbox" ? "page" : undefined} className={step === "betaInbox" ? "active" : ""} onClick={() => open("betaInbox")}><Mail />Mail inbox</button> : null}
         {!account.activationOnly ? <small className="dx-nav-label">Account</small> : null}
         {allowed(account, "settings") ? <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button> : null}
       </nav>
@@ -844,6 +849,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         </span>
       </section>
       <nav>
+        {isIsolatedAmazonOtpAccount(account) ? <button onClick={() => open("betaInbox")}><Mail />Mail inbox<ChevronRight /></button> : null}
         {account.activationOnly ? <><button onClick={() => open("activation")}><ShieldCheck />Work setup<ChevronRight /></button>{!active(account)?<button onClick={() => open("profile")}><UserRound />Registration<ChevronRight /></button>:null}</> : isWorkforceWorkspace(account) ? <>
           <button onClick={() => open("dashboard")}><Gauge />Home<ChevronRight /></button>
           {account.onboardingBeta ? <button onClick={() => open("activation")}><ShieldCheck />Amazon setup <small>Beta</small><ChevronRight /></button> : null}
@@ -910,6 +916,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       {step === "dashboard" && account ? <ConnectNoticeCards notices={visibleDashboardNotices(dashboardNotices)} onOpen={notice => void readNotification(notice)} /> : null}
       {openedNotice ? <ConnectNoticeDialog notice={openedNotice} onClose={() => setOpenedNotice(null)} onContinue={() => { navigateNotification(openedNotice); setOpenedNotice(null); }} /> : null}
       {isolatedBetaJourney && account && (step === "activation" || (step === "profile" && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)))) ? <ConnectBetaJourneyShell key={accountKey(account)} account={account} registration={step === "profile"}>{step === "activation" ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} readOnly={userPreview} />}</ConnectBetaJourneyShell> : null}
+      {step === "betaInbox" && account && isIsolatedAmazonOtpAccount(account) ? <ConnectBetaJourneyShell account={account} registration={false}><ConnectBetaInbox key={accountKey(account)} account={account} /></ConnectBetaJourneyShell> : null}
       {step === "activation" && account?.onboardingBeta && !isolatedBetaJourney ? <ConnectActivationStatus account={account} onRegister={()=>open("profile")} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onAttendanceSummary={(filter) => open("attendance", filter)} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRefer={() => open("refer")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
@@ -945,6 +952,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       </section> : null}
     </main>}
     {loggedIn && account ? <nav aria-label="Primary navigation" className="dx-mobile-nav">
+      {isIsolatedAmazonOtpAccount(account) ? <button aria-current={step === "betaInbox" ? "page" : undefined} className={step === "betaInbox" ? "active" : ""} onClick={() => open("betaInbox")}><Mail /><span>Inbox</span></button> : null}
       {account.activationOnly ? <><button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Setup</span></button>{!active(account)?<button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Register</span></button>:null}</> : isWorkforceWorkspace(account) ? <>
         <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Home /><span>Home</span></button>
         {account.onboardingBeta ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck /><span>Amazon</span></button> : null}
