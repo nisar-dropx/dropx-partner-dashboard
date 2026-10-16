@@ -16,6 +16,22 @@ const payoutPage = readFileSync(new URL("../app/payments/workforce-payouts/page.
 const payoutLoader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
 const payoutPreviewBatching = readFileSync(new URL("./payout-payment-preview-batching.ts", import.meta.url), "utf8");
 
+test("payment setup conflict rows are excluded from every payout mutation", () => {
+  assert.match(payoutTable, /function canManuallyEditPayout[\s\S]*?row\.mappingStatus !== "Payment setup conflict"/);
+  assert.match(payoutTable, /function canDeductAdvanceFromPayout[\s\S]*?row\.paymentDetailsAvailable/);
+  assert.match(payoutTable, /function canChangePayoutHold[\s\S]*?row\.mappingStatus !== "Payment setup conflict"/);
+  assert.match(payoutTable, /function canCreateBankPayment[\s\S]*?row\.paymentDetailsAvailable/);
+  assert.match(payoutTable, /row\.mappingStatus === "Payment setup conflict"[\s\S]*?>Payment setup conflict</);
+  assert.match(payoutLoader, /if \(row\.mappingStatus === "Payment setup conflict"\) return row/);
+  assert.doesNotMatch(payoutLoader, /if \(providerAttendanceConflict\) return \{ rows: \[\]/);
+});
+
+test("attendance loading and ownership retain the station identity", () => {
+  assert.match(payoutLoader, /attendance_daily"\)[\s\S]*?\.select\("id,workforce_id,employee_id,contractor_id,field_executive_id,location_id,station_code,punch_date/);
+  assert.match(payoutLoader, /providerAttendanceLocationKey\(canonicalWorkforceId, stationId, row\.punch_date\)/);
+  assert.match(payoutLoader, /attendanceOwnerOn\(String\(worker\.id\), String\(mapping\.station_id\), date\)/);
+});
+
 test("advance selection detects a Workforce member repeated across payout locations", () => {
   const duplicates = duplicateAdvanceWorkforceIds([
     { reviewSubjectId: "workforce-1", locationId: "station-a" },

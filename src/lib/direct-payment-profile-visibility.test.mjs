@@ -16,8 +16,14 @@ function functionDefinition(source, functionName) {
   return bodyStart >= 0 && end >= 0 ? source.slice(start, end + 3) : source.slice(start);
 }
 
-test("Workforce direct pay shows onboarding statuses but excludes true Inactive profiles", () => {
-  for (const onboarding_status of ["pending", "under_review", "returned", "approved", "rejected", "cancelled"]) {
+test("Workforce direct pay allows non-terminal registration profiles but excludes true Inactive profiles", () => {
+  for (const onboarding_status of ["pending", "under_review", "returned", "approved"]) {
+    const profile = { onboarding_status, lifecycle_status: "onboarding", is_active: false };
+    assert.equal(directPaymentProfileIsVisible(profile, "workforce"), true, onboarding_status);
+    assert.equal(directPaymentProfileIsEditable(profile, "workforce"), true, onboarding_status);
+  }
+
+  for (const onboarding_status of ["rejected", "cancelled"]) {
     const profile = { onboarding_status, lifecycle_status: "onboarding", is_active: false };
     assert.equal(directPaymentProfileIsVisible(profile, "workforce"), true, onboarding_status);
     assert.equal(directPaymentProfileIsEditable(profile, "workforce"), false, onboarding_status);
@@ -77,9 +83,61 @@ test("direct-pay queries load statuses and apply the shared visibility policy in
   assert.doesNotMatch(workforceQuery, /\.eq\("is_active", true\)/);
   assert.match(page, /directPaymentProfileIsVisible\(person, audience\)/);
   assert.match(page, /profileEditable: directPaymentProfileIsEditable\(person, audience\)/);
+  assert.match(actions, /directPaymentProfileIsEditable\(workerResult\.data, "workforce"\)/);
+  assert.doesNotMatch(
+    actions.match(/from\("workforce"\)([\s\S]*?)\.maybeSingle\(\)/)?.[0] ?? "",
+    /\.eq\("is_active", true\)/
+  );
   assert.match(worksheet, /const editable = canEdit && row\.profileEditable/);
   assert.match(worksheet, /disabled=\{!methodId \|\| !editable\}/);
   assert.match(worksheet, /row\.profileEditable \? "Save" : "View only"/);
+});
+
+test("database direct-pay saves allow non-terminal registration profiles without allowing terminal profiles", () => {
+  const migration = readFileSync(new URL("../../supabase/migrations/20261016093000_direct_pay_pending_workforce_setup.sql", import.meta.url), "utf8");
+  const deployScript = readFileSync(new URL("../../scripts/direct_pay_pending_workforce_setup_v1.sql", import.meta.url), "utf8");
+
+  assert.equal(deployScript, migration, "the standalone deploy SQL must exactly match its migration");
+  assert.match(migration, /workforce\.is_active = true/);
+  for (const status of ["pending", "under_review", "returned", "approved"]) {
+    assert.match(migration, new RegExp(`''${status}''`));
+  }
+  assert.match(migration, /workforce\.lifecycle_status/);
+  assert.doesNotMatch(migration, /''rejected''|''cancelled''/);
+  assert.match(migration, /pg_get_functiondef\([\s\S]*?save_workforce_payment_allocation/);
+  assert.match(
+    migration,
+    /if position\(v_old_predicate in v_after\) > 0 then[\s\S]*?elsif position\([\s\S]*?in v_after\) = 0 then/,
+    "the guarded function rewrites must recognize an already-applied deployment"
+  );
+  assert.match(migration, /reconcile_workforce_direct_payment_transition/);
+  assert.match(migration, /not \([\s\S]*?new\.onboarding_status[\s\S]*?new\.lifecycle_status/);
+});
+
+test("payouts exclude Inactive direct allocations without filtering provider-ID mappings", () => {
+  const loader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
+  const directVisibilityStart = loader.indexOf("const directAllocationProfileIsVisible");
+  const providerSegmentStart = loader.indexOf("const providerSegments = mappings.flatMap");
+
+  assert.ok(directVisibilityStart >= 0, "the shared payout loader must apply the direct-pay profile policy");
+  assert.match(
+    loader.slice(directVisibilityStart, directVisibilityStart + 700),
+    /directPaymentProfileIsVisible\([\s\S]*?"workforce"[\s\S]*?allDirectAllocations = allDirectAllocations\.filter\(directAllocationProfileIsVisible\)[\s\S]*?directAllocations = directAllocations\.filter\(directAllocationProfileIsVisible\)/
+  );
+  assert.ok(providerSegmentStart > directVisibilityStart, "provider payout mappings must remain a separate population path");
+  assert.doesNotMatch(
+    loader.slice(providerSegmentStart, providerSegmentStart + 800),
+    /directPaymentProfileIsVisible|directAllocationProfileIsVisible/,
+    "a mapped Provider ID must remain visible regardless of the linked profile status"
+  );
+
+  const orphanPayoutInputStart = loader.indexOf("for (const [identityKey, group] of payoutValueGroups)");
+  assert.ok(orphanPayoutInputStart >= 0, "the payout-input fallback must remain covered");
+  assert.match(
+    loader.slice(orphanPayoutInputStart, orphanPayoutInputStart + 900),
+    /if \(!directPaymentProfileIsVisible\(worker, "workforce"\)\) continue;/,
+    "old additions or deductions must not recreate an Inactive Direct Pay row"
+  );
 });
 
 test("database direct-pay policy is independent of the Field Operations flag", () => {

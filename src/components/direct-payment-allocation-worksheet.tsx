@@ -17,6 +17,7 @@ export type DirectPaymentAllocationRow = {
   designationLabel: string;
   dateOfJoin: string;
   allocationId: string;
+  allocationUpdatedAt: string;
   paymentMethodId: string;
   currentMethodName: string;
   paymentValues: Record<string, number>;
@@ -64,6 +65,8 @@ function AllocationCells({
         <input form={formId} name="subject_type" type="hidden" value={audience} />
         <input form={formId} name="permission_scope" type="hidden" value={permissionScope} />
         <input form={formId} name={audience === "helpers" ? "helper_id" : "workforce_id"} type="hidden" value={row.personId} />
+        <input form={formId} name="allocation_id" type="hidden" value={row.allocationId} />
+        <input form={formId} name="allocation_updated_at" type="hidden" value={row.allocationUpdatedAt} />
         <input form={formId} name="payment_values_json" type="hidden" value={JSON.stringify(methodValues)} />
         <select
           className="select"

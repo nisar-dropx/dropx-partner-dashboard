@@ -80,7 +80,7 @@ test("the payout loader indexes high-cardinality shipment and attendance lookups
   const loader = readFileSync(new URL("./workforce-payout-loader.ts", import.meta.url), "utf8");
   assert.match(loader, /const payoutMappingsByProviderMember = indexMappingsByProviderMember/);
   assert.match(loader, /const shipmentRowsByMappingId = new Map/);
-  assert.match(loader, /const attendanceMappingsByWorkforceId = new Map/);
+  assert.match(loader, /const attendanceMappingsByWorkforceStation = new Map/);
   assert.match(loader, /const eligibleDailyByDate = new Map/);
   assert.doesNotMatch(loader, /const providerDailyRowsFor[\s\S]{0,500}?metricsResult\.data[\s\S]{0,100}?\.filter/);
 });
@@ -175,6 +175,7 @@ test("shipment attendance threshold is stable when deliveries span visible and h
 test("DropX status exposes onboarding, lifecycle and inactive states", () => {
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "pending", lifecycle_status: "", is_active: false }), "Pending");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: false }), "Pending");
+  assert.equal(workforcePayoutDropxStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: true }), "Pending");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "active", lifecycle_status: "onboarding", is_active: true }), "Active");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "returned", lifecycle_status: "", is_active: false }), "Returned");
   assert.equal(workforcePayoutDropxStatus({ onboarding_status: "active", lifecycle_status: "settlement_pending", is_active: true }), "Settlement Pending");
