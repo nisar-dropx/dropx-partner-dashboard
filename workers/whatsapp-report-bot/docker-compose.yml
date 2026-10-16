@@ -1,0 +1,32 @@
+services:
+  report-bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORTAL_URL: "${PORTAL_URL}"
+      WORKER_TOKEN: "${WORKER_TOKEN}"
+      DEVICE_NAME: "${DEVICE_NAME:-DropX Report Bot}"
+      MEDIA_TTL_HOURS: "${MEDIA_TTL_HOURS:-48}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    volumes:
+      # Holds the WhatsApp session. Losing it means linking the number again.
+      - report_bot_data:/data
+    expose:
+      - "8090"
+
+  # HTTPS in front of the worker. Point WORKER_DOMAIN's DNS at this host first.
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${WORKER_DOMAIN} --to report-bot:8090
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      - report-bot
+
+volumes:
+  report_bot_data:
+  caddy_data:

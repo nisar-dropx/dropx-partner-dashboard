@@ -39,6 +39,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/report-bot",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/google-workspace",
       "schedule": "*/5 * * * *"
     },

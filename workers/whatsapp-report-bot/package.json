@@ -1,0 +1,18 @@
+{
+  "name": "dropx-whatsapp-report-bot-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check lib.mjs",
+    "test": "node --test lib.test.mjs"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "pino": "9.7.0"
+  }
+}
