@@ -59,12 +59,12 @@ export function startCommandAttention(a:AuthorizationContext,locations:CodLocati
       const affected=[...new Set(data.people.filter(p=>{const x=summarizeStorePeople([p],now);return x.notReported||x.missingOut||x.unplanned;}).map(p=>p.locationId))];
       return{value:`${affected.length} locations to check`,count:s.notReported+s.missingOut+s.unplanned,href:`/ops-pulse?view=manpower&date=${today}${affected[0]?`&location=${affected[0]}`:''}`,detail:`${s.notReported} not reported · ${s.missingOut} punch-outs · ${s.unplanned} shift times missing`,action:'Check today’s attendance',tone:affected.length?'action':'clear'};
     }),
-    check(mode!=='amazon_now'&&mappingCanView(a)&&codes.length>0,'vehicles','Vehicle confirmations','/fleet/da-mapping',async()=>{
+    check(mode!=='amazon_now'&&mappingCanView(a)&&codes.length>0,'vehicles','Vehicle DA exceptions','/fleet/da-mapping',async()=>{
       const allowed=await mappingStationScope(a),scoped=allowed.stations.filter(s=>codes.includes(s.code));
       if(!scoped.length)return{value:'Not applicable',detail:'No permitted vehicles in this selection.',action:'Open mapping',tone:'clear'};
       const r=await mappingAdmin!.rpc('fleet_pending_da_days',{p_company:company,p_stations:scoped.map(s=>s.code),p_from:null,p_to:today,p_offset:0,p_limit:1});
       if(r.error||!r.data||!Number.isFinite(r.data.totalPending)||!Number.isFinite(r.data.overdue))throw Error('Unavailable');
-      return{value:`${r.data.totalPending} vehicle-days`,count:r.data.totalPending,detail:`${r.data.overdue} overdue · ${r.data.totalPending-r.data.overdue} today · daily assignment confirmations`,action:'Complete mappings',tone:r.data.overdue?'urgent':r.data.totalPending?'action':'clear'};
+      return{value:`${r.data.totalPending} vehicle-days`,count:r.data.totalPending,detail:r.data.pendingReasons?`${r.data.pendingVehicles} vehicles · ${r.data.pendingReasons.missingId} missing ID · ${r.data.pendingReasons.belowMinimum} below minimum · ${r.data.pendingReasons.conflict} conflicts`:`Previous dates · ${r.data.totalPending} pending vehicle-days`,action:'Complete mappings',tone:r.data.overdue?'urgent':r.data.totalPending?'action':'clear'};
     }),
     (async():Promise<AttentionItem[]>=>{
       const items:AttentionItem[]=[];

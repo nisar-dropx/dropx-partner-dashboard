@@ -54,7 +54,8 @@ const route=compile('src/app/api/fleet/da-mapping/route.ts',{
  '@/lib/fleet/da-mapping-server':{loadMapping:async(a,date,station)=>{if(station!=='MAPPED')throw new E('Station is outside your scope.',403);return{canEdit:true,canDefaults:false,options:[{id:'A1',name:'Fixture'}],vehicles:[{id:'v',station_code:station}],assignments:[],confirmations:[],defaults:[],warning:'Counts temporarily unavailable'};}},
  '@/lib/fleet/da-mapping':model,'@/lib/fleet/daily-report':{istDate:()=> '2026-10-07',validDate:d=>/^2026-10-0[1-7]$/.test(d)},'@/lib/fleet/system-log':{withFleetSystemLog:f=>f}
 });
-const post=(station='MAPPED',extra={})=>route.POST(new Request('https://fleet.dropxlogistics.com/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json',origin:'https://fleet.dropxlogistics.com'},body:JSON.stringify({action:'mapping.confirm',station,date:'2026-10-07',rows:[{vehicleId:'v',ids:['A1'],expectedIds:[]}],...extra})}));
+const post=(station='MAPPED',extra={})=>route.POST(new Request('https://fleet.dropxlogistics.com/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json',origin:'https://fleet.dropxlogistics.com'},body:JSON.stringify({action:'mapping.confirm',station,date:'2026-10-06',rows:[{vehicleId:'v',ids:['A1'],expectedIds:[]}],...extra})}));
+assert.equal((await post('MAPPED',{date:'2026-10-07'})).status,400,'Today is not editable');
 assert.equal((await post('OTHER')).status,403);assert.equal(called,0);
 auth.readOnly=true;assert.equal((await post()).status,403);assert.equal(called,0);auth.readOnly=false;
 assert.equal((await post('MAPPED',{rows:[{vehicleId:'not-permitted',ids:['A1'],expectedIds:[]}]})).status,403);
@@ -99,7 +100,7 @@ const fixtureTables={
 const queries=[];
 function fixtureQuery(table){let rows=[...(fixtureTables[table]||[])];const q={select(){return q},eq(){return q},gte(){return q},lte(){return q},gt(){return q},order(){return q},in(col,values){queries.push({table,col,values});rows=rows.filter(r=>values.includes(r[col]));return q},maybeSingle:async()=>({data:rows[0]??null,error:null}),then(resolve){return Promise.resolve({data:rows,error:null}).then(resolve)}};return q;}
 const scoped=compile('src/lib/fleet/da-mapping-server.ts',{
- '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>peopleFixture},'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{from:fixtureQuery}},'@/lib/supabase-pagination':{readAllRows:async q=>await q},
+ '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>peopleFixture},'server-only':{},'@/lib/fleet/da-mapping-client':{mappingAdmin:{from:fixtureQuery,rpc:async()=>({data:[],error:null})}},'@/lib/supabase-pagination':{readAllRows:async q=>await q},
  '@/lib/authorization':{hasPermission:()=>true},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/access-surface':{currentAdminAccessSurface:()=> 'fleet'},'./report-data':{FleetReportError:E},'./vehicle-sources-server':{loadVehicleSources:async()=>({sources:[]})},'./daily-report':{istDate:()=> '2026-10-07'},'./da-mapping':model
 });
 const manager={userId:actor,isMasterOwner:false,hasAllLocationAccess:false,locationScopeIds:['s1','s2']};
@@ -111,7 +112,7 @@ let allSaved;
 const bulkApi=compile('src/app/api/fleet/da-mapping/route.ts',{
  '@/lib/authorization':{getAuthorization:async()=>manager},'@/lib/fleet/da-mapping-client':{mappingAdmin:{rpc:async(name,args)=>{allSaved=args.p_rows;return{data:args.p_rows.length}}}},'@/lib/company-scope':{requireCompanyId:()=>c},'@/lib/fleet/report-data':{FleetReportError:E},'@/lib/fleet/da-mapping-server':{loadMapping:async()=>({...all,canEdit:true})},'@/lib/fleet/da-mapping':model,'@/lib/fleet/daily-report':{istDate:()=> '2026-10-07',validDate:()=>true},'@/lib/fleet/system-log':{withFleetSystemLog:f=>f}
 });
-const bulk=rows=>bulkApi.POST(new Request('https://fleet.example/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'mapping.confirm',station:'*',date:'2026-10-07',rows})}));
+const bulk=rows=>bulkApi.POST(new Request('https://fleet.example/api/fleet/da-mapping',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'mapping.confirm',station:'*',date:'2026-10-06',rows})}));
 assert.equal((await bulk([{vehicleId:'vb',ids:['A1'],expectedIds:[]}])).status,409,'A rider from another station cannot be assigned through All stations');
 assert.equal(allSaved,undefined);
 assert.equal((await bulk([{vehicleId:'va',ids:['A1'],expectedIds:[]},{vehicleId:'vb',ids:['B1'],expectedIds:[]}])).status,200);
@@ -131,3 +132,33 @@ const peopleOutage=await scoped.loadMapping(manager,'2026-10-07','*');
 assert.equal(peopleOutage.stations[0].clusters,null);assert.ok(peopleOutage.clusterWarning);assert.equal(peopleOutage.vehicles.length,2);
 assert.equal((await scoped.loadMapping(manager,'2026-10-07','*',false,false)).clusterWarning,undefined,'Write validation does not load optional People metadata');
 console.log('People clusters: current managers, multiple assignments, no-manager stations, legacy removal and independent writes passed.');
+
+// XPT IDs roll up through the configured parent, without expanding vehicle access.
+fixtureTables.stations.push(
+ {id:'xpt-a',station_code:'AXPT',parent_station_id:'s1',is_active:true,location_models:{code:'XPT'}},
+ {id:'xpt-b',station_code:'BXPT',parent_station_id:'s2',is_active:true,location_models:[{code:'XPT'}]},
+ {id:'other',station_code:'OTHER',parent_station_id:'s1',is_active:true,location_models:{code:'EDSP'}},
+ {id:'off',station_code:'OFF',parent_station_id:'s1',is_active:false,location_models:{code:'XPT'}}
+);
+fixtureTables.cps_shipment_daily.push(
+ {id:'xa',station_code:'AXPT',provider_employee_id:'XA',provider_employee_name:'XPT Alpha DA',work_date:'2026-10-06'},
+ {id:'xb',station_code:'BXPT',provider_employee_id:'XB',provider_employee_name:'XPT Beta DA',work_date:'2026-10-06'},
+ {id:'xa2',station_code:'AXPT',provider_employee_id:'A1',provider_employee_name:'Alpha DA',work_date:'2026-10-06'},
+ {id:'no',station_code:'OTHER',provider_employee_id:'NO',provider_employee_name:'Not XPT',work_date:'2026-10-06'},
+ {id:'off',station_code:'OFF',provider_employee_id:'OFF',provider_employee_name:'Inactive',work_date:'2026-10-06'}
+);
+const xpt=await scoped.loadMapping({...manager,locationScopeIds:['s1']},'2026-10-07','AAA');
+assert.deepEqual(xpt.options.map(o=>o.id).sort(),['A1','XA']);
+assert.equal(xpt.options.filter(o=>o.id==='A1').length,1,'Same ID in base and XPT is deduplicated');
+assert.deepEqual(xpt.options.find(o=>o.id==='XA').feedStationCodes,['AXPT']);
+assert.ok(model.riderAvailableAt(xpt.options.find(o=>o.id==='XA'),'AAA'));
+assert.equal(model.riderAvailableAt(xpt.options.find(o=>o.id==='XA'),'BBB'),false);
+assert.deepEqual(xpt.vehicles.map(v=>v.id),['va'],'Parent feed expansion grants no new vehicle access');
+const multiXpt=await scoped.loadMapping(manager,'2026-10-07','*');
+assert.ok(model.riderAvailableAt(multiXpt.options.find(o=>o.id==='XB'),'BBB'));
+assert.equal(model.riderAvailableAt(multiXpt.options.find(o=>o.id==='XB'),'AAA'),false);
+all.options=multiXpt.options;
+assert.equal((await bulk([{vehicleId:'va',ids:['XA'],expectedIds:[]}])).status,200,'Parent vehicle accepts linked XPT ID in write validation');
+assert.equal((await bulk([{vehicleId:'vb',ids:['XA'],expectedIds:[]}])).status,409,'Unrelated station rejects XPT ID');
+assert.equal(model.riderStationParents([{id:'base',code:'KGQA'}],[{station_code:'KGQC',parent_station_id:'base',is_active:true,location_models:{code:'XPT'}}]).get('KGQC'),'KGQA');
+console.log('XPT parent mapping: configured relation, active XPT only, deduplication, source labels, parent-only reader, all-station isolation and save validation passed.');
