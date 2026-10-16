@@ -154,7 +154,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
           </div>
 
           {isOpsHost&&<OpsWorkspaceSwitcher modes={opsContext.availableModes} mode={opsContext.mode}/>}
-          <SidebarNav active={active} items={visibleNavItems} />
+          <SidebarNav active={active} items={visibleNavItems} prefetch={!(isOpsHost && pageCode === "ops_pulse")} />
 
           <div className="sidebar-footer">
             <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong>

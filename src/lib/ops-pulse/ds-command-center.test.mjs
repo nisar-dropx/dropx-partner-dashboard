@@ -31,7 +31,7 @@ test('command center uses queue pending semantics, excluding terminal stages eve
 });
 function fixture({permissions=['cpu_overview','ops_rostering'],failUnits=false,failPeople=false}={}) {
  const tables={finance_now_volumes:[{station_code:'DS1',units:80,through_date:'2026-10-06'}],payment_requests:[{id:'lm',location_id:'lm',status:'PENDING',created_at:'2026-10-01',stations:{location_model_id:'lm'}},{id:'ds',location_id:'ds',status:'PENDING',created_at:'2026-10-02',stations:{location_model_id:'ds'}},{id:'processed',location_id:'ds',status:'PROCESSED',created_at:'2026-10-02'}]};
- const calls=[];const db={from:name=>{calls.push(name);const q=new Proxy({data:tables[name]||[],error:name==='finance_now_volumes'&&failUnits?{message:'offline'}:null},{get:(o,k)=>k==='then'?undefined:k in o?o[k]:()=>q});return q;}};
+ const calls=[];const db={from:name=>{calls.push(name);const q=new Proxy({data:tables[name]||[],error:name==='finance_now_volumes'&&failUnits?{message:'offline'}:null},{get:(o,k)=>k==='then'?undefined:k in o?o[k]:(...args)=>{calls.push([name,k,...args]);return q;}});return q;}};
  const helpers=compile('./ds-command-data.ts',{'server-only':{},'@/lib/authorization':{hasPermission:(_a,p)=>permissions.includes(p)},'@/lib/company-scope':{requireCompanyId:()=> 'company'},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows:async q=>q},'@/lib/payment-approval-scope':{getPaymentApprovalEligibility:async (_c,_a,rows)=>new Set(rows.map(r=>r.id))},'@/lib/payment-pending-approval':{isPendingPaymentApproval},'./rostering':{loadAssignedOpsRosterApprovals:async()=>[{planId:'plan'},{planId:'plan'}]},'./station-manpower':{loadOpsStationManpower:async (_c,locations)=>{assert.deepEqual(locations.map(l=>l.id),['ds']);if(failPeople)throw Error('offline');return {people:[]};}},'./cod':{locationModelName:l=>l.model},'./ds-command-center':{summarizeStorePeople,summarizeStoreUnits}});
  return {helpers,calls};
 }
@@ -41,3 +41,11 @@ test('store reads are restricted to authorized operating DS locations',async()=>
 test('source failures stay unavailable and do not report zero or false absence',async()=>{const {helpers}=fixture({failUnits:true,failPeople:true});const r=await helpers.loadDsCommandData(auth,locations,'2026-10','2026-10-07');assert.equal(r.stores[0].units,null);assert.equal(r.stores[0].people,null);assert(r.unitError&&r.peopleError);});
 test('unauthorized unit and manpower sources are not queried',async()=>{const {helpers,calls}=fixture({permissions:[]});const r=await helpers.loadDsCommandData(auth,locations,'2026-10','2026-10-07');assert.deepEqual(calls,[]);assert.equal(r.stores[0].people,null);assert.equal(r.stores[0].units,null);});
 test('shared approval actions include LM and DS and roster plans are deduplicated',async()=>{const {helpers}=fixture({permissions:['payment_approvals','ops_rostering']});const r=await helpers.loadDsApprovals(auth);assert.equal(r.payment.count,2);assert.equal(r.rosterCount,1);});
+
+test('approval summaries exclude terminal history before pagination without dropping null stages or broadening scope',async()=>{
+ const {helpers,calls}=fixture({permissions:['payment_approvals']});await helpers.loadDsApprovals(auth);
+ const filters=calls.filter(call=>Array.isArray(call)&&call[0]==='payment_requests'&&call[1]==='or').map(call=>call[2]);
+ assert(filters.includes('status.is.null,status.not.in.(approved,APPROVED)'));
+ assert(filters.some(filter=>filter.startsWith('approval_status.is.null,approval_status.not.in.')&&filter.includes('FINAL_APPROVED')&&filter.includes('final_approved')));
+ assert(calls.some(call=>Array.isArray(call)&&call[1]==='in'&&call[2]==='location_id'&&call[3]===auth.locationScopeIds));
+});
